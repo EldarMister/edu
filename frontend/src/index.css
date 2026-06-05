@@ -1,0 +1,65 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-text-primary font-sans antialiased;
+    font-size: 15px;
+    line-height: 1.4;
+  }
+  /* Убираем стрелки у числовых полей */
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+
+@layer components {
+  /* Базовая кнопка */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors
+           disabled:opacity-50 disabled:cursor-not-allowed select-none;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-white hover:bg-primary-hover;
+  }
+  .btn-secondary {
+    @apply btn bg-white text-text-primary border border-border hover:bg-background;
+  }
+  .btn-danger {
+    @apply btn bg-danger text-white hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply btn text-text-secondary hover:bg-background;
+  }
+  .btn-lg {
+    @apply h-12 px-5 text-[15px];
+  }
+  .btn-md {
+    @apply h-10 px-4 text-[14px];
+  }
+
+  .card {
+    @apply bg-card rounded-2xl border border-border shadow-card;
+  }
+
+  .input {
+    @apply w-full h-11 px-3.5 rounded-xl border border-border bg-white text-[15px]
+           placeholder:text-text-light outline-none transition
+           focus:border-primary focus:ring-2 focus:ring-primary/15;
+  }
+
+  /* Скрыть скроллбар, но оставить прокрутку (горизонтальные вкладки) */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}

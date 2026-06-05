@@ -1,0 +1,353 @@
+// Вкусно POS — Prisma schema
+// Полная схема БД по ТЗ §13. На этапах 1–4 используются: User, Hall, Table,
+// Category, Dish, Order, OrderItem, Payment, KitchenEvent.
+// Остальные модели (Incident, PenaltyReward, AuditLog) заведены заранее
+// для production-ready основы и будут задействованы на этапах 6–7.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Enums ----------
+
+enum Role {
+  WAITER
+  KITCHEN
+  ADMIN
+  OWNER
+}
+
+enum TableStatus {
+  free // свободен
+  occupied // занят
+  sent_to_kitchen // заказ отправлен на кухню
+  accepted // кухня приняла
+  cooking // готовится
+  ready // готов
+  served // вынесен
+  waiting_payment // ожидание оплаты
+  paid // оплачен
+}
+
+enum OrderStatus {
+  draft
+  sent_to_kitchen
+  accepted_by_kitchen
+  cooking
+  ready
+  picked_up
+  served
+  waiting_payment
+  paid
+  rejected
+  partially_rejected
+  cancelled
+}
+
+enum OrderItemStatus {
+  new
+  accepted
+  cooking
+  ready
+  rejected
+  served
+  cancelled
+}
+
+enum DiscountType {
+  none
+  percent
+  fixed
+}
+
+enum PaymentMethod {
+  qr
+  cash
+  card
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  refunded
+  cancelled
+}
+
+enum WaiterShiftStatus {
+  active
+  closed
+}
+
+enum KitchenEventType {
+  accept
+  reject_order
+  reject_item
+  ready_order
+  ready_item
+}
+
+enum IncidentStatus {
+  new
+  in_progress
+  closed
+}
+
+enum PenaltyType {
+  penalty
+  reward
+}
+
+// ---------- Models ----------
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  phone        String   @unique
+  login        String?  @unique
+  passwordHash String   @map("password_hash")
+  pinHash      String?  @map("pin_hash")
+  role         Role
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  orders          Order[]         @relation("WaiterOrders")
+  waiterShifts    WaiterShift[]   @relation("WaiterShifts")
+  payments        Payment[]
+  kitchenEvents   KitchenEvent[]
+  penalties       PenaltyReward[] @relation("PenaltyTarget")
+  assignedRewards PenaltyReward[] @relation("PenaltyAuthor")
+  incidentsOwned  Incident[]      @relation("IncidentUser")
+  incidentsMade   Incident[]      @relation("IncidentAuthor")
+  auditLogs       AuditLog[]
+
+  @@map("users")
+}
+
+model Hall {
+  id        String   @id @default(uuid())
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tables Table[]
+
+  @@map("halls")
+}
+
+model Table {
+  id        String      @id @default(uuid())
+  hallId    String      @map("hall_id")
+  number    Int
+  seats     Int         @default(2)
+  status    TableStatus @default(free)
+  isActive  Boolean     @default(true) @map("is_active")
+  sortOrder Int         @default(0) @map("sort_order")
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  hall      Hall       @relation(fields: [hallId], references: [id], onDelete: Cascade)
+  orders    Order[]
+  incidents Incident[]
+
+  @@unique([hallId, number])
+  @@map("tables")
+}
+
+model Category {
+  id        String   @id @default(uuid())
+  name      String
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  dishes Dish[]
+
+  @@map("categories")
+}
+
+model Dish {
+  id            String       @id @default(uuid())
+  categoryId    String       @map("category_id")
+  name          String
+  description   String?
+  price         Decimal      @db.Decimal(10, 2)
+  imageUrl      String?      @map("image_url")
+  discountType  DiscountType @default(none) @map("discount_type")
+  discountValue Decimal      @default(0) @map("discount_value") @db.Decimal(10, 2)
+  cookingTime   Int?         @map("cooking_time") // минуты, опционально
+  isAvailable   Boolean      @default(true) @map("is_available") // временно отключить
+  isActive      Boolean      @default(true) @map("is_active")
+  sortOrder     Int          @default(0) @map("sort_order")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@map("dishes")
+}
+
+model Order {
+  id             String         @id @default(uuid())
+  orderNumber    String         @unique @map("order_number")
+  tableId        String         @map("table_id")
+  waiterId       String         @map("waiter_id")
+  waiterShiftId  String?        @map("waiter_shift_id")
+  status         OrderStatus    @default(draft)
+  totalAmount    Decimal        @default(0) @map("total_amount") @db.Decimal(10, 2)
+  discountAmount Decimal        @default(0) @map("discount_amount") @db.Decimal(10, 2)
+  finalAmount    Decimal        @default(0) @map("final_amount") @db.Decimal(10, 2)
+  paymentStatus  PaymentStatus  @default(pending) @map("payment_status")
+  paymentMethod  PaymentMethod? @map("payment_method")
+  comment        String?
+  idempotencyKey String?        @unique @map("idempotency_key")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  closedAt       DateTime?      @map("closed_at")
+
+  table         Table          @relation(fields: [tableId], references: [id])
+  waiter        User           @relation("WaiterOrders", fields: [waiterId], references: [id])
+  waiterShift   WaiterShift?   @relation(fields: [waiterShiftId], references: [id])
+  items         OrderItem[]
+  payments      Payment[]
+  kitchenEvents KitchenEvent[]
+  incidents     Incident[]
+
+  @@index([status])
+  @@index([tableId])
+  @@index([waiterId])
+  @@index([waiterShiftId])
+  @@map("orders")
+}
+
+model WaiterShift {
+  id        String            @id @default(uuid())
+  waiterId  String            @map("waiter_id")
+  startedAt DateTime          @default(now()) @map("started_at")
+  endedAt   DateTime?         @map("ended_at")
+  status    WaiterShiftStatus @default(active)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+
+  waiter User    @relation("WaiterShifts", fields: [waiterId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@index([waiterId, status])
+  @@map("waiter_shifts")
+}
+
+model OrderItem {
+  id               String          @id @default(uuid())
+  orderId          String          @map("order_id")
+  dishId           String          @map("dish_id")
+  dishNameSnapshot String          @map("dish_name_snapshot")
+  priceSnapshot    Decimal         @map("price_snapshot") @db.Decimal(10, 2)
+  quantity         Int             @default(1)
+  discountAmount   Decimal         @default(0) @map("discount_amount") @db.Decimal(10, 2)
+  finalPrice       Decimal         @map("final_price") @db.Decimal(10, 2)
+  status           OrderItemStatus @default(new)
+  comment          String?
+  rejectReason     String?         @map("reject_reason")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dish  Dish  @relation(fields: [dishId], references: [id])
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+model Payment {
+  id        String        @id @default(uuid())
+  orderId   String        @map("order_id")
+  amount    Decimal       @db.Decimal(10, 2)
+  method    PaymentMethod
+  status    PaymentStatus @default(paid)
+  paidAt    DateTime      @default(now()) @map("paid_at")
+  cashierId String        @map("cashier_id")
+
+  order   Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  cashier User  @relation(fields: [cashierId], references: [id])
+
+  @@map("payments")
+}
+
+model KitchenEvent {
+  id          String           @id @default(uuid())
+  orderId     String           @map("order_id")
+  orderItemId String?          @map("order_item_id")
+  type        KitchenEventType
+  reason      String?
+  comment     String?
+  createdById String           @map("created_by")
+  createdAt   DateTime         @default(now()) @map("created_at")
+
+  order     Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  createdBy User  @relation(fields: [createdById], references: [id])
+
+  @@index([orderId])
+  @@map("kitchen_events")
+}
+
+model PenaltyReward {
+  id          String      @id @default(uuid())
+  userId      String      @map("user_id")
+  type        PenaltyType
+  amount      Decimal     @db.Decimal(10, 2)
+  reason      String
+  createdById String      @map("created_by")
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  user      User @relation("PenaltyTarget", fields: [userId], references: [id])
+  createdBy User @relation("PenaltyAuthor", fields: [createdById], references: [id])
+
+  @@map("staff_penalties_rewards")
+}
+
+model Incident {
+  id           String         @id @default(uuid())
+  type         String
+  description  String?
+  tableId      String?        @map("table_id")
+  orderId      String?        @map("order_id")
+  userId       String?        @map("user_id")
+  damageAmount Decimal?       @map("damage_amount") @db.Decimal(10, 2)
+  photoUrl     String?        @map("photo_url")
+  status       IncidentStatus @default(new)
+  createdById  String         @map("created_by")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+
+  table     Table? @relation(fields: [tableId], references: [id])
+  order     Order? @relation(fields: [orderId], references: [id])
+  user      User?  @relation("IncidentUser", fields: [userId], references: [id])
+  createdBy User   @relation("IncidentAuthor", fields: [createdById], references: [id])
+
+  @@map("incidents")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?  @map("user_id")
+  action     String
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  oldValue   Json?    @map("old_value")
+  newValue   Json?    @map("new_value")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@map("audit_logs")
+}

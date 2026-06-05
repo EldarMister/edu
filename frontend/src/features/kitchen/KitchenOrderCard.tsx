@@ -1,0 +1,112 @@
+import type { Order } from '@/types';
+import type { KitchenTab } from './api';
+import { OrderBadge } from '@/components/StatusBadge';
+import { timeHM, elapsed } from '@/lib/format';
+import { Spinner } from '@/components/Spinner';
+
+/** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
+const SLOW_AFTER = 8 * 60;
+
+export function KitchenOrderCard({
+  order,
+  tab,
+  now,
+  submitting,
+  onAccept,
+  onReady,
+  onRejectOrder,
+  onRejectItem,
+}: {
+  order: Order;
+  tab: KitchenTab;
+  now: number;
+  submitting: boolean;
+  onAccept: () => void;
+  onReady: () => void;
+  onRejectOrder: () => void;
+  onRejectItem: (itemId: string, name: string) => void;
+}) {
+  const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
+  const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
+  const canRejectItem = tab === 'new' || tab === 'in_work';
+
+  return (
+    <div className="card flex flex-col p-4">
+      {/* Шапка карточки */}
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-[17px] font-semibold text-text-primary">{order.orderNumber}</p>
+          <p className="text-sm text-text-muted">Стол {order.table.number}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-sm text-text-muted">{timeHM(order.createdAt)}</p>
+          {(tab === 'new' || tab === 'in_work') ? (
+            <p className={`text-[15px] font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
+              {elapsed(order.createdAt, now)}
+            </p>
+          ) : (
+            <OrderBadge status={order.status} />
+          )}
+        </div>
+      </div>
+
+      <p className="mt-1 text-sm text-text-muted">Официант: {order.waiter.name}</p>
+
+      {/* Позиции */}
+      <ul className="mt-3 space-y-2 border-t border-border pt-3">
+        {order.items.map((it) => {
+          const rejected = it.status === 'rejected';
+          return (
+            <li key={it.id} className="flex items-start justify-between gap-3 text-[15px]">
+              <div className="min-w-0">
+                <span className={rejected ? 'text-danger line-through' : 'text-text-primary'}>
+                  <span className="font-medium">{it.quantity}×</span> {it.dishNameSnapshot}
+                </span>
+                {it.comment && <p className="text-xs text-warning">{it.comment}</p>}
+                {rejected && it.rejectReason && (
+                  <p className="text-xs text-danger">Отказ: {it.rejectReason}</p>
+                )}
+              </div>
+              {canRejectItem && !rejected && (
+                <button
+                  onClick={() => onRejectItem(it.id, it.dishNameSnapshot)}
+                  className="shrink-0 text-xs text-text-light hover:text-danger"
+                >
+                  отказать
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+
+      {order.comment && (
+        <p className="mt-3 rounded-lg bg-warning/10 px-3 py-2 text-sm text-warning">
+          {order.comment}
+        </p>
+      )}
+
+      {/* Действия */}
+      {tab === 'new' && (
+        <div className="mt-4 flex gap-2">
+          <button className="btn-secondary btn-md flex-1 text-danger" disabled={submitting} onClick={onRejectOrder}>
+            Отказать
+          </button>
+          <button className="btn-primary btn-md flex-[2] font-semibold" disabled={submitting} onClick={onAccept}>
+            {submitting ? <Spinner /> : 'Принять'}
+          </button>
+        </div>
+      )}
+      {tab === 'in_work' && (
+        <div className="mt-4 flex gap-2">
+          <button className="btn-secondary btn-md flex-1 text-danger" disabled={submitting} onClick={onRejectOrder}>
+            Отказать
+          </button>
+          <button className="btn-primary btn-md flex-[2] font-semibold" disabled={submitting} onClick={onReady}>
+            {submitting ? <Spinner /> : 'Готово'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
