@@ -60,10 +60,10 @@ export function TablesGrid({
       </div>
 
       {/* Легенда */}
-      <div className="mt-4 flex flex-wrap gap-x-4 gap-y-2 border-t border-border pt-3">
+      <div className="no-scrollbar mt-3 flex shrink-0 gap-3 overflow-x-auto border-t border-border pt-2">
         {LEGEND.map((s) => (
-          <span key={s} className="inline-flex items-center gap-1.5 text-xs text-text-muted">
-            <span className={`h-2.5 w-2.5 rounded-full ${TABLE_STATUS[s].dot}`} />
+          <span key={s} className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-text-muted">
+            <span className={`h-2 w-2 rounded-full ${TABLE_STATUS[s].dot}`} />
             {TABLE_STATUS[s].label}
           </span>
         ))}

@@ -4,6 +4,7 @@ import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { money } from '@/lib/format';
 import { apiError } from '@/lib/api';
+import { useNotifications } from '@/store/notifications';
 import { usePay, fetchReceipt } from './api';
 import { printReceipt } from './printReceipt';
 
@@ -24,6 +25,7 @@ export function PaymentModal({
   onPaid: () => void;
 }) {
   const pay = usePay();
+  const push = useNotifications((s) => s.push);
   const [method, setMethod] = useState<PaymentMethod>('qr');
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -32,6 +34,7 @@ export function PaymentModal({
     setError('');
     try {
       await pay.mutateAsync({ orderId: order.id, method });
+      push({ message: 'Оплата принята', at: new Date().toISOString() });
       const r = await fetchReceipt(order.id);
       setReceipt(r);
     } catch (err) {

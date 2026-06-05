@@ -1,20 +1,26 @@
 import { useMemo, useState } from 'react';
-import type { Category, Dish } from '@/types';
+import type { CartLine, Category, Dish, TableItem } from '@/types';
 import { money, dishUnitPrice } from '@/lib/format';
+import { cartTotals } from './cart';
 
 export function DishMenu({
   categories,
   dishes,
+  table,
+  cartLines,
   onAdd,
   disabled,
 }: {
   categories: Category[];
   dishes: Dish[];
+  table: TableItem | null;
+  cartLines: CartLine[];
   onAdd: (dish: Dish) => void;
   disabled?: boolean;
 }) {
   const [activeCat, setActiveCat] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const totals = useMemo(() => cartTotals(cartLines), [cartLines]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -27,6 +33,21 @@ export function DishMenu({
 
   return (
     <div className="flex h-full flex-col">
+      <div className="mb-3 rounded-xl border border-primary/15 bg-primary/5 px-3 py-2">
+        {table ? (
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <span className="text-sm font-medium text-text-primary">Стол {table.number}</span>
+            {totals.count > 0 && (
+              <span className="text-xs text-text-secondary">
+                Корзина: {totals.count} {dishWord(totals.count)} · {money(totals.final)}
+              </span>
+            )}
+          </div>
+        ) : (
+          <span className="text-sm text-text-muted">Выберите стол для заказа</span>
+        )}
+      </div>
+
       {/* Поиск */}
       <input
         className="input mb-3"
@@ -48,7 +69,7 @@ export function DishMenu({
       </div>
 
       {/* Блюда */}
-      <div className="grid flex-1 grid-cols-2 content-start gap-2.5 overflow-y-auto lg:grid-cols-3">
+      <div className="menu-scrollbar -mr-1 grid flex-1 grid-cols-2 content-start gap-2.5 overflow-y-auto pr-1 lg:mr-0 lg:grid-cols-3 lg:pr-0">
         {filtered.map((d) => {
           const hasDiscount = d.discountType !== 'none' && Number(d.discountValue) > 0;
           const finalUnit = dishUnitPrice(d.price, d.discountType, d.discountValue);
@@ -82,6 +103,14 @@ export function DishMenu({
       </div>
     </div>
   );
+}
+
+function dishWord(count: number) {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'блюдо';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'блюда';
+  return 'блюд';
 }
 
 function CatTab({

@@ -357,19 +357,22 @@ export class OrdersService {
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
     if (order.status === OrderStatus.paid) {
-      throw new BadRequestException('Заказ уже оплачен');
+      return order;
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.payment.create({
-        data: {
-          orderId,
-          amount: order.finalAmount,
-          method,
-          status: PaymentStatus.paid,
-          cashierId,
-        },
-      });
+      const existingPayment = await tx.payment.findFirst({ where: { orderId, status: PaymentStatus.paid } });
+      if (!existingPayment) {
+        await tx.payment.create({
+          data: {
+            orderId,
+            amount: order.finalAmount,
+            method,
+            status: PaymentStatus.paid,
+            cashierId,
+          },
+        });
+      }
       // Стол освобождается.
       await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
       return tx.order.update({

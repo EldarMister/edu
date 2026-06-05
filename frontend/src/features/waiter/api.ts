@@ -84,6 +84,7 @@ export function useCreateOrder() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
   });
 }
@@ -103,6 +104,7 @@ export function useAddItems() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
   });
 }
@@ -115,6 +117,7 @@ function useOrderAction(path: (id: string) => string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
   });
 }
@@ -131,6 +134,7 @@ export function usePay() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
   });
 }

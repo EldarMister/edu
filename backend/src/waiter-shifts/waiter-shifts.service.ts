@@ -26,10 +26,46 @@ export class WaiterShiftsService {
     });
   }
 
+  async currentWithStats(waiterId: string) {
+    const shift = await this.current(waiterId);
+    if (!shift) return null;
+
+    const [ordersCount, activeOrdersCount, totals] = await Promise.all([
+      this.prisma.order.count({
+        where: {
+          waiterShiftId: shift.id,
+          status: { notIn: [OrderStatus.cancelled] },
+        },
+      }),
+      this.prisma.order.count({
+        where: {
+          waiterShiftId: shift.id,
+          status: { notIn: CLOSED_ORDER_STATUSES },
+        },
+      }),
+      this.prisma.order.aggregate({
+        where: {
+          waiterShiftId: shift.id,
+          status: { notIn: [OrderStatus.cancelled] },
+        },
+        _sum: { finalAmount: true },
+      }),
+    ]);
+
+    return {
+      ...shift,
+      stats: {
+        ordersCount,
+        totalAmount: String(totals._sum.finalAmount ?? 0),
+        activeOrdersCount,
+      },
+    };
+  }
+
   async getRequiredActiveShift(waiterId: string, client: PrismaClientLike = this.prisma) {
     const shift = await this.current(waiterId, client);
     if (!shift) {
-      throw new BadRequestException('Сначала начните смену в профиле.');
+      throw new BadRequestException('Сначала начните смену.');
     }
     return shift;
   }

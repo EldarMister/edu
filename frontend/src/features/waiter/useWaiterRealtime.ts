@@ -12,6 +12,7 @@ export function useWaiterRealtime() {
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['orders'] });
     qc.invalidateQueries({ queryKey: ['halls'] });
+    qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
   };
 
   useSocketEvent<AppNotification>('notification:new', (n) => {

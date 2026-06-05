@@ -4,7 +4,7 @@ import { useNotifications } from '@/store/notifications';
 function Toast({ id, message }: { id: string; message: string }) {
   const dismiss = useNotifications((s) => s.dismiss);
   useEffect(() => {
-    const t = setTimeout(() => dismiss(id), 5000);
+    const t = setTimeout(() => dismiss(id), 2500);
     return () => clearTimeout(t);
   }, [id, dismiss]);
 
@@ -24,7 +24,7 @@ function Toast({ id, message }: { id: string; message: string }) {
 export function Toaster() {
   const toasts = useNotifications((s) => s.toasts);
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-3 z-50 mx-auto flex max-w-sm flex-col gap-2 px-3">
+    <div className="pointer-events-none fixed right-0 top-3 z-50 flex w-full max-w-sm flex-col gap-2 px-3 sm:right-3">
       {toasts.map((t) => (
         <Toast key={t.id} id={t.id} message={t.message} />
       ))}

@@ -53,6 +53,7 @@ export function WaiterApp() {
   const endShift = useEndShift();
 
   const [tab, setTab] = useState<Tab>('tables');
+  const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
 
@@ -70,7 +71,13 @@ export function WaiterApp() {
   const selectedTable =
     halls.flatMap((h) => h.tables).find((t) => t.id === cart.tableId) ?? null;
   const activeOrder = cart.tableId ? ordersByTable.get(cart.tableId) : undefined;
-  const showCart = cart.lines.length > 0 || !activeOrder;
+  const viewingOrder = viewingOrderId ? orders.find((o) => o.id === viewingOrderId) : undefined;
+  const displayedOrder = viewingOrder ?? activeOrder;
+  const showCart = !viewingOrder && (cart.lines.length > 0 || !activeOrder);
+  const activeNavTab: Tab = viewingOrder && tab === 'cart' ? 'orders' : tab;
+  const ordersAttentionCount = orders.filter((o) =>
+    ['ready', 'partially_rejected', 'rejected'].includes(o.status),
+  ).length;
 
   const actionPending =
     pickedUp.isPending || served.isPending || toPayment.isPending;
@@ -81,8 +88,37 @@ export function WaiterApp() {
   }
 
   function selectTable(tableId: string) {
+    setViewingOrderId(null);
     cart.selectTable(tableId);
     setTab(ordersByTable.has(tableId) ? 'cart' : 'menu');
+  }
+
+  function changeTab(next: Tab) {
+    setViewingOrderId(null);
+    setTab(next);
+  }
+
+  function openExistingOrder(order: Order) {
+    setViewingOrderId(order.id);
+    cart.selectTable(order.table.id);
+    setTab('cart');
+    if (order.status === 'waiting_payment') {
+      setPaymentOrder(order);
+    }
+  }
+
+  function addDishToCart(dish: Parameters<typeof cart.add>[0]) {
+    cart.add(dish);
+    push({ message: 'Блюдо добавлено в корзину', at: new Date().toISOString() });
+  }
+
+  async function goToPayment(order: Order) {
+    try {
+      const updated = await toPayment.mutateAsync(order.id);
+      setPaymentOrder(updated);
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
+    }
   }
 
   async function submitCart() {
@@ -95,6 +131,7 @@ export function WaiterApp() {
       if (activeOrder) {
         await addItems.mutateAsync({ orderId: activeOrder.id, lines: cart.lines });
         cart.clear();
+        push({ message: 'Заказ отправлен на кухню', at: new Date().toISOString() });
         setTab('cart');
       } else {
         await create.mutateAsync({
@@ -105,6 +142,7 @@ export function WaiterApp() {
         });
         cart.clear();
         setIdemKey(crypto.randomUUID());
+        push({ message: 'Заказ отправлен на кухню', at: new Date().toISOString() });
         setTab('orders');
       }
     } catch (err) {
@@ -129,15 +167,14 @@ export function WaiterApp() {
 
   const menuPanel = (
     <Panel title="Меню">
-      {!selectedTable ? (
-        <EmptyHint text="Сначала выберите стол" />
-      ) : (
-        <DishMenu
-          categories={categoriesQ.data ?? []}
-          dishes={dishesQ.data ?? []}
-          onAdd={cart.add}
-        />
-      )}
+      <DishMenu
+        categories={categoriesQ.data ?? []}
+        dishes={dishesQ.data ?? []}
+        table={selectedTable}
+        cartLines={cart.lines}
+        onAdd={addDishToCart}
+        disabled={!selectedTable}
+      />
     </Panel>
   );
 
@@ -145,14 +182,13 @@ export function WaiterApp() {
     <Panel title={null}>
       {!selectedTable ? (
         <EmptyHint text="Выберите стол, чтобы открыть заказ" />
-      ) : activeOrder && !showCart ? (
+      ) : displayedOrder && !showCart ? (
         <OrderPanel
-          order={activeOrder}
+          order={displayedOrder}
           submitting={actionPending}
-          onPickedUp={() => runAction(() => pickedUp.mutateAsync(activeOrder.id))}
-          onServed={() => runAction(() => served.mutateAsync(activeOrder.id))}
-          onToPayment={() => runAction(() => toPayment.mutateAsync(activeOrder.id))}
-          onPay={() => setPaymentOrder(activeOrder)}
+          onPickedUp={() => runAction(() => pickedUp.mutateAsync(displayedOrder.id))}
+          onServed={() => runAction(() => served.mutateAsync(displayedOrder.id))}
+          onToPayment={() => goToPayment(displayedOrder)}
         />
       ) : (
         <CartPanel
@@ -175,12 +211,22 @@ export function WaiterApp() {
       shift={activeShift}
       shiftLoading={currentShiftQ.isFetching}
       shiftPending={shiftPending}
-      onStartShift={() => runAction(() => startShift.mutateAsync())}
-      onEndShift={() => runAction(() => endShift.mutateAsync())}
+      onStartShift={() =>
+        runAction(async () => {
+          await startShift.mutateAsync();
+          push({ message: 'Смена начата', at: new Date().toISOString() });
+        })
+      }
+      onEndShift={() =>
+        runAction(async () => {
+          await endShift.mutateAsync();
+          push({ message: 'Смена завершена', at: new Date().toISOString() });
+        })
+      }
     />
   );
 
-  const desktopView: DesktopTab = tab === 'orders' || tab === 'profile' ? tab : 'tables';
+  const desktopView: DesktopTab = activeNavTab === 'orders' || activeNavTab === 'profile' ? activeNavTab : 'tables';
 
   return (
     <div className="flex h-[100dvh] flex-col bg-background">
@@ -194,9 +240,13 @@ export function WaiterApp() {
           </span>
           <span className="hidden text-sm text-text-muted sm:inline">· Кафе «Вкусно»</span>
         </div>
-        <DesktopNav current={desktopView} onChange={(next) => setTab(next)} />
-        <div className="flex items-center gap-4">
+        <DesktopNav current={desktopView} onChange={(next) => changeTab(next)} />
+        <div className="flex items-center gap-3">
           <ConnectionStatus />
+          <span className={`text-xs ${activeShift ? 'text-success' : 'text-text-muted'}`}>
+            <span className="hidden sm:inline">{activeShift ? 'Смена активна' : 'Смена не начата'}</span>
+            <span className="sm:hidden">{activeShift ? 'Смена активна' : 'Нет смены'}</span>
+          </span>
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
         </div>
       </header>
@@ -211,16 +261,19 @@ export function WaiterApp() {
           </>
         ) : desktopView === 'orders' ? (
           <div className="mx-auto flex h-full w-full max-w-3xl flex-col overflow-hidden">
-            <h2 className="mb-3 shrink-0 text-lg font-semibold text-text-primary">Активные заказы</h2>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <OrdersList
-                orders={orders}
-                onOpen={(o) => {
-                  cart.selectTable(o.table.id);
-                  setTab('cart');
-                }}
-              />
-            </div>
+            {viewingOrder ? (
+              <div className="mx-auto h-full w-full max-w-xl">{rightPanel}</div>
+            ) : (
+              <>
+                <h2 className="mb-3 shrink-0 text-lg font-semibold text-text-primary">Активные заказы</h2>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <OrdersList
+                    orders={orders}
+                    onOpen={openExistingOrder}
+                  />
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <div className="mx-auto h-full w-full max-w-xl overflow-y-auto py-2">
@@ -230,7 +283,7 @@ export function WaiterApp() {
       </main>
 
       {/* MOBILE: одна панель + нижняя навигация */}
-      <main className="flex-1 overflow-hidden p-3 lg:hidden">
+      <main className="flex-1 overflow-hidden bg-white px-1 py-2 lg:hidden">
         {tab === 'tables' && tablesPanel}
         {tab === 'menu' && menuPanel}
         {tab === 'cart' && rightPanel}
@@ -239,10 +292,7 @@ export function WaiterApp() {
             <div className="overflow-y-auto">
               <OrdersList
                 orders={orders}
-                onOpen={(o) => {
-                  cart.selectTable(o.table.id);
-                  setTab('cart');
-                }}
+                onOpen={openExistingOrder}
               />
             </div>
           </Panel>
@@ -256,7 +306,12 @@ export function WaiterApp() {
         )}
       </main>
 
-      <BottomNav tab={tab} setTab={setTab} cartCount={cart.lines.length} ordersCount={orders.length} />
+      <BottomNav
+        tab={activeNavTab}
+        setTab={changeTab}
+        cartCount={cart.lines.length}
+        ordersCount={ordersAttentionCount}
+      />
 
       {paymentOrder && (
         <PaymentModal
@@ -265,6 +320,7 @@ export function WaiterApp() {
           onClose={() => setPaymentOrder(null)}
           onPaid={() => {
             setPaymentOrder(null);
+            setViewingOrderId(null);
             setTab('tables');
           }}
         />
@@ -275,7 +331,7 @@ export function WaiterApp() {
 
 function Panel({ title, children }: { title: string | null; children: React.ReactNode }) {
   return (
-    <section className="card flex h-full flex-col p-4">
+    <section className="flex h-full flex-col bg-white px-1 py-2 lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4 lg:shadow-card">
       {title && <h2 className="mb-3 shrink-0 text-lg font-semibold text-text-primary">{title}</h2>}
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>

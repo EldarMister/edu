@@ -8,7 +8,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['icon.png'],
       manifest: {
         name: 'Вкусно • POS',
         short_name: 'Вкусно POS',
@@ -19,8 +19,7 @@ export default defineConfig({
         orientation: 'portrait',
         start_url: '/',
         icons: [
-          { src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
-          { src: 'icon-maskable.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'maskable' },
+          { src: 'icon.png', sizes: '1254x1254', type: 'image/png', purpose: 'any maskable' },
         ],
       },
       devOptions: { enabled: false },

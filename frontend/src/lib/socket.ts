@@ -19,6 +19,9 @@ export function getSocket(): Socket {
   } else {
     // Обновляем токен на случай повторного входа.
     socket.auth = { token };
+    if (token && !socket.connected) {
+      socket.connect();
+    }
   }
   return socket;
 }

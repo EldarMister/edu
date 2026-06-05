@@ -11,7 +11,7 @@ export class WaiterShiftsController {
 
   @Get('current')
   current(@CurrentUser() user: AuthUser) {
-    return this.shifts.current(user.id);
+    return this.shifts.currentWithStats(user.id);
   }
 
   @Post('start')

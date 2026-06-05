@@ -17,14 +17,12 @@ export function OrderPanel({
   onPickedUp,
   onServed,
   onToPayment,
-  onPay,
 }: {
   order: Order;
   submitting: boolean;
   onPickedUp: () => void;
   onServed: () => void;
   onToPayment: () => void;
-  onPay: () => void;
 }) {
   return (
     <div className="flex h-full flex-col">
@@ -86,7 +84,6 @@ export function OrderPanel({
             onPickedUp={onPickedUp}
             onServed={onServed}
             onToPayment={onToPayment}
-            onPay={onPay}
           />
         </div>
       </div>
@@ -100,14 +97,12 @@ function ActionButton({
   onPickedUp,
   onServed,
   onToPayment,
-  onPay,
 }: {
   order: Order;
   submitting: boolean;
   onPickedUp: () => void;
   onServed: () => void;
   onToPayment: () => void;
-  onPay: () => void;
 }) {
   const s = order.status;
   const spin = submitting ? <Spinner /> : null;
@@ -142,9 +137,9 @@ function ActionButton({
   }
   if (s === 'waiting_payment') {
     return (
-      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onPay}>
-        {spin ?? 'Принять оплату'}
-      </button>
+      <div className="rounded-xl bg-purple-50 py-3 text-center text-sm text-purple-600">
+        Ожидает оплаты
+      </div>
     );
   }
   if (s === 'rejected') {

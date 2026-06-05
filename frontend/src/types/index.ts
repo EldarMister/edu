@@ -93,6 +93,11 @@ export interface WaiterShift {
   status: WaiterShiftStatus;
   createdAt: string;
   updatedAt: string;
+  stats?: {
+    ordersCount: number;
+    totalAmount: string;
+    activeOrdersCount: number;
+  };
 }
 
 export interface OrderItem {

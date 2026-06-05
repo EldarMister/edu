@@ -62,4 +62,19 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  .menu-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: #9ca3af transparent;
+  }
+  .menu-scrollbar::-webkit-scrollbar {
+    width: 2px;
+  }
+  .menu-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .menu-scrollbar::-webkit-scrollbar-thumb {
+    background: #9ca3af;
+    border-radius: 999px;
+  }
 }

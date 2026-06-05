@@ -1,10 +1,9 @@
 import type { WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
-import { ConnectionStatus } from '@/components/ConnectionStatus';
 import { Spinner } from '@/components/Spinner';
 import { disconnectSocket } from '@/lib/socket';
-import { timeHM } from '@/lib/format';
+import { money, timeHM } from '@/lib/format';
 
 export function WaiterProfile({
   shift,
@@ -40,10 +39,6 @@ export function WaiterProfile({
             <p className="text-sm text-text-muted">Официант · {user?.phone}</p>
           </div>
         </div>
-        <div className="mt-4 flex items-center justify-between border-t border-border pt-3 text-sm">
-          <span className="text-text-muted">Связь</span>
-          <ConnectionStatus />
-        </div>
       </div>
 
       <div className="card p-5">
@@ -51,7 +46,7 @@ export function WaiterProfile({
           <div>
             <h3 className="text-[15px] font-semibold text-text-primary">Смена</h3>
             <p className="mt-1 text-sm text-text-muted">
-              {shiftActive ? `Начало: ${timeHM(shift.startedAt)}` : 'Смена не начата'}
+              {shiftActive ? 'Смена активна' : 'Смена не начата'}
             </p>
           </div>
           <span
@@ -62,6 +57,15 @@ export function WaiterProfile({
             {shiftActive ? 'Смена активна' : 'Не начата'}
           </span>
         </div>
+
+        {shiftActive && (
+          <div className="mt-4 grid gap-2 border-t border-border pt-3 text-sm">
+            <ShiftRow label="Начало" value={timeHM(shift.startedAt)} />
+            <ShiftRow label="Заказов за смену" value={String(shift.stats?.ordersCount ?? 0)} />
+            <ShiftRow label="Сумма за смену" value={money(shift.stats?.totalAmount ?? 0)} />
+            <ShiftRow label="Активных заказов" value={String(shift.stats?.activeOrdersCount ?? 0)} />
+          </div>
+        )}
 
         <button
           className={`${shiftActive ? 'btn-secondary' : 'btn-primary'} btn-lg mt-4 w-full`}
@@ -100,6 +104,15 @@ export function WaiterProfile({
       <button className="btn-secondary btn-lg w-full" onClick={onLogout}>
         Выйти
       </button>
+    </div>
+  );
+}
+
+function ShiftRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <span className="text-text-muted">{label}</span>
+      <span className="font-medium text-text-primary">{value}</span>
     </div>
   );
 }

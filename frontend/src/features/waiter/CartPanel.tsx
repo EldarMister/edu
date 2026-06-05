@@ -24,7 +24,9 @@ export function CartPanel({
   const { lines, comment, inc, dec, remove, setLineComment, setComment } = useCart();
   const totals = cartTotals(lines);
   const [commentFor, setCommentFor] = useState<string | null>(null);
-  const isSubmitBlocked = !canSubmit && lines.length > 0;
+  const hasLines = lines.length > 0;
+  const canSend = hasLines && canSubmit && !submitting;
+  const isBlockedByShift = hasLines && !canSubmit;
 
   return (
     <div className="flex h-full flex-col">
@@ -119,10 +121,11 @@ export function CartPanel({
         </div>
 
         <button
-          className={`btn-primary btn-lg mt-3 w-full font-semibold ${
-            isSubmitBlocked ? 'cursor-not-allowed opacity-50 hover:bg-primary' : ''
+          className={`${canSend ? 'btn-primary' : 'btn-secondary'} btn-lg mt-3 w-full font-semibold ${
+            isBlockedByShift ? 'cursor-not-allowed opacity-60' : ''
           }`}
-          disabled={lines.length === 0 || submitting}
+          disabled={!hasLines || submitting}
+          aria-disabled={!canSend}
           onClick={() => {
             if (!canSubmit) {
               onBlockedSubmit();
