@@ -2,10 +2,18 @@ import { create } from 'zustand';
 import type { CartLine, Dish } from '@/types';
 import { dishUnitPrice } from '@/lib/format';
 
-interface CartState {
-  tableId: string | null;
+interface TableCart {
   lines: CartLine[];
   comment: string;
+}
+
+interface CartState {
+  tableId: string | null;
+  // Зеркало корзины активного стола (для удобства потребителей).
+  lines: CartLine[];
+  comment: string;
+  // Черновики корзин по каждому столу — не сбрасываются при переключении.
+  carts: Record<string, TableCart>;
   selectTable: (tableId: string) => void;
   add: (dish: Dish) => void;
   inc: (dishId: string) => void;
@@ -16,41 +24,84 @@ interface CartState {
   clear: () => void;
 }
 
+const EMPTY: TableCart = { lines: [], comment: '' };
+
+/** Применяет изменение к корзине активного стола и синхронизирует зеркало. */
+function mutate(s: CartState, fn: (cart: TableCart) => TableCart): Partial<CartState> {
+  if (!s.tableId) return s;
+  const current = s.carts[s.tableId] ?? EMPTY;
+  const next = fn(current);
+  return {
+    lines: next.lines,
+    comment: next.comment,
+    carts: { ...s.carts, [s.tableId]: next },
+  };
+}
+
 export const useCart = create<CartState>((set) => ({
   tableId: null,
   lines: [],
   comment: '',
+  carts: {},
+
+  // Переключение стола сохраняет корзину прежнего и восстанавливает корзину нового.
   selectTable: (tableId) =>
-    set((s) => (s.tableId === tableId ? s : { tableId, lines: [], comment: '' })),
-  add: (dish) =>
     set((s) => {
-      const existing = s.lines.find((l) => l.dish.id === dish.id);
-      if (existing) {
-        return {
-          lines: s.lines.map((l) =>
-            l.dish.id === dish.id ? { ...l, quantity: l.quantity + 1 } : l,
-          ),
-        };
-      }
-      return { lines: [...s.lines, { dish, quantity: 1 }] };
+      if (s.tableId === tableId) return s;
+      const c = s.carts[tableId] ?? EMPTY;
+      return { tableId, lines: c.lines, comment: c.comment };
     }),
+
+  add: (dish) =>
+    set((s) =>
+      mutate(s, (c) => {
+        const existing = c.lines.find((l) => l.dish.id === dish.id);
+        const lines = existing
+          ? c.lines.map((l) => (l.dish.id === dish.id ? { ...l, quantity: l.quantity + 1 } : l))
+          : [...c.lines, { dish, quantity: 1 }];
+        return { ...c, lines };
+      }),
+    ),
+
   inc: (dishId) =>
-    set((s) => ({
-      lines: s.lines.map((l) => (l.dish.id === dishId ? { ...l, quantity: l.quantity + 1 } : l)),
-    })),
+    set((s) =>
+      mutate(s, (c) => ({
+        ...c,
+        lines: c.lines.map((l) => (l.dish.id === dishId ? { ...l, quantity: l.quantity + 1 } : l)),
+      })),
+    ),
+
   dec: (dishId) =>
-    set((s) => ({
-      lines: s.lines
-        .map((l) => (l.dish.id === dishId ? { ...l, quantity: l.quantity - 1 } : l))
-        .filter((l) => l.quantity > 0),
-    })),
-  remove: (dishId) => set((s) => ({ lines: s.lines.filter((l) => l.dish.id !== dishId) })),
+    set((s) =>
+      mutate(s, (c) => ({
+        ...c,
+        lines: c.lines
+          .map((l) => (l.dish.id === dishId ? { ...l, quantity: l.quantity - 1 } : l))
+          .filter((l) => l.quantity > 0),
+      })),
+    ),
+
+  remove: (dishId) =>
+    set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.filter((l) => l.dish.id !== dishId) }))),
+
   setLineComment: (dishId, comment) =>
-    set((s) => ({
-      lines: s.lines.map((l) => (l.dish.id === dishId ? { ...l, comment } : l)),
-    })),
-  setComment: (comment) => set({ comment }),
-  clear: () => set({ lines: [], comment: '' }),
+    set((s) =>
+      mutate(s, (c) => ({
+        ...c,
+        lines: c.lines.map((l) => (l.dish.id === dishId ? { ...l, comment } : l)),
+      })),
+    ),
+
+  setComment: (comment) => set((s) => mutate(s, (c) => ({ ...c, comment }))),
+
+  // Очищает корзину активного стола (после отправки заказа).
+  clear: () =>
+    set((s) => {
+      if (!s.tableId) return { lines: [], comment: '' };
+      const carts = { ...s.carts };
+      delete carts[s.tableId];
+      return { lines: [], comment: '', carts };
+    }),
 }));
 
 export function cartTotals(lines: CartLine[]) {

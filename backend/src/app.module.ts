@@ -13,6 +13,7 @@ import { KitchenModule } from './kitchen/kitchen.module';
 import { PaymentsModule } from './payments/payments.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { WaiterShiftsModule } from './waiter-shifts/waiter-shifts.module';
+import { AdminModule } from './admin/admin.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
@@ -31,6 +32,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     WaiterShiftsModule,
     KitchenModule,
     PaymentsModule,
+    AdminModule,
   ],
   providers: [
     // Глобально: сначала проверка JWT, затем проверка роли.

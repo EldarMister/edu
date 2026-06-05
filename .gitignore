@@ -28,3 +28,4 @@ coverage/
 
 # prisma
 backend/prisma/*.db
+designe/

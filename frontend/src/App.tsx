@@ -5,7 +5,7 @@ import { Toaster } from '@/components/Toaster';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { WaiterApp } from '@/features/waiter/WaiterApp';
 import { KitchenApp } from '@/features/kitchen/KitchenApp';
-import { ComingSoon } from '@/features/common/ComingSoon';
+import { AdminApp } from '@/features/admin/AdminApp';
 
 export function App() {
   const user = useAuth((s) => s.user);
@@ -36,12 +36,12 @@ export function App() {
           }
         />
 
-        {/* Этапы 6–7 — заглушки */}
+        {/* Этап 6 — администратор, Этап 7 — владелец (одна панель, нав зависит от роли) */}
         <Route
           path="/admin/*"
           element={
             <ProtectedRoute roles={['ADMIN', 'OWNER']}>
-              <ComingSoon title="Администрирование" />
+              <AdminApp />
             </ProtectedRoute>
           }
         />
@@ -49,7 +49,7 @@ export function App() {
           path="/owner/*"
           element={
             <ProtectedRoute roles={['OWNER']}>
-              <ComingSoon title="Панель владельца" />
+              <AdminApp />
             </ProtectedRoute>
           }
         />

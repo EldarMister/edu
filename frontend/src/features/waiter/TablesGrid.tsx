@@ -35,8 +35,9 @@ export function TablesGrid({
         ))}
       </div>
 
-      {/* Сетка столов */}
-      <div className="grid flex-1 grid-cols-4 content-start gap-2.5 overflow-y-auto sm:grid-cols-5">
+      {/* Сетка столов — адаптивная auto-fit grid: мало столов → крупнее,
+          много → уменьшаются до минимума, равномерно по ширине контейнера. */}
+      <div className="grid flex-1 content-start gap-2.5 overflow-y-auto grid-cols-[repeat(auto-fit,minmax(78px,1fr))] min-[390px]:grid-cols-[repeat(auto-fit,minmax(86px,1fr))]">
         {hall?.tables.map((t) => {
           const meta = TABLE_STATUS[t.status];
           const selected = t.id === selectedTableId;
@@ -44,7 +45,7 @@ export function TablesGrid({
             <button
               key={t.id}
               onClick={() => onSelect(t.id)}
-              className={`relative flex aspect-square flex-col items-center justify-center rounded-xl border text-lg font-medium transition-all ${
+              className={`relative flex min-h-[88px] w-full flex-col items-center justify-center rounded-xl border text-lg font-medium transition-all ${
                 selected
                   ? 'border-primary bg-primary text-white shadow-soft'
                   : 'border-border bg-white text-text-primary hover:border-primary/40'

@@ -17,5 +17,6 @@ export const SERVER_EVENTS = {
   WAITER_SHIFT_STARTED: 'waiter:shift_started',
   WAITER_SHIFT_ENDED: 'waiter:shift_ended',
   TABLE_STATUS_CHANGED: 'table:status_changed',
+  MENU_UPDATED: 'menu:updated',
   NOTIFICATION_NEW: 'notification:new',
 } as const;
