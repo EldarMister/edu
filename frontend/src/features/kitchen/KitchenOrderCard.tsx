@@ -1,7 +1,7 @@
 import type { Order } from '@/types';
 import type { KitchenTab } from './api';
 import { OrderBadge } from '@/components/StatusBadge';
-import { timeHM, elapsed } from '@/lib/format';
+import { displayOrderNumber, timeHM, elapsed } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 
 /** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
@@ -35,7 +35,7 @@ export function KitchenOrderCard({
       {/* Шапка карточки */}
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-[17px] font-semibold text-text-primary">{order.orderNumber}</p>
+          <p className="text-[17px] font-semibold text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
           <p className="text-sm text-text-muted">Стол {order.table.number}</p>
         </div>
         <div className="text-right">

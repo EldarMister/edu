@@ -1,6 +1,6 @@
 import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
-import { money, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, timeHM } from '@/lib/format';
 
 export function OrdersList({
   orders,
@@ -34,7 +34,7 @@ export function OrdersList({
           >
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[15px] font-semibold text-text-primary">{o.orderNumber}</span>
+                <span className="text-[15px] font-semibold text-text-primary">{displayOrderNumber(o.orderNumber)}</span>
                 <span className="text-sm text-text-muted">Стол {o.table.number}</span>
               </div>
               <p className="mt-1 text-xs text-text-light">

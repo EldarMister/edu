@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { OrderBadge } from '@/components/StatusBadge';
 import { Spinner } from '@/components/Spinner';
-import { money, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconOrders, IconClock, IconCheck, IconX } from '../components/icons';
 import { useAdminOrders, useOrdersOverview } from '../api';
@@ -89,7 +89,7 @@ export function OrdersPage() {
                 <tbody>
                   {data.items.map((ord) => (
                     <tr key={ord.id} className="border-b border-border last:border-0 hover:bg-background/60">
-                      <Td className="font-medium text-text-primary">{ord.orderNumber}</Td>
+                      <Td className="font-medium text-text-primary">{displayOrderNumber(ord.orderNumber)}</Td>
                       <Td className="text-text-secondary">
                         {new Date(ord.createdAt).toLocaleDateString('ru-RU')} {timeHM(ord.createdAt)}
                       </Td>

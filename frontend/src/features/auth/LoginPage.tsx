@@ -4,6 +4,7 @@ import { api, apiError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
 import { homeForRole } from '@/routes/ProtectedRoute';
 import { Spinner } from '@/components/Spinner';
+import { BrandLogo } from '@/components/BrandLogo';
 import type { LoginResponse } from '@/types';
 
 export function LoginPage() {
@@ -36,9 +37,7 @@ export function LoginPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-background px-4">
       {/* Логотип */}
       <div className="mb-8 text-center">
-        <h1 className="text-xl font-semibold text-text-primary">
-          Вкусно <span className="text-primary">•</span> POS
-        </h1>
+        <BrandLogo size="login" className="mx-auto" />
         <p className="mt-1 text-sm text-text-muted">Система управления рестораном</p>
       </div>
 

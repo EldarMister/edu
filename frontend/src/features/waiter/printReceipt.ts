@@ -1,5 +1,5 @@
 import type { Receipt, PaymentMethod } from '@/types';
-import { money, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, timeHM } from '@/lib/format';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   qr: 'QR-код',
@@ -11,6 +11,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
 export function printReceipt(r: Receipt) {
   const date = new Date(r.date);
   const dateStr = `${date.toLocaleDateString('ru-RU')} ${timeHM(r.date)}`;
+  const orderNumber = displayOrderNumber(r.orderNumber);
   const rows = r.items
     .map(
       (it) =>
@@ -20,7 +21,7 @@ export function printReceipt(r: Receipt) {
     )
     .join('');
 
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Чек ${r.orderNumber}</title>
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Чек ${orderNumber}</title>
   <style>
     @page { margin: 0; }
     body { width: 76mm; margin: 0 auto; padding: 6mm 4mm; font-family: 'Inter', monospace, sans-serif; color: #000; font-size: 12px; }
@@ -38,7 +39,7 @@ export function printReceipt(r: Receipt) {
     <h1>${escapeHtml(r.cafeName)}</h1>
     <div class="center muted">${dateStr}</div>
     <hr/>
-    <div class="row muted"><span>Заказ</span><span>${escapeHtml(r.orderNumber)}</span></div>
+    <div class="row muted"><span>Заказ</span><span>${escapeHtml(orderNumber)}</span></div>
     <div class="row muted"><span>Стол</span><span>${r.tableNumber}</span></div>
     <div class="row muted"><span>Официант</span><span>${escapeHtml(r.waiter)}</span></div>
     <hr/>

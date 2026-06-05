@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/store/auth';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
+import { BrandLogo } from '@/components/BrandLogo';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import {
   IconStats,
@@ -66,9 +67,7 @@ export function AdminApp() {
   const sidebar = (
     <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-white">
       <div className="flex h-16 items-center px-5">
-        <span className="text-[15px] font-semibold text-text-primary">
-          Вкусно <span className="text-primary">•</span> POS
-        </span>
+        <BrandLogo />
       </div>
       <nav className="flex-1 space-y-1 px-3 py-2">
         {sections.map((s) => {

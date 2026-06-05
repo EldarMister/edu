@@ -69,7 +69,7 @@ export function DishMenu({
       </div>
 
       {/* Блюда */}
-      <div className="menu-scrollbar -mr-1 grid flex-1 grid-cols-2 content-start gap-2.5 overflow-y-auto pr-1 lg:mr-0 lg:grid-cols-3 lg:pr-0">
+      <div className="no-scrollbar grid flex-1 grid-cols-2 content-start gap-2.5 overflow-y-auto lg:grid-cols-3">
         {filtered.map((d) => {
           const hasDiscount = d.discountType !== 'none' && Number(d.discountValue) > 0;
           const finalUnit = dishUnitPrice(d.price, d.discountType, d.discountValue);

@@ -15,6 +15,12 @@ export function TablesGrid({
 }) {
   const [hallId, setHallId] = useState(halls[0]?.id ?? '');
   const hall = halls.find((h) => h.id === hallId) ?? halls[0];
+  const tableCount = hall?.tables.length ?? 0;
+  const compactGrid = tableCount > 10;
+  const gridClass = compactGrid ? 'grid-cols-4' : 'grid-cols-3';
+  const cardSizeClass = compactGrid
+    ? 'aspect-square min-h-[74px] text-xl'
+    : 'aspect-square min-h-[104px] text-2xl';
 
   return (
     <div className="flex h-full flex-col">
@@ -35,9 +41,8 @@ export function TablesGrid({
         ))}
       </div>
 
-      {/* Сетка столов — адаптивная auto-fit grid: мало столов → крупнее,
-          много → уменьшаются до минимума, равномерно по ширине контейнера. */}
-      <div className="grid flex-1 content-start gap-2.5 overflow-y-auto grid-cols-[repeat(auto-fit,minmax(78px,1fr))] min-[390px]:grid-cols-[repeat(auto-fit,minmax(86px,1fr))]">
+      {/* Сетка столов: мало столов -> крупнее, много -> компактнее. */}
+      <div className={`no-scrollbar grid flex-1 ${gridClass} content-start gap-2.5 overflow-y-auto`}>
         {hall?.tables.map((t) => {
           const meta = TABLE_STATUS[t.status];
           const selected = t.id === selectedTableId;
@@ -45,7 +50,7 @@ export function TablesGrid({
             <button
               key={t.id}
               onClick={() => onSelect(t.id)}
-              className={`relative flex min-h-[88px] w-full flex-col items-center justify-center rounded-xl border text-lg font-medium transition-all ${
+              className={`relative flex w-full flex-col items-center justify-center rounded-xl border font-medium transition-all ${cardSizeClass} ${
                 selected
                   ? 'border-primary bg-primary text-white shadow-soft'
                   : 'border-border bg-white text-text-primary hover:border-primary/40'

@@ -8,6 +8,14 @@ export function money(value: string | number): string {
   return frac > 0 ? `${formatted},${String(frac).padStart(2, '0')} с` : `${formatted} с`;
 }
 
+/** Номер заказа без ведущих нулей: №000006 -> №6. */
+export function displayOrderNumber(value: string): string {
+  return value.replace(/^(\D*)0+(\d+)$/, (_, prefix: string, digits: string) => {
+    const withoutLeadingZeros = digits.replace(/^0+/, '');
+    return `${prefix}${withoutLeadingZeros || '0'}`;
+  });
+}
+
 /** Время HH:MM из ISO. */
 export function timeHM(iso: string): string {
   const d = new Date(iso);

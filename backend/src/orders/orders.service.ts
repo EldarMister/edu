@@ -469,7 +469,7 @@ export class OrdersService {
   private async nextOrderNumber(tx: Prisma.TransactionClient): Promise<string> {
     const count = await tx.order.count();
     const next = count + 1;
-    return `№${String(next).padStart(6, '0')}`;
+    return `№${next}`;
   }
 
   private async getMutableOrder(orderId: string) {

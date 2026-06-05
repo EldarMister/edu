@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { TableItem } from '@/types';
 import { useCart, cartTotals } from './cart';
-import { money, dishUnitPrice } from '@/lib/format';
+import { displayOrderNumber, money, dishUnitPrice } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 
 export function CartPanel({
@@ -32,15 +32,15 @@ export function CartPanel({
     <div className="flex h-full flex-col">
       <div className="border-b border-border pb-3">
         <h2 className="text-lg font-semibold text-text-primary">
-          {mode === 'add' ? `Добавление в ${orderNumber}` : 'Новый заказ'}
+          {mode === 'add' ? `Добавление в ${displayOrderNumber(orderNumber ?? '')}` : 'Новый заказ'}
         </h2>
         <p className="mt-0.5 text-sm text-text-muted">
-          Стол {table.number} · {table.seats} гостя
+          Стол {table.number}
         </p>
       </div>
 
       {/* Позиции */}
-      <div className="flex-1 space-y-3 overflow-y-auto py-3">
+      <div className="no-scrollbar flex-1 space-y-3 overflow-y-auto py-3">
         {lines.length === 0 && (
           <p className="py-10 text-center text-sm text-text-muted">
             Выберите блюда из меню, чтобы добавить в заказ

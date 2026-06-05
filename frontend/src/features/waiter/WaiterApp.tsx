@@ -4,6 +4,7 @@ import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
+import { BrandLogo } from '@/components/BrandLogo';
 import { FullScreenLoader } from '@/components/Spinner';
 import { useCart } from './cart';
 import { useWaiterRealtime } from './useWaiterRealtime';
@@ -235,10 +236,7 @@ export function WaiterApp() {
       {/* Шапка */}
       <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-white px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-[15px] font-semibold text-text-primary">
-            Вкусно <span className="text-primary">•</span> POS
-          </span>
-          <span className="hidden text-sm text-text-muted sm:inline">· Кафе «Вкусно»</span>
+          <BrandLogo />
         </div>
         <DesktopNav current={desktopView} onChange={(next) => changeTab(next)} />
         <div className="flex items-center gap-3">
@@ -266,7 +264,7 @@ export function WaiterApp() {
             ) : (
               <>
                 <h2 className="mb-3 shrink-0 text-lg font-semibold text-text-primary">Активные заказы</h2>
-                <div className="min-h-0 flex-1 overflow-y-auto">
+                <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
                   <OrdersList
                     orders={orders}
                     onOpen={openExistingOrder}
@@ -276,7 +274,7 @@ export function WaiterApp() {
             )}
           </div>
         ) : (
-          <div className="mx-auto h-full w-full max-w-xl overflow-y-auto py-2">
+          <div className="no-scrollbar mx-auto h-full w-full max-w-xl overflow-y-auto py-2">
             {profilePanel}
           </div>
         )}
@@ -289,7 +287,7 @@ export function WaiterApp() {
         {tab === 'cart' && rightPanel}
         {tab === 'orders' && (
           <Panel title="Активные заказы">
-            <div className="overflow-y-auto">
+            <div className="no-scrollbar overflow-y-auto">
               <OrdersList
                 orders={orders}
                 onOpen={openExistingOrder}
@@ -299,7 +297,7 @@ export function WaiterApp() {
         )}
         {tab === 'profile' && (
           <Panel title="Профиль">
-            <div className="overflow-y-auto">
+            <div className="no-scrollbar overflow-y-auto">
               {profilePanel}
             </div>
           </Panel>

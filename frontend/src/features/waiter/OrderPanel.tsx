@@ -1,7 +1,7 @@
 import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { ORDER_STATUS } from '@/lib/status';
-import { money } from '@/lib/format';
+import { displayOrderNumber, money } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 
 /** Возвращает null если строка состоит только из U+FFFD (кракозябры из bash-тестов). */
@@ -28,16 +28,16 @@ export function OrderPanel({
     <div className="flex h-full flex-col">
       <div className="flex items-start justify-between border-b border-border pb-3">
         <div>
-          <h2 className="text-lg font-semibold text-text-primary">Заказ {order.orderNumber}</h2>
+          <h2 className="text-lg font-semibold text-text-primary">Заказ {displayOrderNumber(order.orderNumber)}</h2>
           <p className="mt-0.5 text-sm text-text-muted">
-            Стол {order.table.number} · {order.table.seats} гостя
+            Стол {order.table.number}
           </p>
         </div>
         <OrderBadge status={order.status} />
       </div>
 
       {/* Позиции */}
-      <div className="flex-1 space-y-2.5 overflow-y-auto py-3">
+      <div className="no-scrollbar flex-1 space-y-2.5 overflow-y-auto py-3">
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
           return (

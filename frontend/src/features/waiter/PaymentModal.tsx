@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
-import { money } from '@/lib/format';
+import { displayOrderNumber, money } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
 import { usePay, fetchReceipt } from './api';
@@ -71,7 +71,7 @@ export function PaymentModal({
         <div className="rounded-xl border border-border p-4 text-sm">
           <p className="text-center text-base font-semibold">{receipt.cafeName}</p>
           <p className="mb-3 text-center text-xs text-text-muted">
-            {receipt.orderNumber} · Стол {receipt.tableNumber}
+            {displayOrderNumber(receipt.orderNumber)} · Стол {receipt.tableNumber}
           </p>
           <div className="space-y-1">
             {receipt.items.map((it, i) => (
@@ -109,7 +109,7 @@ export function PaymentModal({
       }
     >
       <p className="mb-1 text-sm text-text-muted">
-        Стол {order.table.number} · {order.orderNumber}
+        Стол {order.table.number} · {displayOrderNumber(order.orderNumber)}
       </p>
       <div className="mb-4 flex items-baseline justify-between">
         <span className="text-text-secondary">К оплате</span>
