@@ -20,13 +20,13 @@ export function StatCard({
     muted: 'bg-slate-100 text-text-muted',
   };
   return (
-    <div className="card flex items-center gap-3.5 p-4">
-      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${tones[tone]}`}>
+    <div className="card flex items-center gap-3 p-3.5 sm:gap-3.5 sm:p-4">
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-11 sm:w-11 ${tones[tone]}`}>
         {icon}
       </div>
-      <div className="min-w-0">
-        <p className="truncate text-sm text-text-muted">{label}</p>
-        <p className="text-xl font-semibold text-text-primary">{value}</p>
+      <div className="min-w-0 flex-1">
+        <p className="break-words text-[13px] leading-snug text-text-muted sm:text-sm">{label}</p>
+        <p className="mt-0.5 text-xl font-semibold leading-tight text-text-primary">{value}</p>
       </div>
     </div>
   );

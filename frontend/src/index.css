@@ -11,6 +11,28 @@
     font-size: 15px;
     line-height: 1.4;
   }
+  html,
+  body,
+  #root {
+    min-height: 100%;
+    background: #f8fafc;
+  }
+  html.modal-open,
+  body.modal-open {
+    background: rgb(149 153 158);
+  }
+  body.modal-open {
+    overflow: hidden;
+  }
+  body.modal-open::before {
+    content: '';
+    position: fixed;
+    inset: calc(-1 * env(safe-area-inset-top, 0px)) 0 auto;
+    height: max(env(safe-area-inset-top, 0px), 1px);
+    background: rgb(0 0 0 / 0.4);
+    z-index: 49;
+    pointer-events: none;
+  }
   /* Убираем стрелки у числовых полей */
   input[type='number']::-webkit-outer-spin-button,
   input[type='number']::-webkit-inner-spin-button {
@@ -46,6 +68,15 @@
 
   .card {
     @apply bg-card rounded-2xl border border-border shadow-card;
+  }
+
+  .modal-backdrop {
+    position: fixed;
+    top: calc(-1 * env(safe-area-inset-top, 0px));
+    right: 0;
+    bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
+    left: 0;
+    background: rgb(0 0 0 / 0.4);
   }
 
   .input {

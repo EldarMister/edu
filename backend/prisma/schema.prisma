@@ -1,4 +1,4 @@
-// Вкусно POS — Prisma schema
+// EDU POS Prisma schema
 // Полная схема БД по ТЗ §13. На этапах 1–4 используются: User, Hall, Table,
 // Category, Dish, Order, OrderItem, Payment, KitchenEvent.
 // Остальные модели (Incident, PenaltyReward, AuditLog) заведены заранее

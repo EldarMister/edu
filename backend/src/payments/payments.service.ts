@@ -3,7 +3,7 @@ import { PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 
-const CAFE_NAME = 'Кафе «Вкусно»';
+const CAFE_NAME = 'EDU POS';
 
 @Injectable()
 export class PaymentsService {

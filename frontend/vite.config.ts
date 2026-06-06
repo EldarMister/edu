@@ -10,8 +10,8 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['icon.png'],
       manifest: {
-        name: 'Вкусно • POS',
-        short_name: 'Вкусно POS',
+        name: 'EDU POS',
+        short_name: 'EDU POS',
         description: 'POS-система для кафе/ресторана',
         theme_color: '#005BFF',
         background_color: '#F8FAFC',

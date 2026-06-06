@@ -22,9 +22,9 @@ export const useAuth = create<AuthState>()(
       setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
       logout: () => set({ user: null, accessToken: null, refreshToken: null }),
     }),
-    { name: 'vkusno-pos-auth' },
+    { name: 'edu-pos-auth' },
   ),
 );
 
 // Доступ к токенам вне React (для axios/socket).
-export const authStorageKey = 'vkusno-pos-auth';
+export const authStorageKey = 'edu-pos-auth';

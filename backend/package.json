@@ -1,7 +1,7 @@
 {
   "name": "edu-pos-backend",
   "version": "0.1.0",
-  "description": "Вкусно POS — backend (NestJS + Prisma + Socket.IO)",
+  "description": "EDU POS backend (NestJS + Prisma + Socket.IO)",
   "private": true,
   "scripts": {
     "build": "nest build",
