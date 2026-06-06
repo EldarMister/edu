@@ -122,6 +122,7 @@ export interface Order {
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
   comment: string | null;
+  requiresWaiterDecision: boolean;
   createdAt: string;
   table: { id: string; number: number; seats: number; hallId: string; status: TableStatus };
   waiter: { id: string; name: string };

@@ -46,6 +46,12 @@ export class OrdersController {
     return this.orders.pickedUp(id, user.id);
   }
 
+  @Post(':id/resolve-partial-rejection')
+  @Roles(Role.WAITER)
+  resolvePartialRejection(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.orders.resolvePartialRejection(id, user.id);
+  }
+
   @Post(':id/served')
   @Roles(Role.WAITER)
   served(@Param('id') id: string, @CurrentUser() user: AuthUser) {

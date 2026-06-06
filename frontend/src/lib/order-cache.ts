@@ -47,9 +47,9 @@ function removeOrder(list: Order[] | undefined, orderId: string) {
 
 function kitchenTab(status: OrderStatus): 'new' | 'in_work' | 'ready' | 'rejected' | null {
   if (status === 'sent_to_kitchen') return 'new';
-  if (status === 'accepted_by_kitchen' || status === 'cooking') return 'in_work';
+  if (status === 'accepted_by_kitchen' || status === 'cooking' || status === 'partially_rejected') return 'in_work';
   if (status === 'ready' || status === 'picked_up' || status === 'served') return 'ready';
-  if (status === 'rejected' || status === 'partially_rejected') return 'rejected';
+  if (status === 'rejected') return 'rejected';
   return null;
 }
 

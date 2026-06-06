@@ -264,7 +264,7 @@ function IconBtn({
       onClick={onClick}
       title={title}
       className={`rounded-lg p-2 transition-colors hover:bg-background ${
-        danger ? 'text-text-light hover:text-danger' : 'text-text-light hover:text-primary'
+        danger ? 'text-danger hover:bg-danger/5' : 'text-text-light hover:text-primary'
       }`}
     >
       {children}

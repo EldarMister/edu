@@ -90,7 +90,7 @@ export function QrPaymentCard({ qrImageUrl }: { qrImageUrl: string | null }) {
                 {busy ? <Spinner /> : t('Изменить')}
               </button>
               <button
-                className="btn-md flex items-center justify-center gap-1.5 rounded-xl border border-danger/30 px-3 text-danger hover:bg-danger/5 disabled:opacity-50"
+                className="btn-danger btn-md flex-1"
                 onClick={onDelete}
                 disabled={busy}
               >

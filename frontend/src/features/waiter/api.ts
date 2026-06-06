@@ -176,6 +176,21 @@ function useOrderAction(path: (id: string) => string) {
 export const usePickedUp = () => useOrderAction((id) => `/orders/${id}/picked-up`);
 export const useServed = () => useOrderAction((id) => `/orders/${id}/served`);
 export const useToPayment = () => useOrderAction((id) => `/orders/${id}/to-payment`);
+export const useResolvePartialRejection = () => useOrderAction((id) => `/orders/${id}/resolve-partial-rejection`);
+
+export function useCancelOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { orderId: string; reason?: string }) =>
+      (await api.post<Order>(`/orders/${payload.orderId}/cancel`, { reason: payload.reason })).data,
+    retry: networkRetry,
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
 
 export function usePay() {
   const qc = useQueryClient();

@@ -57,7 +57,7 @@ export function CartPanel({
                 </div>
                 <button
                   onClick={() => remove(l.dish.id)}
-                  className="text-text-light hover:text-danger"
+                  className="text-danger hover:opacity-80"
                   aria-label="Удалить"
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

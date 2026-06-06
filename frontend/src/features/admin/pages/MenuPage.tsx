@@ -319,7 +319,7 @@ function CategoryModal({
               <span className="text-xs text-text-muted">{c._count.dishes} блюд</span>
               <button
                 onClick={() => onDelete(c.id, c.name)}
-                className="text-text-light hover:text-danger"
+                className="text-danger hover:opacity-80"
                 title="Удалить"
               >
                 <IconTrash className="h-4 w-4" />
@@ -380,7 +380,7 @@ function IconBtn({
       onClick={onClick}
       title={title}
       className={`rounded-lg p-2 transition-colors hover:bg-background ${
-        danger ? 'text-text-light hover:text-danger' : 'text-text-light hover:text-primary'
+        danger ? 'text-danger hover:bg-danger/5' : 'text-text-light hover:text-primary'
       }`}
     >
       {children}

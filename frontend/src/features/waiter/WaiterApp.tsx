@@ -20,6 +20,8 @@ import {
   usePickedUp,
   useServed,
   useToPayment,
+  useResolvePartialRejection,
+  useCancelOrder,
   useStartShift,
   useEndShift,
   useCloseTable,
@@ -64,6 +66,8 @@ export function WaiterApp() {
   const pickedUp = usePickedUp();
   const served = useServed();
   const toPayment = useToPayment();
+  const resolvePartialRejection = useResolvePartialRejection();
+  const cancelOrder = useCancelOrder();
   const startShift = useStartShift();
   const endShift = useEndShift();
   const closeTable = useCloseTable();
@@ -98,11 +102,11 @@ export function WaiterApp() {
   const showCart = !viewingOrder && (cart.lines.length > 0 || !activeOrder);
   const activeNavTab: Tab = viewingOrder && tab === 'cart' ? 'orders' : tab;
   const ordersAttentionCount = orders.filter((o) =>
-    ['ready', 'partially_rejected', 'rejected'].includes(o.status),
+    o.requiresWaiterDecision || ['ready', 'rejected'].includes(o.status),
   ).length;
 
   const actionPending =
-    pickedUp.isPending || served.isPending || toPayment.isPending;
+    pickedUp.isPending || served.isPending || toPayment.isPending || resolvePartialRejection.isPending || cancelOrder.isPending;
   const shiftPending = startShift.isPending || endShift.isPending;
 
   if (hallsQ.isLoading || categoriesQ.isLoading || dishesQ.isLoading || currentShiftQ.isLoading) {
@@ -138,6 +142,37 @@ export function WaiterApp() {
     try {
       const updated = await toPayment.mutateAsync(order.id);
       setPaymentOrder(updated);
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
+
+  async function continueAfterPartialRejection(order: Order) {
+    try {
+      await resolvePartialRejection.mutateAsync(order.id);
+      push({ message: 'Заказ продолжен без отказанного блюда', type: 'success', at: new Date().toISOString() });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
+
+  function addReplacement(order: Order) {
+    setViewingOrderId(null);
+    cart.selectTable(order.table.id);
+    setTab('menu');
+    push({ message: 'Выберите блюдо на замену и отправьте его на кухню', type: 'info', at: new Date().toISOString() });
+  }
+
+  async function cancelAfterPartialRejection(order: Order) {
+    try {
+      await cancelOrder.mutateAsync({
+        orderId: order.id,
+        reason: 'Клиент отменил заказ после частичного отказа кухни',
+      });
+      cart.clear();
+      setViewingOrderId(null);
+      setTab('tables');
+      push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
@@ -260,6 +295,9 @@ export function WaiterApp() {
           onPickedUp={() => runAction(() => pickedUp.mutateAsync(displayedOrder.id))}
           onServed={() => runAction(() => served.mutateAsync(displayedOrder.id))}
           onToPayment={() => goToPayment(displayedOrder)}
+          onContinueAfterRejection={() => continueAfterPartialRejection(displayedOrder)}
+          onAddReplacement={() => addReplacement(displayedOrder)}
+          onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
         />
       ) : (
         <CartPanel

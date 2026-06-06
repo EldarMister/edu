@@ -7,9 +7,9 @@ export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
 
 const TAB_STATUS: Record<KitchenTab, OrderStatus[]> = {
   new: [OrderStatus.sent_to_kitchen],
-  in_work: [OrderStatus.accepted_by_kitchen, OrderStatus.cooking],
+  in_work: [OrderStatus.accepted_by_kitchen, OrderStatus.cooking, OrderStatus.partially_rejected],
   ready: [OrderStatus.ready, OrderStatus.picked_up, OrderStatus.served],
-  rejected: [OrderStatus.rejected, OrderStatus.partially_rejected],
+  rejected: [OrderStatus.rejected],
 };
 
 @Injectable()

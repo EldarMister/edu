@@ -109,7 +109,7 @@ export function KitchenApp() {
               Уведомления
             </button>
           )}
-          <button onClick={onLogout} className="text-text-muted hover:text-danger">
+          <button onClick={onLogout} className="text-text-muted hover:text-text-primary">
             Выйти
           </button>
         </div>

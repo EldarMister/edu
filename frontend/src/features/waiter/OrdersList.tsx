@@ -23,7 +23,12 @@ export function OrdersList({
     <div className="space-y-2.5">
       {sortedOrders.map((o) => {
         const attention = isAttentionOrder(o);
-        const action = o.status === 'ready' || o.status === 'partially_rejected' ? 'Забрать' : 'Открыть';
+        const action =
+          o.status === 'partially_rejected' && o.requiresWaiterDecision
+            ? 'Решить'
+            : (o.status === 'ready' || o.items.some((item) => item.status === 'ready'))
+              ? 'Забрать'
+              : 'Открыть';
         return (
           <button
             key={o.id}
@@ -56,5 +61,5 @@ export function OrdersList({
 }
 
 function isAttentionOrder(order: Order) {
-  return ['ready', 'partially_rejected', 'rejected'].includes(order.status);
+  return order.requiresWaiterDecision || ['ready', 'rejected'].includes(order.status);
 }

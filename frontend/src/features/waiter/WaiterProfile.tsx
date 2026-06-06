@@ -73,7 +73,7 @@ export function WaiterProfile({
         )}
 
         <button
-          className={`${shiftActive ? 'btn-secondary' : 'btn-primary'} btn-lg mt-4 w-full`}
+          className="btn-primary btn-lg mt-4 w-full"
           disabled={shiftLoading || shiftPending}
           onClick={shiftActive ? onEndShift : onStartShift}
         >

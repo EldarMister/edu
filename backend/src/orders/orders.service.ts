@@ -43,6 +43,9 @@ const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   [PaymentMethod.card]: 'Карта',
 };
 
+const PARTIAL_REJECTION_PENDING_MESSAGE =
+  'Ожидается решение официанта по частичному отказу';
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -194,7 +197,7 @@ export class OrdersService {
       await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
       return tx.order.update({
         where: { id: orderId },
-        data: { status: OrderStatus.cancelled, closedAt: new Date() },
+        data: { status: OrderStatus.cancelled, requiresWaiterDecision: false, closedAt: new Date() },
         include: orderInclude,
       });
     });
@@ -277,7 +280,11 @@ export class OrdersService {
       // Новые блюда снова уходят на кухню.
       await tx.order.update({
         where: { id: orderId },
-        data: { status: OrderStatus.sent_to_kitchen, waiterShiftId: activeShift.id },
+        data: {
+          status: OrderStatus.sent_to_kitchen,
+          requiresWaiterDecision: false,
+          waiterShiftId: activeShift.id,
+        },
       });
       return true;
     });
@@ -307,6 +314,7 @@ export class OrdersService {
 
   async kitchenAccept(orderId: string, kitchenUserId: string) {
     const order = await this.getMutableOrder(orderId);
+    this.ensureNoPendingWaiterDecision(order);
     let applied = false;
     const updated = await this.prisma.$transaction(async (tx) => {
       const changed = await tx.order.updateMany({
@@ -346,6 +354,7 @@ export class OrdersService {
 
   async kitchenReady(orderId: string, kitchenUserId: string) {
     const order = await this.getMutableOrder(orderId);
+    this.ensureNoPendingWaiterDecision(order);
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.orderItem.updateMany({
         where: { orderId, status: { in: [OrderItemStatus.cooking, OrderItemStatus.accepted, OrderItemStatus.new] } },
@@ -380,6 +389,7 @@ export class OrdersService {
   /** Отказ по всему заказу с причиной. */
   async kitchenRejectOrder(orderId: string, kitchenUserId: string, reason: string, comment?: string) {
     const order = await this.getMutableOrder(orderId);
+    this.ensureNoPendingWaiterDecision(order);
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.orderItem.updateMany({
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
@@ -392,7 +402,7 @@ export class OrdersService {
       await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
       const o = await tx.order.update({
         where: { id: orderId },
-        data: { status: OrderStatus.rejected },
+        data: { status: OrderStatus.rejected, requiresWaiterDecision: false },
         include: orderInclude,
       });
       return o;
@@ -419,6 +429,7 @@ export class OrdersService {
     comment?: string,
   ) {
     const order = await this.getMutableOrder(orderId);
+    this.ensureNoPendingWaiterDecision(order);
     const item = await this.prisma.orderItem.findFirst({ where: { id: itemId, orderId } });
     if (!item) throw new NotFoundException('Блюдо в заказе не найдено');
 
@@ -451,6 +462,7 @@ export class OrdersService {
         where: { id: orderId },
         data: {
           status: remaining === 0 ? OrderStatus.rejected : OrderStatus.partially_rejected,
+          requiresWaiterDecision: remaining > 0,
         },
         include: orderInclude,
       });
@@ -462,9 +474,13 @@ export class OrdersService {
       this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
     }
     this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
+    const partialText =
+      updated.status === OrderStatus.partially_rejected
+        ? ' Уточните у клиента: продолжить заказ, заменить блюдо или отменить заказ?'
+        : '';
     this.notifyWaiter(
       updated.waiterId,
-      `Стол №${updated.table.number}. Отказано: ${item.dishNameSnapshot}. Причина: ${reason}`,
+      `Стол №${updated.table.number}. Кухня отказала блюдо: ${item.dishNameSnapshot}. Причина: ${reason}.${partialText}`,
       updated,
       'error',
     );
@@ -473,14 +489,50 @@ export class OrdersService {
 
   // ---------- Действия официанта после готовности ----------
 
+  async resolvePartialRejection(orderId: string, waiterId: string) {
+    const order = await this.assertOwnedOrder(orderId, waiterId);
+    if (order.status !== OrderStatus.partially_rejected || !order.requiresWaiterDecision) {
+      throw new BadRequestException('По этому заказу нет ожидающего решения по частичному отказу');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
+      const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
+      if (nextTableStatus) {
+        await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: nextStatus, requiresWaiterDecision: false },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    const tableStatus = this.tableStatusForOrderStatus(updated.status);
+    if (tableStatus) {
+      this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+    }
+    return updated;
+  }
+
   async pickedUp(orderId: string, waiterId: string) {
     const order = await this.assertOwnedOrder(orderId, waiterId);
-    if (!([OrderStatus.ready, OrderStatus.partially_rejected] as OrderStatus[]).includes(order.status)) {
+    if (order.requiresWaiterDecision) {
+      throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
+    }
+    const readyItems = await this.prisma.orderItem.count({
+      where: { orderId, status: OrderItemStatus.ready },
+    });
+    if (
+      readyItems === 0 ||
+      ([OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected, OrderStatus.waiting_payment] as OrderStatus[]).includes(order.status)
+    ) {
       throw new BadRequestException('Заказ ещё не готов');
     }
     const updated = await this.prisma.order.update({
       where: { id: orderId },
-      data: { status: OrderStatus.picked_up },
+      data: { status: OrderStatus.picked_up, requiresWaiterDecision: false },
       include: orderInclude,
     });
     this.emitStatusChanged(updated);
@@ -489,6 +541,9 @@ export class OrdersService {
 
   async served(orderId: string, waiterId: string) {
     const order = await this.assertOwnedOrder(orderId, waiterId);
+    if (order.requiresWaiterDecision) {
+      throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
+    }
     if (!([OrderStatus.picked_up, OrderStatus.ready, OrderStatus.partially_rejected] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Сначала заберите заказ с кухни');
     }
@@ -500,7 +555,7 @@ export class OrdersService {
       await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.served } });
       return tx.order.update({
         where: { id: orderId },
-        data: { status: OrderStatus.served },
+        data: { status: OrderStatus.served, requiresWaiterDecision: false },
         include: orderInclude,
       });
     });
@@ -512,6 +567,9 @@ export class OrdersService {
   /** Перевод к оплате. */
   async toPayment(orderId: string, waiterId: string) {
     const order = await this.assertOwnedOrder(orderId, waiterId);
+    if (order.requiresWaiterDecision) {
+      throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
+    }
     if (([OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ нельзя оплатить');
     }
@@ -658,6 +716,52 @@ export class OrdersService {
         finalAmount: new Prisma.Decimal(round2(final)),
       },
     });
+  }
+
+  private async statusFromActiveItems(tx: Prisma.TransactionClient, orderId: string): Promise<OrderStatus> {
+    const items = await tx.orderItem.findMany({
+      where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+      select: { status: true },
+    });
+    if (items.length === 0) return OrderStatus.rejected;
+
+    const statuses = new Set(items.map((i) => i.status));
+    if (statuses.has(OrderItemStatus.cooking)) return OrderStatus.cooking;
+    if (statuses.has(OrderItemStatus.accepted)) return OrderStatus.accepted_by_kitchen;
+    if (statuses.has(OrderItemStatus.new)) return OrderStatus.sent_to_kitchen;
+    if (statuses.has(OrderItemStatus.ready)) return OrderStatus.ready;
+    if (statuses.has(OrderItemStatus.served)) return OrderStatus.served;
+    return OrderStatus.partially_rejected;
+  }
+
+  private tableStatusForOrderStatus(status: OrderStatus): TableStatus | null {
+    switch (status) {
+      case OrderStatus.sent_to_kitchen:
+        return TableStatus.sent_to_kitchen;
+      case OrderStatus.accepted_by_kitchen:
+        return TableStatus.accepted;
+      case OrderStatus.cooking:
+        return TableStatus.cooking;
+      case OrderStatus.ready:
+        return TableStatus.ready;
+      case OrderStatus.picked_up:
+      case OrderStatus.served:
+        return TableStatus.served;
+      case OrderStatus.waiting_payment:
+        return TableStatus.waiting_payment;
+      case OrderStatus.paid:
+      case OrderStatus.rejected:
+      case OrderStatus.cancelled:
+        return TableStatus.free;
+      default:
+        return null;
+    }
+  }
+
+  private ensureNoPendingWaiterDecision(order: { requiresWaiterDecision: boolean }) {
+    if (order.requiresWaiterDecision) {
+      throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
+    }
   }
 
   private async nextOrderNumber(tx: Prisma.TransactionClient): Promise<string> {

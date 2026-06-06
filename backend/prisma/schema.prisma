@@ -210,6 +210,7 @@ model Order {
   paymentStatus  PaymentStatus  @default(pending) @map("payment_status")
   paymentMethod  PaymentMethod? @map("payment_method")
   comment        String?
+  requiresWaiterDecision Boolean @default(false) @map("requires_waiter_decision")
   idempotencyKey String?        @unique @map("idempotency_key")
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
