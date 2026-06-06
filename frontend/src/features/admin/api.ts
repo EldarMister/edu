@@ -100,6 +100,50 @@ export interface AuditFilterOptions {
   actionTypes: string[];
 }
 
+// ---------- Сверка оплат ----------
+export type ReconStatus = 'matched' | 'not_found' | 'needs_review' | 'amount_mismatch' | 'extra';
+export interface ReconRow {
+  orderId: string | null;
+  orderNumber: string | null;
+  orderTime: string | null;
+  posAmount: number | null;
+  bankAmount: number | null;
+  bankTime: string | null;
+  timeDiffSec: number | null;
+  paymentMethod: string | null;
+  waiter: string | null;
+  status: ReconStatus;
+  comment: string;
+}
+export interface ReconResult {
+  from: string | null;
+  to: string | null;
+  toleranceMin: number;
+  stats: {
+    paidCount: number;
+    matched: number;
+    notFound: number;
+    needsReview: number;
+    amountMismatch: number;
+    extra: number;
+  };
+  rows: ReconRow[];
+}
+
+export function useReconcile() {
+  return useMutation({
+    mutationFn: async (vars: { file: File; from: string; to: string; toleranceMin: number }) => {
+      const fd = new FormData();
+      fd.append('file', vars.file);
+      fd.append('from', vars.from);
+      fd.append('to', vars.to);
+      fd.append('toleranceMin', String(vars.toleranceMin));
+      const { data } = await api.post<ReconResult>('/admin/reconciliation', fd);
+      return data;
+    },
+  });
+}
+
 // ---------- Хелперы ----------
 const get = async <T,>(url: string) => (await api.get<T>(url)).data;
 

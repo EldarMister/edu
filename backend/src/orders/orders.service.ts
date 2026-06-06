@@ -69,7 +69,8 @@ export class OrdersService {
     return this.prisma.order.findMany({
       where: {
         waiterId,
-        status: { notIn: [OrderStatus.paid, OrderStatus.cancelled] },
+        // rejected/cancelled заказы завершены и не должны числиться активными за столом.
+        status: { notIn: [OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] },
       },
       orderBy: { createdAt: 'desc' },
       include: orderInclude,
@@ -390,6 +391,8 @@ export class OrdersService {
       await tx.kitchenEvent.create({
         data: { orderId, type: KitchenEventType.reject_order, reason, comment, createdById: kitchenUserId },
       });
+      // Весь заказ отклонён — стол освобождается.
+      await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
       const o = await tx.order.update({
         where: { id: orderId },
         data: { status: OrderStatus.rejected },
@@ -399,6 +402,7 @@ export class OrdersService {
     });
 
     this.emitStatusChanged(updated);
+    this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
     this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
     this.notifyWaiter(
       updated.waiterId,
@@ -417,7 +421,7 @@ export class OrdersService {
     reason: string,
     comment?: string,
   ) {
-    await this.getMutableOrder(orderId);
+    const order = await this.getMutableOrder(orderId);
     const item = await this.prisma.orderItem.findFirst({ where: { id: itemId, orderId } });
     if (!item) throw new NotFoundException('Блюдо в заказе не найдено');
 
@@ -442,6 +446,10 @@ export class OrdersService {
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
       });
       await this.recalcOrder(tx, orderId);
+      // Все блюда отклонены — стол освобождается.
+      if (remaining === 0) {
+        await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
+      }
       const o = await tx.order.update({
         where: { id: orderId },
         data: {
@@ -453,6 +461,9 @@ export class OrdersService {
     });
 
     this.emitStatusChanged(updated);
+    if (updated.status === OrderStatus.rejected) {
+      this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+    }
     this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
     this.notifyWaiter(
       updated.waiterId,

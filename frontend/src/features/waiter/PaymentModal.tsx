@@ -5,7 +5,7 @@ import { Spinner } from '@/components/Spinner';
 import { displayOrderNumber, money } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
-import { usePublicSettings } from '@/features/settings/api';
+import { usePublicSettings, resolveQrSrc } from '@/features/settings/api';
 import { usePay, fetchReceipt } from './api';
 import { printReceipt } from './printReceipt';
 
@@ -39,7 +39,7 @@ export function PaymentModal({
   const selected: PaymentMethod =
     method && enabled.includes(method) ? method : methods[0]?.value ?? 'qr';
 
-  const qrImageUrl = settings.data?.qrImageUrl ?? null;
+  const qrImageUrl = resolveQrSrc(settings.data?.qrImageUrl);
   const qrSelected = selected === 'qr';
   const qrMissing = qrSelected && !qrImageUrl;
 

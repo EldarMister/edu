@@ -58,9 +58,19 @@ export class SettingsService {
       receiptText: s.receiptText,
       language: s.language,
       paymentMethods: this.enabledMethodsOf(s),
-      qrImageUrl: s.qrImageUrl,
+      // Лёгкая версионированная ссылка вместо тяжёлого base64 — кэшируется браузером.
+      qrImageUrl: s.qrImageUrl ? `/settings/qr?v=${s.updatedAt.getTime()}` : null,
       printerConnected: s.printerConnected,
     };
+  }
+
+  /** Декодирует сохранённый data URL QR-кода в бинарь для отдачи как картинка. */
+  async getQrImage(): Promise<{ buffer: Buffer; mime: string } | null> {
+    const s = await this.ensure();
+    if (!s.qrImageUrl) return null;
+    const m = s.qrImageUrl.match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
+    if (!m) return null;
+    return { mime: m[1], buffer: Buffer.from(m[2], 'base64') };
   }
 
   async update(dto: UpdateSettingsDto, actor: AuditActor): Promise<Settings> {

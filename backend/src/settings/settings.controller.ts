@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Patch } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { Role } from '@prisma/client';
 import { SettingsService } from './settings.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { UpdateSettingsDto } from './dto';
 
@@ -13,6 +15,20 @@ export class SettingsController {
   @Get('settings')
   getPublic() {
     return this.settings.getPublic();
+  }
+
+  /** QR-код как картинка с долгим кэшем (URL версионируется по updatedAt). */
+  @Public()
+  @Get('settings/qr')
+  async qrImage(@Res() res: Response) {
+    const img = await this.settings.getQrImage();
+    if (!img) {
+      res.status(404).end();
+      return;
+    }
+    res.setHeader('Content-Type', img.mime);
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.end(img.buffer);
   }
 
   /** Полные настройки — только владелец. */

@@ -107,6 +107,12 @@ export const IconLogout = (p: P) => (
   </S>
 );
 export const IconUsers = (p: P) => IconStaff(p);
+export const IconReconcile = (p: P) => (
+  <S {...p}>
+    <path d="M9 11l3 3L22 4" />
+    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+  </S>
+);
 export const IconJournal = (p: P) => (
   <S {...p}>
     <path d="M4 5a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2Z" />

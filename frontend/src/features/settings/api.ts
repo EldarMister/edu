@@ -1,6 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, API_URL } from '@/lib/api';
 import type { PaymentMethod } from '@/types';
+
+/** Преобразует значение QR из настроек в пригодный для <img src> адрес.
+ *  Публичные настройки отдают лёгкую ссылку (/settings/qr?v=…), админские — data URL. */
+export function resolveQrSrc(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value.startsWith('data:') || value.startsWith('http')) return value;
+  return `${API_URL}/api${value.startsWith('/') ? value : `/${value}`}`;
+}
 
 export interface Settings {
   id: string;
