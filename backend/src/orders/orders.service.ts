@@ -659,7 +659,7 @@ export class OrdersService {
         throw new BadRequestException(`Блюдо недоступно`);
       }
       if (!dish.isAvailable) {
-        throw new BadRequestException(`Блюдо «${dish.name}» временно недоступно`);
+        throw new BadRequestException(`Блюдо «${dish.name}» сейчас недоступно`);
       }
       const { unit, unitDiscount, unitFinal } = unitPricing(
         dish.price,

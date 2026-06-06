@@ -39,4 +39,6 @@ export function useWaiterRealtime() {
   useSocketEvent('table:status_changed', () =>
     qc.invalidateQueries({ queryKey: ['halls'] }),
   );
+  // Кухня изменила стоп-лист / меню — обновляем доступность блюд без перезагрузки.
+  useSocketEvent('menu:updated', () => qc.invalidateQueries({ queryKey: ['dishes'] }));
 }

@@ -17,6 +17,7 @@ import {
 } from './api';
 import { KitchenOrderCard } from './KitchenOrderCard';
 import { RejectModal } from './RejectModal';
+import { StopListDrawer } from './StopListDrawer';
 
 const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'new', label: 'Новые' },
@@ -39,6 +40,7 @@ export function KitchenApp() {
   const [now, setNow] = useState(() => Date.now());
   const [reject, setReject] = useState<RejectTarget | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [stopListOpen, setStopListOpen] = useState(false);
 
   const ordersQ = useKitchenOrders(tab);
   const accept = useAccept();
@@ -115,24 +117,32 @@ export function KitchenApp() {
         </div>
       </header>
 
-      {/* Вкладки */}
-      <div className="no-scrollbar flex shrink-0 gap-2 overflow-x-auto border-b border-border bg-white px-5 py-2.5">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`shrink-0 rounded-lg px-4 py-2 text-[15px] font-medium transition-colors ${
-              tab === t.key
-                ? 'bg-primary text-white'
-                : 'text-text-secondary hover:bg-background'
-            }`}
-          >
-            {t.label}
-            {tab === t.key && counts > 0 && (
-              <span className="ml-2 rounded-full bg-white/25 px-1.5 text-xs">{counts}</span>
-            )}
-          </button>
-        ))}
+      {/* Вкладки + Стоп-лист */}
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-white px-5 py-2.5">
+        <div className="no-scrollbar flex gap-2 overflow-x-auto">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key)}
+              className={`shrink-0 rounded-lg px-4 py-2 text-[15px] font-medium transition-colors ${
+                tab === t.key
+                  ? 'bg-primary text-white'
+                  : 'text-text-secondary hover:bg-background'
+              }`}
+            >
+              {t.label}
+              {tab === t.key && counts > 0 && (
+                <span className="ml-2 rounded-full bg-white/25 px-1.5 text-xs">{counts}</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => setStopListOpen(true)}
+          className="shrink-0 rounded-lg border border-primary bg-white px-3.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
+        >
+          Стоп-лист
+        </button>
       </div>
 
       {/* Лента заказов */}
@@ -181,6 +191,8 @@ export function KitchenApp() {
         onClose={() => setReject(null)}
         onConfirm={confirmReject}
       />
+
+      <StopListDrawer open={stopListOpen} onClose={() => setStopListOpen(false)} />
     </div>
   );
 }

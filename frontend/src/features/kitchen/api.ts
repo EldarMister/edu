@@ -12,6 +12,38 @@ export function useKitchenOrders(tab: KitchenTab) {
   });
 }
 
+export interface StopListDish {
+  id: string;
+  name: string;
+  isAvailable: boolean;
+}
+export interface StopListCategory {
+  id: string;
+  name: string;
+  dishes: StopListDish[];
+}
+
+export function useStopList(enabled: boolean) {
+  return useQuery({
+    queryKey: ['kitchen', 'stop-list'],
+    queryFn: async () => (await api.get<StopListCategory[]>('/kitchen/stop-list')).data,
+    enabled,
+  });
+}
+
+export function useSaveStopList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: { dishId: string; isAvailable: boolean }[]) =>
+      (await api.patch<StopListCategory[]>('/kitchen/stop-list', { items })).data,
+    retry: networkRetry,
+    onSuccess: (data) => {
+      qc.setQueryData(['kitchen', 'stop-list'], data);
+      qc.invalidateQueries({ queryKey: ['dishes'] });
+    },
+  });
+}
+
 function invalidateKitchen(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['kitchen'] });
 }

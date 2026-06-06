@@ -70,7 +70,16 @@ export function DishMenu({
                   : 'border-border bg-white hover:border-primary/40'
               }`}
             >
-              <span className="line-clamp-2 text-[15px] font-medium leading-snug text-text-primary">
+              {!d.isAvailable && (
+                <span className="absolute right-2 top-2 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-text-muted">
+                  Недоступно
+                </span>
+              )}
+              <span
+                className={`line-clamp-2 text-[15px] font-medium leading-snug text-text-primary ${
+                  !d.isAvailable ? 'pr-20' : ''
+                }`}
+              >
                 {d.name}
               </span>
               {d.description && (

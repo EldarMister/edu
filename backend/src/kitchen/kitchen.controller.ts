@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { KitchenService, KitchenTab } from './kitchen.service';
 import { OrdersService } from '../orders/orders.service';
 import { RejectDto } from './dto/reject.dto';
+import { UpdateStopListDto } from './dto/stop-list.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
@@ -17,6 +18,16 @@ export class KitchenController {
   @Get('orders')
   list(@Query('tab') tab: KitchenTab = 'new') {
     return this.kitchen.findByTab(tab);
+  }
+
+  @Get('stop-list')
+  stopList() {
+    return this.kitchen.getStopList();
+  }
+
+  @Patch('stop-list')
+  updateStopList(@CurrentUser() user: AuthUser, @Body() dto: UpdateStopListDto) {
+    return this.kitchen.updateStopList(user, dto.items);
   }
 
   @Post('orders/:id/accept')
