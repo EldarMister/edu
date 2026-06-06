@@ -6,12 +6,14 @@ export function Modal({
   title,
   children,
   footer,
+  panelClassName = 'max-w-md',
 }: {
   open: boolean;
   onClose: () => void;
   title?: string;
   children: ReactNode;
   footer?: ReactNode;
+  panelClassName?: string;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -35,7 +37,7 @@ export function Modal({
         onClick={onClose}
         aria-hidden
       />
-      <div className="card relative z-10 flex max-h-[92vh] w-full max-w-md flex-col rounded-b-none sm:rounded-2xl">
+      <div className={`card relative z-10 flex max-h-[92vh] w-full flex-col rounded-b-none sm:rounded-2xl ${panelClassName}`}>
         {title && (
           <div className="flex items-center justify-between border-b border-border px-5 py-4">
             <h3 className="text-lg font-semibold text-text-primary">{title}</h3>

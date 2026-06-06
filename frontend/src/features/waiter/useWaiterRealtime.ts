@@ -3,7 +3,8 @@ import { useSocketEvent } from '@/lib/socket';
 import { useNotifications } from '@/store/notifications';
 import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/lib/format';
-import type { AppNotification } from '@/types';
+import { applyOrderStatusToCache } from '@/lib/order-cache';
+import type { AppNotification, Order } from '@/types';
 
 /** Подписки официанта на real-time события сервера. */
 export function useWaiterRealtime() {
@@ -23,7 +24,10 @@ export function useWaiterRealtime() {
     beep('notify');
   });
 
-  useSocketEvent('order:status_changed', invalidate);
+  useSocketEvent<Order>('order:status_changed', (order) => {
+    applyOrderStatusToCache(qc, order);
+    invalidate();
+  });
   useSocketEvent('waiter:order_ready', invalidate);
   useSocketEvent('waiter:order_rejected', invalidate);
   useSocketEvent('waiter:shift_started', () =>

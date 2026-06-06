@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import { applyOrderStatusToCache } from '@/lib/order-cache';
 import type { Order, PaymentMethod, Role, TableStatus } from '@/types';
 
 // ---------- Типы ответов ----------
@@ -55,12 +56,20 @@ export interface OrdersPage {
   pages: number;
 }
 export interface StatsDashboard {
-  cards: { revenueToday: number; ordersToday: number; avgCheck: number; revenuePeriod: number };
-  revenueSeries: { date: string; amount: number }[];
+  cards: {
+    revenueToday: number;
+    ordersToday: number;
+    avgCheck: number;
+    revenuePeriod: number;
+    ordersPeriod: number;
+  };
+  trends: { revenue: number; orders: number; avgCheck: number };
+  revenueSeries: { label: string; amount: number }[];
   paymentMethods: { method: PaymentMethod; amount: number; percent: number }[];
   topDishes: { name: string; amount: number; count: number }[];
   topWaiters: { name: string; amount: number; orders: number }[];
-  period: 'week' | 'month' | 'year';
+  period: StatsPeriod;
+  range: { from: string | null; to: string | null };
 }
 
 export interface AuditLogEntry {
@@ -100,10 +109,16 @@ function useInvalidate(keys: string[][]) {
 }
 
 // ========== СТАТИСТИКА ==========
-export function useStatistics(period: 'week' | 'month' | 'year') {
+export type StatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
+
+export function useStatistics(params: { period: StatsPeriod; from?: string; to?: string }) {
+  const q = new URLSearchParams();
+  q.set('period', params.period);
+  if (params.from) q.set('from', params.from);
+  if (params.to) q.set('to', params.to);
   return useQuery({
-    queryKey: ['admin', 'stats', period],
-    queryFn: () => get<StatsDashboard>(`/admin/statistics?period=${period}`),
+    queryKey: ['admin', 'stats', params],
+    queryFn: () => get<StatsDashboard>(`/admin/statistics?${q.toString()}`),
   });
 }
 
@@ -142,8 +157,9 @@ export function useCancelOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ orderId, reason }: { orderId: string; reason?: string }) =>
-      api.post(`/orders/${orderId}/cancel`, { reason }).then((r) => r.data),
-    onSuccess: () => {
+      api.post<Order>(`/orders/${orderId}/cancel`, { reason }).then((r) => r.data),
+    onSuccess: (order) => {
+      applyOrderStatusToCache(qc, order);
       qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
       qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
       qc.invalidateQueries({ queryKey: ['admin', 'tables'] });

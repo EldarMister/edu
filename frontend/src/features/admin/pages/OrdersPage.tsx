@@ -9,6 +9,7 @@ import { useT } from '@/lib/i18n';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconOrders, IconClock, IconCheck, IconX } from '../components/icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
+import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { useAdminOrders, useOrdersOverview, useCancelOrder } from '../api';
 
 /** Заказ можно отменить, пока он не оплачен/не отменён/не отклонён. */
@@ -27,6 +28,7 @@ export function OrdersPage() {
   const [page, setPage] = useState(1);
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
+  const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
 
   const overview = useOrdersOverview();
   const ordersQ = useAdminOrders({ tab, search, page });
@@ -113,7 +115,19 @@ export function OrdersPage() {
                 </thead>
                 <tbody>
                   {data.items.map((ord) => (
-                    <tr key={ord.id} className="border-b border-border last:border-0 hover:bg-background/60">
+                    <tr
+                      key={ord.id}
+                      className="cursor-pointer border-b border-border last:border-0 hover:bg-background/60 focus-within:bg-background/60"
+                      tabIndex={0}
+                      role="button"
+                      onClick={() => setDetailsOrder(ord)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setDetailsOrder(ord);
+                        }
+                      }}
+                    >
                       <Td className="font-medium text-text-primary">{displayOrderNumber(ord.orderNumber)}</Td>
                       <Td className="text-text-secondary">
                         {new Date(ord.createdAt).toLocaleDateString('ru-RU')} {timeHM(ord.createdAt)}
@@ -128,7 +142,11 @@ export function OrdersPage() {
                         {CANCELLABLE.has(ord.status) && (
                           <button
                             className="text-sm font-medium text-danger hover:underline"
-                            onClick={() => setCancelTarget(ord)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCancelTarget(ord);
+                            }}
+                            onKeyDown={(e) => e.stopPropagation()}
                           >
                             {tr('Отменить')}
                           </button>
@@ -177,6 +195,7 @@ export function OrdersPage() {
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancel}
       />
+      <OrderDetailsModal order={detailsOrder} onClose={() => setDetailsOrder(null)} />
     </div>
   );
 }

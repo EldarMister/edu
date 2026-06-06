@@ -12,6 +12,6 @@ export class StatisticsController {
 
   @Get()
   dashboard(@Query() query: StatsQueryDto) {
-    return this.statistics.dashboard(query.period ?? 'month');
+    return this.statistics.dashboard(query);
   }
 }

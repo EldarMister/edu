@@ -5,6 +5,8 @@ import { useT } from '@/lib/i18n';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
+import { applyOrderStatusToCache } from '@/lib/order-cache';
+import type { Order } from '@/types';
 import {
   IconStats,
   IconOrders,
@@ -51,7 +53,8 @@ export function AdminApp() {
   const [mobileNav, setMobileNav] = useState(false);
 
   // Живое обновление: при изменении статуса заказа обновляем admin-данные.
-  useSocketEvent('order:status_changed', () => {
+  useSocketEvent<Order>('order:status_changed', (order) => {
+    applyOrderStatusToCache(qc, order);
     qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
     qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
   });

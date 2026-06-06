@@ -191,5 +191,11 @@ export class OrderQueryDto {
 // ---------- Статистика ----------
 export class StatsQueryDto {
   @IsOptional() @IsString()
-  period?: 'week' | 'month' | 'year';
+  period?: 'today' | 'week' | 'month' | 'all' | 'custom';
+
+  @IsOptional() @IsString()
+  from?: string;
+
+  @IsOptional() @IsString()
+  to?: string;
 }
