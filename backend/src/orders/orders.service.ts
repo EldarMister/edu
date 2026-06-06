@@ -238,9 +238,6 @@ export class OrdersService {
     }
 
     const activeShift = await this.shifts.getRequiredActiveShift(waiterId);
-    if (order.waiterShiftId && order.waiterShiftId !== activeShift.id) {
-      throw new BadRequestException('Этот заказ относится к другой смене.');
-    }
 
     const actionType = 'add_items';
     if (idempotencyKey) {
@@ -280,7 +277,7 @@ export class OrdersService {
       // Новые блюда снова уходят на кухню.
       await tx.order.update({
         where: { id: orderId },
-        data: { status: OrderStatus.sent_to_kitchen, waiterShiftId: order.waiterShiftId ?? activeShift.id },
+        data: { status: OrderStatus.sent_to_kitchen, waiterShiftId: activeShift.id },
       });
       return true;
     });

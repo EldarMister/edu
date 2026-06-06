@@ -6,6 +6,7 @@ import { displayOrderNumber, money } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
 import { usePublicSettings, resolveQrSrc } from '@/features/settings/api';
+import { beep } from '@/lib/sound';
 import { usePay, fetchReceipt } from './api';
 import { printReceipt } from './printReceipt';
 
@@ -47,6 +48,7 @@ export function PaymentModal({
     setError('');
     try {
       await pay.mutateAsync({ orderId: order.id, method: selected });
+      beep('payment');
       push({ message: 'Оплата принята', type: 'success', at: new Date().toISOString() });
       const r = await fetchReceipt(order.id);
       setReceipt(r);
