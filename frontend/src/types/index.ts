@@ -130,6 +130,9 @@ export interface Order {
 
 export interface Receipt {
   cafeName: string;
+  address?: string;
+  phone?: string;
+  phone2?: string;
   orderNumber: string;
   tableNumber: number;
   waiter: string;

@@ -351,3 +351,21 @@ model AuditLog {
   @@index([entityType, entityId])
   @@map("audit_logs")
 }
+
+// Настройки заведения (singleton, id = "default"). Этап 8.
+model Settings {
+  id               String   @id @default("default")
+  cafeName         String   @default("EDU CAFE") @map("cafe_name")
+  address          String   @default("г. Бишкек, ул. Киевская 120")
+  phone            String   @default("+996 500 123 456")
+  phone2           String   @default("+996 700 123 456")
+  receiptText      String   @default("Спасибо за покупку!") @map("receipt_text")
+  language         String   @default("ru") // ru | ky
+  payQr            Boolean  @default(true) @map("pay_qr")
+  payCash          Boolean  @default(true) @map("pay_cash")
+  payCard          Boolean  @default(true) @map("pay_card")
+  printerConnected Boolean  @default(false) @map("printer_connected")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}

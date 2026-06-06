@@ -1,0 +1,323 @@
+import { useEffect, useState } from 'react';
+import { Spinner } from '@/components/Spinner';
+import { Toggle } from '@/components/Toggle';
+import { apiError } from '@/lib/api';
+import { useNotifications } from '@/store/notifications';
+import { useLocale, type Locale } from '@/store/locale';
+import {
+  IconGlobe,
+  IconQr,
+  IconCash,
+  IconCard,
+  IconPrinter,
+} from '../admin/components/icons';
+import { useAdminSettings, useUpdateSettings } from './api';
+
+interface Form {
+  cafeName: string;
+  address: string;
+  phone: string;
+  phone2: string;
+  receiptText: string;
+  language: Locale;
+  payQr: boolean;
+  payCash: boolean;
+  payCard: boolean;
+}
+
+const RECEIPT_LIMIT = 120;
+
+export function SettingsPage() {
+  const { data, isLoading } = useAdminSettings();
+  const update = useUpdateSettings();
+  const push = useNotifications((s) => s.push);
+  const setLocale = useLocale((s) => s.setLocale);
+
+  const [form, setForm] = useState<Form | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (data) {
+      setForm({
+        cafeName: data.cafeName,
+        address: data.address,
+        phone: data.phone,
+        phone2: data.phone2,
+        receiptText: data.receiptText,
+        language: data.language,
+        payQr: data.payQr,
+        payCash: data.payCash,
+        payCard: data.payCard,
+      });
+    }
+  }, [data?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (isLoading || !form || !data) {
+    return (
+      <div className="flex justify-center py-16 text-primary">
+        <Spinner className="h-7 w-7" />
+      </div>
+    );
+  }
+
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => {
+    setForm((f) => (f ? { ...f, [k]: v } : f));
+    setError('');
+  };
+
+  const noMethod = !form.payQr && !form.payCash && !form.payCard;
+
+  function onCancel() {
+    if (!data) return;
+    setForm({
+      cafeName: data.cafeName,
+      address: data.address,
+      phone: data.phone,
+      phone2: data.phone2,
+      receiptText: data.receiptText,
+      language: data.language,
+      payQr: data.payQr,
+      payCash: data.payCash,
+      payCard: data.payCard,
+    });
+    setError('');
+  }
+
+  async function onSave() {
+    if (!form) return;
+    if (noMethod) {
+      setError('Должен быть включён хотя бы один способ оплаты');
+      return;
+    }
+    try {
+      await update.mutateAsync(form);
+      setLocale(form.language);
+      push({ message: 'Настройки успешно сохранены', at: new Date().toISOString() });
+    } catch (err) {
+      const msg = apiError(err);
+      setError(msg);
+      push({ message: msg, at: new Date().toISOString() });
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Левая большая карточка — информация о кафе */}
+        <div className="card p-5 lg:col-span-2">
+          <h3 className="mb-4 text-[17px] font-semibold text-text-primary">Информация о кафе</h3>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Название кафе" className="sm:col-span-2">
+              <input
+                className="input"
+                value={form.cafeName}
+                onChange={(e) => set('cafeName', e.target.value)}
+                placeholder="EDU CAFE"
+              />
+            </Field>
+            <Field label="Адрес" className="sm:col-span-2">
+              <input
+                className="input"
+                value={form.address}
+                onChange={(e) => set('address', e.target.value)}
+                placeholder="г. Бишкек, ул. Киевская 120"
+              />
+            </Field>
+            <Field label="Номер телефона">
+              <input
+                className="input"
+                value={form.phone}
+                onChange={(e) => set('phone', e.target.value)}
+                placeholder="+996 500 123 456"
+              />
+            </Field>
+            <Field label="Доп. номер">
+              <input
+                className="input"
+                value={form.phone2}
+                onChange={(e) => set('phone2', e.target.value)}
+                placeholder="+996 700 123 456"
+              />
+            </Field>
+            <Field label="Текст в чеке" className="sm:col-span-2">
+              <textarea
+                className="input h-24 resize-none py-2.5"
+                maxLength={RECEIPT_LIMIT}
+                value={form.receiptText}
+                onChange={(e) => set('receiptText', e.target.value)}
+                placeholder="Спасибо за покупку!"
+              />
+              <p className="mt-1 text-right text-xs text-text-muted">
+                {form.receiptText.length}/{RECEIPT_LIMIT}
+              </p>
+            </Field>
+          </div>
+        </div>
+
+        {/* Правая колонка */}
+        <div className="space-y-4">
+          {/* Язык системы */}
+          <div className="card p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <IconGlobe className="h-5 w-5 text-text-secondary" />
+              <h3 className="text-[15px] font-semibold text-text-primary">Язык системы</h3>
+            </div>
+            <div className="flex rounded-xl bg-background p-1">
+              {(
+                [
+                  { value: 'ru', label: 'Русский' },
+                  { value: 'ky', label: 'Кыргызча' },
+                ] as { value: Locale; label: string }[]
+              ).map((l) => (
+                <button
+                  key={l.value}
+                  onClick={() => set('language', l.value)}
+                  className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
+                    form.language === l.value
+                      ? 'bg-white text-primary shadow-sm'
+                      : 'text-text-muted hover:text-text-secondary'
+                  }`}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Способы оплаты */}
+          <div className="card p-5">
+            <h3 className="mb-3 text-[15px] font-semibold text-text-primary">Способы оплаты</h3>
+            <div className="space-y-1">
+              <PayRow
+                icon={<IconQr className="h-5 w-5" />}
+                tone="primary"
+                title="QR-код"
+                desc="Оплата через QR-код"
+                checked={form.payQr}
+                onChange={(v) => set('payQr', v)}
+              />
+              <PayRow
+                icon={<IconCash className="h-5 w-5" />}
+                tone="success"
+                title="Наличные"
+                desc="Оплата наличными средствами"
+                checked={form.payCash}
+                onChange={(v) => set('payCash', v)}
+              />
+              <PayRow
+                icon={<IconCard className="h-5 w-5" />}
+                tone="warning"
+                title="Карта"
+                desc="Оплата банковской картой"
+                checked={form.payCard}
+                onChange={(v) => set('payCard', v)}
+              />
+            </div>
+            <p className={`mt-3 text-xs ${noMethod ? 'text-danger' : 'text-text-muted'}`}>
+              {noMethod
+                ? 'Должен быть включён хотя бы один способ оплаты'
+                : 'Отключённые способы оплаты будут недоступны на экране оплаты'}
+            </p>
+          </div>
+
+          {/* Статус принтера */}
+          <div className="card p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <IconPrinter className="h-5 w-5 text-text-secondary" />
+              <h3 className="text-[15px] font-semibold text-text-primary">Статус принтера</h3>
+            </div>
+            <div className="flex items-center gap-3 rounded-xl border border-border p-3">
+              <div
+                className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                  data.printerConnected ? 'bg-success/10 text-success' : 'bg-slate-100 text-text-muted'
+                }`}
+              >
+                <IconPrinter className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p
+                  className={`text-[15px] font-medium ${
+                    data.printerConnected ? 'text-success' : 'text-text-muted'
+                  }`}
+                >
+                  {data.printerConnected ? 'Подключен' : 'Не подключен'}
+                </p>
+                <p className="text-xs text-text-muted">
+                  {data.printerConnected
+                    ? 'Принтер чеков подключен и готов к печати'
+                    : 'Принтер чеков не подключен'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Кнопки действий */}
+      <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+        {error && <p className="mr-auto self-center text-sm text-danger">{error}</p>}
+        <button className="btn-secondary btn-lg sm:w-auto sm:px-6" onClick={onCancel} disabled={update.isPending}>
+          Отмена
+        </button>
+        <button
+          className="btn-primary btn-lg font-semibold sm:w-auto sm:px-6"
+          onClick={onSave}
+          disabled={update.isPending}
+        >
+          {update.isPending ? <Spinner /> : 'Сохранить изменения'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+  className = '',
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <label className="mb-1.5 block text-sm font-medium text-text-secondary">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function PayRow({
+  icon,
+  tone,
+  title,
+  desc,
+  checked,
+  onChange,
+}: {
+  icon: React.ReactNode;
+  tone: 'primary' | 'success' | 'warning';
+  title: string;
+  desc: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  const tones: Record<string, string> = {
+    primary: 'bg-primary/10 text-primary',
+    success: 'bg-success/10 text-success',
+    warning: 'bg-warning/10 text-warning',
+  };
+  return (
+    <div className="flex items-center gap-3 rounded-xl px-1 py-2.5">
+      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${tones[tone]}`}>
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[15px] font-medium text-text-primary">{title}</p>
+        <p className="text-xs text-text-muted">{desc}</p>
+      </div>
+      <Toggle checked={checked} onChange={onChange} />
+    </div>
+  );
+}

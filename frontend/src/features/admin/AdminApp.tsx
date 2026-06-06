@@ -10,6 +10,7 @@ import {
   IconTables,
   IconMenu,
   IconStaff,
+  IconSettings,
   IconLogout,
 } from './components/icons';
 import { StatisticsPage } from './pages/StatisticsPage';
@@ -17,8 +18,9 @@ import { OrdersPage } from './pages/OrdersPage';
 import { TablesPage } from './pages/TablesPage';
 import { MenuPage } from './pages/MenuPage';
 import { StaffPage } from './pages/StaffPage';
+import { SettingsPage } from '../settings/SettingsPage';
 
-type Section = 'stats' | 'orders' | 'tables' | 'menu' | 'staff';
+type Section = 'stats' | 'orders' | 'tables' | 'menu' | 'staff' | 'settings';
 
 const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly?: boolean }[] = [
   { key: 'stats', label: 'Статистика', icon: IconStats, ownerOnly: true },
@@ -26,6 +28,7 @@ const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly
   { key: 'tables', label: 'Столы', icon: IconTables },
   { key: 'menu', label: 'Меню', icon: IconMenu },
   { key: 'staff', label: 'Персонал', icon: IconStaff },
+  { key: 'settings', label: 'Настройки', icon: IconSettings, ownerOnly: true },
 ];
 
 const ROLE_LABEL: Record<string, string> = {
@@ -146,6 +149,7 @@ export function AdminApp() {
           {section === 'tables' && <TablesPage />}
           {section === 'menu' && <MenuPage />}
           {section === 'staff' && <StaffPage />}
+          {section === 'settings' && isOwner && <SettingsPage />}
         </main>
       </div>
     </div>

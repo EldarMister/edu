@@ -37,6 +37,8 @@ export function printReceipt(r: Receipt) {
     .row { display: flex; justify-content: space-between; }
   </style></head><body>
     <h1>${escapeHtml(r.cafeName)}</h1>
+    ${r.address ? `<div class="center muted">${escapeHtml(r.address)}</div>` : ''}
+    ${r.phone ? `<div class="center muted">${escapeHtml(r.phone)}${r.phone2 ? ', ' + escapeHtml(r.phone2) : ''}</div>` : ''}
     <div class="center muted">${dateStr}</div>
     <hr/>
     <div class="row muted"><span>Заказ</span><span>${escapeHtml(orderNumber)}</span></div>

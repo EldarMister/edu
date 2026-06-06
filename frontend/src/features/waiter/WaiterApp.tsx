@@ -21,6 +21,11 @@ import {
   useToPayment,
   useStartShift,
   useEndShift,
+  useCloseTable,
+  useMoveTable,
+  useTransferTable,
+  useAvailableWaiters,
+  type AvailableWaiter,
 } from './api';
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
@@ -29,6 +34,13 @@ import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
 import { PaymentModal } from './PaymentModal';
+import {
+  TableActionsMenu,
+  TableChip,
+  CloseTableModal,
+  MoveTableModal,
+  TransferTableModal,
+} from './TableActions';
 
 type Tab = 'tables' | 'menu' | 'cart' | 'orders' | 'profile';
 type DesktopTab = 'tables' | 'orders' | 'profile';
@@ -52,11 +64,17 @@ export function WaiterApp() {
   const toPayment = useToPayment();
   const startShift = useStartShift();
   const endShift = useEndShift();
+  const closeTable = useCloseTable();
+  const moveTable = useMoveTable();
+  const transferTable = useTransferTable();
 
   const [tab, setTab] = useState<Tab>('tables');
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
+  const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
   const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
+
+  const availableWaitersQ = useAvailableWaiters(tableModal === 'transfer');
 
   const halls = hallsQ.data ?? [];
   const orders = ordersQ.data ?? [];
@@ -159,20 +177,64 @@ export function WaiterApp() {
     }
   }
 
+  // --- Действия со столом ---
+  async function doCloseTable() {
+    if (!selectedTable) return;
+    try {
+      await closeTable.mutateAsync(selectedTable.id);
+      push({ message: 'Стол успешно закрыт', at: new Date().toISOString() });
+      setTableModal(null);
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
+    }
+  }
+
+  async function doMoveTable(targetTableId: string) {
+    if (!selectedTable) return;
+    try {
+      const updated = await moveTable.mutateAsync({ tableId: selectedTable.id, targetTableId });
+      cart.selectTable(targetTableId);
+      setViewingOrderId(null);
+      push({ message: `Заказ перенесён на стол №${updated.table.number}`, at: new Date().toISOString() });
+      setTableModal(null);
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
+    }
+  }
+
+  async function doTransferTable(waiter: AvailableWaiter) {
+    if (!selectedTable) return;
+    try {
+      await transferTable.mutateAsync({ tableId: selectedTable.id, waiterId: waiter.id });
+      push({ message: `Стол передан официанту ${waiter.name}`, at: new Date().toISOString() });
+      setTableModal(null);
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
+    }
+  }
+
   // --- Панели ---
   const tablesPanel = (
-    <Panel title="Выбор стола">
+    <Panel
+      title="Выбор стола"
+      action={
+        <TableActionsMenu
+          disabled={!selectedTable}
+          onCloseTable={() => setTableModal('close')}
+          onMove={() => setTableModal('move')}
+          onTransfer={() => setTableModal('transfer')}
+        />
+      }
+    >
       <TablesGrid halls={halls} selectedTableId={cart.tableId} onSelect={selectTable} />
     </Panel>
   );
 
   const menuPanel = (
-    <Panel title="Меню">
+    <Panel title="Меню" action={selectedTable ? <TableChip number={selectedTable.number} /> : null}>
       <DishMenu
         categories={categoriesQ.data ?? []}
         dishes={dishesQ.data ?? []}
-        table={selectedTable}
-        cartLines={cart.lines}
         onAdd={addDishToCart}
         disabled={!selectedTable}
       />
@@ -323,14 +385,61 @@ export function WaiterApp() {
           }}
         />
       )}
+
+      {/* Действия со столом */}
+      {tableModal === 'close' && selectedTable && (
+        <CloseTableModal
+          tableNumber={selectedTable.number}
+          hasActiveOrder={!!activeOrder}
+          pending={closeTable.isPending}
+          onConfirm={doCloseTable}
+          onClose={() => setTableModal(null)}
+        />
+      )}
+      {tableModal === 'move' && selectedTable && (
+        <MoveTableModal
+          halls={halls}
+          currentTableId={selectedTable.id}
+          pending={moveTable.isPending}
+          onConfirm={doMoveTable}
+          onClose={() => setTableModal(null)}
+        />
+      )}
+      {tableModal === 'transfer' && selectedTable && (
+        <TransferTableModal
+          waiters={availableWaitersQ.data ?? []}
+          loading={availableWaitersQ.isLoading}
+          excludeWaiterId={displayedOrder?.waiter.id ?? user?.id ?? null}
+          pending={transferTable.isPending}
+          onConfirm={doTransferTable}
+          onClose={() => setTableModal(null)}
+        />
+      )}
     </div>
   );
 }
 
-function Panel({ title, children }: { title: string | null; children: React.ReactNode }) {
+function Panel({
+  title,
+  action,
+  children,
+}: {
+  title: string | null;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <section className="flex h-full flex-col bg-white px-1 py-2 lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4 lg:shadow-card">
-      {title && <h2 className="mb-3 shrink-0 text-lg font-semibold text-text-primary">{title}</h2>}
+      {(title || action) && (
+        <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
+          {title ? (
+            <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+          ) : (
+            <span />
+          )}
+          {action}
+        </div>
+      )}
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </section>
   );

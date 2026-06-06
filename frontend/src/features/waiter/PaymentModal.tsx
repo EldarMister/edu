@@ -5,12 +5,14 @@ import { Spinner } from '@/components/Spinner';
 import { displayOrderNumber, money } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
+import { usePublicSettings } from '@/features/settings/api';
 import { usePay, fetchReceipt } from './api';
 import { printReceipt } from './printReceipt';
 
-const METHODS: { value: PaymentMethod; label: string }[] = [
+const ALL_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'qr', label: 'QR-код' },
   { value: 'cash', label: 'Наличные' },
+  { value: 'card', label: 'Карта' },
 ];
 
 export function PaymentModal({
@@ -26,14 +28,21 @@ export function PaymentModal({
 }) {
   const pay = usePay();
   const push = useNotifications((s) => s.push);
-  const [method, setMethod] = useState<PaymentMethod>('qr');
+  const settings = usePublicSettings();
+  const [method, setMethod] = useState<PaymentMethod | null>(null);
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+
+  // Только включённые в настройках способы оплаты.
+  const enabled = settings.data?.paymentMethods ?? (['qr', 'cash'] as PaymentMethod[]);
+  const methods = ALL_METHODS.filter((m) => enabled.includes(m.value));
+  const selected: PaymentMethod =
+    method && enabled.includes(method) ? method : methods[0]?.value ?? 'qr';
 
   async function onConfirm() {
     setError('');
     try {
-      await pay.mutateAsync({ orderId: order.id, method });
+      await pay.mutateAsync({ orderId: order.id, method: selected });
       push({ message: 'Оплата принята', at: new Date().toISOString() });
       const r = await fetchReceipt(order.id);
       setReceipt(r);
@@ -45,7 +54,7 @@ export function PaymentModal({
   function close() {
     setReceipt(null);
     setError('');
-    setMethod('qr');
+    setMethod(null);
     onClose();
     if (receipt) onPaid();
   }
@@ -117,13 +126,13 @@ export function PaymentModal({
       </div>
 
       <p className="mb-2 text-sm font-medium text-text-secondary">Способ оплаты</p>
-      <div className="grid grid-cols-2 gap-2">
-        {METHODS.map((m) => (
+      <div className={`grid gap-2 ${methods.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        {methods.map((m) => (
           <button
             key={m.value}
             onClick={() => setMethod(m.value)}
             className={`rounded-xl border px-4 py-3 text-[15px] font-medium transition-colors ${
-              method === m.value
+              selected === m.value
                 ? 'border-primary bg-primary/5 text-primary'
                 : 'border-border text-text-secondary hover:border-primary/40'
             }`}

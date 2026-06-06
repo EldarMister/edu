@@ -10,8 +10,10 @@ import {
   PaymentMethod,
   PaymentStatus,
   Prisma,
+  Role,
   TableStatus,
   KitchenEventType,
+  WaiterShiftStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -19,6 +21,18 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { WaiterShiftsService } from '../waiter-shifts/waiter-shifts.service';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
+
+/** Статусы «живого» заказа, который занимает стол. */
+const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.sent_to_kitchen,
+  OrderStatus.accepted_by_kitchen,
+  OrderStatus.cooking,
+  OrderStatus.ready,
+  OrderStatus.picked_up,
+  OrderStatus.served,
+  OrderStatus.waiting_payment,
+  OrderStatus.partially_rejected,
+];
 
 @Injectable()
 export class OrdersService {
@@ -488,6 +502,138 @@ export class OrdersService {
       throw new ForbiddenException('Это не ваш заказ');
     }
     return order;
+  }
+
+  // ---------- Действия со столом (закрыть / перенести / передать) ----------
+
+  /** Активный заказ стола (если есть). */
+  private activeOrderForTable(tableId: string) {
+    return this.prisma.order.findFirst({
+      where: { tableId, status: { in: ACTIVE_ORDER_STATUSES } },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** Закрыть стол — сделать его свободным. Нельзя при незавершённом заказе. */
+  async closeTable(tableId: string) {
+    const table = await this.prisma.table.findUnique({ where: { id: tableId } });
+    if (!table) throw new NotFoundException('Стол не найден');
+
+    const active = await this.activeOrderForTable(tableId);
+    if (active) {
+      throw new BadRequestException(
+        'У этого стола есть активный заказ. Завершите или оплатите заказ перед закрытием стола.',
+      );
+    }
+
+    const updated = await this.prisma.table.update({
+      where: { id: tableId },
+      data: { status: TableStatus.free },
+    });
+    this.emitTableStatus(updated.id, updated.number, TableStatus.free, updated.hallId);
+    return updated;
+  }
+
+  /** Перенести активный заказ на другой (свободный) стол. */
+  async moveTable(sourceTableId: string, targetTableId: string) {
+    if (sourceTableId === targetTableId) {
+      throw new BadRequestException('Нельзя перенести заказ на тот же стол');
+    }
+    const [source, target] = await Promise.all([
+      this.prisma.table.findUnique({ where: { id: sourceTableId } }),
+      this.prisma.table.findUnique({ where: { id: targetTableId } }),
+    ]);
+    if (!source) throw new NotFoundException('Исходный стол не найден');
+    if (!target) throw new NotFoundException('Целевой стол не найден');
+    if (!target.isActive) throw new BadRequestException('Целевой стол отключён');
+
+    const targetBusy = await this.activeOrderForTable(targetTableId);
+    if (targetBusy) throw new BadRequestException('Целевой стол занят');
+
+    const order = await this.activeOrderForTable(sourceTableId);
+    if (!order) throw new BadRequestException('У стола нет активного заказа для переноса');
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.table.update({ where: { id: targetTableId }, data: { status: source.status } });
+      await tx.table.update({ where: { id: sourceTableId }, data: { status: TableStatus.free } });
+      return tx.order.update({
+        where: { id: order.id },
+        data: { tableId: targetTableId },
+        include: orderInclude,
+      });
+    });
+
+    this.emitTableStatus(source.id, source.number, TableStatus.free, source.hallId);
+    this.emitTableStatus(target.id, target.number, source.status, target.hallId);
+    this.emitStatusChanged(updated);
+    this.notifyWaiter(updated.waiterId, `Заказ перенесён на стол №${target.number}`, updated);
+    return updated;
+  }
+
+  /** Передать стол (активный заказ) другому официанту. */
+  async transferTable(sourceTableId: string, waiterId: string, byUserId: string) {
+    const order = await this.activeOrderForTable(sourceTableId);
+    if (!order) throw new BadRequestException('У стола нет активного заказа для передачи');
+
+    const waiter = await this.prisma.user.findUnique({ where: { id: waiterId } });
+    if (!waiter || waiter.role !== Role.WAITER || !waiter.isActive) {
+      throw new BadRequestException('Официант недоступен');
+    }
+    if (waiter.id === order.waiterId) {
+      throw new BadRequestException('Стол уже закреплён за этим официантом');
+    }
+
+    const shift = await this.prisma.waiterShift.findFirst({
+      where: { waiterId, status: WaiterShiftStatus.active },
+    });
+    const fromWaiterId = order.waiterId;
+
+    const updated = await this.prisma.order.update({
+      where: { id: order.id },
+      data: { waiterId, waiterShiftId: shift?.id ?? null },
+      include: orderInclude,
+    });
+
+    // История передачи (ТЗ §18 — audit log).
+    await this.prisma.auditLog.create({
+      data: {
+        userId: byUserId,
+        action: 'table_transfer',
+        entityType: 'order',
+        entityId: order.id,
+        oldValue: { waiterId: fromWaiterId },
+        newValue: { waiterId, tableId: sourceTableId, tableNumber: updated.table.number },
+      },
+    });
+
+    this.emitStatusChanged(updated);
+    this.notifyWaiter(waiterId, `Вам передан стол №${updated.table.number}`, updated);
+    if (fromWaiterId !== waiterId) {
+      this.notifyWaiter(
+        fromWaiterId,
+        `Стол №${updated.table.number} передан официанту ${waiter.name}`,
+        updated,
+      );
+    }
+    return updated;
+  }
+
+  /** Официанты на активной смене — для модалки «Передать стол». */
+  async availableWaiters() {
+    const shifts = await this.prisma.waiterShift.findMany({
+      where: { status: WaiterShiftStatus.active, waiter: { isActive: true, role: Role.WAITER } },
+      select: { waiterId: true, waiter: { select: { id: true, name: true } } },
+      orderBy: { startedAt: 'asc' },
+    });
+    const seen = new Set<string>();
+    const list: { id: string; name: string }[] = [];
+    for (const s of shifts) {
+      if (!seen.has(s.waiterId)) {
+        seen.add(s.waiterId);
+        list.push({ id: s.waiter.id, name: s.waiter.name });
+      }
+    }
+    return list;
   }
 
   // ---------- Real-time helpers ----------
