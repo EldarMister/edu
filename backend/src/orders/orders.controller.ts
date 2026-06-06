@@ -30,7 +30,7 @@ export class OrdersController {
   @Post(':id/items')
   @Roles(Role.WAITER)
   addItems(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: AddItemsDto) {
-    return this.orders.addItems(id, user.id, dto.items);
+    return this.orders.addItems(id, user.id, dto.items, dto.idempotencyKey);
   }
 
   @Post(':id/picked-up')

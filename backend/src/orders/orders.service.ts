@@ -83,33 +83,55 @@ export class OrdersService {
       throw new NotFoundException('Стол не найден');
     }
 
+    const activeOrder = await this.activeOrderForTable(dto.tableId);
+    if (activeOrder) {
+      throw new BadRequestException('У этого стола уже есть активный заказ');
+    }
+
     const itemsData = await this.buildItemsData(dto.items);
     const totals = this.calcTotals(itemsData);
 
-    const order = await this.prisma.$transaction(async (tx) => {
-      const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
-      const orderNumber = await this.nextOrderNumber(tx);
-      await tx.table.update({
-        where: { id: dto.tableId },
-        data: { status: TableStatus.sent_to_kitchen },
+    let order: Awaited<ReturnType<typeof this.findById>>;
+    try {
+      order = await this.prisma.$transaction(async (tx) => {
+        const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
+        const orderNumber = await this.nextOrderNumber(tx);
+        await tx.table.update({
+          where: { id: dto.tableId },
+          data: { status: TableStatus.sent_to_kitchen },
+        });
+        return tx.order.create({
+          data: {
+            orderNumber,
+            tableId: dto.tableId,
+            waiterId,
+            waiterShiftId: activeShift.id,
+            status: OrderStatus.sent_to_kitchen,
+            comment: dto.comment,
+            idempotencyKey: dto.idempotencyKey,
+            totalAmount: totals.total,
+            discountAmount: totals.discount,
+            finalAmount: totals.final,
+            items: { create: itemsData },
+          },
+          include: orderInclude,
+        });
       });
-      return tx.order.create({
-        data: {
-          orderNumber,
-          tableId: dto.tableId,
-          waiterId,
-          waiterShiftId: activeShift.id,
-          status: OrderStatus.sent_to_kitchen,
-          comment: dto.comment,
-          idempotencyKey: dto.idempotencyKey,
-          totalAmount: totals.total,
-          discountAmount: totals.discount,
-          finalAmount: totals.final,
-          items: { create: itemsData },
-        },
-        include: orderInclude,
-      });
-    });
+    } catch (err) {
+      if (this.isUniqueConstraintError(err)) {
+        if (dto.idempotencyKey) {
+          const existing = await this.prisma.order.findUnique({
+            where: { idempotencyKey: dto.idempotencyKey },
+            include: orderInclude,
+          });
+          if (existing) return existing;
+        }
+        if (await this.activeOrderForTable(dto.tableId)) {
+          throw new BadRequestException('У этого стола уже есть активный заказ');
+        }
+      }
+      throw err;
+    }
 
     // Real-time: кухня получает новый заказ, все видят смену статуса стола.
     this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, order);
@@ -126,7 +148,7 @@ export class OrdersService {
   }
 
   /** Добавить блюда к существующему заказу того же стола. */
-  async addItems(orderId: string, waiterId: string, items: CreateOrderItemDto[]) {
+  async addItems(orderId: string, waiterId: string, items: CreateOrderItemDto[], idempotencyKey?: string) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Заказ не найден');
     if (order.waiterId !== waiterId) {
@@ -141,9 +163,37 @@ export class OrdersService {
       throw new BadRequestException('Этот заказ относится к другой смене.');
     }
 
+    const actionType = 'add_items';
+    if (idempotencyKey) {
+      const existingAction = await this.prisma.orderAction.findUnique({
+        where: { type_idempotencyKey: { type: actionType, idempotencyKey } },
+      });
+      if (existingAction) {
+        if (existingAction.orderId !== orderId) {
+          throw new BadRequestException('Ключ повтора уже использован для другого заказа');
+        }
+        return this.findById(orderId);
+      }
+    }
+
     const itemsData = await this.buildItemsData(items);
 
-    await this.prisma.$transaction(async (tx) => {
+    const applied = await this.prisma.$transaction(async (tx) => {
+      if (idempotencyKey) {
+        const createdAction = await tx.orderAction.createMany({
+          data: { orderId, type: actionType, idempotencyKey, userId: waiterId },
+          skipDuplicates: true,
+        });
+        if (createdAction.count === 0) {
+          const existingAction = await tx.orderAction.findUnique({
+            where: { type_idempotencyKey: { type: actionType, idempotencyKey } },
+          });
+          if (existingAction?.orderId !== orderId) {
+            throw new BadRequestException('Ключ повтора уже использован для другого заказа');
+          }
+          return false;
+        }
+      }
       await tx.orderItem.createMany({
         data: itemsData.map((i) => ({ ...i, orderId })),
       });
@@ -153,11 +203,14 @@ export class OrdersService {
         where: { id: orderId },
         data: { status: OrderStatus.sent_to_kitchen, waiterShiftId: order.waiterShiftId ?? activeShift.id },
       });
+      return true;
     });
 
     const updated = await this.findById(orderId);
-    this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
-    this.emitStatusChanged(updated);
+    if (applied) {
+      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
+      this.emitStatusChanged(updated);
+    }
     return updated;
   }
 
@@ -165,7 +218,16 @@ export class OrdersService {
 
   async kitchenAccept(orderId: string, kitchenUserId: string) {
     const order = await this.getMutableOrder(orderId);
+    let applied = false;
     const updated = await this.prisma.$transaction(async (tx) => {
+      const changed = await tx.order.updateMany({
+        where: { id: orderId, status: OrderStatus.sent_to_kitchen },
+        data: { status: OrderStatus.accepted_by_kitchen },
+      });
+      if (changed.count === 0) {
+        return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
+      }
+      applied = true;
       await tx.orderItem.updateMany({
         where: { orderId, status: OrderItemStatus.new },
         data: { status: OrderItemStatus.cooking },
@@ -177,21 +239,19 @@ export class OrdersService {
         where: { id: order.tableId },
         data: { status: TableStatus.accepted },
       });
-      return tx.order.update({
-        where: { id: orderId },
-        data: { status: OrderStatus.accepted_by_kitchen },
-        include: orderInclude,
-      });
+      return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
 
-    this.emitStatusChanged(updated);
-    this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.accepted, updated.table.hallId);
-    this.notifyWaiter(
-      updated.waiterId,
-      `Стол №${updated.table.number}: кухня приняла заказ`,
-      updated,
-      'success',
-    );
+    if (applied) {
+      this.emitStatusChanged(updated);
+      this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.accepted, updated.table.hallId);
+      this.notifyWaiter(
+        updated.waiterId,
+        `Стол №${updated.table.number}: кухня приняла заказ`,
+        updated,
+        'success',
+      );
+    }
     return updated;
   }
 
@@ -645,6 +705,10 @@ export class OrdersService {
   }
 
   // ---------- Real-time helpers ----------
+
+  private isUniqueConstraintError(err: unknown) {
+    return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
+  }
 
   private emitStatusChanged(order: { waiterId: string } & Record<string, unknown>) {
     this.events.emitToWaiter(order.waiterId, SERVER_EVENTS.ORDER_STATUS_CHANGED, order);

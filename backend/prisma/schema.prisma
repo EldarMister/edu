@@ -222,12 +222,28 @@ model Order {
   payments      Payment[]
   kitchenEvents KitchenEvent[]
   incidents     Incident[]
+  actions       OrderAction[]
 
   @@index([status])
   @@index([tableId])
   @@index([waiterId])
   @@index([waiterShiftId])
   @@map("orders")
+}
+
+model OrderAction {
+  id             String   @id @default(uuid())
+  orderId        String   @map("order_id")
+  type           String
+  idempotencyKey String   @map("idempotency_key")
+  userId         String?  @map("user_id")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([type, idempotencyKey])
+  @@index([orderId, type])
+  @@map("order_actions")
 }
 
 model WaiterShift {
