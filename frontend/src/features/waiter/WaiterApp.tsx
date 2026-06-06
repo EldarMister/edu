@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { Order } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
+import { clientId } from '@/lib/id';
 import { useWaiterPushNotifications } from '@/lib/push';
 import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
@@ -78,8 +79,8 @@ export function WaiterApp() {
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
-  const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
-  const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => crypto.randomUUID());
+  const [idemKey, setIdemKey] = useState(() => clientId());
+  const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
 
   const availableWaitersQ = useAvailableWaiters(tableModal === 'transfer');
 
@@ -198,7 +199,7 @@ export function WaiterApp() {
           lines: cart.lines,
         });
         cart.clear();
-        setAddItemsIdemKey(crypto.randomUUID());
+        setAddItemsIdemKey(clientId());
         push({ message: 'Заказ отправлен на кухню', type: 'success', at: new Date().toISOString() });
         setTab('cart');
       } else {
@@ -209,7 +210,7 @@ export function WaiterApp() {
           lines: cart.lines,
         });
         cart.clear();
-        setIdemKey(crypto.randomUUID());
+        setIdemKey(clientId());
         push({ message: 'Заказ отправлен на кухню', type: 'success', at: new Date().toISOString() });
         setTab('orders');
       }
