@@ -1,9 +1,10 @@
+import { useState } from 'react';
 import type { WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { Spinner } from '@/components/Spinner';
 import { disconnectSocket } from '@/lib/socket';
-import { money, timeHM } from '@/lib/format';
+import { timeHM } from '@/lib/format';
 import { beep } from '@/lib/sound';
 
 export function WaiterProfile({
@@ -27,6 +28,10 @@ export function WaiterProfile({
   const history = useNotifications((s) => s.history);
   const shiftActive = shift?.status === 'active';
 
+  const [notifOpen, setNotifOpen] = useState(true);
+  const [showAllNotif, setShowAllNotif] = useState(false);
+  const visibleNotifs = showAllNotif ? history : history.slice(0, 3);
+
   function onLogout() {
     disconnectSocket();
     logout();
@@ -47,13 +52,8 @@ export function WaiterProfile({
       </div>
 
       <div className="card p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-[15px] font-semibold text-text-primary">Смена</h3>
-            <p className="mt-1 text-sm text-text-muted">
-              {shiftActive ? 'Смена активна' : 'Смена не начата'}
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-[15px] font-semibold text-text-primary">Смена</h3>
           <span
             className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
               shiftActive ? 'bg-success/10 text-success' : 'bg-background text-text-muted'
@@ -64,11 +64,9 @@ export function WaiterProfile({
         </div>
 
         {shiftActive && (
-          <div className="mt-4 grid gap-2 border-t border-border pt-3 text-sm">
-            <ShiftRow label="Начало" value={timeHM(shift.startedAt)} />
-            <ShiftRow label="Заказов за смену" value={String(shift.stats?.ordersCount ?? 0)} />
-            <ShiftRow label="Сумма за смену" value={money(shift.stats?.totalAmount ?? 0)} />
-            <ShiftRow label="Активных заказов" value={String(shift.stats?.activeOrdersCount ?? 0)} />
+          <div className="mt-4 flex items-center justify-between gap-4 text-sm">
+            <span className="text-text-muted">Начало</span>
+            <span className="font-medium text-text-primary">{timeHM(shift.startedAt)}</span>
           </div>
         )}
 
@@ -88,41 +86,74 @@ export function WaiterProfile({
       </div>
 
       <div className="card p-5">
-        <h3 className="mb-3 text-[15px] font-semibold text-text-primary">Уведомления</h3>
-        <div className="mb-4 rounded-xl border border-border p-3">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium text-text-primary">Системные уведомления</p>
-              <p className="mt-1 text-xs text-text-muted">{pushStatusText(pushStatus)}</p>
-            </div>
-            {pushStatus !== 'subscribed' && pushStatus !== 'unsupported' && pushStatus !== 'denied' && (
-              <button className="btn-primary btn-md shrink-0" onClick={onEnablePush}>
-                Включить
-              </button>
-            )}
-          </div>
-          <button className="btn-secondary btn-md mt-3 w-full" onClick={() => beep('notify')}>
-            Проверить звук
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-[15px] font-semibold text-text-primary">Уведомления</h3>
+          <button
+            className="flex items-center gap-1 text-sm font-medium text-primary"
+            onClick={() => setNotifOpen((v) => !v)}
+          >
+            {notifOpen ? 'Скрыть' : 'Показать'}
+            <Chevron up={notifOpen} />
           </button>
         </div>
-        {history.length === 0 ? (
-          <p className="text-sm text-text-muted">Уведомлений пока нет</p>
-        ) : (
-          <ul className="space-y-2.5">
-            {history.map((n) => (
-              <li key={n.id} className="flex gap-2.5 text-sm">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+
+        {notifOpen && (
+          <>
+            <div className="mb-4 mt-3 rounded-xl border border-border p-3">
+              <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-text-secondary">{n.message}</p>
-                  <p className="text-xs text-text-light">{timeHM(n.at)}</p>
+                  <p className="text-sm font-medium text-text-primary">Системные уведомления</p>
+                  <p className="mt-1 text-xs text-text-muted">{pushStatusText(pushStatus)}</p>
                 </div>
-              </li>
-            ))}
-          </ul>
+                {pushStatus !== 'subscribed' && pushStatus !== 'unsupported' && pushStatus !== 'denied' && (
+                  <button className="btn-primary btn-md shrink-0" onClick={onEnablePush}>
+                    Включить
+                  </button>
+                )}
+              </div>
+              <button className="btn-secondary btn-md mt-3 w-full" onClick={() => beep('notify')}>
+                Проверить звук
+              </button>
+            </div>
+
+            {history.length === 0 ? (
+              <p className="text-sm text-text-muted">Уведомлений пока нет</p>
+            ) : (
+              <>
+                <ul className="space-y-2.5">
+                  {visibleNotifs.map((n) => (
+                    <li key={n.id} className="flex gap-2.5 text-sm">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                      <div>
+                        <p className="text-text-secondary">{n.message}</p>
+                        <p className="text-xs text-text-light">{timeHM(n.at)}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+                {history.length > 3 && (
+                  <button
+                    className="mt-3 flex items-center gap-1 text-sm font-medium text-primary"
+                    onClick={() => setShowAllNotif((v) => !v)}
+                  >
+                    {showAllNotif ? 'Скрыть лишние уведомления' : 'Показать все уведомления'}
+                    <Chevron up={showAllNotif} />
+                  </button>
+                )}
+              </>
+            )}
+          </>
         )}
       </div>
 
-      <button className="btn-secondary btn-lg w-full" onClick={onLogout}>
+      <button
+        className="btn-secondary btn-lg w-full gap-2 text-danger hover:bg-danger/5"
+        onClick={onLogout}
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <path d="M16 17l5-5-5-5M21 12H9" />
+        </svg>
         Выйти
       </button>
     </div>
@@ -146,11 +177,21 @@ function pushStatusText(status: 'unsupported' | 'unavailable' | 'default' | 'den
   }
 }
 
-function ShiftRow({ label, value }: { label: string; value: string }) {
+function Chevron({ up }: { up: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <span className="text-text-muted">{label}</span>
-      <span className="font-medium text-text-primary">{value}</span>
-    </div>
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`transition-transform ${up ? '' : 'rotate-180'}`}
+      aria-hidden
+    >
+      <path d="m18 15-6-6-6 6" />
+    </svg>
   );
 }

@@ -4,6 +4,26 @@ import { ORDER_STATUS } from '@/lib/status';
 import { displayOrderNumber, money } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 
+function InfoIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0 text-primary"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 16v-4M12 8h.01" />
+    </svg>
+  );
+}
+
 /** Возвращает null если строка состоит только из U+FFFD (кракозябры из bash-тестов). */
 function safeComment(s: string | null | undefined): string | null {
   if (!s) return null;
@@ -51,15 +71,17 @@ export function OrderPanel({
         </div>
       </div>
 
-      {/* Позиции */}
-      <div className="no-scrollbar flex-1 space-y-2.5 overflow-y-auto py-3">
+      {/* Позиции — компактный список */}
+      <div className="no-scrollbar flex-1 space-y-1.5 overflow-y-auto py-3">
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
           const waitingItem = waitingDecision && !rejected;
+          const comment = safeComment(it.comment);
+          const hasExtra = comment || (rejected && it.rejectReason) || waitingItem;
           return (
             <div
               key={it.id}
-              className={`rounded-xl border p-3 ${
+              className={`rounded-lg border px-3 py-2 ${
                 rejected
                   ? 'border-danger/30 bg-danger/5'
                   : waitingItem
@@ -67,24 +89,26 @@ export function OrderPanel({
                     : 'border-border'
               }`}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className={`text-[15px] font-medium ${rejected ? 'text-danger line-through' : 'text-text-primary'}`}>
-                    {it.dishNameSnapshot}
-                  </p>
-                  {safeComment(it.comment) && <p className="text-xs text-text-muted">{it.comment}</p>}
-                  {rejected && it.rejectReason && (
-                    <p className="text-xs text-danger">Отказ: {it.rejectReason}</p>
-                  )}
-                  {waitingItem && (
-                    <p className="text-xs text-warning">Ожидает решения клиента</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-text-secondary">×{it.quantity}</p>
-                  <p className="text-[15px] font-medium text-text-primary">{money(it.finalPrice)}</p>
-                </div>
+              <div className="flex items-center justify-between gap-3">
+                <span
+                  className={`min-w-0 flex-1 truncate text-[15px] ${
+                    rejected ? 'text-danger line-through' : 'text-text-primary'
+                  }`}
+                >
+                  {it.dishNameSnapshot}
+                </span>
+                <span className="shrink-0 text-sm text-text-secondary">×{it.quantity}</span>
+                <span className="shrink-0 min-w-[56px] text-right text-[15px] font-medium text-text-primary">
+                  {money(it.finalPrice)}
+                </span>
               </div>
+              {hasExtra && (
+                <div className="mt-0.5 text-xs">
+                  {comment && <p className="text-text-muted">{comment}</p>}
+                  {rejected && it.rejectReason && <p className="text-danger">Отказ: {it.rejectReason}</p>}
+                  {waitingItem && <p className="text-warning">Ожидает решения клиента</p>}
+                </div>
+              )}
             </div>
           );
         })}
@@ -175,8 +199,9 @@ function ActionButton({
 
   if (s === 'sent_to_kitchen' || s === 'accepted_by_kitchen' || s === 'cooking' || s === 'partially_rejected') {
     return (
-      <div className="rounded-xl bg-background py-3 text-center text-sm text-text-muted">
-        {ORDER_STATUS[s].label} — ожидаем кухню
+      <div className="flex items-center justify-center gap-2 rounded-xl bg-background px-3 py-2.5 text-sm text-text-muted">
+        <InfoIcon />
+        <span>{ORDER_STATUS[s].label} — ожидаем кухню</span>
       </div>
     );
   }
