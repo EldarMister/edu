@@ -109,3 +109,48 @@
     border-radius: 999px;
   }
 }
+
+@layer utilities {
+  /* Анимации промежуточного окна успешной оплаты */
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes card-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.94) translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+  @keyframes check-pop {
+    0% {
+      opacity: 0;
+      transform: scale(0.4);
+    }
+    60% {
+      opacity: 1;
+      transform: scale(1.12);
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  .animate-fade-in {
+    animation: fade-in 0.2s ease-out both;
+  }
+  .animate-card-pop {
+    animation: card-pop 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-check-pop {
+    animation: check-pop 0.45s cubic-bezier(0.16, 1, 0.3, 1) 0.12s both;
+  }
+}

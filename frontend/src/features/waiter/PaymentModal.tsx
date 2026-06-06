@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
@@ -33,6 +33,8 @@ export function PaymentModal({
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  // Промежуточное окно успешной оплаты: показывается ~1.3с, затем открывается чек.
+  const [showSuccess, setShowSuccess] = useState(false);
 
   // Только включённые в настройках способы оплаты.
   const enabled = settings.data?.paymentMethods ?? (['qr', 'cash'] as PaymentMethod[]);
@@ -44,6 +46,13 @@ export function PaymentModal({
   const qrSelected = selected === 'qr';
   const qrMissing = qrSelected && !qrImageUrl;
 
+  // После показа success-окна автоматически переходим к окну печати чека.
+  useEffect(() => {
+    if (!showSuccess) return;
+    const t = setTimeout(() => setShowSuccess(false), 1300);
+    return () => clearTimeout(t);
+  }, [showSuccess]);
+
   async function onConfirm() {
     setError('');
     try {
@@ -52,6 +61,7 @@ export function PaymentModal({
       push({ message: 'Оплата принята', type: 'success', at: new Date().toISOString() });
       const r = await fetchReceipt(order.id);
       setReceipt(r);
+      setShowSuccess(true);
     } catch (err) {
       setError(apiError(err));
     }
@@ -59,10 +69,33 @@ export function PaymentModal({
 
   function close() {
     setReceipt(null);
+    setShowSuccess(false);
     setError('');
     setMethod(null);
     onClose();
     if (receipt) onPaid();
+  }
+
+  // Промежуточный шаг — анимированное подтверждение оплаты
+  if (showSuccess) {
+    return (
+      <div className="modal-backdrop z-50 flex items-center justify-center p-4">
+        <div className="animate-card-pop relative z-10 flex w-full max-w-[300px] flex-col items-center rounded-2xl bg-white px-6 py-8 text-center shadow-soft">
+          <div className="animate-check-pop flex h-16 w-16 items-center justify-center rounded-full bg-success/10">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 6 9 17l-5-5" />
+            </svg>
+          </div>
+          <h3 className="mt-4 text-lg font-semibold text-text-primary">Оплата принята</h3>
+          <p className="mt-1 text-sm text-text-muted">Платёж успешно подтверждён</p>
+          <p className="mt-3 text-2xl font-semibold text-text-primary">{money(order.finalAmount)}</p>
+          <div className="mt-5 flex items-center gap-2 text-xs text-text-light">
+            <Spinner className="h-3.5 w-3.5" />
+            <span>Переходим к чеку…</span>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   // Шаг 2 — чек после успешной оплаты

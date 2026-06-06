@@ -95,6 +95,12 @@ export function WaiterApp() {
     return m;
   }, [orders]);
 
+  const cartQuantities = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const l of cart.lines) map[l.dish.id] = l.quantity;
+    return map;
+  }, [cart.lines]);
+
   const selectedTable =
     halls.flatMap((h) => h.tables).find((t) => t.id === cart.tableId) ?? null;
   const activeOrder = cart.tableId ? ordersByTable.get(cart.tableId) : undefined;
@@ -138,12 +144,6 @@ export function WaiterApp() {
     cart.add(dish);
     push({ message: 'Блюдо добавлено в корзину', at: new Date().toISOString() });
   }
-
-  const cartQuantities = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const l of cart.lines) map[l.dish.id] = l.quantity;
-    return map;
-  }, [cart.lines]);
 
   async function goToPayment(order: Order) {
     try {
