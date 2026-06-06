@@ -136,13 +136,16 @@ export function useCreateOrder() {
 export function useAddItems() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { orderId: string; lines: CartLine[] }) => {
+    mutationFn: async (payload: { orderId: string; idempotencyKey: string; lines: CartLine[] }) => {
       const items = payload.lines.map((l) => ({
         dishId: l.dish.id,
         quantity: l.quantity,
         comment: l.comment?.trim() || undefined,
       }));
-      const { data } = await api.post<Order>(`/orders/${payload.orderId}/items`, { items });
+      const { data } = await api.post<Order>(`/orders/${payload.orderId}/items`, {
+        idempotencyKey: payload.idempotencyKey,
+        items,
+      });
       return data;
     },
     onSuccess: () => {

@@ -75,6 +75,7 @@ export function WaiterApp() {
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
   const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
+  const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => crypto.randomUUID());
 
   const availableWaitersQ = useAvailableWaiters(tableModal === 'transfer');
 
@@ -150,8 +151,13 @@ export function WaiterApp() {
     }
     try {
       if (activeOrder) {
-        await addItems.mutateAsync({ orderId: activeOrder.id, lines: cart.lines });
+        await addItems.mutateAsync({
+          orderId: activeOrder.id,
+          idempotencyKey: addItemsIdemKey,
+          lines: cart.lines,
+        });
         cart.clear();
+        setAddItemsIdemKey(crypto.randomUUID());
         push({ message: 'Заказ отправлен на кухню', type: 'success', at: new Date().toISOString() });
         setTab('cart');
       } else {
