@@ -39,6 +39,10 @@ export function PaymentModal({
   const selected: PaymentMethod =
     method && enabled.includes(method) ? method : methods[0]?.value ?? 'qr';
 
+  const qrImageUrl = settings.data?.qrImageUrl ?? null;
+  const qrSelected = selected === 'qr';
+  const qrMissing = qrSelected && !qrImageUrl;
+
   async function onConfirm() {
     setError('');
     try {
@@ -110,10 +114,16 @@ export function PaymentModal({
       footer={
         <button
           className="btn-primary btn-lg w-full font-semibold"
-          disabled={pay.isPending}
+          disabled={pay.isPending || qrMissing}
           onClick={onConfirm}
         >
-          {pay.isPending ? <Spinner /> : `Принять оплату · ${money(order.finalAmount)}`}
+          {pay.isPending ? (
+            <Spinner />
+          ) : qrSelected ? (
+            `Оплачено · ${money(order.finalAmount)}`
+          ) : (
+            `Принять оплату · ${money(order.finalAmount)}`
+          )}
         </button>
       }
     >
@@ -141,6 +151,29 @@ export function PaymentModal({
           </button>
         ))}
       </div>
+
+      {/* QR-код для оплаты */}
+      {qrSelected && (
+        <div className="mt-4">
+          {qrImageUrl ? (
+            <div className="flex flex-col items-center rounded-xl border border-border bg-white p-4">
+              <p className="mb-3 text-sm text-text-secondary">Покажите QR-код клиенту для оплаты</p>
+              <img
+                src={qrImageUrl}
+                alt="QR-код для оплаты"
+                className="h-56 w-56 object-contain"
+              />
+              <p className="mt-3 text-center text-xs text-text-muted">
+                После оплаты клиентом нажмите «Оплачено»
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 text-center text-sm text-warning">
+              QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.
+            </div>
+          )}
+        </div>
+      )}
 
       {error && <p className="mt-3 text-sm text-danger">{error}</p>}
     </Modal>

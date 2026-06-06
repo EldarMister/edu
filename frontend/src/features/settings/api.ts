@@ -13,6 +13,7 @@ export interface Settings {
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
+  qrImageUrl: string | null;
   printerConnected: boolean;
   updatedAt: string;
 }
@@ -25,6 +26,7 @@ export interface PublicSettings {
   receiptText: string;
   language: 'ru' | 'ky';
   paymentMethods: PaymentMethod[];
+  qrImageUrl: string | null;
   printerConnected: boolean;
 }
 

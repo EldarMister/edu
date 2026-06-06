@@ -18,8 +18,12 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   payQr: 'оплата QR',
   payCash: 'оплата наличными',
   payCard: 'оплата картой',
+  qrImageUrl: 'QR-код',
   printerConnected: 'принтер',
 };
+
+/** Разрешённые форматы загружаемого QR-кода. */
+const QR_DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
 
 @Injectable()
 export class SettingsService {
@@ -54,6 +58,7 @@ export class SettingsService {
       receiptText: s.receiptText,
       language: s.language,
       paymentMethods: this.enabledMethodsOf(s),
+      qrImageUrl: s.qrImageUrl,
       printerConnected: s.printerConnected,
     };
   }
@@ -69,9 +74,23 @@ export class SettingsService {
       throw new BadRequestException('Должен быть включён хотя бы один способ оплаты');
     }
 
+    const data: Prisma.SettingsUpdateInput = { ...dto };
+
+    // QR-код: пустая строка = удалить; иначе проверяем формат data URL.
+    if (dto.qrImageUrl !== undefined) {
+      const trimmed = dto.qrImageUrl.trim();
+      if (trimmed === '') {
+        data.qrImageUrl = null;
+      } else if (!QR_DATA_URL_RE.test(trimmed)) {
+        throw new BadRequestException('Поддерживаются только изображения PNG, JPG или WEBP');
+      } else {
+        data.qrImageUrl = trimmed;
+      }
+    }
+
     const updated = await this.prisma.settings.update({
       where: { id: SINGLETON_ID },
-      data: { ...dto },
+      data,
     });
 
     // Считаем, какие именно поля реально изменились.
@@ -81,8 +100,13 @@ export class SettingsService {
     for (const key of Object.keys(dto) as (keyof UpdateSettingsDto)[]) {
       const before = (current as Record<string, unknown>)[key];
       const after = (updated as Record<string, unknown>)[key];
-      if (before !== after) {
-        changed.push(SETTINGS_FIELD_LABELS[key] ?? key);
+      if (before === after) continue;
+      changed.push(SETTINGS_FIELD_LABELS[key] ?? key);
+      // QR-код — это огромный data URL, в журнал пишем только факт изменения.
+      if (key === 'qrImageUrl') {
+        oldValue[key] = before ? 'загружен' : 'нет';
+        newValue[key] = after ? 'загружен' : 'удалён';
+      } else {
         oldValue[key] = before as Prisma.InputJsonValue;
         newValue[key] = after as Prisma.InputJsonValue;
       }
@@ -110,9 +134,13 @@ export class SettingsService {
 
   /** Бросает ошибку, если способ оплаты отключён в настройках. */
   async assertMethodEnabled(method: PaymentMethod) {
-    const enabled = await this.enabledMethods();
+    const settings = await this.ensure();
+    const enabled = this.enabledMethodsOf(settings);
     if (!enabled.includes(method)) {
       throw new BadRequestException('Этот способ оплаты отключён в настройках');
+    }
+    if (method === PaymentMethod.qr && !settings.qrImageUrl) {
+      throw new BadRequestException('QR-оплата недоступна: QR-код не загружен в настройках');
     }
   }
 

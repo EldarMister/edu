@@ -392,6 +392,7 @@ model Settings {
   payQr            Boolean  @default(true) @map("pay_qr")
   payCash          Boolean  @default(true) @map("pay_cash")
   payCard          Boolean  @default(true) @map("pay_card")
+  qrImageUrl       String?  @map("qr_image_url") // data URL загруженного QR-кода (один на заведение)
   printerConnected Boolean  @default(false) @map("printer_connected")
   updatedAt        DateTime @updatedAt @map("updated_at")
 

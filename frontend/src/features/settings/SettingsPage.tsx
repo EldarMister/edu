@@ -13,6 +13,7 @@ import {
   IconPrinter,
 } from '../admin/components/icons';
 import { useAdminSettings, useUpdateSettings } from './api';
+import { QrPaymentCard } from './QrPaymentCard';
 
 interface Form {
   cafeName: string;
@@ -220,7 +221,15 @@ export function SettingsPage() {
                 ? t('Должен быть включён хотя бы один способ оплаты')
                 : t('Отключённые способы оплаты будут недоступны на экране оплаты')}
             </p>
+            {form.payQr && !data.qrImageUrl && (
+              <p className="mt-2 text-xs text-warning">
+                {t('QR-оплата включена, но QR-код не загружен — официанты не смогут принять оплату по QR.')}
+              </p>
+            )}
           </div>
+
+          {/* QR-оплата */}
+          <QrPaymentCard qrImageUrl={data.qrImageUrl} />
 
           {/* Статус принтера */}
           <div className="card p-5">
