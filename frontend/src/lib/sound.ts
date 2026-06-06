@@ -1,7 +1,13 @@
-// Короткий звуковой сигнал через WebAudio (без аудиофайлов).
+// Короткий звуковой сигнал. Если есть файл в public/sounds, используем его.
 let ctx: AudioContext | null = null;
 
 export function beep(kind: 'notify' | 'newOrder' = 'notify') {
+  const file = kind === 'newOrder' ? '/sounds/new-order.mp3' : '/sounds/notify.mp3';
+  const audio = new Audio(file);
+  audio.play().catch(() => playGeneratedBeep(kind));
+}
+
+function playGeneratedBeep(kind: 'notify' | 'newOrder' = 'notify') {
   try {
     ctx = ctx ?? new (window.AudioContext || (window as any).webkitAudioContext)();
     const o = ctx.createOscillator();

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import type { Order } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
+import { useWaiterPushNotifications } from '@/lib/push';
 import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
@@ -49,6 +50,7 @@ export function WaiterApp() {
   useWaiterRealtime();
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
+  const pushNotifications = useWaiterPushNotifications(user?.role === 'WAITER');
 
   const hallsQ = useHalls();
   const categoriesQ = useCategories();
@@ -286,6 +288,8 @@ export function WaiterApp() {
           push({ message: 'Смена завершена', type: 'success', at: new Date().toISOString() });
         })
       }
+      pushStatus={pushNotifications.status}
+      onEnablePush={pushNotifications.enable}
     />
   );
 

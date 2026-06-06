@@ -15,6 +15,7 @@ import { RealtimeModule } from './realtime/realtime.module';
 import { WaiterShiftsModule } from './waiter-shifts/waiter-shifts.module';
 import { AdminModule } from './admin/admin.module';
 import { SettingsModule } from './settings/settings.module';
+import { PushModule } from './push/push.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
@@ -35,6 +36,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     PaymentsModule,
     AdminModule,
     SettingsModule,
+    PushModule,
   ],
   providers: [
     // Глобально: сначала проверка JWT, затем проверка роли.

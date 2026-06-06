@@ -8,7 +8,10 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.png'],
+      includeAssets: ['icon.png', 'sounds/*.mp3', 'sounds/*.wav', 'sounds/*.ogg'],
+      workbox: {
+        importScripts: ['push-sw.js'],
+      },
       manifest: {
         name: 'EDU POS',
         short_name: 'EDU POS',

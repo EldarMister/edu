@@ -167,10 +167,19 @@ JWT_REFRESH_EXPIRES_IN=7d
 PORT=3000
 CORS_ORIGIN=http://localhost:5173
 
+VAPID_SUBJECT=mailto:admin@example.com
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+
 REDIS_URL=
 ```
 
 `REDIS_URL` сейчас опционален. При пустом значении приложение работает как один Socket.IO instance.
+`VAPID_PUBLIC_KEY` и `VAPID_PRIVATE_KEY` нужны для Web Push уведомлений официантам. Сгенерировать их можно из папки `backend` командой:
+
+```bash
+npx web-push generate-vapid-keys
+```
 
 ### Frontend: `frontend/.env`
 
@@ -179,6 +188,8 @@ VITE_API_URL=http://localhost:3000
 ```
 
 Во фронтенде `/api` добавляется автоматически в `src/lib/api.ts`.
+
+Кастомный звук уведомления положите в `frontend/public/sounds/notify.mp3`. Для отдельного звука новых заказов на кухне можно добавить `frontend/public/sounds/new-order.mp3`.
 
 ## Установка и запуск
 

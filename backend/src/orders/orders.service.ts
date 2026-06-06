@@ -19,6 +19,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { WaiterShiftsService } from '../waiter-shifts/waiter-shifts.service';
+import { PushService } from '../push/push.service';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
 
@@ -40,6 +41,7 @@ export class OrdersService {
     private prisma: PrismaService,
     private events: EventsGateway,
     private shifts: WaiterShiftsService,
+    private push: PushService,
   ) {}
 
   // ---------- Чтение ----------
@@ -660,12 +662,23 @@ export class OrdersService {
     order: { id: string; orderNumber: string },
     type: 'info' | 'success' | 'error' = 'info',
   ) {
-    this.events.emitToWaiter(waiterId, SERVER_EVENTS.NOTIFICATION_NEW, {
+    const payload = {
       message,
       type,
       orderId: order.id,
       orderNumber: order.orderNumber,
       at: new Date().toISOString(),
+    };
+    this.events.emitToWaiter(waiterId, SERVER_EVENTS.NOTIFICATION_NEW, {
+      ...payload,
+    });
+    void this.push.notifyWaiter(waiterId, {
+      title: 'EDU POS',
+      body: message,
+      type,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      url: '/waiter',
     });
   }
 }

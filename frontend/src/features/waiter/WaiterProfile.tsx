@@ -4,6 +4,7 @@ import { useNotifications } from '@/store/notifications';
 import { Spinner } from '@/components/Spinner';
 import { disconnectSocket } from '@/lib/socket';
 import { money, timeHM } from '@/lib/format';
+import { beep } from '@/lib/sound';
 
 export function WaiterProfile({
   shift,
@@ -11,12 +12,16 @@ export function WaiterProfile({
   shiftPending,
   onStartShift,
   onEndShift,
+  pushStatus,
+  onEnablePush,
 }: {
   shift: WaiterShift | null;
   shiftLoading: boolean;
   shiftPending: boolean;
   onStartShift: () => void;
   onEndShift: () => void;
+  pushStatus: 'unsupported' | 'unavailable' | 'default' | 'denied' | 'subscribed' | 'error';
+  onEnablePush: () => void;
 }) {
   const { user, logout } = useAuth();
   const history = useNotifications((s) => s.history);
@@ -84,6 +89,22 @@ export function WaiterProfile({
 
       <div className="card p-5">
         <h3 className="mb-3 text-[15px] font-semibold text-text-primary">Уведомления</h3>
+        <div className="mb-4 rounded-xl border border-border p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-text-primary">Системные уведомления</p>
+              <p className="mt-1 text-xs text-text-muted">{pushStatusText(pushStatus)}</p>
+            </div>
+            {pushStatus !== 'subscribed' && pushStatus !== 'unsupported' && pushStatus !== 'denied' && (
+              <button className="btn-primary btn-md shrink-0" onClick={onEnablePush}>
+                Включить
+              </button>
+            )}
+          </div>
+          <button className="btn-secondary btn-md mt-3 w-full" onClick={() => beep('notify')}>
+            Проверить звук
+          </button>
+        </div>
         {history.length === 0 ? (
           <p className="text-sm text-text-muted">Уведомлений пока нет</p>
         ) : (
@@ -106,6 +127,23 @@ export function WaiterProfile({
       </button>
     </div>
   );
+}
+
+function pushStatusText(status: 'unsupported' | 'unavailable' | 'default' | 'denied' | 'subscribed' | 'error') {
+  switch (status) {
+    case 'subscribed':
+      return 'Включены. Официант получит уведомление, даже если сайт закрыт.';
+    case 'denied':
+      return 'Запрещены в настройках браузера. Разрешите уведомления для этого сайта.';
+    case 'unavailable':
+      return 'Серверные push-ключи ещё не настроены.';
+    case 'unsupported':
+      return 'Этот браузер не поддерживает push-уведомления.';
+    case 'error':
+      return 'Не удалось включить. Проверьте HTTPS, service worker и настройки сервера.';
+    default:
+      return 'Нажмите “Включить”, чтобы получать готовность заказа вне сайта.';
+  }
 }
 
 function ShiftRow({ label, value }: { label: string; value: string }) {

@@ -125,6 +125,7 @@ model User {
   incidentsOwned  Incident[]      @relation("IncidentUser")
   incidentsMade   Incident[]      @relation("IncidentAuthor")
   auditLogs       AuditLog[]
+  pushSubscriptions PushSubscription[]
 
   @@map("users")
 }
@@ -368,4 +369,20 @@ model Settings {
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
