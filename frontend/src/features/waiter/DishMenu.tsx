@@ -5,12 +5,17 @@ import { money, dishUnitPrice } from '@/lib/format';
 export function DishMenu({
   categories,
   dishes,
+  quantities,
   onAdd,
+  onDec,
   disabled,
 }: {
   categories: Category[];
   dishes: Dish[];
+  /** Количество каждого блюда в текущей корзине (dishId → qty). */
+  quantities: Record<string, number>;
   onAdd: (dish: Dish) => void;
+  onDec: (dish: Dish) => void;
   disabled?: boolean;
 }) {
   const [activeCat, setActiveCat] = useState<string>('all');
@@ -52,27 +57,56 @@ export function DishMenu({
         {filtered.map((d) => {
           const hasDiscount = d.discountType !== 'none' && Number(d.discountValue) > 0;
           const finalUnit = dishUnitPrice(d.price, d.discountType, d.discountValue);
+          const qty = quantities[d.id] ?? 0;
+          const active = qty > 0;
           return (
             <button
               key={d.id}
               disabled={disabled || !d.isAvailable}
               onClick={() => onAdd(d)}
-              className="flex h-[88px] flex-col rounded-xl border border-border bg-white px-3 py-2.5 text-left transition-colors hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+              className={`relative flex h-[88px] flex-col rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                active
+                  ? 'border-primary bg-primary/5'
+                  : 'border-border bg-white hover:border-primary/40'
+              }`}
             >
-              <span className="line-clamp-2 text-[15px] font-medium leading-tight text-text-primary">
+              {active && (
+                <span className="absolute right-2 top-2 flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold leading-none text-white">
+                  {qty}
+                </span>
+              )}
+              <span className="line-clamp-2 pr-6 text-[15px] font-medium leading-tight text-text-primary">
                 {d.name}
               </span>
               {d.description && (
                 <span className="mt-0.5 line-clamp-1 text-xs text-text-muted">{d.description}</span>
               )}
-              <span className="mt-auto pt-2 text-[15px] font-semibold text-text-primary">
-                {money(finalUnit)}
-                {hasDiscount && (
-                  <span className="ml-1.5 text-xs font-normal text-text-light line-through">
-                    {money(d.price)}
+              <div className="mt-auto flex items-end justify-between pt-2">
+                <span className="text-[15px] font-semibold text-text-primary">
+                  {money(finalUnit)}
+                  {hasDiscount && (
+                    <span className="ml-1.5 text-xs font-normal text-text-light line-through">
+                      {money(d.price)}
+                    </span>
+                  )}
+                </span>
+                {active && (
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    aria-label="Уменьшить количество"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDec(d);
+                    }}
+                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-red-400 bg-white text-red-500 transition-colors hover:bg-red-50"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                      <path d="M3 7h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                    </svg>
                   </span>
                 )}
-              </span>
+              </div>
             </button>
           );
         })}

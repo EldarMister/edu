@@ -138,6 +138,12 @@ export function WaiterApp() {
     push({ message: 'Блюдо добавлено в корзину', at: new Date().toISOString() });
   }
 
+  const cartQuantities = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const l of cart.lines) map[l.dish.id] = l.quantity;
+    return map;
+  }, [cart.lines]);
+
   async function goToPayment(order: Order) {
     try {
       const updated = await toPayment.mutateAsync(order.id);
@@ -278,7 +284,9 @@ export function WaiterApp() {
       <DishMenu
         categories={categoriesQ.data ?? []}
         dishes={dishesQ.data ?? []}
+        quantities={cartQuantities}
         onAdd={addDishToCart}
+        onDec={(d) => cart.dec(d.id)}
         disabled={!selectedTable}
       />
     </Panel>
