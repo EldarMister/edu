@@ -19,7 +19,7 @@ export function useWaiterRealtime() {
   useSocketEvent<AppNotification>('notification:new', (n) => {
     const orderNumber = n.orderNumber ? displayOrderNumber(n.orderNumber) : undefined;
     const message = n.orderNumber && orderNumber ? n.message.replace(n.orderNumber, orderNumber) : n.message;
-    push({ message, orderId: n.orderId, orderNumber, at: n.at });
+    push({ message, type: n.type ?? 'info', orderId: n.orderId, orderNumber, at: n.at });
     beep('notify');
   });
 

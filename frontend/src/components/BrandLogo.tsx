@@ -4,7 +4,7 @@ type BrandLogoProps = {
 };
 
 export function BrandLogo({ className = '', size = 'header' }: BrandLogoProps) {
-  const sizeClass = size === 'login' ? 'h-10' : 'h-6';
+  const sizeClass = size === 'login' ? 'h-12' : 'h-8';
 
   return (
     <img

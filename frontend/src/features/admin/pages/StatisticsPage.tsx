@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { money } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconMoney, IconOrders, IconCheck } from '../components/icons';
 import { useStatistics } from '../api';
@@ -22,30 +23,31 @@ export function StatisticsPage() {
   const [period, setPeriod] = useState<'week' | 'month' | 'year'>('month');
   const statsQ = useStatistics(period);
   const d = statsQ.data;
+  const t = useT();
 
   return (
     <div className="space-y-4">
       <StatCardsRow>
         <StatCard
-          label="Выручка сегодня"
+          label={t('Выручка сегодня')}
           value={d ? money(d.cards.revenueToday) : '—'}
           icon={<IconMoney />}
           tone="primary"
         />
         <StatCard
-          label="Заказов сегодня"
+          label={t('Заказов сегодня')}
           value={d?.cards.ordersToday ?? '—'}
           icon={<IconOrders />}
           tone="warning"
         />
         <StatCard
-          label="Средний чек"
+          label={t('Средний чек')}
           value={d ? money(d.cards.avgCheck) : '—'}
           icon={<IconCheck />}
           tone="success"
         />
         <StatCard
-          label={`Выручка за ${period === 'week' ? 'неделю' : period === 'year' ? 'год' : 'месяц'}`}
+          label={`${t('Выручка')} ${t(period === 'week' ? 'за неделю' : period === 'year' ? 'за год' : 'за месяц')}`}
           value={d ? money(d.cards.revenuePeriod) : '—'}
           icon={<IconMoney />}
           tone="muted"
@@ -61,7 +63,7 @@ export function StatisticsPage() {
           {/* График выручки */}
           <div className="card p-5 lg:col-span-2">
             <div className="mb-4 flex items-center justify-between">
-              <h3 className="text-[15px] font-semibold text-text-primary">Выручка</h3>
+              <h3 className="text-[15px] font-semibold text-text-primary">{t('Выручка')}</h3>
               <div className="flex gap-1 rounded-lg bg-background p-1">
                 {PERIODS.map((p) => (
                   <button
@@ -71,7 +73,7 @@ export function StatisticsPage() {
                       period === p.value ? 'bg-white text-primary shadow-sm' : 'text-text-muted'
                     }`}
                   >
-                    {p.label}
+                    {t(p.label)}
                   </button>
                 ))}
               </div>
@@ -81,12 +83,12 @@ export function StatisticsPage() {
 
           {/* Способы оплаты */}
           <div className="card p-5">
-            <h3 className="mb-4 text-[15px] font-semibold text-text-primary">Способы оплаты</h3>
+            <h3 className="mb-4 text-[15px] font-semibold text-text-primary">{t('Способы оплаты')}</h3>
             <div className="space-y-4">
               {d.paymentMethods.map((m) => (
                 <div key={m.method}>
                   <div className="mb-1.5 flex items-center justify-between text-sm">
-                    <span className="text-text-secondary">{METHOD_LABEL[m.method]}</span>
+                    <span className="text-text-secondary">{t(METHOD_LABEL[m.method])}</span>
                     <span className="font-medium text-text-primary">{m.percent}%</span>
                   </div>
                   <div className="h-2 overflow-hidden rounded-full bg-background">
@@ -100,7 +102,7 @@ export function StatisticsPage() {
 
           {/* Топ блюд */}
           <div className="card p-5 lg:col-span-1">
-            <h3 className="mb-4 text-[15px] font-semibold text-text-primary">Топ блюд</h3>
+            <h3 className="mb-4 text-[15px] font-semibold text-text-primary">{t('Топ блюд')}</h3>
             <RankList
               items={d.topDishes.map((x) => ({ name: x.name, sub: `${x.count} шт.`, amount: x.amount }))}
               empty="Нет продаж за период"
@@ -109,7 +111,7 @@ export function StatisticsPage() {
 
           {/* Лучшие официанты */}
           <div className="card p-5 lg:col-span-2">
-            <h3 className="mb-4 text-[15px] font-semibold text-text-primary">Лучшие официанты</h3>
+            <h3 className="mb-4 text-[15px] font-semibold text-text-primary">{t('Лучшие официанты')}</h3>
             <RankList
               items={d.topWaiters.map((x) => ({ name: x.name, sub: `${x.orders} заказов`, amount: x.amount }))}
               empty="Нет данных за период"

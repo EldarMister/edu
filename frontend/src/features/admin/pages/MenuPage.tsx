@@ -4,6 +4,7 @@ import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { money } from '@/lib/format';
 import { apiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconMenu, IconCategory, IconCheck, IconMoney, IconEdit, IconTrash, IconPlus } from '../components/icons';
@@ -28,6 +29,7 @@ export function MenuPage() {
   const dishesQ = useAdminDishes(categoryId, search);
   const { remove } = useDishMutations();
   const push = useNotifications((s) => s.push);
+  const tr = useT();
   const o = overview.data;
 
   async function onDelete(d: AdminDish) {
@@ -43,11 +45,11 @@ export function MenuPage() {
   return (
     <div className="space-y-4">
       <StatCardsRow>
-        <StatCard label="Всего блюд" value={o?.dishesCount ?? '—'} icon={<IconMenu />} tone="primary" />
-        <StatCard label="Категорий" value={o?.categoriesCount ?? '—'} icon={<IconCategory />} tone="warning" />
-        <StatCard label="Активных блюд" value={o?.activeDishesCount ?? '—'} icon={<IconCheck />} tone="success" />
+        <StatCard label={tr('Всего блюд')} value={o?.dishesCount ?? '—'} icon={<IconMenu />} tone="primary" />
+        <StatCard label={tr('Категорий')} value={o?.categoriesCount ?? '—'} icon={<IconCategory />} tone="warning" />
+        <StatCard label={tr('Активных блюд')} value={o?.activeDishesCount ?? '—'} icon={<IconCheck />} tone="success" />
         <StatCard
-          label="Средняя цена"
+          label={tr('Средняя цена')}
           value={o ? money(o.avgPrice) : '—'}
           icon={<IconMoney />}
           tone="muted"
@@ -60,22 +62,22 @@ export function MenuPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <input
               className="input h-10 sm:max-w-xs"
-              placeholder="Поиск блюда"
+              placeholder={tr('Поиск блюда')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             <div className="flex gap-2">
               <button className="btn-secondary btn-md" onClick={() => setCatModal(true)}>
-                <IconPlus className="h-4 w-4" /> Категория
+                <IconPlus className="h-4 w-4" /> {tr('Категория')}
               </button>
               <button className="btn-primary btn-md font-medium" onClick={() => setDishModal('new')}>
-                <IconPlus className="h-4 w-4" /> Добавить блюдо
+                <IconPlus className="h-4 w-4" /> {tr('Добавить блюдо')}
               </button>
             </div>
           </div>
           <div className="no-scrollbar flex gap-1.5 overflow-x-auto">
             <CatTab active={categoryId === ''} onClick={() => setCategoryId('')}>
-              Все блюда
+              {tr('Все блюда')}
             </CatTab>
             {categoriesQ.data?.map((c) => (
               <CatTab key={c.id} active={categoryId === c.id} onClick={() => setCategoryId(c.id)}>
@@ -95,11 +97,11 @@ export function MenuPage() {
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-text-muted">
-                  <th className="px-4 py-3 font-medium">Название</th>
-                  <th className="px-4 py-3 font-medium">Категория</th>
-                  <th className="px-4 py-3 text-right font-medium">Цена</th>
-                  <th className="px-4 py-3 font-medium">Статус</th>
-                  <th className="px-4 py-3 text-right font-medium">Действия</th>
+                  <th className="px-4 py-3 font-medium">{tr('Название')}</th>
+                  <th className="px-4 py-3 font-medium">{tr('Категория')}</th>
+                  <th className="px-4 py-3 text-right font-medium">{tr('Цена')}</th>
+                  <th className="px-4 py-3 font-medium">{tr('Статус')}</th>
+                  <th className="px-4 py-3 text-right font-medium">{tr('Действия')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -113,9 +115,9 @@ export function MenuPage() {
                     <td className="px-4 py-3 text-right font-medium text-text-primary">{money(d.price)}</td>
                     <td className="px-4 py-3">
                       {d.isActive && d.isAvailable ? (
-                        <Badge tone="success">Активно</Badge>
+                        <Badge tone="success">{tr('Активно')}</Badge>
                       ) : (
-                        <Badge tone="muted">Скрыто</Badge>
+                        <Badge tone="muted">{tr('Скрыто')}</Badge>
                       )}
                     </td>
                     <td className="px-4 py-3">

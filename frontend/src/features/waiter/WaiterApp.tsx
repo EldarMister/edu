@@ -136,21 +136,21 @@ export function WaiterApp() {
       const updated = await toPayment.mutateAsync(order.id);
       setPaymentOrder(updated);
     } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
   async function submitCart() {
     if (!selectedTable) return;
     if (!activeShift) {
-      push({ message: 'Сначала начните смену в профиле.', at: new Date().toISOString() });
+      push({ message: 'Сначала начните смену в профиле.', type: 'error', at: new Date().toISOString() });
       return;
     }
     try {
       if (activeOrder) {
         await addItems.mutateAsync({ orderId: activeOrder.id, lines: cart.lines });
         cart.clear();
-        push({ message: 'Заказ отправлен на кухню', at: new Date().toISOString() });
+        push({ message: 'Заказ отправлен на кухню', type: 'success', at: new Date().toISOString() });
         setTab('cart');
       } else {
         await create.mutateAsync({
@@ -161,11 +161,11 @@ export function WaiterApp() {
         });
         cart.clear();
         setIdemKey(crypto.randomUUID());
-        push({ message: 'Заказ отправлен на кухню', at: new Date().toISOString() });
+        push({ message: 'Заказ отправлен на кухню', type: 'success', at: new Date().toISOString() });
         setTab('orders');
       }
     } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -173,7 +173,7 @@ export function WaiterApp() {
     try {
       await fn();
     } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -182,10 +182,10 @@ export function WaiterApp() {
     if (!selectedTable) return;
     try {
       await closeTable.mutateAsync(selectedTable.id);
-      push({ message: 'Стол успешно закрыт', at: new Date().toISOString() });
+      push({ message: 'Стол успешно закрыт', type: 'success', at: new Date().toISOString() });
       setTableModal(null);
     } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -195,10 +195,10 @@ export function WaiterApp() {
       const updated = await moveTable.mutateAsync({ tableId: selectedTable.id, targetTableId });
       cart.selectTable(targetTableId);
       setViewingOrderId(null);
-      push({ message: `Заказ перенесён на стол №${updated.table.number}`, at: new Date().toISOString() });
+      push({ message: `Заказ перенесён на стол №${updated.table.number}`, type: 'success', at: new Date().toISOString() });
       setTableModal(null);
     } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -206,10 +206,10 @@ export function WaiterApp() {
     if (!selectedTable) return;
     try {
       await transferTable.mutateAsync({ tableId: selectedTable.id, waiterId: waiter.id });
-      push({ message: `Стол передан официанту ${waiter.name}`, at: new Date().toISOString() });
+      push({ message: `Стол передан официанту ${waiter.name}`, type: 'success', at: new Date().toISOString() });
       setTableModal(null);
     } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -262,7 +262,7 @@ export function WaiterApp() {
           canSubmit={!!activeShift}
           onSubmit={submitCart}
           onBlockedSubmit={() =>
-            push({ message: 'Сначала начните смену в профиле.', at: new Date().toISOString() })
+            push({ message: 'Сначала начните смену в профиле.', type: 'error', at: new Date().toISOString() })
           }
         />
       )}
@@ -277,13 +277,13 @@ export function WaiterApp() {
       onStartShift={() =>
         runAction(async () => {
           await startShift.mutateAsync();
-          push({ message: 'Смена начата', at: new Date().toISOString() });
+          push({ message: 'Смена начата', type: 'success', at: new Date().toISOString() });
         })
       }
       onEndShift={() =>
         runAction(async () => {
           await endShift.mutateAsync();
-          push({ message: 'Смена завершена', at: new Date().toISOString() });
+          push({ message: 'Смена завершена', type: 'success', at: new Date().toISOString() });
         })
       }
     />

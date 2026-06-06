@@ -3,6 +3,7 @@ import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { TableBadge } from '@/components/StatusBadge';
 import { apiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconHall, IconTables, IconCheck, IconClock, IconEdit, IconTrash, IconPlus } from '../components/icons';
@@ -21,6 +22,7 @@ export function TablesPage() {
   const { remove: removeHall } = useHallMutations();
   const { remove: removeTable } = useTableMutations();
   const push = useNotifications((s) => s.push);
+  const tr = useT();
 
   const [hallModal, setHallModal] = useState<AdminHall | null | 'new'>(null);
   const [tableModal, setTableModal] = useState<{ hall: AdminHall; table: AdminTableItem | null } | null>(null);
@@ -47,15 +49,15 @@ export function TablesPage() {
   return (
     <div className="space-y-4">
       <StatCardsRow>
-        <StatCard label="Всего залов" value={o?.hallsCount ?? '—'} icon={<IconHall />} tone="primary" />
-        <StatCard label="Всего столов" value={o?.tablesCount ?? '—'} icon={<IconTables />} tone="warning" />
-        <StatCard label="Активных столов" value={o?.activeTablesCount ?? '—'} icon={<IconCheck />} tone="success" />
-        <StatCard label="Занятых столов" value={o?.occupiedCount ?? '—'} icon={<IconClock />} tone="muted" />
+        <StatCard label={tr('Всего залов')} value={o?.hallsCount ?? '—'} icon={<IconHall />} tone="primary" />
+        <StatCard label={tr('Всего столов')} value={o?.tablesCount ?? '—'} icon={<IconTables />} tone="warning" />
+        <StatCard label={tr('Активных столов')} value={o?.activeTablesCount ?? '—'} icon={<IconCheck />} tone="success" />
+        <StatCard label={tr('Занятых столов')} value={o?.occupiedCount ?? '—'} icon={<IconClock />} tone="muted" />
       </StatCardsRow>
 
       <div className="flex items-center justify-end gap-2">
         <button className="btn-secondary btn-md" onClick={() => setHallModal('new')}>
-          <IconPlus className="h-4 w-4" /> Добавить зал
+          <IconPlus className="h-4 w-4" /> {tr('Добавить зал')}
         </button>
       </div>
 
@@ -74,10 +76,10 @@ export function TablesPage() {
                   </div>
                   <div>
                     <p className="font-semibold text-text-primary">{hall.name}</p>
-                    <p className="text-xs text-text-muted">{hall.tables.length} столов</p>
+                    <p className="text-xs text-text-muted">{hall.tables.length} {tr('столов')}</p>
                   </div>
                   {!hall.isActive && (
-                    <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-xs text-text-muted">отключён</span>
+                    <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-xs text-text-muted">{tr('отключён')}</span>
                   )}
                 </div>
                 <div className="flex items-center gap-1">
@@ -85,7 +87,7 @@ export function TablesPage() {
                     className="btn-secondary btn-md"
                     onClick={() => setTableModal({ hall, table: null })}
                   >
-                    <IconPlus className="h-4 w-4" /> Стол
+                    <IconPlus className="h-4 w-4" /> {tr('Стол')}
                   </button>
                   <IconBtn onClick={() => setHallModal(hall)} title="Изменить зал">
                     <IconEdit className="h-4 w-4" />
@@ -97,7 +99,7 @@ export function TablesPage() {
               </div>
 
               {hall.tables.length === 0 ? (
-                <p className="px-4 py-6 text-center text-sm text-text-muted">В зале пока нет столов</p>
+                <p className="px-4 py-6 text-center text-sm text-text-muted">{tr('В зале пока нет столов')}</p>
               ) : (
                 <ul className="divide-y divide-border">
                   {hall.tables.map((t) => (
@@ -107,8 +109,8 @@ export function TablesPage() {
                           {t.number}
                         </span>
                         <div>
-                          <p className="text-[15px] font-medium text-text-primary">Стол {t.number}</p>
-                          <p className="text-xs text-text-muted">{t.seats} мест</p>
+                          <p className="text-[15px] font-medium text-text-primary">{tr('Стол')} {t.number}</p>
+                          <p className="text-xs text-text-muted">{t.seats} {tr('мест')}</p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">

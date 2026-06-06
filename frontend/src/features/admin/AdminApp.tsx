@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/store/auth';
+import { useT } from '@/lib/i18n';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
@@ -39,6 +40,7 @@ const ROLE_LABEL: Record<string, string> = {
 export function AdminApp() {
   const { user, logout } = useAuth();
   const qc = useQueryClient();
+  const t = useT();
   const isOwner = user?.role === 'OWNER';
 
   const sections = SECTIONS.filter((s) => !s.ownerOnly || isOwner);
@@ -85,7 +87,7 @@ export function AdminApp() {
               }`}
             >
               <Icon />
-              {s.label}
+              {t(s.label)}
             </button>
           );
         })}
@@ -96,7 +98,7 @@ export function AdminApp() {
           className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium text-text-secondary hover:bg-background"
         >
           <IconLogout />
-          Выйти
+          {t('Выйти')}
         </button>
       </div>
     </aside>
@@ -129,13 +131,15 @@ export function AdminApp() {
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <h1 className="text-xl font-semibold text-text-primary lg:text-2xl">{current.label}</h1>
+            <h1 className="text-xl font-semibold text-text-primary lg:text-2xl">{t(current.label)}</h1>
           </div>
           <div className="flex items-center gap-3">
             <ConnectionStatus />
             <div className="hidden text-right sm:block">
               <p className="text-sm font-medium text-text-primary">{user?.name}</p>
-              <p className="text-xs text-text-muted">{ROLE_LABEL[user?.role ?? ''] ?? user?.role}</p>
+              <p className="text-xs text-text-muted">
+                {t(ROLE_LABEL[user?.role ?? ''] ?? user?.role ?? '')}
+              </p>
             </div>
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
               {user?.name?.[0] ?? '?'}

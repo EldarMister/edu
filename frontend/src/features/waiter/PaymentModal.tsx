@@ -43,7 +43,7 @@ export function PaymentModal({
     setError('');
     try {
       await pay.mutateAsync({ orderId: order.id, method: selected });
-      push({ message: 'Оплата принята', at: new Date().toISOString() });
+      push({ message: 'Оплата принята', type: 'success', at: new Date().toISOString() });
       const r = await fetchReceipt(order.id);
       setReceipt(r);
     } catch (err) {

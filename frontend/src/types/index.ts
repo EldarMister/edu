@@ -157,9 +157,12 @@ export interface CartLine {
   comment?: string;
 }
 
+export type NotificationType = 'info' | 'success' | 'error';
+
 export interface AppNotification {
   id: string;
   message: string;
+  type?: NotificationType;
   orderId?: string;
   orderNumber?: string;
   at: string;

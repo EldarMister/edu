@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { OrderBadge } from '@/components/StatusBadge';
 import { Spinner } from '@/components/Spinner';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconOrders, IconClock, IconCheck, IconX } from '../components/icons';
 import { useAdminOrders, useOrdersOverview } from '../api';
@@ -21,6 +22,7 @@ export function OrdersPage() {
   const overview = useOrdersOverview();
   const ordersQ = useAdminOrders({ tab, search, page });
   const data = ordersQ.data;
+  const tr = useT();
 
   function changeTab(t: string) {
     setTab(t);
@@ -32,10 +34,10 @@ export function OrdersPage() {
   return (
     <div className="space-y-4">
       <StatCardsRow>
-        <StatCard label="Заказов сегодня" value={o?.ordersToday ?? '—'} icon={<IconOrders />} tone="primary" />
-        <StatCard label="Активных" value={o?.activeCount ?? '—'} icon={<IconClock />} tone="warning" />
-        <StatCard label="Оплаченные" value={o?.paidCount ?? '—'} icon={<IconCheck />} tone="success" />
-        <StatCard label="Отменённые" value={o?.cancelledCount ?? '—'} icon={<IconX />} tone="danger" />
+        <StatCard label={tr('Заказов сегодня')} value={o?.ordersToday ?? '—'} icon={<IconOrders />} tone="primary" />
+        <StatCard label={tr('Активных')} value={o?.activeCount ?? '—'} icon={<IconClock />} tone="warning" />
+        <StatCard label={tr('Оплаченные')} value={o?.paidCount ?? '—'} icon={<IconCheck />} tone="success" />
+        <StatCard label={tr('Отменённые')} value={o?.cancelledCount ?? '—'} icon={<IconX />} tone="danger" />
       </StatCardsRow>
 
       <div className="card overflow-hidden">
@@ -50,13 +52,13 @@ export function OrdersPage() {
                   tab === t.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
                 }`}
               >
-                {t.label}
+                {tr(t.label)}
               </button>
             ))}
           </div>
           <input
             className="input h-10 sm:max-w-xs"
-            placeholder="Поиск по № или официанту"
+            placeholder={tr('Поиск по № или официанту')}
             value={search}
             onChange={(e) => {
               setSearch(e.target.value);
@@ -71,19 +73,19 @@ export function OrdersPage() {
             <Spinner className="h-6 w-6" />
           </div>
         ) : !data || data.items.length === 0 ? (
-          <p className="py-12 text-center text-text-muted">Заказы не найдены</p>
+          <p className="py-12 text-center text-text-muted">{tr('Заказы не найдены')}</p>
         ) : (
           <>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-xs text-text-muted">
-                    <Th>№ заказа</Th>
-                    <Th>Дата и время</Th>
-                    <Th>Стол</Th>
-                    <Th>Официант</Th>
-                    <Th className="text-right">Сумма</Th>
-                    <Th>Статус</Th>
+                    <Th>{tr('№ заказа')}</Th>
+                    <Th>{tr('Дата и время')}</Th>
+                    <Th>{tr('Стол')}</Th>
+                    <Th>{tr('Официант')}</Th>
+                    <Th className="text-right">{tr('Сумма')}</Th>
+                    <Th>{tr('Статус')}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -93,7 +95,7 @@ export function OrdersPage() {
                       <Td className="text-text-secondary">
                         {new Date(ord.createdAt).toLocaleDateString('ru-RU')} {timeHM(ord.createdAt)}
                       </Td>
-                      <Td className="text-text-secondary">Стол {ord.table.number}</Td>
+                      <Td className="text-text-secondary">{tr('Стол')} {ord.table.number}</Td>
                       <Td className="text-text-secondary">{ord.waiter.name}</Td>
                       <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
                       <Td>
@@ -108,7 +110,7 @@ export function OrdersPage() {
             {/* Пагинация */}
             <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
               <span className="text-text-muted">
-                Всего: {data.total} · стр. {data.page} из {data.pages}
+                {tr('Всего')}: {data.total} · {data.page} / {data.pages}
               </span>
               <div className="flex gap-2">
                 <button
@@ -116,14 +118,14 @@ export function OrdersPage() {
                   disabled={page <= 1}
                   onClick={() => setPage((p) => p - 1)}
                 >
-                  Назад
+                  {tr('Назад')}
                 </button>
                 <button
                   className="btn-secondary btn-md"
                   disabled={page >= data.pages}
                   onClick={() => setPage((p) => p + 1)}
                 >
-                  Вперёд
+                  {tr('Вперёд')}
                 </button>
               </div>
             </div>

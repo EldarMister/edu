@@ -4,6 +4,7 @@ import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconStaff, IconClock, IconEdit, IconTrash, IconPlus } from '../components/icons';
@@ -37,6 +38,7 @@ export function StaffPage() {
   const staffQ = useStaff(role, search);
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
+  const tr = useT();
   const o = overview.data;
 
   async function onDelete(m: StaffMember) {
@@ -52,10 +54,10 @@ export function StaffPage() {
   return (
     <div className="space-y-4">
       <StatCardsRow>
-        <StatCard label="Всего сотрудников" value={o?.totalStaff ?? '—'} icon={<IconStaff />} tone="primary" />
-        <StatCard label="На смене" value={o?.onShiftCount ?? '—'} icon={<IconClock />} tone="success" />
-        <StatCard label="Администраторов" value={o?.adminsCount ?? '—'} icon={<IconStaff />} tone="warning" />
-        <StatCard label="Официантов" value={o?.waitersCount ?? '—'} icon={<IconStaff />} tone="muted" />
+        <StatCard label={tr('Всего сотрудников')} value={o?.totalStaff ?? '—'} icon={<IconStaff />} tone="primary" />
+        <StatCard label={tr('На смене')} value={o?.onShiftCount ?? '—'} icon={<IconClock />} tone="success" />
+        <StatCard label={tr('Администраторов')} value={o?.adminsCount ?? '—'} icon={<IconStaff />} tone="warning" />
+        <StatCard label={tr('Официантов')} value={o?.waitersCount ?? '—'} icon={<IconStaff />} tone="muted" />
       </StatCardsRow>
 
       <div className="card overflow-hidden">
@@ -63,7 +65,7 @@ export function StaffPage() {
           <div className="flex flex-1 gap-2">
             <input
               className="input h-10 sm:max-w-xs"
-              placeholder="Поиск сотрудника"
+              placeholder={tr('Поиск сотрудника')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -71,11 +73,11 @@ export function StaffPage() {
               className="h-10 w-full sm:w-48"
               value={role}
               onChange={setRole}
-              options={ROLE_FILTERS}
+              options={ROLE_FILTERS.map((r) => ({ value: r.value, label: tr(r.label) }))}
             />
           </div>
           <button className="btn-primary btn-md font-medium" onClick={() => setEditing('new')}>
-            <IconPlus className="h-4 w-4" /> Добавить сотрудника
+            <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
           </button>
         </div>
 
@@ -88,26 +90,26 @@ export function StaffPage() {
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-text-muted">
-                  <th className="px-4 py-3 font-medium">Имя</th>
-                  <th className="px-4 py-3 font-medium">Роль</th>
-                  <th className="px-4 py-3 font-medium">Телефон</th>
-                  <th className="px-4 py-3 font-medium">Статус</th>
-                  <th className="px-4 py-3 text-right font-medium">Действия</th>
+                  <th className="px-4 py-3 font-medium">{tr('Имя')}</th>
+                  <th className="px-4 py-3 font-medium">{tr('Роль')}</th>
+                  <th className="px-4 py-3 font-medium">{tr('Телефон')}</th>
+                  <th className="px-4 py-3 font-medium">{tr('Статус')}</th>
+                  <th className="px-4 py-3 text-right font-medium">{tr('Действия')}</th>
                 </tr>
               </thead>
               <tbody>
                 {staffQ.data?.map((m) => (
                   <tr key={m.id} className="border-b border-border last:border-0 hover:bg-background/60">
                     <td className="px-4 py-3 font-medium text-text-primary">{m.name}</td>
-                    <td className="px-4 py-3 text-text-secondary">{ROLE_LABEL[m.role]}</td>
+                    <td className="px-4 py-3 text-text-secondary">{tr(ROLE_LABEL[m.role])}</td>
                     <td className="px-4 py-3 text-text-secondary">{m.phone}</td>
                     <td className="px-4 py-3">
                       {!m.isActive ? (
-                        <Badge tone="muted">Отключён</Badge>
+                        <Badge tone="muted">{tr('Отключён')}</Badge>
                       ) : m.onShift ? (
-                        <Badge tone="success">На смене</Badge>
+                        <Badge tone="success">{tr('На смене')}</Badge>
                       ) : (
-                        <Badge tone="muted">Не на смене</Badge>
+                        <Badge tone="muted">{tr('Не на смене')}</Badge>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -125,7 +127,7 @@ export function StaffPage() {
                 {staffQ.data?.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-4 py-10 text-center text-text-muted">
-                      Сотрудники не найдены
+                      {tr('Сотрудники не найдены')}
                     </td>
                   </tr>
                 )}

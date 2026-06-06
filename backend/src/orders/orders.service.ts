@@ -118,7 +118,7 @@ export class OrdersService {
       status: TableStatus.sent_to_kitchen,
       hallId: table.hallId,
     });
-    this.notifyWaiter(waiterId, `Заказ ${order.orderNumber} отправлен на кухню`, order);
+    // Уведомление официанту об отправке показывается локально на фронте (мгновенно).
 
     return order;
   }
@@ -188,6 +188,7 @@ export class OrdersService {
       updated.waiterId,
       `Стол №${updated.table.number}: кухня приняла заказ`,
       updated,
+      'success',
     );
     return updated;
   }
@@ -220,6 +221,7 @@ export class OrdersService {
       updated.waiterId,
       `Стол №${updated.table.number} — заказ готов. Заберите с кухни.`,
       updated,
+      'success',
     );
     return updated;
   }
@@ -249,6 +251,7 @@ export class OrdersService {
       updated.waiterId,
       `Стол №${updated.table.number}. Кухня отказала в заказе. Причина: ${reason}`,
       updated,
+      'error',
     );
     return updated;
   }
@@ -302,6 +305,7 @@ export class OrdersService {
       updated.waiterId,
       `Стол №${updated.table.number}. Отказано: ${item.dishNameSnapshot}. Причина: ${reason}`,
       updated,
+      'error',
     );
     return updated;
   }
@@ -566,7 +570,7 @@ export class OrdersService {
     this.emitTableStatus(source.id, source.number, TableStatus.free, source.hallId);
     this.emitTableStatus(target.id, target.number, source.status, target.hallId);
     this.emitStatusChanged(updated);
-    this.notifyWaiter(updated.waiterId, `Заказ перенесён на стол №${target.number}`, updated);
+    // Уведомление о переносе показывается локально на фронте у инициатора.
     return updated;
   }
 
@@ -607,12 +611,14 @@ export class OrdersService {
     });
 
     this.emitStatusChanged(updated);
-    this.notifyWaiter(waiterId, `Вам передан стол №${updated.table.number}`, updated);
-    if (fromWaiterId !== waiterId) {
+    this.notifyWaiter(waiterId, `Вам передан стол №${updated.table.number}`, updated, 'info');
+    // Бывшему официанту — только если передачу сделал не он сам (напр. админ).
+    if (fromWaiterId !== waiterId && fromWaiterId !== byUserId) {
       this.notifyWaiter(
         fromWaiterId,
         `Стол №${updated.table.number} передан официанту ${waiter.name}`,
         updated,
+        'info',
       );
     }
     return updated;
@@ -648,9 +654,15 @@ export class OrdersService {
     this.events.emitBroadcast(SERVER_EVENTS.TABLE_STATUS_CHANGED, { id, number, status, hallId });
   }
 
-  private notifyWaiter(waiterId: string, message: string, order: { id: string; orderNumber: string }) {
+  private notifyWaiter(
+    waiterId: string,
+    message: string,
+    order: { id: string; orderNumber: string },
+    type: 'info' | 'success' | 'error' = 'info',
+  ) {
     this.events.emitToWaiter(waiterId, SERVER_EVENTS.NOTIFICATION_NEW, {
       message,
+      type,
       orderId: order.id,
       orderNumber: order.orderNumber,
       at: new Date().toISOString(),

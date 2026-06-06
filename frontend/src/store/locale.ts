@@ -21,6 +21,6 @@ export const useLocale = create<LocaleState>()(
         set({ locale });
       },
     }),
-    { name: 'vkusno-pos-locale' },
+    { name: 'edu-pos-locale' },
   ),
 );

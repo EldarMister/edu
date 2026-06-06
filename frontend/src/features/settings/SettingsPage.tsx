@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
 import { apiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { useLocale, type Locale } from '@/store/locale';
 import {
@@ -32,6 +33,7 @@ export function SettingsPage() {
   const update = useUpdateSettings();
   const push = useNotifications((s) => s.push);
   const setLocale = useLocale((s) => s.setLocale);
+  const t = useT();
 
   const [form, setForm] = useState<Form | null>(null);
   const [error, setError] = useState('');
@@ -92,11 +94,11 @@ export function SettingsPage() {
     try {
       await update.mutateAsync(form);
       setLocale(form.language);
-      push({ message: 'Настройки успешно сохранены', at: new Date().toISOString() });
+      push({ message: 'Настройки успешно сохранены', type: 'success', at: new Date().toISOString() });
     } catch (err) {
       const msg = apiError(err);
       setError(msg);
-      push({ message: msg, at: new Date().toISOString() });
+      push({ message: msg, type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -105,9 +107,9 @@ export function SettingsPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Левая большая карточка — информация о кафе */}
         <div className="card p-5 lg:col-span-2">
-          <h3 className="mb-4 text-[17px] font-semibold text-text-primary">Информация о кафе</h3>
+          <h3 className="mb-4 text-[17px] font-semibold text-text-primary">{t('Информация о кафе')}</h3>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Название кафе" className="sm:col-span-2">
+            <Field label={t('Название кафе')} className="sm:col-span-2">
               <input
                 className="input"
                 value={form.cafeName}
@@ -115,7 +117,7 @@ export function SettingsPage() {
                 placeholder="EDU CAFE"
               />
             </Field>
-            <Field label="Адрес" className="sm:col-span-2">
+            <Field label={t('Адрес')} className="sm:col-span-2">
               <input
                 className="input"
                 value={form.address}
@@ -123,7 +125,7 @@ export function SettingsPage() {
                 placeholder="г. Бишкек, ул. Киевская 120"
               />
             </Field>
-            <Field label="Номер телефона">
+            <Field label={t('Номер телефона')}>
               <input
                 className="input"
                 value={form.phone}
@@ -131,7 +133,7 @@ export function SettingsPage() {
                 placeholder="+996 500 123 456"
               />
             </Field>
-            <Field label="Доп. номер">
+            <Field label={t('Доп. номер')}>
               <input
                 className="input"
                 value={form.phone2}
@@ -139,7 +141,7 @@ export function SettingsPage() {
                 placeholder="+996 700 123 456"
               />
             </Field>
-            <Field label="Текст в чеке" className="sm:col-span-2">
+            <Field label={t('Текст в чеке')} className="sm:col-span-2">
               <textarea
                 className="input h-24 resize-none py-2.5"
                 maxLength={RECEIPT_LIMIT}
@@ -160,7 +162,7 @@ export function SettingsPage() {
           <div className="card p-5">
             <div className="mb-3 flex items-center gap-2">
               <IconGlobe className="h-5 w-5 text-text-secondary" />
-              <h3 className="text-[15px] font-semibold text-text-primary">Язык системы</h3>
+              <h3 className="text-[15px] font-semibold text-text-primary">{t('Язык системы')}</h3>
             </div>
             <div className="flex rounded-xl bg-background p-1">
               {(
@@ -178,7 +180,7 @@ export function SettingsPage() {
                       : 'text-text-muted hover:text-text-secondary'
                   }`}
                 >
-                  {l.label}
+                  {t(l.label)}
                 </button>
               ))}
             </div>
@@ -186,37 +188,37 @@ export function SettingsPage() {
 
           {/* Способы оплаты */}
           <div className="card p-5">
-            <h3 className="mb-3 text-[15px] font-semibold text-text-primary">Способы оплаты</h3>
+            <h3 className="mb-3 text-[15px] font-semibold text-text-primary">{t('Способы оплаты')}</h3>
             <div className="space-y-1">
               <PayRow
                 icon={<IconQr className="h-5 w-5" />}
                 tone="primary"
-                title="QR-код"
-                desc="Оплата через QR-код"
+                title={t('QR-код')}
+                desc={t('Оплата через QR-код')}
                 checked={form.payQr}
                 onChange={(v) => set('payQr', v)}
               />
               <PayRow
                 icon={<IconCash className="h-5 w-5" />}
                 tone="success"
-                title="Наличные"
-                desc="Оплата наличными средствами"
+                title={t('Наличные')}
+                desc={t('Оплата наличными средствами')}
                 checked={form.payCash}
                 onChange={(v) => set('payCash', v)}
               />
               <PayRow
                 icon={<IconCard className="h-5 w-5" />}
                 tone="warning"
-                title="Карта"
-                desc="Оплата банковской картой"
+                title={t('Карта')}
+                desc={t('Оплата банковской картой')}
                 checked={form.payCard}
                 onChange={(v) => set('payCard', v)}
               />
             </div>
             <p className={`mt-3 text-xs ${noMethod ? 'text-danger' : 'text-text-muted'}`}>
               {noMethod
-                ? 'Должен быть включён хотя бы один способ оплаты'
-                : 'Отключённые способы оплаты будут недоступны на экране оплаты'}
+                ? t('Должен быть включён хотя бы один способ оплаты')
+                : t('Отключённые способы оплаты будут недоступны на экране оплаты')}
             </p>
           </div>
 
@@ -224,7 +226,7 @@ export function SettingsPage() {
           <div className="card p-5">
             <div className="mb-3 flex items-center gap-2">
               <IconPrinter className="h-5 w-5 text-text-secondary" />
-              <h3 className="text-[15px] font-semibold text-text-primary">Статус принтера</h3>
+              <h3 className="text-[15px] font-semibold text-text-primary">{t('Статус принтера')}</h3>
             </div>
             <div className="flex items-center gap-3 rounded-xl border border-border p-3">
               <div
@@ -240,12 +242,12 @@ export function SettingsPage() {
                     data.printerConnected ? 'text-success' : 'text-text-muted'
                   }`}
                 >
-                  {data.printerConnected ? 'Подключен' : 'Не подключен'}
+                  {data.printerConnected ? t('Подключен') : t('Не подключен')}
                 </p>
                 <p className="text-xs text-text-muted">
                   {data.printerConnected
-                    ? 'Принтер чеков подключен и готов к печати'
-                    : 'Принтер чеков не подключен'}
+                    ? t('Принтер чеков подключен и готов к печати')
+                    : t('Принтер чеков не подключен')}
                 </p>
               </div>
             </div>
@@ -257,14 +259,14 @@ export function SettingsPage() {
       <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
         {error && <p className="mr-auto self-center text-sm text-danger">{error}</p>}
         <button className="btn-secondary btn-lg sm:w-auto sm:px-6" onClick={onCancel} disabled={update.isPending}>
-          Отмена
+          {t('Отмена')}
         </button>
         <button
           className="btn-primary btn-lg font-semibold sm:w-auto sm:px-6"
           onClick={onSave}
           disabled={update.isPending}
         >
-          {update.isPending ? <Spinner /> : 'Сохранить изменения'}
+          {update.isPending ? <Spinner /> : t('Сохранить изменения')}
         </button>
       </div>
     </div>
