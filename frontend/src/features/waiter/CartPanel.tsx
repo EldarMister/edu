@@ -12,14 +12,16 @@ export function CartPanel({
   canSubmit,
   onSubmit,
   onBlockedSubmit,
+  onCancelEdit,
 }: {
   table: TableItem;
-  mode: 'create' | 'add';
+  mode: 'create' | 'add' | 'edit';
   orderNumber?: string;
   submitting: boolean;
   canSubmit: boolean;
   onSubmit: () => void;
   onBlockedSubmit: () => void;
+  onCancelEdit?: () => void;
 }) {
   const { lines, comment, inc, dec, remove, setLineComment, setComment } = useCart();
   const totals = cartTotals(lines);
@@ -30,13 +32,25 @@ export function CartPanel({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-border pb-3">
-        <h2 className="text-lg font-semibold text-text-primary">
-          {mode === 'add' ? `Добавление в ${displayOrderNumber(orderNumber ?? '')}` : 'Новый заказ'}
-        </h2>
-        <p className="mt-0.5 text-sm text-text-muted">
-          Стол {table.number}
-        </p>
+      <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary">
+            {mode === 'edit'
+              ? `Редактирование ${displayOrderNumber(orderNumber ?? '')}`
+              : mode === 'add'
+                ? `Добавление в ${displayOrderNumber(orderNumber ?? '')}`
+                : 'Новый заказ'}
+          </h2>
+          <p className="mt-0.5 text-sm text-text-muted">Стол {table.number}</p>
+        </div>
+        {mode === 'edit' && onCancelEdit && (
+          <button
+            onClick={onCancelEdit}
+            className="shrink-0 text-sm font-medium text-text-muted hover:text-text-secondary"
+          >
+            Отменить
+          </button>
+        )}
       </div>
 
       {/* Позиции */}
@@ -136,6 +150,8 @@ export function CartPanel({
         >
           {submitting ? (
             <Spinner />
+          ) : mode === 'edit' ? (
+            'Сохранить изменения'
           ) : mode === 'add' ? (
             `Добавить к заказу · ${totals.count} шт.`
           ) : (

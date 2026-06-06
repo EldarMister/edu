@@ -16,6 +16,7 @@ interface CartState {
   carts: Record<string, TableCart>;
   selectTable: (tableId: string) => void;
   add: (dish: Dish) => void;
+  replaceLines: (lines: CartLine[], comment: string) => void;
   inc: (dishId: string) => void;
   dec: (dishId: string) => void;
   remove: (dishId: string) => void;
@@ -62,6 +63,10 @@ export const useCart = create<CartState>((set) => ({
         return { ...c, lines };
       }),
     ),
+
+  // Загружает позиции существующего заказа в корзину активного стола (режим редактирования).
+  replaceLines: (lines, comment) =>
+    set((s) => mutate(s, () => ({ lines, comment }))),
 
   inc: (dishId) =>
     set((s) =>

@@ -183,8 +183,25 @@ export class OrdersService {
   async cancelOrder(orderId: string, actor: AuditActor, reason?: string) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
+    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
     if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ уже закрыт и не может быть отменён');
+    }
+    // После принятия кухней официант не может отменить заказ напрямую —
+    // только через подтверждение кухни (Фаза 2). Админ/владелец не ограничены.
+    const kitchenLocked: OrderStatus[] = [
+      OrderStatus.accepted_by_kitchen,
+      OrderStatus.cooking,
+      OrderStatus.ready,
+      OrderStatus.served,
+      OrderStatus.waiting_payment,
+    ];
+    if (actor.role === Role.WAITER && kitchenLocked.includes(order.status)) {
+      throw new BadRequestException(
+        'Кухня уже приняла заказ — отмена доступна только с подтверждения кухни',
+      );
     }
 
     const prevStatus = order.status;
@@ -226,6 +243,105 @@ export class OrdersService {
     });
 
     return updated;
+  }
+
+  /**
+   * Полное редактирование состава заказа официантом.
+   * Разрешено только пока кухня не приняла заказ (status = sent_to_kitchen).
+   * После принятия изменения идут через подтверждение кухни (Фаза 2).
+   */
+  async editOrder(
+    orderId: string,
+    actor: AuditActor,
+    items: CreateOrderItemDto[],
+    comment?: string,
+  ) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    if (order.waiterId !== actor.id) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
+    if (order.status !== OrderStatus.sent_to_kitchen) {
+      throw new BadRequestException(
+        'Редактировать можно только пока кухня не приняла заказ — после принятия изменения через подтверждение кухни',
+      );
+    }
+    if (!items.length) {
+      throw new BadRequestException('Заказ не может быть пустым — используйте отмену');
+    }
+
+    const itemsData = await this.buildItemsData(items);
+    const totals = this.calcTotals(itemsData);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const changed = await tx.order.updateMany({
+        where: { id: orderId, waiterId: actor.id, status: OrderStatus.sent_to_kitchen },
+        data: {
+          comment,
+          totalAmount: totals.total,
+          discountAmount: totals.discount,
+          finalAmount: totals.final,
+          requiresWaiterDecision: false,
+        },
+      });
+      if (changed.count === 0) {
+        throw new BadRequestException(
+          'Редактировать можно только пока кухня не приняла заказ — после принятия изменения через подтверждение кухни',
+        );
+      }
+      await tx.orderItem.deleteMany({ where: { orderId } });
+      await tx.orderItem.createMany({
+        data: itemsData.map((i) => ({ ...i, orderId })),
+      });
+      return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
+    });
+
+    // Кухня сразу видит обновлённый состав (ещё не принятого) заказа.
+    this.emitStatusChanged(updated);
+
+    // Сводка изменений для журнала: что добавилось / убавилось по блюдам.
+    const before = this.itemQtyMap(order.items);
+    const after = this.itemQtyMap(updated.items);
+    const diff = this.describeItemDiff(before, after);
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.ORDER_UPDATED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId: order.id,
+      tableId: order.tableId,
+      description:
+        `${actor.name ?? 'Сотрудник'} изменил заказ ${order.orderNumber}` +
+        (diff ? `: ${diff}` : ''),
+      oldValue: { finalAmount: Number(order.finalAmount), items: [...before.entries()].map(([n, q]) => `${n} ×${q}`) },
+      newValue: { finalAmount: Number(updated.finalAmount), items: [...after.entries()].map(([n, q]) => `${n} ×${q}`) },
+      metadata: { orderNumber: order.orderNumber, tableNumber: order.table.number },
+    });
+
+    return updated;
+  }
+
+  /** Карта «название блюда → суммарное количество» по позициям заказа. */
+  private itemQtyMap(items: { dishNameSnapshot: string; quantity: number }[]) {
+    const m = new Map<string, number>();
+    for (const it of items) m.set(it.dishNameSnapshot, (m.get(it.dishNameSnapshot) ?? 0) + it.quantity);
+    return m;
+  }
+
+  /** Человеко-читаемая сводка различий составов: «добавил X ×1, убрал Y ×2». */
+  private describeItemDiff(before: Map<string, number>, after: Map<string, number>) {
+    const added: string[] = [];
+    const removed: string[] = [];
+    const names = new Set([...before.keys(), ...after.keys()]);
+    for (const name of names) {
+      const delta = (after.get(name) ?? 0) - (before.get(name) ?? 0);
+      if (delta > 0) added.push(`${name} ×${delta}`);
+      else if (delta < 0) removed.push(`${name} ×${-delta}`);
+    }
+    const parts: string[] = [];
+    if (added.length) parts.push(`добавил ${added.join(', ')}`);
+    if (removed.length) parts.push(`убрал ${removed.join(', ')}`);
+    return parts.join('; ');
   }
 
   /** Добавить блюда к существующему заказу того же стола. */

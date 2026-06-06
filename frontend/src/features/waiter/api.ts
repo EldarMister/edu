@@ -159,6 +159,29 @@ export function useAddItems() {
   });
 }
 
+export function useEditOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { orderId: string; comment?: string; lines: CartLine[] }) => {
+      const items = payload.lines.map((l) => ({
+        dishId: l.dish.id,
+        quantity: l.quantity,
+        comment: l.comment?.trim() || undefined,
+      }));
+      const { data } = await api.patch<Order>(`/orders/${payload.orderId}`, {
+        comment: payload.comment?.trim() || undefined,
+        items,
+      });
+      return data;
+    },
+    retry: networkRetry,
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['halls'] });
+    },
+  });
+}
+
 /** Универсальная мутация перехода статуса заказа официантом. */
 function useOrderAction(path: (id: string) => string) {
   const qc = useQueryClient();

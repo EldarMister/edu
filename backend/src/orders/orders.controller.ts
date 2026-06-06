@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AddItemsDto } from './dto/add-items.dto';
+import { EditOrderDto } from './dto/edit-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -32,6 +33,12 @@ export class OrdersController {
   @Roles(Role.WAITER)
   addItems(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: AddItemsDto) {
     return this.orders.addItems(id, user, dto.items, dto.idempotencyKey);
+  }
+
+  @Patch(':id')
+  @Roles(Role.WAITER)
+  edit(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: EditOrderDto) {
+    return this.orders.editOrder(id, user, dto.items, dto.comment);
   }
 
   @Post(':id/cancel')

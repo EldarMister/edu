@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { Order } from '@/types';
+import type { Order, CartLine } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
+import { displayOrderNumber } from '@/lib/format';
 import { useWaiterPushNotifications } from '@/lib/push';
 import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
@@ -18,6 +19,7 @@ import {
   useCurrentShift,
   useCreateOrder,
   useAddItems,
+  useEditOrder,
   usePickedUp,
   useServed,
   useToPayment,
@@ -38,6 +40,7 @@ import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
 import { PaymentModal } from './PaymentModal';
+import { CancelOrderModal } from './CancelOrderModal';
 import {
   TableActionsMenu,
   TableChip,
@@ -64,6 +67,7 @@ export function WaiterApp() {
   const cart = useCart();
   const create = useCreateOrder();
   const addItems = useAddItems();
+  const editOrder = useEditOrder();
   const pickedUp = usePickedUp();
   const served = useServed();
   const toPayment = useToPayment();
@@ -78,6 +82,8 @@ export function WaiterApp() {
   const [tab, setTab] = useState<Tab>('tables');
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
+  const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
   const [idemKey, setIdemKey] = useState(() => clientId());
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
@@ -104,6 +110,7 @@ export function WaiterApp() {
   const selectedTable =
     halls.flatMap((h) => h.tables).find((t) => t.id === cart.tableId) ?? null;
   const activeOrder = cart.tableId ? ordersByTable.get(cart.tableId) : undefined;
+  const editing = !!editingOrderId && !!activeOrder && activeOrder.id === editingOrderId;
   const viewingOrder = viewingOrderId ? orders.find((o) => o.id === viewingOrderId) : undefined;
   const displayedOrder = viewingOrder ?? activeOrder;
   const showCart = !viewingOrder && (cart.lines.length > 0 || !activeOrder);
@@ -122,8 +129,61 @@ export function WaiterApp() {
 
   function selectTable(tableId: string) {
     setViewingOrderId(null);
+    setEditingOrderId(null);
     cart.selectTable(tableId);
     setTab(ordersByTable.has(tableId) ? 'cart' : 'menu');
+  }
+
+  // --- Редактирование заказа (Фаза 1: только пока кухня не приняла заказ) ---
+  function startEditOrder(order: Order) {
+    setViewingOrderId(null);
+    cart.selectTable(order.table.id);
+    const dishById = new Map((dishesQ.data ?? []).map((d) => [d.id, d]));
+    const lines = order.items
+      .filter((it) => it.status !== 'rejected' && it.status !== 'cancelled')
+      .map((it) => {
+        const dish = dishById.get(it.dishId);
+        return dish ? ({ dish, quantity: it.quantity, comment: it.comment ?? undefined } as CartLine) : null;
+      })
+      .filter((l): l is CartLine => l !== null);
+    cart.replaceLines(lines, order.comment ?? '');
+    setEditingOrderId(order.id);
+    setTab('menu');
+    push({
+      message: `Редактирование ${displayOrderNumber(order.orderNumber)}`,
+      type: 'info',
+      at: new Date().toISOString(),
+    });
+  }
+
+  async function saveEditOrder() {
+    if (!editingOrderId) return;
+    try {
+      await editOrder.mutateAsync({ orderId: editingOrderId, comment: cart.comment, lines: cart.lines });
+      cart.clear();
+      setEditingOrderId(null);
+      push({ message: 'Изменения сохранены', type: 'success', at: new Date().toISOString() });
+      setTab('orders');
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
+
+  function cancelEditing() {
+    cart.clear();
+    setEditingOrderId(null);
+    setTab('orders');
+  }
+
+  async function confirmCancelOrder(reason: string) {
+    if (!cancelTarget) return;
+    try {
+      await cancelOrder.mutateAsync({ orderId: cancelTarget.id, reason });
+      setCancelTarget(null);
+      push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
   }
 
   function changeTab(next: Tab) {
@@ -311,11 +371,12 @@ export function WaiterApp() {
       ) : (
         <CartPanel
           table={selectedTable}
-          mode={activeOrder ? 'add' : 'create'}
+          mode={editing ? 'edit' : activeOrder ? 'add' : 'create'}
           orderNumber={activeOrder?.orderNumber}
-          submitting={create.isPending || addItems.isPending}
+          submitting={create.isPending || addItems.isPending || editOrder.isPending}
           canSubmit={!!activeShift}
-          onSubmit={submitCart}
+          onSubmit={editing ? saveEditOrder : submitCart}
+          onCancelEdit={cancelEditing}
           onBlockedSubmit={() =>
             push({ message: 'Сначала начните смену в профиле.', type: 'error', at: new Date().toISOString() })
           }
@@ -353,7 +414,7 @@ export function WaiterApp() {
       <OfflineBanner />
 
       {/* Шапка */}
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-white px-4 py-3">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-white py-3 pl-2 pr-4 sm:pl-4">
         <div className="flex items-center gap-2">
           <BrandLogo />
         </div>
@@ -387,6 +448,8 @@ export function WaiterApp() {
                   <OrdersList
                     orders={orders}
                     onOpen={openExistingOrder}
+                    onEdit={startEditOrder}
+                    onCancel={(o) => setCancelTarget(o)}
                   />
                 </div>
               </>
@@ -410,6 +473,8 @@ export function WaiterApp() {
               <OrdersList
                 orders={orders}
                 onOpen={openExistingOrder}
+                onEdit={startEditOrder}
+                onCancel={(o) => setCancelTarget(o)}
               />
             </div>
           </Panel>
@@ -442,6 +507,14 @@ export function WaiterApp() {
           }}
         />
       )}
+
+      <CancelOrderModal
+        open={!!cancelTarget}
+        order={cancelTarget}
+        submitting={cancelOrder.isPending}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={confirmCancelOrder}
+      />
 
       {/* Действия со столом */}
       {tableModal === 'close' && selectedTable && (
