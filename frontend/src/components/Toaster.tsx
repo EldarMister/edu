@@ -18,12 +18,12 @@ function Toast({ id, message, type = 'info' }: { id: string; message: string; ty
   const s = STYLES[type];
   return (
     <div
-      className={`card pointer-events-auto flex items-start gap-3 border-l-4 px-4 py-3 shadow-soft animate-[fadeIn_.15s_ease-out] ${s.bar}`}
+      className={`card pointer-events-auto flex w-fit max-w-[calc(100vw-24px)] items-start gap-3 border-l-4 px-4 py-3 shadow-soft animate-[fadeIn_.15s_ease-out] sm:max-w-sm ${s.bar}`}
       onClick={() => dismiss(id)}
       role="status"
     >
       <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
-      <p className="text-sm text-text-primary">{message}</p>
+      <p className="min-w-0 break-words text-sm text-text-primary">{message}</p>
     </div>
   );
 }
@@ -32,7 +32,7 @@ function Toast({ id, message, type = 'info' }: { id: string; message: string; ty
 export function Toaster() {
   const toasts = useNotifications((s) => s.toasts);
   return (
-    <div className="pointer-events-none fixed right-0 top-3 z-50 flex w-full max-w-sm flex-col gap-2 px-3 sm:right-3">
+    <div className="pointer-events-none fixed right-3 top-3 z-50 flex max-w-[calc(100vw-24px)] flex-col items-end gap-2 sm:max-w-sm">
       {toasts.map((t) => (
         <Toast key={t.id} id={t.id} message={t.message} type={t.type} />
       ))}

@@ -151,6 +151,7 @@ export class OrdersService {
     // Real-time: кухня получает новый заказ, все видят смену статуса стола.
     this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, order);
     this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
+    void this.notifyKitchenNewOrder(order);
     this.events.emitBroadcast(SERVER_EVENTS.TABLE_STATUS_CHANGED, {
       id: table.id,
       number: table.number,
@@ -286,6 +287,7 @@ export class OrdersService {
     const updated = await this.findById(orderId);
     if (applied) {
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
+      void this.notifyKitchenNewOrder(updated);
       this.emitStatusChanged(updated);
       const addedCount = items.reduce((sum, i) => sum + i.quantity, 0);
       await this.audit.log({
@@ -890,6 +892,17 @@ export class OrdersService {
       orderId: order.id,
       orderNumber: order.orderNumber,
       url: '/waiter',
+    });
+  }
+
+  private notifyKitchenNewOrder(order: { id: string; orderNumber: string; table: { number: number } }) {
+    return this.push.notifyRole(Role.KITCHEN, {
+      title: 'EDU POS',
+      body: `Новый заказ ${order.orderNumber} · Стол ${order.table.number}`,
+      type: 'info',
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      url: '/kitchen',
     });
   }
 }

@@ -13,6 +13,10 @@ export function useKitchenRealtime() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['kitchen'] });
 
   useSocketEvent<Order>('kitchen:new_order', (order) => {
+    qc.setQueryData<Order[]>(['kitchen', 'new'], (current = []) => {
+      if (current.some((item) => item.id === order.id)) return current;
+      return [order, ...current];
+    });
     invalidate();
     beep('newOrder');
     const orderNumber = displayOrderNumber(order.orderNumber);

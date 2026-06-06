@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import webpush, { PushSubscription as WebPushSubscription } from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
+import { Role } from '@prisma/client';
 import { PushSubscriptionDto } from './dto';
 
-export interface WaiterPushPayload {
+export interface PushPayload {
   title: string;
   body: string;
   type?: 'info' | 'success' | 'error';
@@ -64,12 +65,32 @@ export class PushService {
     return { ok: true };
   }
 
-  async notifyWaiter(waiterId: string, payload: WaiterPushPayload) {
+  async notifyUser(userId: string, payload: PushPayload) {
     if (!this.configured) return;
 
     const subscriptions = await this.prisma.pushSubscription.findMany({
-      where: { userId: waiterId },
+      where: { userId },
     });
+    await this.sendToSubscriptions(subscriptions, payload);
+  }
+
+  async notifyWaiter(waiterId: string, payload: PushPayload) {
+    return this.notifyUser(waiterId, payload);
+  }
+
+  async notifyRole(role: Role, payload: PushPayload) {
+    if (!this.configured) return;
+
+    const subscriptions = await this.prisma.pushSubscription.findMany({
+      where: { user: { role, isActive: true } },
+    });
+    await this.sendToSubscriptions(subscriptions, payload);
+  }
+
+  private async sendToSubscriptions(
+    subscriptions: { endpoint: string; p256dh: string; auth: string }[],
+    payload: PushPayload,
+  ) {
     if (subscriptions.length === 0) return;
 
     await Promise.all(

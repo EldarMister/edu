@@ -4,6 +4,8 @@ import { useAuth } from '@/store/auth';
 import { API_URL } from './api';
 
 let socket: Socket | null = null;
+const VISIBLE_DISCONNECT_GRACE_MS = 8_000;
+const HIDDEN_DISCONNECT_GRACE_MS = 60_000;
 
 /** Возвращает singleton-сокет, подключённый с текущим JWT. */
 export function getSocket(): Socket {
@@ -40,14 +42,56 @@ export function useConnectionStatus(): boolean {
 
   useEffect(() => {
     const sock = getSocket();
-    const onConnect = () => setConnected(true);
-    const onDisconnect = () => setConnected(false);
+    let offlineTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const clearOfflineTimer = () => {
+      if (!offlineTimer) return;
+      clearTimeout(offlineTimer);
+      offlineTimer = null;
+    };
+    const markOfflineLater = () => {
+      clearOfflineTimer();
+      const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      offlineTimer = setTimeout(() => {
+        if (!sock.connected) setConnected(false);
+      }, hidden ? HIDDEN_DISCONNECT_GRACE_MS : VISIBLE_DISCONNECT_GRACE_MS);
+    };
+    const onConnect = () => {
+      clearOfflineTimer();
+      setConnected(true);
+    };
+    const onDisconnect = () => markOfflineLater();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (!sock.connected) sock.connect();
+        if (sock.connected) onConnect();
+        else markOfflineLater();
+      }
+    };
+    const onBrowserOnline = () => {
+      sock.connect();
+      markOfflineLater();
+    };
+    const onBrowserOffline = () => {
+      clearOfflineTimer();
+      setConnected(false);
+    };
+
     sock.on('connect', onConnect);
     sock.on('disconnect', onDisconnect);
-    setConnected(sock.connected);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('online', onBrowserOnline);
+    window.addEventListener('offline', onBrowserOffline);
+    if (navigator.onLine === false) setConnected(false);
+    else if (sock.connected) setConnected(true);
+    else markOfflineLater();
     return () => {
+      clearOfflineTimer();
       sock.off('connect', onConnect);
       sock.off('disconnect', onDisconnect);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('online', onBrowserOnline);
+      window.removeEventListener('offline', onBrowserOffline);
     };
   }, []);
 

@@ -5,6 +5,7 @@ import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { Spinner } from '@/components/Spinner';
 import { disconnectSocket } from '@/lib/socket';
+import { usePushNotifications } from '@/lib/push';
 import { useKitchenRealtime } from './useKitchenRealtime';
 import {
   useKitchenOrders,
@@ -32,6 +33,7 @@ export function KitchenApp() {
   useKitchenRealtime();
   const { user, logout } = useAuth();
   const push = useNotifications((s) => s.push);
+  const pushNotifications = usePushNotifications(user?.role === 'KITCHEN');
 
   const [tab, setTab] = useState<KitchenTab>('new');
   const [now, setNow] = useState(() => Date.now());
@@ -52,6 +54,10 @@ export function KitchenApp() {
 
   const orders = ordersQ.data ?? [];
   const counts = orders.length;
+
+  useEffect(() => {
+    if (orders.length > 0) setNow(Date.now());
+  }, [orders]);
 
   async function act(id: string, fn: () => Promise<unknown>) {
     setActingId(id);
@@ -98,6 +104,11 @@ export function KitchenApp() {
         <div className="flex items-center gap-4 text-sm">
           <span className="text-text-secondary">Повар: {user?.name}</span>
           <ConnectionStatus />
+          {pushNotifications.status !== 'subscribed' && pushNotifications.status !== 'unsupported' && (
+            <button onClick={pushNotifications.enable} className="text-text-muted hover:text-primary">
+              Уведомления
+            </button>
+          )}
           <button onClick={onLogout} className="text-text-muted hover:text-danger">
             Выйти
           </button>

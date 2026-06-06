@@ -16,7 +16,7 @@ export class PushController {
     return this.push.getPublicKey();
   }
 
-  @Roles(Role.WAITER)
+  @Roles(Role.WAITER, Role.KITCHEN)
   @Post('push/subscribe')
   subscribe(
     @CurrentUser() user: AuthUser,
@@ -29,7 +29,7 @@ export class PushController {
     return this.push.subscribe(user.id, { ...dto, userAgent: dto.userAgent ?? userAgent });
   }
 
-  @Roles(Role.WAITER)
+  @Roles(Role.WAITER, Role.KITCHEN)
   @Delete('push/subscribe')
   unsubscribe(@CurrentUser() user: AuthUser, @Body() dto: { endpoint: string }) {
     return this.push.unsubscribe(user.id, dto.endpoint);

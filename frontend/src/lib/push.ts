@@ -52,7 +52,7 @@ async function subscribeBrowser(publicKey: string) {
   });
 }
 
-export function useWaiterPushNotifications(enabled: boolean) {
+export function usePushNotifications(enabled: boolean) {
   const supported = useMemo(
     () => typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window,
     [],
@@ -102,4 +102,8 @@ export function useWaiterPushNotifications(enabled: boolean) {
   }, [enable, enabled, supported]);
 
   return { status, enable };
+}
+
+export function useWaiterPushNotifications(enabled: boolean) {
+  return usePushNotifications(enabled);
 }
