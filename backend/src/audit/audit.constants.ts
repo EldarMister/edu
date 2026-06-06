@@ -1,0 +1,48 @@
+/**
+ * Типы действий и сущностей для журнала аудита (audit_logs).
+ * Значения хранятся в БД строками — это устойчиво к будущим изменениям enum.
+ */
+export const AuditAction = {
+  // Заказы
+  ORDER_CREATED: 'ORDER_CREATED',
+  ORDER_CANCELLED: 'ORDER_CANCELLED',
+  ORDER_UPDATED: 'ORDER_UPDATED',
+  ORDER_PAID: 'ORDER_PAID',
+  ORDER_PAYMENT_METHOD_CHANGED: 'ORDER_PAYMENT_METHOD_CHANGED',
+  ORDER_ITEM_ADDED: 'ORDER_ITEM_ADDED',
+  ORDER_ITEM_REMOVED: 'ORDER_ITEM_REMOVED',
+  ORDER_ITEM_QUANTITY_CHANGED: 'ORDER_ITEM_QUANTITY_CHANGED',
+  // Столы
+  TABLE_CLOSED: 'TABLE_CLOSED',
+  TABLE_MOVED: 'TABLE_MOVED',
+  TABLE_TRANSFERRED: 'TABLE_TRANSFERRED',
+  // Меню
+  MENU_ITEM_CREATED: 'MENU_ITEM_CREATED',
+  MENU_ITEM_UPDATED: 'MENU_ITEM_UPDATED',
+  MENU_ITEM_DELETED: 'MENU_ITEM_DELETED',
+  MENU_ITEM_PRICE_CHANGED: 'MENU_ITEM_PRICE_CHANGED',
+  // Категории
+  CATEGORY_CREATED: 'CATEGORY_CREATED',
+  CATEGORY_UPDATED: 'CATEGORY_UPDATED',
+  CATEGORY_DELETED: 'CATEGORY_DELETED',
+  // Персонал
+  STAFF_CREATED: 'STAFF_CREATED',
+  STAFF_UPDATED: 'STAFF_UPDATED',
+  STAFF_DELETED: 'STAFF_DELETED',
+  // Настройки
+  SETTINGS_UPDATED: 'SETTINGS_UPDATED',
+} as const;
+
+export type AuditAction = (typeof AuditAction)[keyof typeof AuditAction];
+
+export const AuditEntity = {
+  ORDER: 'ORDER',
+  TABLE: 'TABLE',
+  MENU_ITEM: 'MENU_ITEM',
+  CATEGORY: 'CATEGORY',
+  STAFF: 'STAFF',
+  SETTINGS: 'SETTINGS',
+  PAYMENT: 'PAYMENT',
+} as const;
+
+export type AuditEntity = (typeof AuditEntity)[keyof typeof AuditEntity];

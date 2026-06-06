@@ -11,7 +11,9 @@ export function getSocket(): Socket {
   if (!socket) {
     socket = io(API_URL, {
       auth: { token },
-      transports: ['websocket'],
+      // websocket предпочтительнее, но оставляем polling как fallback:
+      // на нестабильной мобильной сети чистый websocket часто не поднимается.
+      transports: ['websocket', 'polling'],
       autoConnect: true,
       reconnection: true,
       reconnectionDelay: 1000,

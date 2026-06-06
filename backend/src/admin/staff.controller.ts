@@ -21,17 +21,17 @@ export class StaffController {
   }
 
   @Post()
-  create(@Body() dto: CreateStaffDto) {
-    return this.staff.create(dto);
+  create(@Body() dto: CreateStaffDto, @CurrentUser() actor: AuthUser) {
+    return this.staff.create(dto, actor);
   }
 
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateStaffDto, @CurrentUser() actor: AuthUser) {
-    return this.staff.update(id, dto, actor.id);
+    return this.staff.update(id, dto, actor);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
-    return this.staff.remove(id, actor.id);
+    return this.staff.remove(id, actor);
   }
 }

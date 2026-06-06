@@ -3,6 +3,7 @@ import { PaymentMethod } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
+import type { AuditActor } from '../audit/audit.service';
 
 @Injectable()
 export class PaymentsService {
@@ -13,9 +14,9 @@ export class PaymentsService {
   ) {}
 
   /** Приём оплаты официантом/кассиром. Способ должен быть включён в настройках. */
-  async pay(cashierId: string, orderId: string, method: PaymentMethod) {
+  async pay(actor: AuditActor, orderId: string, method: PaymentMethod) {
     await this.settings.assertMethodEnabled(method);
-    return this.orders.markPaid(orderId, cashierId, method);
+    return this.orders.markPaid(orderId, actor, method);
   }
 
   /** Данные для печати чека (ТЗ §4.8) — реквизиты берём из настроек заведения. */

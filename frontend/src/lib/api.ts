@@ -54,6 +54,19 @@ api.interceptors.response.use(
   },
 );
 
+/**
+ * Политика повторов для мутаций: повторяем только сетевые сбои (потерянное
+ * соединение/таймаут), но не серверные ответы 4xx/5xx — их повтор бессмыслен.
+ * До 2 попыток: помогает на нестабильной мобильной сети.
+ */
+export function networkRetry(failureCount: number, err: unknown): boolean {
+  if (failureCount >= 2) return false;
+  if (axios.isAxiosError(err)) {
+    return !err.response && (err.code === 'ERR_NETWORK' || err.code === 'ECONNABORTED');
+  }
+  return false;
+}
+
 /** Достаёт человекочитаемое сообщение об ошибке из ответа API. */
 export function apiError(err: unknown): string {
   if (axios.isAxiosError(err)) {

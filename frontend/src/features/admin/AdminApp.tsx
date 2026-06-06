@@ -12,6 +12,7 @@ import {
   IconMenu,
   IconStaff,
   IconSettings,
+  IconJournal,
   IconLogout,
 } from './components/icons';
 import { StatisticsPage } from './pages/StatisticsPage';
@@ -19,9 +20,10 @@ import { OrdersPage } from './pages/OrdersPage';
 import { TablesPage } from './pages/TablesPage';
 import { MenuPage } from './pages/MenuPage';
 import { StaffPage } from './pages/StaffPage';
+import { AuditPage } from './pages/AuditPage';
 import { SettingsPage } from '../settings/SettingsPage';
 
-type Section = 'stats' | 'orders' | 'tables' | 'menu' | 'staff' | 'settings';
+type Section = 'stats' | 'orders' | 'tables' | 'menu' | 'staff' | 'audit' | 'settings';
 
 const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly?: boolean }[] = [
   { key: 'stats', label: 'Статистика', icon: IconStats, ownerOnly: true },
@@ -29,6 +31,7 @@ const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly
   { key: 'tables', label: 'Столы', icon: IconTables },
   { key: 'menu', label: 'Меню', icon: IconMenu },
   { key: 'staff', label: 'Персонал', icon: IconStaff },
+  { key: 'audit', label: 'Журнал', icon: IconJournal, ownerOnly: true },
   { key: 'settings', label: 'Настройки', icon: IconSettings, ownerOnly: true },
 ];
 
@@ -153,6 +156,7 @@ export function AdminApp() {
           {section === 'tables' && <TablesPage />}
           {section === 'menu' && <MenuPage />}
           {section === 'staff' && <StaffPage />}
+          {section === 'audit' && isOwner && <AuditPage />}
           {section === 'settings' && isOwner && <SettingsPage />}
         </main>
       </div>

@@ -3,6 +3,7 @@ import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { AddItemsDto } from './dto/add-items.dto';
+import { CancelOrderDto } from './dto/cancel-order.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
@@ -13,7 +14,7 @@ export class OrdersController {
   @Post()
   @Roles(Role.WAITER)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateOrderDto) {
-    return this.orders.create(user.id, dto);
+    return this.orders.create(user, dto);
   }
 
   @Get('active')
@@ -30,7 +31,13 @@ export class OrdersController {
   @Post(':id/items')
   @Roles(Role.WAITER)
   addItems(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: AddItemsDto) {
-    return this.orders.addItems(id, user.id, dto.items, dto.idempotencyKey);
+    return this.orders.addItems(id, user, dto.items, dto.idempotencyKey);
+  }
+
+  @Post(':id/cancel')
+  @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
+  cancel(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: CancelOrderDto) {
+    return this.orders.cancelOrder(id, user, dto.reason);
   }
 
   @Post(':id/picked-up')

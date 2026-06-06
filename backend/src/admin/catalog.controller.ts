@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import { Role } from '@prisma/client';
 import { CatalogService } from './catalog.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import {
   CreateCategoryDto,
   CreateDishDto,
@@ -71,18 +72,18 @@ export class CatalogController {
   }
 
   @Post('categories')
-  createCategory(@Body() dto: CreateCategoryDto) {
-    return this.catalog.createCategory(dto);
+  createCategory(@Body() dto: CreateCategoryDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.createCategory(dto, user);
   }
 
   @Patch('categories/:id')
-  updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto) {
-    return this.catalog.updateCategory(id, dto);
+  updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.updateCategory(id, dto, user);
   }
 
   @Delete('categories/:id')
-  deleteCategory(@Param('id') id: string) {
-    return this.catalog.deleteCategory(id);
+  deleteCategory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.catalog.deleteCategory(id, user);
   }
 
   @Get('dishes')
@@ -91,17 +92,17 @@ export class CatalogController {
   }
 
   @Post('dishes')
-  createDish(@Body() dto: CreateDishDto) {
-    return this.catalog.createDish(dto);
+  createDish(@Body() dto: CreateDishDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.createDish(dto, user);
   }
 
   @Patch('dishes/:id')
-  updateDish(@Param('id') id: string, @Body() dto: UpdateDishDto) {
-    return this.catalog.updateDish(id, dto);
+  updateDish(@Param('id') id: string, @Body() dto: UpdateDishDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.updateDish(id, dto, user);
   }
 
   @Delete('dishes/:id')
-  deleteDish(@Param('id') id: string) {
-    return this.catalog.deleteDish(id);
+  deleteDish(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.catalog.deleteDish(id, user);
   }
 }

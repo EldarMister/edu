@@ -3,6 +3,8 @@ import { Prisma, TableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
+import { AuditService, type AuditActor } from '../audit/audit.service';
+import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import {
   CreateCategoryDto,
   CreateDishDto,
@@ -20,6 +22,7 @@ export class CatalogService {
   constructor(
     private prisma: PrismaService,
     private events: EventsGateway,
+    private audit: AuditService,
   ) {}
 
   // ===================== ЗАЛЫ И СТОЛЫ =====================
@@ -149,24 +152,51 @@ export class CatalogService {
     });
   }
 
-  createCategory(dto: CreateCategoryDto) {
-    return this.prisma.category.create({
+  async createCategory(dto: CreateCategoryDto, actor: AuditActor) {
+    const category = await this.prisma.category.create({
       data: { name: dto.name, sortOrder: dto.sortOrder ?? 0 },
     });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.CATEGORY_CREATED,
+      entityType: AuditEntity.CATEGORY,
+      entityId: category.id,
+      description: `${actor.name ?? 'Сотрудник'} добавил категорию «${category.name}»`,
+      newValue: { name: category.name },
+    });
+    return category;
   }
 
-  async updateCategory(id: string, dto: UpdateCategoryDto) {
-    await this.ensureCategory(id);
-    return this.prisma.category.update({ where: { id }, data: dto });
+  async updateCategory(id: string, dto: UpdateCategoryDto, actor: AuditActor) {
+    const before = await this.ensureCategory(id);
+    const updated = await this.prisma.category.update({ where: { id }, data: dto });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.CATEGORY_UPDATED,
+      entityType: AuditEntity.CATEGORY,
+      entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} изменил категорию «${before.name}»`,
+      oldValue: { name: before.name, isActive: before.isActive },
+      newValue: { name: updated.name, isActive: updated.isActive },
+    });
+    return updated;
   }
 
-  async deleteCategory(id: string) {
-    await this.ensureCategory(id);
+  async deleteCategory(id: string, actor: AuditActor) {
+    const before = await this.ensureCategory(id);
     const dishes = await this.prisma.dish.count({ where: { categoryId: id } });
     if (dishes > 0) {
       throw new BadRequestException('В категории есть блюда. Сначала перенесите или удалите их.');
     }
     await this.prisma.category.delete({ where: { id } });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.CATEGORY_DELETED,
+      entityType: AuditEntity.CATEGORY,
+      entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} удалил категорию «${before.name}»`,
+      oldValue: { name: before.name },
+    });
     return { ok: true };
   }
 
@@ -183,9 +213,9 @@ export class CatalogService {
     });
   }
 
-  async createDish(dto: CreateDishDto) {
+  async createDish(dto: CreateDishDto, actor: AuditActor) {
     await this.ensureCategory(dto.categoryId);
-    return this.prisma.dish.create({
+    const dish = await this.prisma.dish.create({
       data: {
         name: dto.name,
         categoryId: dto.categoryId,
@@ -198,9 +228,18 @@ export class CatalogService {
       },
       include: { category: { select: { id: true, name: true } } },
     });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.MENU_ITEM_CREATED,
+      entityType: AuditEntity.MENU_ITEM,
+      entityId: dish.id,
+      description: `${actor.name ?? 'Сотрудник'} добавил блюдо «${dish.name}» (${Number(dish.price)} с)`,
+      newValue: { name: dish.name, price: Number(dish.price), categoryId: dish.categoryId },
+    });
+    return dish;
   }
 
-  async updateDish(id: string, dto: UpdateDishDto) {
+  async updateDish(id: string, dto: UpdateDishDto, actor: AuditActor) {
     const dish = await this.prisma.dish.findUnique({ where: { id } });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
     const data: Prisma.DishUpdateInput = { ...dto } as Prisma.DishUpdateInput;
@@ -216,23 +255,73 @@ export class CatalogService {
     });
     // Меню изменилось — оповестим клиентов (официанты обновят список).
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: id });
+
+    const oldPrice = Number(dish.price);
+    const newPrice = Number(updated.price);
+    // Отдельная запись об изменении цены — самое спорное действие (ТЗ §3.4).
+    if (dto.price !== undefined && oldPrice !== newPrice) {
+      await this.audit.log({
+        actor,
+        actionType: AuditAction.MENU_ITEM_PRICE_CHANGED,
+        entityType: AuditEntity.MENU_ITEM,
+        entityId: id,
+        description: `${actor.name ?? 'Сотрудник'} изменил цену блюда «${dish.name}» с ${oldPrice} с на ${newPrice} с`,
+        oldValue: { price: oldPrice },
+        newValue: { price: newPrice },
+        metadata: { dishName: dish.name },
+      });
+    }
+    // Общая запись об изменении блюда (имя/категория/доступность/скидка и т.п.).
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.MENU_ITEM_UPDATED,
+      entityType: AuditEntity.MENU_ITEM,
+      entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} изменил блюдо «${dish.name}»`,
+      oldValue: {
+        name: dish.name,
+        price: oldPrice,
+        categoryId: dish.categoryId,
+        isAvailable: dish.isAvailable,
+        isActive: dish.isActive,
+      },
+      newValue: {
+        name: updated.name,
+        price: newPrice,
+        categoryId: updated.categoryId,
+        isAvailable: updated.isAvailable,
+        isActive: updated.isActive,
+      },
+    });
     return updated;
   }
 
-  async deleteDish(id: string) {
+  async deleteDish(id: string, actor: AuditActor) {
     const dish = await this.prisma.dish.findUnique({ where: { id } });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
     const used = await this.prisma.orderItem.count({ where: { dishId: id } });
+    let result: unknown;
     if (used > 0) {
       // Блюдо в истории заказов — мягко отключаем.
-      return this.prisma.dish.update({
+      result = await this.prisma.dish.update({
         where: { id },
         data: { isActive: false, isAvailable: false },
         include: { category: { select: { id: true, name: true } } },
       });
+    } else {
+      await this.prisma.dish.delete({ where: { id } });
+      result = { ok: true };
     }
-    await this.prisma.dish.delete({ where: { id } });
-    return { ok: true };
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.MENU_ITEM_DELETED,
+      entityType: AuditEntity.MENU_ITEM,
+      entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} удалил блюдо «${dish.name}»${used > 0 ? ' (отключено, есть в истории заказов)' : ''}`,
+      oldValue: { name: dish.name, price: Number(dish.price) },
+      metadata: { softDeleted: used > 0 },
+    });
+    return result;
   }
 
   private async ensureCategory(id: string) {

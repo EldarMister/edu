@@ -63,6 +63,34 @@ export interface StatsDashboard {
   period: 'week' | 'month' | 'year';
 }
 
+export interface AuditLogEntry {
+  id: string;
+  createdAt: string;
+  userId: string | null;
+  userName: string | null;
+  userRole: Role | null;
+  actionType: string;
+  entityType: string;
+  entityId: string | null;
+  tableId: string | null;
+  orderId: string | null;
+  description: string | null;
+  oldValue: unknown;
+  newValue: unknown;
+  metadata: Record<string, unknown> | null;
+}
+export interface AuditLogPage {
+  items: AuditLogEntry[];
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
+export interface AuditFilterOptions {
+  users: { id: string; name: string }[];
+  actionTypes: string[];
+}
+
 // ---------- Хелперы ----------
 const get = async <T,>(url: string) => (await api.get<T>(url)).data;
 
@@ -106,6 +134,49 @@ export function useAdminOrders(params: {
   return useQuery({
     queryKey: ['admin', 'orders', 'list', params],
     queryFn: () => get<OrdersPage>(`/admin/orders?${q.toString()}`),
+  });
+}
+
+/** Отмена заказа (с причиной) — официант/админ/владелец. */
+export function useCancelOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId, reason }: { orderId: string; reason?: string }) =>
+      api.post(`/orders/${orderId}/cancel`, { reason }).then((r) => r.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+}
+
+// ========== ЖУРНАЛ ДЕЙСТВИЙ (АУДИТ) ==========
+export interface AuditQueryParams {
+  from?: string;
+  to?: string;
+  userId?: string;
+  actionType?: string;
+  page: number;
+}
+export function useAuditLogs(params: AuditQueryParams) {
+  const q = new URLSearchParams();
+  if (params.from) q.set('from', params.from);
+  if (params.to) q.set('to', params.to);
+  if (params.userId) q.set('userId', params.userId);
+  if (params.actionType) q.set('actionType', params.actionType);
+  q.set('page', String(params.page));
+  q.set('limit', '50');
+  return useQuery({
+    queryKey: ['audit', 'list', params],
+    queryFn: () => get<AuditLogPage>(`/audit-logs?${q.toString()}`),
+  });
+}
+export function useAuditFilters() {
+  return useQuery({
+    queryKey: ['audit', 'filters'],
+    queryFn: () => get<AuditFilterOptions>('/audit-logs/filters'),
   });
 }
 

@@ -107,6 +107,12 @@ export const IconLogout = (p: P) => (
   </S>
 );
 export const IconUsers = (p: P) => IconStaff(p);
+export const IconJournal = (p: P) => (
+  <S {...p}>
+    <path d="M4 5a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2Z" />
+    <path d="M4 5a2 2 0 0 0 2 2h12M8 11h7M8 15h5" />
+  </S>
+);
 export const IconSettings = (p: P) => (
   <S {...p}>
     <circle cx="12" cy="12" r="3" />

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Patch } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { SettingsService } from './settings.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { UpdateSettingsDto } from './dto';
 
 @Controller()
@@ -23,7 +24,7 @@ export class SettingsController {
 
   @Patch('admin/settings')
   @Roles(Role.OWNER)
-  update(@Body() dto: UpdateSettingsDto) {
-    return this.settings.update(dto);
+  update(@Body() dto: UpdateSettingsDto, @CurrentUser() user: AuthUser) {
+    return this.settings.update(dto, user);
   }
 }

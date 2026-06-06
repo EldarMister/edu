@@ -354,17 +354,28 @@ model Incident {
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  userId     String?  @map("user_id")
-  action     String
-  entityType String   @map("entity_type")
-  entityId   String?  @map("entity_id")
-  oldValue   Json?    @map("old_value")
-  newValue   Json?    @map("new_value")
-  createdAt  DateTime @default(now()) @map("created_at")
+  id          String   @id @default(uuid())
+  userId      String?  @map("user_id")
+  userName    String?  @map("user_name") // имя на момент действия (не зависит от переименования)
+  userRole    String?  @map("user_role")
+  actionType  String   @map("action_type")
+  entityType  String   @map("entity_type")
+  entityId    String?  @map("entity_id")
+  tableId     String?  @map("table_id")
+  orderId     String?  @map("order_id")
+  description String?
+  oldValue    Json?    @map("old_value")
+  newValue    Json?    @map("new_value")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
 
   user User? @relation(fields: [userId], references: [id])
 
+  @@index([createdAt])
+  @@index([actionType])
+  @@index([userId])
+  @@index([orderId])
+  @@index([tableId])
   @@index([entityType, entityId])
   @@map("audit_logs")
 }

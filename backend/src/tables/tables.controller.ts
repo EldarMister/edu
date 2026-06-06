@@ -27,19 +27,19 @@ export class TablesController {
 
   @Post(':id/close')
   @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
-  close(@Param('id') id: string) {
-    return this.orders.closeTable(id);
+  close(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.orders.closeTable(id, user);
   }
 
   @Post(':id/move')
   @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
-  move(@Param('id') id: string, @Body() dto: MoveTableDto) {
-    return this.orders.moveTable(id, dto.targetTableId);
+  move(@Param('id') id: string, @Body() dto: MoveTableDto, @CurrentUser() user: AuthUser) {
+    return this.orders.moveTable(id, dto.targetTableId, user);
   }
 
   @Post(':id/transfer')
   @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
   transfer(@Param('id') id: string, @Body() dto: TransferTableDto, @CurrentUser() user: AuthUser) {
-    return this.orders.transferTable(id, dto.waiterId, user.id);
+    return this.orders.transferTable(id, dto.waiterId, user);
   }
 }

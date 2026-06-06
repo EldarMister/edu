@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, networkRetry } from '@/lib/api';
 import type { Order } from '@/types';
 
 export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
@@ -21,7 +21,8 @@ export function useAccept() {
   return useMutation({
     mutationFn: async (orderId: string) =>
       (await api.post<Order>(`/kitchen/orders/${orderId}/accept`)).data,
-    onSuccess: () => invalidateKitchen(qc),
+    retry: networkRetry,
+    onSettled: () => invalidateKitchen(qc),
   });
 }
 
@@ -30,7 +31,8 @@ export function useReady() {
   return useMutation({
     mutationFn: async (orderId: string) =>
       (await api.post<Order>(`/kitchen/orders/${orderId}/ready`)).data,
-    onSuccess: () => invalidateKitchen(qc),
+    retry: networkRetry,
+    onSettled: () => invalidateKitchen(qc),
   });
 }
 
@@ -42,7 +44,8 @@ export function useRejectOrder() {
         reason: p.reason,
         comment: p.comment,
       })).data,
-    onSuccess: () => invalidateKitchen(qc),
+    retry: networkRetry,
+    onSettled: () => invalidateKitchen(qc),
   });
 }
 
@@ -54,6 +57,7 @@ export function useRejectItem() {
         reason: p.reason,
         comment: p.comment,
       })).data,
-    onSuccess: () => invalidateKitchen(qc),
+    retry: networkRetry,
+    onSettled: () => invalidateKitchen(qc),
   });
 }

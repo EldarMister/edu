@@ -16,6 +16,7 @@ import { WaiterShiftsModule } from './waiter-shifts/waiter-shifts.module';
 import { AdminModule } from './admin/admin.module';
 import { SettingsModule } from './settings/settings.module';
 import { PushModule } from './push/push.module';
+import { AuditModule } from './audit/audit.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
@@ -37,6 +38,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     AdminModule,
     SettingsModule,
     PushModule,
+    AuditModule,
   ],
   providers: [
     // Глобально: сначала проверка JWT, затем проверка роли.

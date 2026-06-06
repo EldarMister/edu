@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { api, networkRetry } from '@/lib/api';
 import type { Category, Dish, Hall, Order, PaymentMethod, Receipt, WaiterShift } from '@/types';
 import type { CartLine } from '@/types';
 
@@ -57,7 +57,8 @@ function useTableMutation<TVars, TData>(fn: (vars: TVars) => Promise<TData>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onSuccess: () => {
+    retry: networkRetry,
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
     },
@@ -125,7 +126,8 @@ export function useCreateOrder() {
       });
       return data;
     },
-    onSuccess: () => {
+    retry: networkRetry,
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
@@ -148,7 +150,8 @@ export function useAddItems() {
       });
       return data;
     },
-    onSuccess: () => {
+    retry: networkRetry,
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
@@ -161,7 +164,8 @@ function useOrderAction(path: (id: string) => string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (orderId: string) => (await api.post<Order>(path(orderId))).data,
-    onSuccess: () => {
+    retry: networkRetry,
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
@@ -178,7 +182,7 @@ export function usePay() {
   return useMutation({
     mutationFn: async (payload: { orderId: string; method: PaymentMethod }) =>
       (await api.post<Order>('/payments', payload)).data,
-    onSuccess: () => {
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });

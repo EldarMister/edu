@@ -1,11 +1,18 @@
 import { useState } from 'react';
+import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { Spinner } from '@/components/Spinner';
+import { useNotifications } from '@/store/notifications';
+import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconOrders, IconClock, IconCheck, IconX } from '../components/icons';
-import { useAdminOrders, useOrdersOverview } from '../api';
+import { CancelOrderModal } from '../components/CancelOrderModal';
+import { useAdminOrders, useOrdersOverview, useCancelOrder } from '../api';
+
+/** Заказ можно отменить, пока он не оплачен/не отменён/не отклонён. */
+const CANCELLABLE = new Set(['draft', 'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready', 'picked_up', 'served', 'waiting_payment', 'partially_rejected']);
 
 const TABS = [
   { key: 'all', label: 'Все' },
@@ -19,14 +26,29 @@ export function OrdersPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
 
+  const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
+
   const overview = useOrdersOverview();
   const ordersQ = useAdminOrders({ tab, search, page });
+  const cancelOrder = useCancelOrder();
+  const push = useNotifications((s) => s.push);
   const data = ordersQ.data;
   const tr = useT();
 
   function changeTab(t: string) {
     setTab(t);
     setPage(1);
+  }
+
+  async function confirmCancel(reason: string) {
+    if (!cancelTarget) return;
+    try {
+      await cancelOrder.mutateAsync({ orderId: cancelTarget.id, reason });
+      push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
+      setCancelTarget(null);
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
   }
 
   const o = overview.data;
@@ -86,6 +108,7 @@ export function OrdersPage() {
                     <Th>{tr('Официант')}</Th>
                     <Th className="text-right">{tr('Сумма')}</Th>
                     <Th>{tr('Статус')}</Th>
+                    <Th className="text-right">{tr('Действия')}</Th>
                   </tr>
                 </thead>
                 <tbody>
@@ -100,6 +123,16 @@ export function OrdersPage() {
                       <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
                       <Td>
                         <OrderBadge status={ord.status} />
+                      </Td>
+                      <Td className="text-right">
+                        {CANCELLABLE.has(ord.status) && (
+                          <button
+                            className="text-sm font-medium text-danger hover:underline"
+                            onClick={() => setCancelTarget(ord)}
+                          >
+                            {tr('Отменить')}
+                          </button>
+                        )}
                       </Td>
                     </tr>
                   ))}
@@ -132,6 +165,18 @@ export function OrdersPage() {
           </>
         )}
       </div>
+
+      <CancelOrderModal
+        open={!!cancelTarget}
+        orderLabel={
+          cancelTarget
+            ? `${tr('Заказ')} ${displayOrderNumber(cancelTarget.orderNumber)} · ${tr('Стол')} ${cancelTarget.table.number} · ${money(cancelTarget.finalAmount)}`
+            : ''
+        }
+        submitting={cancelOrder.isPending}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={confirmCancel}
+      />
     </div>
   );
 }

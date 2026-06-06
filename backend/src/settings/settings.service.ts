@@ -1,13 +1,32 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { PaymentMethod, Settings } from '@prisma/client';
+import { PaymentMethod, Prisma, Settings } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService, type AuditActor } from '../audit/audit.service';
+import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { UpdateSettingsDto } from './dto';
 
 const SINGLETON_ID = 'default';
 
+/** Человекочитаемые названия полей настроек для описаний аудита. */
+const SETTINGS_FIELD_LABELS: Record<string, string> = {
+  cafeName: 'название кафе',
+  address: 'адрес',
+  phone: 'телефон',
+  phone2: 'второй телефон',
+  receiptText: 'текст чека',
+  language: 'язык',
+  payQr: 'оплата QR',
+  payCash: 'оплата наличными',
+  payCard: 'оплата картой',
+  printerConnected: 'принтер',
+};
+
 @Injectable()
 export class SettingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   /** Возвращает singleton-настройки, создавая их при первом обращении. */
   async ensure(): Promise<Settings> {
@@ -39,7 +58,7 @@ export class SettingsService {
     };
   }
 
-  async update(dto: UpdateSettingsDto): Promise<Settings> {
+  async update(dto: UpdateSettingsDto, actor: AuditActor): Promise<Settings> {
     const current = await this.ensure();
 
     // Проверка: хотя бы один способ оплаты должен остаться включённым.
@@ -50,10 +69,38 @@ export class SettingsService {
       throw new BadRequestException('Должен быть включён хотя бы один способ оплаты');
     }
 
-    return this.prisma.settings.update({
+    const updated = await this.prisma.settings.update({
       where: { id: SINGLETON_ID },
       data: { ...dto },
     });
+
+    // Считаем, какие именно поля реально изменились.
+    const changed: string[] = [];
+    const oldValue: Record<string, Prisma.InputJsonValue> = {};
+    const newValue: Record<string, Prisma.InputJsonValue> = {};
+    for (const key of Object.keys(dto) as (keyof UpdateSettingsDto)[]) {
+      const before = (current as Record<string, unknown>)[key];
+      const after = (updated as Record<string, unknown>)[key];
+      if (before !== after) {
+        changed.push(SETTINGS_FIELD_LABELS[key] ?? key);
+        oldValue[key] = before as Prisma.InputJsonValue;
+        newValue[key] = after as Prisma.InputJsonValue;
+      }
+    }
+
+    if (changed.length > 0) {
+      await this.audit.log({
+        actor,
+        actionType: AuditAction.SETTINGS_UPDATED,
+        entityType: AuditEntity.SETTINGS,
+        entityId: SINGLETON_ID,
+        description: `${actor.name ?? 'Владелец'} изменил настройки: ${changed.join(', ')}`,
+        oldValue,
+        newValue,
+      });
+    }
+
+    return updated;
   }
 
   /** Список включённых способов оплаты. */

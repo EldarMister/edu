@@ -16,9 +16,28 @@ async function getServiceWorkerRegistration() {
   return navigator.serviceWorker.register('/sw.js');
 }
 
+function sameKey(subscription: PushSubscription, publicKey: string) {
+  const current = subscription.options?.applicationServerKey;
+  if (!current) return false;
+  const want = urlBase64ToUint8Array(publicKey);
+  const have = new Uint8Array(current);
+  if (have.length !== want.length) return false;
+  return have.every((b, i) => b === want[i]);
+}
+
 async function subscribeBrowser(publicKey: string) {
   const registration = await getServiceWorkerRegistration();
-  const existing = await registration.pushManager.getSubscription();
+  // Дожидаемся активации SW — без этого pushManager.subscribe иногда падает.
+  await navigator.serviceWorker.ready;
+
+  let existing = await registration.pushManager.getSubscription();
+  // Если на устройстве осталась подписка со старым VAPID-ключом — пересоздаём,
+  // иначе push либо не доходит, либо subscribe бросает InvalidStateError.
+  if (existing && !sameKey(existing, publicKey)) {
+    await existing.unsubscribe();
+    existing = null;
+  }
+
   const subscription =
     existing ??
     (await registration.pushManager.subscribe({
@@ -69,7 +88,10 @@ export function useWaiterPushNotifications(enabled: boolean) {
 
       await subscribeBrowser(data.publicKey);
       setStatus('subscribed');
-    } catch {
+    } catch (err) {
+      // Реальную причину (нет HTTPS, SW не зарегистрировался, неверный VAPID-ключ
+      // и т.п.) глушить нельзя — без неё «не работает» невозможно диагностировать.
+      console.error('[push] не удалось включить уведомления:', err);
       setStatus('error');
     }
   }, [enabled, supported]);

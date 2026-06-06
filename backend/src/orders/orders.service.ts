@@ -20,6 +20,8 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { WaiterShiftsService } from '../waiter-shifts/waiter-shifts.service';
 import { PushService } from '../push/push.service';
+import { AuditService, type AuditActor } from '../audit/audit.service';
+import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
 
@@ -35,6 +37,12 @@ const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.partially_rejected,
 ];
 
+const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
+  [PaymentMethod.qr]: 'QR',
+  [PaymentMethod.cash]: 'Наличные',
+  [PaymentMethod.card]: 'Карта',
+};
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -42,7 +50,13 @@ export class OrdersService {
     private events: EventsGateway,
     private shifts: WaiterShiftsService,
     private push: PushService,
+    private audit: AuditService,
   ) {}
+
+  /** Денежный формат для человекочитаемых описаний аудита. */
+  private money(value: unknown): string {
+    return `${Number(value)} с`;
+  }
 
   // ---------- Чтение ----------
 
@@ -64,7 +78,8 @@ export class OrdersService {
 
   // ---------- Создание заказа (официант → кухня) ----------
 
-  async create(waiterId: string, dto: CreateOrderDto) {
+  async create(actor: AuditActor, dto: CreateOrderDto) {
+    const waiterId = actor.id;
     // Идемпотентность: повтор того же запроса вернёт уже созданный заказ.
     if (dto.idempotencyKey) {
       const existing = await this.prisma.order.findUnique({
@@ -144,11 +159,73 @@ export class OrdersService {
     });
     // Уведомление официанту об отправке показывается локально на фронте (мгновенно).
 
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.ORDER_CREATED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId: order.id,
+      tableId: order.tableId,
+      description: `${actor.name ?? 'Сотрудник'} создал заказ ${order.orderNumber} на столе ${table.number}, сумма ${this.money(order.finalAmount)}`,
+      newValue: { orderNumber: order.orderNumber, finalAmount: Number(order.finalAmount) },
+      metadata: { tableNumber: table.number, itemsCount: order.items.length },
+    });
+
     return order;
   }
 
+  /** Отмена заказа официантом/админом/владельцем с причиной (audit обязателен). */
+  async cancelOrder(orderId: string, actor: AuditActor, reason?: string) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
+      throw new BadRequestException('Заказ уже закрыт и не может быть отменён');
+    }
+
+    const prevStatus = order.status;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.updateMany({
+        where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.served] } },
+        data: { status: OrderItemStatus.cancelled },
+      });
+      // Освобождаем стол.
+      await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.cancelled, closedAt: new Date() },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.ORDER_CANCELLED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId: order.id,
+      tableId: order.tableId,
+      description:
+        `${actor.name ?? 'Сотрудник'} отменил заказ ${order.orderNumber} на столе ${order.table.number}, сумма ${this.money(order.finalAmount)}` +
+        (reason ? ` · причина: ${reason}` : ''),
+      oldValue: { status: prevStatus },
+      newValue: { status: OrderStatus.cancelled },
+      metadata: {
+        reason: reason ?? null,
+        amount: Number(order.finalAmount),
+        tableNumber: order.table.number,
+        orderNumber: order.orderNumber,
+      },
+    });
+
+    return updated;
+  }
+
   /** Добавить блюда к существующему заказу того же стола. */
-  async addItems(orderId: string, waiterId: string, items: CreateOrderItemDto[], idempotencyKey?: string) {
+  async addItems(orderId: string, actor: AuditActor, items: CreateOrderItemDto[], idempotencyKey?: string) {
+    const waiterId = actor.id;
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Заказ не найден');
     if (order.waiterId !== waiterId) {
@@ -210,6 +287,18 @@ export class OrdersService {
     if (applied) {
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
       this.emitStatusChanged(updated);
+      const addedCount = items.reduce((sum, i) => sum + i.quantity, 0);
+      await this.audit.log({
+        actor,
+        actionType: AuditAction.ORDER_ITEM_ADDED,
+        entityType: AuditEntity.ORDER,
+        entityId: orderId,
+        orderId,
+        tableId: updated.tableId,
+        description: `${actor.name ?? 'Сотрудник'} добавил ${addedCount} поз. в заказ ${updated.orderNumber} (стол ${updated.table.number})`,
+        newValue: { items: items.map((i) => ({ dishId: i.dishId, quantity: i.quantity })) },
+        metadata: { tableNumber: updated.table.number, finalAmount: Number(updated.finalAmount) },
+      });
     }
     return updated;
   }
@@ -433,7 +522,8 @@ export class OrdersService {
   }
 
   /** Приём оплаты: закрывает заказ, освобождает стол. Вызывается из PaymentsService. */
-  async markPaid(orderId: string, cashierId: string, method: PaymentMethod) {
+  async markPaid(orderId: string, actor: AuditActor, method: PaymentMethod) {
+    const cashierId = actor.id;
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
     if (order.status === OrderStatus.paid) {
@@ -469,6 +559,20 @@ export class OrdersService {
 
     this.emitStatusChanged(updated);
     this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+
+    const methodLabel = PAYMENT_METHOD_LABEL[method] ?? method;
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.ORDER_PAID,
+      entityType: AuditEntity.PAYMENT,
+      entityId: updated.id,
+      orderId: updated.id,
+      tableId: updated.tableId,
+      description: `${actor.name ?? 'Сотрудник'} принял оплату по заказу ${updated.orderNumber} (стол ${updated.table.number}): ${this.money(updated.finalAmount)} · ${methodLabel}`,
+      newValue: { paymentMethod: method, finalAmount: Number(updated.finalAmount) },
+      metadata: { method, amount: Number(updated.finalAmount), tableNumber: updated.table.number },
+    });
+
     return updated;
   }
 
@@ -581,7 +685,7 @@ export class OrdersService {
   }
 
   /** Закрыть стол — сделать его свободным. Нельзя при незавершённом заказе. */
-  async closeTable(tableId: string) {
+  async closeTable(tableId: string, actor: AuditActor) {
     const table = await this.prisma.table.findUnique({ where: { id: tableId } });
     if (!table) throw new NotFoundException('Стол не найден');
 
@@ -592,16 +696,29 @@ export class OrdersService {
       );
     }
 
+    const prevStatus = table.status;
     const updated = await this.prisma.table.update({
       where: { id: tableId },
       data: { status: TableStatus.free },
     });
     this.emitTableStatus(updated.id, updated.number, TableStatus.free, updated.hallId);
+
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.TABLE_CLOSED,
+      entityType: AuditEntity.TABLE,
+      entityId: table.id,
+      tableId: table.id,
+      description: `${actor.name ?? 'Сотрудник'} закрыл стол ${table.number}`,
+      oldValue: { status: prevStatus },
+      newValue: { status: TableStatus.free },
+      metadata: { tableNumber: table.number },
+    });
     return updated;
   }
 
   /** Перенести активный заказ на другой (свободный) стол. */
-  async moveTable(sourceTableId: string, targetTableId: string) {
+  async moveTable(sourceTableId: string, targetTableId: string, actor: AuditActor) {
     if (sourceTableId === targetTableId) {
       throw new BadRequestException('Нельзя перенести заказ на тот же стол');
     }
@@ -633,11 +750,30 @@ export class OrdersService {
     this.emitTableStatus(target.id, target.number, source.status, target.hallId);
     this.emitStatusChanged(updated);
     // Уведомление о переносе показывается локально на фронте у инициатора.
+
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.TABLE_MOVED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId: order.id,
+      tableId: targetTableId,
+      description: `${actor.name ?? 'Сотрудник'} перенёс заказ ${updated.orderNumber} со стола ${source.number} на стол ${target.number}`,
+      oldValue: { tableId: sourceTableId, tableNumber: source.number },
+      newValue: { tableId: targetTableId, tableNumber: target.number },
+      metadata: {
+        fromTableNumber: source.number,
+        toTableNumber: target.number,
+        orderNumber: updated.orderNumber,
+        amount: Number(updated.finalAmount),
+      },
+    });
     return updated;
   }
 
   /** Передать стол (активный заказ) другому официанту. */
-  async transferTable(sourceTableId: string, waiterId: string, byUserId: string) {
+  async transferTable(sourceTableId: string, waiterId: string, actor: AuditActor) {
+    const byUserId = actor.id;
     const order = await this.activeOrderForTable(sourceTableId);
     if (!order) throw new BadRequestException('У стола нет активного заказа для передачи');
 
@@ -661,14 +797,25 @@ export class OrdersService {
     });
 
     // История передачи (ТЗ §18 — audit log).
-    await this.prisma.auditLog.create({
-      data: {
-        userId: byUserId,
-        action: 'table_transfer',
-        entityType: 'order',
-        entityId: order.id,
-        oldValue: { waiterId: fromWaiterId },
-        newValue: { waiterId, tableId: sourceTableId, tableNumber: updated.table.number },
+    const fromWaiter = await this.prisma.user.findUnique({
+      where: { id: fromWaiterId },
+      select: { name: true },
+    });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.TABLE_TRANSFERRED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId: order.id,
+      tableId: sourceTableId,
+      description: `${actor.name ?? 'Сотрудник'} передал стол ${updated.table.number} официанту ${waiter.name}`,
+      oldValue: { waiterId: fromWaiterId, waiterName: fromWaiter?.name },
+      newValue: { waiterId, waiterName: waiter.name },
+      metadata: {
+        tableNumber: updated.table.number,
+        orderNumber: updated.orderNumber,
+        fromWaiterName: fromWaiter?.name,
+        toWaiterName: waiter.name,
       },
     });
 

@@ -2,6 +2,8 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService, type AuditActor } from '../audit/audit.service';
+import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { CreateStaffDto, UpdateStaffDto } from './dto';
 
 const STAFF_SELECT = {
@@ -15,7 +17,10 @@ const STAFF_SELECT = {
 
 @Injectable()
 export class StaffService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+  ) {}
 
   async overview() {
     const [total, admins, waiters, kitchen, activeShifts] = await Promise.all([
@@ -69,20 +74,30 @@ export class StaffService {
     return phone.trim().replace(/[^\d+]/g, '');
   }
 
-  async create(dto: CreateStaffDto) {
+  async create(dto: CreateStaffDto, actor: AuditActor) {
     const phone = this.normalizePhone(dto.phone);
     const exists = await this.prisma.user.findUnique({ where: { phone } });
     if (exists) {
       throw new BadRequestException('Сотрудник с таким телефоном уже есть');
     }
     const passwordHash = await bcrypt.hash(dto.password, 10);
-    return this.prisma.user.create({
+    const created = await this.prisma.user.create({
       data: { name: dto.name, phone, role: dto.role, passwordHash },
       select: STAFF_SELECT,
     });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.STAFF_CREATED,
+      entityType: AuditEntity.STAFF,
+      entityId: created.id,
+      description: `${actor.name ?? 'Сотрудник'} добавил сотрудника ${created.name} (${created.role})`,
+      newValue: { name: created.name, phone: created.phone, role: created.role },
+    });
+    return created;
   }
 
-  async update(id: string, dto: UpdateStaffDto, actorId: string) {
+  async update(id: string, dto: UpdateStaffDto, actor: AuditActor) {
+    const actorId = actor.id;
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Сотрудник не найден');
 
@@ -107,25 +122,55 @@ export class StaffService {
       data.passwordHash = await bcrypt.hash(dto.password, 10);
     }
 
-    return this.prisma.user.update({ where: { id }, data, select: STAFF_SELECT });
+    const updated = await this.prisma.user.update({ where: { id }, data, select: STAFF_SELECT });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.STAFF_UPDATED,
+      entityType: AuditEntity.STAFF,
+      entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} изменил сотрудника ${updated.name}` +
+        (dto.role !== undefined && dto.role !== user.role ? ` · роль ${user.role} → ${dto.role}` : '') +
+        (dto.isActive !== undefined && dto.isActive !== user.isActive
+          ? dto.isActive
+            ? ' · доступ включён'
+            : ' · доступ выключен'
+          : ''),
+      oldValue: { name: user.name, role: user.role, phone: user.phone, isActive: user.isActive },
+      newValue: { name: updated.name, role: updated.role, phone: updated.phone, isActive: updated.isActive },
+      metadata: { passwordChanged: !!dto.password },
+    });
+    return updated;
   }
 
-  async remove(id: string, actorId: string) {
+  async remove(id: string, actor: AuditActor) {
+    const actorId = actor.id;
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Сотрудник не найден');
     if (id === actorId) {
       throw new ForbiddenException('Нельзя удалить самого себя');
     }
     const hasOrders = await this.prisma.order.count({ where: { waiterId: id } });
+    let result: unknown;
     if (hasOrders > 0) {
       // Есть история — мягко отключаем.
-      return this.prisma.user.update({
+      result = await this.prisma.user.update({
         where: { id },
         data: { isActive: false },
         select: STAFF_SELECT,
       });
+    } else {
+      await this.prisma.user.delete({ where: { id } });
+      result = { ok: true };
     }
-    await this.prisma.user.delete({ where: { id } });
-    return { ok: true };
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.STAFF_DELETED,
+      entityType: AuditEntity.STAFF,
+      entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} удалил сотрудника ${user.name}${hasOrders > 0 ? ' (отключён, есть история заказов)' : ''}`,
+      oldValue: { name: user.name, role: user.role, phone: user.phone },
+      metadata: { softDeleted: hasOrders > 0 },
+    });
+    return result;
   }
 }
