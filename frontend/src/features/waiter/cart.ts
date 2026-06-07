@@ -15,6 +15,8 @@ interface CartState {
   // Черновики корзин по каждому столу — не сбрасываются при переключении.
   carts: Record<string, TableCart>;
   selectTable: (tableId: string) => void;
+  // Переносит текущий черновик корзины на другой стол (смена стола на экране меню).
+  moveDraftTo: (targetTableId: string) => void;
   add: (dish: Dish) => void;
   replaceLines: (lines: CartLine[], comment: string) => void;
   inc: (dishId: string) => void;
@@ -51,6 +53,17 @@ export const useCart = create<CartState>((set) => ({
       if (s.tableId === tableId) return s;
       const c = s.carts[tableId] ?? EMPTY;
       return { tableId, lines: c.lines, comment: c.comment };
+    }),
+
+  // Переносит черновик текущего стола на целевой (перезаписывает его черновик) и переключается.
+  moveDraftTo: (targetTableId) =>
+    set((s) => {
+      if (!s.tableId || s.tableId === targetTableId) return s;
+      const current = s.carts[s.tableId] ?? EMPTY;
+      const carts = { ...s.carts };
+      delete carts[s.tableId];
+      carts[targetTableId] = current;
+      return { tableId: targetTableId, lines: current.lines, comment: current.comment, carts };
     }),
 
   add: (dish) =>

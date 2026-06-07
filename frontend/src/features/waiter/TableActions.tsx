@@ -18,13 +18,82 @@ const CloseIcon = () => <I d="M18 6 6 18|M6 6l12 12" />;
 const MoveIcon = () => <I d="M5 9l-3 3 3 3|M9 5l3-3 3 3|M15 19l-3 3-3-3|M19 9l3 3-3 3|M2 12h20|M12 2v20" />;
 const TransferIcon = () => <I d="M16 3h5v5|M21 3l-7 7|M8 21H3v-5|M3 21l7-7" />;
 
-// ---------- Chip «Стол X» рядом с «Меню» ----------
+// ---------- Chip «Стол X» рядом с «Меню» (десктоп) ----------
 export function TableChip({ number }: { number: number }) {
   const t = useT();
   return (
     <span className="inline-flex items-center rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
       {t('Стол')} {number}
     </span>
+  );
+}
+
+// ---------- Кнопка выбора стола рядом с поиском (экран меню) ----------
+export function TableSelectButton({
+  number,
+  onClick,
+  disabled,
+}: {
+  number: number;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  const t = useT();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-border bg-white px-3 text-sm font-medium text-text-primary transition-colors hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      {t('Стол')} {number}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-muted">
+        <path d="m6 9 6 6 6-6" />
+      </svg>
+    </button>
+  );
+}
+
+// ---------- Модалка выбора стола на экране меню ----------
+export function TableSelectModal({
+  halls,
+  currentTableId,
+  onPick,
+  onClose,
+}: {
+  halls: Hall[];
+  currentTableId: string | null;
+  onPick: (tableId: string) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const groups = halls.map((h) => ({ name: h.name, tables: h.tables })).filter((g) => g.tables.length > 0);
+
+  return (
+    <Modal open onClose={onClose} title={t('Выбор стола')}>
+      <div className="space-y-3">
+        {groups.map((g) => (
+          <div key={g.name}>
+            <p className="mb-1.5 text-xs font-medium text-text-muted">{g.name}</p>
+            <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+              {g.tables.map((tbl) => (
+                <button
+                  key={tbl.id}
+                  onClick={() => onPick(tbl.id)}
+                  className={`flex h-[60px] flex-col items-center justify-center rounded-xl border text-[15px] font-medium transition-colors ${
+                    tbl.id === currentTableId
+                      ? 'border-primary bg-primary text-white'
+                      : 'border-border bg-white text-text-primary hover:border-primary/40'
+                  }`}
+                >
+                  {tbl.number}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Modal>
   );
 }
 

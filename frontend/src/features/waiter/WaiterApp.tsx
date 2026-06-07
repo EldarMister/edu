@@ -3,14 +3,15 @@ import type { Order, CartLine } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
-import { displayOrderNumber } from '@/lib/format';
+import { displayOrderNumber, money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useWaiterPushNotifications } from '@/lib/push';
 import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
-import { FullScreenLoader } from '@/components/Spinner';
-import { useCart } from './cart';
+import { FullScreenLoader, Spinner } from '@/components/Spinner';
+import { Modal } from '@/components/Modal';
+import { useCart, cartTotals } from './cart';
 import { useWaiterRealtime } from './useWaiterRealtime';
 import {
   useHalls,
@@ -37,6 +38,7 @@ import {
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
 import { CartPanel } from './CartPanel';
+import { CartSheet } from './CartSheet';
 import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
@@ -46,6 +48,8 @@ import { CancelOrderModal } from './CancelOrderModal';
 import {
   TableActionsMenu,
   TableChip,
+  TableSelectButton,
+  TableSelectModal,
   CloseTableModal,
   MoveTableModal,
   TransferTableModal,
@@ -89,6 +93,9 @@ export function WaiterApp() {
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [cabinetOpen, setCabinetOpen] = useState(false);
   const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
+  const [tablePickerOpen, setTablePickerOpen] = useState(false);
+  const [pendingTableId, setPendingTableId] = useState<string | null>(null);
+  const [cartSheetOpen, setCartSheetOpen] = useState(false);
   const [idemKey, setIdemKey] = useState(() => clientId());
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
 
@@ -137,6 +144,23 @@ export function WaiterApp() {
     setEditingOrderId(null);
     cart.selectTable(tableId);
     setTab(ordersByTable.has(tableId) ? 'cart' : 'menu');
+  }
+
+  // Смена стола прямо на экране меню (кнопка рядом с поиском).
+  function pickMenuTable(tableId: string) {
+    setTablePickerOpen(false);
+    if (tableId === cart.tableId) return;
+    if (cart.lines.length === 0) {
+      cart.selectTable(tableId);
+    } else {
+      // В корзине уже есть блюда — спрашиваем про перенос на другой стол.
+      setPendingTableId(tableId);
+    }
+  }
+
+  function confirmMoveCart() {
+    if (pendingTableId) cart.moveDraftTo(pendingTableId);
+    setPendingTableId(null);
   }
 
   // --- Редактирование заказа (Фаза 1: только пока кухня не приняла заказ) ---
@@ -347,6 +371,7 @@ export function WaiterApp() {
     </Panel>
   );
 
+  // Десктоп: меню в панели с заголовком и чипом стола.
   const menuPanel = (
     <Panel title={t('Меню')} action={selectedTable ? <TableChip number={selectedTable.number} /> : null}>
       <DishMenu
@@ -358,6 +383,25 @@ export function WaiterApp() {
         disabled={!selectedTable}
       />
     </Panel>
+  );
+
+  // Мобильный экран меню: без заголовка, выбор стола в строке поиска.
+  const mobileMenuNode = (
+    <section className="flex h-full flex-col bg-white px-2 py-2">
+      <DishMenu
+        categories={categoriesQ.data ?? []}
+        dishes={dishesQ.data ?? []}
+        quantities={cartQuantities}
+        onAdd={addDishToCart}
+        onDec={(d) => cart.dec(d.id)}
+        disabled={!selectedTable}
+        tableSlot={
+          selectedTable ? (
+            <TableSelectButton number={selectedTable.number} onClick={() => setTablePickerOpen(true)} />
+          ) : null
+        }
+      />
+    </section>
   );
 
   const rightPanel = (
@@ -427,7 +471,7 @@ export function WaiterApp() {
       <OfflineBanner />
 
       {/* Шапка */}
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-white py-3 pl-2 pr-4 sm:pl-4">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-white py-2 pl-2 pr-4 sm:pl-4">
         <div className="flex items-center gap-2">
           <BrandLogo />
         </div>
@@ -482,7 +526,7 @@ export function WaiterApp() {
       {/* MOBILE: одна панель + нижняя навигация */}
       <main className="flex-1 overflow-hidden bg-white px-1 py-2 lg:hidden">
         {tab === 'tables' && tablesPanel}
-        {tab === 'menu' && menuPanel}
+        {tab === 'menu' && mobileMenuNode}
         {tab === 'cart' && rightPanel}
         {tab === 'orders' && (
           <Panel title={t('Активные заказы')}>
@@ -506,12 +550,30 @@ export function WaiterApp() {
           ))}
       </main>
 
-      <BottomNav
-        tab={activeNavTab}
-        setTab={changeTab}
-        cartCount={cart.lines.length}
-        ordersCount={ordersAttentionCount}
+      {/* Корзина над нижней навигацией (только на экране меню) */}
+      {tab === 'menu' && (
+        <MenuCartBar
+          count={cart.lines.length}
+          total={cartTotals(cart.lines).final}
+          submitting={create.isPending || addItems.isPending}
+          onOpenCart={() => setCartSheetOpen(true)}
+          onSubmit={submitCart}
+        />
+      )}
+
+      {/* Корзина как bottom sheet поверх меню */}
+      <CartSheet
+        open={cartSheetOpen && tab === 'menu'}
+        onClose={() => setCartSheetOpen(false)}
+        submitting={create.isPending || addItems.isPending}
+        canSubmit={!!activeShift}
+        onSubmit={async () => {
+          await submitCart();
+          setCartSheetOpen(false);
+        }}
       />
+
+      <BottomNav tab={activeNavTab} setTab={changeTab} ordersCount={ordersAttentionCount} />
 
       {paymentOrder && (
         <PaymentModal
@@ -533,6 +595,39 @@ export function WaiterApp() {
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancelOrder}
       />
+
+      {/* Смена стола на экране меню */}
+      {tablePickerOpen && (
+        <TableSelectModal
+          halls={halls}
+          currentTableId={cart.tableId}
+          onPick={pickMenuTable}
+          onClose={() => setTablePickerOpen(false)}
+        />
+      )}
+
+      {/* Подтверждение переноса непустой корзины на другой стол */}
+      {pendingTableId && (
+        <Modal
+          open
+          onClose={() => setPendingTableId(null)}
+          title={t('Сменить стол?')}
+          footer={
+            <div className="flex gap-2">
+              <button className="btn-secondary btn-lg flex-1" onClick={() => setPendingTableId(null)}>
+                {t('Отмена')}
+              </button>
+              <button className="btn-primary btn-lg flex-1 font-semibold" onClick={confirmMoveCart}>
+                {t('Перенести')}
+              </button>
+            </div>
+          }
+        >
+          <p className="text-sm text-text-secondary">
+            {t('В корзине уже есть блюда. Перенести корзину на другой стол?')}
+          </p>
+        </Modal>
+      )}
 
       {/* Действия со столом */}
       {tableModal === 'close' && selectedTable && (
@@ -659,7 +754,6 @@ function DesktopNav({
 const NAV: { key: Tab; label: string; icon: JSX.Element }[] = [
   { key: 'tables', label: 'Столы', icon: <IconGrid /> },
   { key: 'menu', label: 'Меню', icon: <IconMenu /> },
-  { key: 'cart', label: 'Корзина', icon: <IconCart /> },
   { key: 'orders', label: 'Заказы', icon: <IconList /> },
   { key: 'profile', label: 'Профиль', icon: <IconUser /> },
 ];
@@ -667,20 +761,18 @@ const NAV: { key: Tab; label: string; icon: JSX.Element }[] = [
 function BottomNav({
   tab,
   setTab,
-  cartCount,
   ordersCount,
 }: {
   tab: Tab;
   setTab: (t: Tab) => void;
-  cartCount: number;
   ordersCount: number;
 }) {
   const t = useT();
   return (
-    <nav className="grid shrink-0 grid-cols-5 border-t border-border bg-white pb-[env(safe-area-inset-bottom)] lg:hidden">
+    <nav className="relative z-50 grid shrink-0 grid-cols-4 border-t border-border bg-white pb-[env(safe-area-inset-bottom)] lg:hidden">
       {NAV.map((n) => {
         const active = tab === n.key;
-        const badge = n.key === 'cart' ? cartCount : n.key === 'orders' ? ordersCount : 0;
+        const badge = n.key === 'orders' ? ordersCount : 0;
         return (
           <button
             key={n.key}
@@ -702,6 +794,62 @@ function BottomNav({
         );
       })}
     </nav>
+  );
+}
+
+function pozLabel(n: number): string {
+  const a = Math.abs(n) % 100;
+  const b = n % 10;
+  if (a > 10 && a < 20) return 'позиций';
+  if (b === 1) return 'позиция';
+  if (b >= 2 && b <= 4) return 'позиции';
+  return 'позиций';
+}
+
+function MenuCartBar({
+  count,
+  total,
+  submitting,
+  onOpenCart,
+  onSubmit,
+}: {
+  count: number;
+  total: number;
+  submitting: boolean;
+  onOpenCart: () => void;
+  onSubmit: () => void;
+}) {
+  const t = useT();
+  const hasItems = count > 0;
+  return (
+    <div className="shrink-0 border-t border-border bg-white px-2 py-2 lg:hidden">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onOpenCart}
+          disabled={!hasItems}
+          className="flex min-w-0 shrink-0 items-center gap-2 rounded-xl border border-border bg-background px-3 py-1.5 text-left transition-colors enabled:hover:border-primary/40 disabled:opacity-60"
+        >
+          <span className="text-text-secondary">
+            <IconCart />
+          </span>
+          <span className="min-w-0 leading-tight">
+            <span className="block text-[11px] text-text-muted">
+              {count} {pozLabel(count)}
+            </span>
+            <span className="block text-sm font-semibold text-text-primary">{money(total)}</span>
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={!hasItems || submitting}
+          className="btn-primary h-12 flex-1 rounded-lg font-semibold disabled:opacity-50"
+        >
+          {submitting ? <Spinner /> : t('Отправить на кухню')}
+        </button>
+      </div>
+    </div>
   );
 }
 
