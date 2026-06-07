@@ -122,6 +122,7 @@ export function WaiterApp() {
   const ordersAttentionCount = orders.filter((o) =>
     o.requiresWaiterDecision || ['ready', 'rejected'].includes(o.status),
   ).length;
+  const showPushBanner = ['default', 'error'].includes(pushNotifications.status);
 
   const actionPending =
     pickedUp.isPending || served.isPending || toPayment.isPending || resolvePartialRejection.isPending || cancelOrder.isPending;
@@ -441,6 +442,10 @@ export function WaiterApp() {
         </div>
       </header>
 
+      {showPushBanner && (
+        <BackgroundPushBanner onEnable={pushNotifications.enable} />
+      )}
+
       {/* DESKTOP: 3 колонки */}
       <main className="hidden flex-1 gap-4 overflow-hidden p-4 lg:flex">
         {desktopView === 'tables' ? (
@@ -592,6 +597,25 @@ function EmptyHint({ text }: { text: string }) {
   return (
     <div className="flex h-full items-center justify-center px-6 text-center text-sm text-text-muted">
       {text}
+    </div>
+  );
+}
+
+function BackgroundPushBanner({ onEnable }: { onEnable: () => void }) {
+  const t = useT();
+  return (
+    <div className="shrink-0 border-b border-border bg-warning/10 px-3 py-2">
+      <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-text-primary">{t('Фоновые уведомления выключены')}</p>
+          <p className="truncate text-xs text-text-muted">
+            {t('Включите уведомления, чтобы слышать готовность заказа в фоне.')}
+          </p>
+        </div>
+        <button className="btn-primary btn-md shrink-0" onClick={onEnable}>
+          {t('Включить')}
+        </button>
+      </div>
     </div>
   );
 }

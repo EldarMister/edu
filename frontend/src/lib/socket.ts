@@ -5,7 +5,6 @@ import { API_URL } from './api';
 
 let socket: Socket | null = null;
 const VISIBLE_DISCONNECT_GRACE_MS = 8_000;
-const HIDDEN_DISCONNECT_GRACE_MS = 60_000;
 
 /** Возвращает singleton-сокет, подключённый с текущим JWT. */
 export function getSocket(): Socket {
@@ -51,10 +50,12 @@ export function useConnectionStatus(): boolean {
     };
     const markOfflineLater = () => {
       clearOfflineTimer();
-      const hidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
       offlineTimer = setTimeout(() => {
         if (!sock.connected) setConnected(false);
-      }, hidden ? HIDDEN_DISCONNECT_GRACE_MS : VISIBLE_DISCONNECT_GRACE_MS);
+      }, VISIBLE_DISCONNECT_GRACE_MS);
     };
     const onConnect = () => {
       clearOfflineTimer();

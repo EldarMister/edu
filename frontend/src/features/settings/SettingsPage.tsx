@@ -68,6 +68,11 @@ export function SettingsPage() {
     setError('');
   };
 
+  const selectLanguage = (language: Locale) => {
+    set('language', language);
+    setLocale(language);
+  };
+
   const noMethod = !form.payQr && !form.payCash && !form.payCard;
 
   function onCancel() {
@@ -83,6 +88,7 @@ export function SettingsPage() {
       payCash: data.payCash,
       payCard: data.payCard,
     });
+    setLocale(data.language);
     setError('');
   }
 
@@ -174,7 +180,7 @@ export function SettingsPage() {
               ).map((l) => (
                 <button
                   key={l.value}
-                  onClick={() => set('language', l.value)}
+                  onClick={() => selectLanguage(l.value)}
                   className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
                     form.language === l.value
                       ? 'bg-white text-primary shadow-sm'

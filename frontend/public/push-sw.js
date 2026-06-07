@@ -13,7 +13,13 @@ self.addEventListener('push', (event) => {
     badge: '/icon.png',
     tag: payload.orderId || payload.orderNumber || 'edu-pos-notification',
     renotify: true,
-    requireInteraction: payload.type === 'error',
+    requireInteraction: true,
+    silent: false,
+    timestamp: Date.now(),
+    vibrate: [250, 100, 250, 100, 250],
+    actions: [
+      { action: 'open', title: 'Открыть' },
+    ],
     data: {
       url: payload.url || '/waiter',
       orderId: payload.orderId,
