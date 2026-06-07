@@ -3,6 +3,7 @@ import type { Order } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { displayOrderNumber } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 
 const REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
 
@@ -26,6 +27,7 @@ export function CancelOrderModal({
   onClose: () => void;
   onConfirm: (reason: string) => void;
 }) {
+  const t = useT();
   const [reason, setReason] = useState<string>(REASONS[0]);
   const [other, setOther] = useState('');
 
@@ -39,11 +41,11 @@ export function CancelOrderModal({
   if (!order) return null;
 
   const finalReason = reason === 'Другое' ? other.trim() || 'Другое' : reason;
-  const title = accepted ? 'Запросить отмену заказа?' : 'Отменить заказ?';
+  const title = accepted ? t('Запросить отмену заказа?') : t('Отменить заказ?');
   const text = accepted
     ? 'Кухня уже приняла заказ. Отмена будет выполнена только после подтверждения кухни.'
     : 'Заказ ещё не принят кухней, поэтому он будет отменён сразу.';
-  const confirmLabel = accepted ? 'Запросить отмену' : 'Отменить заказ';
+  const confirmLabel = accepted ? t('Запросить отмену') : t('Отменить заказ');
 
   return (
     <Modal
@@ -53,7 +55,7 @@ export function CancelOrderModal({
       footer={
         <div className="flex gap-2">
           <button className="btn-secondary btn-lg flex-1" disabled={submitting} onClick={onClose}>
-            Назад
+            {t('Назад')}
           </button>
           <button
             className={`btn-lg flex-1 font-semibold ${accepted ? 'btn-primary' : 'btn-danger'}`}
@@ -65,10 +67,10 @@ export function CancelOrderModal({
         </div>
       }
     >
-      <p className="mb-1 text-sm text-text-muted">{displayOrderNumber(order.orderNumber)} · Стол {order.table.number}</p>
-      <p className="mb-4 text-sm text-text-secondary">{text}</p>
+      <p className="mb-1 text-sm text-text-muted">{displayOrderNumber(order.orderNumber)} · {t('Стол')} {order.table.number}</p>
+      <p className="mb-4 text-sm text-text-secondary">{t(text)}</p>
 
-      <p className="mb-2 text-sm font-medium text-text-secondary">Причина</p>
+      <p className="mb-2 text-sm font-medium text-text-secondary">{t('Причина')}</p>
       <div className="space-y-2">
         {REASONS.map((r) => (
           <label
@@ -84,14 +86,14 @@ export function CancelOrderModal({
               checked={reason === r}
               onChange={() => setReason(r)}
             />
-            {r}
+            {t(r)}
           </label>
         ))}
       </div>
       {reason === 'Другое' && (
         <input
           className="input mt-2"
-          placeholder="Укажите причину"
+          placeholder={t('Укажите причину')}
           value={other}
           autoFocus
           onChange={(e) => setOther(e.target.value)}

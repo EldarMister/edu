@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { PaymentMethod } from '@prisma/client';
+import { ForbiddenException, Injectable } from '@nestjs/common';
+import { PaymentMethod, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
@@ -20,7 +20,7 @@ export class PaymentsService {
   }
 
   /** Данные для печати чека (ТЗ §4.8) — реквизиты берём из настроек заведения. */
-  async receipt(orderId: string) {
+  async receipt(actor: AuditActor, orderId: string) {
     const [order, settings] = await Promise.all([
       this.prisma.order.findUniqueOrThrow({
         where: { id: orderId },
@@ -40,6 +40,9 @@ export class PaymentsService {
       }),
       this.settings.ensure(),
     ]);
+    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
 
     return {
       cafeName: settings.cafeName,

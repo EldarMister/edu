@@ -31,8 +31,9 @@ export class OrdersController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.orders.findById(id);
+  @Roles(Role.WAITER, Role.KITCHEN, Role.ADMIN, Role.OWNER)
+  findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.orders.findByIdForActor(id, user);
   }
 
   @Post(':id/items')

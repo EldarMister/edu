@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 
 export function OrdersList({
   orders,
@@ -15,10 +16,11 @@ export function OrdersList({
   onEdit: (order: Order) => void;
   onCancel: (order: Order) => void;
 }) {
+  const t = useT();
   const [menuFor, setMenuFor] = useState<string | null>(null);
 
   if (orders.length === 0) {
-    return <p className="py-12 text-center text-sm text-text-muted">Активных заказов нет</p>;
+    return <p className="py-12 text-center text-sm text-text-muted">{t('Активных заказов нет')}</p>;
   }
   const sortedOrders = [...orders].sort((a, b) => {
     const aAttention = isAttentionOrder(a) ? 1 : 0;
@@ -53,11 +55,11 @@ export function OrdersList({
                 <span className="text-base font-semibold text-text-primary">
                   {displayOrderNumber(o.orderNumber)}
                 </span>
-                <span className="text-sm text-text-muted">Стол {o.table.number}</span>
+                <span className="text-sm text-text-muted">{t('Стол')} {o.table.number}</span>
               </div>
               <p className="flex items-center gap-1.5 text-xs text-text-light">
                 <ClockIcon />
-                {timeHM(o.createdAt)} · {o.items.length} поз.
+                {timeHM(o.createdAt)} · {o.items.length} {t('поз')}.
               </p>
             </div>
 
@@ -106,6 +108,7 @@ function OrderActionsMenu({
   onEdit: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
@@ -150,7 +153,7 @@ function OrderActionsMenu({
       <button
         ref={btnRef}
         type="button"
-        aria-label="Действия с заказом"
+        aria-label={t('Действия с заказом')}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={onToggle}
@@ -176,15 +179,15 @@ function OrderActionsMenu({
           >
             {showEdit && (
               <MenuItem disabled={!editable} onClick={onEdit}>
-                Редактировать заказ
+                {t('Редактировать заказ')}
               </MenuItem>
             )}
             <MenuItem disabled={!cancellable} danger onClick={onCancel}>
-              Отменить заказ
+              {t('Отменить заказ')}
             </MenuItem>
             {needsKitchen && (
               <p className="px-3 pb-1.5 pt-1 text-[11px] leading-snug text-text-light">
-                Кухня уже приняла заказ — изменения и отмена скоро будут через её подтверждение.
+                {t('Кухня уже приняла заказ — изменения и отмена скоро будут через её подтверждение.')}
               </p>
             )}
           </div>,

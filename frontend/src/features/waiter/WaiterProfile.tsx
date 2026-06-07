@@ -6,6 +6,7 @@ import { Spinner } from '@/components/Spinner';
 import { disconnectSocket } from '@/lib/socket';
 import { timeHM } from '@/lib/format';
 import { beep } from '@/lib/sound';
+import { useT } from '@/lib/i18n';
 
 export function WaiterProfile({
   shift,
@@ -26,6 +27,7 @@ export function WaiterProfile({
   onEnablePush: () => void;
   onOpenCabinet: () => void;
 }) {
+  const t = useT();
   const { user, logout } = useAuth();
   const history = useNotifications((s) => s.history);
   const shiftActive = shift?.status === 'active';
@@ -50,7 +52,7 @@ export function WaiterProfile({
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[17px] font-semibold text-text-primary">{user?.name}</p>
-          <p className="truncate text-sm text-text-muted">Официант · {user?.phone}</p>
+          <p className="truncate text-sm text-text-muted">{t('Официант')} · {user?.phone}</p>
         </div>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-text-light" aria-hidden>
           <path d="m9 18 6-6-6-6" />
@@ -59,19 +61,19 @@ export function WaiterProfile({
 
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-[15px] font-semibold text-text-primary">Смена</h3>
+          <h3 className="text-[15px] font-semibold text-text-primary">{t('Смена')}</h3>
           <span
             className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
               shiftActive ? 'bg-success/10 text-success' : 'bg-background text-text-muted'
             }`}
           >
-            {shiftActive ? 'Смена активна' : 'Не начата'}
+            {shiftActive ? t('Смена активна') : t('Не начата')}
           </span>
         </div>
 
         {shiftActive && (
           <div className="mt-4 flex items-center justify-between gap-4 text-sm">
-            <span className="text-text-muted">Начало</span>
+            <span className="text-text-muted">{t('Начало')}</span>
             <span className="font-medium text-text-primary">{timeHM(shift.startedAt)}</span>
           </div>
         )}
@@ -84,21 +86,21 @@ export function WaiterProfile({
           {shiftPending || shiftLoading ? (
             <Spinner />
           ) : shiftActive ? (
-            'Закончить смену'
+            t('Закончить смену')
           ) : (
-            'Начать смену'
+            t('Начать смену')
           )}
         </button>
       </div>
 
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-[15px] font-semibold text-text-primary">Уведомления</h3>
+          <h3 className="text-[15px] font-semibold text-text-primary">{t('Уведомления')}</h3>
           <button
             className="flex items-center gap-1 text-sm font-medium text-primary"
             onClick={() => setNotifOpen((v) => !v)}
           >
-            {notifOpen ? 'Скрыть' : 'Показать'}
+            {notifOpen ? t('Скрыть') : t('Показать')}
             <Chevron up={notifOpen} />
           </button>
         </div>
@@ -108,22 +110,22 @@ export function WaiterProfile({
             <div className="mb-4 mt-3 rounded-xl border border-border p-3">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium text-text-primary">Системные уведомления</p>
-                  <p className="mt-1 text-xs text-text-muted">{pushStatusText(pushStatus)}</p>
+                  <p className="text-sm font-medium text-text-primary">{t('Системные уведомления')}</p>
+                  <p className="mt-1 text-xs text-text-muted">{pushStatusText(pushStatus, t)}</p>
                 </div>
                 {pushStatus !== 'subscribed' && pushStatus !== 'unsupported' && pushStatus !== 'denied' && (
                   <button className="btn-primary btn-md shrink-0" onClick={onEnablePush}>
-                    Включить
+                    {t('Включить')}
                   </button>
                 )}
               </div>
               <button className="btn-secondary btn-md mt-3 w-full" onClick={() => beep('notify')}>
-                Проверить звук
+                {t('Проверить звук')}
               </button>
             </div>
 
             {history.length === 0 ? (
-              <p className="text-sm text-text-muted">Уведомлений пока нет</p>
+              <p className="text-sm text-text-muted">{t('Уведомлений пока нет')}</p>
             ) : (
               <>
                 <ul className="space-y-2.5">
@@ -142,7 +144,7 @@ export function WaiterProfile({
                     className="mt-3 flex items-center gap-1 text-sm font-medium text-primary"
                     onClick={() => setShowAllNotif((v) => !v)}
                   >
-                    {showAllNotif ? 'Скрыть лишние уведомления' : 'Показать все уведомления'}
+                    {showAllNotif ? t('Скрыть лишние уведомления') : t('Показать все уведомления')}
                     <Chevron up={showAllNotif} />
                   </button>
                 )}
@@ -160,26 +162,29 @@ export function WaiterProfile({
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
           <path d="M16 17l5-5-5-5M21 12H9" />
         </svg>
-        Выйти
+        {t('Выйти')}
       </button>
     </div>
   );
 }
 
-function pushStatusText(status: 'unsupported' | 'unavailable' | 'default' | 'denied' | 'subscribed' | 'error') {
+function pushStatusText(
+  status: 'unsupported' | 'unavailable' | 'default' | 'denied' | 'subscribed' | 'error',
+  t: (value: string) => string,
+) {
   switch (status) {
     case 'subscribed':
-      return 'Включены. Официант получит уведомление, даже если сайт закрыт.';
+      return t('Включены. Официант получит уведомление, даже если сайт закрыт.');
     case 'denied':
-      return 'Запрещены в настройках браузера. Разрешите уведомления для этого сайта.';
+      return t('Запрещены в настройках браузера. Разрешите уведомления для этого сайта.');
     case 'unavailable':
-      return 'Серверные push-ключи ещё не настроены.';
+      return t('Серверные push-ключи ещё не настроены.');
     case 'unsupported':
-      return 'Этот браузер не поддерживает push-уведомления.';
+      return t('Этот браузер не поддерживает push-уведомления.');
     case 'error':
-      return 'Не удалось включить. Проверьте HTTPS, service worker и настройки сервера.';
+      return t('Не удалось включить. Проверьте HTTPS, service worker и настройки сервера.');
     default:
-      return 'Нажмите “Включить”, чтобы получать готовность заказа вне сайта.';
+      return t('Нажмите “Включить”, чтобы получать готовность заказа вне сайта.');
   }
 }
 

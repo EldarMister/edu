@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { Hall, TableStatus } from '@/types';
 import { TABLE_STATUS } from '@/lib/status';
+import { useT } from '@/lib/i18n';
 
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
 
@@ -13,6 +14,7 @@ export function TablesGrid({
   selectedTableId: string | null;
   onSelect: (tableId: string) => void;
 }) {
+  const t = useT();
   const [hallId, setHallId] = useState(halls[0]?.id ?? '');
   const hall = halls.find((h) => h.id === hallId) ?? halls[0];
   const tableCount = hall?.tables.length ?? 0;
@@ -70,7 +72,7 @@ export function TablesGrid({
         {LEGEND.map((s) => (
           <span key={s} className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-[11px] text-text-muted">
             <span className={`h-2 w-2 rounded-full ${TABLE_STATUS[s].dot}`} />
-            {TABLE_STATUS[s].label}
+            {t(TABLE_STATUS[s].label)}
           </span>
         ))}
       </div>

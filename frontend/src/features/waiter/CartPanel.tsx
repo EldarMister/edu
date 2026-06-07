@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { TableItem } from '@/types';
 import { useCart, cartTotals } from './cart';
 import { displayOrderNumber, money, dishUnitPrice } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 
 export function CartPanel({
@@ -23,6 +24,7 @@ export function CartPanel({
   onBlockedSubmit: () => void;
   onCancelEdit?: () => void;
 }) {
+  const t = useT();
   const { lines, comment, inc, dec, remove, setLineComment, setComment } = useCart();
   const totals = cartTotals(lines);
   const [commentFor, setCommentFor] = useState<string | null>(null);
@@ -36,19 +38,19 @@ export function CartPanel({
         <div>
           <h2 className="text-lg font-semibold text-text-primary">
             {mode === 'edit'
-              ? `Редактирование ${displayOrderNumber(orderNumber ?? '')}`
+              ? `${t('Редактирование')} ${displayOrderNumber(orderNumber ?? '')}`
               : mode === 'add'
-                ? `Добавление в ${displayOrderNumber(orderNumber ?? '')}`
-                : 'Новый заказ'}
+                ? `${t('Добавление в')} ${displayOrderNumber(orderNumber ?? '')}`
+                : t('Новый заказ')}
           </h2>
-          <p className="mt-0.5 text-sm text-text-muted">Стол {table.number}</p>
+          <p className="mt-0.5 text-sm text-text-muted">{t('Стол')} {table.number}</p>
         </div>
         {mode === 'edit' && onCancelEdit && (
           <button
             onClick={onCancelEdit}
             className="shrink-0 text-sm font-medium text-text-muted hover:text-text-secondary"
           >
-            Отменить
+            {t('Отмена')}
           </button>
         )}
       </div>
@@ -57,7 +59,7 @@ export function CartPanel({
       <div className="no-scrollbar flex-1 space-y-3 overflow-y-auto py-3">
         {lines.length === 0 && (
           <p className="py-10 text-center text-sm text-text-muted">
-            Выберите блюда из меню, чтобы добавить в заказ
+            {t('Выберите блюда из меню, чтобы добавить в заказ')}
           </p>
         )}
         {lines.map((l) => {
@@ -72,7 +74,7 @@ export function CartPanel({
                 <button
                   onClick={() => remove(l.dish.id)}
                   className="text-danger hover:opacity-80"
-                  aria-label="Удалить"
+                  aria-label={t('Удалить')}
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
@@ -94,7 +96,7 @@ export function CartPanel({
               {commentFor === l.dish.id || l.comment ? (
                 <input
                   className="input mt-2 h-9 text-sm"
-                  placeholder="Комментарий: без лука, острый…"
+                  placeholder={t('Комментарий: без лука, острый…')}
                   value={l.comment ?? ''}
                   autoFocus={commentFor === l.dish.id}
                   onChange={(e) => setLineComment(l.dish.id, e.target.value)}
@@ -104,7 +106,7 @@ export function CartPanel({
                   onClick={() => setCommentFor(l.dish.id)}
                   className="mt-2 text-xs text-primary hover:underline"
                 >
-                  + комментарий
+                  {t('+ комментарий')}
                 </button>
               )}
             </div>
@@ -116,20 +118,20 @@ export function CartPanel({
       <div className="border-t border-border pt-3">
         <input
           className="input mb-3 h-10 text-sm"
-          placeholder="Комментарий к заказу"
+          placeholder={t('Комментарий к заказу')}
           value={comment}
           onChange={(e) => setComment(e.target.value)}
         />
 
         <div className="space-y-1 text-sm">
           {totals.discount > 0 && (
-            <Row label="Сумма" value={money(totals.total)} />
+            <Row label={t('Сумма')} value={money(totals.total)} />
           )}
           {totals.discount > 0 && (
-            <Row label="Скидка" value={`−${money(totals.discount)}`} valueClass="text-success" />
+            <Row label={t('Скидка')} value={`−${money(totals.discount)}`} valueClass="text-success" />
           )}
           <div className="flex items-center justify-between pt-1">
-            <span className="text-[15px] font-medium text-text-secondary">Итого</span>
+            <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
             <span className="text-xl font-semibold text-text-primary">{money(totals.final)}</span>
           </div>
         </div>
@@ -151,11 +153,11 @@ export function CartPanel({
           {submitting ? (
             <Spinner />
           ) : mode === 'edit' ? (
-            'Сохранить изменения'
+            t('Сохранить изменения')
           ) : mode === 'add' ? (
-            `Добавить к заказу · ${totals.count} шт.`
+            `${t('Добавить к заказу')} · ${totals.count} ${t('шт')}.`
           ) : (
-            'Отправить на кухню'
+            t('Отправить на кухню')
           )}
         </button>
       </div>

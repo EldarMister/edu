@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { Category, Dish } from '@/types';
 import { money, dishUnitPrice } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 
 export function DishMenu({
   categories,
@@ -18,16 +19,22 @@ export function DishMenu({
   onDec: (dish: Dish) => void;
   disabled?: boolean;
 }) {
+  const t = useT();
   const [activeCat, setActiveCat] = useState<string>('all');
   const [search, setSearch] = useState('');
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return dishes.filter((d) => {
+    const matching = dishes.filter((d) => {
       const byCat = activeCat === 'all' || d.categoryId === activeCat;
       const byQ = !q || d.name.toLowerCase().includes(q);
       return byCat && byQ;
     });
+
+    return [
+      ...matching.filter((d) => d.isAvailable),
+      ...matching.filter((d) => !d.isAvailable),
+    ];
   }, [dishes, activeCat, search]);
 
   return (
@@ -35,7 +42,7 @@ export function DishMenu({
       {/* Поиск */}
       <input
         className="input mb-3"
-        placeholder="Поиск блюда"
+        placeholder={t('Поиск блюда')}
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
@@ -43,7 +50,7 @@ export function DishMenu({
       {/* Категории */}
       <div className="no-scrollbar mb-3 flex gap-2 overflow-x-auto">
         <CatTab active={activeCat === 'all'} onClick={() => setActiveCat('all')}>
-          Все
+          {t('Все')}
         </CatTab>
         {categories.map((c) => (
           <CatTab key={c.id} active={activeCat === c.id} onClick={() => setActiveCat(c.id)}>
@@ -72,7 +79,7 @@ export function DishMenu({
             >
               {!d.isAvailable && (
                 <span className="absolute right-2 top-2 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-text-muted">
-                  Недоступно
+                  {t('Недоступно')}
                 </span>
               )}
               <span
@@ -102,7 +109,7 @@ export function DishMenu({
                     <span
                       role="button"
                       tabIndex={-1}
-                      aria-label="Уменьшить количество"
+                      aria-label={t('Уменьшить количество')}
                       onClick={(e) => {
                         e.stopPropagation();
                         onDec(d);
@@ -120,7 +127,7 @@ export function DishMenu({
           );
         })}
         {filtered.length === 0 && (
-          <p className="col-span-full py-8 text-center text-sm text-text-muted">Ничего не найдено</p>
+          <p className="col-span-full py-8 text-center text-sm text-text-muted">{t('Ничего не найдено')}</p>
         )}
       </div>
     </div>

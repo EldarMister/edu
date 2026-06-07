@@ -2,6 +2,7 @@ import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { ORDER_STATUS } from '@/lib/status';
 import { displayOrderNumber, money } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 
 function InfoIcon() {
@@ -50,22 +51,23 @@ export function OrderPanel({
   onAddReplacement: () => void;
   onCancelOrder: () => void;
 }) {
+  const t = useT();
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-start justify-between border-b border-border pb-3">
         <div>
-          <h2 className="text-lg font-semibold text-text-primary">Заказ {displayOrderNumber(order.orderNumber)}</h2>
+          <h2 className="text-lg font-semibold text-text-primary">{t('Заказ')} {displayOrderNumber(order.orderNumber)}</h2>
           <p className="mt-0.5 text-sm text-text-muted">
-            Стол {order.table.number}
+            {t('Стол')} {order.table.number}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <OrderBadge status={order.status} />
           {waitingDecision && (
             <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
-              Нужен ответ
+              {t('Нужен ответ')}
             </span>
           )}
         </div>
@@ -105,8 +107,8 @@ export function OrderPanel({
               {hasExtra && (
                 <div className="mt-0.5 text-xs">
                   {comment && <p className="text-text-muted">{comment}</p>}
-                  {rejected && it.rejectReason && <p className="text-danger">Отказ: {it.rejectReason}</p>}
-                  {waitingItem && <p className="text-warning">Ожидает решения клиента</p>}
+                  {rejected && it.rejectReason && <p className="text-danger">{t('Отказ')}: {it.rejectReason}</p>}
+                  {waitingItem && <p className="text-warning">{t('Ожидает решения клиента')}</p>}
                 </div>
               )}
             </div>
@@ -122,7 +124,7 @@ export function OrderPanel({
           </p>
         )}
         <div className="flex items-center justify-between">
-          <span className="text-[15px] font-medium text-text-secondary">Итого</span>
+          <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
           <span className="text-xl font-semibold text-text-primary">{money(order.finalAmount)}</span>
         </div>
 
@@ -162,6 +164,7 @@ function ActionButton({
   onAddReplacement: () => void;
   onCancelOrder: () => void;
 }) {
+  const t = useT();
   const s = order.status;
   const spin = submitting ? <Spinner /> : null;
   const waitingDecision = s === 'partially_rejected' && order.requiresWaiterDecision;
@@ -171,16 +174,16 @@ function ActionButton({
     return (
       <div className="space-y-2.5">
         <div className="rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">
-          Кухня отказала часть заказа. Уточните у клиента, что делать дальше.
+          {t('Кухня отказала часть заказа. Уточните у клиента, что делать дальше.')}
         </div>
         <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onContinueAfterRejection}>
-          {spin ?? 'Продолжить без отказанного блюда'}
+          {spin ?? t('Продолжить без отказанного блюда')}
         </button>
         <button className="btn-secondary btn-lg w-full font-semibold" disabled={submitting} onClick={onAddReplacement}>
-          Добавить замену
+          {t('Добавить замену')}
         </button>
         <button className="btn-danger btn-lg w-full font-semibold" disabled={submitting} onClick={onCancelOrder}>
-          Отменить весь заказ
+          {t('Отменить весь заказ')}
         </button>
       </div>
     );
@@ -192,7 +195,7 @@ function ActionButton({
   ) {
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onPickedUp}>
-        {spin ?? 'Забрал с кухни'}
+        {spin ?? t('Забрал с кухни')}
       </button>
     );
   }
@@ -201,35 +204,35 @@ function ActionButton({
     return (
       <div className="flex items-center justify-center gap-2 rounded-xl bg-background px-3 py-2.5 text-sm text-text-muted">
         <InfoIcon />
-        <span>{ORDER_STATUS[s].label} — ожидаем кухню</span>
+        <span>{t(ORDER_STATUS[s].label)} - {t('ожидаем кухню')}</span>
       </div>
     );
   }
   if (s === 'picked_up') {
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onServed}>
-        {spin ?? 'Вынес гостям'}
+        {spin ?? t('Вынес гостям')}
       </button>
     );
   }
   if (s === 'served') {
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onToPayment}>
-        {spin ?? 'Перейти к оплате'}
+        {spin ?? t('Перейти к оплате')}
       </button>
     );
   }
   if (s === 'waiting_payment') {
     return (
       <div className="rounded-xl bg-purple-50 py-3 text-center text-sm text-purple-600">
-        Ожидает оплаты
+        {t('Ожидает оплаты')}
       </div>
     );
   }
   if (s === 'rejected') {
     return (
       <div className="rounded-xl bg-danger/5 py-3 text-center text-sm text-danger">
-        Кухня отказала в заказе
+        {t('Кухня отказала в заказе')}
       </div>
     );
   }

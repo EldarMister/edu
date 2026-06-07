@@ -2,12 +2,6 @@ import { useEffect } from 'react';
 import { useNotifications } from '@/store/notifications';
 import type { NotificationType } from '@/types';
 
-const STYLES: Record<NotificationType, { bar: string; dot: string }> = {
-  info: { bar: 'border-l-primary', dot: 'bg-primary' },
-  success: { bar: 'border-l-success', dot: 'bg-success' },
-  error: { bar: 'border-l-danger', dot: 'bg-danger' },
-};
-
 function Toast({ id, message, type = 'info' }: { id: string; message: string; type?: NotificationType }) {
   const dismiss = useNotifications((s) => s.dismiss);
   useEffect(() => {
@@ -15,15 +9,13 @@ function Toast({ id, message, type = 'info' }: { id: string; message: string; ty
     return () => clearTimeout(t);
   }, [id, dismiss, type]);
 
-  const s = STYLES[type];
   return (
     <div
-      className={`card pointer-events-auto flex w-fit max-w-[calc(100vw-24px)] items-start gap-3 border-l-4 px-4 py-3 shadow-soft animate-[fadeIn_.15s_ease-out] sm:max-w-sm ${s.bar}`}
+      className="pointer-events-auto w-fit max-w-[calc(100vw-24px)] rounded-xl border border-border bg-white px-4 py-2.5 shadow-soft animate-[fadeIn_.15s_ease-out] sm:max-w-sm"
       onClick={() => dismiss(id)}
       role="status"
     >
-      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
-      <p className="min-w-0 break-words text-sm text-text-primary">{message}</p>
+      <p className="min-w-0 truncate whitespace-nowrap text-sm text-text-primary">{message}</p>
     </div>
   );
 }

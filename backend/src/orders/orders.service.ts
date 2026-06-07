@@ -67,6 +67,14 @@ export class OrdersService {
     return this.prisma.order.findUniqueOrThrow({ where: { id }, include: orderInclude });
   }
 
+  async findByIdForActor(id: string, actor: AuditActor) {
+    const order = await this.findById(id);
+    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
+    return order;
+  }
+
   /** Активные заказы официанта (не закрытые). */
   findActiveForWaiter(waiterId: string) {
     return this.prisma.order.findMany({
@@ -761,6 +769,9 @@ export class OrdersService {
     const cashierId = actor.id;
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
+    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
     if (order.status === OrderStatus.paid) {
       return order;
     }
@@ -1016,6 +1027,9 @@ export class OrdersService {
 
     const order = await this.activeOrderForTable(sourceTableId);
     if (!order) throw new BadRequestException('У стола нет активного заказа для переноса');
+    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.table.update({ where: { id: targetTableId }, data: { status: source.status } });
@@ -1057,6 +1071,9 @@ export class OrdersService {
     const byUserId = actor.id;
     const order = await this.activeOrderForTable(sourceTableId);
     if (!order) throw new BadRequestException('У стола нет активного заказа для передачи');
+    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
 
     const waiter = await this.prisma.user.findUnique({ where: { id: waiterId } });
     if (!waiter || waiter.role !== Role.WAITER || !waiter.isActive) {

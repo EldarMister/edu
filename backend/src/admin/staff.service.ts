@@ -22,9 +22,20 @@ export class StaffService {
     private audit: AuditService,
   ) {}
 
-  async overview() {
+  private isOwner(actor: AuditActor) {
+    return actor.role === Role.OWNER;
+  }
+
+  private assertCanManageRole(actor: AuditActor, role: Role) {
+    if (role === Role.OWNER && !this.isOwner(actor)) {
+      throw new ForbiddenException('Только владелец может управлять владельцами');
+    }
+  }
+
+  async overview(actor: AuditActor) {
+    const visibleRoles = this.isOwner(actor) ? undefined : { not: Role.OWNER };
     const [total, admins, waiters, kitchen, activeShifts] = await Promise.all([
-      this.prisma.user.count(),
+      this.prisma.user.count({ where: visibleRoles ? { role: visibleRoles } : {} }),
       this.prisma.user.count({ where: { role: Role.ADMIN } }),
       this.prisma.user.count({ where: { role: Role.WAITER } }),
       this.prisma.user.count({ where: { role: Role.KITCHEN } }),
@@ -42,8 +53,12 @@ export class StaffService {
     };
   }
 
-  async list(params: { role?: Role; search?: string }) {
+  async list(actor: AuditActor, params: { role?: Role; search?: string }) {
+    if (params.role === Role.OWNER && !this.isOwner(actor)) {
+      throw new ForbiddenException('Только владелец может просматривать владельцев');
+    }
     const where: Prisma.UserWhereInput = {
+      ...(!this.isOwner(actor) ? { role: { not: Role.OWNER } } : {}),
       ...(params.role ? { role: params.role } : {}),
       ...(params.search
         ? {
@@ -75,6 +90,7 @@ export class StaffService {
   }
 
   async create(dto: CreateStaffDto, actor: AuditActor) {
+    this.assertCanManageRole(actor, dto.role);
     const phone = this.normalizePhone(dto.phone);
     const exists = await this.prisma.user.findUnique({ where: { phone } });
     if (exists) {
@@ -100,6 +116,10 @@ export class StaffService {
     const actorId = actor.id;
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Сотрудник не найден');
+    this.assertCanManageRole(actor, user.role);
+    if (dto.role !== undefined) {
+      this.assertCanManageRole(actor, dto.role);
+    }
 
     const data: Prisma.UserUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
@@ -146,6 +166,7 @@ export class StaffService {
     const actorId = actor.id;
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Сотрудник не найден');
+    this.assertCanManageRole(actor, user.role);
     if (id === actorId) {
       throw new ForbiddenException('Нельзя удалить самого себя');
     }

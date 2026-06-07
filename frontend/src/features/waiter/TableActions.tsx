@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Hall, TableItem } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
+import { useT } from '@/lib/i18n';
 import type { AvailableWaiter } from './api';
 
 // ---------- Маленькие иконки ----------
@@ -19,9 +20,10 @@ const TransferIcon = () => <I d="M16 3h5v5|M21 3l-7 7|M8 21H3v-5|M3 21l7-7" />;
 
 // ---------- Chip «Стол X» рядом с «Меню» ----------
 export function TableChip({ number }: { number: number }) {
+  const t = useT();
   return (
     <span className="inline-flex items-center rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-      Стол {number}
+      {t('Стол')} {number}
     </span>
   );
 }
@@ -38,6 +40,7 @@ export function TableActionsMenu({
   onMove: () => void;
   onTransfer: () => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -70,7 +73,7 @@ export function TableActionsMenu({
         className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-white px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:border-primary/40 hover:text-primary disabled:cursor-not-allowed disabled:opacity-40"
       >
         <PencilIcon />
-        Редактировать
+        {t('Редактировать')}
       </button>
 
       {open && (
@@ -85,7 +88,7 @@ export function TableActionsMenu({
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-text-secondary transition-colors hover:bg-background hover:text-text-primary"
             >
               <span className="text-text-light">{it.icon}</span>
-              {it.label}
+              {t(it.label)}
             </button>
           ))}
         </div>
@@ -108,20 +111,21 @@ export function CloseTableModal({
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   if (hasActiveOrder) {
     return (
       <Modal
         open
         onClose={onClose}
-        title="Закрыть стол?"
+        title={t('Закрыть стол?')}
         footer={
           <button className="btn-secondary btn-lg w-full" onClick={onClose}>
-            Понятно
+            {t('Понятно')}
           </button>
         }
       >
         <p className="text-sm text-text-secondary">
-          У этого стола есть активный заказ. Завершите или оплатите заказ перед закрытием стола.
+          {t('У этого стола есть активный заказ. Завершите или оплатите заказ перед закрытием стола.')}
         </p>
       </Modal>
     );
@@ -130,20 +134,20 @@ export function CloseTableModal({
     <Modal
       open
       onClose={onClose}
-      title="Закрыть стол?"
+      title={t('Закрыть стол?')}
       footer={
         <div className="flex gap-2">
           <button className="btn-secondary btn-lg flex-1" onClick={onClose}>
-            Отмена
+            {t('Отмена')}
           </button>
           <button className="btn-primary btn-lg flex-1 font-semibold" disabled={pending} onClick={onConfirm}>
-            {pending ? <Spinner /> : 'Закрыть стол'}
+            {pending ? <Spinner /> : t('Закрыть стол')}
           </button>
         </div>
       }
     >
       <p className="text-sm text-text-secondary">
-        Вы действительно хотите закрыть стол №{tableNumber}?
+        {t('Вы действительно хотите закрыть стол')} №{tableNumber}?
       </p>
     </Modal>
   );
@@ -163,6 +167,7 @@ export function MoveTableModal({
   onConfirm: (targetTableId: string) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [target, setTarget] = useState<string | null>(null);
 
   const groups = halls
@@ -178,25 +183,25 @@ export function MoveTableModal({
     <Modal
       open
       onClose={onClose}
-      title="Перенести стол"
+      title={t('Перенести стол')}
       footer={
         <div className="flex gap-2">
           <button className="btn-secondary btn-lg flex-1" onClick={onClose}>
-            Отмена
+            {t('Отмена')}
           </button>
           <button
             className="btn-primary btn-lg flex-1 font-semibold"
             disabled={!target || pending}
             onClick={() => target && onConfirm(target)}
           >
-            {pending ? <Spinner /> : 'Перенести'}
+            {pending ? <Spinner /> : t('Перенести')}
           </button>
         </div>
       }
     >
-      <p className="mb-3 text-sm text-text-muted">Выберите стол, на который нужно перенести заказ</p>
+      <p className="mb-3 text-sm text-text-muted">{t('Выберите стол, на который нужно перенести заказ')}</p>
       {total === 0 ? (
-        <p className="py-8 text-center text-sm text-text-muted">Нет доступных столов для переноса</p>
+        <p className="py-8 text-center text-sm text-text-muted">{t('Нет доступных столов для переноса')}</p>
       ) : (
         <div className="space-y-3">
           {groups.map((g) => (
@@ -246,6 +251,7 @@ export function TransferTableModal({
   onConfirm: (waiter: AvailableWaiter) => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const [sel, setSel] = useState<string | null>(null);
   const list = waiters.filter((w) => w.id !== excludeWaiterId);
   const selected = list.find((w) => w.id === sel) ?? null;
@@ -254,29 +260,29 @@ export function TransferTableModal({
     <Modal
       open
       onClose={onClose}
-      title="Передать стол"
+      title={t('Передать стол')}
       footer={
         <div className="flex gap-2">
           <button className="btn-secondary btn-lg flex-1" onClick={onClose}>
-            Отмена
+            {t('Отмена')}
           </button>
           <button
             className="btn-primary btn-lg flex-1 font-semibold"
             disabled={!selected || pending}
             onClick={() => selected && onConfirm(selected)}
           >
-            {pending ? <Spinner /> : 'Передать'}
+            {pending ? <Spinner /> : t('Передать')}
           </button>
         </div>
       }
     >
-      <p className="mb-3 text-sm text-text-muted">Выберите официанта, которому нужно передать стол</p>
+      <p className="mb-3 text-sm text-text-muted">{t('Выберите официанта, которому нужно передать стол')}</p>
       {loading ? (
         <div className="flex justify-center py-8 text-primary">
           <Spinner />
         </div>
       ) : list.length === 0 ? (
-        <p className="py-8 text-center text-sm text-text-muted">Нет доступных официантов для передачи</p>
+        <p className="py-8 text-center text-sm text-text-muted">{t('Нет доступных официантов для передачи')}</p>
       ) : (
         <div className="space-y-2">
           {list.map((w) => (

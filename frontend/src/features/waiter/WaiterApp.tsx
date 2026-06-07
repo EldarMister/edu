@@ -4,6 +4,7 @@ import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
 import { displayOrderNumber } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { useWaiterPushNotifications } from '@/lib/push';
 import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
@@ -57,6 +58,7 @@ export function WaiterApp() {
   useWaiterRealtime();
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
+  const t = useT();
   const pushNotifications = useWaiterPushNotifications(user?.role === 'WAITER');
 
   const hallsQ = useHalls();
@@ -152,7 +154,7 @@ export function WaiterApp() {
     setEditingOrderId(order.id);
     setTab('menu');
     push({
-      message: `Редактирование ${displayOrderNumber(order.orderNumber)}`,
+      message: `${t('Редактирование')} ${displayOrderNumber(order.orderNumber)}`,
       type: 'info',
       at: new Date().toISOString(),
     });
@@ -164,7 +166,7 @@ export function WaiterApp() {
       await editOrder.mutateAsync({ orderId: editingOrderId, comment: cart.comment, lines: cart.lines });
       cart.clear();
       setEditingOrderId(null);
-      push({ message: 'Изменения сохранены', type: 'success', at: new Date().toISOString() });
+      push({ message: t('Изменения сохранены'), type: 'success', at: new Date().toISOString() });
       setTab('orders');
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
@@ -182,7 +184,7 @@ export function WaiterApp() {
     try {
       await cancelOrder.mutateAsync({ orderId: cancelTarget.id, reason });
       setCancelTarget(null);
-      push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
+      push({ message: t('Заказ отменён'), type: 'success', at: new Date().toISOString() });
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
@@ -204,8 +206,9 @@ export function WaiterApp() {
   }
 
   function addDishToCart(dish: Parameters<typeof cart.add>[0]) {
+    const nextQuantity = (cart.lines.find((line) => line.dish.id === dish.id)?.quantity ?? 0) + 1;
     cart.add(dish);
-    push({ message: 'Блюдо добавлено в корзину', at: new Date().toISOString() });
+    push({ message: `${dish.name} ×${nextQuantity} добавлено`, at: new Date().toISOString() });
   }
 
   async function goToPayment(order: Order) {
@@ -220,7 +223,7 @@ export function WaiterApp() {
   async function continueAfterPartialRejection(order: Order) {
     try {
       await resolvePartialRejection.mutateAsync(order.id);
-      push({ message: 'Заказ продолжен без отказанного блюда', type: 'success', at: new Date().toISOString() });
+      push({ message: t('Заказ продолжен без отказанного блюда'), type: 'success', at: new Date().toISOString() });
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
@@ -230,7 +233,7 @@ export function WaiterApp() {
     setViewingOrderId(null);
     cart.selectTable(order.table.id);
     setTab('menu');
-    push({ message: 'Выберите блюдо на замену и отправьте его на кухню', type: 'info', at: new Date().toISOString() });
+    push({ message: t('Выберите блюдо на замену и отправьте его на кухню'), type: 'info', at: new Date().toISOString() });
   }
 
   async function cancelAfterPartialRejection(order: Order) {
@@ -242,7 +245,7 @@ export function WaiterApp() {
       cart.clear();
       setViewingOrderId(null);
       setTab('tables');
-      push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
+      push({ message: t('Заказ отменён'), type: 'success', at: new Date().toISOString() });
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
@@ -251,7 +254,7 @@ export function WaiterApp() {
   async function submitCart() {
     if (!selectedTable) return;
     if (!activeShift) {
-      push({ message: 'Сначала начните смену в профиле.', type: 'error', at: new Date().toISOString() });
+      push({ message: t('Сначала начните смену в профиле.'), type: 'error', at: new Date().toISOString() });
       return;
     }
     try {
@@ -263,7 +266,7 @@ export function WaiterApp() {
         });
         cart.clear();
         setAddItemsIdemKey(clientId());
-        push({ message: 'Заказ отправлен на кухню', type: 'success', at: new Date().toISOString() });
+        push({ message: t('Заказ отправлен на кухню'), type: 'success', at: new Date().toISOString() });
         setTab('cart');
       } else {
         await create.mutateAsync({
@@ -274,7 +277,7 @@ export function WaiterApp() {
         });
         cart.clear();
         setIdemKey(clientId());
-        push({ message: 'Заказ отправлен на кухню', type: 'success', at: new Date().toISOString() });
+        push({ message: t('Заказ отправлен на кухню'), type: 'success', at: new Date().toISOString() });
         setTab('orders');
       }
     } catch (err) {
@@ -295,7 +298,7 @@ export function WaiterApp() {
     if (!selectedTable) return;
     try {
       await closeTable.mutateAsync(selectedTable.id);
-      push({ message: 'Стол успешно закрыт', type: 'success', at: new Date().toISOString() });
+      push({ message: t('Стол успешно закрыт'), type: 'success', at: new Date().toISOString() });
       setTableModal(null);
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
@@ -308,7 +311,7 @@ export function WaiterApp() {
       const updated = await moveTable.mutateAsync({ tableId: selectedTable.id, targetTableId });
       cart.selectTable(targetTableId);
       setViewingOrderId(null);
-      push({ message: `Заказ перенесён на стол №${updated.table.number}`, type: 'success', at: new Date().toISOString() });
+      push({ message: `${t('Заказ перенесён на стол')} №${updated.table.number}`, type: 'success', at: new Date().toISOString() });
       setTableModal(null);
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
@@ -319,7 +322,7 @@ export function WaiterApp() {
     if (!selectedTable) return;
     try {
       await transferTable.mutateAsync({ tableId: selectedTable.id, waiterId: waiter.id });
-      push({ message: `Стол передан официанту ${waiter.name}`, type: 'success', at: new Date().toISOString() });
+      push({ message: `${t('Стол передан официанту')} ${waiter.name}`, type: 'success', at: new Date().toISOString() });
       setTableModal(null);
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
@@ -329,7 +332,7 @@ export function WaiterApp() {
   // --- Панели ---
   const tablesPanel = (
     <Panel
-      title="Выбор стола"
+      title={t('Выбор стола')}
       action={
         <TableActionsMenu
           disabled={!selectedTable}
@@ -344,7 +347,7 @@ export function WaiterApp() {
   );
 
   const menuPanel = (
-    <Panel title="Меню" action={selectedTable ? <TableChip number={selectedTable.number} /> : null}>
+    <Panel title={t('Меню')} action={selectedTable ? <TableChip number={selectedTable.number} /> : null}>
       <DishMenu
         categories={categoriesQ.data ?? []}
         dishes={dishesQ.data ?? []}
@@ -359,7 +362,7 @@ export function WaiterApp() {
   const rightPanel = (
     <Panel title={null}>
       {!selectedTable ? (
-        <EmptyHint text="Выберите стол, чтобы открыть заказ" />
+        <EmptyHint text={t('Выберите стол, чтобы открыть заказ')} />
       ) : displayedOrder && !showCart ? (
         <OrderPanel
           order={displayedOrder}
@@ -381,7 +384,7 @@ export function WaiterApp() {
           onSubmit={editing ? saveEditOrder : submitCart}
           onCancelEdit={cancelEditing}
           onBlockedSubmit={() =>
-            push({ message: 'Сначала начните смену в профиле.', type: 'error', at: new Date().toISOString() })
+            push({ message: t('Сначала начните смену в профиле.'), type: 'error', at: new Date().toISOString() })
           }
         />
       )}
@@ -396,13 +399,13 @@ export function WaiterApp() {
       onStartShift={() =>
         runAction(async () => {
           await startShift.mutateAsync();
-          push({ message: 'Смена начата', type: 'success', at: new Date().toISOString() });
+          push({ message: t('Смена начата'), type: 'success', at: new Date().toISOString() });
         })
       }
       onEndShift={() =>
         runAction(async () => {
           await endShift.mutateAsync();
-          push({ message: 'Смена завершена', type: 'success', at: new Date().toISOString() });
+          push({ message: t('Смена завершена'), type: 'success', at: new Date().toISOString() });
         })
       }
       pushStatus={pushNotifications.status}
@@ -431,8 +434,8 @@ export function WaiterApp() {
         <div className="flex items-center gap-3">
           <ConnectionStatus />
           <span className={`text-xs ${activeShift ? 'text-success' : 'text-text-muted'}`}>
-            <span className="hidden sm:inline">{activeShift ? 'Смена активна' : 'Смена не начата'}</span>
-            <span className="sm:hidden">{activeShift ? 'Смена активна' : 'Нет смены'}</span>
+            <span className="hidden sm:inline">{activeShift ? t('Смена активна') : t('Смена не начата')}</span>
+            <span className="sm:hidden">{activeShift ? t('Смена активна') : t('Нет смены')}</span>
           </span>
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
         </div>
@@ -452,7 +455,7 @@ export function WaiterApp() {
               <div className="mx-auto h-full w-full max-w-xl">{rightPanel}</div>
             ) : (
               <>
-                <h2 className="mb-3 shrink-0 text-lg font-semibold text-text-primary">Активные заказы</h2>
+                <h2 className="mb-3 shrink-0 text-lg font-semibold text-text-primary">{t('Активные заказы')}</h2>
                 <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
                   <OrdersList
                     orders={orders}
@@ -477,7 +480,7 @@ export function WaiterApp() {
         {tab === 'menu' && menuPanel}
         {tab === 'cart' && rightPanel}
         {tab === 'orders' && (
-          <Panel title="Активные заказы">
+          <Panel title={t('Активные заказы')}>
             <div className="no-scrollbar overflow-y-auto">
               <OrdersList
                 orders={orders}
@@ -492,7 +495,7 @@ export function WaiterApp() {
           (cabinetOpen ? (
             <div className="no-scrollbar h-full overflow-y-auto px-1 py-1">{cabinetNode}</div>
           ) : (
-            <Panel title="Профиль">
+            <Panel title={t('Профиль')}>
               <div className="no-scrollbar overflow-y-auto">{profilePanel}</div>
             </Panel>
           ))}
@@ -600,6 +603,7 @@ function DesktopNav({
   current: DesktopTab;
   onChange: (tab: DesktopTab) => void;
 }) {
+  const t = useT();
   const items: { key: DesktopTab; label: string }[] = [
     { key: 'tables', label: 'Столы / Заказ' },
     { key: 'orders', label: 'Заказы' },
@@ -620,7 +624,7 @@ function DesktopNav({
             }`}
             onClick={() => onChange(item.key)}
           >
-            {item.label}
+            {t(item.label)}
           </button>
         );
       })}
@@ -647,6 +651,7 @@ function BottomNav({
   cartCount: number;
   ordersCount: number;
 }) {
+  const t = useT();
   return (
     <nav className="grid shrink-0 grid-cols-5 border-t border-border bg-white pb-[env(safe-area-inset-bottom)] lg:hidden">
       {NAV.map((n) => {
@@ -668,7 +673,7 @@ function BottomNav({
                 </span>
               )}
             </span>
-            {n.label}
+            {t(n.label)}
           </button>
         );
       })}

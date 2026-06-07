@@ -11,13 +11,13 @@ export class StaffController {
   constructor(private readonly staff: StaffService) {}
 
   @Get('overview')
-  overview() {
-    return this.staff.overview();
+  overview(@CurrentUser() actor: AuthUser) {
+    return this.staff.overview(actor);
   }
 
   @Get()
-  list(@Query('role') role?: Role, @Query('search') search?: string) {
-    return this.staff.list({ role, search });
+  list(@CurrentUser() actor: AuthUser, @Query('role') role?: Role, @Query('search') search?: string) {
+    return this.staff.list(actor, { role, search });
   }
 
   @Post()

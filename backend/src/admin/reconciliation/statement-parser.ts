@@ -91,24 +91,75 @@ async function parsePdf(buffer: Buffer): Promise<BankOp[]> {
     throw new BadRequestException('Не удалось распознать PDF-выписку');
   }
 
-  const ops: BankOp[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    const time = lineDate(line);
-    if (!time) continue;
-    const cleaned = stripDates(line);
-    for (const amount of lineAmounts(cleaned)) {
-      ops.push({ amount, time, raw: line.replace(/\s+/g, ' ').trim().slice(0, 160) });
-      if (ops.length >= MAX_OPS) return ops;
-    }
-  }
-  return ops;
+  return parsePdfText(text);
 }
 
 const DATE_RE =
   /(\d{4}-\d{2}-\d{2}|\d{2}[.\-/]\d{2}[.\-/]\d{4})(?:[ T](\d{1,2}:\d{2}(?::\d{2})?))?/;
+const LINE_START_DATE_RE =
+  /^(\d{4}-\d{2}-\d{2}|\d{2}[.\-/]\d{2}[.\-/]\d{4})(?:[ T](\d{1,2}:\d{2}(?::\d{2})?))?\b/;
+const SIGNED_AMOUNT_RE = /(?:^|\s)([+-])\s*(\d[\d  ]*[.,]\d{2})(?=\s|$)/g;
 
-function lineDate(line: string): Date | null {
-  const m = line.match(DATE_RE);
+function parsePdfText(text: string): BankOp[] {
+  const ops: BankOp[] = [];
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  let current: { time: Date; lines: string[] } | null = null;
+
+  const flush = () => {
+    if (!current) return;
+    const block = current.lines.join(' ').replace(/\s+/g, ' ').trim();
+    const { amounts, sawSignedAmount } = signedAmountsOf(block);
+    if (amounts.length > 0) {
+      for (const amount of amounts) {
+        ops.push({ amount, time: current.time, raw: block.slice(0, 160) });
+        if (ops.length >= MAX_OPS) return;
+      }
+      return;
+    }
+    if (sawSignedAmount) return;
+
+    // Fallback для PDF, где вся операция действительно находится в одной строке.
+    const cleaned = stripDates(block);
+    for (const amount of lineAmounts(cleaned)) {
+      ops.push({ amount, time: current.time, raw: block.slice(0, 160) });
+      if (ops.length >= MAX_OPS) return;
+    }
+  };
+
+  for (const line of lines) {
+    const time = lineStartDate(line);
+    if (time) {
+      flush();
+      current = { time, lines: [line] };
+      if (ops.length >= MAX_OPS) return ops;
+      continue;
+    }
+    if (current) current.lines.push(line);
+  }
+  flush();
+
+  return ops.slice(0, MAX_OPS);
+}
+
+function signedAmountsOf(block: string): { amounts: number[]; sawSignedAmount: boolean } {
+  const amounts: number[] = [];
+  let sawSignedAmount = false;
+  let m: RegExpExecArray | null;
+  while ((m = SIGNED_AMOUNT_RE.exec(block))) {
+    sawSignedAmount = true;
+    if (m[1] !== '+') continue; // сверяем поступления на счёт, списания не являются оплатами кафе
+    const n = toAmount(m[2]);
+    if (n != null && n > 0) amounts.push(n);
+  }
+  return { amounts, sawSignedAmount };
+}
+
+function lineStartDate(line: string): Date | null {
+  const m = line.match(LINE_START_DATE_RE);
   if (!m) return null;
   return parseDateString(m[1], m[2]);
 }

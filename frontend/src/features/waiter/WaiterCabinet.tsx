@@ -1,57 +1,19 @@
 import type { OrderStatus } from '@/types';
 import { useAuth } from '@/store/auth';
-import { useLang } from '@/store/lang';
+import { useLocale } from '@/store/locale';
 import { disconnectSocket } from '@/lib/socket';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { ORDER_STATUS } from '@/lib/status';
+import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { OrderDetailsModal } from '@/features/admin/components/OrderDetailsModal';
 import { useState } from 'react';
 import { useWaiterCabinet, useOrderDetails, type CabinetRecentOrder } from './api';
 
-const T = {
-  ru: {
-    title: 'Личный кабинет',
-    lang: 'Язык',
-    ky: 'Кыргызча',
-    ru: 'Русский',
-    stats7: 'Статистика за 7 дней',
-    completed: 'Завершено',
-    cancelled: 'Отменено',
-    revenue: 'Выручка',
-    recent: 'Последние заказы',
-    viewAll: 'Смотреть все',
-    today: 'Сегодня',
-    yesterday: 'Вчера',
-    earlier: 'Ранее',
-    empty: 'Заказов пока нет',
-    table: 'Стол',
-    logout: 'Выйти',
-  },
-  ky: {
-    title: 'Жеке кабинет',
-    lang: 'Тил',
-    ky: 'Кыргызча',
-    ru: 'Русский',
-    stats7: '7 күндүк статистика',
-    completed: 'Аякталган',
-    cancelled: 'Жокко чыгарылган',
-    revenue: 'Түшүм',
-    recent: 'Акыркы заказдар',
-    viewAll: 'Баарын көрүү',
-    today: 'Бүгүн',
-    yesterday: 'Кечээ',
-    earlier: 'Мурда',
-    empty: 'Азырынча заказдар жок',
-    table: 'Стол',
-    logout: 'Чыгуу',
-  },
-} as const;
-
 export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onViewAll: () => void }) {
   const logout = useAuth((s) => s.logout);
-  const { lang, setLang } = useLang();
-  const t = T[lang];
+  const { locale, setLocale } = useLocale();
+  const t = useT();
   const cabinetQ = useWaiterCabinet();
   const [detailId, setDetailId] = useState<string | null>(null);
   const detailQ = useOrderDetails(detailId);
@@ -69,41 +31,41 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
       <div className="flex items-center gap-2">
         <button
           onClick={onBack}
-          aria-label="Назад"
+          aria-label={t('Назад')}
           className="-ml-1 flex h-9 w-9 items-center justify-center rounded-lg text-text-secondary transition-colors hover:bg-background"
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="m15 18-6-6 6-6" />
           </svg>
         </button>
-        <h2 className="text-lg font-semibold text-text-primary">{t.title}</h2>
+        <h2 className="text-lg font-semibold text-text-primary">{t('Личный кабинет')}</h2>
       </div>
 
       {/* Язык */}
       <div className="card flex items-center justify-between gap-3 p-4">
-        <span className="text-[15px] font-medium text-text-primary">{t.lang}</span>
+        <span className="text-[15px] font-medium text-text-primary">{t('Язык')}</span>
         <div className="flex rounded-lg border border-border p-0.5">
-          <LangButton active={lang === 'ky'} onClick={() => setLang('ky')}>
-            {t.ky}
+          <LangButton active={locale === 'ky'} onClick={() => setLocale('ky')}>
+            {t('Кыргызча')}
           </LangButton>
-          <LangButton active={lang === 'ru'} onClick={() => setLang('ru')}>
-            {t.ru}
+          <LangButton active={locale === 'ru'} onClick={() => setLocale('ru')}>
+            {t('Русский')}
           </LangButton>
         </div>
       </div>
 
       {/* Статистика за 7 дней */}
       <div className="card p-5">
-        <h3 className="mb-3 text-[15px] font-semibold text-text-primary">{t.stats7}</h3>
+        <h3 className="mb-3 text-[15px] font-semibold text-text-primary">{t('Статистика за 7 дней')}</h3>
         {cabinetQ.isLoading ? (
           <div className="flex justify-center py-4 text-primary">
             <Spinner className="h-5 w-5" />
           </div>
         ) : (
           <div className="divide-y divide-border">
-            <StatRow icon={<IconCheck />} tint="text-success" label={t.completed} value={String(cabinetQ.data?.stats.completed ?? 0)} />
-            <StatRow icon={<IconCancel />} tint="text-warning" label={t.cancelled} value={String(cabinetQ.data?.stats.cancelled ?? 0)} />
-            <StatRow icon={<IconRevenue />} tint="text-primary" label={t.revenue} value={money(cabinetQ.data?.stats.revenue ?? 0)} valueClass="text-primary" />
+            <StatRow icon={<IconCheck />} tint="text-success" label={t('Завершено')} value={String(cabinetQ.data?.stats.completed ?? 0)} />
+            <StatRow icon={<IconCancel />} tint="text-warning" label={t('Отменено')} value={String(cabinetQ.data?.stats.cancelled ?? 0)} />
+            <StatRow icon={<IconRevenue />} tint="text-primary" label={t('Выручка')} value={money(cabinetQ.data?.stats.revenue ?? 0)} valueClass="text-primary" />
           </div>
         )}
       </div>
@@ -111,9 +73,9 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
       {/* Последние заказы */}
       <div className="card p-5">
         <div className="mb-2 flex items-center justify-between gap-3">
-          <h3 className="text-[15px] font-semibold text-text-primary">{t.recent}</h3>
+          <h3 className="text-[15px] font-semibold text-text-primary">{t('Последние заказы')}</h3>
           <button onClick={onViewAll} className="text-sm font-medium text-primary hover:underline">
-            {t.viewAll}
+            {t('Смотреть все')}
           </button>
         </div>
 
@@ -122,7 +84,7 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
             <Spinner className="h-5 w-5" />
           </div>
         ) : groups.length === 0 ? (
-          <p className="py-4 text-center text-sm text-text-muted">{t.empty}</p>
+          <p className="py-4 text-center text-sm text-text-muted">{t('Заказов пока нет')}</p>
         ) : (
           <div className="space-y-3">
             {groups.map((g) => (
@@ -130,7 +92,7 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
                 <p className="mb-1 text-xs font-medium uppercase tracking-wide text-text-light">{g.label}</p>
                 <div className="divide-y divide-border">
                   {g.orders.map((o) => (
-                    <OrderRow key={o.id} order={o} tableLabel={t.table} onOpen={() => setDetailId(o.id)} />
+                    <OrderRow key={o.id} order={o} tableLabel={t('Стол')} onOpen={() => setDetailId(o.id)} />
                   ))}
                 </div>
               </div>
@@ -145,7 +107,7 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
           <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
           <path d="M16 17l5-5-5-5M21 12H9" />
         </svg>
-        {t.logout}
+        {t('Выйти')}
       </button>
 
       <OrderDetailsModal order={detailQ.data ?? null} onClose={() => setDetailId(null)} />
@@ -199,6 +161,7 @@ function OrderRow({
   tableLabel: string;
   onOpen: () => void;
 }) {
+  const t = useT();
   const s = statusMeta(order.status);
   return (
     <button
@@ -209,7 +172,7 @@ function OrderRow({
       <span className="shrink-0 text-text-muted">{tableLabel} {order.tableNumber}</span>
       <span className="shrink-0 text-text-light">{timeHM(order.createdAt)}</span>
       <span className="ml-auto shrink-0 font-medium text-text-primary">{money(order.finalAmount)}</span>
-      <span className={`shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-medium ${s.cls}`}>{s.label}</span>
+      <span className={`shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-medium ${s.cls}`}>{t(s.label)}</span>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-text-light" aria-hidden>
         <path d="m9 18 6-6-6-6" />
       </svg>
@@ -226,7 +189,7 @@ function statusMeta(status: OrderStatus): { label: string; cls: string } {
 
 function groupByDay(
   orders: CabinetRecentOrder[],
-  t: { today: string; yesterday: string; earlier: string },
+  t: (value: string) => string,
 ) {
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const todayStart = startOfDay(new Date());
@@ -239,9 +202,9 @@ function groupByDay(
     else buckets.earlier.push(o);
   }
   return [
-    { key: 'today', label: t.today, orders: buckets.today },
-    { key: 'yesterday', label: t.yesterday, orders: buckets.yesterday },
-    { key: 'earlier', label: t.earlier, orders: buckets.earlier },
+    { key: 'today', label: t('Сегодня'), orders: buckets.today },
+    { key: 'yesterday', label: t('Вчера'), orders: buckets.yesterday },
+    { key: 'earlier', label: t('Ранее'), orders: buckets.earlier },
   ].filter((g) => g.orders.length > 0);
 }
 

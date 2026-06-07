@@ -17,7 +17,7 @@ export class PaymentsController {
 
   @Get(':orderId/receipt')
   @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
-  receipt(@Param('orderId') orderId: string) {
-    return this.payments.receipt(orderId);
+  receipt(@CurrentUser() user: AuthUser, @Param('orderId') orderId: string) {
+    return this.payments.receipt(user, orderId);
   }
 }
