@@ -1,8 +1,10 @@
 import { Spinner } from '@/components/Spinner';
-import { apiError } from '@/lib/api';
+import { api, apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
+import type { Receipt } from '@/types';
+import { printReceipt } from '@/features/waiter/printReceipt';
 import { useReceiptPrintRequests, useReceiptPrintActions } from '../api';
 
 /** Раздел администратора «Печать чека»: заявки официантов на печать. */
@@ -25,6 +27,19 @@ export function ReceiptPrintsPage() {
       await action.mutateAsync(id);
       push({ message: okMessage, type: 'success', at: new Date().toISOString() });
     } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
+
+  async function approveAndPrint(id: string, okMessage: string) {
+    const printWindow = window.open('', '_blank', 'width=380,height=640');
+    try {
+      const request = await approve.mutateAsync(id);
+      const receipt = (await api.get<Receipt>(`/payments/${request.orderId}/receipt`)).data;
+      printReceipt(receipt, printWindow);
+      push({ message: okMessage, type: 'success', at: new Date().toISOString() });
+    } catch (err) {
+      printWindow?.close();
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
@@ -68,7 +83,7 @@ export function ReceiptPrintsPage() {
                           aria-label={t('Принять')}
                           title={t('Принять')}
                           disabled={busy}
-                          onClick={() => run(approve, r.id, `Чек ${displayOrderNumber(r.orderNumber)} распечатан`)}
+                          onClick={() => approveAndPrint(r.id, `Чек ${displayOrderNumber(r.orderNumber)} распечатан`)}
                           className="flex h-9 w-9 items-center justify-center rounded-lg border border-success/40 text-success transition-colors hover:bg-success/10 disabled:opacity-50"
                         >
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

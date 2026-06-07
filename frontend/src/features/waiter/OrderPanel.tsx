@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { ORDER_STATUS } from '@/lib/status';
@@ -165,10 +166,27 @@ function ActionButton({
   onCancelOrder: () => void;
 }) {
   const t = useT();
+  const [actionCooldown, setActionCooldown] = useState(0);
   const s = order.status;
   const spin = submitting ? <Spinner /> : null;
   const waitingDecision = s === 'partially_rejected' && order.requiresWaiterDecision;
   const hasReadyItem = order.items.some((item) => item.status === 'ready');
+  const cooldownActive = actionCooldown > 0;
+
+  useEffect(() => {
+    if (!cooldownActive) return;
+    const id = window.setTimeout(() => setActionCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(id);
+  }, [cooldownActive, actionCooldown]);
+
+  useEffect(() => {
+    setActionCooldown(0);
+  }, [order.id]);
+
+  function runProtectedAction(action: () => void) {
+    setActionCooldown(5);
+    action();
+  }
 
   if (waitingDecision) {
     return (
@@ -194,8 +212,8 @@ function ActionButton({
     !['paid', 'cancelled', 'rejected', 'waiting_payment', 'picked_up', 'served'].includes(s)
   ) {
     return (
-      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onPickedUp}>
-        {spin ?? t('Забрал с кухни')}
+      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onPickedUp)}>
+        {cooldownActive ? actionCooldown : spin ?? t('Забрал с кухни')}
       </button>
     );
   }
@@ -210,15 +228,15 @@ function ActionButton({
   }
   if (s === 'picked_up') {
     return (
-      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onServed}>
-        {spin ?? t('Вынес гостям')}
+      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onServed)}>
+        {cooldownActive ? actionCooldown : spin ?? t('Вынес гостям')}
       </button>
     );
   }
   if (s === 'served') {
     return (
-      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onToPayment}>
-        {spin ?? t('Перейти к оплате')}
+      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onToPayment)}>
+        {cooldownActive ? actionCooldown : spin ?? t('Перейти к оплате')}
       </button>
     );
   }

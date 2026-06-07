@@ -8,7 +8,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
 };
 
 /** Открывает окно печати с компактным чеком (подходит для термопринтера 58–80мм). */
-export function printReceipt(r: Receipt) {
+export function printReceipt(r: Receipt, targetWindow?: Window | null) {
   const date = new Date(r.date);
   const dateStr = `${date.toLocaleDateString('ru-RU')} ${timeHM(r.date)}`;
   const orderNumber = displayOrderNumber(r.orderNumber);
@@ -54,7 +54,7 @@ export function printReceipt(r: Receipt) {
     <div class="center muted">${escapeHtml(r.thanks)}</div>
   </body></html>`;
 
-  const w = window.open('', '_blank', 'width=380,height=640');
+  const w = targetWindow ?? window.open('', '_blank', 'width=380,height=640');
   if (!w) return;
   w.document.write(html);
   w.document.close();

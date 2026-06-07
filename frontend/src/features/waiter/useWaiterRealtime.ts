@@ -6,7 +6,6 @@ import { displayOrderNumber } from '@/lib/format';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import type { AppNotification, Order, ReceiptPrintRequest } from '@/types';
 import { useReceiptPrint } from './receiptPrint';
-import { printReceipt } from './printReceipt';
 
 /** Подписки официанта на real-time события сервера. */
 export function useWaiterRealtime() {
@@ -48,7 +47,6 @@ export function useWaiterRealtime() {
   useSocketEvent<ReceiptPrintRequest>('receipt_print_request_printed', (req) => {
     const st = useReceiptPrint.getState();
     if (st.request?.id !== req.id) return;
-    if (st.receipt) printReceipt(st.receipt);
     if (st.sheetOpen) {
       st.resolve('printed');
     } else {
