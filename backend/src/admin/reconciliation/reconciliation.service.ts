@@ -87,6 +87,6 @@ export class ReconciliationService {
 }
 
 function clampTolerance(min: number): number {
-  if (!Number.isFinite(min)) return 5;
+  if (!Number.isFinite(min)) return 3;
   return Math.min(60, Math.max(1, Math.round(min)));
 }

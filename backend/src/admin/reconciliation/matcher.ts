@@ -3,9 +3,18 @@ import type { BankOp, OrderLite, ReconResult, ReconRow, ReconStatus } from './re
 const AMOUNT_EPS = 0.01;
 /** Если две ближайшие операции отличаются по времени меньше этого порога — это «требует проверки». */
 const AMBIGUOUS_MS = 60_000;
+const MAX_NEAR_AMOUNT_DIFF = 2;
 
 function sameAmount(a: number, b: number) {
   return Math.abs(a - b) < AMOUNT_EPS;
+}
+
+function amountDiff(a: number, b: number) {
+  return Math.abs(a - b);
+}
+
+function closeAmount(a: number, b: number) {
+  return amountDiff(a, b) <= MAX_NEAR_AMOUNT_DIFF;
 }
 
 /** Числовой токен номера заказа («№25» → "25") для поиска в тексте операции. */
@@ -50,9 +59,22 @@ export function reconcile(orders: OrderLite[], ops: BankOp[], toleranceMin: numb
             .sort((a, b) => a.dist - b.dist)[0]
         : undefined;
 
+      const close = timed
+        .map((op, i) => ({
+          op,
+          i,
+          dist: Math.abs(op.time!.getTime() - order.time.getTime()),
+          amountDiff: amountDiff(op.amount, order.amount),
+        }))
+        .filter((c) => !used.has(c.i) && c.dist <= tolMs && closeAmount(c.op.amount, order.amount))
+        .sort((a, b) => a.amountDiff - b.amountDiff || a.dist - b.dist)[0];
+
       if (linked) {
         used.add(linked.i);
         rows.push(orderRow(order, linked.op, linked.dist, 'amount_mismatch', 'Связь по номеру заказа, сумма отличается'));
+      } else if (close) {
+        used.add(close.i);
+        rows.push(orderRow(order, close.op, close.dist, 'amount_mismatch', 'Похоже по времени, сумма отличается'));
       } else {
         rows.push(orderRow(order, null, null, 'not_found', 'Подходящей операции в выписке нет'));
       }
@@ -77,7 +99,7 @@ export function reconcile(orders: OrderLite[], ops: BankOp[], toleranceMin: numb
     if (used.has(i)) continue;
     const op = timed[i];
     const looksLikeOrder = orders.some(
-      (o) => sameAmount(o.amount, op.amount) && Math.abs(op.time!.getTime() - o.time.getTime()) <= tolMs,
+      (o) => closeAmount(op.amount, o.amount) && Math.abs(op.time!.getTime() - o.time.getTime()) <= tolMs,
     );
     if (!looksLikeOrder) continue; // нерелевантные/личные операции игнорируем (приватность)
     rows.push({

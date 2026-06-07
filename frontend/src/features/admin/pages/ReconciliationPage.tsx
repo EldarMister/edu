@@ -5,7 +5,7 @@ import { money } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { useReconcile, type ReconResult, type ReconRow, type ReconStatus } from '../api';
 
-const TOLERANCES = [1, 3, 5, 10];
+const DEFAULT_TOLERANCE_MIN = 3;
 const ACCEPT = '.pdf,.xls,.xlsx,.csv';
 
 const STATUS_META: Record<ReconStatus, { label: string; cls: string }> = {
@@ -24,7 +24,6 @@ export function ReconciliationPage() {
 
   const [from, setFrom] = useState(weekAgo);
   const [to, setTo] = useState(today);
-  const [tolerance, setTolerance] = useState(5);
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<ReconResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -37,7 +36,7 @@ export function ReconciliationPage() {
       return;
     }
     try {
-      const res = await recon.mutateAsync({ file, from, to, toleranceMin: tolerance });
+      const res = await recon.mutateAsync({ file, from, to, toleranceMin: DEFAULT_TOLERANCE_MIN });
       setResult(res);
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
@@ -55,22 +54,6 @@ export function ReconciliationPage() {
           <Field label="По дату">
             <input className="input h-10 w-[150px]" type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
           </Field>
-          <Field label="Погрешность времени">
-            <div className="inline-flex rounded-xl bg-background p-1">
-              {TOLERANCES.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTolerance(t)}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                    tolerance === t ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
-                  }`}
-                >
-                  ±{t} мин
-                </button>
-              ))}
-            </div>
-          </Field>
-
           <div className="ml-auto flex items-end gap-2">
             <input
               ref={fileRef}
@@ -102,7 +85,7 @@ export function ReconciliationPage() {
         <div className="card flex flex-col items-center justify-center gap-2 py-16 text-center">
           <p className="text-text-secondary">Загрузите банковскую выписку и нажмите «Начать сверку»</p>
           <p className="max-w-md text-xs text-text-muted">
-            Система сопоставит оплаченные заказы POS с операциями из выписки по сумме и времени (±{tolerance} мин).
+            Система сопоставит оплаченные заказы POS с операциями из выписки по сумме и времени.
             Личные операции, не относящиеся к заказам, не отображаются.
           </p>
         </div>
