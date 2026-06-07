@@ -102,6 +102,13 @@ enum PenaltyType {
   reward
 }
 
+enum ReceiptPrintStatus {
+  pending // ожидает решения администратора
+  approved // администратор подтвердил
+  rejected // администратор отклонил
+  printed // чек распечатан / отправлен на печать
+}
+
 // ---------- Models ----------
 
 model User {
@@ -126,6 +133,7 @@ model User {
   incidentsMade   Incident[]      @relation("IncidentAuthor")
   auditLogs       AuditLog[]
   pushSubscriptions PushSubscription[]
+  receiptPrintRequests ReceiptPrintRequest[] @relation("WaiterReceiptPrints")
 
   @@map("users")
 }
@@ -224,6 +232,7 @@ model Order {
   kitchenEvents KitchenEvent[]
   incidents     Incident[]
   actions       OrderAction[]
+  receiptPrintRequests ReceiptPrintRequest[]
 
   @@index([status])
   @@index([tableId])
@@ -414,4 +423,25 @@ model PushSubscription {
 
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+// Запрос официанта на печать чека — подтверждается администратором (раздел «Печать чека»).
+model ReceiptPrintRequest {
+  id          String             @id @default(uuid())
+  orderId     String             @map("order_id")
+  waiterId    String             @map("waiter_id")
+  tableNumber Int                @map("table_number")
+  orderNumber String             @map("order_number")
+  amount      Decimal            @db.Decimal(10, 2)
+  status      ReceiptPrintStatus @default(pending)
+  decidedById String?            @map("decided_by") // администратор, принявший решение
+  createdAt   DateTime           @default(now()) @map("created_at")
+  decidedAt   DateTime?          @map("decided_at")
+
+  order  Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  waiter User  @relation("WaiterReceiptPrints", fields: [waiterId], references: [id])
+
+  @@index([status])
+  @@index([waiterId])
+  @@map("receipt_print_requests")
 }

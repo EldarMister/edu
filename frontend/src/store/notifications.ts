@@ -10,6 +10,7 @@ interface NotifyState {
 }
 
 let counter = 0;
+const MAX_TOASTS = 4;
 
 export const useNotifications = create<NotifyState>((set) => ({
   toasts: [],
@@ -17,7 +18,7 @@ export const useNotifications = create<NotifyState>((set) => ({
   push: (n) =>
     set((s) => {
       const item: AppNotification = { ...n, id: `n${++counter}` };
-      return { toasts: [...s.toasts, item], history: [item, ...s.history].slice(0, 50) };
+      return { toasts: [...s.toasts, item].slice(-MAX_TOASTS), history: [item, ...s.history].slice(0, 50) };
     }),
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   clearHistory: () => set({ history: [] }),

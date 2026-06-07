@@ -11,6 +11,7 @@ import { DishesModule } from './dishes/dishes.module';
 import { OrdersModule } from './orders/orders.module';
 import { KitchenModule } from './kitchen/kitchen.module';
 import { PaymentsModule } from './payments/payments.module';
+import { ReceiptPrintsModule } from './receipt-prints/receipt-prints.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { WaiterShiftsModule } from './waiter-shifts/waiter-shifts.module';
 import { AdminModule } from './admin/admin.module';
@@ -35,6 +36,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     WaiterShiftsModule,
     KitchenModule,
     PaymentsModule,
+    ReceiptPrintsModule,
     AdminModule,
     SettingsModule,
     PushModule,

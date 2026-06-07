@@ -8,8 +8,8 @@ import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { usePublicSettings, resolveQrSrc } from '@/features/settings/api';
 import { beep } from '@/lib/sound';
-import { usePay, fetchReceipt } from './api';
-import { printReceipt } from './printReceipt';
+import { usePay, fetchReceipt, useCreateReceiptPrintRequest } from './api';
+import { useReceiptPrint } from './receiptPrint';
 
 const ALL_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'qr', label: 'QR-код' },
@@ -30,6 +30,8 @@ export function PaymentModal({
 }) {
   const t = useT();
   const pay = usePay();
+  const createPrintRequest = useCreateReceiptPrintRequest();
+  const beginPrint = useReceiptPrint((s) => s.begin);
   const push = useNotifications((s) => s.push);
   const settings = usePublicSettings();
   const [method, setMethod] = useState<PaymentMethod | null>(null);
@@ -78,6 +80,19 @@ export function PaymentModal({
     if (receipt) onPaid();
   }
 
+  // «Печать чека»: не печатаем сразу, а создаём запрос администратору и
+  // открываем нижний лист ожидания. Сам чек распечатается после подтверждения.
+  async function requestPrint() {
+    if (!receipt) return;
+    try {
+      const request = await createPrintRequest.mutateAsync(order.id);
+      beginPrint(request, receipt);
+      close();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
   // Промежуточный шаг — анимированное подтверждение оплаты
   if (showSuccess) {
     return (
@@ -112,8 +127,12 @@ export function PaymentModal({
             <button className="btn-secondary btn-lg flex-1" onClick={close}>
               {t('Готово')}
             </button>
-            <button className="btn-primary btn-lg flex-1 font-semibold" onClick={() => printReceipt(receipt)}>
-              {t('Печать чека')}
+            <button
+              className="btn-primary btn-lg flex-1 font-semibold"
+              disabled={createPrintRequest.isPending}
+              onClick={requestPrint}
+            >
+              {createPrintRequest.isPending ? <Spinner /> : t('Печать чека')}
             </button>
           </div>
         }

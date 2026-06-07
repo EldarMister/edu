@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
-import type { Order, PaymentMethod, Role, TableStatus } from '@/types';
+import type { Order, PaymentMethod, ReceiptPrintRequest, Role, TableStatus } from '@/types';
 
 // ---------- Типы ответов ----------
 export interface AdminTableItem {
@@ -413,4 +413,25 @@ export function useStaffMutations() {
     onSuccess: invalidate,
   });
   return { create, update, remove };
+}
+
+// ========== ПЕЧАТЬ ЧЕКА ==========
+export function useReceiptPrintRequests() {
+  return useQuery({
+    queryKey: ['admin', 'receipt-prints'],
+    queryFn: () => get<ReceiptPrintRequest[]>('/receipt-prints'),
+  });
+}
+
+export function useReceiptPrintActions() {
+  const invalidate = useInvalidate([['admin', 'receipt-prints']]);
+  const approve = useMutation({
+    mutationFn: (id: string) => api.post(`/receipt-prints/${id}/approve`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const reject = useMutation({
+    mutationFn: (id: string) => api.post(`/receipt-prints/${id}/reject`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { approve, reject };
 }

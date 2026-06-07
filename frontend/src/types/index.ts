@@ -151,6 +151,22 @@ export interface Receipt {
   thanks: string;
 }
 
+export type ReceiptPrintStatus = 'pending' | 'approved' | 'rejected' | 'printed';
+
+/** Запрос официанта на печать чека (подтверждается администратором). */
+export interface ReceiptPrintRequest {
+  id: string;
+  orderId: string;
+  orderNumber: string;
+  tableNumber: number;
+  waiterId: string;
+  waiterName: string;
+  amount: string;
+  status: ReceiptPrintStatus;
+  createdAt: string;
+  decidedAt?: string | null;
+}
+
 /** Локальная позиция корзины (до отправки на кухню). */
 export interface CartLine {
   dish: Dish;

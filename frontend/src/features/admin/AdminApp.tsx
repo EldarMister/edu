@@ -16,6 +16,7 @@ import {
   IconSettings,
   IconJournal,
   IconReconcile,
+  IconPrinter,
   IconLogout,
 } from './components/icons';
 import { StatisticsPage } from './pages/StatisticsPage';
@@ -25,13 +26,24 @@ import { MenuPage } from './pages/MenuPage';
 import { StaffPage } from './pages/StaffPage';
 import { AuditPage } from './pages/AuditPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
+import { ReceiptPrintsPage } from './pages/ReceiptPrintsPage';
 import { SettingsPage } from '../settings/SettingsPage';
 
-type Section = 'stats' | 'orders' | 'tables' | 'menu' | 'staff' | 'audit' | 'reconcile' | 'settings';
+type Section =
+  | 'stats'
+  | 'orders'
+  | 'receipts'
+  | 'tables'
+  | 'menu'
+  | 'staff'
+  | 'audit'
+  | 'reconcile'
+  | 'settings';
 
 const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly?: boolean }[] = [
   { key: 'stats', label: 'Статистика', icon: IconStats, ownerOnly: true },
   { key: 'orders', label: 'Заказы', icon: IconOrders },
+  { key: 'receipts', label: 'Печать чека', icon: IconPrinter },
   { key: 'tables', label: 'Столы', icon: IconTables },
   { key: 'menu', label: 'Меню', icon: IconMenu },
   { key: 'staff', label: 'Персонал', icon: IconStaff },
@@ -65,6 +77,12 @@ export function AdminApp() {
     qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
     qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
   });
+  // Печать чека: новая заявка / решение по ней — обновляем список без перезагрузки.
+  const invalidateReceipts = () =>
+    qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
+  useSocketEvent('receipt_print_request_created', invalidateReceipts);
+  useSocketEvent('receipt_print_request_printed', invalidateReceipts);
+  useSocketEvent('receipt_print_request_rejected', invalidateReceipts);
 
   function onLogout() {
     disconnectSocket();
@@ -159,6 +177,7 @@ export function AdminApp() {
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           {section === 'stats' && isOwner && <StatisticsPage />}
           {section === 'orders' && <OrdersPage />}
+          {section === 'receipts' && <ReceiptPrintsPage />}
           {section === 'tables' && <TablesPage />}
           {section === 'menu' && <MenuPage />}
           {section === 'staff' && <StaffPage />}

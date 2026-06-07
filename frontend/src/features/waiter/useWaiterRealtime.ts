@@ -4,7 +4,9 @@ import { useNotifications } from '@/store/notifications';
 import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/lib/format';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
-import type { AppNotification, Order } from '@/types';
+import type { AppNotification, Order, ReceiptPrintRequest } from '@/types';
+import { useReceiptPrint } from './receiptPrint';
+import { printReceipt } from './printReceipt';
 
 /** Подписки официанта на real-time события сервера. */
 export function useWaiterRealtime() {
@@ -41,4 +43,38 @@ export function useWaiterRealtime() {
   );
   // Кухня изменила стоп-лист / меню — обновляем доступность блюд без перезагрузки.
   useSocketEvent('menu:updated', () => qc.invalidateQueries({ queryKey: ['dishes'] }));
+
+  // Печать чека: администратор подтвердил → печатаем; отклонил → показываем отказ.
+  useSocketEvent<ReceiptPrintRequest>('receipt_print_request_printed', (req) => {
+    const st = useReceiptPrint.getState();
+    if (st.request?.id !== req.id) return;
+    if (st.receipt) printReceipt(st.receipt);
+    if (st.sheetOpen) {
+      st.resolve('printed');
+    } else {
+      push({
+        message: `Чек ${displayOrderNumber(req.orderNumber)} распечатан. Заберите чек.`,
+        type: 'success',
+        at: new Date().toISOString(),
+      });
+      st.dismiss();
+    }
+    beep('notify');
+  });
+
+  useSocketEvent<ReceiptPrintRequest>('receipt_print_request_rejected', (req) => {
+    const st = useReceiptPrint.getState();
+    if (st.request?.id !== req.id) return;
+    if (st.sheetOpen) {
+      st.resolve('rejected');
+    } else {
+      push({
+        message: 'Печать чека отклонена администратором',
+        type: 'error',
+        at: new Date().toISOString(),
+      });
+      st.dismiss();
+    }
+    beep('notify');
+  });
 }

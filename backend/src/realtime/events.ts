@@ -19,4 +19,9 @@ export const SERVER_EVENTS = {
   TABLE_STATUS_CHANGED: 'table:status_changed',
   MENU_UPDATED: 'menu:updated',
   NOTIFICATION_NEW: 'notification:new',
+  // Печать чека: официант ⇄ администратор.
+  RECEIPT_PRINT_REQUEST_CREATED: 'receipt_print_request_created',
+  RECEIPT_PRINT_REQUEST_APPROVED: 'receipt_print_request_approved',
+  RECEIPT_PRINT_REQUEST_REJECTED: 'receipt_print_request_rejected',
+  RECEIPT_PRINT_REQUEST_PRINTED: 'receipt_print_request_printed',
 } as const;

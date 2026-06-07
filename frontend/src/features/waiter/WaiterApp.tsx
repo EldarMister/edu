@@ -45,6 +45,7 @@ import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
 import { WaiterCabinet } from './WaiterCabinet';
 import { PaymentModal } from './PaymentModal';
+import { ReceiptPrintSheet } from './ReceiptPrintSheet';
 import { CancelOrderModal } from './CancelOrderModal';
 import {
   TableActionsMenu,
@@ -596,6 +597,9 @@ export function WaiterApp() {
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancelOrder}
       />
+
+      {/* Нижний лист «Печать чека» (ожидание / распечатан / отклонён) */}
+      <ReceiptPrintSheet />
 
       {/* Смена стола на экране меню */}
       {tablePickerOpen && (

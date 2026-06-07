@@ -1,6 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, networkRetry } from '@/lib/api';
-import type { Category, Dish, Hall, Order, OrderStatus, PaymentMethod, Receipt, WaiterShift } from '@/types';
+import type {
+  Category,
+  Dish,
+  Hall,
+  Order,
+  OrderStatus,
+  PaymentMethod,
+  Receipt,
+  ReceiptPrintRequest,
+  WaiterShift,
+} from '@/types';
 import type { CartLine } from '@/types';
 
 export interface CabinetRecentOrder {
@@ -258,4 +268,13 @@ export function usePay() {
 
 export async function fetchReceipt(orderId: string): Promise<Receipt> {
   return (await api.get<Receipt>(`/payments/${orderId}/receipt`)).data;
+}
+
+/** Официант создаёт запрос на печать чека (уходит администратору). */
+export function useCreateReceiptPrintRequest() {
+  return useMutation({
+    mutationFn: async (orderId: string) =>
+      (await api.post<ReceiptPrintRequest>('/receipt-prints', { orderId })).data,
+    retry: networkRetry,
+  });
 }
