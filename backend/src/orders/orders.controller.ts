@@ -24,6 +24,12 @@ export class OrdersController {
     return this.orders.findActiveForWaiter(user.id);
   }
 
+  @Get('cabinet')
+  @Roles(Role.WAITER)
+  cabinet(@CurrentUser() user: AuthUser) {
+    return this.orders.waiterCabinet(user.id);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.orders.findById(id);

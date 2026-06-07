@@ -39,6 +39,7 @@ import { CartPanel } from './CartPanel';
 import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
+import { WaiterCabinet } from './WaiterCabinet';
 import { PaymentModal } from './PaymentModal';
 import { CancelOrderModal } from './CancelOrderModal';
 import {
@@ -84,6 +85,7 @@ export function WaiterApp() {
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
+  const [cabinetOpen, setCabinetOpen] = useState(false);
   const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
   const [idemKey, setIdemKey] = useState(() => clientId());
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
@@ -188,6 +190,7 @@ export function WaiterApp() {
 
   function changeTab(next: Tab) {
     setViewingOrderId(null);
+    setCabinetOpen(false);
     setTab(next);
   }
 
@@ -404,7 +407,13 @@ export function WaiterApp() {
       }
       pushStatus={pushNotifications.status}
       onEnablePush={pushNotifications.enable}
+      onOpenCabinet={() => setCabinetOpen(true)}
     />
+  );
+
+  // Личный кабинет официанта — отдельный экран поверх вкладки «Профиль».
+  const cabinetNode = (
+    <WaiterCabinet onBack={() => setCabinetOpen(false)} onViewAll={() => changeTab('orders')} />
   );
 
   const desktopView: DesktopTab = activeNavTab === 'orders' || activeNavTab === 'profile' ? activeNavTab : 'tables';
@@ -457,7 +466,7 @@ export function WaiterApp() {
           </div>
         ) : (
           <div className="no-scrollbar mx-auto h-full w-full max-w-xl overflow-y-auto py-2">
-            {profilePanel}
+            {cabinetOpen ? cabinetNode : profilePanel}
           </div>
         )}
       </main>
@@ -479,13 +488,14 @@ export function WaiterApp() {
             </div>
           </Panel>
         )}
-        {tab === 'profile' && (
-          <Panel title="Профиль">
-            <div className="no-scrollbar overflow-y-auto">
-              {profilePanel}
-            </div>
-          </Panel>
-        )}
+        {tab === 'profile' &&
+          (cabinetOpen ? (
+            <div className="no-scrollbar h-full overflow-y-auto px-1 py-1">{cabinetNode}</div>
+          ) : (
+            <Panel title="Профиль">
+              <div className="no-scrollbar overflow-y-auto">{profilePanel}</div>
+            </Panel>
+          ))}
       </main>
 
       <BottomNav

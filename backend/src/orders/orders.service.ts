@@ -80,6 +80,57 @@ export class OrdersService {
     });
   }
 
+  /**
+   * Сводка для личного кабинета официанта: статистика за 7 дней
+   * (завершено / отменено / выручка) и последние заказы.
+   */
+  async waiterCabinet(waiterId: string) {
+    const since = new Date();
+    since.setDate(since.getDate() - 7);
+
+    const [completed, cancelled, revenue, recent] = await Promise.all([
+      this.prisma.order.count({
+        where: { waiterId, status: OrderStatus.paid, createdAt: { gte: since } },
+      }),
+      this.prisma.order.count({
+        where: { waiterId, status: OrderStatus.cancelled, createdAt: { gte: since } },
+      }),
+      this.prisma.order.aggregate({
+        _sum: { finalAmount: true },
+        where: { waiterId, status: OrderStatus.paid, createdAt: { gte: since } },
+      }),
+      this.prisma.order.findMany({
+        where: { waiterId },
+        orderBy: { createdAt: 'desc' },
+        take: 8,
+        select: {
+          id: true,
+          orderNumber: true,
+          finalAmount: true,
+          status: true,
+          createdAt: true,
+          table: { select: { number: true } },
+        },
+      }),
+    ]);
+
+    return {
+      stats: {
+        completed,
+        cancelled,
+        revenue: String(revenue._sum.finalAmount ?? 0),
+      },
+      recentOrders: recent.map((o) => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        tableNumber: o.table.number,
+        finalAmount: String(o.finalAmount),
+        status: o.status,
+        createdAt: o.createdAt,
+      })),
+    };
+  }
+
   // ---------- Создание заказа (официант → кухня) ----------
 
   async create(actor: AuditActor, dto: CreateOrderDto) {

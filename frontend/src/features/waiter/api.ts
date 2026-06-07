@@ -1,7 +1,35 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, networkRetry } from '@/lib/api';
-import type { Category, Dish, Hall, Order, PaymentMethod, Receipt, WaiterShift } from '@/types';
+import type { Category, Dish, Hall, Order, OrderStatus, PaymentMethod, Receipt, WaiterShift } from '@/types';
 import type { CartLine } from '@/types';
+
+export interface CabinetRecentOrder {
+  id: string;
+  orderNumber: string;
+  tableNumber: number;
+  finalAmount: string;
+  status: OrderStatus;
+  createdAt: string;
+}
+export interface WaiterCabinetData {
+  stats: { completed: number; cancelled: number; revenue: string };
+  recentOrders: CabinetRecentOrder[];
+}
+
+export function useWaiterCabinet() {
+  return useQuery({
+    queryKey: ['waiter', 'cabinet'],
+    queryFn: async () => (await api.get<WaiterCabinetData>('/orders/cabinet')).data,
+  });
+}
+
+export function useOrderDetails(id: string | null) {
+  return useQuery({
+    queryKey: ['orders', 'detail', id],
+    queryFn: async () => (await api.get<Order>(`/orders/${id}`)).data,
+    enabled: !!id,
+  });
+}
 
 export function useHalls() {
   return useQuery({
