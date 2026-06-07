@@ -56,8 +56,8 @@ export function useWaiterRealtime() {
         at: new Date().toISOString(),
       });
       st.dismiss();
+      beep('notify');
     }
-    beep('notify');
   });
 
   useSocketEvent<ReceiptPrintRequest>('receipt_print_request_rejected', (req) => {
