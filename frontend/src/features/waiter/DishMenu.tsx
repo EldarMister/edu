@@ -85,7 +85,7 @@ export function DishMenu({
               key={d.id}
               disabled={disabled || !d.isAvailable}
               onClick={() => onAdd(d)}
-              className={`relative flex h-[116px] flex-col rounded-xl border px-3 py-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`relative flex h-[100px] flex-col rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                 active
                   ? 'border-primary bg-primary/5'
                   : 'border-border bg-white hover:border-primary/40'
@@ -116,10 +116,8 @@ export function DishMenu({
                   )}
                 </span>
                 {active && (
-                  <span className="flex shrink-0 items-center gap-2">
-                    <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold leading-none text-white">
-                      {qty}
-                    </span>
+                  <span className="flex shrink-0 items-center gap-2.5">
+                    <span className="text-[15px] font-medium text-text-primary">{qty}</span>
                     <span
                       role="button"
                       tabIndex={-1}

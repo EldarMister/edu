@@ -3,7 +3,7 @@ import type { Order, CartLine } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
-import { displayOrderNumber, money } from '@/lib/format';
+import { displayOrderNumber } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useWaiterPushNotifications } from '@/lib/push';
 import { useNotifications } from '@/store/notifications';
@@ -11,6 +11,7 @@ import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
 import { FullScreenLoader, Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
+import { NumberTicker } from '@/components/NumberTicker';
 import { useCart, cartTotals } from './cart';
 import { useWaiterRealtime } from './useWaiterRealtime';
 import {
@@ -837,7 +838,7 @@ function MenuCartBar({
             <span className="block text-[11px] text-text-muted">
               {count} {pozLabel(count)}
             </span>
-            <span className="block text-sm font-semibold text-text-primary">{money(total)}</span>
+            <NumberTicker value={total} className="block text-sm font-semibold text-text-primary" />
           </span>
         </button>
         <button

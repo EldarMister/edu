@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { money, dishUnitPrice } from '@/lib/format';
+import { dishUnitPrice } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
+import { NumberTicker } from '@/components/NumberTicker';
 import { useCart, cartTotals } from './cart';
+
+// Длительность и плавность открытия/закрытия листа.
+// Мягкий старт и плавное замедление (без резкого рывка в начале).
+const SHEET_MS = 440;
+const SHEET_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
 /**
  * Корзина как нижний bottom sheet поверх экрана меню.
@@ -43,11 +49,19 @@ export function CartSheet({
     if (open) {
       setRender(true);
       setDrag(0);
-      const id = requestAnimationFrame(() => setVisible(true));
-      return () => cancelAnimationFrame(id);
+      // Двойной rAF: гарантируем, что стартовое положение (translateY(100%))
+      // отрисовано до переключения на 0, иначе переход «проскакивает».
+      let raf2 = 0;
+      const raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => setVisible(true));
+      });
+      return () => {
+        cancelAnimationFrame(raf1);
+        cancelAnimationFrame(raf2);
+      };
     }
     setVisible(false);
-    const id = setTimeout(() => setRender(false), 260);
+    const id = setTimeout(() => setRender(false), SHEET_MS);
     return () => clearTimeout(id);
   }, [open]);
 
@@ -98,7 +112,7 @@ export function CartSheet({
       {/* Затемнение фона */}
       <div
         className="absolute inset-0 bg-black/40"
-        style={{ transition: 'opacity 260ms ease', opacity: visible ? 1 : 0 }}
+        style={{ transition: `opacity ${SHEET_MS}ms ease`, opacity: visible ? 1 : 0 }}
         onClick={onClose}
         aria-hidden
       />
@@ -108,7 +122,7 @@ export function CartSheet({
         className="absolute inset-x-0 bottom-0 flex max-h-[78vh] flex-col rounded-t-2xl bg-white shadow-soft"
         style={{
           transform: sheetTransform,
-          transition: dragging ? 'none' : 'transform 260ms cubic-bezier(0.32, 0.72, 0, 1)',
+          transition: dragging ? 'none' : `transform ${SHEET_MS}ms ${SHEET_EASE}`,
           paddingBottom: 'calc(58px + env(safe-area-inset-bottom))',
         }}
         role="dialog"
@@ -146,9 +160,10 @@ export function CartSheet({
                       </span>
                       <RoundBtn variant="inc" onClick={() => inc(l.dish.id)} label={t('Увеличить количество')} />
                     </div>
-                    <span className="w-[68px] shrink-0 text-right text-[15px] font-semibold text-text-primary">
-                      {money(unit * l.quantity)}
-                    </span>
+                    <NumberTicker
+                      value={unit * l.quantity}
+                      className="w-[68px] shrink-0 justify-end text-[15px] font-semibold text-text-primary"
+                    />
                   </div>
                 );
               })}
@@ -160,7 +175,7 @@ export function CartSheet({
         <div className="shrink-0 px-4 pt-3">
           <div className="flex items-center justify-between border-t border-border pt-3">
             <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
-            <span className="text-lg font-semibold text-text-primary">{money(totals.final)}</span>
+            <NumberTicker value={totals.final} className="text-lg font-semibold text-text-primary" />
           </div>
 
           <button
