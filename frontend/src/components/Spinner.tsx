@@ -9,7 +9,7 @@ export function Spinner({ className = '' }: { className?: string }) {
 
 export function FullScreenLoader() {
   return (
-    <div className="flex h-screen items-center justify-center text-primary">
+    <div className="flex h-full min-h-[60vh] items-center justify-center text-primary">
       <Spinner className="h-8 w-8" />
     </div>
   );

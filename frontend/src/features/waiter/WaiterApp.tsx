@@ -468,7 +468,7 @@ export function WaiterApp() {
   const desktopView: DesktopTab = activeNavTab === 'orders' || activeNavTab === 'profile' ? activeNavTab : 'tables';
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-background">
+    <div className="flex h-full flex-col bg-background">
       <OfflineBanner />
 
       {/* Шапка */}

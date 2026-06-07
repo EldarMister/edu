@@ -97,7 +97,7 @@ export function KitchenApp() {
   }
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-background">
+    <div className="flex h-full flex-col bg-background">
       <OfflineBanner />
 
       {/* Шапка */}

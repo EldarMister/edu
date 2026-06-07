@@ -114,7 +114,7 @@ export function AdminApp() {
   );
 
   return (
-    <div className="flex h-[100dvh] bg-background">
+    <div className="flex h-full bg-background">
       {/* Desktop sidebar */}
       <div className="hidden lg:block">{sidebar}</div>
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { Hall, TableItem } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
+import { TABLE_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
 import type { AvailableWaiter } from './api';
 
@@ -76,19 +77,27 @@ export function TableSelectModal({
           <div key={g.name}>
             <p className="mb-1.5 text-xs font-medium text-text-muted">{g.name}</p>
             <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
-              {g.tables.map((tbl) => (
-                <button
-                  key={tbl.id}
-                  onClick={() => onPick(tbl.id)}
-                  className={`flex h-[60px] flex-col items-center justify-center rounded-xl border text-[15px] font-medium transition-colors ${
-                    tbl.id === currentTableId
-                      ? 'border-primary bg-primary text-white'
-                      : 'border-border bg-white text-text-primary hover:border-primary/40'
-                  }`}
-                >
-                  {tbl.number}
-                </button>
-              ))}
+              {g.tables.map((tbl) => {
+                const selected = tbl.id === currentTableId;
+                return (
+                  <button
+                    key={tbl.id}
+                    onClick={() => onPick(tbl.id)}
+                    className={`relative flex h-[60px] flex-col items-center justify-center rounded-xl border text-[15px] font-medium transition-colors ${
+                      selected
+                        ? 'border-primary bg-primary text-white'
+                        : 'border-border bg-white text-text-primary hover:border-primary/40'
+                    }`}
+                  >
+                    {tbl.number}
+                    {!selected && (
+                      <span
+                        className={`absolute right-2 top-2 h-2.5 w-2.5 rounded-full ${TABLE_STATUS[tbl.status].dot}`}
+                      />
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
         ))}

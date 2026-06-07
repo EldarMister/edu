@@ -4,7 +4,7 @@ import { useAuth } from '@/store/auth';
 export function ComingSoon({ title }: { title: string }) {
   const { user, logout } = useAuth();
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center gap-4 px-6 text-center">
+    <div className="flex min-h-full flex-col items-center justify-center gap-4 px-6 text-center">
       <h1 className="text-2xl font-semibold text-text-primary">{title}</h1>
       <p className="max-w-sm text-text-secondary">
         Этот раздел будет реализован на следующем этапе. Сейчас готовы авторизация, официантская и

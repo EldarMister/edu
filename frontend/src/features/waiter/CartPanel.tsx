@@ -1,9 +1,10 @@
-import { useState } from 'react';
 import type { TableItem } from '@/types';
 import { useCart, cartTotals } from './cart';
-import { displayOrderNumber, money, dishUnitPrice } from '@/lib/format';
+import { displayOrderNumber, money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
+import { NumberTicker } from '@/components/NumberTicker';
+import { CartLinesList } from './CartItems';
 
 export function CartPanel({
   table,
@@ -25,9 +26,8 @@ export function CartPanel({
   onCancelEdit?: () => void;
 }) {
   const t = useT();
-  const { lines, comment, inc, dec, remove, setLineComment, setComment } = useCart();
+  const { lines, comment, inc, dec, setComment, clear } = useCart();
   const totals = cartTotals(lines);
-  const [commentFor, setCommentFor] = useState<string | null>(null);
   const hasLines = lines.length > 0;
   const canSend = hasLines && canSubmit && !submitting;
   const isBlockedByShift = hasLines && !canSubmit;
@@ -55,66 +55,18 @@ export function CartPanel({
         )}
       </div>
 
-      {/* Позиции */}
-      <div className="no-scrollbar flex-1 space-y-3 overflow-y-auto py-3">
-        {lines.length === 0 && (
+      {/* Позиции — компактный список как в мобильной корзине */}
+      <div className="no-scrollbar flex-1 overflow-y-auto py-3">
+        {hasLines ? (
+          <CartLinesList lines={lines} inc={inc} dec={dec} priceWidth="w-[88px]" />
+        ) : (
           <p className="py-10 text-center text-sm text-text-muted">
             {t('Выберите блюда из меню, чтобы добавить в заказ')}
           </p>
         )}
-        {lines.map((l) => {
-          const unit = dishUnitPrice(l.dish.price, l.dish.discountType, l.dish.discountValue);
-          return (
-            <div key={l.dish.id} className="rounded-xl border border-border p-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-[15px] font-medium text-text-primary">{l.dish.name}</p>
-                  <p className="text-sm text-text-muted">{money(unit)}</p>
-                </div>
-                <button
-                  onClick={() => remove(l.dish.id)}
-                  className="text-danger hover:opacity-80"
-                  aria-label={t('Удалить')}
-                >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
-                  </svg>
-                </button>
-              </div>
-
-              <div className="mt-2 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Stepper sign="−" onClick={() => dec(l.dish.id)} />
-                  <span className="w-6 text-center text-[15px] font-medium">{l.quantity}</span>
-                  <Stepper sign="+" onClick={() => inc(l.dish.id)} />
-                </div>
-                <span className="text-[15px] font-semibold text-text-primary">
-                  {money(unit * l.quantity)}
-                </span>
-              </div>
-
-              {commentFor === l.dish.id || l.comment ? (
-                <input
-                  className="input mt-2 h-9 text-sm"
-                  placeholder={t('Комментарий: без лука, острый…')}
-                  value={l.comment ?? ''}
-                  autoFocus={commentFor === l.dish.id}
-                  onChange={(e) => setLineComment(l.dish.id, e.target.value)}
-                />
-              ) : (
-                <button
-                  onClick={() => setCommentFor(l.dish.id)}
-                  className="mt-2 text-xs text-primary hover:underline"
-                >
-                  {t('+ комментарий')}
-                </button>
-              )}
-            </div>
-          );
-        })}
       </div>
 
-      {/* Низ: общий комментарий + итоги + кнопка */}
+      {/* Низ: общий комментарий + итоги + кнопки */}
       <div className="border-t border-border pt-3">
         <input
           className="input mb-3 h-10 text-sm"
@@ -132,7 +84,7 @@ export function CartPanel({
           )}
           <div className="flex items-center justify-between pt-1">
             <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
-            <span className="text-xl font-semibold text-text-primary">{money(totals.final)}</span>
+            <NumberTicker value={totals.final} className="text-xl font-semibold text-text-primary" />
           </div>
         </div>
 
@@ -160,19 +112,17 @@ export function CartPanel({
             t('Отправить на кухню')
           )}
         </button>
+
+        {hasLines && (
+          <button
+            className="mt-2 h-9 w-full text-sm font-medium text-primary hover:underline"
+            onClick={() => clear()}
+          >
+            {t('Очистить')}
+          </button>
+        )}
       </div>
     </div>
-  );
-}
-
-function Stepper({ sign, onClick }: { sign: string; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className="flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-white text-lg leading-none text-text-secondary hover:border-primary hover:text-primary"
-    >
-      {sign}
-    </button>
   );
 }
 

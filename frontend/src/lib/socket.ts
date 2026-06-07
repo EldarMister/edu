@@ -37,7 +37,14 @@ export function disconnectSocket() {
 /** Хук: статус соединения. Используется индикатором «Онлайн / Нет соединения». */
 export function useConnectionStatus(): boolean {
   const s = getSocket();
-  const [connected, setConnected] = useState(s.connected);
+  // Оптимистичный старт: при перезагрузке сокет ещё не успел подключиться,
+  // но это не значит «нет связи». Покажем офлайн только если устройство
+  // действительно офлайн, либо если переподключение не пройдёт за grace-период.
+  const [connected, setConnected] = useState(() => {
+    if (s.connected) return true;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+    return true;
+  });
 
   useEffect(() => {
     const sock = getSocket();
