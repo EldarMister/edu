@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import type { BankOp } from './reconciliation.types';
 
 const MAX_OPS = 20_000;
+const BISHKEK_UTC_OFFSET_MIN = 6 * 60;
 
 /** Парсит банковскую выписку в список операций (сумма + время). */
 export async function parseStatement(
@@ -210,7 +211,7 @@ function parseDateString(date: string, time?: string): Date | null {
     mi = parts[1] ?? 0;
     ss = parts[2] ?? 0;
   }
-  const dt = new Date(y, mo - 1, d, hh, mi, ss);
+  const dt = new Date(Date.UTC(y, mo - 1, d, hh, mi, ss) - BISHKEK_UTC_OFFSET_MIN * 60_000);
   return Number.isNaN(dt.getTime()) ? null : dt;
 }
 

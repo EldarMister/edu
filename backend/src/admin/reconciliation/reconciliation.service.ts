@@ -12,16 +12,24 @@ interface UploadedFileLike {
   size: number;
 }
 
-function startOfDay(d: Date) {
-  const s = new Date(d);
-  s.setHours(0, 0, 0, 0);
-  return s;
+const DAY_MS = 86_400_000;
+const BISHKEK_UTC_OFFSET_MIN = 6 * 60;
+const BISHKEK_UTC_OFFSET_MS = BISHKEK_UTC_OFFSET_MIN * 60_000;
+
+function bishkekDayStartUtc(year: number, month: number, day: number): Date {
+  return new Date(Date.UTC(year, month - 1, day) - BISHKEK_UTC_OFFSET_MS);
 }
 
-function parseDate(value: string | undefined, fallback: Date): Date {
-  if (!value) return fallback;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? fallback : d;
+function parseBusinessDate(value: string | undefined, fallback: Date): Date {
+  const m = value?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return bishkekDayStartUtc(Number(m[1]), Number(m[2]), Number(m[3]));
+
+  const bishkek = new Date(fallback.getTime() + BISHKEK_UTC_OFFSET_MS);
+  return bishkekDayStartUtc(
+    bishkek.getUTCFullYear(),
+    bishkek.getUTCMonth() + 1,
+    bishkek.getUTCDate(),
+  );
 }
 
 @Injectable()
@@ -37,9 +45,9 @@ export class ReconciliationService {
     }
 
     const today = new Date();
-    const from = startOfDay(parseDate(body.from, new Date(today.getTime() - 6 * 86_400_000)));
-    const to = parseDate(body.to, today);
-    const toEnd = new Date(startOfDay(to).getTime() + 86_400_000); // включительно по день
+    const from = parseBusinessDate(body.from, new Date(today.getTime() - 6 * DAY_MS));
+    const to = parseBusinessDate(body.to, today);
+    const toEnd = new Date(to.getTime() + DAY_MS); // включительно по день
     const toleranceMin = clampTolerance(Number(body.toleranceMin));
 
     // Только оплаченные заказы периода, проходящие через банк (нал не попадает в выписку).
