@@ -69,8 +69,8 @@ export class ReceiptPrintsService {
     });
 
     const dto = this.serialize(request);
-    // Заявка сразу появляется у администратора.
-    this.events.emitToAdmin(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, dto);
+    // Заявка сразу появляется только у администраторов.
+    this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, dto);
     return dto;
   }
 
@@ -105,7 +105,7 @@ export class ReceiptPrintsService {
     this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, dto);
     this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
     // Другим админам — убрать заявку из списка.
-    this.events.emitToAdmin(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
+    this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
     return dto;
   }
 
@@ -125,7 +125,7 @@ export class ReceiptPrintsService {
     const dto = this.serialize(updated);
 
     this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_REJECTED, dto);
-    this.events.emitToAdmin(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_REJECTED, dto);
+    this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_REJECTED, dto);
     return dto;
   }
 

@@ -10,28 +10,28 @@ export class ReceiptPrintsController {
 
   /** Официант создаёт запрос на печать чека. */
   @Post()
-  @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
+  @Roles(Role.WAITER)
   create(@CurrentUser() user: AuthUser, @Body() body: { orderId: string }) {
     return this.service.create(user, body.orderId);
   }
 
   /** Администратор видит список ожидающих заявок. */
   @Get()
-  @Roles(Role.ADMIN, Role.OWNER)
+  @Roles(Role.ADMIN)
   list() {
     return this.service.listPending();
   }
 
   /** Администратор принимает заявку — чек печатается. */
   @Post(':id/approve')
-  @Roles(Role.ADMIN, Role.OWNER)
+  @Roles(Role.ADMIN)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.approve(user, id);
   }
 
   /** Администратор отклоняет заявку — чек не печатается. */
   @Post(':id/reject')
-  @Roles(Role.ADMIN, Role.OWNER)
+  @Roles(Role.ADMIN)
   reject(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.reject(user, id);
   }

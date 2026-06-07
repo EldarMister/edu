@@ -5,6 +5,7 @@
 export const ROOMS = {
   KITCHEN: 'role:kitchen',
   ADMIN: 'role:admin',
+  ADMIN_ONLY: 'role:admin-only',
   waiter: (waiterId: string) => `waiter:${waiterId}`,
 };
 

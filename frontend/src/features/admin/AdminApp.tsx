@@ -40,10 +40,10 @@ type Section =
   | 'reconcile'
   | 'settings';
 
-const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly?: boolean }[] = [
+const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly?: boolean; adminOnly?: boolean }[] = [
   { key: 'stats', label: 'Статистика', icon: IconStats, ownerOnly: true },
   { key: 'orders', label: 'Заказы', icon: IconOrders },
-  { key: 'receipts', label: 'Печать чека', icon: IconPrinter },
+  { key: 'receipts', label: 'Печать чека', icon: IconPrinter, adminOnly: true },
   { key: 'tables', label: 'Столы', icon: IconTables },
   { key: 'menu', label: 'Меню', icon: IconMenu },
   { key: 'staff', label: 'Персонал', icon: IconStaff },
@@ -62,8 +62,9 @@ export function AdminApp() {
   const qc = useQueryClient();
   const t = useT();
   const isOwner = user?.role === 'OWNER';
+  const isAdmin = user?.role === 'ADMIN';
 
-  const sections = SECTIONS.filter((s) => !s.ownerOnly || isOwner);
+  const sections = SECTIONS.filter((s) => (!s.ownerOnly || isOwner) && (!s.adminOnly || isAdmin));
   const [section, setSection] = useState<Section>(isOwner ? 'stats' : 'orders');
   const [mobileNav, setMobileNav] = useState(false);
 
@@ -177,7 +178,7 @@ export function AdminApp() {
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
           {section === 'stats' && isOwner && <StatisticsPage />}
           {section === 'orders' && <OrdersPage />}
-          {section === 'receipts' && <ReceiptPrintsPage />}
+          {section === 'receipts' && isAdmin && <ReceiptPrintsPage />}
           {section === 'tables' && <TablesPage />}
           {section === 'menu' && <MenuPage />}
           {section === 'staff' && <StaffPage />}
