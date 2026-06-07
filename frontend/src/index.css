@@ -185,6 +185,14 @@
       transform: translate3d(0, 0, 0) scale(1);
     }
   }
+  @keyframes sheet-up {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: translateY(0);
+    }
+  }
   .animate-fade-in {
     animation: fade-in 0.2s ease-out both;
   }
@@ -211,5 +219,8 @@
   }
   .animate-receipt-feed {
     animation: receipt-feed 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  }
+  .animate-sheet-up {
+    animation: sheet-up 0.24s cubic-bezier(0.4, 0, 0.2, 1) both;
   }
 }

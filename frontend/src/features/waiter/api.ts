@@ -153,6 +153,7 @@ export function useCreateOrder() {
     }) => {
       const items = payload.lines.map((l) => ({
         dishId: l.dish.id,
+        variantId: l.variant?.id,
         quantity: l.quantity,
         comment: l.comment?.trim() || undefined,
       }));
@@ -179,6 +180,7 @@ export function useAddItems() {
     mutationFn: async (payload: { orderId: string; idempotencyKey: string; lines: CartLine[] }) => {
       const items = payload.lines.map((l) => ({
         dishId: l.dish.id,
+        variantId: l.variant?.id,
         quantity: l.quantity,
         comment: l.comment?.trim() || undefined,
       }));
@@ -203,6 +205,7 @@ export function useEditOrder() {
     mutationFn: async (payload: { orderId: string; comment?: string; lines: CartLine[] }) => {
       const items = payload.lines.map((l) => ({
         dishId: l.dish.id,
+        variantId: l.variant?.id,
         quantity: l.quantity,
         comment: l.comment?.trim() || undefined,
       }));

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { Order, CartLine } from '@/types';
+import type { Order, CartLine, DishVariant } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
@@ -12,7 +12,7 @@ import { BrandLogo } from '@/components/BrandLogo';
 import { FullScreenLoader, Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
 import { NumberTicker } from '@/components/NumberTicker';
-import { useCart, cartTotals } from './cart';
+import { useCart, cartLineKeyFromParts, cartTotals } from './cart';
 import { useWaiterRealtime } from './useWaiterRealtime';
 import {
   useHalls,
@@ -116,7 +116,7 @@ export function WaiterApp() {
 
   const cartQuantities = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const l of cart.lines) map[l.dish.id] = l.quantity;
+    for (const l of cart.lines) map[l.dish.id] = (map[l.dish.id] ?? 0) + l.quantity;
     return map;
   }, [cart.lines]);
 
@@ -174,7 +174,16 @@ export function WaiterApp() {
       .filter((it) => it.status !== 'rejected' && it.status !== 'cancelled')
       .map((it) => {
         const dish = dishById.get(it.dishId);
-        return dish ? ({ dish, quantity: it.quantity, comment: it.comment ?? undefined } as CartLine) : null;
+        if (!dish) return null;
+        const variant = it.dishVariantId
+          ? dish.variants.find((candidate) => candidate.id === it.dishVariantId)
+          : undefined;
+        return {
+          dish,
+          variant,
+          quantity: it.quantity,
+          comment: it.comment ?? undefined,
+        } as CartLine;
       })
       .filter((l): l is CartLine => l !== null);
     cart.replaceLines(lines, order.comment ?? '');
@@ -232,10 +241,12 @@ export function WaiterApp() {
     }
   }
 
-  function addDishToCart(dish: Parameters<typeof cart.add>[0]) {
-    const nextQuantity = (cart.lines.find((line) => line.dish.id === dish.id)?.quantity ?? 0) + 1;
-    cart.add(dish);
-    push({ message: `${dish.name} ×${nextQuantity} добавлено`, at: new Date().toISOString() });
+  function addDishToCart(dish: Parameters<typeof cart.add>[0], variant?: DishVariant) {
+    const key = cartLineKeyFromParts(dish.id, variant?.id);
+    const nextQuantity = (cart.lines.find((line) => cartLineKeyFromParts(line.dish.id, line.variant?.id) === key)?.quantity ?? 0) + 1;
+    cart.add(dish, variant);
+    const name = variant ? `${dish.name} · ${variant.name}` : dish.name;
+    push({ message: `${name} ×${nextQuantity} добавлено`, at: new Date().toISOString() });
   }
 
   async function goToPayment(order: Order) {
@@ -381,7 +392,7 @@ export function WaiterApp() {
         dishes={dishesQ.data ?? []}
         quantities={cartQuantities}
         onAdd={addDishToCart}
-        onDec={(d) => cart.dec(d.id)}
+        onDec={(d) => cart.dec(cartLineKeyFromParts(d.id))}
         disabled={!selectedTable}
       />
     </Panel>
@@ -395,7 +406,7 @@ export function WaiterApp() {
         dishes={dishesQ.data ?? []}
         quantities={cartQuantities}
         onAdd={addDishToCart}
-        onDec={(d) => cart.dec(d.id)}
+        onDec={(d) => cart.dec(cartLineKeyFromParts(d.id))}
         disabled={!selectedTable}
         tableSlot={
           selectedTable ? (

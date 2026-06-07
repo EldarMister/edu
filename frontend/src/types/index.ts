@@ -46,6 +46,13 @@ export interface Category {
 
 export type DiscountType = 'none' | 'percent' | 'fixed';
 
+export interface DishVariant {
+  id: string;
+  name: string;
+  price: string;
+  sortOrder: number;
+}
+
 export interface Dish {
   id: string;
   categoryId: string;
@@ -56,6 +63,7 @@ export interface Dish {
   discountType: DiscountType;
   discountValue: string;
   isAvailable: boolean;
+  variants: DishVariant[];
 }
 
 export type OrderStatus =
@@ -103,7 +111,9 @@ export interface WaiterShift {
 export interface OrderItem {
   id: string;
   dishId: string;
+  dishVariantId: string | null;
   dishNameSnapshot: string;
+  dishVariantNameSnapshot: string | null;
   priceSnapshot: string;
   quantity: number;
   discountAmount: string;
@@ -140,6 +150,7 @@ export interface Receipt {
   date: string;
   items: {
     dishNameSnapshot: string;
+    dishVariantNameSnapshot?: string | null;
     quantity: number;
     priceSnapshot: string;
     finalPrice: string;
@@ -170,6 +181,7 @@ export interface ReceiptPrintRequest {
 /** Локальная позиция корзины (до отправки на кухню). */
 export interface CartLine {
   dish: Dish;
+  variant?: DishVariant;
   quantity: number;
   comment?: string;
 }

@@ -381,10 +381,19 @@ export class OrdersService {
   }
 
   /** Карта «название блюда → суммарное количество» по позициям заказа. */
-  private itemQtyMap(items: { dishNameSnapshot: string; quantity: number }[]) {
+  private itemQtyMap(items: { dishNameSnapshot: string; dishVariantNameSnapshot?: string | null; quantity: number }[]) {
     const m = new Map<string, number>();
-    for (const it of items) m.set(it.dishNameSnapshot, (m.get(it.dishNameSnapshot) ?? 0) + it.quantity);
+    for (const it of items) {
+      const name = this.orderItemName(it);
+      m.set(name, (m.get(name) ?? 0) + it.quantity);
+    }
     return m;
+  }
+
+  private orderItemName(item: { dishNameSnapshot: string; dishVariantNameSnapshot?: string | null }) {
+    return item.dishVariantNameSnapshot
+      ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
+      : item.dishNameSnapshot;
   }
 
   /** Человеко-читаемая сводка различий составов: «добавил X ×1, убрал Y ×2». */
@@ -478,7 +487,7 @@ export class OrdersService {
         orderId,
         tableId: updated.tableId,
         description: `${actor.name ?? 'Сотрудник'} добавил ${addedCount} поз. в заказ ${updated.orderNumber} (стол ${updated.table.number})`,
-        newValue: { items: items.map((i) => ({ dishId: i.dishId, quantity: i.quantity })) },
+        newValue: { items: items.map((i) => ({ dishId: i.dishId, variantId: i.variantId, quantity: i.quantity })) },
         metadata: { tableNumber: updated.table.number, finalAmount: Number(updated.finalAmount) },
       });
     }
@@ -653,9 +662,10 @@ export class OrdersService {
       updated.status === OrderStatus.partially_rejected
         ? ' Уточните у клиента: продолжить заказ, заменить блюдо или отменить заказ?'
         : '';
+    const itemName = this.orderItemName(item);
     this.notifyWaiter(
       updated.waiterId,
-      `Стол №${updated.table.number}. Кухня отказала блюдо: ${item.dishNameSnapshot}. Причина: ${reason}.${partialText}`,
+      `Стол №${updated.table.number}. Кухня отказала блюдо: ${itemName}. Причина: ${reason}.${partialText}`,
       updated,
       'error',
     );
@@ -826,10 +836,16 @@ export class OrdersService {
 
   private async buildItemsData(items: CreateOrderItemDto[]): Promise<Prisma.OrderItemCreateManyOrderInput[]> {
     const dishIds = [...new Set(items.map((i) => i.dishId))];
+    const variantIds = [...new Set(items.map((i) => i.variantId).filter((id): id is string => !!id))];
     const dishes = await this.prisma.dish.findMany({
       where: { id: { in: dishIds }, isActive: true },
+      include: { variants: { orderBy: { sortOrder: 'asc' } } },
     });
     const byId = new Map(dishes.map((d) => [d.id, d]));
+    const variants = variantIds.length
+      ? await this.prisma.dishVariant.findMany({ where: { id: { in: variantIds } } })
+      : [];
+    const variantById = new Map(variants.map((variant) => [variant.id, variant]));
 
     return items.map((i) => {
       const dish = byId.get(i.dishId);
@@ -839,14 +855,28 @@ export class OrdersService {
       if (!dish.isAvailable) {
         throw new BadRequestException(`Блюдо «${dish.name}» сейчас недоступно`);
       }
+      const hasVariants = dish.variants.length > 0;
+      const variant = i.variantId ? variantById.get(i.variantId) : null;
+      if (hasVariants && !variant) {
+        throw new BadRequestException(`Выберите вариант блюда «${dish.name}»`);
+      }
+      if (!hasVariants && i.variantId) {
+        throw new BadRequestException(`У блюда «${dish.name}» нет вариантов`);
+      }
+      if (variant && variant.dishId !== dish.id) {
+        throw new BadRequestException('Вариант не относится к выбранному блюду');
+      }
+      const basePrice = variant?.price ?? dish.price;
       const { unit, unitDiscount, unitFinal } = unitPricing(
-        dish.price,
+        basePrice,
         dish.discountType,
         dish.discountValue,
       );
       return {
         dishId: dish.id,
+        dishVariantId: variant?.id,
         dishNameSnapshot: dish.name,
+        dishVariantNameSnapshot: variant?.name,
         priceSnapshot: new Prisma.Decimal(unit),
         quantity: i.quantity,
         discountAmount: new Prisma.Decimal(round2(unitDiscount * i.quantity)),

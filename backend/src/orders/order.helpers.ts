@@ -9,7 +9,9 @@ export const orderInclude = {
     select: {
       id: true,
       dishId: true,
+      dishVariantId: true,
       dishNameSnapshot: true,
+      dishVariantNameSnapshot: true,
       priceSnapshot: true,
       quantity: true,
       discountAmount: true,

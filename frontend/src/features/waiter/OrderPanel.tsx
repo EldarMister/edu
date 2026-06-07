@@ -1,7 +1,7 @@
 import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { ORDER_STATUS } from '@/lib/status';
-import { displayOrderNumber, money } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 
@@ -97,7 +97,7 @@ export function OrderPanel({
                     rejected ? 'text-danger line-through' : 'text-text-primary'
                   }`}
                 >
-                  {it.dishNameSnapshot}
+                  {orderItemDisplayName(it)}
                 </span>
                 <span className="shrink-0 text-sm text-text-secondary">×{it.quantity}</span>
                 <span className="shrink-0 min-w-[56px] text-right text-[15px] font-medium text-text-primary">

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
-import { displayOrderNumber, money } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
@@ -146,7 +146,7 @@ export function PaymentModal({
             {receipt.items.map((it, i) => (
               <div key={i} className="flex justify-between">
                 <span className="text-text-secondary">
-                  {it.dishNameSnapshot} <span className="text-text-light">×{it.quantity}</span>
+                  {orderItemDisplayName(it)} <span className="text-text-light">×{it.quantity}</span>
                 </span>
                 <span>{money(it.finalPrice)}</span>
               </div>

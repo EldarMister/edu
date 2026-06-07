@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { displayOrderNumber, money } from '@/lib/format';
+import { useEffect, useRef, useState } from 'react';
+import { displayOrderNumber, money, orderItemDisplayName } from '@/lib/format';
 import { useT } from '@/lib/i18n';
+import { beep } from '@/lib/sound';
 import { useReceiptPrint } from './receiptPrint';
 
 const SHEET_MS = 380;
@@ -17,6 +18,7 @@ export function ReceiptPrintSheet() {
 
   const [render, setRender] = useState(open);
   const [visible, setVisible] = useState(false);
+  const lastAcceptedSoundRequestId = useRef<string | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -42,6 +44,13 @@ export function ReceiptPrintSheet() {
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, status]);
+
+  useEffect(() => {
+    if (!open || status !== 'printed' || !request) return;
+    if (lastAcceptedSoundRequestId.current === request.id) return;
+    lastAcceptedSoundRequestId.current = request.id;
+    beep('accept');
+  }, [open, request, status]);
 
   if (!render || !request) return null;
 
@@ -169,7 +178,7 @@ export function ReceiptPrintSheet() {
           {receipt.items.map((it, i) => (
             <div key={i} className="flex justify-between gap-2">
               <span className="min-w-0 truncate text-text-secondary">
-                {it.dishNameSnapshot} <span className="text-text-light">×{it.quantity}</span>
+                {orderItemDisplayName(it)} <span className="text-text-light">×{it.quantity}</span>
               </span>
               <span className="shrink-0">{money(it.finalPrice)}</span>
             </div>

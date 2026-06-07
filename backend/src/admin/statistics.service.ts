@@ -109,14 +109,17 @@ export class StatisticsService {
         },
         status: { notIn: ['rejected', 'cancelled'] },
       },
-      select: { dishNameSnapshot: true, finalPrice: true, quantity: true },
+      select: { dishNameSnapshot: true, dishVariantNameSnapshot: true, finalPrice: true, quantity: true },
     });
     const dishMap = new Map<string, { name: string; amount: number; count: number }>();
     for (const it of items) {
-      const cur = dishMap.get(it.dishNameSnapshot) ?? { name: it.dishNameSnapshot, amount: 0, count: 0 };
+      const name = it.dishVariantNameSnapshot
+        ? `${it.dishNameSnapshot} · ${it.dishVariantNameSnapshot}`
+        : it.dishNameSnapshot;
+      const cur = dishMap.get(name) ?? { name, amount: 0, count: 0 };
       cur.amount += Number(it.finalPrice);
       cur.count += it.quantity;
-      dishMap.set(it.dishNameSnapshot, cur);
+      dishMap.set(name, cur);
     }
     const topDishes = [...dishMap.values()].sort((a, b) => b.amount - a.amount).slice(0, 5);
 

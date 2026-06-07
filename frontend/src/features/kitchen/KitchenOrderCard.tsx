@@ -1,7 +1,7 @@
 import type { Order } from '@/types';
 import type { KitchenTab } from './api';
 import { OrderBadge } from '@/components/StatusBadge';
-import { displayOrderNumber, timeHM, elapsed } from '@/lib/format';
+import { displayOrderNumber, timeHM, elapsed, orderItemDisplayName } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 
 /** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
@@ -70,11 +70,12 @@ export function KitchenOrderCard({
       <ul className="mt-3 space-y-2 border-t border-border pt-3">
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
+          const itemName = orderItemDisplayName(it);
           return (
             <li key={it.id} className="flex items-start justify-between gap-3 text-[15px]">
               <div className="min-w-0">
                 <span className={rejected ? 'text-danger line-through' : 'text-text-primary'}>
-                  <span className="font-medium">{it.quantity}×</span> {it.dishNameSnapshot}
+                  <span className="font-medium">{it.quantity}×</span> {itemName}
                 </span>
                 {it.comment && <p className="text-xs text-warning">{it.comment}</p>}
                 {rejected && it.rejectReason && (
@@ -86,7 +87,7 @@ export function KitchenOrderCard({
               </div>
               {canRejectItem && !rejected && (
                 <button
-                  onClick={() => onRejectItem(it.id, it.dishNameSnapshot)}
+                  onClick={() => onRejectItem(it.id, itemName)}
                   className="shrink-0 text-xs font-medium text-danger hover:underline"
                 >
                   отказать

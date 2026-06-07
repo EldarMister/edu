@@ -1,7 +1,7 @@
 import type { CartLine } from '@/types';
-import { dishUnitPrice } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { NumberTicker } from '@/components/NumberTicker';
+import { cartLineKey, cartLineName, cartLineUnitPrice } from './cart';
 
 /**
  * Компактный список блюд корзины: название · «−» кол-во «+» · цена,
@@ -15,8 +15,8 @@ export function CartLinesList({
   priceWidth = 'w-[68px]',
 }: {
   lines: CartLine[];
-  inc: (dishId: string) => void;
-  dec: (dishId: string) => void;
+  inc: (lineKey: string) => void;
+  dec: (lineKey: string) => void;
   /** Ширина колонки цены (на desktop чуть шире). */
   priceWidth?: string;
 }) {
@@ -24,14 +24,15 @@ export function CartLinesList({
   return (
     <div className="divide-y divide-border">
       {lines.map((l) => {
-        const unit = dishUnitPrice(l.dish.price, l.dish.discountType, l.dish.discountValue);
+        const key = cartLineKey(l);
+        const unit = cartLineUnitPrice(l);
         return (
-          <div key={l.dish.id} className="flex items-center gap-3 py-2.5">
-            <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{l.dish.name}</span>
+          <div key={key} className="flex items-center gap-3 py-2.5">
+            <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{cartLineName(l)}</span>
             <div className="flex shrink-0 items-center gap-2.5">
-              <RoundBtn variant="dec" onClick={() => dec(l.dish.id)} label={t('Уменьшить количество')} />
+              <RoundBtn variant="dec" onClick={() => dec(key)} label={t('Уменьшить количество')} />
               <span className="w-5 text-center text-[15px] font-medium text-text-primary">{l.quantity}</span>
-              <RoundBtn variant="inc" onClick={() => inc(l.dish.id)} label={t('Увеличить количество')} />
+              <RoundBtn variant="inc" onClick={() => inc(key)} label={t('Увеличить количество')} />
             </div>
             <NumberTicker
               value={unit * l.quantity}

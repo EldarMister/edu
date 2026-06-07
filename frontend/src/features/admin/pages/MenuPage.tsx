@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
-import { money } from '@/lib/format';
+import { minDishUnitPrice, money, variantNamesLine } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
@@ -16,6 +16,7 @@ import {
   useDishMutations,
   type AdminDish,
   type AdminCategory,
+  type AdminDishVariant,
 } from '../api';
 
 export function MenuPage() {
@@ -109,10 +110,15 @@ export function MenuPage() {
                   <tr key={d.id} className="border-b border-border last:border-0 hover:bg-background/60">
                     <td className="px-4 py-3">
                       <p className="font-medium text-text-primary">{d.name}</p>
+                      {d.variants.length > 0 && (
+                        <p className="text-xs font-medium text-primary">{variantNamesLine(d.variants)}</p>
+                      )}
                       {d.description && <p className="text-xs text-text-muted">{d.description}</p>}
                     </td>
                     <td className="px-4 py-3 text-text-secondary">{d.category.name}</td>
-                    <td className="px-4 py-3 text-right font-medium text-text-primary">{money(d.price)}</td>
+                    <td className="px-4 py-3 text-right font-medium text-text-primary">
+                      {d.variants.length > 0 ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}
+                    </td>
                     <td className="px-4 py-3">
                       {d.isActive && d.isAvailable ? (
                         <Badge tone="success">{tr('Активно')}</Badge>
@@ -160,6 +166,22 @@ export function MenuPage() {
   );
 }
 
+interface DishVariantDraft {
+  uid: string;
+  id?: string;
+  name: string;
+  price: string;
+}
+
+function variantDraft(variant?: AdminDishVariant): DishVariantDraft {
+  return {
+    uid: variant?.id ?? `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    id: variant?.id,
+    name: variant?.name ?? '',
+    price: variant ? String(Number(variant.price)) : '',
+  };
+}
+
 function DishModal({
   dish,
   categories,
@@ -178,25 +200,77 @@ function DishModal({
   const [categoryId, setCategoryId] = useState(
     dish?.categoryId ?? (defaultCategoryId || categories[0]?.id || ''),
   );
-  const [price, setPrice] = useState(dish ? String(Number(dish.price)) : '');
+  const [price, setPrice] = useState(dish ? (dish.variants.length > 0 ? '' : String(Number(dish.price))) : '');
   const [description, setDescription] = useState(dish?.description ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
+  const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
+  function updateVariant(uid: string, patch: Partial<Pick<DishVariantDraft, 'name' | 'price'>>) {
+    setVariants((current) => current.map((variant) => (variant.uid === uid ? { ...variant, ...patch } : variant)));
+  }
+
+  function addVariant() {
+    setVariants((current) => [...current, variantDraft()]);
+  }
+
+  function removeVariant(uid: string) {
+    setVariants((current) => current.filter((variant) => variant.uid !== uid));
+  }
+
+  function moveVariant(from: number, to: number) {
+    setVariants((current) => {
+      if (from === to || from < 0 || to < 0 || from >= current.length || to >= current.length) return current;
+      const next = [...current];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+  }
+
   async function onSubmit() {
     setError('');
-    if (!name.trim() || !categoryId || !price) {
-      setError('Заполните название, категорию и цену');
+    if (!name.trim() || !categoryId) {
+      setError('Заполните название и категорию');
+      return;
+    }
+    const filledVariants = variants
+      .map((variant) => ({
+        id: variant.id,
+        name: variant.name.trim(),
+        price: variant.price.trim(),
+      }))
+      .filter((variant) => variant.name || variant.price);
+    for (const variant of filledVariants) {
+      const variantPrice = Number(variant.price);
+      if (!variant.name || !variant.price || !Number.isFinite(variantPrice) || variantPrice <= 0) {
+        setError('У каждого варианта должны быть название и цена больше 0');
+        return;
+      }
+    }
+    const priceValue = price.trim() ? Number(price) : undefined;
+    if (priceValue !== undefined && (!Number.isFinite(priceValue) || priceValue < 0)) {
+      setError('Цена блюда должна быть числом');
+      return;
+    }
+    if (filledVariants.length === 0 && (!priceValue || priceValue <= 0)) {
+      setError('Укажите цену блюда или добавьте варианты с ценами');
       return;
     }
     try {
       const body = {
         name: name.trim(),
         categoryId,
-        price: Number(price),
+        price: priceValue,
         description: description.trim() || undefined,
         isAvailable,
+        variants: filledVariants.map((variant) => ({
+          id: variant.id,
+          name: variant.name,
+          price: Number(variant.price),
+        })),
       };
       if (isEdit) {
         await update.mutateAsync({ id: dish!.id, ...body });
@@ -216,6 +290,7 @@ function DishModal({
       open
       onClose={onClose}
       title={isEdit ? 'Изменить блюдо' : 'Новое блюдо'}
+      panelClassName="max-w-xl"
       footer={
         <button className="btn-primary btn-lg w-full font-semibold" disabled={pending} onClick={onSubmit}>
           {pending ? <Spinner /> : isEdit ? 'Сохранить' : 'Добавить'}
@@ -257,6 +332,69 @@ function DishModal({
           <input type="checkbox" checked={isAvailable} onChange={(e) => setIsAvailable(e.target.checked)} />
           Доступно для заказа
         </label>
+        <div className="pt-2">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h4 className="text-[15px] font-semibold text-text-primary">Варианты блюда</h4>
+            <button type="button" className="btn-secondary btn-md" onClick={addVariant}>
+              <IconPlus className="h-4 w-4" /> Добавить вариант
+            </button>
+          </div>
+          <div className="overflow-hidden rounded-xl border border-border">
+            <div className="grid grid-cols-[28px_minmax(0,1fr)_112px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
+              <span />
+              <span>Название варианта</span>
+              <span>Цена (с)</span>
+              <span />
+            </div>
+            {variants.length === 0 ? (
+              <div className="px-3 py-4 text-sm text-text-muted">Варианты не добавлены</div>
+            ) : (
+              variants.map((variant, index) => (
+                <div
+                  key={variant.uid}
+                  draggable
+                  onDragStart={() => setDragIndex(index)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => {
+                    if (dragIndex !== null) moveVariant(dragIndex, index);
+                    setDragIndex(null);
+                  }}
+                  onDragEnd={() => setDragIndex(null)}
+                  className={`grid grid-cols-[28px_minmax(0,1fr)_112px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
+                    dragIndex === index ? 'bg-primary/5' : 'bg-white'
+                  }`}
+                >
+                  <span className="cursor-grab select-none text-center text-lg leading-none text-text-light" title="Изменить порядок">
+                    ⋮⋮
+                  </span>
+                  <input
+                    className="input h-10"
+                    value={variant.name}
+                    placeholder="30 см"
+                    onChange={(e) => updateVariant(variant.uid, { name: e.target.value })}
+                  />
+                  <input
+                    className="input h-10"
+                    type="number"
+                    inputMode="numeric"
+                    min="0"
+                    value={variant.price}
+                    placeholder="400"
+                    onChange={(e) => updateVariant(variant.uid, { price: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/5"
+                    title="Удалить вариант"
+                    onClick={() => removeVariant(variant.uid)}
+                  >
+                    <IconTrash className="h-4 w-4" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
         {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     </Modal>

@@ -1,7 +1,7 @@
 // Короткий звуковой сигнал. Если есть файл в public/sounds, используем его.
 let ctx: AudioContext | null = null;
 
-type SoundKind = 'notify' | 'newOrder' | 'payment';
+type SoundKind = 'notify' | 'newOrder' | 'payment' | 'accept';
 
 export function beep(kind: SoundKind = 'notify') {
   const file =
@@ -9,7 +9,9 @@ export function beep(kind: SoundKind = 'notify') {
       ? '/sounds/new-order.mp3'
       : kind === 'payment'
         ? '/sounds/payment%20sound.mp3'
-        : '/sounds/notify.mp3';
+        : kind === 'accept'
+          ? '/sounds/accept.mp3'
+          : '/sounds/notify.mp3';
   const audio = new Audio(file);
   audio.play().catch(() => playGeneratedBeep(kind));
 }

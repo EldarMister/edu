@@ -201,8 +201,25 @@ model Dish {
 
   category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   orderItems OrderItem[]
+  variants   DishVariant[]
 
   @@map("dishes")
+}
+
+model DishVariant {
+  id        String   @id @default(uuid())
+  dishId    String   @map("dish_id")
+  name      String
+  price     Decimal  @db.Decimal(10, 2)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  dish       Dish        @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  orderItems OrderItem[]
+
+  @@index([dishId])
+  @@map("dish_variants")
 }
 
 model Order {
@@ -276,7 +293,9 @@ model OrderItem {
   id               String          @id @default(uuid())
   orderId          String          @map("order_id")
   dishId           String          @map("dish_id")
+  dishVariantId    String?         @map("dish_variant_id")
   dishNameSnapshot String          @map("dish_name_snapshot")
+  dishVariantNameSnapshot String?  @map("dish_variant_name_snapshot")
   priceSnapshot    Decimal         @map("price_snapshot") @db.Decimal(10, 2)
   quantity         Int             @default(1)
   discountAmount   Decimal         @default(0) @map("discount_amount") @db.Decimal(10, 2)
@@ -287,10 +306,12 @@ model OrderItem {
   createdAt        DateTime        @default(now()) @map("created_at")
   updatedAt        DateTime        @updatedAt @map("updated_at")
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  dish  Dish  @relation(fields: [dishId], references: [id])
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  dish        Dish         @relation(fields: [dishId], references: [id])
+  dishVariant DishVariant? @relation(fields: [dishVariantId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
+  @@index([dishVariantId])
   @@map("order_items")
 }
 

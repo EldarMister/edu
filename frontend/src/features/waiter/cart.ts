@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CartLine, Dish } from '@/types';
+import type { CartLine, Dish, DishVariant } from '@/types';
 import { dishUnitPrice } from '@/lib/format';
 
 interface TableCart {
@@ -17,17 +17,37 @@ interface CartState {
   selectTable: (tableId: string) => void;
   // Переносит текущий черновик корзины на другой стол (смена стола на экране меню).
   moveDraftTo: (targetTableId: string) => void;
-  add: (dish: Dish) => void;
+  add: (dish: Dish, variant?: DishVariant) => void;
   replaceLines: (lines: CartLine[], comment: string) => void;
-  inc: (dishId: string) => void;
-  dec: (dishId: string) => void;
-  remove: (dishId: string) => void;
-  setLineComment: (dishId: string, comment: string) => void;
+  inc: (lineKey: string) => void;
+  dec: (lineKey: string) => void;
+  remove: (lineKey: string) => void;
+  setLineComment: (lineKey: string, comment: string) => void;
   setComment: (comment: string) => void;
   clear: () => void;
 }
 
 const EMPTY: TableCart = { lines: [], comment: '' };
+
+export function cartLineKeyFromParts(dishId: string, variantId?: string | null) {
+  return `${dishId}:${variantId ?? 'base'}`;
+}
+
+export function cartLineKey(line: CartLine) {
+  return cartLineKeyFromParts(line.dish.id, line.variant?.id);
+}
+
+export function cartLineName(line: CartLine) {
+  return line.variant ? `${line.dish.name} · ${line.variant.name}` : line.dish.name;
+}
+
+export function cartLineBasePrice(line: CartLine) {
+  return line.variant?.price ?? line.dish.price;
+}
+
+export function cartLineUnitPrice(line: CartLine) {
+  return dishUnitPrice(cartLineBasePrice(line), line.dish.discountType, line.dish.discountValue);
+}
 
 /** Применяет изменение к корзине активного стола и синхронизирует зеркало. */
 function mutate(s: CartState, fn: (cart: TableCart) => TableCart): Partial<CartState> {
@@ -66,13 +86,14 @@ export const useCart = create<CartState>((set) => ({
       return { tableId: targetTableId, lines: current.lines, comment: current.comment, carts };
     }),
 
-  add: (dish) =>
+  add: (dish, variant) =>
     set((s) =>
       mutate(s, (c) => {
-        const existing = c.lines.find((l) => l.dish.id === dish.id);
+        const key = cartLineKeyFromParts(dish.id, variant?.id);
+        const existing = c.lines.find((l) => cartLineKey(l) === key);
         const lines = existing
-          ? c.lines.map((l) => (l.dish.id === dish.id ? { ...l, quantity: l.quantity + 1 } : l))
-          : [...c.lines, { dish, quantity: 1 }];
+          ? c.lines.map((l) => (cartLineKey(l) === key ? { ...l, quantity: l.quantity + 1 } : l))
+          : [...c.lines, { dish, variant, quantity: 1 }];
         return { ...c, lines };
       }),
     ),
@@ -81,32 +102,32 @@ export const useCart = create<CartState>((set) => ({
   replaceLines: (lines, comment) =>
     set((s) => mutate(s, () => ({ lines, comment }))),
 
-  inc: (dishId) =>
+  inc: (lineKey) =>
     set((s) =>
       mutate(s, (c) => ({
         ...c,
-        lines: c.lines.map((l) => (l.dish.id === dishId ? { ...l, quantity: l.quantity + 1 } : l)),
+        lines: c.lines.map((l) => (cartLineKey(l) === lineKey ? { ...l, quantity: l.quantity + 1 } : l)),
       })),
     ),
 
-  dec: (dishId) =>
+  dec: (lineKey) =>
     set((s) =>
       mutate(s, (c) => ({
         ...c,
         lines: c.lines
-          .map((l) => (l.dish.id === dishId ? { ...l, quantity: l.quantity - 1 } : l))
+          .map((l) => (cartLineKey(l) === lineKey ? { ...l, quantity: l.quantity - 1 } : l))
           .filter((l) => l.quantity > 0),
       })),
     ),
 
-  remove: (dishId) =>
-    set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.filter((l) => l.dish.id !== dishId) }))),
+  remove: (lineKey) =>
+    set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.filter((l) => cartLineKey(l) !== lineKey) }))),
 
-  setLineComment: (dishId, comment) =>
+  setLineComment: (lineKey, comment) =>
     set((s) =>
       mutate(s, (c) => ({
         ...c,
-        lines: c.lines.map((l) => (l.dish.id === dishId ? { ...l, comment } : l)),
+        lines: c.lines.map((l) => (cartLineKey(l) === lineKey ? { ...l, comment } : l)),
       })),
     ),
 
@@ -127,8 +148,8 @@ export function cartTotals(lines: CartLine[]) {
   let discount = 0;
   let count = 0;
   for (const l of lines) {
-    const unit = Number(l.dish.price);
-    const unitFinal = dishUnitPrice(l.dish.price, l.dish.discountType, l.dish.discountValue);
+    const unit = Number(cartLineBasePrice(l));
+    const unitFinal = cartLineUnitPrice(l);
     total += unit * l.quantity;
     discount += (unit - unitFinal) * l.quantity;
     count += l.quantity;

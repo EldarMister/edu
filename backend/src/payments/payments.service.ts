@@ -31,6 +31,7 @@ export class PaymentsService {
             where: { status: { notIn: ['rejected', 'cancelled'] } },
             select: {
               dishNameSnapshot: true,
+              dishVariantNameSnapshot: true,
               quantity: true,
               priceSnapshot: true,
               finalPrice: true,

@@ -9,6 +9,8 @@ import {
   IsString,
   Min,
   MaxLength,
+  IsArray,
+  ValidateNested,
 } from 'class-validator';
 import { Role, DiscountType, TableStatus } from '@prisma/client';
 
@@ -79,6 +81,17 @@ export class UpdateCategoryDto {
 }
 
 // ---------- Блюда ----------
+export class DishVariantDto {
+  @IsOptional() @IsString()
+  id?: string;
+
+  @IsString() @IsNotEmpty() @MaxLength(80)
+  name: string;
+
+  @IsNumber() @Min(0.01)
+  price: number;
+}
+
 export class CreateDishDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
   name: string;
@@ -86,8 +99,8 @@ export class CreateDishDto {
   @IsString() @IsNotEmpty()
   categoryId: string;
 
-  @IsNumber() @Min(0)
-  price: number;
+  @IsOptional() @IsNumber() @Min(0)
+  price?: number;
 
   @IsOptional() @IsString() @MaxLength(300)
   description?: string;
@@ -103,6 +116,12 @@ export class CreateDishDto {
 
   @IsOptional() @IsInt() @Min(0)
   cookingTime?: number;
+
+  @IsOptional() @IsBoolean()
+  isAvailable?: boolean;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
+  variants?: DishVariantDto[];
 }
 export class UpdateDishDto {
   @IsOptional() @IsString() @MaxLength(120)
@@ -134,6 +153,9 @@ export class UpdateDishDto {
 
   @IsOptional() @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
+  variants?: DishVariantDto[];
 }
 
 // ---------- Персонал ----------

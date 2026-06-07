@@ -16,6 +16,10 @@ export class CreateOrderItemDto {
   @IsNotEmpty()
   dishId: string;
 
+  @IsOptional()
+  @IsString()
+  variantId?: string;
+
   @IsInt()
   @Min(1)
   quantity: number;

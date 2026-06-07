@@ -38,3 +38,26 @@ export function dishUnitPrice(price: string, discountType: string, discountValue
   if (discountType === 'fixed') return Math.max(0, p - v);
   return p;
 }
+
+export function variantNamesLine(variants: { name: string }[]): string {
+  return variants.map((variant) => variant.name).join(' / ');
+}
+
+export function minDishUnitPrice(dish: {
+  price: string;
+  discountType: string;
+  discountValue: string;
+  variants?: { price: string }[];
+}): number {
+  const prices = dish.variants?.length ? dish.variants.map((variant) => variant.price) : [dish.price];
+  return Math.min(...prices.map((price) => dishUnitPrice(price, dish.discountType, dish.discountValue)));
+}
+
+export function orderItemDisplayName(item: {
+  dishNameSnapshot: string;
+  dishVariantNameSnapshot?: string | null;
+}): string {
+  return item.dishVariantNameSnapshot
+    ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
+    : item.dishNameSnapshot;
+}

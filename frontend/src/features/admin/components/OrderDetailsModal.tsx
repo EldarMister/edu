@@ -1,7 +1,7 @@
 import { Modal } from '@/components/Modal';
 import { OrderBadge } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
-import { displayOrderNumber, money, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName, timeHM } from '@/lib/format';
 
 const ITEM_STATUS: Record<OrderItemStatus, string> = {
   new: 'Новое',
@@ -59,7 +59,7 @@ export function OrderDetailsModal({
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-medium text-text-primary">
-                      {item.quantity}× {item.dishNameSnapshot}
+                      {item.quantity}× {orderItemDisplayName(item)}
                     </p>
                     {item.comment && <p className="mt-1 text-sm text-warning">{item.comment}</p>}
                     {item.rejectReason && <p className="mt-1 text-sm text-danger">Отказ: {item.rejectReason}</p>}

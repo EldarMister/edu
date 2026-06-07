@@ -8,6 +8,7 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import {
   CreateCategoryDto,
   CreateDishDto,
+  DishVariantDto,
   CreateHallDto,
   CreateTableDto,
   UpdateCategoryDto,
@@ -15,6 +16,13 @@ import {
   UpdateHallDto,
   UpdateTableDto,
 } from './dto';
+
+type NormalizedDishVariant = {
+  id?: string;
+  name: string;
+  price: number;
+  sortOrder: number;
+};
 
 /** Управление каталогом (залы, столы, категории, блюда) для админа/владельца. */
 @Injectable()
@@ -209,24 +217,81 @@ export class CatalogService {
     return this.prisma.dish.findMany({
       where,
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      include: { category: { select: { id: true, name: true } } },
+      include: {
+        category: { select: { id: true, name: true } },
+        variants: { orderBy: { sortOrder: 'asc' } },
+      },
     });
+  }
+
+  private normalizeVariants(variants?: DishVariantDto[]): NormalizedDishVariant[] {
+    return (variants ?? []).map((variant, index) => {
+      const name = variant.name?.trim();
+      const price = Number(variant.price);
+      if (!name) {
+        throw new BadRequestException('Укажите название варианта');
+      }
+      if (!Number.isFinite(price) || price <= 0) {
+        throw new BadRequestException('Цена варианта должна быть больше 0');
+      }
+      return {
+        id: variant.id?.trim() || undefined,
+        name,
+        price,
+        sortOrder: index,
+      };
+    });
+  }
+
+  private resolveDishPrice(
+    price: number | undefined,
+    variants: NormalizedDishVariant[],
+    currentPrice?: Prisma.Decimal,
+  ): number {
+    if (price !== undefined) {
+      if (variants.length === 0 && price <= 0) {
+        throw new BadRequestException('Цена блюда должна быть больше 0');
+      }
+      return price;
+    }
+    if (variants.length > 0) return Math.min(...variants.map((v) => v.price));
+    if (currentPrice !== undefined && Number(currentPrice) > 0) return Number(currentPrice);
+    throw new BadRequestException('Укажите цену блюда или добавьте варианты с ценами');
+  }
+
+  private dishInclude() {
+    return {
+      category: { select: { id: true, name: true } },
+      variants: { orderBy: { sortOrder: 'asc' as const } },
+    };
   }
 
   async createDish(dto: CreateDishDto, actor: AuditActor) {
     await this.ensureCategory(dto.categoryId);
+    const variants = this.normalizeVariants(dto.variants);
+    const price = this.resolveDishPrice(dto.price, variants);
     const dish = await this.prisma.dish.create({
       data: {
         name: dto.name,
         categoryId: dto.categoryId,
-        price: new Prisma.Decimal(dto.price),
+        price: new Prisma.Decimal(price),
         description: dto.description,
         imageUrl: dto.imageUrl,
         discountType: dto.discountType ?? 'none',
         discountValue: new Prisma.Decimal(dto.discountValue ?? 0),
         cookingTime: dto.cookingTime,
+        isAvailable: dto.isAvailable ?? true,
+        variants: variants.length
+          ? {
+              create: variants.map((variant) => ({
+                name: variant.name,
+                price: new Prisma.Decimal(variant.price),
+                sortOrder: variant.sortOrder,
+              })),
+            }
+          : undefined,
       },
-      include: { category: { select: { id: true, name: true } } },
+      include: this.dishInclude(),
     });
     await this.audit.log({
       actor,
@@ -234,24 +299,70 @@ export class CatalogService {
       entityType: AuditEntity.MENU_ITEM,
       entityId: dish.id,
       description: `${actor.name ?? 'Сотрудник'} добавил блюдо «${dish.name}» (${Number(dish.price)} с)`,
-      newValue: { name: dish.name, price: Number(dish.price), categoryId: dish.categoryId },
+      newValue: {
+        name: dish.name,
+        price: Number(dish.price),
+        categoryId: dish.categoryId,
+        variants: dish.variants.map((variant) => ({ name: variant.name, price: Number(variant.price) })),
+      },
     });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: dish.id });
     return dish;
   }
 
   async updateDish(id: string, dto: UpdateDishDto, actor: AuditActor) {
     const dish = await this.prisma.dish.findUnique({ where: { id } });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
-    const data: Prisma.DishUpdateInput = { ...dto } as Prisma.DishUpdateInput;
-    if (dto.price !== undefined) data.price = new Prisma.Decimal(dto.price);
-    if (dto.discountValue !== undefined) data.discountValue = new Prisma.Decimal(dto.discountValue);
-    if (dto.categoryId) {
-      await this.ensureCategory(dto.categoryId);
+    const { variants: variantsDto, ...dishDto } = dto;
+    const variants = variantsDto !== undefined ? this.normalizeVariants(variantsDto) : undefined;
+    const data: Prisma.DishUpdateInput = { ...dishDto } as Prisma.DishUpdateInput;
+    if (variants !== undefined || dto.price !== undefined) {
+      data.price = new Prisma.Decimal(this.resolveDishPrice(dto.price, variants ?? [], dish.price));
     }
-    const updated = await this.prisma.dish.update({
-      where: { id },
-      data,
-      include: { category: { select: { id: true, name: true } } },
+    if (dto.discountValue !== undefined) data.discountValue = new Prisma.Decimal(dto.discountValue);
+    if (dto.categoryId) await this.ensureCategory(dto.categoryId);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (variants !== undefined) {
+        const incomingIds = variants.map((variant) => variant.id).filter((variantId): variantId is string => !!variantId);
+        if (incomingIds.length > 0) {
+          const owned = await tx.dishVariant.count({ where: { dishId: id, id: { in: incomingIds } } });
+          if (owned !== incomingIds.length) {
+            throw new BadRequestException('Вариант блюда не найден');
+          }
+        }
+        await tx.dishVariant.deleteMany({
+          where: {
+            dishId: id,
+            ...(incomingIds.length > 0 ? { id: { notIn: incomingIds } } : {}),
+          },
+        });
+        for (const variant of variants) {
+          if (variant.id) {
+            await tx.dishVariant.update({
+              where: { id: variant.id },
+              data: {
+                name: variant.name,
+                price: new Prisma.Decimal(variant.price),
+                sortOrder: variant.sortOrder,
+              },
+            });
+          } else {
+            await tx.dishVariant.create({
+              data: {
+                dishId: id,
+                name: variant.name,
+                price: new Prisma.Decimal(variant.price),
+                sortOrder: variant.sortOrder,
+              },
+            });
+          }
+        }
+      }
+      return tx.dish.update({
+        where: { id },
+        data,
+        include: this.dishInclude(),
+      });
     });
     // Меню изменилось — оповестим клиентов (официанты обновят список).
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: id });
@@ -291,6 +402,7 @@ export class CatalogService {
         categoryId: updated.categoryId,
         isAvailable: updated.isAvailable,
         isActive: updated.isActive,
+        variants: updated.variants.map((variant) => ({ name: variant.name, price: Number(variant.price) })),
       },
     });
     return updated;
@@ -321,6 +433,7 @@ export class CatalogService {
       oldValue: { name: dish.name, price: Number(dish.price) },
       metadata: { softDeleted: used > 0 },
     });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: id });
     return result;
   }
 

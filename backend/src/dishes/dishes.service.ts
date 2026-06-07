@@ -29,6 +29,15 @@ export class DishesService {
         discountType: true,
         discountValue: true,
         isAvailable: true,
+        variants: {
+          orderBy: { sortOrder: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            sortOrder: true,
+          },
+        },
       },
     });
   }

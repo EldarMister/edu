@@ -1,5 +1,5 @@
 import type { Receipt, PaymentMethod } from '@/types';
-import { displayOrderNumber, money, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName, timeHM } from '@/lib/format';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   qr: 'QR-код',
@@ -15,7 +15,7 @@ export function printReceipt(r: Receipt) {
   const rows = r.items
     .map(
       (it) =>
-        `<tr><td>${escapeHtml(it.dishNameSnapshot)}</td><td class="c">${it.quantity}</td><td class="r">${money(
+        `<tr><td>${escapeHtml(orderItemDisplayName(it))}</td><td class="c">${it.quantity}</td><td class="r">${money(
           it.finalPrice,
         )}</td></tr>`,
     )

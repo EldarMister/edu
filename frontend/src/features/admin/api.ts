@@ -38,6 +38,13 @@ export interface AdminDish {
   isAvailable: boolean;
   isActive: boolean;
   cookingTime: number | null;
+  variants: AdminDishVariant[];
+}
+export interface AdminDishVariant {
+  id: string;
+  name: string;
+  price: string;
+  sortOrder: number;
 }
 export interface StaffMember {
   id: string;
@@ -342,12 +349,13 @@ export function useCategoryMutations() {
 export interface DishInput {
   name: string;
   categoryId: string;
-  price: number;
+  price?: number;
   description?: string;
   discountType?: 'none' | 'percent' | 'fixed';
   discountValue?: number;
   isAvailable?: boolean;
   isActive?: boolean;
+  variants?: { id?: string; name: string; price: number }[];
 }
 export function useDishMutations() {
   const invalidate = useInvalidate([['admin', 'dishes'], ['admin', 'menu', 'overview']]);
