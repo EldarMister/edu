@@ -35,21 +35,19 @@ export function printReceipt(
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${docTitle} ${orderNumber}</title>
   <style>
     @page { margin: 0; }
-    body { width: 76mm; margin: 0 auto; padding: 6mm 4mm; font-family: 'Inter', monospace, sans-serif; color: #000; font-size: 12px; }
-    h1 { font-size: 15px; text-align: center; margin: 0 0 2px; font-weight: 600; }
-    .muted { color: #333; font-size: 11px; }
+    body { width: 80mm; margin: 0 auto; padding: 8mm 4mm; font-family: 'Inter', monospace, sans-serif; color: #000; font-size: 14px; }
+    h1 { font-size: 20px; text-align: center; margin: 0 0 6px; font-weight: 600; }
+    .muted { color: #333; font-size: 13px; }
     .center { text-align: center; }
-    hr { border: none; border-top: 1px dashed #999; margin: 8px 0; }
+    hr { border: none; border-top: 1px dashed #999; margin: 12px 0; }
     table { width: 100%; border-collapse: collapse; }
-    td { padding: 2px 0; vertical-align: top; }
-    .c { text-align: center; width: 28px; }
+    td { padding: 4px 0; vertical-align: top; }
+    .c { text-align: center; width: 36px; }
     .r { text-align: right; white-space: nowrap; }
-    .total { font-size: 14px; font-weight: 600; }
-    .row { display: flex; justify-content: space-between; }
-    .badge { text-align: center; font-weight: 700; letter-spacing: 0.5px; border: 1px dashed #000; border-radius: 4px; padding: 3px 0; margin: 6px 0 2px; }
+    .total { font-size: 18px; font-weight: 700; margin-top: 6px; }
+    .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
   </style></head><body>
     <h1>${escapeHtml(r.cafeName)}</h1>
-    ${preliminary ? '<div class="badge">ПРЕДВАРИТЕЛЬНЫЙ ЧЕК</div>' : ''}
     ${r.address ? `<div class="center muted">${escapeHtml(r.address)}</div>` : ''}
     ${r.phone ? `<div class="center muted">${escapeHtml(r.phone)}${r.phone2 ? ', ' + escapeHtml(r.phone2) : ''}</div>` : ''}
     <div class="center muted">${dateStr}</div>
