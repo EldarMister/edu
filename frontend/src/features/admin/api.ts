@@ -38,6 +38,10 @@ export interface AdminDish {
   isAvailable: boolean;
   isActive: boolean;
   cookingTime: number | null;
+  trackInventory?: boolean;
+  stock?: number;
+  initialStock?: number;
+  unit?: string;
   variants: AdminDishVariant[];
 }
 export interface AdminDishVariant {
@@ -45,6 +49,9 @@ export interface AdminDishVariant {
   name: string;
   price: string;
   sortOrder: number;
+  stock?: number;
+  initialStock?: number;
+  unit?: string;
 }
 export interface StaffMember {
   id: string;
@@ -54,6 +61,13 @@ export interface StaffMember {
   isActive: boolean;
   createdAt: string;
   onShift: boolean;
+}
+export interface WaiterReportItem {
+  id: string;
+  name: string;
+  revenue: number;
+  closedOrders: number;
+  cancelledOrders: number;
 }
 export interface OrdersPage {
   items: Order[];
@@ -355,7 +369,11 @@ export interface DishInput {
   discountValue?: number;
   isAvailable?: boolean;
   isActive?: boolean;
-  variants?: { id?: string; name: string; price: number }[];
+  trackInventory?: boolean;
+  stock?: number;
+  initialStock?: number;
+  unit?: string;
+  variants?: { id?: string; name: string; price: number; stock?: number; initialStock?: number; unit?: string }[];
 }
 export function useDishMutations() {
   const invalidate = useInvalidate([['admin', 'dishes'], ['admin', 'menu', 'overview']]);
@@ -387,6 +405,16 @@ export function useStaffOverview() {
         kitchenCount: number;
         onShiftCount: number;
       }>('/admin/staff/overview'),
+  });
+}
+
+export function useWaiterReport(period: 'today' | 'week' | 'month', date?: string) {
+  const q = new URLSearchParams();
+  q.set('period', period);
+  if (date) q.set('date', date);
+  return useQuery({
+    queryKey: ['admin', 'staff', 'waiter-report', period, date],
+    queryFn: () => get<WaiterReportItem[]>(`/admin/staff/waiter-report?${q.toString()}`),
   });
 }
 export function useStaff(role: string, search: string) {

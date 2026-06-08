@@ -15,6 +15,14 @@ export class StaffController {
     return this.staff.overview(actor);
   }
 
+  @Get('waiter-report')
+  waiterReport(
+    @Query('period') period?: 'today' | 'week' | 'month',
+    @Query('date') date?: string,
+  ) {
+    return this.staff.waiterReport(period ?? 'today', date);
+  }
+
   @Get()
   list(@CurrentUser() actor: AuthUser, @Query('role') role?: Role, @Query('search') search?: string) {
     return this.staff.list(actor, { role, search });

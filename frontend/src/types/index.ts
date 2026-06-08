@@ -51,6 +51,9 @@ export interface DishVariant {
   name: string;
   price: string;
   sortOrder: number;
+  stock?: number;
+  minStock?: number;
+  unit?: string;
 }
 
 export interface Dish {
@@ -63,6 +66,10 @@ export interface Dish {
   discountType: DiscountType;
   discountValue: string;
   isAvailable: boolean;
+  trackInventory?: boolean;
+  stock?: number;
+  minStock?: number;
+  unit?: string;
   variants: DishVariant[];
 }
 

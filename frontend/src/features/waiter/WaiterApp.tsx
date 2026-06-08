@@ -123,7 +123,12 @@ export function WaiterApp() {
 
   const cartQuantities = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const l of cart.lines) map[l.dish.id] = (map[l.dish.id] ?? 0) + l.quantity;
+    for (const l of cart.lines) {
+      map[l.dish.id] = (map[l.dish.id] ?? 0) + l.quantity;
+      if (l.variant) {
+        map[l.variant.id] = (map[l.variant.id] ?? 0) + l.quantity;
+      }
+    }
     return map;
   }, [cart.lines]);
 
@@ -249,6 +254,15 @@ export function WaiterApp() {
   }
 
   function addDishToCart(dish: Parameters<typeof cart.add>[0], variant?: DishVariant) {
+    if (dish.trackInventory) {
+      const currentQty = (variant ? cartQuantities[variant.id] : cartQuantities[dish.id]) ?? 0;
+      const stock = variant ? variant.stock : dish.stock;
+      if (stock !== undefined && stock !== null && currentQty >= stock) {
+        push({ message: `Недостаточно на складе. Остаток: ${stock}`, type: 'error', at: new Date().toISOString() });
+        return;
+      }
+    }
+
     const key = cartLineKeyFromParts(dish.id, variant?.id);
     const nextQuantity = (cart.lines.find((line) => cartLineKeyFromParts(line.dish.id, line.variant?.id) === key)?.quantity ?? 0) + 1;
     cart.add(dish, variant);

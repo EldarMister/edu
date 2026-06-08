@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, Role, WaiterShiftStatus } from '@prisma/client';
+import { OrderStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
@@ -193,5 +193,75 @@ export class StaffService {
       metadata: { softDeleted: hasOrders > 0 },
     });
     return result;
+  }
+
+  async waiterReport(period: 'today' | 'week' | 'month', dateStr?: string) {
+    const startOfDay = (d = new Date()) => {
+      const s = new Date(d);
+      s.setHours(0, 0, 0, 0);
+      return s;
+    };
+    const endExclusive = (d: Date) => {
+      const next = startOfDay(d);
+      next.setDate(next.getDate() + 1);
+      return next;
+    };
+    const addDays = (d: Date, days: number) => {
+      const next = new Date(d);
+      next.setDate(next.getDate() + days);
+      return next;
+    };
+
+    const today = startOfDay();
+    const baseDate = dateStr && !Number.isNaN(new Date(dateStr).getTime()) ? startOfDay(new Date(dateStr)) : today;
+
+    let from: Date;
+    let to: Date;
+    if (period === 'today') {
+      from = baseDate;
+      to = endExclusive(baseDate);
+    } else if (period === 'week') {
+      from = addDays(baseDate, -6);
+      to = endExclusive(baseDate);
+    } else { // month
+      from = addDays(baseDate, -29);
+      to = endExclusive(baseDate);
+    }
+
+    const waiters = await this.prisma.user.findMany({
+      where: { role: Role.WAITER },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: { in: [OrderStatus.paid, OrderStatus.cancelled] },
+        closedAt: { gte: from, lt: to },
+      },
+      select: { waiterId: true, status: true, finalAmount: true },
+    });
+
+    const report = waiters.map(w => ({
+      id: w.id,
+      name: w.name,
+      revenue: 0,
+      closedOrders: 0,
+      cancelledOrders: 0,
+    }));
+    const waiterMap = new Map(report.map(r => [r.id, r]));
+
+    for (const o of orders) {
+      const w = waiterMap.get(o.waiterId);
+      if (!w) continue;
+      if (o.status === OrderStatus.paid) {
+        w.revenue += Number(o.finalAmount);
+        w.closedOrders += 1;
+      } else if (o.status === OrderStatus.cancelled) {
+        w.cancelledOrders += 1;
+      }
+    }
+
+    return report;
   }
 }

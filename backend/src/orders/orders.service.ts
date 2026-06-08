@@ -175,19 +175,20 @@ export class OrdersService {
       throw new BadRequestException('У этого стола уже есть активный заказ');
     }
 
-    const itemsData = await this.buildItemsData(dto.items);
+    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(dto.items);
 
     let order: Awaited<ReturnType<typeof this.findById>>;
     try {
       order = await this.prisma.$transaction(async (tx) => {
         const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
         const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
-        const totals = this.calcTotals(itemsData, serviceChargeAmount);
+        const totals = this.calcTotals(itemsData as Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount);
         const orderNumber = await this.nextOrderNumber(tx);
         await tx.table.update({
           where: { id: dto.tableId },
           data: { status: TableStatus.sent_to_kitchen },
         });
+        await this.deductInventory(tx, dishDeductions, variantDeductions);
         return tx.order.create({
           data: {
             orderNumber,
@@ -276,6 +277,10 @@ export class OrdersService {
 
     const prevStatus = order.status;
     const updated = await this.prisma.$transaction(async (tx) => {
+      const itemsToCancel = order.items.filter(item => 
+        ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.served].includes(item.status as any)
+      );
+      await this.restoreInventory(tx, itemsToCancel);
       await tx.orderItem.updateMany({
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.served] } },
         data: { status: OrderItemStatus.cancelled },
@@ -340,11 +345,12 @@ export class OrdersService {
       throw new BadRequestException('Заказ не может быть пустым — используйте отмену');
     }
 
-    const itemsData = await this.buildItemsData(items);
+    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(items);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.restoreInventory(tx, order.items);
       const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
-      const totals = this.calcTotals(itemsData, serviceChargeAmount);
+      const totals = this.calcTotals(itemsData as Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount);
       const changed = await tx.order.updateMany({
         where: { id: orderId, waiterId: actor.id, status: OrderStatus.sent_to_kitchen },
         data: {
@@ -363,8 +369,9 @@ export class OrdersService {
       }
       await tx.orderItem.deleteMany({ where: { orderId } });
       await tx.orderItem.createMany({
-        data: itemsData.map((i) => ({ ...i, orderId })),
+        data: itemsData.map((i) => ({ ...i, orderId })) as Prisma.OrderItemCreateManyInput[],
       });
+      await this.deductInventory(tx, dishDeductions, variantDeductions);
       return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
 
@@ -452,7 +459,7 @@ export class OrdersService {
       }
     }
 
-    const itemsData = await this.buildItemsData(items);
+    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(items);
 
     const applied = await this.prisma.$transaction(async (tx) => {
       if (idempotencyKey) {
@@ -471,8 +478,9 @@ export class OrdersService {
         }
       }
       await tx.orderItem.createMany({
-        data: itemsData.map((i) => ({ ...i, orderId })),
+        data: itemsData.map((i) => ({ ...i, orderId })) as Prisma.OrderItemCreateManyInput[],
       });
+      await this.deductInventory(tx, dishDeductions, variantDeductions);
       await this.recalcOrder(tx, orderId);
       // Новые блюда снова уходят на кухню.
       await tx.order.update({
@@ -588,6 +596,10 @@ export class OrdersService {
     const order = await this.getMutableOrder(orderId);
     this.ensureNoPendingWaiterDecision(order);
     const updated = await this.prisma.$transaction(async (tx) => {
+      const itemsToReject = order.items.filter(item => 
+        ![OrderItemStatus.rejected, OrderItemStatus.cancelled].includes(item.status as any)
+      );
+      await this.restoreInventory(tx, itemsToReject);
       await tx.orderItem.updateMany({
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
         data: { status: OrderItemStatus.rejected, rejectReason: reason },
@@ -631,6 +643,7 @@ export class OrdersService {
     if (!item) throw new NotFoundException('Блюдо в заказе не найдено');
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await this.restoreInventory(tx, [item]);
       await tx.orderItem.update({
         where: { id: itemId },
         data: { status: OrderItemStatus.rejected, rejectReason: reason },
@@ -941,7 +954,11 @@ export class OrdersService {
 
   // ---------- Внутренние помощники ----------
 
-  private async buildItemsData(items: CreateOrderItemDto[]): Promise<Prisma.OrderItemCreateManyOrderInput[]> {
+  private async buildItemsData(items: CreateOrderItemDto[]): Promise<{
+    itemsData: Prisma.OrderItemCreateManyOrderInput[];
+    dishDeductions: Map<string, number>;
+    variantDeductions: Map<string, number>;
+  }> {
     const dishIds = [...new Set(items.map((i) => i.dishId))];
     const variantIds = [...new Set(items.map((i) => i.variantId).filter((id): id is string => !!id))];
     const dishes = await this.prisma.dish.findMany({
@@ -954,7 +971,10 @@ export class OrdersService {
       : [];
     const variantById = new Map(variants.map((variant) => [variant.id, variant]));
 
-    return items.map((i) => {
+    const dishDeductions = new Map<string, number>();
+    const variantDeductions = new Map<string, number>();
+
+    const itemsData = items.map((i) => {
       const dish = byId.get(i.dishId);
       if (!dish) {
         throw new BadRequestException(`Блюдо недоступно`);
@@ -973,6 +993,27 @@ export class OrdersService {
       if (variant && variant.dishId !== dish.id) {
         throw new BadRequestException('Вариант не относится к выбранному блюду');
       }
+
+      if (dish.trackInventory) {
+        if (hasVariants && variant) {
+          if (variant.stock !== null) {
+            const current = variantDeductions.get(variant.id) ?? 0;
+            if ((variant.stock ?? 0) < current + i.quantity) {
+              throw new BadRequestException(`Недостаточно остатка для «${dish.name} - ${variant.name}»`);
+            }
+            variantDeductions.set(variant.id, current + i.quantity);
+          }
+        } else {
+          if (dish.stock !== null) {
+            const current = dishDeductions.get(dish.id) ?? 0;
+            if ((dish.stock ?? 0) < current + i.quantity) {
+              throw new BadRequestException(`Недостаточно остатка для «${dish.name}»`);
+            }
+            dishDeductions.set(dish.id, current + i.quantity);
+          }
+        }
+      }
+
       const basePrice = variant?.price ?? dish.price;
       const { unit, unitDiscount, unitFinal } = unitPricing(
         basePrice,
@@ -992,6 +1033,65 @@ export class OrdersService {
         comment: i.comment,
       };
     });
+
+    return { itemsData, dishDeductions, variantDeductions };
+  }
+
+  private async deductInventory(
+    tx: Prisma.TransactionClient,
+    dishDeductions: Map<string, number>,
+    variantDeductions: Map<string, number>,
+  ) {
+    for (const [dishId, qty] of dishDeductions.entries()) {
+      await tx.dish.update({ where: { id: dishId }, data: { stock: { decrement: qty } } });
+    }
+    for (const [variantId, qty] of variantDeductions.entries()) {
+      await tx.dishVariant.update({ where: { id: variantId }, data: { stock: { decrement: qty } } });
+    }
+  }
+
+  private async restoreInventory(
+    tx: Prisma.TransactionClient,
+    items: { dishId: string; dishVariantId: string | null; quantity: number }[],
+  ) {
+    if (!items.length) return;
+    const dishIds = [...new Set(items.map((i) => i.dishId))];
+    const variantIds = items.map((i) => i.dishVariantId).filter((id): id is string => !!id);
+    const variants = variantIds.length
+      ? await tx.dishVariant.findMany({ where: { id: { in: variantIds } } })
+      : [];
+    const nonNullVariantIds = new Set(variants.filter((v) => v.stock !== null).map((v) => v.id));
+
+    const dishes = await tx.dish.findMany({
+      where: { id: { in: dishIds }, trackInventory: true },
+      select: { id: true, stock: true },
+    });
+    const trackedDishIds = new Set(dishes.map((d) => d.id));
+    const dishesWithStock = new Set(dishes.filter((d) => d.stock !== null).map((d) => d.id));
+
+    const dishIncrements = new Map<string, number>();
+    const variantIncrements = new Map<string, number>();
+
+    for (const item of items) {
+      if (trackedDishIds.has(item.dishId)) {
+        if (item.dishVariantId) {
+          if (nonNullVariantIds.has(item.dishVariantId)) {
+            variantIncrements.set(item.dishVariantId, (variantIncrements.get(item.dishVariantId) ?? 0) + item.quantity);
+          }
+        } else {
+          if (dishesWithStock.has(item.dishId)) {
+            dishIncrements.set(item.dishId, (dishIncrements.get(item.dishId) ?? 0) + item.quantity);
+          }
+        }
+      }
+    }
+
+    for (const [dishId, qty] of dishIncrements.entries()) {
+      await tx.dish.update({ where: { id: dishId }, data: { stock: { increment: qty } } });
+    }
+    for (const [variantId, qty] of variantIncrements.entries()) {
+      await tx.dishVariant.update({ where: { id: variantId }, data: { stock: { increment: qty } } });
+    }
   }
 
   private calcTotals(items: Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount = 0) {
@@ -1097,7 +1197,7 @@ export class OrdersService {
   }
 
   private async getMutableOrder(orderId: string) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { items: true, table: true } });
     if (!order) throw new NotFoundException('Заказ не найден');
     if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ уже закрыт');

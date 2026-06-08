@@ -53,10 +53,6 @@ const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly
   { key: 'settings', label: 'Настройки', icon: IconSettings, ownerOnly: true },
 ];
 
-const ROLE_LABEL: Record<string, string> = {
-  OWNER: 'Владелец',
-  ADMIN: 'Администратор',
-};
 
 export function AdminApp() {
   const { user, logout } = useAuth();
@@ -165,15 +161,6 @@ export function AdminApp() {
           </div>
           <div className="flex items-center gap-3">
             <ConnectionStatus />
-            <div className="hidden text-right sm:block">
-              <p className="text-sm font-medium text-text-primary">{user?.name}</p>
-              <p className="text-xs text-text-muted">
-                {t(ROLE_LABEL[user?.role ?? ''] ?? user?.role ?? '')}
-              </p>
-            </div>
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-              {user?.name?.[0] ?? '?'}
-            </div>
           </div>
         </header>
 
@@ -182,10 +169,10 @@ export function AdminApp() {
           {section === 'orders' && <OrdersPage />}
           {section === 'receipts' && isAdmin && <ReceiptPrintsPage />}
           {section === 'tables' && <TablesPage />}
-          {section === 'menu' && <MenuPage />}
-          {section === 'staff' && <StaffPage />}
-          {section === 'audit' && isOwner && <AuditPage />}
-          {section === 'reconcile' && isOwner && <ReconciliationPage />}
+          { section === 'menu' && <MenuPage /> }
+          { section === 'staff' && <StaffPage /> }
+          { section === 'audit' && isOwner && <AuditPage /> }
+          { section === 'reconcile' && isOwner && <ReconciliationPage /> }
           {section === 'settings' && isOwner && <SettingsPage />}
         </main>
       </div>

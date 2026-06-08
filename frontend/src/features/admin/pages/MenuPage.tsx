@@ -7,7 +7,7 @@ import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { StatCard, StatCardsRow } from '../components/StatCard';
-import { IconMenu, IconCategory, IconCheck, IconMoney, IconEdit, IconTrash, IconPlus } from '../components/icons';
+import { IconMenu, IconCategory, IconCheck, IconEdit, IconTrash, IconPlus } from '../components/icons';
 import {
   useMenuOverview,
   useAdminCategories,
@@ -49,12 +49,6 @@ export function MenuPage() {
         <StatCard label={tr('Всего блюд')} value={o?.dishesCount ?? '—'} icon={<IconMenu />} tone="primary" />
         <StatCard label={tr('Категорий')} value={o?.categoriesCount ?? '—'} icon={<IconCategory />} tone="warning" />
         <StatCard label={tr('Активных блюд')} value={o?.activeDishesCount ?? '—'} icon={<IconCheck />} tone="success" />
-        <StatCard
-          label={tr('Средняя цена')}
-          value={o ? money(o.avgPrice) : '—'}
-          icon={<IconMoney />}
-          tone="muted"
-        />
       </StatCardsRow>
 
       <div className="card overflow-hidden">
@@ -101,6 +95,7 @@ export function MenuPage() {
                   <th className="px-4 py-3 font-medium">{tr('Название')}</th>
                   <th className="px-4 py-3 font-medium">{tr('Категория')}</th>
                   <th className="px-4 py-3 text-right font-medium">{tr('Цена')}</th>
+                  <th className="px-4 py-3 text-right font-medium">{tr('Остаток')}</th>
                   <th className="px-4 py-3 font-medium">{tr('Статус')}</th>
                   <th className="px-4 py-3 text-right font-medium">{tr('Действия')}</th>
                 </tr>
@@ -119,12 +114,26 @@ export function MenuPage() {
                     <td className="px-4 py-3 text-right font-medium text-text-primary">
                       {d.variants.length > 0 ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}
                     </td>
+                    <td className="px-4 py-3 text-right text-text-secondary">
+                      {(() => {
+                        if (!d.trackInventory) return '—';
+                        const hasVar = d.variants.length > 0;
+                        const stock = hasVar ? d.variants.reduce((a, v) => a + (v.stock ?? 0), 0) : (d.stock ?? 0);
+                        return `${stock} ${d.unit || 'шт'}`;
+                      })()}
+                    </td>
                     <td className="px-4 py-3">
-                      {d.isActive && d.isAvailable ? (
-                        <Badge tone="success">{tr('Активно')}</Badge>
-                      ) : (
-                        <Badge tone="muted">{tr('Скрыто')}</Badge>
-                      )}
+                      {(() => {
+                        const hasVar = d.variants.length > 0;
+                        const stock = hasVar ? d.variants.reduce((a, v) => a + (v.stock ?? 0), 0) : (d.stock ?? 0);
+                        if (d.trackInventory && stock === 0) {
+                          return <Badge tone="danger">{tr('Нет в наличии')}</Badge>;
+                        }
+                        if (d.isActive && d.isAvailable) {
+                          return <Badge tone="success">{tr('Активно')}</Badge>;
+                        }
+                        return <Badge tone="muted">{tr('Скрыто')}</Badge>;
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
@@ -140,7 +149,7 @@ export function MenuPage() {
                 ))}
                 {dishesQ.data?.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-text-muted">
+                    <td colSpan={6} className="px-4 py-10 text-center text-text-muted">
                       Блюда не найдены
                     </td>
                   </tr>
@@ -171,6 +180,8 @@ interface DishVariantDraft {
   id?: string;
   name: string;
   price: string;
+  stock: string;
+  unit: string;
 }
 
 function variantDraft(variant?: AdminDishVariant): DishVariantDraft {
@@ -179,6 +190,8 @@ function variantDraft(variant?: AdminDishVariant): DishVariantDraft {
     id: variant?.id,
     name: variant?.name ?? '',
     price: variant ? String(Number(variant.price)) : '',
+    stock: variant?.stock != null ? String(variant.stock) : '',
+    unit: variant?.unit ?? 'шт',
   };
 }
 
@@ -201,6 +214,8 @@ function DishModal({
     dish?.categoryId ?? (defaultCategoryId || categories[0]?.id || ''),
   );
   const [price, setPrice] = useState(dish ? (dish.variants.length > 0 ? '' : String(Number(dish.price))) : '');
+  const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : '');
+  const [unit] = useState(dish?.unit ?? 'шт');
   const [description, setDescription] = useState(dish?.description ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
   const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
@@ -208,7 +223,7 @@ function DishModal({
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
-  function updateVariant(uid: string, patch: Partial<Pick<DishVariantDraft, 'name' | 'price'>>) {
+  function updateVariant(uid: string, patch: Partial<Pick<DishVariantDraft, 'name' | 'price' | 'stock' | 'unit'>>) {
     setVariants((current) => current.map((variant) => (variant.uid === uid ? { ...variant, ...patch } : variant)));
   }
 
@@ -241,6 +256,8 @@ function DishModal({
         id: variant.id,
         name: variant.name.trim(),
         price: variant.price.trim(),
+        stock: variant.stock.trim(),
+        unit: variant.unit.trim(),
       }))
       .filter((variant) => variant.name || variant.price);
     for (const variant of filledVariants) {
@@ -266,10 +283,17 @@ function DishModal({
         price: priceValue,
         description: description.trim() || undefined,
         isAvailable,
+        trackInventory: filledVariants.length > 0 ? filledVariants.some(v => v.stock.trim() !== '') : stock.trim() !== '',
+        stock: priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
+        initialStock: !isEdit && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
+        unit: priceValue !== undefined ? unit : undefined,
         variants: filledVariants.map((variant) => ({
           id: variant.id,
           name: variant.name,
           price: Number(variant.price),
+          stock: variant.stock.trim() ? Number(variant.stock) : undefined,
+          initialStock: (!isEdit || !variant.id) && variant.stock.trim() ? Number(variant.stock) : undefined,
+          unit: variant.unit,
         })),
       };
       if (isEdit) {
@@ -310,16 +334,28 @@ function DishModal({
               options={categories.map((c) => ({ value: c.id, label: c.name }))}
             />
           </Field>
-          <Field label="Цена (с)">
-            <input
-              className="input"
-              type="number"
-              inputMode="numeric"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-            />
-          </Field>
         </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Цена (с)">
+              <input
+                className="input"
+                type="number"
+                inputMode="numeric"
+                value={price}
+                onChange={(e) => setPrice(e.target.value)}
+              />
+            </Field>
+            <Field label="Остаток">
+              <input
+                className="input"
+                type="number"
+                inputMode="numeric"
+                value={stock}
+                placeholder="Без учета"
+                onChange={(e) => setStock(e.target.value)}
+              />
+            </Field>
+          </div>
         <Field label="Описание">
           <input
             className="input"
@@ -339,59 +375,71 @@ function DishModal({
               <IconPlus className="h-4 w-4" /> Добавить вариант
             </button>
           </div>
-          <div className="overflow-hidden rounded-xl border border-border">
-            <div className="grid grid-cols-[28px_minmax(0,1fr)_112px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
+          <div className="overflow-hidden rounded-xl border border-border overflow-x-auto">
+            <div className="grid min-w-[420px] grid-cols-[28px_minmax(120px,1fr)_100px_100px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
               <span />
               <span>Название варианта</span>
               <span>Цена (с)</span>
+              <span>Остаток</span>
               <span />
             </div>
             {variants.length === 0 ? (
               <div className="px-3 py-4 text-sm text-text-muted">Варианты не добавлены</div>
             ) : (
-              variants.map((variant, index) => (
-                <div
-                  key={variant.uid}
-                  draggable
-                  onDragStart={() => setDragIndex(index)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => {
-                    if (dragIndex !== null) moveVariant(dragIndex, index);
-                    setDragIndex(null);
-                  }}
-                  onDragEnd={() => setDragIndex(null)}
-                  className={`grid grid-cols-[28px_minmax(0,1fr)_112px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
-                    dragIndex === index ? 'bg-primary/5' : 'bg-white'
-                  }`}
-                >
-                  <span className="cursor-grab select-none text-center text-lg leading-none text-text-light" title="Изменить порядок">
-                    ⋮⋮
-                  </span>
-                  <input
-                    className="input h-10"
-                    value={variant.name}
-                    placeholder="30 см"
-                    onChange={(e) => updateVariant(variant.uid, { name: e.target.value })}
-                  />
-                  <input
-                    className="input h-10"
-                    type="number"
-                    inputMode="numeric"
-                    min="0"
-                    value={variant.price}
-                    placeholder="400"
-                    onChange={(e) => updateVariant(variant.uid, { price: e.target.value })}
-                  />
-                  <button
-                    type="button"
-                    className="flex h-9 w-9 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/5"
-                    title="Удалить вариант"
-                    onClick={() => removeVariant(variant.uid)}
+              <div className="min-w-[500px]">
+                {variants.map((variant, index) => (
+                  <div
+                    key={variant.uid}
+                    draggable
+                    onDragStart={() => setDragIndex(index)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={() => {
+                      if (dragIndex !== null) moveVariant(dragIndex, index);
+                      setDragIndex(null);
+                    }}
+                    onDragEnd={() => setDragIndex(null)}
+                    className={`grid grid-cols-[28px_minmax(120px,1fr)_100px_100px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
+                      dragIndex === index ? 'bg-primary/5' : 'bg-white'
+                    }`}
                   >
-                    <IconTrash className="h-4 w-4" />
-                  </button>
-                </div>
-              ))
+                    <span className="cursor-grab select-none text-center text-lg leading-none text-text-light" title="Изменить порядок">
+                      ⋮⋮
+                    </span>
+                    <input
+                      className="input h-10"
+                      value={variant.name}
+                      placeholder="30 см"
+                      onChange={(e) => updateVariant(variant.uid, { name: e.target.value })}
+                    />
+                    <input
+                      className="input h-10"
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      value={variant.price}
+                      placeholder="400"
+                      onChange={(e) => updateVariant(variant.uid, { price: e.target.value })}
+                    />
+                    <input
+                      className="input h-10"
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      value={variant.stock}
+                      placeholder="Без учета"
+                      onChange={(e) => updateVariant(variant.uid, { stock: e.target.value })}
+                    />
+                    <button
+                      type="button"
+                      className="flex h-9 w-9 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/5"
+                      title="Удалить вариант"
+                      onClick={() => removeVariant(variant.uid)}
+                    >
+                      <IconTrash className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -498,9 +546,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
-function Badge({ children, tone }: { children: React.ReactNode; tone: 'success' | 'muted' }) {
-  const cls = tone === 'success' ? 'bg-success/10 text-success' : 'bg-slate-100 text-text-muted';
-  return <span className={`inline-flex rounded-lg px-2.5 py-1 text-xs font-medium ${cls}`}>{children}</span>;
+function Badge({ children, tone }: { children: React.ReactNode; tone: 'success' | 'danger' | 'muted' }) {
+  const bg = {
+    success: 'bg-success/15 text-success-dark',
+    danger: 'bg-danger/15 text-danger-dark',
+    muted: 'bg-slate-100 text-slate-600',
+  }[tone];
+  return <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${bg}`}>{children}</span>;
 }
 function IconBtn({
   children,

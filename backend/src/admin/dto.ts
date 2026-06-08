@@ -90,6 +90,15 @@ export class DishVariantDto {
 
   @IsNumber() @Min(0.01)
   price: number;
+
+  @IsOptional() @IsInt() @Min(0)
+  stock?: number;
+
+  @IsOptional() @IsInt() @Min(0)
+  initialStock?: number;
+
+  @IsOptional() @IsString()
+  unit?: string;
 }
 
 export class CreateDishDto {
@@ -119,6 +128,18 @@ export class CreateDishDto {
 
   @IsOptional() @IsBoolean()
   isAvailable?: boolean;
+
+  @IsOptional() @IsBoolean()
+  trackInventory?: boolean;
+
+  @IsOptional() @IsInt() @Min(0)
+  stock?: number;
+
+  @IsOptional() @IsInt() @Min(0)
+  initialStock?: number;
+
+  @IsOptional() @IsString()
+  unit?: string;
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
   variants?: DishVariantDto[];
@@ -153,6 +174,18 @@ export class UpdateDishDto {
 
   @IsOptional() @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional() @IsBoolean()
+  trackInventory?: boolean;
+
+  @IsOptional() @IsInt() @Min(0)
+  stock?: number;
+
+  @IsOptional() @IsInt() @Min(0)
+  initialStock?: number;
+
+  @IsOptional() @IsString()
+  unit?: string;
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
   variants?: DishVariantDto[];
