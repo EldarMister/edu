@@ -101,7 +101,10 @@ export function KitchenApp() {
       <OfflineBanner />
 
       {/* Шапка */}
-      <header className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-b border-border bg-white px-5 py-3.5">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
+        <div className="text-xl font-bold tracking-tight text-text-primary">
+          {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+        </div>
         <div className="flex items-center gap-4 text-sm">
           <ConnectionStatus />
           {pushNotifications.status !== 'subscribed' && pushNotifications.status !== 'unsupported' && (

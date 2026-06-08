@@ -5,7 +5,7 @@ import { displayOrderNumber, timeHM, elapsed, orderItemDisplayName } from '@/lib
 import { Spinner } from '@/components/Spinner';
 
 /** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
-const SLOW_AFTER = 8 * 60;
+const SLOW_AFTER = 20 * 60;
 
 export function KitchenOrderCard({
   order,
