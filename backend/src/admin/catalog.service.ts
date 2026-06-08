@@ -22,6 +22,9 @@ type NormalizedDishVariant = {
   name: string;
   price: number;
   sortOrder: number;
+  stock?: number;
+  initialStock?: number;
+  unit?: string;
 };
 
 /** Управление каталогом (залы, столы, категории, блюда) для админа/владельца. */
@@ -239,6 +242,9 @@ export class CatalogService {
         name,
         price,
         sortOrder: index,
+        stock: variant.stock,
+        initialStock: variant.initialStock,
+        unit: variant.unit,
       };
     });
   }
@@ -281,12 +287,19 @@ export class CatalogService {
         discountValue: new Prisma.Decimal(dto.discountValue ?? 0),
         cookingTime: dto.cookingTime,
         isAvailable: dto.isAvailable ?? true,
+        trackInventory: dto.trackInventory ?? false,
+        stock: dto.stock,
+        initialStock: dto.initialStock,
+        unit: dto.unit,
         variants: variants.length
           ? {
               create: variants.map((variant) => ({
                 name: variant.name,
                 price: new Prisma.Decimal(variant.price),
                 sortOrder: variant.sortOrder,
+                stock: variant.stock,
+                initialStock: variant.initialStock,
+                unit: variant.unit,
               })),
             }
           : undefined,
@@ -316,6 +329,9 @@ export class CatalogService {
     const { variants: variantsDto, ...dishDto } = dto;
     const variants = variantsDto !== undefined ? this.normalizeVariants(variantsDto) : undefined;
     const data: Prisma.DishUpdateInput = { ...dishDto } as Prisma.DishUpdateInput;
+    if (dto.trackInventory !== undefined) {
+      data.trackInventory = dto.trackInventory;
+    }
     if (variants !== undefined || dto.price !== undefined) {
       data.price = new Prisma.Decimal(this.resolveDishPrice(dto.price, variants ?? [], dish.price));
     }
@@ -344,6 +360,9 @@ export class CatalogService {
                 name: variant.name,
                 price: new Prisma.Decimal(variant.price),
                 sortOrder: variant.sortOrder,
+                stock: variant.stock,
+                initialStock: variant.initialStock,
+                unit: variant.unit,
               },
             });
           } else {
@@ -353,6 +372,9 @@ export class CatalogService {
                 name: variant.name,
                 price: new Prisma.Decimal(variant.price),
                 sortOrder: variant.sortOrder,
+                stock: variant.stock,
+                initialStock: variant.initialStock,
+                unit: variant.unit,
               },
             });
           }

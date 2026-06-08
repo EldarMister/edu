@@ -85,10 +85,14 @@ export function DishMenu({
           const finalUnit = hasVariants ? minDishUnitPrice(d) : dishUnitPrice(d.price, d.discountType, d.discountValue);
           const qty = quantities[d.id] ?? 0;
           const active = qty > 0;
+          const isOutOfStock = d.trackInventory && (hasVariants
+            ? d.variants.every((v) => typeof v.stock === 'number' && v.stock <= 0)
+            : typeof d.stock === 'number' && d.stock <= 0);
+          const isDishDisabled = disabled || !d.isAvailable || isOutOfStock;
           return (
             <button
               key={d.id}
-              disabled={disabled || !d.isAvailable}
+              disabled={isDishDisabled}
               onClick={() => {
                 if (hasVariants) setVariantDish(d);
                 else onAdd(d);
@@ -99,14 +103,18 @@ export function DishMenu({
                   : 'border-border bg-white hover:border-primary/40'
               }`}
             >
-              {!d.isAvailable && (
+              {!d.isAvailable ? (
                 <span className="absolute right-2 top-2 rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-text-muted">
                   {t('Недоступно')}
                 </span>
-              )}
+              ) : isOutOfStock ? (
+                <span className="absolute right-2 top-2 rounded-md bg-red-100 px-1.5 py-0.5 text-[11px] font-medium text-red-600">
+                  {t('Нет в наличии')}
+                </span>
+              ) : null}
               <span
                 className={`line-clamp-2 text-[15px] font-medium leading-snug text-text-primary ${
-                  !d.isAvailable ? 'pr-20' : ''
+                  (!d.isAvailable || isOutOfStock) ? 'pr-20' : ''
                 }`}
               >
                 {d.name}
@@ -299,14 +307,16 @@ function VariantPickerSheet({
           {renderDish.variants.map((variant) => {
             const selected = variant.id === selectedId;
             const price = dishUnitPrice(variant.price, renderDish.discountType, renderDish.discountValue);
+            const isOutOfStock = renderDish.trackInventory && typeof variant.stock === 'number' && variant.stock <= 0;
             return (
               <button
                 key={variant.id}
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                onClick={() => setSelectedId(variant.id)}
-                className={`flex w-full items-center gap-3 rounded-xl border px-3.5 py-3.5 text-left transition-colors ${
+                disabled={isOutOfStock}
+                onClick={() => !isOutOfStock && setSelectedId(variant.id)}
+                className={`flex w-full items-center gap-3 rounded-xl border px-3.5 py-3.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
                   selected ? 'border-primary bg-primary/5' : 'border-border bg-white hover:border-primary/40'
                 }`}
               >
@@ -318,7 +328,10 @@ function VariantPickerSheet({
                 >
                   {selected && <span className="h-2.5 w-2.5 rounded-full bg-primary" />}
                 </span>
-                <span className="min-w-0 flex-1 text-[16px] font-medium text-text-primary">{variant.name}</span>
+                <span className="min-w-0 flex-1 text-[16px] font-medium text-text-primary">
+                  {variant.name}
+                  {isOutOfStock && <span className="ml-2 text-xs font-medium text-red-500">{t('Нет в наличии')}</span>}
+                </span>
                 <span className="shrink-0 text-[16px] font-semibold text-text-primary">{money(price)}</span>
               </button>
             );

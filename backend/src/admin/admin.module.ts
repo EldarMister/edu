@@ -9,6 +9,8 @@ import { StatisticsController } from './statistics.controller';
 import { StatisticsService } from './statistics.service';
 import { ReconciliationController } from './reconciliation/reconciliation.controller';
 import { ReconciliationService } from './reconciliation/reconciliation.service';
+import { AdminWarehouseController } from './warehouse.controller';
+import { AdminWarehouseService } from './warehouse.service';
 
 /** Этапы 6–7: административная часть и статистика владельца. */
 @Module({
@@ -18,6 +20,7 @@ import { ReconciliationService } from './reconciliation/reconciliation.service';
     AdminOrdersController,
     StatisticsController,
     ReconciliationController,
+    AdminWarehouseController,
   ],
   providers: [
     CatalogService,
@@ -25,6 +28,7 @@ import { ReconciliationService } from './reconciliation/reconciliation.service';
     AdminOrdersService,
     StatisticsService,
     ReconciliationService,
+    AdminWarehouseService,
   ],
 })
 export class AdminModule {}

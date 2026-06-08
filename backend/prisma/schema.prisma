@@ -202,6 +202,10 @@ model Dish {
   isAvailable   Boolean      @default(true) @map("is_available") // временно отключить
   isActive      Boolean      @default(true) @map("is_active")
   sortOrder     Int          @default(0) @map("sort_order")
+  trackInventory Boolean     @default(false) @map("track_inventory")
+  stock         Int?
+  initialStock  Int?         @map("initial_stock")
+  unit          String       @default("шт")
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
@@ -218,6 +222,9 @@ model DishVariant {
   name      String
   price     Decimal  @db.Decimal(10, 2)
   sortOrder Int      @default(0) @map("sort_order")
+  stock     Int?
+  initialStock Int?  @map("initial_stock")
+  unit      String   @default("шт")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

@@ -6,14 +6,45 @@ import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
-import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconStaff, IconClock, IconEdit, IconTrash, IconPlus } from '../components/icons';
 import {
   useStaff,
   useStaffOverview,
   useStaffMutations,
+  useWaiterReport,
   type StaffMember,
 } from '../api';
+import { money } from '@/lib/format';
+
+function IconRefresh(p: { className?: string }) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
+      <path d="M21 2v6h-6" />
+      <path d="M3 12a9 9 0 1 0 2.13-5.88L21 8" />
+    </svg>
+  );
+}
+
+function SummaryItem({ label, value, icon, tone }: { label: string; value: React.ReactNode; icon: React.ReactNode; tone: 'primary' | 'success' | 'warning' | 'danger' | 'muted' }) {
+  const iconColors = {
+    primary: 'bg-primary/10 text-primary',
+    success: 'bg-success/10 text-success',
+    warning: 'bg-warning/10 text-warning',
+    danger: 'bg-danger/10 text-danger',
+    muted: 'bg-slate-100 text-slate-500',
+  };
+  return (
+    <div className="flex items-center justify-between rounded-xl border border-border bg-white px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div className={`flex h-9 w-9 items-center justify-center rounded-full ${iconColors[tone]}`}>
+          {icon}
+        </div>
+        <span className="text-[15px] font-medium text-text-secondary">{label}</span>
+      </div>
+      <span className="text-lg font-bold text-text-primary">{value}</span>
+    </div>
+  );
+}
 
 const ROLE_LABEL: Record<Role, string> = {
   OWNER: 'Владелец',
@@ -36,6 +67,8 @@ export function StaffPage() {
 
   const overview = useStaffOverview();
   const staffQ = useStaff(role, search);
+  const [reportPeriod, setReportPeriod] = useState<'today' | 'week' | 'month'>('today');
+  const reportQ = useWaiterReport(reportPeriod);
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const tr = useT();
@@ -52,16 +85,105 @@ export function StaffPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <StatCardsRow>
-        <StatCard label={tr('Всего сотрудников')} value={o?.totalStaff ?? '—'} icon={<IconStaff />} tone="primary" />
-        <StatCard label={tr('На смене')} value={o?.onShiftCount ?? '—'} icon={<IconClock />} tone="success" />
-        <StatCard label={tr('Администраторов')} value={o?.adminsCount ?? '—'} icon={<IconStaff />} tone="warning" />
-        <StatCard label={tr('Официантов')} value={o?.waitersCount ?? '—'} icon={<IconStaff />} tone="muted" />
-      </StatCardsRow>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-6 lg:flex-row">
+        {/* Left: Summary */}
+        <div className="w-full shrink-0 lg:w-72">
+          <h2 className="mb-3 text-lg font-semibold text-text-primary">{tr('Сводка по персоналу')}</h2>
+          <div className="flex flex-col gap-2">
+            <SummaryItem label={tr('Всего сотрудников')} value={o?.totalStaff ?? '—'} icon={<IconStaff />} tone="primary" />
+            <SummaryItem label={tr('На смене')} value={o?.onShiftCount ?? '—'} icon={<IconClock />} tone="success" />
+            <SummaryItem label={tr('Администраторов')} value={o?.adminsCount ?? '—'} icon={<IconStaff />} tone="warning" />
+            <SummaryItem label={tr('Официантов')} value={o?.waitersCount ?? '—'} icon={<IconStaff />} tone="muted" />
+          </div>
+        </div>
 
-      <div className="card overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+        {/* Right: Waiter Report */}
+        <div className="min-w-0 flex-1">
+          <h2 className="mb-3 text-lg font-semibold text-text-primary">{tr('Отчет по официантам')}</h2>
+          <div className="card overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border p-4">
+              <div className="flex items-center gap-2 rounded-lg bg-slate-100 p-1">
+                {(['today', 'week', 'month'] as const).map((p) => (
+                  <button
+                    key={p}
+                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                      reportPeriod === p ? 'bg-white text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'
+                    }`}
+                    onClick={() => setReportPeriod(p)}
+                  >
+                    {tr(p === 'today' ? 'День' : p === 'week' ? 'Неделя' : 'Месяц')}
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                {reportQ.data && (
+                  <span className="text-xs text-text-muted">
+                    {tr('Обновлено:')} {new Date().toLocaleTimeString().slice(0, 5)}
+                  </span>
+                )}
+                <button
+                  onClick={() => reportQ.refetch()}
+                  disabled={reportQ.isFetching}
+                  className="rounded-lg p-1.5 text-text-secondary hover:bg-slate-100"
+                >
+                  <IconRefresh className={`h-5 w-5 ${reportQ.isFetching ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              {reportQ.isLoading ? (
+                <div className="flex justify-center py-12 text-primary">
+                  <Spinner className="h-6 w-6" />
+                </div>
+              ) : reportQ.data?.length === 0 ? (
+                <div className="py-12 text-center text-sm text-text-muted">
+                  {tr('За выбранный период данных нет')}
+                </div>
+              ) : (
+                <table className="w-full min-w-[500px] text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-text-muted bg-slate-50">
+                      <th className="px-4 py-3 font-medium">{tr('Официант')}</th>
+                      <th className="px-4 py-3 text-right font-medium">{tr('Выручка')}</th>
+                      <th className="px-4 py-3 text-center font-medium">{tr('Закрыто заказов')}</th>
+                      <th className="px-4 py-3 text-center font-medium">{tr('Отмененные')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportQ.data?.map(r => (
+                      <tr key={r.id} className="border-b border-border last:border-0 hover:bg-slate-50/50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-text-primary">{r.name}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-text-primary">{money(r.revenue)}</td>
+                        <td className="px-4 py-3 text-center text-text-secondary">{r.closedOrders}</td>
+                        <td className="px-4 py-3 text-center text-text-secondary">{r.cancelledOrders}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-slate-50 font-medium">
+                      <td className="px-4 py-3 text-text-primary">{tr('Итого')}</td>
+                      <td className="px-4 py-3 text-right text-text-primary">
+                        {money(reportQ.data?.reduce((s, r) => s + r.revenue, 0) ?? 0)}
+                      </td>
+                      <td className="px-4 py-3 text-center text-text-primary">
+                        {reportQ.data?.reduce((s, r) => s + r.closedOrders, 0) ?? 0}
+                      </td>
+                      <td className="px-4 py-3 text-center text-text-primary">
+                        {reportQ.data?.reduce((s, r) => s + r.cancelledOrders, 0) ?? 0}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h2 className="mb-3 text-lg font-semibold text-text-primary">{tr('Сотрудники')}</h2>
+        <div className="card overflow-hidden">
+          <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-1 gap-2">
             <input
               className="input h-10 sm:max-w-xs"
@@ -135,6 +257,7 @@ export function StaffPage() {
             </table>
           </div>
         )}
+      </div>
       </div>
 
       {editing !== null && (
