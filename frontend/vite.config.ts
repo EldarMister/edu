@@ -42,10 +42,10 @@ function appVersion(): string {
   if (env.VITE_APP_VERSION) return env.VITE_APP_VERSION; // явный полный оверрайд
   const [major = '0', minor = '1', patch = '0'] = pkg.version.split('.');
   const build =
-    git('git rev-list --count HEAD') ??
+    env.VITE_APP_BUILD ?? // явный приоритет (переменная Railway)
+    git('git rev-list --count HEAD') ?? // локально/где есть git — авто-счётчик
     env.GITHUB_RUN_NUMBER ?? // GitHub Actions
     env.BUILD_NUMBER ??
-    env.VITE_APP_BUILD ?? // ручной/CI оверрайд
     patch;
   return `${major}.${minor}.${build}`;
 }
