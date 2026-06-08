@@ -36,7 +36,7 @@ export function ReceiptPrintsPage() {
     try {
       const request = await approve.mutateAsync(id);
       const receipt = (await api.get<Receipt>(`/payments/${request.orderId}/receipt`)).data;
-      printReceipt(receipt, printWindow);
+      printReceipt(receipt, printWindow, { preliminary: request.type === 'preliminary' });
       push({ message: okMessage, type: 'success', at: new Date().toISOString() });
     } catch (err) {
       printWindow?.close();
@@ -58,6 +58,7 @@ export function ReceiptPrintsPage() {
             <thead>
               <tr className="border-b border-border text-left text-xs font-medium uppercase tracking-wide text-text-muted">
                 <th className="px-4 py-3">{t('№ заказа')}</th>
+                <th className="px-4 py-3">{t('Тип')}</th>
                 <th className="px-4 py-3">{t('Стол')}</th>
                 <th className="px-4 py-3">{t('Официант')}</th>
                 <th className="px-4 py-3">{t('Сумма')}</th>
@@ -68,10 +69,22 @@ export function ReceiptPrintsPage() {
             <tbody>
               {items.map((r) => {
                 const busy = pendingId === r.id;
+                const prelim = r.type === 'preliminary';
                 return (
                   <tr key={r.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-3 font-medium text-text-primary">
                       {displayOrderNumber(r.orderNumber)}
+                    </td>
+                    <td className="px-4 py-3">
+                      {prelim ? (
+                        <span className="inline-block rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
+                          {t('Предчек')}
+                        </span>
+                      ) : (
+                        <span className="inline-block rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
+                          {t('Чек')}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-text-secondary">{r.tableNumber}</td>
                     <td className="px-4 py-3 text-text-secondary">{r.waiterName}</td>
@@ -83,7 +96,7 @@ export function ReceiptPrintsPage() {
                           aria-label={t('Принять')}
                           title={t('Принять')}
                           disabled={busy}
-                          onClick={() => approveAndPrint(r.id, `Чек ${displayOrderNumber(r.orderNumber)} распечатан`)}
+                          onClick={() => approveAndPrint(r.id, `${prelim ? 'Предчек' : 'Чек'} ${displayOrderNumber(r.orderNumber)} распечатан`)}
                           className="flex h-9 w-9 items-center justify-center rounded-lg border border-success/40 text-success transition-colors hover:bg-success/10 disabled:opacity-50"
                         >
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

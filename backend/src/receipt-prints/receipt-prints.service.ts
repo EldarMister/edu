@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ReceiptPrintStatus, Role } from '@prisma/client';
+import { Prisma, ReceiptPrintStatus, ReceiptPrintType, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
@@ -29,6 +29,7 @@ export class ReceiptPrintsService {
       orderId: r.orderId,
       orderNumber: r.orderNumber,
       tableNumber: r.tableNumber,
+      type: r.type,
       waiterId: r.waiterId,
       waiterName: r.waiter?.name ?? '',
       amount: String(r.amount),
@@ -39,7 +40,11 @@ export class ReceiptPrintsService {
   }
 
   /** Официант создаёт запрос на печать чека. Запрос уходит администратору. */
-  async create(actor: AuditActor, orderId: string) {
+  async create(
+    actor: AuditActor,
+    orderId: string,
+    type: ReceiptPrintType = ReceiptPrintType.receipt,
+  ) {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { table: { select: { number: true } } },
@@ -49,9 +54,9 @@ export class ReceiptPrintsService {
       throw new ForbiddenException('Это не ваш заказ');
     }
 
-    // Уже есть активный (ожидающий) запрос по этому заказу — вернём его, не дублируем.
+    // Уже есть активный (ожидающий) запрос того же типа по заказу — вернём его, не дублируем.
     const existing = await this.prisma.receiptPrintRequest.findFirst({
-      where: { orderId, status: ReceiptPrintStatus.pending },
+      where: { orderId, type, status: ReceiptPrintStatus.pending },
       include: withWaiter,
     });
     if (existing) return this.serialize(existing);
@@ -63,6 +68,7 @@ export class ReceiptPrintsService {
         tableNumber: order.table.number,
         orderNumber: order.orderNumber,
         amount: order.finalAmount,
+        type,
         status: ReceiptPrintStatus.pending,
       },
       include: withWaiter,

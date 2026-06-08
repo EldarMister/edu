@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { ReceiptPrintType, Role } from '@prisma/client';
 import { ReceiptPrintsService } from './receipt-prints.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -8,11 +8,14 @@ import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorat
 export class ReceiptPrintsController {
   constructor(private readonly service: ReceiptPrintsService) {}
 
-  /** Официант создаёт запрос на печать чека. */
+  /** Официант создаёт запрос на печать чека (обычного или предварительного). */
   @Post()
   @Roles(Role.WAITER)
-  create(@CurrentUser() user: AuthUser, @Body() body: { orderId: string }) {
-    return this.service.create(user, body.orderId);
+  create(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { orderId: string; type?: ReceiptPrintType },
+  ) {
+    return this.service.create(user, body.orderId, body.type);
   }
 
   /** Администратор видит список ожидающих заявок. */

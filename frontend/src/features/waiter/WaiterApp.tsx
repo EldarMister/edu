@@ -34,8 +34,11 @@ import {
   useMoveTable,
   useTransferTable,
   useAvailableWaiters,
+  useCreateReceiptPrintRequest,
+  fetchReceipt,
   type AvailableWaiter,
 } from './api';
+import { useReceiptPrint } from './receiptPrint';
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
 import { CartPanel } from './CartPanel';
@@ -87,6 +90,8 @@ export function WaiterApp() {
   const closeTable = useCloseTable();
   const moveTable = useMoveTable();
   const transferTable = useTransferTable();
+  const createPrintRequest = useCreateReceiptPrintRequest();
+  const beginPrint = useReceiptPrint((s) => s.begin);
 
   const [tab, setTab] = useState<Tab>('tables');
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
@@ -253,6 +258,20 @@ export function WaiterApp() {
     try {
       const updated = await toPayment.mutateAsync(order.id);
       setPaymentOrder(updated);
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
+
+  // «Предчек»: создаём запрос на печать предварительного чека (тот же поток
+  // подтверждения администратором, что и обычный чек) и открываем лист ожидания.
+  async function requestPreliminaryReceipt(order: Order) {
+    try {
+      const [request, receipt] = await Promise.all([
+        createPrintRequest.mutateAsync({ orderId: order.id, type: 'preliminary' }),
+        fetchReceipt(order.id),
+      ]);
+      beginPrint(request, receipt);
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
@@ -425,9 +444,11 @@ export function WaiterApp() {
         <OrderPanel
           order={displayedOrder}
           submitting={actionPending}
+          preliminaryPending={createPrintRequest.isPending}
           onPickedUp={() => runAction(() => pickedUp.mutateAsync(displayedOrder.id))}
           onServed={() => runAction(() => served.mutateAsync(displayedOrder.id))}
           onToPayment={() => goToPayment(displayedOrder)}
+          onPreliminaryReceipt={() => requestPreliminaryReceipt(displayedOrder)}
           onContinueAfterRejection={() => continueAfterPartialRejection(displayedOrder)}
           onAddReplacement={() => addReplacement(displayedOrder)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}

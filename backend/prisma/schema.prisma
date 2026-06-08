@@ -109,6 +109,11 @@ enum ReceiptPrintStatus {
   printed // чек распечатан / отправлен на печать
 }
 
+enum ReceiptPrintType {
+  receipt // обычный (финальный) чек
+  preliminary // предварительный чек (предчек)
+}
+
 // ---------- Models ----------
 
 model User {
@@ -454,6 +459,7 @@ model ReceiptPrintRequest {
   tableNumber Int                @map("table_number")
   orderNumber String             @map("order_number")
   amount      Decimal            @db.Decimal(10, 2)
+  type        ReceiptPrintType   @default(receipt)
   status      ReceiptPrintStatus @default(pending)
   decidedById String?            @map("decided_by") // администратор, принявший решение
   createdAt   DateTime           @default(now()) @map("created_at")

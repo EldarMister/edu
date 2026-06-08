@@ -9,6 +9,7 @@ import type {
   PaymentMethod,
   Receipt,
   ReceiptPrintRequest,
+  ReceiptPrintType,
   WaiterShift,
 } from '@/types';
 import type { CartLine } from '@/types';
@@ -273,11 +274,16 @@ export async function fetchReceipt(orderId: string): Promise<Receipt> {
   return (await api.get<Receipt>(`/payments/${orderId}/receipt`)).data;
 }
 
-/** Официант создаёт запрос на печать чека (уходит администратору). */
+/**
+ * Официант создаёт запрос на печать чека (уходит администратору).
+ * Тип `receipt` — обычный чек, `preliminary` — предварительный (предчек).
+ */
 export function useCreateReceiptPrintRequest() {
   return useMutation({
-    mutationFn: async (orderId: string) =>
-      (await api.post<ReceiptPrintRequest>('/receipt-prints', { orderId })).data,
+    mutationFn: async (vars: string | { orderId: string; type?: ReceiptPrintType }) => {
+      const body = typeof vars === 'string' ? { orderId: vars } : vars;
+      return (await api.post<ReceiptPrintRequest>('/receipt-prints', body)).data;
+    },
     retry: networkRetry,
   });
 }

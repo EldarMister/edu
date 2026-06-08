@@ -36,18 +36,22 @@ function safeComment(s: string | null | undefined): string | null {
 export function OrderPanel({
   order,
   submitting,
+  preliminaryPending,
   onPickedUp,
   onServed,
   onToPayment,
+  onPreliminaryReceipt,
   onContinueAfterRejection,
   onAddReplacement,
   onCancelOrder,
 }: {
   order: Order;
   submitting: boolean;
+  preliminaryPending: boolean;
   onPickedUp: () => void;
   onServed: () => void;
   onToPayment: () => void;
+  onPreliminaryReceipt: () => void;
   onContinueAfterRejection: () => void;
   onAddReplacement: () => void;
   onCancelOrder: () => void;
@@ -133,9 +137,11 @@ export function OrderPanel({
           <ActionButton
             order={order}
             submitting={submitting}
+            preliminaryPending={preliminaryPending}
             onPickedUp={onPickedUp}
             onServed={onServed}
             onToPayment={onToPayment}
+            onPreliminaryReceipt={onPreliminaryReceipt}
             onContinueAfterRejection={onContinueAfterRejection}
             onAddReplacement={onAddReplacement}
             onCancelOrder={onCancelOrder}
@@ -149,18 +155,22 @@ export function OrderPanel({
 function ActionButton({
   order,
   submitting,
+  preliminaryPending,
   onPickedUp,
   onServed,
   onToPayment,
+  onPreliminaryReceipt,
   onContinueAfterRejection,
   onAddReplacement,
   onCancelOrder,
 }: {
   order: Order;
   submitting: boolean;
+  preliminaryPending: boolean;
   onPickedUp: () => void;
   onServed: () => void;
   onToPayment: () => void;
+  onPreliminaryReceipt: () => void;
   onContinueAfterRejection: () => void;
   onAddReplacement: () => void;
   onCancelOrder: () => void;
@@ -235,9 +245,22 @@ function ActionButton({
   }
   if (s === 'served') {
     return (
-      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onToPayment)}>
-        {cooldownActive ? actionCooldown : spin ?? t('Перейти к оплате')}
-      </button>
+      <div className="flex gap-2">
+        <button
+          className="btn btn-lg shrink-0 border border-primary bg-white px-4 font-medium text-primary hover:bg-primary/5"
+          disabled={preliminaryPending}
+          onClick={onPreliminaryReceipt}
+        >
+          {preliminaryPending ? <Spinner /> : t('Предчек')}
+        </button>
+        <button
+          className="btn-primary btn-lg flex-1 font-semibold"
+          disabled={submitting || cooldownActive}
+          onClick={() => runProtectedAction(onToPayment)}
+        >
+          {cooldownActive ? actionCooldown : spin ?? t('Перейти к оплате')}
+        </button>
+      </div>
     );
   }
   if (s === 'waiting_payment') {
