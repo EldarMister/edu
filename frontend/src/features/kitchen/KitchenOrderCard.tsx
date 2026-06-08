@@ -98,7 +98,13 @@ export function KitchenOrderCard({
                 )}
               </div>
               {canRejectItem && !rejected && !isReady && (
-                <div className="flex flex-col items-end gap-2 shrink-0">
+                <div className="flex items-center gap-3 shrink-0">
+                  <button
+                    onClick={() => onRejectItem(it.id, itemName)}
+                    className="text-xs font-medium text-danger hover:underline"
+                  >
+                    отказать
+                  </button>
                   {tab === 'in_work' && (
                     <button
                       onClick={() => onReadyItem(it.id)}
@@ -108,12 +114,6 @@ export function KitchenOrderCard({
                       Готово
                     </button>
                   )}
-                  <button
-                    onClick={() => onRejectItem(it.id, itemName)}
-                    className="text-xs font-medium text-danger hover:underline"
-                  >
-                    отказать
-                  </button>
                 </div>
               )}
               {isReady && (

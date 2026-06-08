@@ -735,7 +735,7 @@ export class OrdersService {
       this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, updated);
       this.notifyWaiter(
         updated.waiterId,
-        `Заказ №${updated.orderNumber} готов полностью`,
+        `Заказ ${updated.orderNumber} готов полностью`,
         updated,
         'success',
       );
@@ -743,7 +743,7 @@ export class OrdersService {
       const itemName = this.orderItemName(item);
       this.notifyWaiter(
         updated.waiterId,
-        `Заказ №${updated.orderNumber}: ${itemName} готов`,
+        `Заказ ${updated.orderNumber}: ${itemName} готов`,
         updated,
         'success',
       );
