@@ -9,32 +9,51 @@ const pkg = createRequire(import.meta.url)('./package.json') as { version: strin
 
 function git(cmd: string): string | null {
   try {
-    return execSync(cmd).toString().trim();
+    return execSync(cmd).toString().trim() || null;
   } catch {
     return null;
   }
 }
 
-// Короткий git-хеш текущей сборки (если git недоступен — 'dev').
-function gitCommit(): string {
-  return git('git rev-parse --short HEAD') ?? 'dev';
+const env = process.env;
+
+/** Коммит сборки: сначала из git, потом из env хостинга. Нет — пустая строка (без «dev»). */
+function buildCommit(): string {
+  const sha =
+    git('git rev-parse --short HEAD') ??
+    env.RAILWAY_GIT_COMMIT_SHA ??
+    env.VERCEL_GIT_COMMIT_SHA ??
+    env.COMMIT_REF ?? // Netlify
+    env.RENDER_GIT_COMMIT ??
+    env.GITHUB_SHA ??
+    env.SOURCE_VERSION ?? // Heroku/Cloudflare
+    '';
+  return sha ? sha.slice(0, 7) : '';
 }
 
 /**
- * Маркетинговая версия: major.minor берём из package.json (контролируется
- * вручную для крупных релизов), а patch — число git-коммитов, поэтому версия
- * растёт автоматически с каждой сборкой/деплоем. Без git — fallback на package.json.
+ * Маркетинговая версия `major.minor.patch`. major.minor — из package.json
+ * (контролируется вручную для крупных релизов). patch — авто-инкремент по числу
+ * сборок/коммитов: git-счётчик, иначе номер CI-сборки, иначе VITE_APP_BUILD из env,
+ * иначе patch из package.json. Версия меняется на каждой сборке, где доступен любой
+ * из этих источников.
  */
 function appVersion(): string {
-  const [major = '0', minor = '0', patch = '0'] = pkg.version.split('.');
-  const count = git('git rev-list --count HEAD');
-  return count ? `${major}.${minor}.${count}` : `${major}.${minor}.${patch}`;
+  if (env.VITE_APP_VERSION) return env.VITE_APP_VERSION; // явный полный оверрайд
+  const [major = '0', minor = '1', patch = '0'] = pkg.version.split('.');
+  const build =
+    git('git rev-list --count HEAD') ??
+    env.GITHUB_RUN_NUMBER ?? // GitHub Actions
+    env.BUILD_NUMBER ??
+    env.VITE_APP_BUILD ?? // ручной/CI оверрайд
+    patch;
+  return `${major}.${minor}.${build}`;
 }
 
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(appVersion()),
-    __APP_COMMIT__: JSON.stringify(gitCommit()),
+    __APP_COMMIT__: JSON.stringify(buildCommit()),
     __APP_BUILT_AT__: JSON.stringify(new Date().toISOString()),
   },
   plugins: [
