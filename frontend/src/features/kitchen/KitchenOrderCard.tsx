@@ -14,6 +14,7 @@ export function KitchenOrderCard({
   submitting,
   onAccept,
   onReady,
+  onReadyItem,
   onRejectOrder,
   onRejectItem,
 }: {
@@ -23,6 +24,7 @@ export function KitchenOrderCard({
   submitting: boolean;
   onAccept: () => void;
   onReady: () => void;
+  onReadyItem: (itemId: string) => void;
   onRejectOrder: () => void;
   onRejectItem: (itemId: string, name: string) => void;
 }) {
@@ -30,6 +32,9 @@ export function KitchenOrderCard({
   const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
   const canRejectItem = (tab === 'new' || tab === 'in_work') && !waitingDecision;
+
+  const activeItemsCount = order.items.filter(it => it.status !== 'rejected' && it.status !== 'cancelled').length;
+  const readyItemsCount = order.items.filter(it => it.status === 'ready' || it.status === 'served').length;
 
   return (
     <div className="card flex flex-col p-4">
@@ -53,6 +58,12 @@ export function KitchenOrderCard({
 
       <p className="mt-1 text-sm text-text-muted">Официант: {order.waiter.name}</p>
 
+      {tab === 'in_work' && (
+        <p className="mt-1 text-sm font-medium text-text-primary">
+          Готово: {readyItemsCount} из {activeItemsCount}
+        </p>
+      )}
+
       {order.status === 'partially_rejected' && (
         <div className="mt-3 flex flex-wrap gap-2">
           <span className="rounded-full bg-danger/10 px-2.5 py-1 text-xs font-medium text-danger">
@@ -70,6 +81,7 @@ export function KitchenOrderCard({
       <ul className="mt-3 space-y-2 border-t border-border pt-3">
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
+          const isReady = it.status === 'ready' || it.status === 'served';
           const itemName = orderItemDisplayName(it);
           return (
             <li key={it.id} className="flex items-start justify-between gap-3 text-[15px]">
@@ -85,13 +97,34 @@ export function KitchenOrderCard({
                   <p className="text-xs text-text-muted">Ожидает решения официанта</p>
                 )}
               </div>
-              {canRejectItem && !rejected && (
-                <button
-                  onClick={() => onRejectItem(it.id, itemName)}
-                  className="shrink-0 text-xs font-medium text-danger hover:underline"
-                >
-                  отказать
-                </button>
+              {canRejectItem && !rejected && !isReady && (
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                  {tab === 'in_work' && (
+                    <button
+                      onClick={() => onReadyItem(it.id)}
+                      className="rounded bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/20"
+                      disabled={submitting}
+                    >
+                      Готово
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onRejectItem(it.id, itemName)}
+                    className="text-xs font-medium text-danger hover:underline"
+                  >
+                    отказать
+                  </button>
+                </div>
+              )}
+              {isReady && (
+                <span className="shrink-0 text-sm font-semibold text-green-600">
+                  ✓ Готово
+                </span>
+              )}
+              {rejected && (
+                <span className="shrink-0 text-sm font-medium text-danger">
+                  Отказано
+                </span>
               )}
             </li>
           );

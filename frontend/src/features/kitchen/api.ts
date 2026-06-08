@@ -93,3 +93,13 @@ export function useRejectItem() {
     onSettled: () => invalidateKitchen(qc),
   });
 }
+
+export function useItemReady() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { orderId: string; itemId: string }) =>
+      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/${p.itemId}/ready`)).data,
+    retry: networkRetry,
+    onSettled: () => invalidateKitchen(qc),
+  });
+}

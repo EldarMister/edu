@@ -11,6 +11,7 @@ import {
   useKitchenOrders,
   useAccept,
   useReady,
+  useItemReady,
   useRejectOrder,
   useRejectItem,
   type KitchenTab,
@@ -45,6 +46,7 @@ export function KitchenApp() {
   const ordersQ = useKitchenOrders(tab);
   const accept = useAccept();
   const ready = useReady();
+  const itemReady = useItemReady();
   const rejectOrder = useRejectOrder();
   const rejectItem = useRejectItem();
 
@@ -173,6 +175,7 @@ export function KitchenApp() {
                 submitting={actingId === o.id}
                 onAccept={() => act(o.id, () => accept.mutateAsync(o.id))}
                 onReady={() => act(o.id, () => ready.mutateAsync(o.id))}
+                onReadyItem={(itemId) => act(o.id, () => itemReady.mutateAsync({ orderId: o.id, itemId }))}
                 onRejectOrder={() => setReject({ type: 'order', orderId: o.id })}
                 onRejectItem={(itemId, name) =>
                   setReject({ type: 'item', orderId: o.id, itemId, name })

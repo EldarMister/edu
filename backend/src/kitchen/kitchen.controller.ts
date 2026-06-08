@@ -54,4 +54,13 @@ export class KitchenController {
   ) {
     return this.orders.kitchenRejectItem(id, itemId, user.id, dto.reason, dto.comment);
   }
+
+  @Post('orders/:id/items/:itemId/ready')
+  readyItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.orders.kitchenReadyItem(id, itemId, user.id);
+  }
 }

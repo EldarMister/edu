@@ -679,6 +679,79 @@ export class OrdersService {
     return updated;
   }
 
+  /** Отметить одно блюдо готовым. Заказ становится ready если все активные готовы. */
+  async kitchenReadyItem(orderId: string, itemId: string, kitchenUserId: string) {
+    const order = await this.getMutableOrder(orderId);
+    this.ensureNoPendingWaiterDecision(order);
+    const item = await this.prisma.orderItem.findFirst({ where: { id: itemId, orderId } });
+    if (!item) throw new NotFoundException('Блюдо в заказе не найдено');
+
+    if (item.status === OrderItemStatus.ready) {
+      return this.findById(orderId);
+    }
+
+    if (item.status === OrderItemStatus.rejected || item.status === OrderItemStatus.cancelled) {
+      throw new BadRequestException('Нельзя приготовить отмененное или отказанное блюдо');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.update({
+        where: { id: itemId },
+        data: { status: OrderItemStatus.ready },
+      });
+      await tx.kitchenEvent.create({
+        data: {
+          orderId,
+          orderItemId: itemId,
+          type: KitchenEventType.ready_item,
+          createdById: kitchenUserId,
+        },
+      });
+
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
+      if (nextStatus !== order.status) {
+        const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
+        if (nextTableStatus) {
+          await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+        }
+      }
+
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: nextStatus },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    if (updated.status !== order.status) {
+      const tableStatus = this.tableStatusForOrderStatus(updated.status);
+      if (tableStatus) {
+        this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+      }
+    }
+
+    if (updated.status === OrderStatus.ready) {
+      this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, updated);
+      this.notifyWaiter(
+        updated.waiterId,
+        `Заказ №${updated.orderNumber} готов полностью`,
+        updated,
+        'success',
+      );
+    } else {
+      const itemName = this.orderItemName(item);
+      this.notifyWaiter(
+        updated.waiterId,
+        `Заказ №${updated.orderNumber}: ${itemName} готов`,
+        updated,
+        'success',
+      );
+    }
+
+    return updated;
+  }
+
   // ---------- Действия официанта после готовности ----------
 
   async resolvePartialRejection(orderId: string, waiterId: string) {

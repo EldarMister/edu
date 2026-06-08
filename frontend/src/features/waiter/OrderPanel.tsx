@@ -105,9 +105,26 @@ export function OrderPanel({
                   {orderItemDisplayName(it)}
                 </span>
                 <span className="shrink-0 text-sm text-text-secondary">×{it.quantity}</span>
-                <span className="shrink-0 min-w-[56px] text-right text-[15px] font-medium text-text-primary">
-                  {money(it.finalPrice)}
-                </span>
+                <div className="flex flex-col items-end shrink-0 min-w-[80px]">
+                  <span className="text-[15px] font-medium text-text-primary">
+                    {money(it.finalPrice)}
+                  </span>
+                  {!rejected && !waitingItem && (it.status === 'ready' || it.status === 'served') && (
+                    <span className="text-xs font-semibold text-green-600 mt-0.5">
+                      ✓ {t('Готово')}
+                    </span>
+                  )}
+                  {!rejected && !waitingItem && (it.status === 'cooking' || it.status === 'accepted') && (
+                    <span className="text-xs font-medium text-text-muted mt-0.5">
+                      {t('Готовится')}
+                    </span>
+                  )}
+                  {(rejected || it.status === 'cancelled') && (
+                    <span className="text-xs font-medium text-danger mt-0.5">
+                      {t('Отказано')}
+                    </span>
+                  )}
+                </div>
               </div>
               {hasExtra && (
                 <div className="mt-0.5 text-xs">
