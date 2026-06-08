@@ -61,6 +61,7 @@ export function printReceipt(
     <table>${rows}</table>
     <hr/>
     ${Number(r.discountAmount) > 0 ? `<div class="row"><span>Сумма</span><span>${money(r.totalAmount)}</span></div><div class="row"><span>Скидка</span><span>−${money(r.discountAmount)}</span></div>` : ''}
+    ${Number(r.serviceChargeAmount) > 0 ? `<div class="row"><span>Обслуживание</span><span>${money(r.serviceChargeAmount)}</span></div>` : ''}
     <div class="row total"><span>Итого</span><span>${money(r.finalAmount)}</span></div>
     ${preliminary ? '' : paymentBlock(r)}
     <hr/>

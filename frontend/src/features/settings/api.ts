@@ -17,6 +17,7 @@ export interface Settings {
   phone: string;
   phone2: string;
   receiptText: string;
+  serviceChargeAmount: string;
   language: 'ru' | 'ky';
   payQr: boolean;
   payCash: boolean;
@@ -32,6 +33,7 @@ export interface PublicSettings {
   phone: string;
   phone2: string;
   receiptText: string;
+  serviceChargeAmount: string;
   language: 'ru' | 'ky';
   paymentMethods: PaymentMethod[];
   qrImageUrl: string | null;
@@ -55,7 +57,9 @@ export function useAdminSettings() {
   });
 }
 
-export type SettingsInput = Partial<Omit<Settings, 'id' | 'updatedAt' | 'printerConnected'>>;
+export type SettingsInput = Partial<Omit<Settings, 'id' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount'>> & {
+  serviceChargeAmount?: number;
+};
 
 export function useUpdateSettings() {
   const qc = useQueryClient();

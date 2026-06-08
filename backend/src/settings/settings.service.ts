@@ -14,6 +14,7 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   phone: 'телефон',
   phone2: 'второй телефон',
   receiptText: 'текст чека',
+  serviceChargeAmount: 'обслуживание',
   language: 'язык',
   payQr: 'оплата QR',
   payCash: 'оплата наличными',
@@ -56,6 +57,7 @@ export class SettingsService {
       phone: s.phone,
       phone2: s.phone2,
       receiptText: s.receiptText,
+      serviceChargeAmount: s.serviceChargeAmount,
       language: s.language,
       paymentMethods: this.enabledMethodsOf(s),
       // Лёгкая версионированная ссылка вместо тяжёлого base64 — кэшируется браузером.
@@ -85,6 +87,9 @@ export class SettingsService {
     }
 
     const data: Prisma.SettingsUpdateInput = { ...dto };
+    if (dto.serviceChargeAmount !== undefined) {
+      data.serviceChargeAmount = new Prisma.Decimal(round2(dto.serviceChargeAmount));
+    }
 
     // QR-код: пустая строка = удалить; иначе проверяем формат data URL.
     if (dto.qrImageUrl !== undefined) {
@@ -161,4 +166,8 @@ export class SettingsService {
     if (s.payCard) list.push(PaymentMethod.card);
     return list;
   }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }

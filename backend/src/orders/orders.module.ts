@@ -3,9 +3,10 @@ import { OrdersService } from './orders.service';
 import { OrdersController } from './orders.controller';
 import { WaiterShiftsModule } from '../waiter-shifts/waiter-shifts.module';
 import { PushModule } from '../push/push.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
-  imports: [WaiterShiftsModule, PushModule],
+  imports: [WaiterShiftsModule, PushModule, SettingsModule],
   controllers: [OrdersController],
   providers: [OrdersService],
   exports: [OrdersService],

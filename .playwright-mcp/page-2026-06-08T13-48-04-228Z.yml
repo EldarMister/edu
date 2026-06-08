@@ -1,0 +1,21 @@
+- generic [ref=e3]:
+  - generic [ref=e4]:
+    - img "EDU POS" [ref=e5]
+    - paragraph [ref=e6]: Система управления рестораном
+  - generic [ref=e7]:
+    - generic [ref=e8]:
+      - heading "Вход в систему" [level=2] [ref=e9]
+      - paragraph [ref=e10]: Введите номер телефона и пароль для входа в систему
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: Номер телефона
+        - textbox "Введите номер телефона" [ref=e14]: "+70000000004"
+      - generic [ref=e15]:
+        - generic [ref=e16]: Пароль
+        - generic [ref=e17]:
+          - textbox "Введите пароль" [ref=e18]: owner123
+          - button "Показать пароль" [ref=e19] [cursor=pointer]:
+            - img [ref=e20]
+      - paragraph [ref=e25]: Нет соединения с сервером
+      - button "Войти" [ref=e23] [cursor=pointer]
+  - button "v0.1.43 · 8f51d0d · 08.06.2026 19:44" [ref=e24] [cursor=pointer]

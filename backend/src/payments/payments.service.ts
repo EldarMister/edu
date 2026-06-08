@@ -78,6 +78,7 @@ export class PaymentsService {
       items: order.items,
       totalAmount: order.totalAmount,
       discountAmount: order.discountAmount,
+      serviceChargeAmount: order.serviceChargeAmount,
       finalAmount: order.finalAmount,
       paymentMethod: order.paymentMethod,
       // Разбивка по способам (для смешанной оплаты — наличные + QR).

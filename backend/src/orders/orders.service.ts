@@ -20,6 +20,7 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { WaiterShiftsService } from '../waiter-shifts/waiter-shifts.service';
 import { PushService } from '../push/push.service';
+import { SettingsService } from '../settings/settings.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
@@ -54,6 +55,7 @@ export class OrdersService {
     private events: EventsGateway,
     private shifts: WaiterShiftsService,
     private push: PushService,
+    private settings: SettingsService,
     private audit: AuditService,
   ) {}
 
@@ -168,12 +170,13 @@ export class OrdersService {
     }
 
     const itemsData = await this.buildItemsData(dto.items);
-    const totals = this.calcTotals(itemsData);
 
     let order: Awaited<ReturnType<typeof this.findById>>;
     try {
       order = await this.prisma.$transaction(async (tx) => {
         const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
+        const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
+        const totals = this.calcTotals(itemsData, serviceChargeAmount);
         const orderNumber = await this.nextOrderNumber(tx);
         await tx.table.update({
           where: { id: dto.tableId },
@@ -190,6 +193,7 @@ export class OrdersService {
             idempotencyKey: dto.idempotencyKey,
             totalAmount: totals.total,
             discountAmount: totals.discount,
+            serviceChargeAmount: totals.serviceCharge,
             finalAmount: totals.final,
             items: { create: itemsData },
           },
@@ -331,15 +335,17 @@ export class OrdersService {
     }
 
     const itemsData = await this.buildItemsData(items);
-    const totals = this.calcTotals(itemsData);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
+      const totals = this.calcTotals(itemsData, serviceChargeAmount);
       const changed = await tx.order.updateMany({
         where: { id: orderId, waiterId: actor.id, status: OrderStatus.sent_to_kitchen },
         data: {
           comment,
           totalAmount: totals.total,
           discountAmount: totals.discount,
+          serviceChargeAmount: totals.serviceCharge,
           finalAmount: totals.final,
           requiresWaiterDecision: false,
         },
@@ -909,7 +915,7 @@ export class OrdersService {
     });
   }
 
-  private calcTotals(items: Prisma.OrderItemCreateManyOrderInput[]) {
+  private calcTotals(items: Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount = 0) {
     let total = 0;
     let discount = 0;
     let final = 0;
@@ -919,10 +925,12 @@ export class OrdersService {
       discount += Number(i.discountAmount ?? 0);
       final += Number(i.finalPrice);
     }
+    const serviceCharge = round2(Math.max(0, serviceChargeAmount));
     return {
       total: new Prisma.Decimal(round2(total)),
       discount: new Prisma.Decimal(round2(discount)),
-      final: new Prisma.Decimal(round2(final)),
+      serviceCharge: new Prisma.Decimal(serviceCharge),
+      final: new Prisma.Decimal(round2(final + serviceCharge)),
     };
   }
 
@@ -938,14 +946,23 @@ export class OrdersService {
       discount += Number(i.discountAmount);
       final += Number(i.finalPrice);
     }
+    const serviceCharge = await this.currentServiceChargeAmount(tx);
     await tx.order.update({
       where: { id: orderId },
       data: {
         totalAmount: new Prisma.Decimal(round2(total)),
         discountAmount: new Prisma.Decimal(round2(discount)),
-        finalAmount: new Prisma.Decimal(round2(final)),
+        serviceChargeAmount: new Prisma.Decimal(serviceCharge),
+        finalAmount: new Prisma.Decimal(round2(final + serviceCharge)),
       },
     });
+  }
+
+  private async currentServiceChargeAmount(tx?: Prisma.TransactionClient): Promise<number> {
+    const settings = tx
+      ? await tx.settings.findUnique({ where: { id: 'default' }, select: { serviceChargeAmount: true } })
+      : await this.settings.ensure();
+    return Math.max(0, round2(Number(settings?.serviceChargeAmount ?? 0)));
   }
 
   private async statusFromActiveItems(tx: Prisma.TransactionClient, orderId: string): Promise<OrderStatus> {

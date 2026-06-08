@@ -184,6 +184,12 @@ export function PaymentModal({
               </div>
             ))}
           </div>
+          {Number(receipt.serviceChargeAmount) > 0 && (
+            <div className="mt-2 flex justify-between border-t border-border pt-2 text-sm text-text-secondary">
+              <span>{t('Обслуживание')}</span>
+              <span>{money(receipt.serviceChargeAmount)}</span>
+            </div>
+          )}
           <div className="mt-3 flex justify-between border-t border-border pt-2 text-base font-semibold">
             <span>{t('Итого')}</span>
             <span>{money(receipt.finalAmount)}</span>

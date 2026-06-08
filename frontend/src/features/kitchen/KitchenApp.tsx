@@ -101,10 +101,8 @@ export function KitchenApp() {
       <OfflineBanner />
 
       {/* Шапка */}
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
-        <h1 className="text-2xl font-semibold text-text-primary">Кухня</h1>
+      <header className="flex shrink-0 flex-wrap items-center justify-end gap-3 border-b border-border bg-white px-5 py-3.5">
         <div className="flex items-center gap-4 text-sm">
-          <span className="text-text-secondary">Повар: {user?.name}</span>
           <ConnectionStatus />
           {pushNotifications.status !== 'subscribed' && pushNotifications.status !== 'unsupported' && (
             <button onClick={pushNotifications.enable} className="text-text-muted hover:text-primary">

@@ -129,6 +129,7 @@ export interface Order {
   status: OrderStatus;
   totalAmount: string;
   discountAmount: string;
+  serviceChargeAmount: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
   comment: string | null;
@@ -157,6 +158,7 @@ export interface Receipt {
   }[];
   totalAmount: string;
   discountAmount: string;
+  serviceChargeAmount: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
   /** Разбивка по способам оплаты (для смешанной — наличные + QR). */

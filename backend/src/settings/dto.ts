@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class UpdateSettingsDto {
   @IsOptional() @IsString() @MaxLength(80)
@@ -15,6 +15,9 @@ export class UpdateSettingsDto {
 
   @IsOptional() @IsString() @MaxLength(120)
   receiptText?: string;
+
+  @IsOptional() @IsNumber() @Min(0) @Max(100000)
+  serviceChargeAmount?: number;
 
   @IsOptional() @IsIn(['ru', 'ky'])
   language?: string;

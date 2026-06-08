@@ -77,6 +77,9 @@ export function OrderDetailsModal({
         <div className="grid gap-2 border-t border-border pt-4 text-sm">
           <Total label="Итого" value={money(order.totalAmount)} />
           <Total label="Скидка" value={money(order.discountAmount)} />
+          {Number(order.serviceChargeAmount) > 0 && (
+            <Total label="Обслуживание" value={money(order.serviceChargeAmount)} />
+          )}
           <Total label="К оплате" value={money(order.finalAmount)} strong />
         </div>
       </div>

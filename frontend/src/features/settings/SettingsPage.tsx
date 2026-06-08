@@ -21,6 +21,7 @@ interface Form {
   phone: string;
   phone2: string;
   receiptText: string;
+  serviceChargeAmount: string;
   language: Locale;
   payQr: boolean;
   payCash: boolean;
@@ -47,6 +48,7 @@ export function SettingsPage() {
         phone: data.phone,
         phone2: data.phone2,
         receiptText: data.receiptText,
+        serviceChargeAmount: String(data.serviceChargeAmount ?? 0),
         language: data.language,
         payQr: data.payQr,
         payCash: data.payCash,
@@ -83,6 +85,7 @@ export function SettingsPage() {
       phone: data.phone,
       phone2: data.phone2,
       receiptText: data.receiptText,
+      serviceChargeAmount: String(data.serviceChargeAmount ?? 0),
       language: data.language,
       payQr: data.payQr,
       payCash: data.payCash,
@@ -99,7 +102,10 @@ export function SettingsPage() {
       return;
     }
     try {
-      await update.mutateAsync(form);
+      await update.mutateAsync({
+        ...form,
+        serviceChargeAmount: Math.max(0, Number(form.serviceChargeAmount) || 0),
+      });
       setLocale(form.language);
       push({ message: 'Настройки успешно сохранены', type: 'success', at: new Date().toISOString() });
     } catch (err) {
@@ -159,6 +165,17 @@ export function SettingsPage() {
               <p className="mt-1 text-right text-xs text-text-muted">
                 {form.receiptText.length}/{RECEIPT_LIMIT}
               </p>
+            </Field>
+            <Field label={t('Обслуживание, сом')}>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step="1"
+                value={form.serviceChargeAmount}
+                onChange={(e) => set('serviceChargeAmount', e.target.value)}
+                placeholder="10"
+              />
             </Field>
           </div>
         </div>
