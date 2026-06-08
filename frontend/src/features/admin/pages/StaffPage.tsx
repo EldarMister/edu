@@ -200,7 +200,7 @@ function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: 
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
         <Field label="Телефон">
-          <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+7..." />
+          <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
         </Field>
         <Field label="Роль">
           <Select
