@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -26,8 +26,8 @@ export class OrdersController {
 
   @Get('cabinet')
   @Roles(Role.WAITER)
-  cabinet(@CurrentUser() user: AuthUser) {
-    return this.orders.waiterCabinet(user.id);
+  cabinet(@CurrentUser() user: AuthUser, @Query('period') period?: 'day' | 'week' | 'month') {
+    return this.orders.waiterCabinet(user.id, period);
   }
 
   @Get(':id')

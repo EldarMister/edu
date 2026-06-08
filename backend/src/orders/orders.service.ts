@@ -95,9 +95,15 @@ export class OrdersService {
    * Сводка для личного кабинета официанта: статистика за 7 дней
    * (завершено / отменено / выручка) и последние заказы.
    */
-  async waiterCabinet(waiterId: string) {
+  async waiterCabinet(waiterId: string, period: 'day' | 'week' | 'month' = 'week') {
     const since = new Date();
-    since.setDate(since.getDate() - 7);
+    if (period === 'day') {
+      since.setDate(since.getDate() - 1);
+    } else if (period === 'month') {
+      since.setMonth(since.getMonth() - 1);
+    } else {
+      since.setDate(since.getDate() - 7);
+    }
 
     const [completed, cancelled, revenue, recent] = await Promise.all([
       this.prisma.order.count({

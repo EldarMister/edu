@@ -27,10 +27,10 @@ export interface WaiterCabinetData {
   recentOrders: CabinetRecentOrder[];
 }
 
-export function useWaiterCabinet() {
+export function useWaiterCabinet(period: 'day' | 'week' | 'month' = 'week') {
   return useQuery({
-    queryKey: ['waiter', 'cabinet'],
-    queryFn: async () => (await api.get<WaiterCabinetData>('/orders/cabinet')).data,
+    queryKey: ['waiter', 'cabinet', period],
+    queryFn: async () => (await api.get<WaiterCabinetData>(`/orders/cabinet?period=${period}`)).data,
   });
 }
 

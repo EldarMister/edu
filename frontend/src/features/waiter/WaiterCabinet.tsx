@@ -7,6 +7,7 @@ import { ORDER_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { OrderDetailsModal } from '@/features/admin/components/OrderDetailsModal';
+import { Select } from '@/components/Select';
 import { useState } from 'react';
 import { useWaiterCabinet, useOrderDetails, type CabinetRecentOrder } from './api';
 
@@ -14,7 +15,8 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
   const logout = useAuth((s) => s.logout);
   const { locale, setLocale } = useLocale();
   const t = useT();
-  const cabinetQ = useWaiterCabinet();
+  const [period, setPeriod] = useState<'day' | 'week' | 'month'>('week');
+  const cabinetQ = useWaiterCabinet(period);
   const [detailId, setDetailId] = useState<string | null>(null);
   const detailQ = useOrderDetails(detailId);
 
@@ -54,9 +56,23 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
         </div>
       </div>
 
-      {/* Статистика за 7 дней */}
+      {/* Статистика */}
       <div className="card p-5">
-        <h3 className="mb-3 text-[15px] font-semibold text-text-primary">{t('Статистика за 7 дней')}</h3>
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h3 className="text-[15px] font-semibold text-text-primary">
+            {period === 'day' ? t('Статистика за день') : period === 'month' ? t('Статистика за месяц') : t('Статистика за 7 дней')}
+          </h3>
+          <Select
+            className="h-10 w-36"
+            value={period}
+            onChange={(v) => setPeriod(v as 'day' | 'week' | 'month')}
+            options={[
+              { value: 'day', label: t('За день') },
+              { value: 'week', label: t('За 7 дней') },
+              { value: 'month', label: t('За месяц') },
+            ]}
+          />
+        </div>
         {cabinetQ.isLoading ? (
           <div className="flex justify-center py-4 text-primary">
             <Spinner className="h-5 w-5" />
