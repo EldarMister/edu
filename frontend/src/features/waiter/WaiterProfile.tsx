@@ -3,6 +3,7 @@ import type { WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { Spinner } from '@/components/Spinner';
+import { AppVersion } from '@/components/AppVersion';
 import { disconnectSocket } from '@/lib/socket';
 import { timeHM } from '@/lib/format';
 import { beep } from '@/lib/sound';
@@ -164,6 +165,8 @@ export function WaiterProfile({
         </svg>
         {t('Выйти')}
       </button>
+
+      <AppVersion className="pt-1" />
     </div>
   );
 }

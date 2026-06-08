@@ -5,6 +5,7 @@ import { useAuth } from '@/store/auth';
 import { homeForRole } from '@/routes/ProtectedRoute';
 import { Spinner } from '@/components/Spinner';
 import { BrandLogo } from '@/components/BrandLogo';
+import { AppVersion } from '@/components/AppVersion';
 import type { LoginResponse } from '@/types';
 
 export function LoginPage() {
@@ -98,6 +99,8 @@ export function LoginPage() {
           </button>
         </form>
       </div>
+
+      <AppVersion className="mt-6" />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useAuth } from '@/store/auth';
 import { useT } from '@/lib/i18n';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
+import { AppVersion } from '@/components/AppVersion';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import type { Order } from '@/types';
@@ -128,6 +129,7 @@ export function AdminApp() {
           <IconLogout />
           {t('Выйти')}
         </button>
+        <AppVersion className="mt-2" />
       </div>
     </aside>
   );
