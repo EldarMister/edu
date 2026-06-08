@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { Order, CartLine, DishVariant } from '@/types';
+import type { Order, CartLine, DishVariant, WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
@@ -49,6 +49,7 @@ import { WaiterProfile } from './WaiterProfile';
 import { WaiterCabinet } from './WaiterCabinet';
 import { PaymentModal } from './PaymentModal';
 import { ReceiptPrintSheet } from './ReceiptPrintSheet';
+import { ShiftSummaryModal } from './ShiftSummaryModal';
 import { CancelOrderModal } from './CancelOrderModal';
 import {
   TableActionsMenu,
@@ -99,6 +100,7 @@ export function WaiterApp() {
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [cabinetOpen, setCabinetOpen] = useState(false);
+  const [shiftSummary, setShiftSummary] = useState<WaiterShift | null>(null);
   const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [pendingTableId, setPendingTableId] = useState<string | null>(null);
@@ -483,8 +485,8 @@ export function WaiterApp() {
       }
       onEndShift={() =>
         runAction(async () => {
-          await endShift.mutateAsync();
-          push({ message: t('Смена завершена'), type: 'success', at: new Date().toISOString() });
+          const ended = await endShift.mutateAsync();
+          setShiftSummary(ended);
         })
       }
       pushStatus={pushNotifications.status}
@@ -632,6 +634,13 @@ export function WaiterApp() {
 
       {/* Нижний лист «Печать чека» (ожидание / распечатан / отклонён) */}
       <ReceiptPrintSheet />
+
+      {/* Итоги смены после её завершения */}
+      <ShiftSummaryModal
+        shift={shiftSummary}
+        open={!!shiftSummary}
+        onClose={() => setShiftSummary(null)}
+      />
 
       {/* Смена стола на экране меню */}
       {tablePickerOpen && (

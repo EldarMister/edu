@@ -114,8 +114,27 @@ export class WaiterShiftsService {
       });
     });
 
+    // Итоги смены: сколько заказов официант закрыл (оплачено) и на какую сумму.
+    const [ordersCount, totals] = await Promise.all([
+      this.prisma.order.count({
+        where: { waiterShiftId: shift.id, status: OrderStatus.paid },
+      }),
+      this.prisma.order.aggregate({
+        where: { waiterShiftId: shift.id, status: OrderStatus.paid },
+        _sum: { finalAmount: true },
+      }),
+    ]);
+    const result = {
+      ...shift,
+      stats: {
+        ordersCount,
+        totalAmount: String(totals._sum.finalAmount ?? 0),
+        activeOrdersCount: 0,
+      },
+    };
+
     this.events.emitToWaiter(waiterId, SERVER_EVENTS.WAITER_SHIFT_ENDED, shift);
     this.events.emitToAdmin(SERVER_EVENTS.WAITER_SHIFT_ENDED, shift);
-    return shift;
+    return result;
   }
 }
