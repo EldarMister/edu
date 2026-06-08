@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { OrderStatus, PaymentMethod } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatsQueryDto } from './dto';
 
@@ -58,6 +58,7 @@ export class StatisticsService {
           closedAt: true,
           waiterId: true,
           waiter: { select: { name: true } },
+          payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true } },
         },
       }),
       this.prisma.order.findMany({
@@ -81,9 +82,10 @@ export class StatisticsService {
     const previousAvg =
       previousOrders.length > 0 ? previousRevenue / previousOrders.length : 0;
 
-    const methodTotals: Record<PaymentMethod, number> = { qr: 0, cash: 0, card: 0 };
+    // Считаем по строкам оплат, чтобы смешанная оплата корректно разложилась на наличные/QR.
+    const methodTotals: Record<PaymentMethod, number> = { qr: 0, cash: 0, card: 0, mixed: 0 };
     for (const o of currentOrders) {
-      if (o.paymentMethod) methodTotals[o.paymentMethod] += Number(o.finalAmount);
+      for (const p of o.payments) methodTotals[p.method] += Number(p.amount);
     }
     const methodsSum = methodTotals.qr + methodTotals.cash + methodTotals.card || 1;
     const paymentMethods = (['qr', 'cash', 'card'] as PaymentMethod[]).map((m) => ({

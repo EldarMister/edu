@@ -14,7 +14,23 @@ export class PaymentsService {
   ) {}
 
   /** Приём оплаты официантом/кассиром. Способ должен быть включён в настройках. */
-  async pay(actor: AuditActor, orderId: string, method: PaymentMethod) {
+  async pay(
+    actor: AuditActor,
+    orderId: string,
+    method: PaymentMethod,
+    cashAmount?: number,
+    qrAmount?: number,
+  ) {
+    if (method === PaymentMethod.mixed) {
+      // Смешанная складывается из наличных и QR — оба способа должны быть включены.
+      await this.settings.assertMethodEnabled(PaymentMethod.cash);
+      await this.settings.assertMethodEnabled(PaymentMethod.qr);
+      const parts = [
+        { method: PaymentMethod.cash, amount: cashAmount ?? 0 },
+        { method: PaymentMethod.qr, amount: qrAmount ?? 0 },
+      ];
+      return this.orders.markPaid(orderId, actor, method, parts);
+    }
     await this.settings.assertMethodEnabled(method);
     return this.orders.markPaid(orderId, actor, method);
   }
@@ -36,6 +52,11 @@ export class PaymentsService {
               priceSnapshot: true,
               finalPrice: true,
             },
+          },
+          payments: {
+            where: { status: 'paid' },
+            select: { method: true, amount: true },
+            orderBy: { paidAt: 'asc' },
           },
         },
       }),
@@ -59,6 +80,8 @@ export class PaymentsService {
       discountAmount: order.discountAmount,
       finalAmount: order.finalAmount,
       paymentMethod: order.paymentMethod,
+      // Разбивка по способам (для смешанной оплаты — наличные + QR).
+      payments: order.payments.map((p) => ({ method: p.method, amount: String(p.amount) })),
       thanks: settings.receiptText,
     };
   }

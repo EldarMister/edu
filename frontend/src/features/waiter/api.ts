@@ -260,8 +260,12 @@ export function useCancelOrder() {
 export function usePay() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { orderId: string; method: PaymentMethod }) =>
-      (await api.post<Order>('/payments', payload)).data,
+    mutationFn: async (payload: {
+      orderId: string;
+      method: PaymentMethod;
+      cashAmount?: number;
+      qrAmount?: number;
+    }) => (await api.post<Order>('/payments', payload)).data,
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });

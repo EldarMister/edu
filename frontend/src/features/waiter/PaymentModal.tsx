@@ -17,6 +17,13 @@ const ALL_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'card', label: 'Карта' },
 ];
 
+const METHOD_LABELS: Record<PaymentMethod, string> = {
+  qr: 'QR-код',
+  cash: 'Наличные',
+  card: 'Карта',
+  mixed: 'Смешанная',
+};
+
 export function PaymentModal({
   order,
   open,
@@ -39,16 +46,34 @@ export function PaymentModal({
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   // Промежуточное окно успешной оплаты: показывается ~1.3с, затем открывается чек.
   const [showSuccess, setShowSuccess] = useState(false);
+  // Суммы для смешанной оплаты (как строки из инпутов).
+  const [cashInput, setCashInput] = useState('');
+  const [qrInput, setQrInput] = useState('');
 
-  // Только включённые в настройках способы оплаты.
+  // Только включённые в настройках способы оплаты. «Смешанная» доступна,
+  // если включены и наличные, и QR (она из них и складывается).
   const enabled = settings.data?.paymentMethods ?? (['qr', 'cash'] as PaymentMethod[]);
-  const methods = ALL_METHODS.filter((m) => enabled.includes(m.value));
+  const mixedAvailable = enabled.includes('qr') && enabled.includes('cash');
+  const methods: { value: PaymentMethod; label: string }[] = [
+    ...ALL_METHODS.filter((m) => enabled.includes(m.value)),
+    ...(mixedAvailable ? [{ value: 'mixed' as PaymentMethod, label: 'Смешанная' }] : []),
+  ];
   const selected: PaymentMethod =
-    method && enabled.includes(method) ? method : methods[0]?.value ?? 'qr';
+    method && methods.some((m) => m.value === method) ? method : methods[0]?.value ?? 'qr';
 
   const qrImageUrl = resolveQrSrc(settings.data?.qrImageUrl);
   const qrSelected = selected === 'qr';
   const qrMissing = qrSelected && !qrImageUrl;
+
+  // Расчёты для смешанной оплаты.
+  const total = Number(order.finalAmount);
+  const mixedSelected = selected === 'mixed';
+  const cashNum = Number(cashInput) || 0;
+  const qrNum = Number(qrInput) || 0;
+  const entered = cashNum + qrNum;
+  const remaining = Math.round((total - entered) * 100) / 100;
+  const over = remaining < -0.01;
+  const mixedValid = mixedSelected && Math.abs(remaining) < 0.01;
 
   // После показа success-окна автоматически переходим к окну печати чека.
   useEffect(() => {
@@ -59,8 +84,13 @@ export function PaymentModal({
 
   async function onConfirm() {
     setError('');
+    if (mixedSelected && !mixedValid) return;
     try {
-      await pay.mutateAsync({ orderId: order.id, method: selected });
+      await pay.mutateAsync(
+        mixedSelected
+          ? { orderId: order.id, method: 'mixed', cashAmount: cashNum, qrAmount: qrNum }
+          : { orderId: order.id, method: selected },
+      );
       beep('payment');
       push({ message: t('Оплата принята'), type: 'success', at: new Date().toISOString() });
       const r = await fetchReceipt(order.id);
@@ -76,6 +106,8 @@ export function PaymentModal({
     setShowSuccess(false);
     setError('');
     setMethod(null);
+    setCashInput('');
+    setQrInput('');
     onClose();
     if (receipt) onPaid();
   }
@@ -156,6 +188,16 @@ export function PaymentModal({
             <span>{t('Итого')}</span>
             <span>{money(receipt.finalAmount)}</span>
           </div>
+          {receipt.payments && receipt.payments.length > 1 && (
+            <div className="mt-2 space-y-1 border-t border-border pt-2 text-sm">
+              {receipt.payments.map((p, i) => (
+                <div key={i} className="flex justify-between text-text-secondary">
+                  <span>{t(METHOD_LABELS[p.method])}</span>
+                  <span>{money(p.amount)}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </Modal>
     );
@@ -170,12 +212,12 @@ export function PaymentModal({
       footer={
         <button
           className="btn-primary btn-lg w-full font-semibold"
-          disabled={pay.isPending || qrMissing}
+          disabled={pay.isPending || qrMissing || (mixedSelected && !mixedValid)}
           onClick={onConfirm}
         >
           {pay.isPending ? (
             <Spinner />
-          ) : qrSelected ? (
+          ) : qrSelected || mixedSelected ? (
             `${t('Оплачено')} · ${money(order.finalAmount)}`
           ) : (
             `${t('Принять оплату')} · ${money(order.finalAmount)}`
@@ -227,6 +269,61 @@ export function PaymentModal({
             <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 text-center text-sm text-warning">
               {t('QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.')}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Смешанная оплата: разбивка наличные + QR */}
+      {mixedSelected && (
+        <div className="mt-4">
+          <div className="space-y-3 rounded-xl border border-border bg-background p-4">
+            <label className="flex items-center justify-between gap-3">
+              <span className="text-[15px] text-text-secondary">{t('Наличные')}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                className="input h-11 w-40 text-right"
+                value={cashInput}
+                onChange={(e) => setCashInput(e.target.value)}
+                placeholder="0"
+              />
+            </label>
+            <label className="flex items-center justify-between gap-3">
+              <span className="text-[15px] text-text-secondary">{t('QR-код')}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                className="input h-11 w-40 text-right"
+                value={qrInput}
+                onChange={(e) => setQrInput(e.target.value)}
+                placeholder="0"
+              />
+            </label>
+          </div>
+
+          <div className="mt-3 space-y-1.5 border-t border-border pt-3 text-sm">
+            <div className="flex justify-between">
+              <span className="text-text-muted">{t('Итого внесено')}</span>
+              <span className="font-medium text-text-primary">{money(entered)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-text-muted">{t('Осталось')}</span>
+              <span
+                className={`font-medium ${
+                  remaining === 0 ? 'text-success' : over ? 'text-danger' : 'text-text-primary'
+                }`}
+              >
+                {money(Math.max(0, remaining))}
+              </span>
+            </div>
+          </div>
+
+          {over ? (
+            <p className="mt-2 text-sm text-danger">{t('Сумма превышает итог заказа')}</p>
+          ) : (
+            <p className="mt-2 text-xs text-text-light">{t('Сумма должна совпадать с итогом заказа')}</p>
           )}
         </div>
       )}

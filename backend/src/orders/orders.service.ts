@@ -41,6 +41,7 @@ const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   [PaymentMethod.qr]: 'QR',
   [PaymentMethod.cash]: 'Наличные',
   [PaymentMethod.card]: 'Карта',
+  [PaymentMethod.mixed]: 'Смешанная',
 };
 
 const PARTIAL_REJECTION_PENDING_MESSAGE =
@@ -775,7 +776,12 @@ export class OrdersService {
   }
 
   /** Приём оплаты: закрывает заказ, освобождает стол. Вызывается из PaymentsService. */
-  async markPaid(orderId: string, actor: AuditActor, method: PaymentMethod) {
+  async markPaid(
+    orderId: string,
+    actor: AuditActor,
+    method: PaymentMethod,
+    parts?: { method: PaymentMethod; amount: number }[],
+  ) {
     const cashierId = actor.id;
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
@@ -786,17 +792,33 @@ export class OrdersService {
       return order;
     }
 
+    // Смешанная оплата: суммы частей должны точно совпадать с итогом заказа.
+    const final = Number(order.finalAmount);
+    let paymentParts: { method: PaymentMethod; amount: number }[];
+    if (method === PaymentMethod.mixed) {
+      paymentParts = (parts ?? []).filter((p) => p.amount > 0);
+      if (paymentParts.length < 2) {
+        throw new BadRequestException('Для смешанной оплаты укажите суммы наличными и по QR');
+      }
+      const sum = paymentParts.reduce((acc, p) => acc + p.amount, 0);
+      if (Math.abs(sum - final) > 0.01) {
+        throw new BadRequestException('Сумма частей оплаты должна совпадать с итогом заказа');
+      }
+    } else {
+      paymentParts = [{ method, amount: final }];
+    }
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const existingPayment = await tx.payment.findFirst({ where: { orderId, status: PaymentStatus.paid } });
       if (!existingPayment) {
-        await tx.payment.create({
-          data: {
+        await tx.payment.createMany({
+          data: paymentParts.map((p) => ({
             orderId,
-            amount: order.finalAmount,
-            method,
+            amount: p.amount,
+            method: p.method,
             status: PaymentStatus.paid,
             cashierId,
-          },
+          })),
         });
       }
       // Стол освобождается.

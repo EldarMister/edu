@@ -5,6 +5,7 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   qr: 'QR-код',
   cash: 'Наличные',
   card: 'Карта',
+  mixed: 'Смешанная',
 };
 
 /**
@@ -61,7 +62,7 @@ export function printReceipt(
     <hr/>
     ${Number(r.discountAmount) > 0 ? `<div class="row"><span>Сумма</span><span>${money(r.totalAmount)}</span></div><div class="row"><span>Скидка</span><span>−${money(r.discountAmount)}</span></div>` : ''}
     <div class="row total"><span>Итого</span><span>${money(r.finalAmount)}</span></div>
-    ${preliminary ? '' : `<div class="row muted"><span>Оплата</span><span>${r.paymentMethod ? METHOD_LABEL[r.paymentMethod] : '—'}</span></div>`}
+    ${preliminary ? '' : paymentBlock(r)}
     <hr/>
     <div class="center muted">${preliminary ? 'Предварительный расчёт. Не является фискальным документом.' : escapeHtml(r.thanks)}</div>
   </body></html>`;
@@ -74,6 +75,20 @@ export function printReceipt(
   setTimeout(() => {
     w.print();
   }, 300);
+}
+
+/** Блок оплаты: для смешанной — построчно наличные + QR, иначе один способ. */
+function paymentBlock(r: Receipt): string {
+  if (r.payments && r.payments.length > 1) {
+    return r.payments
+      .map(
+        (p) =>
+          `<div class="row muted"><span>${METHOD_LABEL[p.method]}</span><span>${money(p.amount)}</span></div>`,
+      )
+      .join('');
+  }
+  const label = r.paymentMethod ? METHOD_LABEL[r.paymentMethod] : '—';
+  return `<div class="row muted"><span>Оплата</span><span>${label}</span></div>`;
 }
 
 function escapeHtml(s: string): string {

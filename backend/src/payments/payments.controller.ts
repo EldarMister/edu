@@ -12,7 +12,7 @@ export class PaymentsController {
   @Post()
   @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
   pay(@CurrentUser() user: AuthUser, @Body() dto: PayDto) {
-    return this.payments.pay(user, dto.orderId, dto.method);
+    return this.payments.pay(user, dto.orderId, dto.method, dto.cashAmount, dto.qrAmount);
   }
 
   @Get(':orderId/receipt')

@@ -17,6 +17,8 @@ const METHOD_META: Record<PaymentMethod, { label: string; bar: string; tone: str
   qr: { label: 'QR-код', bar: 'bg-primary', tone: 'bg-primary/10 text-primary', icon: <IconQr /> },
   cash: { label: 'Наличные', bar: 'bg-success', tone: 'bg-success/10 text-success', icon: <IconCash /> },
   card: { label: 'Карта', bar: 'bg-warning', tone: 'bg-warning/10 text-warning', icon: <IconCard /> },
+  // Смешанная в статистике раскладывается на наличные/QR на бэке, отдельной строкой не выводится.
+  mixed: { label: 'Смешанная', bar: 'bg-primary', tone: 'bg-primary/10 text-primary', icon: <IconQr /> },
 };
 
 export function StatisticsPage() {

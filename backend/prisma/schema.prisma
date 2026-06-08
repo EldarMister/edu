@@ -69,6 +69,7 @@ enum PaymentMethod {
   qr
   cash
   card
+  mixed // смешанная: часть наличными, часть QR (детали — в строках Payment)
 }
 
 enum PaymentStatus {

@@ -89,7 +89,7 @@ export type OrderItemStatus =
   | 'served'
   | 'cancelled';
 
-export type PaymentMethod = 'qr' | 'cash' | 'card';
+export type PaymentMethod = 'qr' | 'cash' | 'card' | 'mixed';
 
 export type WaiterShiftStatus = 'active' | 'closed';
 
@@ -159,6 +159,8 @@ export interface Receipt {
   discountAmount: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
+  /** Разбивка по способам оплаты (для смешанной — наличные + QR). */
+  payments?: { method: PaymentMethod; amount: string }[];
   thanks: string;
 }
 
