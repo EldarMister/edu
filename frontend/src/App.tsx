@@ -2,7 +2,6 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from '@/store/auth';
 import { ProtectedRoute, homeForRole } from '@/routes/ProtectedRoute';
 import { Toaster } from '@/components/Toaster';
-import { OrientationLock } from '@/components/OrientationLock';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { WaiterApp } from '@/features/waiter/WaiterApp';
 import { KitchenApp } from '@/features/kitchen/KitchenApp';
@@ -23,9 +22,7 @@ export function App() {
           path="/waiter/*"
           element={
             <ProtectedRoute roles={['WAITER']}>
-              <OrientationLock className="portrait-orientation-lock waiter-orientation-lock" lock="portrait">
-                <WaiterApp />
-              </OrientationLock>
+              <WaiterApp />
             </ProtectedRoute>
           }
         />
@@ -34,9 +31,7 @@ export function App() {
           path="/kitchen/*"
           element={
             <ProtectedRoute roles={['KITCHEN', 'ADMIN', 'OWNER']}>
-              <OrientationLock className="kitchen-orientation-lock" lock="landscape">
-                <KitchenApp />
-              </OrientationLock>
+              <KitchenApp />
             </ProtectedRoute>
           }
         />
@@ -46,9 +41,7 @@ export function App() {
           path="/admin/*"
           element={
             <ProtectedRoute roles={['ADMIN', 'OWNER']}>
-              <OrientationLock className="portrait-orientation-lock" lock="portrait">
-                <AdminApp />
-              </OrientationLock>
+              <AdminApp />
             </ProtectedRoute>
           }
         />
@@ -56,9 +49,7 @@ export function App() {
           path="/owner/*"
           element={
             <ProtectedRoute roles={['OWNER']}>
-              <OrientationLock className="portrait-orientation-lock" lock="portrait">
-                <AdminApp />
-              </OrientationLock>
+              <AdminApp />
             </ProtectedRoute>
           }
         />

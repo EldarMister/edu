@@ -1,20 +1,8 @@
-import { type ReactNode } from 'react';
-
-type OrientationLockProps = {
-  children: ReactNode;
-  className: string;
-  lock: 'portrait' | 'landscape';
-};
-
 /**
- * Обёртка для маршрутов. Ориентация следует системному автоповороту.
- * Принудительная блокировка через JS API убрана — она конфликтовала с
- * манифестом и не работала надёжно на всех устройствах.
+ * OrientationLock — REMOVED.
+ *
+ * Обёртка-контейнер для маршрутов больше не управляет ориентацией.
+ * Вместо неё маршруты рендерятся напрямую без обёртки.
+ *
+ * Этот файл оставлен как заглушка. Если ни один модуль его не импортирует — удалите.
  */
-export function OrientationLock({ children, className }: OrientationLockProps) {
-  return (
-    <div className={className}>
-      <div className="orientation-content">{children}</div>
-    </div>
-  );
-}
