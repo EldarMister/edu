@@ -3,6 +3,7 @@ import { Role } from '@prisma/client';
 import { KitchenService, KitchenTab } from './kitchen.service';
 import { OrdersService } from '../orders/orders.service';
 import { RejectDto } from './dto/reject.dto';
+import { ReadyItemsDto, RejectItemsDto } from './dto/batch.dto';
 import { UpdateStopListDto } from './dto/stop-list.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -62,5 +63,15 @@ export class KitchenController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.orders.kitchenReadyItem(id, itemId, user.id);
+  }
+
+  @Post('orders/:id/items/ready-batch')
+  readyItems(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReadyItemsDto) {
+    return this.orders.kitchenReadyItems(id, dto.itemIds, user.id);
+  }
+
+  @Post('orders/:id/items/reject-batch')
+  rejectItems(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: RejectItemsDto) {
+    return this.orders.kitchenRejectItems(id, dto.itemIds, user.id, dto.reason ?? 'Отказ кухни', dto.comment);
   }
 }

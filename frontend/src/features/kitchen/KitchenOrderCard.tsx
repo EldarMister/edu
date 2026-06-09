@@ -1,4 +1,5 @@
-import type { Order } from '@/types';
+import { useEffect, useState } from 'react';
+import type { Order, OrderItemStatus } from '@/types';
 import type { KitchenTab } from './api';
 import { OrderBadge } from '@/components/StatusBadge';
 import { displayOrderNumber, timeHM, elapsed, orderItemDisplayName } from '@/lib/format';
@@ -7,47 +8,77 @@ import { Spinner } from '@/components/Spinner';
 /** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
 const SLOW_AFTER = 20 * 60;
 
+const FINAL_ITEM_STATUSES: OrderItemStatus[] = ['rejected', 'cancelled', 'ready', 'served'];
+
 export function KitchenOrderCard({
   order,
   tab,
   now,
   submitting,
+  pendingItemIds,
+  pendingType,
   onAccept,
-  onReady,
-  onReadyItem,
-  onRejectOrder,
-  onRejectItem,
+  onBatch,
 }: {
   order: Order;
   tab: KitchenTab;
   now: number;
   submitting: boolean;
+  /** Блюда заказа с отложенным (ещё не подтверждённым) действием. */
+  pendingItemIds: string[];
+  pendingType: 'reject' | 'ready' | null;
   onAccept: () => void;
-  onReady: () => void;
-  onReadyItem: (itemId: string) => void;
-  onRejectOrder: () => void;
-  onRejectItem: (itemId: string, name: string) => void;
+  onBatch: (type: 'reject' | 'ready', itemIds: string[]) => void;
 }) {
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
   const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
-  const canRejectItem = (tab === 'new' || tab === 'in_work') && !waitingDecision;
+  const canSelect = (tab === 'new' || tab === 'in_work') && !waitingDecision;
 
-  const activeItemsCount = order.items.filter(it => it.status !== 'rejected' && it.status !== 'cancelled').length;
-  const readyItemsCount = order.items.filter(it => it.status === 'ready' || it.status === 'served').length;
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Блюдо можно выбрать, если оно ещё «живое» и по нему нет отложенного действия.
+  const isSelectable = (status: OrderItemStatus, id: string) =>
+    canSelect && !FINAL_ITEM_STATUSES.includes(status) && !pendingItemIds.includes(id);
+
+  // Чистим выбор от позиций, которые стали невыбираемыми (обновление по сокету / отложенное действие).
+  useEffect(() => {
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => {
+        const it = order.items.find((i) => i.id === id);
+        return it && isSelectable(it.status, id);
+      }));
+      return next.size === prev.size ? prev : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order.items, pendingItemIds]);
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  function runBatch(type: 'reject' | 'ready') {
+    if (selected.size === 0) return;
+    onBatch(type, [...selected]);
+    setSelected(new Set());
+  }
 
   return (
-    <div className="card flex flex-col p-4">
+    <div className="card flex flex-col p-3.5">
       {/* Шапка карточки */}
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-[17px] font-semibold text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
-          <p className="text-sm text-text-muted">Стол {order.table.number}</p>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-base font-semibold text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
+          <p className="text-[13px] text-text-muted">Стол {order.table.number}</p>
         </div>
         <div className="text-right">
-          <p className="text-sm text-text-muted">{timeHM(order.createdAt)}</p>
-          {(tab === 'new' || tab === 'in_work') ? (
-            <p className={`text-[15px] font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
+          <p className="text-[13px] text-text-muted">{timeHM(order.createdAt)}</p>
+          {tab === 'new' || tab === 'in_work' ? (
+            <p className={`text-sm font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
               {elapsed(order.createdAt, now)}
             </p>
           ) : (
@@ -56,21 +87,15 @@ export function KitchenOrderCard({
         </div>
       </div>
 
-      <p className="mt-1 text-sm text-text-muted">Официант: {order.waiter.name}</p>
-
-      {tab === 'in_work' && (
-        <p className="mt-1 text-sm font-medium text-text-primary">
-          Готово: {readyItemsCount} из {activeItemsCount}
-        </p>
-      )}
+      <p className="mt-0.5 text-[13px] text-text-muted">Официант: {order.waiter.name}</p>
 
       {order.status === 'partially_rejected' && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <span className="rounded-full bg-danger/10 px-2.5 py-1 text-xs font-medium text-danger">
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger">
             Частичный отказ
           </span>
           {waitingDecision && (
-            <span className="rounded-full bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning">
+            <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
               Ожидает решения официанта
             </span>
           )}
@@ -78,91 +103,93 @@ export function KitchenOrderCard({
       )}
 
       {/* Позиции */}
-      <ul className="mt-3 space-y-2 border-t border-border pt-3">
+      <ul className="mt-2.5 space-y-1 border-t border-border pt-2.5">
         {order.items.map((it) => {
-          const rejected = it.status === 'rejected';
-          const isReady = it.status === 'ready' || it.status === 'served';
+          const pending = pendingItemIds.includes(it.id);
+          const rejected = it.status === 'rejected' || (pending && pendingType === 'reject');
+          const isReady =
+            it.status === 'ready' || it.status === 'served' || (pending && pendingType === 'ready');
+          const selectable = isSelectable(it.status, it.id);
           const itemName = orderItemDisplayName(it);
           return (
-            <li key={it.id} className="flex items-start justify-between gap-3 text-[15px]">
-              <div className="min-w-0">
-                <span className={rejected ? 'text-danger line-through' : 'text-text-primary'}>
-                  <span className="font-medium">{it.quantity}×</span> {itemName}
-                </span>
-                {it.comment && <p className="text-xs text-warning">{it.comment}</p>}
-                {rejected && it.rejectReason && (
-                  <p className="text-xs text-danger">Отказ: {it.rejectReason}</p>
-                )}
-                {waitingDecision && !rejected && (
-                  <p className="text-xs text-text-muted">Ожидает решения официанта</p>
-                )}
-              </div>
-              {canRejectItem && !rejected && !isReady && (
-                <div className="flex items-center gap-3 shrink-0">
-                  <button
-                    onClick={() => onRejectItem(it.id, itemName)}
-                    className="text-xs font-medium text-danger hover:underline"
-                  >
-                    отказать
-                  </button>
-                  {tab === 'in_work' && (
-                    <button
-                      onClick={() => onReadyItem(it.id)}
-                      className="rounded bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary hover:bg-primary/20"
-                      disabled={submitting}
-                    >
-                      Готово
-                    </button>
-                  )}
-                </div>
+            <li key={it.id} className="flex items-center gap-2 text-[13.5px]">
+              {canSelect && (
+                selectable ? (
+                  <input
+                    type="checkbox"
+                    checked={selected.has(it.id)}
+                    onChange={() => toggle(it.id)}
+                    className="h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
+                  />
+                ) : (
+                  <span className="h-4 w-4 shrink-0" />
+                )
               )}
-              {isReady && (
-                <span className="shrink-0 text-sm font-semibold text-green-600">
-                  ✓ Готово
-                </span>
-              )}
-              {rejected && (
-                <span className="shrink-0 text-sm font-medium text-danger">
-                  Отказано
-                </span>
-              )}
+              <span
+                className={`min-w-0 flex-1 truncate ${
+                  rejected ? 'text-danger line-through' : isReady ? 'text-text-muted' : 'text-text-primary'
+                }`}
+              >
+                <span className="font-medium">{it.quantity}×</span> {itemName}
+                {it.comment && <span className="text-warning"> · {it.comment}</span>}
+              </span>
+              {isReady && <span className="shrink-0 text-xs font-semibold text-green-600">✓ Готово</span>}
+              {rejected && <span className="shrink-0 text-xs font-medium text-danger">Отказ</span>}
             </li>
           );
         })}
       </ul>
 
       {order.comment && (
-        <p className="mt-3 rounded-lg bg-warning/10 px-3 py-2 text-sm text-warning">
-          {order.comment}
-        </p>
+        <p className="mt-2.5 rounded-lg bg-warning/10 px-2.5 py-1.5 text-[13px] text-warning">{order.comment}</p>
       )}
 
       {waitingDecision && (
-        <div className="mt-4 rounded-lg border border-warning/20 bg-warning/10 px-3 py-2 text-sm text-warning">
+        <div className="mt-3 rounded-lg border border-warning/20 bg-warning/10 px-2.5 py-1.5 text-[13px] text-warning">
           Ожидаем решение официанта по частичному отказу
         </div>
       )}
 
-      {/* Действия */}
-      {tab === 'new' && !waitingDecision && (
-        <div className="mt-4 flex gap-2">
-          <button className="btn-danger btn-md flex-1" disabled={submitting} onClick={onRejectOrder}>
-            Отказать
-          </button>
-          <button className="btn-primary btn-md flex-[2] font-semibold" disabled={submitting} onClick={onAccept}>
-            {submitting ? <Spinner /> : 'Принять'}
-          </button>
+      {/* Блок действий по выбранным блюдам */}
+      {canSelect && selected.size > 0 && (
+        <div className="mt-3 flex items-center gap-2 border-t border-border pt-2.5">
+          <span className="text-[13px] font-medium text-text-secondary">Выбрано: {selected.size}</span>
+          <div className="ml-auto flex gap-1.5">
+            <button
+              onClick={() => runBatch('reject')}
+              className="btn-danger h-9 rounded-lg px-3 text-[13px] font-semibold"
+            >
+              Отказать выбранные
+            </button>
+            {tab === 'in_work' && (
+              <button
+                onClick={() => runBatch('ready')}
+                className="btn-primary h-9 rounded-lg px-3 text-[13px] font-semibold"
+              >
+                Готово выбранные
+              </button>
+            )}
+          </div>
         </div>
       )}
-      {tab === 'in_work' && !waitingDecision && (
-        <div className="mt-4 flex gap-2">
-          <button className="btn-danger btn-md flex-1" disabled={submitting} onClick={onRejectOrder}>
-            Отказать
-          </button>
-          <button className="btn-primary btn-md flex-[2] font-semibold" disabled={submitting} onClick={onReady}>
-            {submitting ? <Spinner /> : 'Готово'}
-          </button>
-        </div>
+      {canSelect && selected.size > 0 && (
+        <button
+          onClick={() => setSelected(new Set())}
+          className="mt-1.5 self-start text-[12px] text-text-muted hover:text-text-primary"
+        >
+          Снять выбор
+        </button>
+      )}
+
+      {/* «Принять» — кухня начинает работу, заказ уходит в «В работе». */}
+      {tab === 'new' && !waitingDecision && (
+        <button
+          className="btn-primary btn-md mt-3 w-full font-semibold"
+          disabled={submitting}
+          onClick={onAccept}
+        >
+          {submitting ? <Spinner /> : 'Принять в работу'}
+        </button>
       )}
     </div>
   );

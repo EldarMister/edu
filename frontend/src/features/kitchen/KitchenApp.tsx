@@ -7,29 +7,36 @@ import { Spinner } from '@/components/Spinner';
 import { disconnectSocket } from '@/lib/socket';
 import { usePushNotifications } from '@/lib/push';
 import { useKitchenRealtime } from './useKitchenRealtime';
-import {
-  useKitchenOrders,
-  useAccept,
-  useReady,
-  useItemReady,
-  useRejectOrder,
-  useRejectItem,
-  type KitchenTab,
-} from './api';
+import { useKitchenOrders, useAccept, useReadyItems, useRejectItems, type KitchenTab } from './api';
 import { KitchenOrderCard } from './KitchenOrderCard';
-import { RejectModal } from './RejectModal';
 import { StopListDrawer } from './StopListDrawer';
 
 const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'new', label: 'Новые' },
   { key: 'in_work', label: 'В работе' },
-  { key: 'ready', label: 'Готовые' },
+  { key: 'ready', label: 'Завершенные' },
   { key: 'rejected', label: 'Отказанные' },
 ];
 
-type RejectTarget =
-  | { type: 'order'; orderId: string }
-  | { type: 'item'; orderId: string; itemId: string; name: string };
+/** Сколько секунд показывается блок отмены, прежде чем действие уйдёт официанту. */
+const UNDO_SECONDS = 8;
+
+type PendingAction = {
+  orderId: string;
+  type: 'reject' | 'ready';
+  itemIds: string[];
+  deadline: number;
+};
+
+/** Русское склонение: 1 позиция, 2 позиции, 5 позиций. */
+function pluralPositions(n: number): string {
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if (a > 10 && a < 20) return 'позиций';
+  if (b > 1 && b < 5) return 'позиции';
+  if (b === 1) return 'позиция';
+  return 'позиций';
+}
 
 export function KitchenApp() {
   useKitchenRealtime();
@@ -39,18 +46,16 @@ export function KitchenApp() {
 
   const [tab, setTab] = useState<KitchenTab>('new');
   const [now, setNow] = useState(() => Date.now());
-  const [reject, setReject] = useState<RejectTarget | null>(null);
   const [actingId, setActingId] = useState<string | null>(null);
   const [stopListOpen, setStopListOpen] = useState(false);
+  const [pending, setPending] = useState<PendingAction | null>(null);
 
   const ordersQ = useKitchenOrders(tab);
   const accept = useAccept();
-  const ready = useReady();
-  const itemReady = useItemReady();
-  const rejectOrder = useRejectOrder();
-  const rejectItem = useRejectItem();
+  const readyItems = useReadyItems();
+  const rejectItems = useRejectItems();
 
-  // Тикающий таймер ожидания.
+  // Тикающий таймер (ожидание заказов + обратный отсчёт блока отмены).
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
@@ -63,6 +68,36 @@ export function KitchenApp() {
     if (orders.length > 0) setNow(Date.now());
   }, [orders]);
 
+  // Отправляет отложенное действие на сервер (= «уходит официанту»).
+  function commit(p: PendingAction) {
+    const run =
+      p.type === 'reject'
+        ? rejectItems.mutateAsync({ orderId: p.orderId, itemIds: p.itemIds })
+        : readyItems.mutateAsync({ orderId: p.orderId, itemIds: p.itemIds });
+    run.catch((err) => push({ message: apiError(err), at: new Date().toISOString() }));
+  }
+
+  // По истечении таймера действие фиксируется и уходит на сервер.
+  useEffect(() => {
+    if (!pending) return;
+    const t = setTimeout(() => {
+      commit(pending);
+      setPending(null);
+    }, Math.max(0, pending.deadline - Date.now()));
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending]);
+
+  function onBatch(orderId: string, type: 'reject' | 'ready', itemIds: string[]) {
+    // Новое действие, пока предыдущее не подтверждено — фиксируем предыдущее сразу.
+    if (pending) commit(pending);
+    setPending({ orderId, type, itemIds, deadline: Date.now() + UNDO_SECONDS * 1000 });
+  }
+
+  function cancelPending() {
+    setPending(null);
+  }
+
   async function act(id: string, fn: () => Promise<unknown>) {
     setActingId(id);
     try {
@@ -74,29 +109,12 @@ export function KitchenApp() {
     }
   }
 
-  async function confirmReject(reason: string, comment?: string) {
-    if (!reject) return;
-    try {
-      if (reject.type === 'order') {
-        await rejectOrder.mutateAsync({ orderId: reject.orderId, reason, comment });
-      } else {
-        await rejectItem.mutateAsync({
-          orderId: reject.orderId,
-          itemId: reject.itemId,
-          reason,
-          comment,
-        });
-      }
-      setReject(null);
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
-    }
-  }
-
   function onLogout() {
     disconnectSocket();
     logout();
   }
+
+  const undoSecondsLeft = pending ? Math.max(0, Math.ceil((pending.deadline - now) / 1000)) : 0;
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -128,9 +146,7 @@ export function KitchenApp() {
               key={t.key}
               onClick={() => setTab(t.key)}
               className={`shrink-0 rounded-lg px-4 py-2 text-[15px] font-medium transition-colors ${
-                tab === t.key
-                  ? 'bg-primary text-white'
-                  : 'text-text-secondary hover:bg-background'
+                tab === t.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
               }`}
             >
               {t.label}
@@ -161,11 +177,11 @@ export function KitchenApp() {
               : tab === 'in_work'
                 ? 'Нет заказов в работе'
                 : tab === 'ready'
-                  ? 'Готовых заказов нет'
+                  ? 'Завершённых заказов нет'
                   : 'Отказанных заказов нет'}
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {orders.map((o) => (
               <KitchenOrderCard
                 key={o.id}
@@ -173,28 +189,45 @@ export function KitchenApp() {
                 tab={tab}
                 now={now}
                 submitting={actingId === o.id}
+                pendingItemIds={pending?.orderId === o.id ? pending.itemIds : []}
+                pendingType={pending?.orderId === o.id ? pending.type : null}
                 onAccept={() => act(o.id, () => accept.mutateAsync(o.id))}
-                onReady={() => act(o.id, () => ready.mutateAsync(o.id))}
-                onReadyItem={(itemId) => act(o.id, () => itemReady.mutateAsync({ orderId: o.id, itemId }))}
-                onRejectOrder={() => setReject({ type: 'order', orderId: o.id })}
-                onRejectItem={(itemId, name) =>
-                  setReject({ type: 'item', orderId: o.id, itemId, name })
-                }
+                onBatch={(type, itemIds) => onBatch(o.id, type, itemIds)}
               />
             ))}
           </div>
         )}
       </main>
 
-      <RejectModal
-        open={!!reject}
-        title={
-          reject?.type === 'item' ? `Отказ: ${reject.name}` : 'Отказ по заказу'
-        }
-        submitting={rejectOrder.isPending || rejectItem.isPending}
-        onClose={() => setReject(null)}
-        onConfirm={confirmReject}
-      />
+      {/* Нижний блок отмены действия с таймером */}
+      {pending && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4">
+          <div className="pointer-events-auto flex w-full max-w-xl items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 shadow-lg">
+            <span
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base font-bold ${
+                pending.type === 'reject' ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary'
+              }`}
+            >
+              {pending.type === 'reject' ? '✕' : '✓'}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-text-primary">
+                {pending.itemIds.length} {pluralPositions(pending.itemIds.length)}{' '}
+                {pending.type === 'reject' ? 'помечены как отказ' : 'помечены как готовые'}
+              </p>
+              <p className="text-xs text-text-muted">
+                Отправка официанту через {String(undoSecondsLeft).padStart(2, '0')} сек
+              </p>
+            </div>
+            <button
+              onClick={cancelPending}
+              className="shrink-0 rounded-xl border border-danger px-4 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/5"
+            >
+              Отменить
+            </button>
+          </div>
+        </div>
+      )}
 
       <StopListDrawer open={stopListOpen} onClose={() => setStopListOpen(false)} />
     </div>

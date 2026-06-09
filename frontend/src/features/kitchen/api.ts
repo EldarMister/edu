@@ -103,3 +103,29 @@ export function useItemReady() {
     onSettled: () => invalidateKitchen(qc),
   });
 }
+
+/** Пакетная отметка нескольких блюд готовыми («Готово выбранные»). */
+export function useReadyItems() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { orderId: string; itemIds: string[] }) =>
+      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/ready-batch`, { itemIds: p.itemIds })).data,
+    retry: networkRetry,
+    onSettled: () => invalidateKitchen(qc),
+  });
+}
+
+/** Пакетный отказ по нескольким блюдам («Отказать выбранные»). */
+export function useRejectItems() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { orderId: string; itemIds: string[]; reason?: string; comment?: string }) =>
+      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/reject-batch`, {
+        itemIds: p.itemIds,
+        reason: p.reason,
+        comment: p.comment,
+      })).data,
+    retry: networkRetry,
+    onSettled: () => invalidateKitchen(qc),
+  });
+}

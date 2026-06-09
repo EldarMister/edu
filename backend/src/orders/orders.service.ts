@@ -774,6 +774,158 @@ export class OrdersService {
     return updated;
   }
 
+  /**
+   * Пакетно отметить несколько блюд готовыми (массовое действие кухни «Готово выбранные»).
+   * Атомарно: один пересчёт статуса заказа, одно уведомление официанту.
+   */
+  async kitchenReadyItems(orderId: string, itemIds: string[], kitchenUserId: string) {
+    const order = await this.getMutableOrder(orderId);
+    this.ensureNoPendingWaiterDecision(order);
+
+    const targetIds = order.items
+      .filter(
+        (it) =>
+          itemIds.includes(it.id) &&
+          ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.ready, OrderItemStatus.served].includes(
+            it.status as any,
+          ),
+      )
+      .map((it) => it.id);
+
+    if (targetIds.length === 0) {
+      throw new BadRequestException('Нет блюд, которые можно отметить готовыми');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.updateMany({
+        where: { id: { in: targetIds }, orderId },
+        data: { status: OrderItemStatus.ready },
+      });
+      await tx.kitchenEvent.createMany({
+        data: targetIds.map((id) => ({
+          orderId,
+          orderItemId: id,
+          type: KitchenEventType.ready_item,
+          createdById: kitchenUserId,
+        })),
+      });
+
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
+      if (nextStatus !== order.status) {
+        const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
+        if (nextTableStatus) {
+          await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+        }
+      }
+
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: nextStatus },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    if (updated.status !== order.status) {
+      const tableStatus = this.tableStatusForOrderStatus(updated.status);
+      if (tableStatus) {
+        this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+      }
+    }
+
+    if (updated.status === OrderStatus.ready) {
+      this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, updated);
+      this.notifyWaiter(updated.waiterId, `Заказ ${updated.orderNumber} готов полностью`, updated, 'success');
+    } else {
+      this.notifyWaiter(
+        updated.waiterId,
+        `Заказ ${updated.orderNumber}: готово позиций — ${targetIds.length}`,
+        updated,
+        'success',
+      );
+    }
+
+    return updated;
+  }
+
+  /**
+   * Пакетный отказ по нескольким блюдам (массовое действие кухни «Отказать выбранные»).
+   * Атомарно: один пересчёт сумм, одно уведомление официанту.
+   */
+  async kitchenRejectItems(
+    orderId: string,
+    itemIds: string[],
+    kitchenUserId: string,
+    reason: string,
+    comment?: string,
+  ) {
+    const order = await this.getMutableOrder(orderId);
+    this.ensureNoPendingWaiterDecision(order);
+
+    const items = order.items.filter(
+      (it) =>
+        itemIds.includes(it.id) &&
+        ![OrderItemStatus.rejected, OrderItemStatus.cancelled].includes(it.status as any),
+    );
+    if (items.length === 0) {
+      throw new BadRequestException('Нет блюд, которые можно отказать');
+    }
+    const targetIds = items.map((it) => it.id);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.restoreInventory(tx, items);
+      await tx.orderItem.updateMany({
+        where: { id: { in: targetIds }, orderId },
+        data: { status: OrderItemStatus.rejected, rejectReason: reason },
+      });
+      await tx.kitchenEvent.createMany({
+        data: targetIds.map((id) => ({
+          orderId,
+          orderItemId: id,
+          type: KitchenEventType.reject_item,
+          reason,
+          comment,
+          createdById: kitchenUserId,
+        })),
+      });
+
+      // Если отказаны все блюда — заказ rejected, иначе partially_rejected.
+      const remaining = await tx.orderItem.count({
+        where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+      });
+      await this.recalcOrder(tx, orderId);
+      if (remaining === 0) {
+        await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: remaining === 0 ? OrderStatus.rejected : OrderStatus.partially_rejected,
+          requiresWaiterDecision: remaining > 0,
+        },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    if (updated.status === OrderStatus.rejected) {
+      this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+    }
+    this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
+    const names = items.map((it) => this.orderItemName(it)).join(', ');
+    const partialText =
+      updated.status === OrderStatus.partially_rejected
+        ? ' Уточните у клиента: продолжить заказ, заменить блюдо или отменить заказ?'
+        : '';
+    this.notifyWaiter(
+      updated.waiterId,
+      `Стол №${updated.table.number}. Кухня отказала: ${names}. Причина: ${reason}.${partialText}`,
+      updated,
+      'error',
+    );
+    return updated;
+  }
+
   // ---------- Действия официанта после готовности ----------
 
   async resolvePartialRejection(orderId: string, waiterId: string) {
