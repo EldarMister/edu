@@ -60,7 +60,7 @@ export function KitchenApp({
   const ordersQ = useKitchenOrders(tab, station);
   const accept = useAccept(station);
   const readyItems = useReadyItems();
-  const rejectItems = useRejectItems();
+  const rejectItems = useRejectItems(station);
 
   // Тикающий таймер (ожидание заказов + обратный отсчёт блока отмены).
   useEffect(() => {
@@ -239,7 +239,7 @@ export function KitchenApp({
         </div>
       )}
 
-      <StopListDrawer open={stopListOpen} onClose={() => setStopListOpen(false)} />
+      <StopListDrawer open={stopListOpen} station={station} onClose={() => setStopListOpen(false)} />
     </div>
   );
 }

@@ -27,8 +27,8 @@ export class KitchenController {
   }
 
   @Get('stop-list')
-  stopList() {
-    return this.kitchen.getStopList();
+  stopList(@Query('station') station?: string) {
+    return this.kitchen.getStopList(this.parseStation(station));
   }
 
   @Patch('stop-list')
@@ -76,7 +76,14 @@ export class KitchenController {
   }
 
   @Post('orders/:id/items/reject-batch')
-  rejectItems(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: RejectItemsDto) {
-    return this.orders.kitchenRejectItems(id, dto.itemIds, user.id, dto.reason ?? 'Отказ кухни', dto.comment);
+  rejectItems(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: RejectItemsDto,
+    @Query('station') station?: string,
+  ) {
+    const st = this.parseStation(station);
+    const reason = dto.reason ?? (st === PrepStation.bar ? 'Отказ бара' : 'Отказ кухни');
+    return this.orders.kitchenRejectItems(id, dto.itemIds, user.id, reason, dto.comment, st);
   }
 }

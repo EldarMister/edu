@@ -24,10 +24,11 @@ export interface StopListCategory {
   dishes: StopListDish[];
 }
 
-export function useStopList(enabled: boolean) {
+export function useStopList(enabled: boolean, station: PrepStation = 'kitchen') {
   return useQuery({
-    queryKey: ['kitchen', 'stop-list'],
-    queryFn: async () => (await api.get<StopListCategory[]>('/kitchen/stop-list')).data,
+    queryKey: ['kitchen', 'stop-list', station],
+    queryFn: async () =>
+      (await api.get<StopListCategory[]>(`/kitchen/stop-list?station=${station}`)).data,
     enabled,
   });
 }
@@ -38,8 +39,9 @@ export function useSaveStopList() {
     mutationFn: async (items: { dishId: string; isAvailable: boolean }[]) =>
       (await api.patch<StopListCategory[]>('/kitchen/stop-list', { items })).data,
     retry: networkRetry,
-    onSuccess: (data) => {
-      qc.setQueryData(['kitchen', 'stop-list'], data);
+    onSuccess: () => {
+      // Стоп-лист общий по составу, но фильтруется по станции — обновляем оба экрана.
+      qc.invalidateQueries({ queryKey: ['kitchen', 'stop-list'] });
       qc.invalidateQueries({ queryKey: ['dishes'] });
     },
   });
@@ -117,11 +119,11 @@ export function useReadyItems() {
 }
 
 /** Пакетный отказ по нескольким блюдам («Отказать выбранные»). */
-export function useRejectItems() {
+export function useRejectItems(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (p: { orderId: string; itemIds: string[]; reason?: string; comment?: string }) =>
-      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/reject-batch`, {
+      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/reject-batch?station=${station}`, {
         itemIds: p.itemIds,
         reason: p.reason,
         comment: p.comment,

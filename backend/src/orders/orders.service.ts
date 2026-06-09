@@ -877,6 +877,7 @@ export class OrdersService {
     kitchenUserId: string,
     reason: string,
     comment?: string,
+    station: PrepStation = PrepStation.kitchen,
   ) {
     const order = await this.getMutableOrder(orderId);
     this.ensureNoPendingWaiterDecision(order);
@@ -932,13 +933,14 @@ export class OrdersService {
     }
     this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
     const names = items.map((it) => this.orderItemName(it)).join(', ');
+    const stationLabel = station === PrepStation.bar ? 'Бар' : 'Кухня';
     const partialText =
       updated.status === OrderStatus.partially_rejected
         ? ' Уточните у клиента: продолжить заказ, заменить блюдо или отменить заказ?'
         : '';
     this.notifyWaiter(
       updated.waiterId,
-      `Стол №${updated.table.number}. Кухня отказала: ${names}. Причина: ${reason}.${partialText}`,
+      `Стол №${updated.table.number}. ${stationLabel} отказал: ${names}. Причина: ${reason}.${partialText}`,
       updated,
       'error',
     );

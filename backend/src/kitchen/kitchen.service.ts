@@ -76,22 +76,34 @@ export class KitchenService {
       .filter((o) => stationTabOf(o.items) === tab);
   }
 
-  /** Стоп-лист: активные блюда по категориям с текущей доступностью. */
-  async getStopList() {
+  /**
+   * Стоп-лист станции: активные блюда по категориям с текущей доступностью,
+   * только те, что относятся к станции (направление блюда, иначе — категории).
+   */
+  async getStopList(station: PrepStation = PrepStation.kitchen) {
     const categories = await this.prisma.category.findMany({
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
       select: {
         id: true,
         name: true,
+        prepStation: true,
         dishes: {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
-          select: { id: true, name: true, isAvailable: true },
+          select: { id: true, name: true, isAvailable: true, prepStation: true },
         },
       },
     });
-    return categories.filter((c) => c.dishes.length > 0);
+    return categories
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        dishes: c.dishes
+          .filter((d) => (d.prepStation ?? c.prepStation) === station)
+          .map((d) => ({ id: d.id, name: d.name, isAvailable: d.isAvailable })),
+      }))
+      .filter((c) => c.dishes.length > 0);
   }
 
   /** Сохраняет доступность блюд. Меняет только изменившиеся, пишет аудит, шлёт realtime. */
