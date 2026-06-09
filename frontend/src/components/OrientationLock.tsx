@@ -1,5 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
-import orientationService from '@/services/orientationService';
+import { type ReactNode } from 'react';
 
 type OrientationLockProps = {
   children: ReactNode;
@@ -7,19 +6,12 @@ type OrientationLockProps = {
   lock: 'portrait' | 'landscape';
 };
 
-export function OrientationLock({ children, className, lock }: OrientationLockProps) {
-  useEffect(() => {
-    if (lock === 'portrait') {
-      void orientationService.lockPortrait();
-    } else {
-      void orientationService.lockLandscape();
-    }
-
-    return () => {
-      orientationService.unlock();
-    };
-  }, [lock]);
-
+/**
+ * Обёртка для маршрутов. Ориентация следует системному автоповороту.
+ * Принудительная блокировка через JS API убрана — она конфликтовала с
+ * манифестом и не работала надёжно на всех устройствах.
+ */
+export function OrientationLock({ children, className }: OrientationLockProps) {
   return (
     <div className={className}>
       <div className="orientation-content">{children}</div>
