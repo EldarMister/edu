@@ -18,8 +18,15 @@ datasource db {
 enum Role {
   WAITER
   KITCHEN
+  BAR
   ADMIN
   OWNER
+}
+
+// Направление приготовления/выдачи позиции: кухня или бар.
+enum PrepStation {
+  kitchen
+  bar
 }
 
 enum TableStatus {
@@ -177,12 +184,13 @@ model Table {
 }
 
 model Category {
-  id        String   @id @default(uuid())
-  name      String
-  sortOrder Int      @default(0) @map("sort_order")
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id          String      @id @default(uuid())
+  name        String
+  sortOrder   Int         @default(0) @map("sort_order")
+  isActive    Boolean     @default(true) @map("is_active")
+  prepStation PrepStation @default(kitchen) @map("prep_station")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
 
   dishes Dish[]
 
@@ -206,6 +214,8 @@ model Dish {
   stock         Int?
   initialStock  Int?         @map("initial_stock")
   unit          String       @default("шт")
+  // null = наследовать направление от категории; задано — приоритет над категорией.
+  prepStation   PrepStation? @map("prep_station")
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
@@ -315,6 +325,7 @@ model OrderItem {
   discountAmount   Decimal         @default(0) @map("discount_amount") @db.Decimal(10, 2)
   finalPrice       Decimal         @map("final_price") @db.Decimal(10, 2)
   status           OrderItemStatus @default(new)
+  prepStation      PrepStation     @default(kitchen) @map("prep_station")
   comment          String?
   rejectReason     String?         @map("reject_reason")
   createdAt        DateTime        @default(now()) @map("created_at")

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
-import type { Order, PaymentMethod, ReceiptPrintRequest, Role, TableStatus } from '@/types';
+import type { Order, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
 
 // ---------- Типы ответов ----------
 export interface AdminTableItem {
@@ -24,6 +24,7 @@ export interface AdminCategory {
   name: string;
   sortOrder: number;
   isActive: boolean;
+  prepStation: PrepStation;
   _count: { dishes: number };
 }
 export interface AdminDish {
@@ -42,6 +43,7 @@ export interface AdminDish {
   stock?: number;
   initialStock?: number;
   unit?: string;
+  prepStation: PrepStation | null;
   variants: AdminDishVariant[];
 }
 export interface AdminDishVariant {
@@ -345,11 +347,12 @@ export function useCategoryMutations() {
     ['admin', 'dishes'],
   ]);
   const create = useMutation({
-    mutationFn: (b: { name: string }) => api.post('/admin/categories', b).then((r) => r.data),
+    mutationFn: (b: { name: string; prepStation?: PrepStation }) =>
+      api.post('/admin/categories', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean }) =>
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation }) =>
       api.patch(`/admin/categories/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
@@ -373,6 +376,7 @@ export interface DishInput {
   stock?: number;
   initialStock?: number;
   unit?: string;
+  prepStation?: PrepStation | null;
   variants?: { id?: string; name: string; price: number; stock?: number; initialStock?: number; unit?: string }[];
 }
 export function useDishMutations() {

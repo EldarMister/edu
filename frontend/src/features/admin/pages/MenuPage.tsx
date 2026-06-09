@@ -33,6 +33,10 @@ export function MenuPage() {
   const tr = useT();
   const o = overview.data;
 
+  // Эффективное направление блюда: своё, иначе — направление категории.
+  const stationByCat = new Map((categoriesQ.data ?? []).map((c) => [c.id, c.prepStation ?? 'kitchen']));
+  const dishStation = (d: AdminDish) => d.prepStation ?? stationByCat.get(d.categoryId) ?? 'kitchen';
+
   async function onDelete(d: AdminDish) {
     if (!confirm(`Удалить блюдо «${d.name}»?`)) return;
     try {
@@ -104,7 +108,14 @@ export function MenuPage() {
                 {dishesQ.data?.map((d) => (
                   <tr key={d.id} className="border-b border-border last:border-0 hover:bg-background/60">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-text-primary">{d.name}</p>
+                      <p className="flex items-center gap-2 font-medium text-text-primary">
+                        {d.name}
+                        {dishStation(d) === 'bar' && (
+                          <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                            Бар
+                          </span>
+                        )}
+                      </p>
                       {d.variants.length > 0 && (
                         <p className="text-xs font-medium text-primary">{variantNamesLine(d.variants)}</p>
                       )}
@@ -218,6 +229,8 @@ function DishModal({
   const [unit] = useState(dish?.unit ?? 'шт');
   const [description, setDescription] = useState(dish?.description ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
+  // '' = брать направление из категории; иначе приоритет блюда.
+  const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar'>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -283,6 +296,7 @@ function DishModal({
         price: priceValue,
         description: description.trim() || undefined,
         isAvailable,
+        prepStation: prepStation === '' ? null : prepStation,
         trackInventory: filledVariants.length > 0 ? filledVariants.some(v => v.stock.trim() !== '') : stock.trim() !== '',
         stock: priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
         initialStock: !isEdit && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
@@ -332,6 +346,18 @@ function DishModal({
               value={categoryId}
               onChange={setCategoryId}
               options={categories.map((c) => ({ value: c.id, label: c.name }))}
+            />
+          </Field>
+          <Field label="Куда отправлять">
+            <Select
+              className="h-11 w-full"
+              value={prepStation}
+              onChange={(v) => setPrepStation(v as '' | 'kitchen' | 'bar')}
+              options={[
+                { value: '', label: 'По категории' },
+                { value: 'kitchen', label: 'Кухня' },
+                { value: 'bar', label: 'Бар' },
+              ]}
             />
           </Field>
         </div>
@@ -458,20 +484,30 @@ function CategoryModal({
   categories: AdminCategory[];
   onClose: () => void;
 }) {
-  const { create, remove } = useCategoryMutations();
+  const { create, update, remove } = useCategoryMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState('');
+  const [prepStation, setPrepStation] = useState<'kitchen' | 'bar'>('kitchen');
   const [error, setError] = useState('');
 
   async function add() {
     setError('');
     if (!name.trim()) return;
     try {
-      await create.mutateAsync({ name: name.trim() });
+      await create.mutateAsync({ name: name.trim(), prepStation });
       setName('');
+      setPrepStation('kitchen');
       push({ message: 'Категория добавлена', at: new Date().toISOString() });
     } catch (err) {
       setError(apiError(err));
+    }
+  }
+
+  async function changeStation(id: string, value: 'kitchen' | 'bar') {
+    try {
+      await update.mutateAsync({ id, prepStation: value });
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
     }
   }
 
@@ -486,13 +522,22 @@ function CategoryModal({
 
   return (
     <Modal open onClose={onClose} title="Категории">
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex flex-wrap gap-2">
         <input
-          className="input"
+          className="input flex-1"
           placeholder="Название категории"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && add()}
+        />
+        <Select
+          className="h-11 w-32 shrink-0"
+          value={prepStation}
+          onChange={(v) => setPrepStation(v as 'kitchen' | 'bar')}
+          options={[
+            { value: 'kitchen', label: 'Кухня' },
+            { value: 'bar', label: 'Бар' },
+          ]}
         />
         <button className="btn-primary btn-md shrink-0" disabled={create.isPending} onClick={add}>
           {create.isPending ? <Spinner /> : 'Добавить'}
@@ -501,9 +546,18 @@ function CategoryModal({
       {error && <p className="mb-2 text-sm text-danger">{error}</p>}
       <ul className="space-y-2">
         {categories.map((c) => (
-          <li key={c.id} className="flex items-center justify-between rounded-xl border border-border px-3.5 py-2.5">
-            <span className="text-[15px] text-text-primary">{c.name}</span>
-            <div className="flex items-center gap-3">
+          <li key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+            <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{c.name}</span>
+            <div className="flex shrink-0 items-center gap-3">
+              <Select
+                className="h-9 w-28"
+                value={c.prepStation ?? 'kitchen'}
+                onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar')}
+                options={[
+                  { value: 'kitchen', label: 'Кухня' },
+                  { value: 'bar', label: 'Бар' },
+                ]}
+              />
               <span className="text-xs text-text-muted">{c._count.dishes} блюд</span>
               <button
                 onClick={() => onDelete(c.id, c.name)}

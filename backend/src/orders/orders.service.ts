@@ -10,6 +10,7 @@ import {
   PaymentMethod,
   PaymentStatus,
   Prisma,
+  PrepStation,
   Role,
   TableStatus,
   KitchenEventType,
@@ -520,39 +521,57 @@ export class OrdersService {
 
   // ---------- Действия кухни ----------
 
-  async kitchenAccept(orderId: string, kitchenUserId: string) {
+  /**
+   * Станционный приём заказа в работу: переводит в «готовится» только позиции
+   * своей станции (кухня/бар). Глобальный статус заказа пересчитывается по всем
+   * активным позициям, поэтому заказ «готов» только когда готовы обе станции.
+   */
+  async stationAccept(orderId: string, kitchenUserId: string, station: PrepStation) {
     const order = await this.getMutableOrder(orderId);
     this.ensureNoPendingWaiterDecision(order);
+
+    const targetIds = order.items
+      .filter((it) => it.prepStation === station && it.status === OrderItemStatus.new)
+      .map((it) => it.id);
+
     let applied = false;
     const updated = await this.prisma.$transaction(async (tx) => {
-      const changed = await tx.order.updateMany({
-        where: { id: orderId, status: OrderStatus.sent_to_kitchen },
-        data: { status: OrderStatus.accepted_by_kitchen },
-      });
-      if (changed.count === 0) {
+      if (targetIds.length === 0) {
         return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
       }
       applied = true;
       await tx.orderItem.updateMany({
-        where: { orderId, status: OrderItemStatus.new },
+        where: { id: { in: targetIds }, orderId },
         data: { status: OrderItemStatus.cooking },
       });
       await tx.kitchenEvent.create({
         data: { orderId, type: KitchenEventType.accept, createdById: kitchenUserId },
       });
-      await tx.table.update({
-        where: { id: order.tableId },
-        data: { status: TableStatus.accepted },
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
+      if (nextStatus !== order.status) {
+        const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
+        if (nextTableStatus) {
+          await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+        }
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: nextStatus },
+        include: orderInclude,
       });
-      return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
 
     if (applied) {
       this.emitStatusChanged(updated);
-      this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.accepted, updated.table.hallId);
+      if (updated.status !== order.status) {
+        const tableStatus = this.tableStatusForOrderStatus(updated.status);
+        if (tableStatus) {
+          this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+        }
+      }
       this.notifyWaiter(
         updated.waiterId,
-        `Стол №${updated.table.number}: кухня приняла заказ`,
+        `Стол №${updated.table.number}: ${station === PrepStation.bar ? 'бар' : 'кухня'} принял заказ`,
         updated,
         'success',
       );
@@ -1118,7 +1137,10 @@ export class OrdersService {
     const variantIds = [...new Set(items.map((i) => i.variantId).filter((id): id is string => !!id))];
     const dishes = await this.prisma.dish.findMany({
       where: { id: { in: dishIds }, isActive: true },
-      include: { variants: { orderBy: { sortOrder: 'asc' } } },
+      include: {
+        variants: { orderBy: { sortOrder: 'asc' } },
+        category: { select: { prepStation: true } },
+      },
     });
     const byId = new Map(dishes.map((d) => [d.id, d]));
     const variants = variantIds.length
@@ -1185,6 +1207,8 @@ export class OrdersService {
         discountAmount: new Prisma.Decimal(round2(unitDiscount * i.quantity)),
         finalPrice: new Prisma.Decimal(round2(unitFinal * i.quantity)),
         status: OrderItemStatus.new,
+        // Направление позиции: приоритет у блюда, иначе — направление категории.
+        prepStation: dish.prepStation ?? dish.category.prepStation,
         comment: i.comment,
       };
     });

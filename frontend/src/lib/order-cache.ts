@@ -45,14 +45,6 @@ function removeOrder(list: Order[] | undefined, orderId: string) {
   return list?.filter((item) => item.id !== orderId);
 }
 
-function kitchenTab(status: OrderStatus): 'new' | 'in_work' | 'ready' | 'rejected' | null {
-  if (status === 'sent_to_kitchen') return 'new';
-  if (status === 'accepted_by_kitchen' || status === 'cooking' || status === 'partially_rejected') return 'in_work';
-  if (status === 'ready' || status === 'picked_up' || status === 'served') return 'ready';
-  if (status === 'rejected') return 'rejected';
-  return null;
-}
-
 function adminTabMatches(tab: unknown, status: OrderStatus) {
   if (tab === 'active') return ADMIN_ACTIVE.has(status);
   if (tab === 'paid') return status === 'paid';
@@ -65,12 +57,7 @@ export function applyOrderStatusToCache(qc: QueryClient, order: Order) {
     WAITER_ACTIVE.has(order.status) ? upsertOrder(current, order) : removeOrder(current, order.id),
   );
 
-  const targetKitchenTab = kitchenTab(order.status);
-  for (const tab of ['new', 'in_work', 'ready', 'rejected'] as const) {
-    qc.setQueryData<Order[]>(['kitchen', tab], (current) =>
-      tab === targetKitchenTab ? upsertOrder(current, order) : removeOrder(current, order.id),
-    );
-  }
+  // Кухня/бар обновляются через invalidate (сервер фильтрует позиции по станции).
 
   qc.getQueryCache().findAll({ queryKey: ['admin', 'orders', 'list'] }).forEach((query) => {
     qc.setQueryData<OrdersPageData>(query.queryKey, (current) => {

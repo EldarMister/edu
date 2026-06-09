@@ -5,6 +5,7 @@ import { Toaster } from '@/components/Toaster';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { WaiterApp } from '@/features/waiter/WaiterApp';
 import { KitchenApp } from '@/features/kitchen/KitchenApp';
+import { BarApp } from '@/features/bar/BarApp';
 import { AdminApp } from '@/features/admin/AdminApp';
 
 export function App() {
@@ -32,6 +33,15 @@ export function App() {
           element={
             <ProtectedRoute roles={['KITCHEN', 'ADMIN', 'OWNER']}>
               <KitchenApp />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/bar/*"
+          element={
+            <ProtectedRoute roles={['BAR', 'ADMIN', 'OWNER']}>
+              <BarApp />
             </ProtectedRoute>
           }
         />

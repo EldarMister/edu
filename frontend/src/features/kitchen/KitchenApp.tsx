@@ -7,6 +7,7 @@ import { Spinner } from '@/components/Spinner';
 import { disconnectSocket } from '@/lib/socket';
 import { usePushNotifications } from '@/lib/push';
 import { useKitchenRealtime } from './useKitchenRealtime';
+import type { PrepStation } from '@/types';
 import { useKitchenOrders, useAccept, useReadyItems, useRejectItems, type KitchenTab } from './api';
 import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
@@ -38,11 +39,17 @@ function pluralPositions(n: number): string {
   return 'позиций';
 }
 
-export function KitchenApp() {
+export function KitchenApp({
+  station = 'kitchen',
+  title = station === 'bar' ? 'Бар' : 'Кухня',
+}: {
+  station?: PrepStation;
+  title?: string;
+} = {}) {
   useKitchenRealtime();
   const { user, logout } = useAuth();
   const push = useNotifications((s) => s.push);
-  const pushNotifications = usePushNotifications(user?.role === 'KITCHEN');
+  const pushNotifications = usePushNotifications(user?.role === 'KITCHEN' || user?.role === 'BAR');
 
   const [tab, setTab] = useState<KitchenTab>('new');
   const [now, setNow] = useState(() => Date.now());
@@ -50,8 +57,8 @@ export function KitchenApp() {
   const [stopListOpen, setStopListOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
 
-  const ordersQ = useKitchenOrders(tab);
-  const accept = useAccept();
+  const ordersQ = useKitchenOrders(tab, station);
+  const accept = useAccept(station);
   const readyItems = useReadyItems();
   const rejectItems = useRejectItems();
 
@@ -122,8 +129,11 @@ export function KitchenApp() {
 
       {/* Шапка */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
-        <div className="text-xl font-bold tracking-tight text-text-primary">
-          {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+        <div className="flex items-baseline gap-3">
+          <span className="text-xl font-bold tracking-tight text-text-primary">{title}</span>
+          <span className="text-base font-semibold text-text-muted">
+            {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+          </span>
         </div>
         <div className="flex items-center gap-4 text-sm">
           <ConnectionStatus />

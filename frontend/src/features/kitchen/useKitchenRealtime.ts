@@ -21,10 +21,7 @@ export function useKitchenRealtime() {
   const invalidate = () => qc.invalidateQueries({ queryKey: ['kitchen'] });
 
   useSocketEvent<Order>('kitchen:new_order', (order) => {
-    qc.setQueryData<Order[]>(['kitchen', 'new'], (current = []) => {
-      if (current.some((item) => item.id === order.id)) return current;
-      return [order, ...current];
-    });
+    // Список тянем заново с сервера — он отфильтрует позиции по станции экрана.
     invalidate();
 
     // 1. Сначала — звук уведомления

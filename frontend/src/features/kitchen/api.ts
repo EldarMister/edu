@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, networkRetry } from '@/lib/api';
-import type { Order } from '@/types';
+import type { Order, PrepStation } from '@/types';
 
 export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
 
-export function useKitchenOrders(tab: KitchenTab) {
+export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitchen') {
   return useQuery({
-    queryKey: ['kitchen', tab],
-    queryFn: async () => (await api.get<Order[]>(`/kitchen/orders?tab=${tab}`)).data,
+    queryKey: ['kitchen', station, tab],
+    queryFn: async () =>
+      (await api.get<Order[]>(`/kitchen/orders?tab=${tab}&station=${station}`)).data,
     refetchInterval: 15_000, // подстраховка, основное обновление — через сокет
   });
 }
@@ -48,11 +49,11 @@ function invalidateKitchen(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['kitchen'] });
 }
 
-export function useAccept() {
+export function useAccept(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (orderId: string) =>
-      (await api.post<Order>(`/kitchen/orders/${orderId}/accept`)).data,
+      (await api.post<Order>(`/kitchen/orders/${orderId}/accept?station=${station}`)).data,
     retry: networkRetry,
     onSettled: () => invalidateKitchen(qc),
   });

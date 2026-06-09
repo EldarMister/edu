@@ -159,13 +159,13 @@ export class CatalogService {
   categoriesAll() {
     return this.prisma.category.findMany({
       orderBy: { sortOrder: 'asc' },
-      select: { id: true, name: true, sortOrder: true, isActive: true, _count: { select: { dishes: true } } },
+      select: { id: true, name: true, sortOrder: true, isActive: true, prepStation: true, _count: { select: { dishes: true } } },
     });
   }
 
   async createCategory(dto: CreateCategoryDto, actor: AuditActor) {
     const category = await this.prisma.category.create({
-      data: { name: dto.name, sortOrder: dto.sortOrder ?? 0 },
+      data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation: dto.prepStation },
     });
     await this.audit.log({
       actor,
@@ -291,6 +291,7 @@ export class CatalogService {
         stock: dto.stock,
         initialStock: dto.initialStock,
         unit: dto.unit,
+        prepStation: dto.prepStation ?? null,
         variants: variants.length
           ? {
               create: variants.map((variant) => ({

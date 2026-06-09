@@ -12,7 +12,7 @@ import {
   IsArray,
   ValidateNested,
 } from 'class-validator';
-import { Role, DiscountType, TableStatus } from '@prisma/client';
+import { Role, DiscountType, TableStatus, PrepStation } from '@prisma/client';
 
 // ---------- Залы ----------
 export class CreateHallDto {
@@ -68,6 +68,9 @@ export class CreateCategoryDto {
 
   @IsOptional() @IsInt()
   sortOrder?: number;
+
+  @IsOptional() @IsEnum(PrepStation)
+  prepStation?: PrepStation;
 }
 export class UpdateCategoryDto {
   @IsOptional() @IsString() @MaxLength(60)
@@ -78,6 +81,9 @@ export class UpdateCategoryDto {
 
   @IsOptional() @IsInt()
   sortOrder?: number;
+
+  @IsOptional() @IsEnum(PrepStation)
+  prepStation?: PrepStation;
 }
 
 // ---------- Блюда ----------
@@ -141,6 +147,10 @@ export class CreateDishDto {
   @IsOptional() @IsString()
   unit?: string;
 
+  // null = брать направление из категории; задано — приоритет блюда.
+  @IsOptional() @IsEnum(PrepStation)
+  prepStation?: PrepStation | null;
+
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
   variants?: DishVariantDto[];
 }
@@ -186,6 +196,10 @@ export class UpdateDishDto {
 
   @IsOptional() @IsString()
   unit?: string;
+
+  // null = брать направление из категории; задано — приоритет блюда.
+  @IsOptional() @IsEnum(PrepStation)
+  prepStation?: PrepStation | null;
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
   variants?: DishVariantDto[];

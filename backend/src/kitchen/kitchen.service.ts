@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { OrderStatus } from '@prisma/client';
+import { OrderItemStatus, OrderStatus, PrepStation } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { orderInclude } from '../orders/order.helpers';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -10,12 +10,33 @@ import { StopListItemDto } from './dto/stop-list.dto';
 
 export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
 
-const TAB_STATUS: Record<KitchenTab, OrderStatus[]> = {
-  new: [OrderStatus.sent_to_kitchen],
-  in_work: [OrderStatus.accepted_by_kitchen, OrderStatus.cooking, OrderStatus.partially_rejected],
-  ready: [OrderStatus.ready, OrderStatus.picked_up, OrderStatus.served],
-  rejected: [OrderStatus.rejected],
-};
+/** Статусы заказа, в которых станция может иметь активные позиции. */
+const ACTIVE_TAB_STATUSES: OrderStatus[] = [
+  OrderStatus.sent_to_kitchen,
+  OrderStatus.accepted_by_kitchen,
+  OrderStatus.cooking,
+  OrderStatus.partially_rejected,
+  OrderStatus.ready,
+  OrderStatus.picked_up,
+  OrderStatus.served,
+];
+
+type StationItem = { status: OrderItemStatus };
+
+/**
+ * Вкладка станции вычисляется по её собственным позициям — независимо от другой
+ * станции. Пусто (нет активных позиций станции) → null (заказ не показываем).
+ */
+function stationTabOf(items: StationItem[]): Exclude<KitchenTab, 'rejected'> | null {
+  const active = items.filter(
+    (i) => i.status !== OrderItemStatus.rejected && i.status !== OrderItemStatus.cancelled,
+  );
+  if (active.length === 0) return null;
+  const statuses = new Set(active.map((i) => i.status));
+  if (statuses.has(OrderItemStatus.new)) return 'new';
+  if (statuses.has(OrderItemStatus.cooking) || statuses.has(OrderItemStatus.accepted)) return 'in_work';
+  return 'ready';
+}
 
 @Injectable()
 export class KitchenService {
@@ -25,13 +46,34 @@ export class KitchenService {
     private audit: AuditService,
   ) {}
 
-  findByTab(tab: KitchenTab) {
-    const statuses = TAB_STATUS[tab] ?? TAB_STATUS.new;
-    return this.prisma.order.findMany({
-      where: { status: { in: statuses } },
+  async findByTab(tab: KitchenTab, station: PrepStation = PrepStation.kitchen) {
+    if (tab === 'rejected') {
+      const orders = await this.prisma.order.findMany({
+        where: { status: OrderStatus.rejected, items: { some: { prepStation: station } } },
+        orderBy: { createdAt: 'asc' },
+        include: orderInclude,
+      });
+      return orders.map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }));
+    }
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        status: { in: ACTIVE_TAB_STATUSES },
+        items: {
+          some: {
+            prepStation: station,
+            status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] },
+          },
+        },
+      },
       orderBy: { createdAt: 'asc' },
       include: orderInclude,
     });
+
+    // Оставляем только позиции станции и раскладываем по вкладке станции.
+    return orders
+      .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }))
+      .filter((o) => stationTabOf(o.items) === tab);
   }
 
   /** Стоп-лист: активные блюда по категориям с текущей доступностью. */

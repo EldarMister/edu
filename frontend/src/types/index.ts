@@ -1,4 +1,7 @@
-export type Role = 'WAITER' | 'KITCHEN' | 'ADMIN' | 'OWNER';
+export type Role = 'WAITER' | 'KITCHEN' | 'BAR' | 'ADMIN' | 'OWNER';
+
+/** Направление приготовления/выдачи позиции. */
+export type PrepStation = 'kitchen' | 'bar';
 
 export interface AuthUser {
   id: string;
@@ -42,6 +45,7 @@ export interface Category {
   id: string;
   name: string;
   sortOrder: number;
+  prepStation?: PrepStation;
 }
 
 export type DiscountType = 'none' | 'percent' | 'fixed';
@@ -70,6 +74,8 @@ export interface Dish {
   stock?: number;
   minStock?: number;
   unit?: string;
+  /** null/undefined = брать направление из категории. */
+  prepStation?: PrepStation | null;
   variants: DishVariant[];
 }
 
@@ -126,6 +132,7 @@ export interface OrderItem {
   discountAmount: string;
   finalPrice: string;
   status: OrderItemStatus;
+  prepStation: PrepStation;
   comment: string | null;
   rejectReason: string | null;
 }

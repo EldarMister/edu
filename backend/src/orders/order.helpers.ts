@@ -17,6 +17,7 @@ export const orderInclude = {
       discountAmount: true,
       finalPrice: true,
       status: true,
+      prepStation: true,
       comment: true,
       rejectReason: true,
     },

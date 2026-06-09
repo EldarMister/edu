@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { PrepStation, Role } from '@prisma/client';
 import { KitchenService, KitchenTab } from './kitchen.service';
 import { OrdersService } from '../orders/orders.service';
 import { RejectDto } from './dto/reject.dto';
@@ -9,16 +9,21 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
 @Controller('kitchen')
-@Roles(Role.KITCHEN, Role.ADMIN, Role.OWNER)
+@Roles(Role.KITCHEN, Role.BAR, Role.ADMIN, Role.OWNER)
 export class KitchenController {
   constructor(
     private readonly kitchen: KitchenService,
     private readonly orders: OrdersService,
   ) {}
 
+  /** Станция из query (?station=kitchen|bar); по умолчанию — кухня. */
+  private parseStation(value?: string): PrepStation {
+    return value === PrepStation.bar ? PrepStation.bar : PrepStation.kitchen;
+  }
+
   @Get('orders')
-  list(@Query('tab') tab: KitchenTab = 'new') {
-    return this.kitchen.findByTab(tab);
+  list(@Query('tab') tab: KitchenTab = 'new', @Query('station') station?: string) {
+    return this.kitchen.findByTab(tab, this.parseStation(station));
   }
 
   @Get('stop-list')
@@ -32,8 +37,8 @@ export class KitchenController {
   }
 
   @Post('orders/:id/accept')
-  accept(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.orders.kitchenAccept(id, user.id);
+  accept(@Param('id') id: string, @CurrentUser() user: AuthUser, @Query('station') station?: string) {
+    return this.orders.stationAccept(id, user.id, this.parseStation(station));
   }
 
   @Post('orders/:id/ready')
