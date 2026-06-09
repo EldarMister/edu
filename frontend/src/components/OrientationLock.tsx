@@ -9,7 +9,11 @@ type OrientationLockProps = {
 
 export function OrientationLock({ children, className, lock }: OrientationLockProps) {
   useEffect(() => {
-    void orientationService.lock(lock);
+    if (lock === 'portrait') {
+      void orientationService.lockPortrait();
+    } else {
+      void orientationService.lockLandscape();
+    }
 
     return () => {
       orientationService.unlock();
