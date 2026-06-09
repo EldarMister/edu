@@ -7,6 +7,12 @@ import { applyOrderStatusToCache } from '@/lib/order-cache';
 import tts from '@/services/ttsService';
 import type { Order } from '@/types';
 
+/**
+ * Задержка перед голосом (мс) — даём звуку уведомления прозвучать первым.
+ * new-order.mp3 обычно ~1.5–2 сек; берём 1800 мс как безопасное значение.
+ */
+const VOICE_DELAY_MS = 1800;
+
 /** Подписки кухни: новый заказ — звук + тост, любые изменения — обновление списков. */
 export function useKitchenRealtime() {
   const qc = useQueryClient();
@@ -20,23 +26,36 @@ export function useKitchenRealtime() {
       return [order, ...current];
     });
     invalidate();
+
+    // 1. Сначала — звук уведомления
     beep('newOrder');
+
+    // 2. Тост
     const orderNumber = displayOrderNumber(order.orderNumber);
-    tts.speak('Новый заказ.');
     push({
       message: `Новый заказ ${orderNumber} · Стол ${order.table?.number}`,
       orderId: order.id,
       orderNumber,
       at: new Date().toISOString(),
     });
+
+    // 3. Голос — ПОСЛЕ звука уведомления
+    tts.speakAfterDelay('Новый заказ.', VOICE_DELAY_MS);
   });
 
   useSocketEvent<Order>('order:status_changed', (order) => {
     applyOrderStatusToCache(qc, order);
     invalidate();
+
     if (order.status === 'cancelled' || order.status === 'rejected') {
       const orderNumber = displayOrderNumber(order.orderNumber).replace(/^№\s*/, '');
-      tts.speakUrgent(`Внимание! Отмена заказа. Заказ номер ${orderNumber}.`);
+
+      // Срочный звук + голос после него
+      beep('notify');
+      tts.speakUrgentAfterDelay(
+        `Внимание! Отмена заказа. Заказ номер ${orderNumber}.`,
+        VOICE_DELAY_MS,
+      );
     }
   });
 }
