@@ -71,7 +71,7 @@ export default defineConfig({
         theme_color: '#005BFF',
         background_color: '#F8FAFC',
         display: 'standalone',
-        orientation: 'any',
+        orientation: 'portrait',
         start_url: '/',
         icons: [
           { src: 'icon.png', sizes: '1254x1254', type: 'image/png', purpose: 'any maskable' },

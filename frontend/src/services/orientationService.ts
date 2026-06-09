@@ -1,4 +1,10 @@
-type OrientationLockType = 'portrait' | 'landscape';
+// Specific orientation lock types are more reliably supported in PWA mode
+// than the generic 'portrait' / 'landscape' values.
+type OrientationLockType =
+  | 'portrait-primary'
+  | 'landscape-primary'
+  | 'portrait'
+  | 'landscape';
 
 type LockableScreenOrientation = ScreenOrientation & {
   lock?: (orientation: OrientationLockType) => Promise<void>;
@@ -6,14 +12,19 @@ type LockableScreenOrientation = ScreenOrientation & {
 };
 
 class OrientationService {
-  async lock(type: OrientationLockType) {
+  async lock(type: 'portrait' | 'landscape') {
     const orientation = this.getOrientation();
     if (!orientation?.lock) return;
 
+    // Use the specific primary variant for better PWA support
+    const lockType: OrientationLockType =
+      type === 'portrait' ? 'portrait-primary' : 'landscape-primary';
+
     try {
-      await orientation.lock(type);
+      await orientation.lock(lockType);
     } catch {
       // Some browsers only allow orientation lock in installed PWA/fullscreen mode.
+      // Silently ignore — the manifest orientation will serve as the fallback.
     }
   }
 
