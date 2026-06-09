@@ -24,7 +24,7 @@
     overscroll-behavior: none;
   }
   #root {
-    height: var(--app-height, 100%);
+    height: var(--app-height, 100dvh);
     background: #f8fafc;
   }
   html.modal-open,

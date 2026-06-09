@@ -260,18 +260,13 @@ export class OrdersService {
     if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ уже закрыт и не может быть отменён');
     }
-    // После принятия кухней официант не может отменить заказ напрямую —
-    // только через подтверждение кухни (Фаза 2). Админ/владелец не ограничены.
-    const kitchenLocked: OrderStatus[] = [
-      OrderStatus.accepted_by_kitchen,
-      OrderStatus.cooking,
-      OrderStatus.ready,
-      OrderStatus.served,
-      OrderStatus.waiting_payment,
-    ];
-    if (actor.role === Role.WAITER && kitchenLocked.includes(order.status)) {
+    // Официант может отменить заказ в любом активном статусе (включая принятый кухней).
+    // Единственное ограничение — заказ уже оплачен или отменён (проверено выше).
+    // Статус waiting_payment и served — только администратор/владелец.
+    const adminOnly: OrderStatus[] = [OrderStatus.waiting_payment, OrderStatus.served];
+    if (actor.role === Role.WAITER && adminOnly.includes(order.status)) {
       throw new BadRequestException(
-        'Кухня уже приняла заказ — отмена доступна только с подтверждения кухни',
+        'Отмена заказа на этом этапе доступна только администратору',
       );
     }
 
@@ -322,8 +317,9 @@ export class OrdersService {
 
   /**
    * Полное редактирование состава заказа официантом.
-   * Разрешено только пока кухня не приняла заказ (status = sent_to_kitchen).
-   * После принятия изменения идут через подтверждение кухни (Фаза 2).
+   * Разрешено в статусах: sent_to_kitchen, accepted_by_kitchen, cooking.
+   * После редактирования статус сбрасывается в sent_to_kitchen,
+   * кухня получает уведомление о новом/обновлённом заказе.
    */
   async editOrder(
     orderId: string,
@@ -333,12 +329,19 @@ export class OrdersService {
   ) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (order.waiterId !== actor.id) {
+    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
       throw new ForbiddenException('Это не ваш заказ');
     }
-    if (order.status !== OrderStatus.sent_to_kitchen) {
+
+    // Редактирование разрешено пока кухня не поставила «Готово» и не перешла к оплате.
+    const editableStatuses: OrderStatus[] = [
+      OrderStatus.sent_to_kitchen,
+      OrderStatus.accepted_by_kitchen,
+      OrderStatus.cooking,
+    ];
+    if (!editableStatuses.includes(order.status)) {
       throw new BadRequestException(
-        'Редактировать можно только пока кухня не приняла заказ — после принятия изменения через подтверждение кухни',
+        'Редактирование заказа недоступно на текущем этапе',
       );
     }
     if (!items.length) {
@@ -351,8 +354,8 @@ export class OrdersService {
       await this.restoreInventory(tx, order.items);
       const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
       const totals = this.calcTotals(itemsData as Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount);
-      const changed = await tx.order.updateMany({
-        where: { id: orderId, waiterId: actor.id, status: OrderStatus.sent_to_kitchen },
+      await tx.order.update({
+        where: { id: orderId },
         data: {
           comment,
           totalAmount: totals.total,
@@ -360,13 +363,10 @@ export class OrdersService {
           serviceChargeAmount: totals.serviceCharge,
           finalAmount: totals.final,
           requiresWaiterDecision: false,
+          // Сбрасываем статус — кухня должна принять обновлённый состав заново.
+          status: OrderStatus.sent_to_kitchen,
         },
       });
-      if (changed.count === 0) {
-        throw new BadRequestException(
-          'Редактировать можно только пока кухня не приняла заказ — после принятия изменения через подтверждение кухни',
-        );
-      }
       await tx.orderItem.deleteMany({ where: { orderId } });
       await tx.orderItem.createMany({
         data: itemsData.map((i) => ({ ...i, orderId })) as Prisma.OrderItemCreateManyInput[],
@@ -375,7 +375,10 @@ export class OrdersService {
       return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
 
-    // Кухня сразу видит обновлённый состав (ещё не принятого) заказа.
+    // Уведомляем кухню — звук + обновление списка.
+    this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
+    void this.notifyKitchenNewOrder(updated);
+    // Уведомляем остальных (официант, администратор) об изменении статуса.
     this.emitStatusChanged(updated);
 
     // Сводка изменений для журнала: что добавилось / убавилось по блюдам.

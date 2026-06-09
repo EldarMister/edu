@@ -142,11 +142,13 @@ function OrderActionsMenu({
     };
   }, [open, onClose]);
 
-  // Фаза 1: прямое действие доступно только пока кухня не приняла заказ.
-  const editable = order.status === 'sent_to_kitchen';
-  const cancellable = order.status === 'sent_to_kitchen';
-  const showEdit = order.status !== 'ready'; // для готового заказа редактирование скрыто
-  const needsKitchen = ['accepted_by_kitchen', 'cooking', 'ready'].includes(order.status);
+  // Редактирование: разрешено пока заказ не готов и не перешёл к оплате.
+  const editableStatuses = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
+  // Отмена: разрешена во всех активных статусах кроме оплаченных/отменённых/waiting_payment/served.
+  const cancellableStatuses = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready', 'partially_rejected'];
+  const editable = editableStatuses.includes(order.status);
+  const cancellable = cancellableStatuses.includes(order.status);
+  const showEdit = editable;
 
   return (
     <div className="self-center" onClick={(e) => e.stopPropagation()}>
@@ -178,18 +180,13 @@ function OrderActionsMenu({
             onClick={(e) => e.stopPropagation()}
           >
             {showEdit && (
-              <MenuItem disabled={!editable} onClick={onEdit}>
+              <MenuItem onClick={onEdit}>
                 {t('Редактировать заказ')}
               </MenuItem>
             )}
             <MenuItem disabled={!cancellable} danger onClick={onCancel}>
               {t('Отменить заказ')}
             </MenuItem>
-            {needsKitchen && (
-              <p className="px-3 pb-1.5 pt-1 text-[11px] leading-snug text-text-light">
-                {t('Кухня уже приняла заказ — изменения и отмена скоро будут через её подтверждение.')}
-              </p>
-            )}
           </div>,
           document.body,
         )}
