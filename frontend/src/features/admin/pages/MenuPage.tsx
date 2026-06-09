@@ -335,6 +335,7 @@ function DishModal({
             />
           </Field>
         </div>
+          {variants.length === 0 && (
           <div className="grid grid-cols-2 gap-3">
             <Field label="Цена (с)">
               <input
@@ -356,6 +357,7 @@ function DishModal({
               />
             </Field>
           </div>
+          )}
         <Field label="Описание">
           <input
             className="input"
