@@ -1,0 +1,22 @@
+# Service Worker и манифест — НИКОГДА не кэшировать браузером/CDN
+# Это гарантирует что при деплое пользователи сразу получат обновление
+/sw.js
+  Cache-Control: no-store, no-cache, must-revalidate
+  Pragma: no-cache
+
+/workbox-*.js
+  Cache-Control: no-store, no-cache, must-revalidate
+
+/manifest.webmanifest
+  Cache-Control: no-store, no-cache, must-revalidate
+
+/registerSW.js
+  Cache-Control: no-store, no-cache, must-revalidate
+
+# HTML — не кэшировать (чтобы SW мог проверить обновление)
+/*.html
+  Cache-Control: no-store, no-cache, must-revalidate
+
+# Статика с хешем в имени (assets/) — кэшировать на год (безопасно, хеш меняется)
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

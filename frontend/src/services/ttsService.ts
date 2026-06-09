@@ -3,7 +3,7 @@
  *
  * Особенности:
  *  1. Голос выбирается автоматически: приоритет у Google/Microsoft/Apple
- *     голосов (они гораздо естественнее дефолтного синтезатора).
+ *     (они гораздо естественнее дефолтного синтезатора).
  *  2. speakAfterDelay(ms) — воспроизводит текст через задержку,
  *     чтобы голос звучал ПОСЛЕ звукового уведомления.
  *  3. Очередь: если несколько уведомлений пришли одновременно,
@@ -11,33 +11,27 @@
  */
 class TtsService {
   private readonly lang = 'ru-RU';
-  private readonly fallbackLang = 'ru';
-  private voiceCache: SpeechSynthesisVoice | null = null;
-  private voiceLoaded = false;
+  private voiceCache: SpeechSynthesisVoice | null | undefined = undefined; // undefined = ещё не искали
   private pendingTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /** Произнести текст немедленно (добавить в очередь синтезатора). */
+  /** Произнести текст немедленно. */
   speak(text: string) {
     this.enqueue(text);
   }
 
   /**
-   * Произнести текст ПОСЛЕ задержки в `delayMs` миллисекунд.
-   * Используется на кухне: сначала играет звук уведомления, потом голос.
+   * Произнести текст через `delayMs` мс.
+   * На кухне: сначала звук уведомления, потом голос.
    */
   speakAfterDelay(text: string, delayMs: number) {
-    if (this.pendingTimer !== null) {
-      clearTimeout(this.pendingTimer);
-    }
+    if (this.pendingTimer !== null) clearTimeout(this.pendingTimer);
     this.pendingTimer = setTimeout(() => {
       this.pendingTimer = null;
       this.enqueue(text);
     }, delayMs);
   }
 
-  /**
-   * Срочное сообщение: прерывает текущую речь и произносит немедленно.
-   */
+  /** Срочно: прервать текущую речь и произнести немедленно. */
   speakUrgent(text: string) {
     const synthesis = this.getSynthesis();
     if (!synthesis) return;
@@ -45,13 +39,9 @@ class TtsService {
     this.enqueue(text, { urgent: true });
   }
 
-  /**
-   * Срочное сообщение с задержкой (для отмены заказа после сигнала).
-   */
+  /** Срочно с задержкой (для отмены заказа после сигнала). */
   speakUrgentAfterDelay(text: string, delayMs: number) {
-    if (this.pendingTimer !== null) {
-      clearTimeout(this.pendingTimer);
-    }
+    if (this.pendingTimer !== null) clearTimeout(this.pendingTimer);
     this.pendingTimer = setTimeout(() => {
       this.pendingTimer = null;
       this.speakUrgent(text);
@@ -67,78 +57,82 @@ class TtsService {
     utterance.lang = this.lang;
     utterance.volume = 1;
 
-    // Параметры для естественного звучания:
-    // rate 0.92 — чуть медленнее стандарта, лучше разборчивость
-    // pitch 1.0 — натуральная высота, без роботизированного задирания
-    utterance.rate = options.urgent ? 0.95 : 0.92;
+    // rate 1.15 — живее стандартного, не роботизирован
+    // pitch 1.0 — натуральная высота (не задранная)
+    utterance.rate = options.urgent ? 1.1 : 1.15;
     utterance.pitch = 1.0;
 
-    // Попытаемся подобрать лучший голос
-    const voice = this.getBestVoice();
+    const voice = this.getBestVoice(synthesis);
     if (voice) utterance.voice = voice;
 
     synthesis.speak(utterance);
   }
 
   /**
-   * Выбирает наиболее естественный русский голос из доступных.
-   * Приоритеты:
-   *  1. Google голоса (Android Chrome — самые естественные)
-   *  2. Microsoft голоса (Windows/Edge)
-   *  3. Apple голоса (iOS/macOS Safari)
-   *  4. Любой другой ru-RU голос
-   *  5. null — браузер использует дефолтный
+   * Выбирает наиболее естественный русский голос.
+   *
+   * Приоритет:
+   *  1. «Google русский» / «Google Russian» (Android Chrome — нейросетевой)
+   *  2. Любой другой Google ru-RU голос
+   *  3. Microsoft ru-RU голос (Windows/Edge — тоже хороший)
+   *  4. Apple ru-RU голос (iOS/macOS)
+   *  5. Любой онлайн (не локальный) ru-RU голос
+   *  6. Первый доступный ru-RU голос
+   *  7. null — браузер использует дефолтный
    */
-  private getBestVoice(): SpeechSynthesisVoice | null {
-    if (this.voiceLoaded) return this.voiceCache;
-
-    const synthesis = this.getSynthesis();
-    if (!synthesis) return null;
+  private getBestVoice(synthesis: SpeechSynthesis): SpeechSynthesisVoice | null {
+    // Уже нашли (или убедились что нет) — возвращаем кэш
+    if (this.voiceCache !== undefined) return this.voiceCache;
 
     const voices = synthesis.getVoices();
 
     if (voices.length === 0) {
-      // Голоса ещё не загружены — подпишемся один раз
+      // Голоса ещё не загружены асинхронно — подпишемся один раз
       synthesis.onvoiceschanged = () => {
         this.voiceCache = this.selectVoice(synthesis.getVoices());
-        this.voiceLoaded = true;
         synthesis.onvoiceschanged = null;
       };
       return null;
     }
 
     this.voiceCache = this.selectVoice(voices);
-    this.voiceLoaded = true;
     return this.voiceCache;
   }
 
   private selectVoice(voices: SpeechSynthesisVoice[]): SpeechSynthesisVoice | null {
-    // Фильтруем русские голоса
-    const ruVoices = voices.filter(
-      (v) => v.lang === this.lang || v.lang.startsWith(this.fallbackLang),
+    const ru = voices.filter(
+      (v) => v.lang === 'ru-RU' || v.lang === 'ru' || v.lang.startsWith('ru-'),
     );
+    if (ru.length === 0) return null;
 
-    if (ruVoices.length === 0) return null;
+    // 1. Точные имена Google-голосов на Android Chrome
+    const googleExact = ru.find(
+      (v) => v.name === 'Google русский' || v.name === 'Google Russian',
+    );
+    if (googleExact) return googleExact;
 
-    // Приоритет по производителю (самые естественные первыми)
-    const preferred = ['Google', 'Microsoft', 'Apple', 'Yandex'];
-    for (const brand of preferred) {
-      const match = ruVoices.find((v) => v.name.includes(brand));
-      if (match) return match;
-    }
+    // 2. Любой Google-голос
+    const google = ru.find((v) => v.name.toLowerCase().includes('google'));
+    if (google) return google;
 
-    // Fallback: любой не-локальный голос (онлайн голоса обычно лучше)
-    const remote = ruVoices.find((v) => !v.localService);
+    // 3. Microsoft (Edge/Windows — Neural голоса очень качественные)
+    const microsoft = ru.find((v) => v.name.toLowerCase().includes('microsoft'));
+    if (microsoft) return microsoft;
+
+    // 4. Apple (iOS/macOS)
+    const apple = ru.find((v) => v.name.toLowerCase().includes('apple'));
+    if (apple) return apple;
+
+    // 5. Онлайн-голоса лучше локальных
+    const remote = ru.find((v) => !v.localService);
     if (remote) return remote;
 
-    // Последний вариант: первый доступный
-    return ruVoices[0] ?? null;
+    // 6. Хоть что-то
+    return ru[0] ?? null;
   }
 
   private getSynthesis(): SpeechSynthesis | null {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      return null;
-    }
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
     return window.speechSynthesis;
   }
 }

@@ -63,7 +63,13 @@ export default defineConfig({
       includeAssets: ['icon.png', 'sounds/*.mp3', 'sounds/*.wav', 'sounds/*.ogg'],
       workbox: {
         importScripts: ['push-sw.js'],
+        // Новый SW активируется сразу — не ждёт закрытия всех вкладок
+        skipWaiting: true,
+        clientsClaim: true,
+        // SW-файл не кэшируется HTTP-кэшем браузера — всегда проверяется с сервера
+        // (без этого браузер может игнорировать обновления до 24 часов)
       },
+
       manifest: {
         name: 'EDU POS',
         short_name: 'EDU POS',
