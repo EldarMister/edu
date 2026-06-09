@@ -1,86 +1,68 @@
 /**
- * OrientationService — управляет блокировкой ориентации экрана.
+ * OrientationService — управление ориентацией экрана в PWA.
  *
- * Принцип работы:
- *  - screen.orientation.lock() работает только в установленном PWA (standalone/fullscreen).
- *  - В браузерной вкладке вызов бросает ошибку — она подавляется,
- *    и в роли fallback выступает "orientation": "any" из манифеста (= следует системному автоповороту).
- *
- * Портретные экраны (официант, администратор, владелец):
- *  - Блокируются в portrait-primary — экран не поворачивается НИКОГДА,
- *    даже если системный автоповорот включён.
- *
- * Экран кухни:
- *  - Блокируется в 'landscape' (не 'landscape-primary'!).
- *  - Значение 'landscape' разрешает ОБЕ альбомные ориентации:
- *    landscape-primary и landscape-secondary.
- *  - Если автоповорот включён → экран свободно вращается между двумя
- *    альбомными позициями.
- *  - Если автоповорот выключен → экран остаётся в текущей альбомной
- *    позиции (не возвращается в портрет).
- *  - Определять состояние автоповорота вручную не нужно — API делает
- *    это сам через значение 'landscape'.
+ * Стратегия:
+ *  - Манифест задаёт "orientation": "portrait" → ОС блокирует портрет системно.
+ *    Это надёжная защита для официанта, администратора и владельца.
+ *  - JS API screen.orientation.lock() используется для КУХНИ, чтобы переключить
+ *    на landscape поверх системного portrait из манифеста.
+ *  - Для портретных экранов JS API используется как дополнительный слой поверх манифеста.
+ *  - Если API недоступен (iOS, браузерная вкладка) — молча игнорируем,
+ *    манифест остаётся единственной защитой.
  */
 
-// Расширяем стандартный тип: в некоторых браузерах lock/unlock опциональны
 type LockableScreenOrientation = ScreenOrientation & {
-  lock?: (orientation: OrientationLockType) => Promise<void>;
+  lock?: (orientation: string) => Promise<void>;
   unlock?: () => void;
 };
 
-type OrientationLockType =
-  | 'any'
-  | 'natural'
-  | 'landscape'
-  | 'portrait'
-  | 'portrait-primary'
-  | 'portrait-secondary'
-  | 'landscape-primary'
-  | 'landscape-secondary';
-
 class OrientationService {
   /**
-   * Портретные экраны: официант, администратор, владелец.
-   * portrait-primary — строго «нормальный» портрет (не перевёрнутый).
-   * Переопределяет системный автоповорот в PWA режиме.
+   * Портретные экраны (официант, администратор, владелец).
+   * Манифест уже держит portrait — JS API как дополнительный слой.
    */
   async lockPortrait(): Promise<void> {
-    await this.applyLock('portrait-primary');
+    // Пробуем конкретное значение, потом общее
+    await this.tryLock(['portrait-primary', 'portrait']);
   }
 
   /**
    * Экран кухни.
-   * 'landscape' — разрешает landscape-primary И landscape-secondary.
-   * При включённом автоповороте: экран свободно вращается между ними.
-   * При выключённом автоповороте: удерживает текущую альбомную позицию.
+   * Перекрывает portrait из манифеста → переключает в landscape.
+   * 'landscape' разрешает оба направления (primary + secondary),
+   * что правильно при включённом автоповороте.
    */
   async lockLandscape(): Promise<void> {
-    await this.applyLock('landscape');
+    await this.tryLock(['landscape', 'landscape-primary']);
   }
 
-  /**
-   * Снять блокировку при размонтировании компонента.
-   */
   unlock(): void {
     const orientation = this.getOrientation();
     if (!orientation?.unlock) return;
     try {
       orientation.unlock();
     } catch {
-      // Подавляем: на iOS и в браузерных вкладках unlock тоже не поддерживается
+      /* игнорируем */
     }
   }
 
-  private async applyLock(type: OrientationLockType): Promise<void> {
+  /**
+   * Перебирает список типов ориентации и применяет первый успешный.
+   * Это нужно потому что разные браузеры поддерживают разные значения.
+   */
+  private async tryLock(types: string[]): Promise<void> {
     const orientation = this.getOrientation();
     if (!orientation?.lock) return;
 
-    try {
-      await orientation.lock(type);
-    } catch {
-      // screen.orientation.lock() бросает SecurityError / NotSupportedError
-      // в браузерных вкладках и на iOS — это нормально, подавляем.
+    for (const type of types) {
+      try {
+        await orientation.lock(type);
+        return; // успешно — выходим
+      } catch {
+        // этот тип не поддерживается — пробуем следующий
+      }
     }
+    // Все попытки провалились — API недоступен в этом браузере/режиме
   }
 
   private getOrientation(): LockableScreenOrientation | null {
