@@ -7,11 +7,11 @@ import { applyOrderStatusToCache } from '@/lib/order-cache';
 import tts from '@/services/ttsService';
 import type { Order } from '@/types';
 
-/**
- * Задержка перед голосом (мс) — даём звуку уведомления прозвучать первым.
- * new-order.mp3 ≈ 47 КБ ≈ ~1 сек; берём 900 мс чтобы не было долгой паузы.
- */
+/** Задержка голоса для нового заказа (мс) — звук new-order.mp3 ≈ 1 сек. */
 const VOICE_DELAY_MS = 900;
+
+/** Задержка голоса при отмене (+100 мс запаса — notify.mp3 чуть длиннее). */
+const CANCEL_VOICE_DELAY_MS = 1000;
 
 /** Подписки кухни: новый заказ — звук + тост, любые изменения — обновление списков. */
 export function useKitchenRealtime() {
@@ -54,7 +54,7 @@ export function useKitchenRealtime() {
       beep('notify');
       tts.speakUrgentAfterDelay(
         `Внимание! Отмена заказа. Заказ номер ${orderNumber}.`,
-        VOICE_DELAY_MS,
+        CANCEL_VOICE_DELAY_MS,
       );
     }
   });

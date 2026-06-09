@@ -57,9 +57,9 @@ class TtsService {
     utterance.lang = this.lang;
     utterance.volume = 1;
 
-    // rate 1.15 — живее стандартного, не роботизирован
-    // pitch 1.0 — натуральная высота (не задранная)
-    utterance.rate = options.urgent ? 1.1 : 1.15;
+    // rate 1.07 — немного живее стандартного, разборчиво и не роботизировано
+    // urgent 1.1 — чуть быстрее для срочных сообщений
+    utterance.rate = options.urgent ? 1.1 : 1.07;
     utterance.pitch = 1.0;
 
     const voice = this.getBestVoice(synthesis);
