@@ -140,6 +140,7 @@
     transform: translate3d(0, -18px, 0);
   }
 
+  .portrait-orientation-lock,
   .waiter-orientation-lock,
   .kitchen-orientation-lock,
   .orientation-content {
@@ -147,6 +148,7 @@
     height: 100%;
   }
 
+  .portrait-orientation-lock,
   .waiter-orientation-lock {
     overflow: hidden;
     background: #f8fafc;
@@ -162,12 +164,14 @@
   }
 
   @media (max-width: 1023px) and (orientation: landscape) {
+    .portrait-orientation-lock,
     .waiter-orientation-lock {
       display: flex;
       justify-content: center;
       background: #e2e8f0;
     }
 
+    .portrait-orientation-lock > .orientation-content,
     .waiter-orientation-lock > .orientation-content {
       width: min(430px, 100vw);
       max-width: 430px;

@@ -23,7 +23,7 @@ export function App() {
           path="/waiter/*"
           element={
             <ProtectedRoute roles={['WAITER']}>
-              <OrientationLock className="waiter-orientation-lock" lock="portrait">
+              <OrientationLock className="portrait-orientation-lock waiter-orientation-lock" lock="portrait">
                 <WaiterApp />
               </OrientationLock>
             </ProtectedRoute>
@@ -46,7 +46,9 @@ export function App() {
           path="/admin/*"
           element={
             <ProtectedRoute roles={['ADMIN', 'OWNER']}>
-              <AdminApp />
+              <OrientationLock className="portrait-orientation-lock" lock="portrait">
+                <AdminApp />
+              </OrientationLock>
             </ProtectedRoute>
           }
         />
@@ -54,7 +56,9 @@ export function App() {
           path="/owner/*"
           element={
             <ProtectedRoute roles={['OWNER']}>
-              <AdminApp />
+              <OrientationLock className="portrait-orientation-lock" lock="portrait">
+                <AdminApp />
+              </OrientationLock>
             </ProtectedRoute>
           }
         />
