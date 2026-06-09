@@ -7,11 +7,11 @@ import { applyOrderStatusToCache } from '@/lib/order-cache';
 import tts from '@/services/ttsService';
 import type { Order } from '@/types';
 
-/** Задержка голоса для нового заказа (мс) — звук new-order.mp3 ≈ 1 сек. */
-const VOICE_DELAY_MS = 900;
+/** Задержка голоса для нового заказа (мс) — звук new-order.mp3 ≈ 1 сек + 150 мс запаса. */
+const VOICE_DELAY_MS = 1050;
 
-/** Задержка голоса при отмене (+100 мс запаса — notify.mp3 чуть длиннее). */
-const CANCEL_VOICE_DELAY_MS = 1000;
+/** Задержка голоса при отмене (+150 мс запаса — notify.mp3 чуть длиннее). */
+const CANCEL_VOICE_DELAY_MS = 1150;
 
 /** Подписки кухни: новый заказ — звук + тост, любые изменения — обновление списков. */
 export function useKitchenRealtime() {
