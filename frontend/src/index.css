@@ -163,41 +163,7 @@
     min-height: 0;
   }
 
-  @media (max-width: 1023px) and (orientation: landscape) {
-    .portrait-orientation-lock,
-    .waiter-orientation-lock {
-      display: flex;
-      justify-content: center;
-      background: #e2e8f0;
-    }
 
-    .portrait-orientation-lock > .orientation-content,
-    .waiter-orientation-lock > .orientation-content {
-      width: min(430px, 100vw);
-      max-width: 430px;
-      background: #f8fafc;
-      box-shadow: 0 0 0 1px rgb(15 23 42 / 0.08);
-    }
-  }
-
-  @media (max-width: 1366px) and (orientation: portrait) {
-    .kitchen-orientation-lock {
-      position: fixed;
-      inset: 0;
-      width: 100vw;
-      height: 100vh;
-    }
-
-    .kitchen-orientation-lock > .orientation-content {
-      position: absolute;
-      top: 0;
-      left: 100vw;
-      width: 100vh;
-      height: 100vw;
-      transform: rotate(90deg);
-      transform-origin: left top;
-    }
-  }
 }
 
 @layer utilities {
