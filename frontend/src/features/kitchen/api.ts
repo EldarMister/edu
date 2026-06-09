@@ -108,11 +108,13 @@ export function useItemReady() {
 }
 
 /** Пакетная отметка нескольких блюд готовыми («Готово выбранные»). */
-export function useReadyItems() {
+export function useReadyItems(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (p: { orderId: string; itemIds: string[] }) =>
-      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/ready-batch`, { itemIds: p.itemIds })).data,
+      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/ready-batch?station=${station}`, {
+        itemIds: p.itemIds,
+      })).data,
     retry: networkRetry,
     onSettled: () => invalidateKitchen(qc),
   });

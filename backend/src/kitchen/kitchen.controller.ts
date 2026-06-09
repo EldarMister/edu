@@ -71,8 +71,13 @@ export class KitchenController {
   }
 
   @Post('orders/:id/items/ready-batch')
-  readyItems(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: ReadyItemsDto) {
-    return this.orders.kitchenReadyItems(id, dto.itemIds, user.id);
+  readyItems(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ReadyItemsDto,
+    @Query('station') station?: string,
+  ) {
+    return this.orders.kitchenReadyItems(id, dto.itemIds, user.id, this.parseStation(station));
   }
 
   @Post('orders/:id/items/reject-batch')

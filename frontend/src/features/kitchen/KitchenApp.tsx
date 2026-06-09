@@ -59,7 +59,7 @@ export function KitchenApp({
 
   const ordersQ = useKitchenOrders(tab, station);
   const accept = useAccept(station);
-  const readyItems = useReadyItems();
+  const readyItems = useReadyItems(station);
   const rejectItems = useRejectItems(station);
 
   // Тикающий таймер (ожидание заказов + обратный отсчёт блока отмены).

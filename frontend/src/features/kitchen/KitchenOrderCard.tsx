@@ -32,7 +32,10 @@ export function KitchenOrderCard({
 }) {
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
   const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
-  const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
+  // Частичный отказ/ожидание решения — только если отказ есть среди позиций ЭТОЙ станции.
+  // Станции независимы: отказ на баре не блокирует кухню и наоборот.
+  const stationRejected = order.items.some((it) => it.status === 'rejected');
+  const waitingDecision = order.requiresWaiterDecision && stationRejected;
   const canSelect = (tab === 'new' || tab === 'in_work') && !waitingDecision;
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -89,7 +92,7 @@ export function KitchenOrderCard({
 
       <p className="mt-0.5 text-[13px] text-text-muted">Официант: {order.waiter.name}</p>
 
-      {order.status === 'partially_rejected' && (
+      {stationRejected && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger">
             Частичный отказ

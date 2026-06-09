@@ -528,7 +528,7 @@ export class OrdersService {
    */
   async stationAccept(orderId: string, kitchenUserId: string, station: PrepStation) {
     const order = await this.getMutableOrder(orderId);
-    this.ensureNoPendingWaiterDecision(order);
+    this.ensureStationDecision(order, station);
 
     const targetIds = order.items
       .filter((it) => it.prepStation === station && it.status === OrderItemStatus.new)
@@ -797,9 +797,14 @@ export class OrdersService {
    * Пакетно отметить несколько блюд готовыми (массовое действие кухни «Готово выбранные»).
    * Атомарно: один пересчёт статуса заказа, одно уведомление официанту.
    */
-  async kitchenReadyItems(orderId: string, itemIds: string[], kitchenUserId: string) {
+  async kitchenReadyItems(
+    orderId: string,
+    itemIds: string[],
+    kitchenUserId: string,
+    station: PrepStation = PrepStation.kitchen,
+  ) {
     const order = await this.getMutableOrder(orderId);
-    this.ensureNoPendingWaiterDecision(order);
+    this.ensureStationDecision(order, station);
 
     const targetIds = order.items
       .filter(
@@ -880,7 +885,7 @@ export class OrdersService {
     station: PrepStation = PrepStation.kitchen,
   ) {
     const order = await this.getMutableOrder(orderId);
-    this.ensureNoPendingWaiterDecision(order);
+    this.ensureStationDecision(order, station);
 
     const items = order.items.filter(
       (it) =>
@@ -1367,6 +1372,22 @@ export class OrdersService {
 
   private ensureNoPendingWaiterDecision(order: { requiresWaiterDecision: boolean }) {
     if (order.requiresWaiterDecision) {
+      throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
+    }
+  }
+
+  /**
+   * Станционный аналог: ожидание решения официанта блокирует только ту станцию,
+   * где есть отказанная позиция. Другая станция работает независимо.
+   */
+  private ensureStationDecision(
+    order: { requiresWaiterDecision: boolean; items: { prepStation: PrepStation; status: OrderItemStatus }[] },
+    station: PrepStation,
+  ) {
+    if (
+      order.requiresWaiterDecision &&
+      order.items.some((it) => it.prepStation === station && it.status === OrderItemStatus.rejected)
+    ) {
       throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
     }
   }
