@@ -213,6 +213,7 @@ export function DishMenu({
         <SetConfigSheet
           set={configSet}
           menuDishes={menuDishes}
+          categories={categories}
           onClose={() => setConfigSet(null)}
           onAdd={(components) => {
             onAddSet(configSet, components);
