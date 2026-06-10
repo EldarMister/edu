@@ -1165,7 +1165,7 @@ export class OrdersService {
     const componentDishes = componentDishIds.length
       ? await this.prisma.dish.findMany({
           where: { id: { in: componentDishIds } },
-          select: { id: true, name: true, isSet: true, isActive: true },
+          select: { id: true, name: true, price: true, isSet: true, isActive: true },
         })
       : [];
     const compById = new Map(componentDishes.map((d) => [d.id, d]));
@@ -1214,42 +1214,50 @@ export class OrdersService {
       }
 
       // Состав сета с изменениями (только для блюд-сетов).
+      // Цена сета меняется: убрали блюдо → минус его цена; заменили → разница цен.
       let setComponents: Prisma.OrderItemSetComponentUncheckedCreateNestedManyWithoutOrderItemInput | undefined;
+      let setDelta = 0;
       if (dish.isSet) {
         const qtyByOrig = new Map(dish.setComponents.map((sc) => [sc.dishId, sc.quantity]));
         const rows = (i.setComponents ?? []).map((c, idx) => {
           const orig = compById.get(c.originalDishId);
           if (!orig) throw new BadRequestException('Блюдо состава сета не найдено');
+          const qty = qtyByOrig.get(c.originalDishId) ?? 1;
           let finalDishId: string | null = null;
           let finalNameSnapshot: string | null = null;
-          if (c.action === 'replaced') {
+          let priceDelta = 0;
+          if (c.action === 'removed') {
+            priceDelta = -Number(orig.price) * qty;
+          } else if (c.action === 'replaced') {
             if (!c.finalDishId) throw new BadRequestException('Не указано блюдо замены');
             const fin = compById.get(c.finalDishId);
             if (!fin || !fin.isActive) throw new BadRequestException('Блюдо замены недоступно');
             if (fin.isSet) throw new BadRequestException('Нельзя заменить на сет');
             finalDishId = fin.id;
             finalNameSnapshot = fin.name;
+            priceDelta = (Number(fin.price) - Number(orig.price)) * qty;
           }
+          setDelta += priceDelta;
           return {
             originalDishId: c.originalDishId,
             originalNameSnapshot: orig.name,
             finalDishId,
             finalNameSnapshot,
             action: c.action,
-            quantity: qtyByOrig.get(c.originalDishId) ?? 1,
+            quantity: qty,
             sortOrder: idx,
-            priceDelta: new Prisma.Decimal(0),
+            priceDelta: new Prisma.Decimal(round2(priceDelta)),
           };
         });
         if (rows.length > 0) setComponents = { create: rows };
       }
 
       const basePrice = variant?.price ?? dish.price;
-      const { unit, unitDiscount, unitFinal } = unitPricing(
-        basePrice,
-        dish.discountType,
-        dish.discountValue,
-      );
+      const pricing = unitPricing(basePrice, dish.discountType, dish.discountValue);
+      // Для сета корректируем цену на дельту состава (не уходим в минус).
+      const unit = dish.isSet ? Math.max(0, round2(pricing.unit + setDelta)) : pricing.unit;
+      const unitDiscount = dish.isSet ? 0 : pricing.unitDiscount;
+      const unitFinal = dish.isSet ? Math.max(0, round2(pricing.unitFinal + setDelta)) : pricing.unitFinal;
       return {
         dishId: dish.id,
         dishVariantId: variant?.id,

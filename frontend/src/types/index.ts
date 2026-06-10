@@ -232,12 +232,14 @@ export interface CartSetComponent {
   componentId: string;
   originalDishId: string;
   originalName: string;
+  originalPrice: string;
   quantity: number;
   removable: boolean;
   replaceable: boolean;
   action: SetComponentAction;
   finalDishId?: string;
   finalName?: string;
+  finalPrice?: string;
 }
 
 export interface CartLine {
