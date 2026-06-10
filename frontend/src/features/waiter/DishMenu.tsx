@@ -194,33 +194,33 @@ export function DishMenu({
         }}
       />
 
-      {setPickerOpen && (
-        <SetPickerSheet
-          sets={sets}
-          onClose={() => setSetPickerOpen(false)}
-          onPick={(set) => {
-            onAddSet(set, defaultSetComponents(set));
-            setSetPickerOpen(false);
-          }}
-          onConfigure={(set) => {
-            setSetPickerOpen(false);
-            setConfigSet(set);
-          }}
-        />
-      )}
+      <SetPickerSheet
+        open={setPickerOpen}
+        sets={sets}
+        onClose={() => setSetPickerOpen(false)}
+        onPick={(set) => {
+          onAddSet(set, defaultSetComponents(set));
+          setSetPickerOpen(false);
+        }}
+        onConfigure={(set) => {
+          setSetPickerOpen(false);
+          setConfigSet(set);
+        }}
+      />
 
-      {configSet && (
-        <SetConfigSheet
-          set={configSet}
-          menuDishes={menuDishes}
-          categories={categories}
-          onClose={() => setConfigSet(null)}
-          onAdd={(components) => {
-            onAddSet(configSet, components);
-            setConfigSet(null);
-          }}
-        />
-      )}
+      <SetConfigSheet
+        open={!!configSet}
+        set={configSet}
+        menuDishes={menuDishes}
+        categories={categories}
+        onClose={() => setConfigSet(null)}
+        onAdd={(components) => {
+          if (!configSet) return;
+          onAddSet(configSet, components);
+          setConfigSet(null);
+        }}
+      />
+
     </div>
   );
 }
