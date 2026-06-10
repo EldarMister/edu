@@ -1,7 +1,7 @@
 export type Role = 'WAITER' | 'KITCHEN' | 'BAR' | 'ADMIN' | 'OWNER';
 
-/** Направление приготовления/выдачи позиции. */
-export type PrepStation = 'kitchen' | 'bar';
+/** Направление приготовления/выдачи позиции. `none` — без отправки (официант забирает сам). */
+export type PrepStation = 'kitchen' | 'bar' | 'none';
 
 export interface AuthUser {
   id: string;

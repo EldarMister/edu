@@ -178,6 +178,12 @@ export class OrdersService {
 
     const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(dto.items);
 
+    // Есть ли позиции, которые реально уходят на станцию (кухня/бар).
+    // Заказ только из «Без отправки» сразу готов: на кухню/бар ничего не шлём.
+    const hasPrep = itemsData.some((i) => i.prepStation !== PrepStation.none);
+    const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
+    const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
+
     let order: Awaited<ReturnType<typeof this.findById>>;
     try {
       order = await this.prisma.$transaction(async (tx) => {
@@ -187,7 +193,7 @@ export class OrdersService {
         const orderNumber = await this.nextOrderNumber(tx);
         await tx.table.update({
           where: { id: dto.tableId },
-          data: { status: TableStatus.sent_to_kitchen },
+          data: { status: initialTableStatus },
         });
         await this.deductInventory(tx, dishDeductions, variantDeductions);
         return tx.order.create({
@@ -196,7 +202,7 @@ export class OrdersService {
             tableId: dto.tableId,
             waiterId,
             waiterShiftId: activeShift.id,
-            status: OrderStatus.sent_to_kitchen,
+            status: initialStatus,
             comment: dto.comment,
             idempotencyKey: dto.idempotencyKey,
             totalAmount: totals.total,
@@ -224,14 +230,16 @@ export class OrdersService {
       throw err;
     }
 
-    // Real-time: кухня получает новый заказ, все видят смену статуса стола.
-    this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, order);
-    this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
-    void this.notifyKitchenNewOrder(order);
+    // Real-time: кухня получает новый заказ только если есть что готовить.
+    if (hasPrep) {
+      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, order);
+      this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
+      void this.notifyKitchenNewOrder(order);
+    }
     this.events.emitBroadcast(SERVER_EVENTS.TABLE_STATUS_CHANGED, {
       id: table.id,
       number: table.number,
-      status: TableStatus.sent_to_kitchen,
+      status: initialTableStatus,
       hallId: table.hallId,
     });
     // Уведомление официанту об отправке показывается локально на фронте (мгновенно).
@@ -351,6 +359,11 @@ export class OrdersService {
 
     const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(items);
 
+    // Заказ только из «Без отправки» сразу готов — на кухню/бар не уходит.
+    const hasPrep = itemsData.some((i) => i.prepStation !== PrepStation.none);
+    const nextStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
+    const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
+
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, order.items);
       const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
@@ -365,18 +378,26 @@ export class OrdersService {
           finalAmount: totals.final,
           requiresWaiterDecision: false,
           // Сбрасываем статус — кухня должна принять обновлённый состав заново.
-          status: OrderStatus.sent_to_kitchen,
+          status: nextStatus,
         },
       });
+      if (nextTableStatus) {
+        await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+      }
       await tx.orderItem.deleteMany({ where: { orderId } });
       await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
       return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
 
-    // Уведомляем кухню — звук + обновление списка.
-    this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
-    void this.notifyKitchenNewOrder(updated);
+    // Уведомляем кухню — звук + обновление списка, только если есть что готовить.
+    if (hasPrep) {
+      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
+      void this.notifyKitchenNewOrder(updated);
+    }
+    if (nextTableStatus) {
+      this.emitTableStatus(updated.table.id, updated.table.number, nextTableStatus, updated.table.hallId);
+    }
     // Уведомляем остальных (официант, администратор) об изменении статуса.
     this.emitStatusChanged(updated);
 
@@ -463,6 +484,9 @@ export class OrdersService {
 
     const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(items);
 
+    // Добавляемые позиции «Без отправки» не возвращают заказ на кухню/бар.
+    const hasPrepAdded = itemsData.some((i) => i.prepStation !== PrepStation.none);
+
     const applied = await this.prisma.$transaction(async (tx) => {
       if (idempotencyKey) {
         const createdAction = await tx.orderAction.createMany({
@@ -482,11 +506,15 @@ export class OrdersService {
       await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
       await this.recalcOrder(tx, orderId);
-      // Новые блюда снова уходят на кухню.
+      // Новые блюда снова уходят на кухню; если добавили только «Без отправки» —
+      // статус заказа пересчитываем по составу, кухню не трогаем.
+      const nextStatus = hasPrepAdded
+        ? OrderStatus.sent_to_kitchen
+        : await this.statusFromActiveItems(tx, orderId);
       await tx.order.update({
         where: { id: orderId },
         data: {
-          status: OrderStatus.sent_to_kitchen,
+          status: nextStatus,
           requiresWaiterDecision: false,
           waiterShiftId: activeShift.id,
         },
@@ -496,8 +524,10 @@ export class OrdersService {
 
     const updated = await this.findById(orderId);
     if (applied) {
-      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
-      void this.notifyKitchenNewOrder(updated);
+      if (hasPrepAdded) {
+        this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
+        void this.notifyKitchenNewOrder(updated);
+      }
       this.emitStatusChanged(updated);
       const addedCount = items.reduce((sum, i) => sum + i.quantity, 0);
       await this.audit.log({
@@ -1297,6 +1327,12 @@ export class OrdersService {
         }
       }
 
+      // Направление позиции: приоритет у блюда, иначе — направление категории.
+      const prepStation = dish.prepStation ?? dish.category.prepStation;
+      // «Без отправки»: позиция не готовится — сразу «готова», на кухню/бар не уходит.
+      const initialStatus =
+        prepStation === PrepStation.none ? OrderItemStatus.ready : OrderItemStatus.new;
+
       // Состав сета с изменениями (только для блюд-сетов).
       // Цена сета меняется: убрали блюдо → минус его цена; заменили → разница цен.
       let setComponents: Prisma.OrderItemSetComponentUncheckedCreateNestedManyWithoutOrderItemInput | undefined;
@@ -1328,8 +1364,9 @@ export class OrdersService {
             finalDishId,
             finalNameSnapshot,
             action: c.action,
-            // Удалённое из сета блюдо («без X») кухня не готовит.
-            status: c.action === 'removed' ? OrderItemStatus.cancelled : OrderItemStatus.new,
+            // Удалённое из сета блюдо («без X») кухня не готовит; «без отправки» сразу готово.
+            status:
+              c.action === 'removed' ? OrderItemStatus.cancelled : initialStatus,
             quantity: qty,
             sortOrder: idx,
             priceDelta: new Prisma.Decimal(round2(priceDelta)),
@@ -1353,9 +1390,8 @@ export class OrdersService {
         quantity: i.quantity,
         discountAmount: new Prisma.Decimal(round2(unitDiscount * i.quantity)),
         finalPrice: new Prisma.Decimal(round2(unitFinal * i.quantity)),
-        status: OrderItemStatus.new,
-        // Направление позиции: приоритет у блюда, иначе — направление категории.
-        prepStation: dish.prepStation ?? dish.category.prepStation,
+        status: initialStatus,
+        prepStation,
         comment: i.comment,
         setComponents,
       };
