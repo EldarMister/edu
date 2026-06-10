@@ -25,6 +25,8 @@ export const orderInclude = {
         select: {
           id: true,
           action: true,
+          status: true,
+          rejectReason: true,
           originalDishId: true,
           originalNameSnapshot: true,
           finalDishId: true,

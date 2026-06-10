@@ -97,6 +97,9 @@ export type SetComponentAction = 'default' | 'removed' | 'replaced';
 export interface OrderSetComponent {
   id: string;
   action: SetComponentAction;
+  /** Кухня отмечает каждое блюдо состава сета отдельно. */
+  status: OrderItemStatus;
+  rejectReason?: string | null;
   originalDishId: string;
   originalNameSnapshot: string;
   finalDishId: string | null;

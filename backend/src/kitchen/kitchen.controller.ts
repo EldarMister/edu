@@ -77,7 +77,13 @@ export class KitchenController {
     @Body() dto: ReadyItemsDto,
     @Query('station') station?: string,
   ) {
-    return this.orders.kitchenReadyItems(id, dto.itemIds, user.id, this.parseStation(station));
+    return this.orders.kitchenReadyItems(
+      id,
+      dto.itemIds ?? [],
+      user.id,
+      this.parseStation(station),
+      dto.setComponentIds ?? [],
+    );
   }
 
   @Post('orders/:id/items/reject-batch')
@@ -89,6 +95,14 @@ export class KitchenController {
   ) {
     const st = this.parseStation(station);
     const reason = dto.reason ?? (st === PrepStation.bar ? 'Отказ бара' : 'Отказ кухни');
-    return this.orders.kitchenRejectItems(id, dto.itemIds, user.id, reason, dto.comment, st);
+    return this.orders.kitchenRejectItems(
+      id,
+      dto.itemIds ?? [],
+      user.id,
+      reason,
+      dto.comment,
+      st,
+      dto.setComponentIds ?? [],
+    );
   }
 }

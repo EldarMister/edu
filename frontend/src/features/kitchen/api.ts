@@ -111,9 +111,10 @@ export function useItemReady() {
 export function useReadyItems(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (p: { orderId: string; itemIds: string[] }) =>
+    mutationFn: async (p: { orderId: string; itemIds: string[]; setComponentIds: string[] }) =>
       (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/ready-batch?station=${station}`, {
         itemIds: p.itemIds,
+        setComponentIds: p.setComponentIds,
       })).data,
     retry: networkRetry,
     onSettled: () => invalidateKitchen(qc),
@@ -124,9 +125,16 @@ export function useReadyItems(station: PrepStation = 'kitchen') {
 export function useRejectItems(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (p: { orderId: string; itemIds: string[]; reason?: string; comment?: string }) =>
+    mutationFn: async (p: {
+      orderId: string;
+      itemIds: string[];
+      setComponentIds: string[];
+      reason?: string;
+      comment?: string;
+    }) =>
       (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/reject-batch?station=${station}`, {
         itemIds: p.itemIds,
+        setComponentIds: p.setComponentIds,
         reason: p.reason,
         comment: p.comment,
       })).data,
