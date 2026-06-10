@@ -119,13 +119,18 @@ export function KitchenOrderCard({
           const setParts = it.setComponents ?? [];
           return (
             <li key={it.id} className="text-[15px]">
-              <label className={`flex items-center gap-3 ${selectable ? 'cursor-pointer' : ''}`}>
+              <div 
+                className={`flex items-center gap-3 ${selectable ? 'cursor-pointer' : ''}`}
+                onClick={() => {
+                  if (selectable) toggle(it.id);
+                }}
+              >
                 {canSelect && selectable && selected.has(it.id) && (
                   <input
                     type="checkbox"
                     checked={true}
-                    onChange={() => toggle(it.id)}
-                    className="h-[22px] w-[22px] shrink-0 cursor-pointer rounded-[6px] border-border accent-primary"
+                    readOnly
+                    className="h-[22px] w-[22px] shrink-0 cursor-pointer rounded-[6px] border-border accent-primary pointer-events-none"
                   />
                 )}
                 <span
@@ -138,7 +143,7 @@ export function KitchenOrderCard({
                 </span>
                 {isReady && <span className="shrink-0 text-[13px] font-bold text-green-600">✓ Готово</span>}
                 {rejected && <span className="shrink-0 text-[13px] font-bold text-danger">Отказ</span>}
-              </label>
+              </div>
               {setParts.length > 0 && (
                 <ul className={`mt-1.5 space-y-1 text-[13.5px] ${canSelect ? 'pl-8' : 'pl-3'}`}>
                   {setParts.map((sc) => (
