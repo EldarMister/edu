@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import type { PrepStation } from '@/types';
 import { Toggle } from '@/components/Toggle';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
@@ -6,19 +7,28 @@ import { useNotifications } from '@/store/notifications';
 import { useStopList, useSaveStopList } from './api';
 
 /**
- * Боковая панель «Стоп-лист»: кухня временно отключает блюда.
+ * Боковая панель «Стоп-лист»: станция временно отключает свои блюда.
  * Toggle включён → блюдо недоступно (в стоп-листе) и его нельзя заказать.
+ * Изменение сохраняется автоматически при переключении ползунка.
  */
-export function StopListDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const stopListQ = useStopList(open);
+export function StopListDrawer({
+  open,
+  station = 'kitchen',
+  onClose,
+}: {
+  open: boolean;
+  station?: PrepStation;
+  onClose: () => void;
+}) {
+  const stopListQ = useStopList(open, station);
   const save = useSaveStopList();
   const push = useNotifications((s) => s.push);
 
   const [search, setSearch] = useState('');
-  // Черновик доступности: dishId → isAvailable. Не применяется, пока не нажат «Сохранить».
+  // Локальная доступность для мгновенного отклика: dishId → isAvailable.
   const [draft, setDraft] = useState<Record<string, boolean>>({});
 
-  // Инициализируем черновик при открытии / получении данных.
+  // Синхронизируем локальное состояние с сервером при открытии / обновлении данных.
   useEffect(() => {
     if (!open) return;
     const data = stopListQ.data;
@@ -26,8 +36,11 @@ export function StopListDrawer({ open, onClose }: { open: boolean; onClose: () =
     const next: Record<string, boolean> = {};
     for (const cat of data) for (const d of cat.dishes) next[d.id] = d.isAvailable;
     setDraft(next);
-    setSearch('');
   }, [open, stopListQ.data]);
+
+  useEffect(() => {
+    if (open) setSearch('');
+  }, [open]);
 
   const categories = useMemo(() => {
     const data = stopListQ.data ?? [];
@@ -38,24 +51,14 @@ export function StopListDrawer({ open, onClose }: { open: boolean; onClose: () =
       .filter((c) => c.dishes.length > 0);
   }, [stopListQ.data, search]);
 
-  async function onSave() {
-    const data = stopListQ.data ?? [];
-    const items: { dishId: string; isAvailable: boolean }[] = [];
-    for (const cat of data) {
-      for (const d of cat.dishes) {
-        const next = draft[d.id];
-        if (next !== undefined && next !== d.isAvailable) items.push({ dishId: d.id, isAvailable: next });
-      }
-    }
-    if (items.length === 0) {
-      onClose();
-      return;
-    }
+  // Автосохранение: переключили ползунок → сразу пишем на сервер.
+  async function toggleDish(dishId: string, makeStopped: boolean) {
+    const nextAvailable = !makeStopped;
+    setDraft((p) => ({ ...p, [dishId]: nextAvailable }));
     try {
-      await save.mutateAsync(items);
-      push({ message: 'Стоп-лист обновлён', type: 'success', at: new Date().toISOString() });
-      onClose();
+      await save.mutateAsync([{ dishId, isAvailable: nextAvailable }]);
     } catch (err) {
+      setDraft((p) => ({ ...p, [dishId]: !nextAvailable })); // откат
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
@@ -97,7 +100,7 @@ export function StopListDrawer({ open, onClose }: { open: boolean; onClose: () =
         </div>
 
         {/* Список блюд по категориям */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
           {stopListQ.isLoading ? (
             <div className="flex justify-center py-10 text-primary">
               <Spinner className="h-6 w-6" />
@@ -128,11 +131,8 @@ export function StopListDrawer({ open, onClose }: { open: boolean; onClose: () =
                         >
                           {available ? 'Доступно' : 'Недоступно'}
                         </span>
-                        {/* Toggle включён = недоступно (в стоп-листе) */}
-                        <Toggle
-                          checked={!available}
-                          onChange={(stopped) => setDraft((p) => ({ ...p, [d.id]: !stopped }))}
-                        />
+                        {/* Toggle включён = недоступно (в стоп-листе); сохраняется сразу */}
+                        <Toggle checked={!available} onChange={(stopped) => toggleDish(d.id, stopped)} />
                       </div>
                     );
                   })}
@@ -140,20 +140,6 @@ export function StopListDrawer({ open, onClose }: { open: boolean; onClose: () =
               </div>
             ))
           )}
-        </div>
-
-        {/* Кнопки */}
-        <div className="flex shrink-0 gap-2 border-t border-border px-5 py-4">
-          <button className="btn-secondary btn-lg flex-1" onClick={onClose} disabled={save.isPending}>
-            Отменить
-          </button>
-          <button
-            className="btn-primary btn-lg flex-1 font-semibold"
-            onClick={onSave}
-            disabled={save.isPending || stopListQ.isLoading}
-          >
-            {save.isPending ? <Spinner /> : 'Сохранить'}
-          </button>
         </div>
       </aside>
     </div>

@@ -10,6 +10,7 @@ import {
   PaymentMethod,
   PaymentStatus,
   Prisma,
+  PrepStation,
   Role,
   TableStatus,
   KitchenEventType,
@@ -182,7 +183,7 @@ export class OrdersService {
       order = await this.prisma.$transaction(async (tx) => {
         const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
         const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
-        const totals = this.calcTotals(itemsData as Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount);
+        const totals = this.calcTotals(itemsData, serviceChargeAmount);
         const orderNumber = await this.nextOrderNumber(tx);
         await tx.table.update({
           where: { id: dto.tableId },
@@ -353,7 +354,7 @@ export class OrdersService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, order.items);
       const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
-      const totals = this.calcTotals(itemsData as Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount);
+      const totals = this.calcTotals(itemsData, serviceChargeAmount);
       await tx.order.update({
         where: { id: orderId },
         data: {
@@ -368,9 +369,7 @@ export class OrdersService {
         },
       });
       await tx.orderItem.deleteMany({ where: { orderId } });
-      await tx.orderItem.createMany({
-        data: itemsData.map((i) => ({ ...i, orderId })) as Prisma.OrderItemCreateManyInput[],
-      });
+      await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
       return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
@@ -480,9 +479,7 @@ export class OrdersService {
           return false;
         }
       }
-      await tx.orderItem.createMany({
-        data: itemsData.map((i) => ({ ...i, orderId })) as Prisma.OrderItemCreateManyInput[],
-      });
+      await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
       await this.recalcOrder(tx, orderId);
       // Новые блюда снова уходят на кухню.
@@ -520,39 +517,57 @@ export class OrdersService {
 
   // ---------- Действия кухни ----------
 
-  async kitchenAccept(orderId: string, kitchenUserId: string) {
+  /**
+   * Станционный приём заказа в работу: переводит в «готовится» только позиции
+   * своей станции (кухня/бар). Глобальный статус заказа пересчитывается по всем
+   * активным позициям, поэтому заказ «готов» только когда готовы обе станции.
+   */
+  async stationAccept(orderId: string, kitchenUserId: string, station: PrepStation) {
     const order = await this.getMutableOrder(orderId);
-    this.ensureNoPendingWaiterDecision(order);
+    this.ensureStationDecision(order, station);
+
+    const targetIds = order.items
+      .filter((it) => it.prepStation === station && it.status === OrderItemStatus.new)
+      .map((it) => it.id);
+
     let applied = false;
     const updated = await this.prisma.$transaction(async (tx) => {
-      const changed = await tx.order.updateMany({
-        where: { id: orderId, status: OrderStatus.sent_to_kitchen },
-        data: { status: OrderStatus.accepted_by_kitchen },
-      });
-      if (changed.count === 0) {
+      if (targetIds.length === 0) {
         return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
       }
       applied = true;
       await tx.orderItem.updateMany({
-        where: { orderId, status: OrderItemStatus.new },
+        where: { id: { in: targetIds }, orderId },
         data: { status: OrderItemStatus.cooking },
       });
       await tx.kitchenEvent.create({
         data: { orderId, type: KitchenEventType.accept, createdById: kitchenUserId },
       });
-      await tx.table.update({
-        where: { id: order.tableId },
-        data: { status: TableStatus.accepted },
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
+      if (nextStatus !== order.status) {
+        const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
+        if (nextTableStatus) {
+          await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+        }
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: nextStatus },
+        include: orderInclude,
       });
-      return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
 
     if (applied) {
       this.emitStatusChanged(updated);
-      this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.accepted, updated.table.hallId);
+      if (updated.status !== order.status) {
+        const tableStatus = this.tableStatusForOrderStatus(updated.status);
+        if (tableStatus) {
+          this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+        }
+      }
       this.notifyWaiter(
         updated.waiterId,
-        `Стол №${updated.table.number}: кухня приняла заказ`,
+        `Стол №${updated.table.number}: ${station === PrepStation.bar ? 'бар' : 'кухня'} принял заказ`,
         updated,
         'success',
       );
@@ -774,6 +789,165 @@ export class OrdersService {
     return updated;
   }
 
+  /**
+   * Пакетно отметить несколько блюд готовыми (массовое действие кухни «Готово выбранные»).
+   * Атомарно: один пересчёт статуса заказа, одно уведомление официанту.
+   */
+  async kitchenReadyItems(
+    orderId: string,
+    itemIds: string[],
+    kitchenUserId: string,
+    station: PrepStation = PrepStation.kitchen,
+  ) {
+    const order = await this.getMutableOrder(orderId);
+    this.ensureStationDecision(order, station);
+
+    const targetIds = order.items
+      .filter(
+        (it) =>
+          itemIds.includes(it.id) &&
+          ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.ready, OrderItemStatus.served].includes(
+            it.status as any,
+          ),
+      )
+      .map((it) => it.id);
+
+    if (targetIds.length === 0) {
+      throw new BadRequestException('Нет блюд, которые можно отметить готовыми');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.updateMany({
+        where: { id: { in: targetIds }, orderId },
+        data: { status: OrderItemStatus.ready },
+      });
+      await tx.kitchenEvent.createMany({
+        data: targetIds.map((id) => ({
+          orderId,
+          orderItemId: id,
+          type: KitchenEventType.ready_item,
+          createdById: kitchenUserId,
+        })),
+      });
+
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
+      if (nextStatus !== order.status) {
+        const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
+        if (nextTableStatus) {
+          await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+        }
+      }
+
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: nextStatus },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    if (updated.status !== order.status) {
+      const tableStatus = this.tableStatusForOrderStatus(updated.status);
+      if (tableStatus) {
+        this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+      }
+    }
+
+    if (updated.status === OrderStatus.ready) {
+      this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, updated);
+      this.notifyWaiter(updated.waiterId, `Заказ ${updated.orderNumber} готов полностью`, updated, 'success');
+    } else {
+      this.notifyWaiter(
+        updated.waiterId,
+        `Заказ ${updated.orderNumber}: готово позиций — ${targetIds.length}`,
+        updated,
+        'success',
+      );
+    }
+
+    return updated;
+  }
+
+  /**
+   * Пакетный отказ по нескольким блюдам (массовое действие кухни «Отказать выбранные»).
+   * Атомарно: один пересчёт сумм, одно уведомление официанту.
+   */
+  async kitchenRejectItems(
+    orderId: string,
+    itemIds: string[],
+    kitchenUserId: string,
+    reason: string,
+    comment?: string,
+    station: PrepStation = PrepStation.kitchen,
+  ) {
+    const order = await this.getMutableOrder(orderId);
+    this.ensureStationDecision(order, station);
+
+    const items = order.items.filter(
+      (it) =>
+        itemIds.includes(it.id) &&
+        ![OrderItemStatus.rejected, OrderItemStatus.cancelled].includes(it.status as any),
+    );
+    if (items.length === 0) {
+      throw new BadRequestException('Нет блюд, которые можно отказать');
+    }
+    const targetIds = items.map((it) => it.id);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await this.restoreInventory(tx, items);
+      await tx.orderItem.updateMany({
+        where: { id: { in: targetIds }, orderId },
+        data: { status: OrderItemStatus.rejected, rejectReason: reason },
+      });
+      await tx.kitchenEvent.createMany({
+        data: targetIds.map((id) => ({
+          orderId,
+          orderItemId: id,
+          type: KitchenEventType.reject_item,
+          reason,
+          comment,
+          createdById: kitchenUserId,
+        })),
+      });
+
+      // Если отказаны все блюда — заказ rejected, иначе partially_rejected.
+      const remaining = await tx.orderItem.count({
+        where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+      });
+      await this.recalcOrder(tx, orderId);
+      if (remaining === 0) {
+        await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: remaining === 0 ? OrderStatus.rejected : OrderStatus.partially_rejected,
+          requiresWaiterDecision: remaining > 0,
+        },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    if (updated.status === OrderStatus.rejected) {
+      this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
+    }
+    this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
+    const names = items.map((it) => this.orderItemName(it)).join(', ');
+    const stationLabel = station === PrepStation.bar ? 'Бар' : 'Кухня';
+    const partialText =
+      updated.status === OrderStatus.partially_rejected
+        ? ' Уточните у клиента: продолжить заказ, заменить блюдо или отменить заказ?'
+        : '';
+    this.notifyWaiter(
+      updated.waiterId,
+      `Стол №${updated.table.number}. ${stationLabel} отказал: ${names}. Причина: ${reason}.${partialText}`,
+      updated,
+      'error',
+    );
+    return updated;
+  }
+
   // ---------- Действия официанта после готовности ----------
 
   async resolvePartialRejection(orderId: string, waiterId: string) {
@@ -958,7 +1132,7 @@ export class OrdersService {
   // ---------- Внутренние помощники ----------
 
   private async buildItemsData(items: CreateOrderItemDto[]): Promise<{
-    itemsData: Prisma.OrderItemCreateManyOrderInput[];
+    itemsData: Prisma.OrderItemUncheckedCreateWithoutOrderInput[];
     dishDeductions: Map<string, number>;
     variantDeductions: Map<string, number>;
   }> {
@@ -966,7 +1140,11 @@ export class OrdersService {
     const variantIds = [...new Set(items.map((i) => i.variantId).filter((id): id is string => !!id))];
     const dishes = await this.prisma.dish.findMany({
       where: { id: { in: dishIds }, isActive: true },
-      include: { variants: { orderBy: { sortOrder: 'asc' } } },
+      include: {
+        variants: { orderBy: { sortOrder: 'asc' } },
+        category: { select: { prepStation: true } },
+        setComponents: { select: { dishId: true, quantity: true } },
+      },
     });
     const byId = new Map(dishes.map((d) => [d.id, d]));
     const variants = variantIds.length
@@ -974,10 +1152,28 @@ export class OrdersService {
       : [];
     const variantById = new Map(variants.map((variant) => [variant.id, variant]));
 
+    // Имена блюд состава сета (оригиналы + замены) — для снимков.
+    const componentDishIds = [
+      ...new Set(
+        items.flatMap((i) =>
+          (i.setComponents ?? []).flatMap((c) =>
+            [c.originalDishId, c.finalDishId].filter((x): x is string => !!x),
+          ),
+        ),
+      ),
+    ];
+    const componentDishes = componentDishIds.length
+      ? await this.prisma.dish.findMany({
+          where: { id: { in: componentDishIds } },
+          select: { id: true, name: true, price: true, isSet: true, isActive: true },
+        })
+      : [];
+    const compById = new Map(componentDishes.map((d) => [d.id, d]));
+
     const dishDeductions = new Map<string, number>();
     const variantDeductions = new Map<string, number>();
 
-    const itemsData = items.map((i) => {
+    const itemsData = items.map((i): Prisma.OrderItemUncheckedCreateWithoutOrderInput => {
       const dish = byId.get(i.dishId);
       if (!dish) {
         throw new BadRequestException(`Блюдо недоступно`);
@@ -1017,12 +1213,51 @@ export class OrdersService {
         }
       }
 
+      // Состав сета с изменениями (только для блюд-сетов).
+      // Цена сета меняется: убрали блюдо → минус его цена; заменили → разница цен.
+      let setComponents: Prisma.OrderItemSetComponentUncheckedCreateNestedManyWithoutOrderItemInput | undefined;
+      let setDelta = 0;
+      if (dish.isSet) {
+        const qtyByOrig = new Map(dish.setComponents.map((sc) => [sc.dishId, sc.quantity]));
+        const rows = (i.setComponents ?? []).map((c, idx) => {
+          const orig = compById.get(c.originalDishId);
+          if (!orig) throw new BadRequestException('Блюдо состава сета не найдено');
+          const qty = qtyByOrig.get(c.originalDishId) ?? 1;
+          let finalDishId: string | null = null;
+          let finalNameSnapshot: string | null = null;
+          let priceDelta = 0;
+          if (c.action === 'removed') {
+            priceDelta = -Number(orig.price) * qty;
+          } else if (c.action === 'replaced') {
+            if (!c.finalDishId) throw new BadRequestException('Не указано блюдо замены');
+            const fin = compById.get(c.finalDishId);
+            if (!fin || !fin.isActive) throw new BadRequestException('Блюдо замены недоступно');
+            if (fin.isSet) throw new BadRequestException('Нельзя заменить на сет');
+            finalDishId = fin.id;
+            finalNameSnapshot = fin.name;
+            priceDelta = (Number(fin.price) - Number(orig.price)) * qty;
+          }
+          setDelta += priceDelta;
+          return {
+            originalDishId: c.originalDishId,
+            originalNameSnapshot: orig.name,
+            finalDishId,
+            finalNameSnapshot,
+            action: c.action,
+            quantity: qty,
+            sortOrder: idx,
+            priceDelta: new Prisma.Decimal(round2(priceDelta)),
+          };
+        });
+        if (rows.length > 0) setComponents = { create: rows };
+      }
+
       const basePrice = variant?.price ?? dish.price;
-      const { unit, unitDiscount, unitFinal } = unitPricing(
-        basePrice,
-        dish.discountType,
-        dish.discountValue,
-      );
+      const pricing = unitPricing(basePrice, dish.discountType, dish.discountValue);
+      // Для сета корректируем цену на дельту состава (не уходим в минус).
+      const unit = dish.isSet ? Math.max(0, round2(pricing.unit + setDelta)) : pricing.unit;
+      const unitDiscount = dish.isSet ? 0 : pricing.unitDiscount;
+      const unitFinal = dish.isSet ? Math.max(0, round2(pricing.unitFinal + setDelta)) : pricing.unitFinal;
       return {
         dishId: dish.id,
         dishVariantId: variant?.id,
@@ -1033,11 +1268,25 @@ export class OrdersService {
         discountAmount: new Prisma.Decimal(round2(unitDiscount * i.quantity)),
         finalPrice: new Prisma.Decimal(round2(unitFinal * i.quantity)),
         status: OrderItemStatus.new,
+        // Направление позиции: приоритет у блюда, иначе — направление категории.
+        prepStation: dish.prepStation ?? dish.category.prepStation,
         comment: i.comment,
+        setComponents,
       };
     });
 
     return { itemsData, dishDeductions, variantDeductions };
+  }
+
+  /** Создаёт позиции заказа по одной (поддерживает вложенный состав сета). */
+  private async createOrderItems(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+    itemsData: Prisma.OrderItemUncheckedCreateWithoutOrderInput[],
+  ) {
+    for (const item of itemsData) {
+      await tx.orderItem.create({ data: { ...item, orderId } });
+    }
   }
 
   private async deductInventory(
@@ -1097,7 +1346,15 @@ export class OrdersService {
     }
   }
 
-  private calcTotals(items: Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount = 0) {
+  private calcTotals(
+    items: {
+      priceSnapshot: string | number | Prisma.Decimal | Prisma.DecimalJsLike;
+      quantity?: number | null;
+      discountAmount?: string | number | Prisma.Decimal | Prisma.DecimalJsLike | null;
+      finalPrice: string | number | Prisma.Decimal | Prisma.DecimalJsLike;
+    }[],
+    serviceChargeAmount = 0,
+  ) {
     let total = 0;
     let discount = 0;
     let final = 0;
@@ -1189,6 +1446,22 @@ export class OrdersService {
 
   private ensureNoPendingWaiterDecision(order: { requiresWaiterDecision: boolean }) {
     if (order.requiresWaiterDecision) {
+      throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
+    }
+  }
+
+  /**
+   * Станционный аналог: ожидание решения официанта блокирует только ту станцию,
+   * где есть отказанная позиция. Другая станция работает независимо.
+   */
+  private ensureStationDecision(
+    order: { requiresWaiterDecision: boolean; items: { prepStation: PrepStation; status: OrderItemStatus }[] },
+    station: PrepStation,
+  ) {
+    if (
+      order.requiresWaiterDecision &&
+      order.items.some((it) => it.prepStation === station && it.status === OrderItemStatus.rejected)
+    ) {
       throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
     }
   }

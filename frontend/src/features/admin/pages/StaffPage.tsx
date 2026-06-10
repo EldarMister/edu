@@ -50,11 +50,13 @@ const ROLE_LABEL: Record<Role, string> = {
   ADMIN: 'Администратор',
   WAITER: 'Официант',
   KITCHEN: 'Кухня',
+  BAR: 'Бар',
 };
 const ROLE_FILTERS: { value: string; label: string }[] = [
   { value: '', label: 'Все роли' },
   { value: 'WAITER', label: 'Официанты' },
   { value: 'KITCHEN', label: 'Кухня' },
+  { value: 'BAR', label: 'Бар' },
   { value: 'ADMIN', label: 'Администраторы' },
   { value: 'OWNER', label: 'Владельцы' },
 ];
@@ -332,6 +334,7 @@ function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: 
             options={[
               { value: 'WAITER', label: 'Официант' },
               { value: 'KITCHEN', label: 'Кухня' },
+              { value: 'BAR', label: 'Бар' },
               { value: 'ADMIN', label: 'Администратор' },
               { value: 'OWNER', label: 'Владелец' },
             ]}

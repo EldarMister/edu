@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -10,6 +11,20 @@ import {
   MaxLength,
   ValidateNested,
 } from 'class-validator';
+import { SetComponentAction } from '@prisma/client';
+
+export class SetComponentInputDto {
+  @IsString()
+  @IsNotEmpty()
+  originalDishId: string;
+
+  @IsOptional()
+  @IsString()
+  finalDishId?: string;
+
+  @IsEnum(SetComponentAction)
+  action: SetComponentAction;
+}
 
 export class CreateOrderItemDto {
   @IsString()
@@ -28,6 +43,13 @@ export class CreateOrderItemDto {
   @IsString()
   @MaxLength(200)
   comment?: string;
+
+  /** Состав сета с изменениями (только для блюд-сетов). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => SetComponentInputDto)
+  setComponents?: SetComponentInputDto[];
 }
 
 export class CreateOrderDto {

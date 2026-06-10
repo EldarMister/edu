@@ -6,10 +6,12 @@ import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorat
 import {
   CreateCategoryDto,
   CreateDishDto,
+  CreateSetDto,
   CreateHallDto,
   CreateTableDto,
   UpdateCategoryDto,
   UpdateDishDto,
+  UpdateSetDto,
   UpdateHallDto,
   UpdateTableDto,
 } from './dto';
@@ -103,6 +105,27 @@ export class CatalogController {
 
   @Delete('dishes/:id')
   deleteDish(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.catalog.deleteDish(id, user);
+  }
+
+  // ---- Сеты ----
+  @Get('sets')
+  sets() {
+    return this.catalog.setsAll();
+  }
+
+  @Post('sets')
+  createSet(@Body() dto: CreateSetDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.createSet(dto, user);
+  }
+
+  @Patch('sets/:id')
+  updateSet(@Param('id') id: string, @Body() dto: UpdateSetDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.updateSet(id, dto, user);
+  }
+
+  @Delete('sets/:id')
+  deleteSet(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.catalog.deleteDish(id, user);
   }
 }

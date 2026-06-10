@@ -53,7 +53,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const user: SocketUser = { id: payload.sub, role: payload.role };
       client.data.user = user;
 
-      if (user.role === 'KITCHEN') {
+      if (user.role === 'KITCHEN' || user.role === 'BAR') {
+        // Бар получает ту же ленту, что и кухня; экран фильтрует позиции по станции.
         client.join(ROOMS.KITCHEN);
       } else if (user.role === 'WAITER') {
         client.join(ROOMS.waiter(user.id));

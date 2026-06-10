@@ -48,6 +48,7 @@ const ROLE_LABELS: Record<string, string> = {
   ADMIN: 'Администратор',
   WAITER: 'Официант',
   KITCHEN: 'Кухня',
+  BAR: 'Бар',
 };
 
 export function AuditPage() {

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CartLine, Dish, DishVariant } from '@/types';
+import type { CartLine, CartSetComponent, Dish, DishVariant } from '@/types';
 import { dishUnitPrice } from '@/lib/format';
 
 interface TableCart {
@@ -18,6 +18,8 @@ interface CartState {
   // Переносит текущий черновик корзины на другой стол (смена стола на экране меню).
   moveDraftTo: (targetTableId: string) => void;
   add: (dish: Dish, variant?: DishVariant) => void;
+  /** Добавляет сет отдельной линией (сеты не сливаются — у каждого свой состав). */
+  addSet: (dish: Dish, components: CartSetComponent[]) => void;
   replaceLines: (lines: CartLine[], comment: string) => void;
   inc: (lineKey: string) => void;
   dec: (lineKey: string) => void;
@@ -34,11 +36,17 @@ export function cartLineKeyFromParts(dishId: string, variantId?: string | null) 
 }
 
 export function cartLineKey(line: CartLine) {
-  return cartLineKeyFromParts(line.dish.id, line.variant?.id);
+  return line.lineId ?? cartLineKeyFromParts(line.dish.id, line.variant?.id);
 }
 
 export function cartLineName(line: CartLine) {
+  if (line.set) return line.dish.name;
   return line.variant ? `${line.dish.name} · ${line.variant.name}` : line.dish.name;
+}
+
+/** У сета изменён состав, если есть убранные/заменённые позиции. */
+export function cartSetChanged(line: CartLine) {
+  return !!line.set?.components.some((c) => c.action !== 'default');
 }
 
 export function cartLineBasePrice(line: CartLine) {
@@ -96,6 +104,22 @@ export const useCart = create<CartState>((set) => ({
           : [...c.lines, { dish, variant, quantity: 1 }];
         return { ...c, lines };
       }),
+    ),
+
+  addSet: (dish, components) =>
+    set((s) =>
+      mutate(s, (c) => ({
+        ...c,
+        lines: [
+          ...c.lines,
+          {
+            dish,
+            quantity: 1,
+            lineId: `set-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            set: { components },
+          },
+        ],
+      })),
     ),
 
   // Загружает позиции существующего заказа в корзину активного стола (режим редактирования).

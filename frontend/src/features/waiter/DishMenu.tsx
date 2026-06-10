@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Category, Dish, DishVariant } from '@/types';
+import type { Category, CartSetComponent, Dish, DishVariant } from '@/types';
 import { money, dishUnitPrice, minDishUnitPrice, variantNamesLine } from '@/lib/format';
 import { useT } from '@/lib/i18n';
+import { SetPickerSheet, SetConfigSheet, defaultSetComponents } from './SetSheets';
 
 const VARIANT_SHEET_MS = 520;
 const VARIANT_SHEET_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
@@ -11,6 +12,7 @@ export function DishMenu({
   dishes,
   quantities,
   onAdd,
+  onAddSet,
   onDec,
   disabled,
   tableSlot,
@@ -20,6 +22,7 @@ export function DishMenu({
   /** Количество каждого блюда в текущей корзине (dishId → qty). */
   quantities: Record<string, number>;
   onAdd: (dish: Dish, variant?: DishVariant) => void;
+  onAddSet: (set: Dish, components: CartSetComponent[]) => void;
   onDec: (dish: Dish) => void;
   disabled?: boolean;
   /** Селект выбранного стола, который показывается справа от поиска (экран меню). */
@@ -29,10 +32,17 @@ export function DishMenu({
   const [activeCat, setActiveCat] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [variantDish, setVariantDish] = useState<Dish | null>(null);
+  const [setPickerOpen, setSetPickerOpen] = useState(false);
+  const [configSet, setConfigSet] = useState<Dish | null>(null);
+
+  // Сеты не показываем как обычные карточки — они открываются через лист «Сеты».
+  const sets = useMemo(() => dishes.filter((d) => d.isSet), [dishes]);
+  const setsCategoryIds = useMemo(() => new Set(sets.map((s) => s.categoryId)), [sets]);
+  const menuDishes = useMemo(() => dishes.filter((d) => !d.isSet), [dishes]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const matching = dishes.filter((d) => {
+    const matching = menuDishes.filter((d) => {
       const byCat = activeCat === 'all' || d.categoryId === activeCat;
       const byQ = !q || d.name.toLowerCase().includes(q);
       return byCat && byQ;
@@ -42,7 +52,7 @@ export function DishMenu({
       ...matching.filter((d) => d.isAvailable),
       ...matching.filter((d) => !d.isAvailable),
     ];
-  }, [dishes, activeCat, search]);
+  }, [menuDishes, activeCat, search]);
 
   return (
     <div className="flex h-full flex-col">
@@ -70,11 +80,19 @@ export function DishMenu({
         <CatTab active={activeCat === 'all'} onClick={() => setActiveCat('all')}>
           {t('Все')}
         </CatTab>
-        {categories.map((c) => (
-          <CatTab key={c.id} active={activeCat === c.id} onClick={() => setActiveCat(c.id)}>
-            {c.name}
-          </CatTab>
-        ))}
+        {categories.map((c) => {
+          const isSetsCat = setsCategoryIds.has(c.id);
+          return (
+            <CatTab
+              key={c.id}
+              active={!isSetsCat && activeCat === c.id}
+              disabled={isSetsCat && disabled}
+              onClick={() => (isSetsCat ? setSetPickerOpen(true) : setActiveCat(c.id))}
+            >
+              {c.name}
+            </CatTab>
+          );
+        })}
       </div>
 
       {/* Блюда */}
@@ -175,6 +193,34 @@ export function DishMenu({
           setVariantDish(null);
         }}
       />
+
+      {setPickerOpen && (
+        <SetPickerSheet
+          sets={sets}
+          onClose={() => setSetPickerOpen(false)}
+          onPick={(set) => {
+            onAddSet(set, defaultSetComponents(set));
+            setSetPickerOpen(false);
+          }}
+          onConfigure={(set) => {
+            setSetPickerOpen(false);
+            setConfigSet(set);
+          }}
+        />
+      )}
+
+      {configSet && (
+        <SetConfigSheet
+          set={configSet}
+          menuDishes={menuDishes}
+          categories={categories}
+          onClose={() => setConfigSet(null)}
+          onAdd={(components) => {
+            onAddSet(configSet, components);
+            setConfigSet(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -182,16 +228,19 @@ export function DishMenu({
 function CatTab({
   active,
   onClick,
+  disabled,
   children,
 }: {
   active: boolean;
   onClick: () => void;
+  disabled?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`shrink-0 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
+      disabled={disabled}
+      className={`shrink-0 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
         active ? 'bg-primary text-white' : 'bg-white text-text-secondary border border-border hover:bg-background'
       }`}
     >

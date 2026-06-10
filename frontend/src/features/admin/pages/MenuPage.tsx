@@ -14,6 +14,7 @@ import {
   useAdminDishes,
   useCategoryMutations,
   useDishMutations,
+  useSetMutations,
   type AdminDish,
   type AdminCategory,
   type AdminDishVariant,
@@ -23,6 +24,7 @@ export function MenuPage() {
   const [categoryId, setCategoryId] = useState('');
   const [search, setSearch] = useState('');
   const [dishModal, setDishModal] = useState<AdminDish | null | 'new'>(null);
+  const [setModal, setSetModal] = useState<AdminDish | null | 'new'>(null);
   const [catModal, setCatModal] = useState(false);
 
   const overview = useMenuOverview();
@@ -32,6 +34,10 @@ export function MenuPage() {
   const push = useNotifications((s) => s.push);
   const tr = useT();
   const o = overview.data;
+
+  // Эффективное направление блюда: своё, иначе — направление категории.
+  const stationByCat = new Map((categoriesQ.data ?? []).map((c) => [c.id, c.prepStation ?? 'kitchen']));
+  const dishStation = (d: AdminDish) => d.prepStation ?? stationByCat.get(d.categoryId) ?? 'kitchen';
 
   async function onDelete(d: AdminDish) {
     if (!confirm(`Удалить блюдо «${d.name}»?`)) return;
@@ -64,6 +70,9 @@ export function MenuPage() {
             <div className="flex gap-2">
               <button className="btn-secondary btn-md" onClick={() => setCatModal(true)}>
                 <IconPlus className="h-4 w-4" /> {tr('Категория')}
+              </button>
+              <button className="btn-secondary btn-md" onClick={() => setSetModal('new')}>
+                <IconPlus className="h-4 w-4" /> {tr('Сет')}
               </button>
               <button className="btn-primary btn-md font-medium" onClick={() => setDishModal('new')}>
                 <IconPlus className="h-4 w-4" /> {tr('Добавить блюдо')}
@@ -104,7 +113,19 @@ export function MenuPage() {
                 {dishesQ.data?.map((d) => (
                   <tr key={d.id} className="border-b border-border last:border-0 hover:bg-background/60">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-text-primary">{d.name}</p>
+                      <p className="flex items-center gap-2 font-medium text-text-primary">
+                        {d.name}
+                        {d.isSet && (
+                          <span className="inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
+                            Сет
+                          </span>
+                        )}
+                        {dishStation(d) === 'bar' && (
+                          <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
+                            Бар
+                          </span>
+                        )}
+                      </p>
                       {d.variants.length > 0 && (
                         <p className="text-xs font-medium text-primary">{variantNamesLine(d.variants)}</p>
                       )}
@@ -137,7 +158,7 @@ export function MenuPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
-                        <IconBtn onClick={() => setDishModal(d)} title="Изменить">
+                        <IconBtn onClick={() => (d.isSet ? setSetModal(d) : setDishModal(d))} title="Изменить">
                           <IconEdit className="h-4 w-4" />
                         </IconBtn>
                         <IconBtn onClick={() => onDelete(d)} title="Удалить" danger>
@@ -167,6 +188,9 @@ export function MenuPage() {
           defaultCategoryId={categoryId}
           onClose={() => setDishModal(null)}
         />
+      )}
+      {setModal !== null && (
+        <SetModal set={setModal === 'new' ? null : setModal} onClose={() => setSetModal(null)} />
       )}
       {catModal && (
         <CategoryModal categories={categoriesQ.data ?? []} onClose={() => setCatModal(false)} />
@@ -218,6 +242,8 @@ function DishModal({
   const [unit] = useState(dish?.unit ?? 'шт');
   const [description, setDescription] = useState(dish?.description ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
+  // '' = брать направление из категории; иначе приоритет блюда.
+  const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar'>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -283,6 +309,7 @@ function DishModal({
         price: priceValue,
         description: description.trim() || undefined,
         isAvailable,
+        prepStation: prepStation === '' ? null : prepStation,
         trackInventory: filledVariants.length > 0 ? filledVariants.some(v => v.stock.trim() !== '') : stock.trim() !== '',
         stock: priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
         initialStock: !isEdit && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
@@ -332,6 +359,18 @@ function DishModal({
               value={categoryId}
               onChange={setCategoryId}
               options={categories.map((c) => ({ value: c.id, label: c.name }))}
+            />
+          </Field>
+          <Field label="Куда отправлять">
+            <Select
+              className="h-11 w-full"
+              value={prepStation}
+              onChange={(v) => setPrepStation(v as '' | 'kitchen' | 'bar')}
+              options={[
+                { value: '', label: 'По категории' },
+                { value: 'kitchen', label: 'Кухня' },
+                { value: 'bar', label: 'Бар' },
+              ]}
             />
           </Field>
         </div>
@@ -458,20 +497,30 @@ function CategoryModal({
   categories: AdminCategory[];
   onClose: () => void;
 }) {
-  const { create, remove } = useCategoryMutations();
+  const { create, update, remove } = useCategoryMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState('');
+  const [prepStation, setPrepStation] = useState<'kitchen' | 'bar'>('kitchen');
   const [error, setError] = useState('');
 
   async function add() {
     setError('');
     if (!name.trim()) return;
     try {
-      await create.mutateAsync({ name: name.trim() });
+      await create.mutateAsync({ name: name.trim(), prepStation });
       setName('');
+      setPrepStation('kitchen');
       push({ message: 'Категория добавлена', at: new Date().toISOString() });
     } catch (err) {
       setError(apiError(err));
+    }
+  }
+
+  async function changeStation(id: string, value: 'kitchen' | 'bar') {
+    try {
+      await update.mutateAsync({ id, prepStation: value });
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
     }
   }
 
@@ -486,13 +535,22 @@ function CategoryModal({
 
   return (
     <Modal open onClose={onClose} title="Категории">
-      <div className="mb-4 flex gap-2">
+      <div className="mb-4 flex flex-wrap gap-2">
         <input
-          className="input"
+          className="input flex-1"
           placeholder="Название категории"
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && add()}
+        />
+        <Select
+          className="h-11 w-32 shrink-0"
+          value={prepStation}
+          onChange={(v) => setPrepStation(v as 'kitchen' | 'bar')}
+          options={[
+            { value: 'kitchen', label: 'Кухня' },
+            { value: 'bar', label: 'Бар' },
+          ]}
         />
         <button className="btn-primary btn-md shrink-0" disabled={create.isPending} onClick={add}>
           {create.isPending ? <Spinner /> : 'Добавить'}
@@ -501,9 +559,18 @@ function CategoryModal({
       {error && <p className="mb-2 text-sm text-danger">{error}</p>}
       <ul className="space-y-2">
         {categories.map((c) => (
-          <li key={c.id} className="flex items-center justify-between rounded-xl border border-border px-3.5 py-2.5">
-            <span className="text-[15px] text-text-primary">{c.name}</span>
-            <div className="flex items-center gap-3">
+          <li key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
+            <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{c.name}</span>
+            <div className="flex shrink-0 items-center gap-3">
+              <Select
+                className="h-9 w-28"
+                value={c.prepStation ?? 'kitchen'}
+                onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar')}
+                options={[
+                  { value: 'kitchen', label: 'Кухня' },
+                  { value: 'bar', label: 'Бар' },
+                ]}
+              />
               <span className="text-xs text-text-muted">{c._count.dishes} блюд</span>
               <button
                 onClick={() => onDelete(c.id, c.name)}
@@ -516,6 +583,188 @@ function CategoryModal({
           </li>
         ))}
       </ul>
+    </Modal>
+  );
+}
+
+interface SetCompDraft {
+  uid: string;
+  dishId: string;
+  name: string;
+  quantity: number;
+  removable: boolean;
+  replaceable: boolean;
+}
+
+function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void }) {
+  const isEdit = !!set;
+  const { create, update } = useSetMutations();
+  const push = useNotifications((s) => s.push);
+  const [name, setName] = useState(set?.name ?? '');
+  const [price, setPrice] = useState(set ? String(Number(set.price)) : '');
+  const [components, setComponents] = useState<SetCompDraft[]>(() =>
+    (set?.setComponents ?? []).map((c) => ({
+      uid: c.id,
+      dishId: c.dish.id,
+      name: c.dish.name,
+      quantity: c.quantity,
+      removable: c.removable,
+      replaceable: c.replaceable,
+    })),
+  );
+  const [search, setSearch] = useState('');
+  const dishesQ = useAdminDishes('', search.trim());
+  const [error, setError] = useState('');
+  const pending = create.isPending || update.isPending;
+
+  const candidates = (dishesQ.data ?? []).filter(
+    (d) => !d.isSet && d.isActive && !components.some((c) => c.dishId === d.id),
+  );
+
+  function addComp(d: AdminDish) {
+    setComponents((cur) => [
+      ...cur,
+      { uid: `tmp-${d.id}-${Date.now()}`, dishId: d.id, name: d.name, quantity: 1, removable: true, replaceable: true },
+    ]);
+  }
+  function patch(uid: string, p: Partial<SetCompDraft>) {
+    setComponents((cur) => cur.map((c) => (c.uid === uid ? { ...c, ...p } : c)));
+  }
+
+  async function onSubmit() {
+    setError('');
+    const priceNum = Number(price);
+    if (!name.trim()) return setError('Укажите название сета');
+    if (!Number.isFinite(priceNum) || priceNum <= 0) return setError('Цена сета должна быть больше 0');
+    if (components.length === 0) return setError('Добавьте блюда в состав сета');
+    const body = {
+      name: name.trim(),
+      price: priceNum,
+      components: components.map((c) => ({
+        dishId: c.dishId,
+        quantity: c.quantity,
+        removable: c.removable,
+        replaceable: c.replaceable,
+      })),
+    };
+    try {
+      if (isEdit) {
+        await update.mutateAsync({ id: set!.id, ...body });
+        push({ message: 'Сет обновлён', at: new Date().toISOString() });
+      } else {
+        await create.mutateAsync(body);
+        push({ message: 'Сет создан', at: new Date().toISOString() });
+      }
+      onClose();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={isEdit ? 'Изменить сет' : 'Новый сет'}
+      panelClassName="max-w-xl"
+      footer={
+        <button className="btn-primary btn-lg w-full font-semibold" disabled={pending} onClick={onSubmit}>
+          {pending ? <Spinner /> : isEdit ? 'Сохранить' : 'Создать сет'}
+        </button>
+      }
+    >
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Название">
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Сет-6" />
+          </Field>
+          <Field label="Цена (с)">
+            <input
+              className="input"
+              type="number"
+              inputMode="numeric"
+              value={price}
+              onChange={(e) => setPrice(e.target.value)}
+            />
+          </Field>
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-sm font-medium text-text-secondary">Состав сета</p>
+          {components.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-border px-3 py-3 text-sm text-text-muted">
+              Добавьте блюда из списка ниже
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {components.map((c) => (
+                <div key={c.uid} className="flex flex-wrap items-center gap-2 rounded-xl border border-border px-3 py-2">
+                  <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{c.name}</span>
+                  <input
+                    className="input h-9 w-16 px-2 text-center"
+                    type="number"
+                    min="1"
+                    value={c.quantity}
+                    onChange={(e) => patch(c.uid, { quantity: Math.max(1, Number(e.target.value) || 1) })}
+                  />
+                  <label className="flex items-center gap-1 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={c.removable}
+                      onChange={(e) => patch(c.uid, { removable: e.target.checked })}
+                    />
+                    убирать
+                  </label>
+                  <label className="flex items-center gap-1 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={c.replaceable}
+                      onChange={(e) => patch(c.uid, { replaceable: e.target.checked })}
+                    />
+                    заменять
+                  </label>
+                  <button
+                    type="button"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg text-danger hover:bg-danger/5"
+                    onClick={() => setComponents((cur) => cur.filter((x) => x.uid !== c.uid))}
+                    title="Убрать из состава"
+                  >
+                    <IconTrash className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <p className="mb-1.5 text-sm font-medium text-text-secondary">Добавить блюдо</p>
+          <input
+            className="input mb-2"
+            placeholder="Поиск блюда"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <div className="max-h-48 space-y-1 overflow-y-auto">
+            {candidates.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                onClick={() => addComp(d)}
+                className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-left transition-colors hover:border-primary/40"
+              >
+                <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{d.name}</span>
+                <IconPlus className="h-4 w-4 shrink-0 text-primary" />
+              </button>
+            ))}
+            {candidates.length === 0 && (
+              <p className="py-3 text-center text-sm text-text-muted">Блюда не найдены</p>
+            )}
+          </div>
+        </div>
+
+        {error && <p className="text-sm text-danger">{error}</p>}
+      </div>
     </Modal>
   );
 }

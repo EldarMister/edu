@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, networkRetry } from '@/lib/api';
-import type { Order } from '@/types';
+import type { Order, PrepStation } from '@/types';
 
 export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
 
-export function useKitchenOrders(tab: KitchenTab) {
+export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitchen') {
   return useQuery({
-    queryKey: ['kitchen', tab],
-    queryFn: async () => (await api.get<Order[]>(`/kitchen/orders?tab=${tab}`)).data,
+    queryKey: ['kitchen', station, tab],
+    queryFn: async () =>
+      (await api.get<Order[]>(`/kitchen/orders?tab=${tab}&station=${station}`)).data,
     refetchInterval: 15_000, // подстраховка, основное обновление — через сокет
   });
 }
@@ -23,10 +24,11 @@ export interface StopListCategory {
   dishes: StopListDish[];
 }
 
-export function useStopList(enabled: boolean) {
+export function useStopList(enabled: boolean, station: PrepStation = 'kitchen') {
   return useQuery({
-    queryKey: ['kitchen', 'stop-list'],
-    queryFn: async () => (await api.get<StopListCategory[]>('/kitchen/stop-list')).data,
+    queryKey: ['kitchen', 'stop-list', station],
+    queryFn: async () =>
+      (await api.get<StopListCategory[]>(`/kitchen/stop-list?station=${station}`)).data,
     enabled,
   });
 }
@@ -37,8 +39,9 @@ export function useSaveStopList() {
     mutationFn: async (items: { dishId: string; isAvailable: boolean }[]) =>
       (await api.patch<StopListCategory[]>('/kitchen/stop-list', { items })).data,
     retry: networkRetry,
-    onSuccess: (data) => {
-      qc.setQueryData(['kitchen', 'stop-list'], data);
+    onSuccess: () => {
+      // Стоп-лист общий по составу, но фильтруется по станции — обновляем оба экрана.
+      qc.invalidateQueries({ queryKey: ['kitchen', 'stop-list'] });
       qc.invalidateQueries({ queryKey: ['dishes'] });
     },
   });
@@ -48,11 +51,11 @@ function invalidateKitchen(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['kitchen'] });
 }
 
-export function useAccept() {
+export function useAccept(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (orderId: string) =>
-      (await api.post<Order>(`/kitchen/orders/${orderId}/accept`)).data,
+      (await api.post<Order>(`/kitchen/orders/${orderId}/accept?station=${station}`)).data,
     retry: networkRetry,
     onSettled: () => invalidateKitchen(qc),
   });
@@ -99,6 +102,34 @@ export function useItemReady() {
   return useMutation({
     mutationFn: async (p: { orderId: string; itemId: string }) =>
       (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/${p.itemId}/ready`)).data,
+    retry: networkRetry,
+    onSettled: () => invalidateKitchen(qc),
+  });
+}
+
+/** Пакетная отметка нескольких блюд готовыми («Готово выбранные»). */
+export function useReadyItems(station: PrepStation = 'kitchen') {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { orderId: string; itemIds: string[] }) =>
+      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/ready-batch?station=${station}`, {
+        itemIds: p.itemIds,
+      })).data,
+    retry: networkRetry,
+    onSettled: () => invalidateKitchen(qc),
+  });
+}
+
+/** Пакетный отказ по нескольким блюдам («Отказать выбранные»). */
+export function useRejectItems(station: PrepStation = 'kitchen') {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { orderId: string; itemIds: string[]; reason?: string; comment?: string }) =>
+      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/reject-batch?station=${station}`, {
+        itemIds: p.itemIds,
+        reason: p.reason,
+        comment: p.comment,
+      })).data,
     retry: networkRetry,
     onSettled: () => invalidateKitchen(qc),
   });
