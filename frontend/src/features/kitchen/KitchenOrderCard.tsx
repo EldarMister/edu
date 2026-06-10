@@ -93,6 +93,32 @@ export function KitchenOrderCard({
     setSelected(new Set());
   }
 
+  // Все ещё «живые» позиции станции (для действий по всему заказу).
+  // У сета берём его блюда состава, у обычного блюда — саму позицию.
+  function collectAllActive(): { itemIds: string[]; setComponentIds: string[] } {
+    const itemIds: string[] = [];
+    const setComponentIds: string[] = [];
+    for (const it of order.items) {
+      const setParts = it.setComponents ?? [];
+      if (setParts.length > 0) {
+        for (const sc of setParts) {
+          if (isSelectable(sc.status, sc.id)) setComponentIds.push(sc.id);
+        }
+      } else if (isSelectable(it.status, it.id)) {
+        itemIds.push(it.id);
+      }
+    }
+    return { itemIds, setComponentIds };
+  }
+
+  /** Действие по всему заказу (отмена/готово целиком) — переиспользует ту же логику onBatch. */
+  function runWhole(type: 'reject' | 'ready') {
+    const ids = collectAllActive();
+    if (ids.itemIds.length === 0 && ids.setComponentIds.length === 0) return;
+    onBatch(type, ids);
+    setSelected(new Set());
+  }
+
   /** Подпись блюда состава сета для кухни (с вариантом, например «Coca-Cola 1 л»). */
   const componentLabel = (sc: OrderSetComponent) => {
     const orig = sc.originalVariantNameSnapshot
@@ -223,8 +249,9 @@ export function KitchenOrderCard({
         </div>
       )}
 
-      {/* Блок действий по выбранным блюдам */}
-      {canSelect && selected.size > 0 && (
+      {/* Действия. Выбраны блюда чекбоксами → действия по выбранным.
+          Ничего не выбрано → действия по всему заказу (отмена + принять/готово). */}
+      {canSelect && selected.size > 0 ? (
         <>
           <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-border pt-3">
             <span className="text-[13px] font-medium text-text-secondary">Выбрано: {selected.size}</span>
@@ -252,18 +279,34 @@ export function KitchenOrderCard({
             Снять выбор
           </button>
         </>
-      )}
-
-      {/* «Принять» — кухня начинает работу, заказ уходит в «В работе». */}
-      {tab === 'new' && !waitingDecision && (
-        <button
-          className="btn-primary btn-md mt-3 w-full font-semibold"
-          disabled={submitting}
-          onClick={onAccept}
-        >
-          {submitting ? <Spinner /> : 'Принять в работу'}
-        </button>
-      )}
+      ) : canSelect ? (
+        <div className="mt-3 flex gap-2 border-t border-border pt-3">
+          <button
+            onClick={() => runWhole('reject')}
+            disabled={submitting}
+            className="btn-danger btn-md flex-1 font-semibold"
+          >
+            Отменить заказ
+          </button>
+          {tab === 'new' ? (
+            <button
+              className="btn-primary btn-md flex-1 font-semibold"
+              disabled={submitting}
+              onClick={onAccept}
+            >
+              {submitting ? <Spinner /> : 'Принять в работу'}
+            </button>
+          ) : (
+            <button
+              onClick={() => runWhole('ready')}
+              disabled={submitting}
+              className="btn-primary btn-md flex-1 font-semibold"
+            >
+              Готово
+            </button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
