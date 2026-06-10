@@ -5,5 +5,5 @@ import { KitchenApp } from '@/features/kitchen/KitchenApp';
  * барные позиции заказов (`station='bar'`). См. KitchenApp.
  */
 export function BarApp() {
-  return <KitchenApp station="bar" title="Бар" />;
+  return <KitchenApp station="bar" />;
 }
