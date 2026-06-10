@@ -29,6 +29,7 @@ export const orderInclude = {
           rejectReason: true,
           originalDishId: true,
           originalNameSnapshot: true,
+          originalVariantNameSnapshot: true,
           finalDishId: true,
           finalNameSnapshot: true,
           quantity: true,

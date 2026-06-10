@@ -87,6 +87,31 @@ export class UpdateCategoryDto {
   prepStation?: PrepStation;
 }
 
+/** Удаление категории: что сделать с блюдами внутри. */
+export class DeleteCategoryDto {
+  // move — перенести блюда в другую категорию; delete — удалить вместе с блюдами.
+  @IsOptional() @IsString()
+  strategy?: 'move' | 'delete';
+
+  @IsOptional() @IsString()
+  targetCategoryId?: string;
+}
+
+/** Новый порядок категорий (массив id в нужной последовательности). */
+export class ReorderCategoriesDto {
+  @IsArray() @IsString({ each: true })
+  ids: string[];
+}
+
+/** Массовый перенос блюд из одной категории в другую. */
+export class MoveCategoryDishesDto {
+  @IsString() @IsNotEmpty()
+  fromCategoryId: string;
+
+  @IsString() @IsNotEmpty()
+  toCategoryId: string;
+}
+
 // ---------- Блюда ----------
 export class DishVariantDto {
   @IsOptional() @IsString()
@@ -210,6 +235,10 @@ export class UpdateDishDto {
 export class SetComponentDto {
   @IsString() @IsNotEmpty()
   dishId: string;
+
+  // Вариант блюда (например, «1 л»). Разные варианты одного блюда — разные строки сета.
+  @IsOptional() @IsString()
+  dishVariantId?: string;
 
   @IsOptional() @IsInt() @Min(1)
   quantity?: number;

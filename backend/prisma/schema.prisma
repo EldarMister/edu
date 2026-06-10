@@ -240,17 +240,21 @@ model SetComponent {
   id          String   @id @default(uuid())
   setId       String   @map("set_id")
   dishId      String   @map("dish_id")
+  // Вариант блюда в составе (например, «1 л»). null — блюдо без вариантов / базовое.
+  dishVariantId String? @map("dish_variant_id")
   quantity    Int      @default(1)
   sortOrder   Int      @default(0) @map("sort_order")
   removable   Boolean  @default(true)
   replaceable Boolean  @default(true)
   createdAt   DateTime @default(now()) @map("created_at")
 
-  set  Dish @relation("SetOf", fields: [setId], references: [id], onDelete: Cascade)
-  dish Dish @relation("ComponentOf", fields: [dishId], references: [id], onDelete: Cascade)
+  set         Dish         @relation("SetOf", fields: [setId], references: [id], onDelete: Cascade)
+  dish        Dish         @relation("ComponentOf", fields: [dishId], references: [id], onDelete: Cascade)
+  dishVariant DishVariant? @relation(fields: [dishVariantId], references: [id], onDelete: Cascade)
 
   @@index([setId])
   @@index([dishId])
+  @@index([dishVariantId])
   @@map("set_components")
 }
 
@@ -266,8 +270,9 @@ model DishVariant {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  dish       Dish        @relation(fields: [dishId], references: [id], onDelete: Cascade)
-  orderItems OrderItem[]
+  dish          Dish           @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  orderItems    OrderItem[]
+  setComponents SetComponent[]
 
   @@index([dishId])
   @@map("dish_variants")
@@ -344,7 +349,8 @@ model WaiterShift {
 model OrderItem {
   id               String          @id @default(uuid())
   orderId          String          @map("order_id")
-  dishId           String          @map("dish_id")
+  // nullable: блюдо может быть полностью удалено из меню — позиция остаётся в истории по снимкам.
+  dishId           String?         @map("dish_id")
   dishVariantId    String?         @map("dish_variant_id")
   dishNameSnapshot String          @map("dish_name_snapshot")
   dishVariantNameSnapshot String?  @map("dish_variant_name_snapshot")
@@ -360,7 +366,7 @@ model OrderItem {
   updatedAt        DateTime        @updatedAt @map("updated_at")
 
   order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  dish        Dish         @relation(fields: [dishId], references: [id])
+  dish        Dish?        @relation(fields: [dishId], references: [id], onDelete: SetNull)
   dishVariant DishVariant? @relation(fields: [dishVariantId], references: [id], onDelete: SetNull)
   // Состав сета с изменениями (если эта позиция — сет).
   setComponents OrderItemSetComponent[]
@@ -379,8 +385,11 @@ enum SetComponentAction {
 model OrderItemSetComponent {
   id                   String             @id @default(uuid())
   orderItemId          String             @map("order_item_id")
-  originalDishId       String             @map("original_dish_id")
+  // nullable: блюдо состава может быть удалено из меню — имя сохраняется в снимке.
+  originalDishId       String?            @map("original_dish_id")
   originalNameSnapshot String             @map("original_name_snapshot")
+  // Снимок названия варианта блюда состава (например, «1 л»), если он выбран.
+  originalVariantNameSnapshot String?     @map("original_variant_name_snapshot")
   finalDishId          String?            @map("final_dish_id")
   finalNameSnapshot    String?            @map("final_name_snapshot")
   action               SetComponentAction @default(default)
@@ -394,7 +403,7 @@ model OrderItemSetComponent {
   createdAt            DateTime           @default(now()) @map("created_at")
 
   orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  originalDish Dish      @relation("OrigDish", fields: [originalDishId], references: [id])
+  originalDish Dish?     @relation("OrigDish", fields: [originalDishId], references: [id], onDelete: SetNull)
   finalDish    Dish?     @relation("FinalDish", fields: [finalDishId], references: [id])
 
   @@index([orderItemId])

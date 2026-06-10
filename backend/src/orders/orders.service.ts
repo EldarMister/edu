@@ -1257,7 +1257,7 @@ export class OrdersService {
       include: {
         variants: { orderBy: { sortOrder: 'asc' } },
         category: { select: { prepStation: true } },
-        setComponents: { select: { dishId: true, quantity: true } },
+        setComponents: { select: { dishId: true, dishVariantId: true, quantity: true } },
       },
     });
     const byId = new Map(dishes.map((d) => [d.id, d]));
@@ -1283,6 +1283,22 @@ export class OrdersService {
         })
       : [];
     const compById = new Map(componentDishes.map((d) => [d.id, d]));
+
+    // Варианты блюд состава сета (например, «1 л») — для снимков названия/цены.
+    const componentVariantIds = [
+      ...new Set(
+        items.flatMap((i) =>
+          (i.setComponents ?? []).map((c) => c.originalVariantId).filter((x): x is string => !!x),
+        ),
+      ),
+    ];
+    const componentVariants = componentVariantIds.length
+      ? await this.prisma.dishVariant.findMany({
+          where: { id: { in: componentVariantIds } },
+          select: { id: true, dishId: true, name: true, price: true },
+        })
+      : [];
+    const compVariantById = new Map(componentVariants.map((v) => [v.id, v]));
 
     const dishDeductions = new Map<string, number>();
     const variantDeductions = new Map<string, number>();
@@ -1338,16 +1354,26 @@ export class OrdersService {
       let setComponents: Prisma.OrderItemSetComponentUncheckedCreateNestedManyWithoutOrderItemInput | undefined;
       let setDelta = 0;
       if (dish.isSet) {
-        const qtyByOrig = new Map(dish.setComponents.map((sc) => [sc.dishId, sc.quantity]));
+        // Состав ключуем по блюду + варианту: одно блюдо с разными вариантами — разные строки.
+        const compKey = (dishId: string, variantId?: string | null) => `${dishId}|${variantId ?? ''}`;
+        const qtyByOrig = new Map(
+          dish.setComponents.map((sc) => [compKey(sc.dishId, sc.dishVariantId), sc.quantity]),
+        );
         const rows = (i.setComponents ?? []).map((c, idx) => {
           const orig = compById.get(c.originalDishId);
           if (!orig) throw new BadRequestException('Блюдо состава сета не найдено');
-          const qty = qtyByOrig.get(c.originalDishId) ?? 1;
+          const origVariant = c.originalVariantId ? compVariantById.get(c.originalVariantId) : null;
+          if (c.originalVariantId && (!origVariant || origVariant.dishId !== c.originalDishId)) {
+            throw new BadRequestException('Вариант блюда состава не найден');
+          }
+          const qty = qtyByOrig.get(compKey(c.originalDishId, c.originalVariantId)) ?? 1;
+          // Цена оригинала — вариант, если он задан, иначе базовая цена блюда.
+          const origPrice = origVariant ? Number(origVariant.price) : Number(orig.price);
           let finalDishId: string | null = null;
           let finalNameSnapshot: string | null = null;
           let priceDelta = 0;
           if (c.action === 'removed') {
-            priceDelta = -Number(orig.price) * qty;
+            priceDelta = -origPrice * qty;
           } else if (c.action === 'replaced') {
             if (!c.finalDishId) throw new BadRequestException('Не указано блюдо замены');
             const fin = compById.get(c.finalDishId);
@@ -1355,12 +1381,13 @@ export class OrdersService {
             if (fin.isSet) throw new BadRequestException('Нельзя заменить на сет');
             finalDishId = fin.id;
             finalNameSnapshot = fin.name;
-            priceDelta = (Number(fin.price) - Number(orig.price)) * qty;
+            priceDelta = (Number(fin.price) - origPrice) * qty;
           }
           setDelta += priceDelta;
           return {
             originalDishId: c.originalDishId,
             originalNameSnapshot: orig.name,
+            originalVariantNameSnapshot: origVariant?.name ?? null,
             finalDishId,
             finalNameSnapshot,
             action: c.action,
@@ -1426,10 +1453,11 @@ export class OrdersService {
 
   private async restoreInventory(
     tx: Prisma.TransactionClient,
-    items: { dishId: string; dishVariantId: string | null; quantity: number }[],
+    items: { dishId: string | null; dishVariantId: string | null; quantity: number }[],
   ) {
     if (!items.length) return;
-    const dishIds = [...new Set(items.map((i) => i.dishId))];
+    // Удалённое из меню блюдо (dishId === null) не имеет остатков для возврата.
+    const dishIds = [...new Set(items.map((i) => i.dishId).filter((id): id is string => !!id))];
     const variantIds = items.map((i) => i.dishVariantId).filter((id): id is string => !!id);
     const variants = variantIds.length
       ? await tx.dishVariant.findMany({ where: { id: { in: variantIds } } })
@@ -1447,7 +1475,7 @@ export class OrdersService {
     const variantIncrements = new Map<string, number>();
 
     for (const item of items) {
-      if (trackedDishIds.has(item.dishId)) {
+      if (item.dishId && trackedDishIds.has(item.dishId)) {
         if (item.dishVariantId) {
           if (nonNullVariantIds.has(item.dishVariantId)) {
             variantIncrements.set(item.dishVariantId, (variantIncrements.get(item.dishVariantId) ?? 0) + item.quantity);
@@ -1578,7 +1606,7 @@ export class OrdersService {
         setComponents: { select: { status: true } },
       },
     });
-    const becameRejected: { dishId: string; dishVariantId: string | null; quantity: number }[] = [];
+    const becameRejected: { dishId: string | null; dishVariantId: string | null; quantity: number }[] = [];
     for (const item of setItems) {
       const next = this.aggregateItemStatus(item.setComponents.map((c) => c.status));
       if (next === item.status) continue;
