@@ -43,6 +43,7 @@ import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
 import { CartPanel } from './CartPanel';
 import { CartSheet } from './CartSheet';
+import { cartLinesAllNone } from '@/lib/prep-station';
 import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
@@ -140,6 +141,16 @@ export function WaiterApp() {
   const displayedOrder = viewingOrder ?? activeOrder;
   const showCart = !viewingOrder && (cart.lines.length > 0 || !activeOrder);
   const activeNavTab: Tab = viewingOrder && tab === 'cart' ? 'orders' : tab;
+  // Все позиции корзины — «Без отправки»: заказ создаётся без кухни/бара,
+  // основная кнопка меняется на «Создать заказ».
+  const cartOnlyNone = cartLinesAllNone(cart.lines, categoriesQ.data ?? []);
+  const cartSubmitLabel = editing
+    ? t('Сохранить изменения')
+    : activeOrder
+      ? t('Добавить к заказу')
+      : cartOnlyNone
+        ? t('Создать заказ')
+        : t('Отправить на кухню');
   const ordersAttentionCount = orders.filter((o) =>
     o.requiresWaiterDecision || ['ready', 'rejected'].includes(o.status),
   ).length;
@@ -185,17 +196,24 @@ export function WaiterApp() {
     const lines = order.items
       .filter((it) => it.status !== 'rejected' && it.status !== 'cancelled')
       .map((it) => {
-        const dish = dishById.get(it.dishId);
+        const dish = it.dishId ? dishById.get(it.dishId) : undefined;
         if (!dish) return null;
         // Сет — восстанавливаем линию с изменённым составом.
         if (dish.isSet && it.setComponents?.length) {
-          const defs = new Map((dish.setComponents ?? []).map((sc) => [sc.dish.id, sc]));
+          // Ключ учитывает вариант: одно блюдо с разными вариантами — разные строки.
+          const defKey = (dishId: string, variantName?: string | null) => `${dishId}|${variantName ?? ''}`;
+          const defs = new Map(
+            (dish.setComponents ?? []).map((sc) => [defKey(sc.dish.id, sc.dishVariant?.name), sc]),
+          );
           const components = it.setComponents.map((sc) => {
-            const def = defs.get(sc.originalDishId);
+            const def = defs.get(defKey(sc.originalDishId ?? '', sc.originalVariantNameSnapshot));
             return {
               componentId: def?.id ?? sc.id,
-              originalDishId: sc.originalDishId,
-              originalName: sc.originalNameSnapshot,
+              originalDishId: sc.originalDishId ?? '',
+              originalVariantId: def?.dishVariant?.id,
+              originalName: sc.originalVariantNameSnapshot
+                ? `${sc.originalNameSnapshot} ${sc.originalVariantNameSnapshot}`
+                : sc.originalNameSnapshot,
               quantity: sc.quantity,
               removable: def?.removable ?? true,
               replaceable: def?.replaceable ?? true,
@@ -368,7 +386,11 @@ export function WaiterApp() {
         });
         cart.clear();
         setAddItemsIdemKey(clientId());
-        push({ message: t('Заказ отправлен на кухню'), type: 'success', at: new Date().toISOString() });
+        push({
+          message: cartOnlyNone ? t('Позиции добавлены в заказ') : t('Заказ отправлен на кухню'),
+          type: 'success',
+          at: new Date().toISOString(),
+        });
         setTab('cart');
       } else {
         await create.mutateAsync({
@@ -379,7 +401,11 @@ export function WaiterApp() {
         });
         cart.clear();
         setIdemKey(clientId());
-        push({ message: t('Заказ отправлен на кухню'), type: 'success', at: new Date().toISOString() });
+        push({
+          message: cartOnlyNone ? t('Заказ создан') : t('Заказ отправлен на кухню'),
+          type: 'success',
+          at: new Date().toISOString(),
+        });
         setTab('orders');
       }
     } catch (err) {
@@ -499,6 +525,7 @@ export function WaiterApp() {
           onContinueAfterRejection={() => continueAfterPartialRejection(displayedOrder)}
           onAddReplacement={() => addReplacement(displayedOrder)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
+          onEdit={() => startEditOrder(displayedOrder)}
         />
       ) : (
         <CartPanel
@@ -507,6 +534,7 @@ export function WaiterApp() {
           orderNumber={activeOrder?.orderNumber}
           submitting={create.isPending || addItems.isPending || editOrder.isPending}
           canSubmit={!!activeShift}
+          allNone={cartOnlyNone}
           onSubmit={editing ? saveEditOrder : submitCart}
           onCancelEdit={cancelEditing}
           onBlockedSubmit={() =>
@@ -636,9 +664,10 @@ export function WaiterApp() {
         <MenuCartBar
           count={cart.lines.length}
           total={cartTotals(cart.lines).final}
-          submitting={create.isPending || addItems.isPending}
+          submitting={create.isPending || addItems.isPending || editOrder.isPending}
+          submitLabel={cartSubmitLabel}
           onOpenCart={() => setCartSheetOpen(true)}
-          onSubmit={submitCart}
+          onSubmit={editing ? saveEditOrder : submitCart}
         />
       )}
 
@@ -646,10 +675,11 @@ export function WaiterApp() {
       <CartSheet
         open={cartSheetOpen && tab === 'menu'}
         onClose={() => setCartSheetOpen(false)}
-        submitting={create.isPending || addItems.isPending}
+        submitting={create.isPending || addItems.isPending || editOrder.isPending}
         canSubmit={!!activeShift}
+        submitLabel={cartSubmitLabel}
         onSubmit={async () => {
-          await submitCart();
+          await (editing ? saveEditOrder() : submitCart());
           setCartSheetOpen(false);
         }}
       />
@@ -901,16 +931,17 @@ function MenuCartBar({
   count,
   total,
   submitting,
+  submitLabel,
   onOpenCart,
   onSubmit,
 }: {
   count: number;
   total: number;
   submitting: boolean;
+  submitLabel: string;
   onOpenCart: () => void;
   onSubmit: () => void;
 }) {
-  const t = useT();
   const hasItems = count > 0;
   return (
     <div className="shrink-0 border-t border-border bg-white px-2 py-2 lg:hidden">
@@ -937,7 +968,7 @@ function MenuCartBar({
           disabled={!hasItems || submitting}
           className="btn-primary h-12 flex-1 rounded-lg font-semibold disabled:opacity-50"
         >
-          {submitting ? <Spinner /> : t('Отправить на кухню')}
+          {submitting ? <Spinner /> : submitLabel}
         </button>
       </div>
     </div>

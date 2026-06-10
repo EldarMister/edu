@@ -1,3 +1,19 @@
+/** Человекочитаемое название способа оплаты. */
+export function paymentMethodLabel(method: string | null | undefined): string {
+  switch (method) {
+    case 'qr':
+      return 'QR-код';
+    case 'cash':
+      return 'Наличные';
+    case 'card':
+      return 'Карта';
+    case 'mixed':
+      return 'Смешанная';
+    default:
+      return '—';
+  }
+}
+
 /** Форматирование суммы: 1063 → «1 063 с» (сом). */
 export function money(value: string | number): string {
   const n = typeof value === 'string' ? Number(value) : value;

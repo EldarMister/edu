@@ -93,11 +93,13 @@ export function KitchenOrderCard({
     setSelected(new Set());
   }
 
-  /** Подпись блюда состава сета для кухни. */
-  const componentLabel = (sc: OrderSetComponent) =>
-    sc.action === 'replaced'
-      ? `Замена: ${sc.originalNameSnapshot} → ${sc.finalNameSnapshot}`
+  /** Подпись блюда состава сета для кухни (с вариантом, например «Coca-Cola 1 л»). */
+  const componentLabel = (sc: OrderSetComponent) => {
+    const orig = sc.originalVariantNameSnapshot
+      ? `${sc.originalNameSnapshot} ${sc.originalVariantNameSnapshot}`
       : sc.originalNameSnapshot;
+    return sc.action === 'replaced' ? `Замена: ${orig} → ${sc.finalNameSnapshot}` : orig;
+  };
 
   // Единая строка позиции — и для обычных блюд, и для блюд внутри сета.
   // Сам сет — контейнер (container), его нельзя выбрать целиком: действия идут по составу.

@@ -44,6 +44,7 @@ export function OrderPanel({
   onContinueAfterRejection,
   onAddReplacement,
   onCancelOrder,
+  onEdit,
 }: {
   order: Order;
   submitting: boolean;
@@ -55,25 +56,42 @@ export function OrderPanel({
   onContinueAfterRejection: () => void;
   onAddReplacement: () => void;
   onCancelOrder: () => void;
+  /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
+  onEdit?: () => void;
 }) {
   const t = useT();
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
+  // Редактирование доступно, пока кухня не завершила заказ (как в списке заказов).
+  const editable = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'].includes(order.status);
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-start justify-between border-b border-border pb-3">
-        <div>
-          <h2 className="text-lg font-semibold text-text-primary">{t('Заказ')} {displayOrderNumber(order.orderNumber)}</h2>
-          <p className="mt-0.5 text-sm text-text-muted">
-            {t('Стол')} {order.table.number}
-          </p>
+      {/* Компактная шапка: номер + стол слева, лёгкий бейдж и «Редактировать» справа */}
+      <div className="flex items-center justify-between gap-2 border-b border-border pb-2">
+        <div className="min-w-0">
+          <h2 className="truncate text-[15px] font-semibold leading-tight text-text-primary">
+            {t('Заказ')} {displayOrderNumber(order.orderNumber)}
+            <span className="ml-2 text-[13px] font-normal text-text-muted">{t('Стол')} {order.table.number}</span>
+          </h2>
         </div>
-        <div className="flex flex-col items-end gap-1.5">
-          <OrderBadge status={order.status} />
+        <div className="flex shrink-0 items-center gap-2">
           {waitingDecision && (
-            <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
+            <span className="rounded-md bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
               {t('Нужен ответ')}
             </span>
+          )}
+          <OrderBadge status={order.status} size="sm" />
+          {onEdit && editable && (
+            <button
+              onClick={onEdit}
+              className="flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border px-2 text-[12px] font-medium text-text-secondary transition-colors hover:border-primary/50 hover:text-primary"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+              </svg>
+              {t('Изменить')}
+            </button>
           )}
         </div>
       </div>
@@ -197,7 +215,11 @@ function ActionButton({
   const s = order.status;
   const spin = submitting ? <Spinner /> : null;
   const waitingDecision = s === 'partially_rejected' && order.requiresWaiterDecision;
-  const hasReadyItem = order.items.some((item) => item.status === 'ready');
+  // Кухонная/барная логика — только по позициям, реально отправленным на станцию.
+  // Позиции «Без отправки» (prepStation === 'none') не участвуют в кухне/баре.
+  const stationItems = order.items.filter((item) => item.prepStation !== 'none');
+  const hasStationItems = stationItems.length > 0;
+  const hasReadyStationItem = stationItems.some((item) => item.status === 'ready');
   const cooldownActive = actionCooldown > 0;
 
   useEffect(() => {
@@ -234,13 +256,24 @@ function ActionButton({
     );
   }
 
+  // «Забрал с кухни» — только если есть готовая позиция, реально отправленная на станцию.
   if (
-    hasReadyItem &&
+    hasReadyStationItem &&
     !['paid', 'cancelled', 'rejected', 'waiting_payment', 'picked_up', 'served'].includes(s)
   ) {
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onPickedUp)}>
         {cooldownActive ? actionCooldown : spin ?? t('Забрал с кухни')}
+      </button>
+    );
+  }
+
+  // Заказ без кухни/бара (все позиции «Без отправки») создаётся сразу готовым —
+  // забирать с кухни нечего, официант просто выносит гостям и переходит к оплате.
+  if (!hasStationItems && s === 'ready') {
+    return (
+      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onServed)}>
+        {cooldownActive ? actionCooldown : spin ?? t('Вынес гостям')}
       </button>
     );
   }

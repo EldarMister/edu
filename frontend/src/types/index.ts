@@ -88,7 +88,10 @@ export interface SetComponentDef {
   quantity: number;
   removable: boolean;
   replaceable: boolean;
+  /** Вариант блюда состава (например, «1 л»), если выбран. */
+  dishVariantId?: string | null;
   dish: { id: string; name: string; price: string };
+  dishVariant?: { id: string; name: string; price: string } | null;
 }
 
 export type SetComponentAction = 'default' | 'removed' | 'replaced';
@@ -100,8 +103,10 @@ export interface OrderSetComponent {
   /** Кухня отмечает каждое блюдо состава сета отдельно. */
   status: OrderItemStatus;
   rejectReason?: string | null;
-  originalDishId: string;
+  originalDishId: string | null;
   originalNameSnapshot: string;
+  /** Снимок названия варианта блюда состава (например, «1 л»). */
+  originalVariantNameSnapshot?: string | null;
   finalDishId: string | null;
   finalNameSnapshot: string | null;
   quantity: number;
@@ -151,7 +156,8 @@ export interface WaiterShift {
 
 export interface OrderItem {
   id: string;
-  dishId: string;
+  /** null — блюдо удалено из меню; позиция остаётся в истории по снимкам. */
+  dishId: string | null;
   dishVariantId: string | null;
   dishNameSnapshot: string;
   dishVariantNameSnapshot: string | null;
@@ -234,6 +240,8 @@ export interface ReceiptPrintRequest {
 export interface CartSetComponent {
   componentId: string;
   originalDishId: string;
+  /** Вариант оригинального блюда состава (например, «1 л»), если задан. */
+  originalVariantId?: string;
   originalName: string;
   originalPrice: string;
   quantity: number;

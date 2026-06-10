@@ -153,6 +153,7 @@ function linesToItems(lines: CartLine[]) {
     setComponents: l.set
       ? l.set.components.map((c) => ({
           originalDishId: c.originalDishId,
+          originalVariantId: c.originalVariantId,
           finalDishId: c.action === 'replaced' ? c.finalDishId : undefined,
           action: c.action,
         }))

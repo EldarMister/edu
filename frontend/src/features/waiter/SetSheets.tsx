@@ -10,8 +10,10 @@ export function defaultSetComponents(set: Dish): CartSetComponent[] {
   return (set.setComponents ?? []).map((c) => ({
     componentId: c.id,
     originalDishId: c.dish.id,
-    originalName: c.dish.name,
-    originalPrice: c.dish.price,
+    originalVariantId: c.dishVariant?.id,
+    // Название с вариантом (например, «Coca-Cola 1 л») и цена варианта, если он задан.
+    originalName: c.dishVariant ? `${c.dish.name} ${c.dishVariant.name}` : c.dish.name,
+    originalPrice: c.dishVariant?.price ?? c.dish.price,
     quantity: c.quantity,
     removable: c.removable,
     replaceable: c.replaceable,
