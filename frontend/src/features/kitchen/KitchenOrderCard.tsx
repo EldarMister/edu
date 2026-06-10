@@ -120,19 +120,13 @@ export function KitchenOrderCard({
           return (
             <li key={it.id} className="text-[15px]">
               <label className={`flex items-center gap-3 ${selectable ? 'cursor-pointer' : ''}`}>
-                {canSelect && (
-                  selectable ? (
-                    <input
-                      type="checkbox"
-                      checked={selected.has(it.id)}
-                      onChange={() => toggle(it.id)}
-                      className={`h-[22px] w-[22px] shrink-0 cursor-pointer rounded-[6px] border-border accent-primary transition-opacity ${
-                        selected.has(it.id) ? 'opacity-100' : 'opacity-0'
-                      }`}
-                    />
-                  ) : (
-                    <span className="h-[22px] w-[22px] shrink-0" />
-                  )
+                {canSelect && selectable && selected.has(it.id) && (
+                  <input
+                    type="checkbox"
+                    checked={true}
+                    onChange={() => toggle(it.id)}
+                    className="h-[22px] w-[22px] shrink-0 cursor-pointer rounded-[6px] border-border accent-primary"
+                  />
                 )}
                 <span
                   className={`min-w-0 flex-1 ${
