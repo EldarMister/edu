@@ -71,21 +71,23 @@ export function KitchenOrderCard({
   }
 
   return (
-    <div className="card flex flex-col p-3.5">
+    <div className="card flex flex-col p-4">
       {/* Шапка карточки */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-base font-semibold text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
-          <p className="text-[13px] text-text-muted">Стол {order.table.number}</p>
+          <p className="text-lg font-bold leading-tight text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
+          <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}</p>
         </div>
         <div className="text-right">
           <p className="text-[13px] text-text-muted">{timeHM(order.createdAt)}</p>
           {tab === 'new' || tab === 'in_work' ? (
-            <p className={`text-sm font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
+            <p className={`text-[15px] font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
               {elapsed(order.createdAt, now)}
             </p>
           ) : (
-            <OrderBadge status={order.status} />
+            <div className="mt-0.5">
+              <OrderBadge status={order.status} />
+            </div>
           )}
         </div>
       </div>
@@ -106,7 +108,7 @@ export function KitchenOrderCard({
       )}
 
       {/* Позиции */}
-      <ul className="mt-2.5 space-y-1 border-t border-border pt-2.5">
+      <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
         {order.items.map((it) => {
           const pending = pendingItemIds.includes(it.id);
           const rejected = it.status === 'rejected' || (pending && pendingType === 'reject');
@@ -124,10 +126,10 @@ export function KitchenOrderCard({
                       type="checkbox"
                       checked={selected.has(it.id)}
                       onChange={() => toggle(it.id)}
-                      className="h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
+                      className="h-[18px] w-[18px] shrink-0 cursor-pointer rounded-[5px] border-border accent-primary"
                     />
                   ) : (
-                    <span className="h-4 w-4 shrink-0" />
+                    <span className="h-[18px] w-[18px] shrink-0" />
                   )
                 )}
                 <span
@@ -174,33 +176,33 @@ export function KitchenOrderCard({
 
       {/* Блок действий по выбранным блюдам */}
       {canSelect && selected.size > 0 && (
-        <div className="mt-3 flex items-center gap-2 border-t border-border pt-2.5">
-          <span className="text-[13px] font-medium text-text-secondary">Выбрано: {selected.size}</span>
-          <div className="ml-auto flex gap-1.5">
-            <button
-              onClick={() => runBatch('reject')}
-              className="btn-danger h-9 rounded-lg px-3 text-[13px] font-semibold"
-            >
-              Отказать выбранные
-            </button>
-            {tab === 'in_work' && (
+        <>
+          <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 border-t border-border pt-3">
+            <span className="text-[13px] font-medium text-text-secondary">Выбрано: {selected.size}</span>
+            <div className="ml-auto flex gap-1.5">
               <button
-                onClick={() => runBatch('ready')}
-                className="btn-primary h-9 rounded-lg px-3 text-[13px] font-semibold"
+                onClick={() => runBatch('reject')}
+                className="btn-danger h-8 rounded-lg px-2.5 text-[13px] font-semibold"
               >
-                Готово выбранные
+                Отказать выбранные
               </button>
-            )}
+              {tab === 'in_work' && (
+                <button
+                  onClick={() => runBatch('ready')}
+                  className="btn-primary h-8 rounded-lg px-2.5 text-[13px] font-semibold"
+                >
+                  Готово выбранные
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
-      {canSelect && selected.size > 0 && (
-        <button
-          onClick={() => setSelected(new Set())}
-          className="mt-1.5 self-start text-[12px] text-text-muted hover:text-text-primary"
-        >
-          Снять выбор
-        </button>
+          <button
+            onClick={() => setSelected(new Set())}
+            className="mt-2 self-start text-[12px] font-medium text-primary hover:text-primary-hover"
+          >
+            Снять выбор
+          </button>
+        </>
       )}
 
       {/* «Принять» — кухня начинает работу, заказ уходит в «В работе». */}

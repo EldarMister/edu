@@ -191,7 +191,7 @@ export function KitchenApp({
                   : 'Отказанных заказов нет'}
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {orders.map((o) => (
               <KitchenOrderCard
                 key={o.id}
@@ -211,27 +211,29 @@ export function KitchenApp({
 
       {/* Нижний блок отмены действия с таймером */}
       {pending && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4">
-          <div className="pointer-events-auto flex w-full max-w-xl items-center gap-3 rounded-2xl border border-border bg-white px-4 py-3 shadow-lg">
-            <span
-              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base font-bold ${
-                pending.type === 'reject' ? 'bg-danger/10 text-danger' : 'bg-primary/10 text-primary'
-              }`}
-            >
-              {pending.type === 'reject' ? '✕' : '✓'}
+        <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4 sm:px-5 sm:pb-5">
+          <div className="pointer-events-auto flex w-full max-w-5xl items-center gap-3.5 rounded-2xl border border-border bg-white px-4 py-3.5 shadow-soft sm:px-5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger/10 text-danger">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7v6h6" />
+                <path d="M3 13a9 9 0 1 0 3-7.7L3 8" />
+              </svg>
             </span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-text-primary">
+              <p className="truncate text-[15px] font-semibold text-text-primary">
                 {pending.itemIds.length} {pluralPositions(pending.itemIds.length)}{' '}
                 {pending.type === 'reject' ? 'помечены как отказ' : 'помечены как готовые'}
               </p>
-              <p className="text-xs text-text-muted">
-                Отправка официанту через {String(undoSecondsLeft).padStart(2, '0')} сек
+              <p className="text-[13px] text-text-muted">
+                Отправка официанту через{' '}
+                <span className="font-semibold text-danger">
+                  {String(undoSecondsLeft).padStart(2, '0')} сек
+                </span>
               </p>
             </div>
             <button
               onClick={cancelPending}
-              className="shrink-0 rounded-xl border border-danger px-4 py-2 text-sm font-semibold text-danger transition-colors hover:bg-danger/5"
+              className="shrink-0 rounded-xl border border-primary bg-white px-5 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/5"
             >
               Отменить
             </button>
