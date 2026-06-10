@@ -41,10 +41,8 @@ function pluralPositions(n: number): string {
 
 export function KitchenApp({
   station = 'kitchen',
-  title = station === 'bar' ? 'Бар' : 'Кухня',
 }: {
   station?: PrepStation;
-  title?: string;
 } = {}) {
   useKitchenRealtime();
   const { user, logout } = useAuth();
@@ -130,8 +128,7 @@ export function KitchenApp({
       {/* Шапка */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
         <div className="flex items-baseline gap-3">
-          <span className="text-xl font-bold tracking-tight text-text-primary">{title}</span>
-          <span className="text-base font-semibold text-text-muted">
+          <span className="text-[26px] font-medium tracking-tight text-text-primary">
             {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
           </span>
         </div>
@@ -191,7 +188,7 @@ export function KitchenApp({
                   : 'Отказанных заказов нет'}
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid items-start grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {orders.map((o) => (
               <KitchenOrderCard
                 key={o.id}

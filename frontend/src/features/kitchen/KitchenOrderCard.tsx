@@ -108,7 +108,7 @@ export function KitchenOrderCard({
       )}
 
       {/* Позиции */}
-      <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
+      <ul className="mt-4 space-y-3 border-t border-border pt-4">
         {order.items.map((it) => {
           const pending = pendingItemIds.includes(it.id);
           const rejected = it.status === 'rejected' || (pending && pendingType === 'reject');
@@ -118,37 +118,37 @@ export function KitchenOrderCard({
           const itemName = orderItemDisplayName(it);
           const setParts = it.setComponents ?? [];
           return (
-            <li key={it.id} className="text-[13.5px]">
-              <div className="flex items-center gap-2">
+            <li key={it.id} className="text-[15px]">
+              <label className={`flex items-center gap-3 ${selectable ? 'cursor-pointer' : ''}`}>
                 {canSelect && (
                   selectable ? (
                     <input
                       type="checkbox"
                       checked={selected.has(it.id)}
                       onChange={() => toggle(it.id)}
-                      className="h-[18px] w-[18px] shrink-0 cursor-pointer rounded-[5px] border-border accent-primary"
+                      className="h-[22px] w-[22px] shrink-0 cursor-pointer rounded-[6px] border-border accent-primary"
                     />
                   ) : (
-                    <span className="h-[18px] w-[18px] shrink-0" />
+                    <span className="h-[22px] w-[22px] shrink-0" />
                   )
                 )}
                 <span
-                  className={`min-w-0 flex-1 truncate ${
+                  className={`min-w-0 flex-1 ${
                     rejected ? 'text-danger line-through' : isReady ? 'text-text-muted' : 'text-text-primary'
                   }`}
                 >
-                  <span className="font-medium">{it.quantity}×</span> {itemName}
-                  {it.comment && <span className="text-warning"> · {it.comment}</span>}
+                  <span className="font-semibold">{it.quantity}×</span> {itemName}
+                  {it.comment && <span className="text-warning font-medium"> · {it.comment}</span>}
                 </span>
-                {isReady && <span className="shrink-0 text-xs font-semibold text-green-600">✓ Готово</span>}
-                {rejected && <span className="shrink-0 text-xs font-medium text-danger">Отказ</span>}
-              </div>
+                {isReady && <span className="shrink-0 text-[13px] font-bold text-green-600">✓ Готово</span>}
+                {rejected && <span className="shrink-0 text-[13px] font-bold text-danger">Отказ</span>}
+              </label>
               {setParts.length > 0 && (
-                <ul className={`mt-0.5 space-y-0.5 text-[12px] ${canSelect ? 'pl-6' : 'pl-3'}`}>
+                <ul className={`mt-1.5 space-y-1 text-[13.5px] ${canSelect ? 'pl-8' : 'pl-3'}`}>
                   {setParts.map((sc) => (
                     <li
                       key={sc.id}
-                      className={sc.action === 'removed' ? 'text-danger' : 'text-text-muted'}
+                      className={sc.action === 'removed' ? 'text-danger font-medium' : 'text-text-muted'}
                     >
                       {sc.action === 'replaced'
                         ? `Замена: ${sc.originalNameSnapshot} → ${sc.finalNameSnapshot}`
