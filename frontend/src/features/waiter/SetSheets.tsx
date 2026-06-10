@@ -31,34 +31,65 @@ function calcSetPrice(basePrice: string, components: CartSetComponent[]): number
 
 function SheetShell({
   onClose,
+  title,
+  subtitle,
   children,
 }: {
   onClose: () => void;
+  title: string;
+  subtitle?: string;
   children: React.ReactNode;
 }) {
+  const [drag, setDrag] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const [startY, setStartY] = useState<number | null>(null);
+
+  function onPointerDown(e: React.PointerEvent) {
+    setStartY(e.clientY);
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e: React.PointerEvent) {
+    if (startY === null) return;
+    const dy = e.clientY - startY;
+    setDrag(dy > 0 ? dy : 0);
+  }
+  function onPointerUp(e: React.PointerEvent) {
+    if (startY === null) return;
+    setStartY(null);
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    setDragging(false);
+    if (drag > 110) onClose();
+    else requestAnimationFrame(() => setDrag(0));
+  }
+
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <div className="relative z-10 flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft">
+      <div
+        className="relative z-10 flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft"
+        style={{ transform: `translateY(${drag}px)`, transition: dragging ? 'none' : 'transform 0.3s cubic-bezier(0.4,0,0.2,1)' }}
+      >
+        {/* Drag handle */}
+        <div
+          className="shrink-0 cursor-grab touch-none px-4 pb-1 pt-2.5"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        >
+          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300" />
+          <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+          {subtitle && <p className="mt-0.5 text-sm text-text-muted">{subtitle}</p>}
+        </div>
         {children}
       </div>
     </div>
   );
 }
 
-function CloseBtn({ onClose }: { onClose: () => void }) {
-  return (
-    <button
-      onClick={onClose}
-      aria-label="Закрыть"
-      className="-mr-1 text-text-light transition-colors hover:text-text-secondary"
-    >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M18 6 6 18M6 6l12 12" />
-      </svg>
-    </button>
-  );
-}
+
+
 
 /** Bottom sheet «Выберите сет»: radio-список с глазком настройки. */
 export function SetPickerSheet({
@@ -76,15 +107,7 @@ export function SetPickerSheet({
   const selected = sets.find((s) => s.id === selectedId) ?? null;
 
   return (
-    <SheetShell onClose={onClose}>
-      <div className="flex shrink-0 items-start justify-between gap-3 px-4 pb-2 pt-3">
-        <div>
-          <h2 className="text-lg font-semibold text-text-primary">Сеты</h2>
-          <p className="mt-0.5 text-sm text-text-muted">Выберите сет</p>
-        </div>
-        <CloseBtn onClose={onClose} />
-      </div>
-
+    <SheetShell onClose={onClose} title="Сеты" subtitle="Выберите сет">
       <div className="no-scrollbar min-h-0 flex-1 space-y-1.5 overflow-y-auto px-4 pb-3 pt-1">
         {sets.map((s) => {
           const isSel = s.id === selectedId;
@@ -314,13 +337,7 @@ export function SetConfigSheet({
   const hasChanges = components.some((c) => c.action !== 'default');
 
   return (
-    <SheetShell onClose={onClose}>
-      {/* Шапка с текущей ценой */}
-      <div className="flex shrink-0 items-center justify-between gap-3 px-4 pb-3 pt-3">
-        <h2 className="text-lg font-semibold text-text-primary">Настроить сет</h2>
-        <CloseBtn onClose={onClose} />
-      </div>
-
+    <SheetShell onClose={onClose} title="Настроить сет">
       {/* Инфо-блок: название + актуальная цена */}
       <div className="shrink-0 px-4">
         <div className="flex items-center justify-between gap-3 rounded-xl bg-background px-3 py-2.5">
