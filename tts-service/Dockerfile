@@ -17,7 +17,7 @@ COPY app.py .
 
 # Модели кэшируются здесь; смонтируйте volume, чтобы не качать при каждом старте.
 ENV TTS_MODELS_DIR=/app/models
-VOLUME ["/app/models"]
+# VOLUME ["/app/models"]
 
 EXPOSE 8001
 # 1 воркер: модель тяжёлая, держим один процесс. Параллелизм — через torch threads.
