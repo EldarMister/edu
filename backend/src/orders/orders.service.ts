@@ -183,7 +183,7 @@ export class OrdersService {
       order = await this.prisma.$transaction(async (tx) => {
         const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
         const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
-        const totals = this.calcTotals(itemsData as Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount);
+        const totals = this.calcTotals(itemsData, serviceChargeAmount);
         const orderNumber = await this.nextOrderNumber(tx);
         await tx.table.update({
           where: { id: dto.tableId },
@@ -354,7 +354,7 @@ export class OrdersService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, order.items);
       const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
-      const totals = this.calcTotals(itemsData as Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount);
+      const totals = this.calcTotals(itemsData, serviceChargeAmount);
       await tx.order.update({
         where: { id: orderId },
         data: {
@@ -369,9 +369,7 @@ export class OrdersService {
         },
       });
       await tx.orderItem.deleteMany({ where: { orderId } });
-      await tx.orderItem.createMany({
-        data: itemsData.map((i) => ({ ...i, orderId })) as Prisma.OrderItemCreateManyInput[],
-      });
+      await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
       return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
@@ -481,9 +479,7 @@ export class OrdersService {
           return false;
         }
       }
-      await tx.orderItem.createMany({
-        data: itemsData.map((i) => ({ ...i, orderId })) as Prisma.OrderItemCreateManyInput[],
-      });
+      await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
       await this.recalcOrder(tx, orderId);
       // Новые блюда снова уходят на кухню.
@@ -1136,7 +1132,7 @@ export class OrdersService {
   // ---------- Внутренние помощники ----------
 
   private async buildItemsData(items: CreateOrderItemDto[]): Promise<{
-    itemsData: Prisma.OrderItemCreateManyOrderInput[];
+    itemsData: Prisma.OrderItemUncheckedCreateWithoutOrderInput[];
     dishDeductions: Map<string, number>;
     variantDeductions: Map<string, number>;
   }> {
@@ -1147,6 +1143,7 @@ export class OrdersService {
       include: {
         variants: { orderBy: { sortOrder: 'asc' } },
         category: { select: { prepStation: true } },
+        setComponents: { select: { dishId: true, quantity: true } },
       },
     });
     const byId = new Map(dishes.map((d) => [d.id, d]));
@@ -1155,10 +1152,28 @@ export class OrdersService {
       : [];
     const variantById = new Map(variants.map((variant) => [variant.id, variant]));
 
+    // Имена блюд состава сета (оригиналы + замены) — для снимков.
+    const componentDishIds = [
+      ...new Set(
+        items.flatMap((i) =>
+          (i.setComponents ?? []).flatMap((c) =>
+            [c.originalDishId, c.finalDishId].filter((x): x is string => !!x),
+          ),
+        ),
+      ),
+    ];
+    const componentDishes = componentDishIds.length
+      ? await this.prisma.dish.findMany({
+          where: { id: { in: componentDishIds } },
+          select: { id: true, name: true, isSet: true, isActive: true },
+        })
+      : [];
+    const compById = new Map(componentDishes.map((d) => [d.id, d]));
+
     const dishDeductions = new Map<string, number>();
     const variantDeductions = new Map<string, number>();
 
-    const itemsData = items.map((i) => {
+    const itemsData = items.map((i): Prisma.OrderItemUncheckedCreateWithoutOrderInput => {
       const dish = byId.get(i.dishId);
       if (!dish) {
         throw new BadRequestException(`Блюдо недоступно`);
@@ -1198,6 +1213,37 @@ export class OrdersService {
         }
       }
 
+      // Состав сета с изменениями (только для блюд-сетов).
+      let setComponents: Prisma.OrderItemSetComponentUncheckedCreateNestedManyWithoutOrderItemInput | undefined;
+      if (dish.isSet) {
+        const qtyByOrig = new Map(dish.setComponents.map((sc) => [sc.dishId, sc.quantity]));
+        const rows = (i.setComponents ?? []).map((c, idx) => {
+          const orig = compById.get(c.originalDishId);
+          if (!orig) throw new BadRequestException('Блюдо состава сета не найдено');
+          let finalDishId: string | null = null;
+          let finalNameSnapshot: string | null = null;
+          if (c.action === 'replaced') {
+            if (!c.finalDishId) throw new BadRequestException('Не указано блюдо замены');
+            const fin = compById.get(c.finalDishId);
+            if (!fin || !fin.isActive) throw new BadRequestException('Блюдо замены недоступно');
+            if (fin.isSet) throw new BadRequestException('Нельзя заменить на сет');
+            finalDishId = fin.id;
+            finalNameSnapshot = fin.name;
+          }
+          return {
+            originalDishId: c.originalDishId,
+            originalNameSnapshot: orig.name,
+            finalDishId,
+            finalNameSnapshot,
+            action: c.action,
+            quantity: qtyByOrig.get(c.originalDishId) ?? 1,
+            sortOrder: idx,
+            priceDelta: new Prisma.Decimal(0),
+          };
+        });
+        if (rows.length > 0) setComponents = { create: rows };
+      }
+
       const basePrice = variant?.price ?? dish.price;
       const { unit, unitDiscount, unitFinal } = unitPricing(
         basePrice,
@@ -1217,10 +1263,22 @@ export class OrdersService {
         // Направление позиции: приоритет у блюда, иначе — направление категории.
         prepStation: dish.prepStation ?? dish.category.prepStation,
         comment: i.comment,
+        setComponents,
       };
     });
 
     return { itemsData, dishDeductions, variantDeductions };
+  }
+
+  /** Создаёт позиции заказа по одной (поддерживает вложенный состав сета). */
+  private async createOrderItems(
+    tx: Prisma.TransactionClient,
+    orderId: string,
+    itemsData: Prisma.OrderItemUncheckedCreateWithoutOrderInput[],
+  ) {
+    for (const item of itemsData) {
+      await tx.orderItem.create({ data: { ...item, orderId } });
+    }
   }
 
   private async deductInventory(
@@ -1280,7 +1338,15 @@ export class OrdersService {
     }
   }
 
-  private calcTotals(items: Prisma.OrderItemCreateManyOrderInput[], serviceChargeAmount = 0) {
+  private calcTotals(
+    items: {
+      priceSnapshot: string | number | Prisma.Decimal | Prisma.DecimalJsLike;
+      quantity?: number | null;
+      discountAmount?: string | number | Prisma.Decimal | Prisma.DecimalJsLike | null;
+      finalPrice: string | number | Prisma.Decimal | Prisma.DecimalJsLike;
+    }[],
+    serviceChargeAmount = 0,
+  ) {
     let total = 0;
     let discount = 0;
     let final = 0;

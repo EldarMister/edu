@@ -216,14 +216,40 @@ model Dish {
   unit          String       @default("шт")
   // null = наследовать направление от категории; задано — приоритет над категорией.
   prepStation   PrepStation? @map("prep_station")
+  // true — это «шапка» сета (состав в SetComponent), а не обычное блюдо.
+  isSet         Boolean      @default(false) @map("is_set")
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
   category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   orderItems OrderItem[]
   variants   DishVariant[]
+  // Состав сета (если это сет) и вхождения этого блюда в чужие сеты.
+  setComponents     SetComponent[] @relation("SetOf")
+  inSetComponents   SetComponent[] @relation("ComponentOf")
+  // Снимки этого блюда в изменённых составах заказов.
+  origOrderSetItems  OrderItemSetComponent[] @relation("OrigDish")
+  finalOrderSetItems OrderItemSetComponent[] @relation("FinalDish")
 
   @@map("dishes")
+}
+
+model SetComponent {
+  id          String   @id @default(uuid())
+  setId       String   @map("set_id")
+  dishId      String   @map("dish_id")
+  quantity    Int      @default(1)
+  sortOrder   Int      @default(0) @map("sort_order")
+  removable   Boolean  @default(true)
+  replaceable Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  set  Dish @relation("SetOf", fields: [setId], references: [id], onDelete: Cascade)
+  dish Dish @relation("ComponentOf", fields: [dishId], references: [id], onDelete: Cascade)
+
+  @@index([setId])
+  @@index([dishId])
+  @@map("set_components")
 }
 
 model DishVariant {
@@ -334,10 +360,40 @@ model OrderItem {
   order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   dish        Dish         @relation(fields: [dishId], references: [id])
   dishVariant DishVariant? @relation(fields: [dishVariantId], references: [id], onDelete: SetNull)
+  // Состав сета с изменениями (если эта позиция — сет).
+  setComponents OrderItemSetComponent[]
 
   @@index([orderId])
   @@index([dishVariantId])
   @@map("order_items")
+}
+
+enum SetComponentAction {
+  default
+  removed
+  replaced
+}
+
+model OrderItemSetComponent {
+  id                   String             @id @default(uuid())
+  orderItemId          String             @map("order_item_id")
+  originalDishId       String             @map("original_dish_id")
+  originalNameSnapshot String             @map("original_name_snapshot")
+  finalDishId          String?            @map("final_dish_id")
+  finalNameSnapshot    String?            @map("final_name_snapshot")
+  action               SetComponentAction @default(default)
+  quantity             Int                @default(1)
+  sortOrder            Int                @default(0) @map("sort_order")
+  comment              String?
+  priceDelta           Decimal            @default(0) @map("price_delta") @db.Decimal(10, 2)
+  createdAt            DateTime           @default(now()) @map("created_at")
+
+  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  originalDish Dish      @relation("OrigDish", fields: [originalDishId], references: [id])
+  finalDish    Dish?     @relation("FinalDish", fields: [finalDishId], references: [id])
+
+  @@index([orderItemId])
+  @@map("order_item_set_components")
 }
 
 model Payment {

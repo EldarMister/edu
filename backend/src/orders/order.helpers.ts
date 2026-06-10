@@ -20,6 +20,18 @@ export const orderInclude = {
       prepStation: true,
       comment: true,
       rejectReason: true,
+      setComponents: {
+        orderBy: { sortOrder: 'asc' as const },
+        select: {
+          id: true,
+          action: true,
+          originalDishId: true,
+          originalNameSnapshot: true,
+          finalDishId: true,
+          finalNameSnapshot: true,
+          quantity: true,
+        },
+      },
     },
   },
 } satisfies Prisma.OrderInclude;

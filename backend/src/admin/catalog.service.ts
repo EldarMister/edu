@@ -8,11 +8,14 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import {
   CreateCategoryDto,
   CreateDishDto,
+  CreateSetDto,
   DishVariantDto,
   CreateHallDto,
   CreateTableDto,
+  SetComponentDto,
   UpdateCategoryDto,
   UpdateDishDto,
+  UpdateSetDto,
   UpdateHallDto,
   UpdateTableDto,
 } from './dto';
@@ -220,10 +223,7 @@ export class CatalogService {
     return this.prisma.dish.findMany({
       where,
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      include: {
-        category: { select: { id: true, name: true } },
-        variants: { orderBy: { sortOrder: 'asc' } },
-      },
+      include: this.dishInclude(),
     });
   }
 
@@ -269,6 +269,16 @@ export class CatalogService {
     return {
       category: { select: { id: true, name: true } },
       variants: { orderBy: { sortOrder: 'asc' as const } },
+      setComponents: {
+        orderBy: { sortOrder: 'asc' as const },
+        select: {
+          id: true,
+          quantity: true,
+          removable: true,
+          replaceable: true,
+          dish: { select: { id: true, name: true, price: true } },
+        },
+      },
     };
   }
 
@@ -458,6 +468,113 @@ export class CatalogService {
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: id });
     return result;
+  }
+
+  // ===================== СЕТЫ =====================
+
+  /** Все сеты (включая неактивные) с составом — для управления. */
+  setsAll() {
+    return this.prisma.dish.findMany({
+      where: { isSet: true },
+      orderBy: [{ isActive: 'desc' }, { sortOrder: 'asc' }, { name: 'asc' }],
+      include: this.dishInclude(),
+    });
+  }
+
+  async createSet(dto: CreateSetDto, actor: AuditActor) {
+    await this.validateSetComponents(dto.components);
+    const categoryId = await this.ensureSetsCategory();
+    const set = await this.prisma.dish.create({
+      data: {
+        name: dto.name,
+        categoryId,
+        price: new Prisma.Decimal(dto.price),
+        isSet: true,
+        trackInventory: false,
+        setComponents: { create: this.mapSetComponents(dto.components) },
+      },
+      include: this.dishInclude(),
+    });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.MENU_ITEM_CREATED,
+      entityType: AuditEntity.MENU_ITEM,
+      entityId: set.id,
+      description: `${actor.name ?? 'Сотрудник'} создал сет «${set.name}» (${Number(set.price)} с, ${dto.components.length} поз.)`,
+      newValue: { name: set.name, price: Number(set.price), isSet: true },
+    });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: set.id });
+    return set;
+  }
+
+  async updateSet(id: string, dto: UpdateSetDto, actor: AuditActor) {
+    const set = await this.prisma.dish.findUnique({ where: { id } });
+    if (!set || !set.isSet) throw new NotFoundException('Сет не найден');
+    if (dto.components) await this.validateSetComponents(dto.components);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (dto.components) {
+        await tx.setComponent.deleteMany({ where: { setId: id } });
+        await tx.setComponent.createMany({
+          data: this.mapSetComponents(dto.components).map((c) => ({ ...c, setId: id })),
+        });
+      }
+      return tx.dish.update({
+        where: { id },
+        data: {
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
+          ...(dto.price !== undefined ? { price: new Prisma.Decimal(dto.price) } : {}),
+          ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        },
+        include: this.dishInclude(),
+      });
+    });
+
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.MENU_ITEM_UPDATED,
+      entityType: AuditEntity.MENU_ITEM,
+      entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} изменил сет «${updated.name}»`,
+      oldValue: { name: set.name, price: Number(set.price) },
+      newValue: { name: updated.name, price: Number(updated.price) },
+    });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: id });
+    return updated;
+  }
+
+  private mapSetComponents(components: SetComponentDto[]) {
+    return components.map((c, idx) => ({
+      dishId: c.dishId,
+      quantity: c.quantity ?? 1,
+      sortOrder: idx,
+      removable: c.removable ?? true,
+      replaceable: c.replaceable ?? true,
+    }));
+  }
+
+  /** Компоненты сета должны быть существующими активными обычными блюдами (не сетами). */
+  private async validateSetComponents(components: SetComponentDto[]) {
+    const ids = [...new Set(components.map((c) => c.dishId))];
+    if (ids.length === 0) throw new BadRequestException('Добавьте блюда в состав сета');
+    const dishes = await this.prisma.dish.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, isSet: true, isActive: true },
+    });
+    if (dishes.length !== ids.length) throw new BadRequestException('Блюдо состава не найдено');
+    if (dishes.some((d) => d.isSet)) throw new BadRequestException('Нельзя добавить сет внутрь сета');
+    if (dishes.some((d) => !d.isActive)) throw new BadRequestException('Блюдо состава отключено');
+  }
+
+  /** Категория «Сеты» (создаётся при необходимости). */
+  private async ensureSetsCategory(): Promise<string> {
+    const existing = await this.prisma.category.findFirst({ where: { name: 'Сеты' } });
+    if (existing) return existing.id;
+    const agg = await this.prisma.category.aggregate({ _max: { sortOrder: true } });
+    const cat = await this.prisma.category.create({
+      data: { name: 'Сеты', sortOrder: (agg._max.sortOrder ?? 0) + 1 },
+    });
+    return cat.id;
   }
 
   private async ensureCategory(id: string) {

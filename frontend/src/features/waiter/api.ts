@@ -143,6 +143,23 @@ export function useEndShift() {
   });
 }
 
+/** Преобразует линии корзины в позиции заказа (учитывает состав сета). */
+function linesToItems(lines: CartLine[]) {
+  return lines.map((l) => ({
+    dishId: l.dish.id,
+    variantId: l.variant?.id,
+    quantity: l.quantity,
+    comment: l.comment?.trim() || undefined,
+    setComponents: l.set
+      ? l.set.components.map((c) => ({
+          originalDishId: c.originalDishId,
+          finalDishId: c.action === 'replaced' ? c.finalDishId : undefined,
+          action: c.action,
+        }))
+      : undefined,
+  }));
+}
+
 export function useCreateOrder() {
   const qc = useQueryClient();
   return useMutation({
@@ -152,12 +169,7 @@ export function useCreateOrder() {
       idempotencyKey: string;
       lines: CartLine[];
     }) => {
-      const items = payload.lines.map((l) => ({
-        dishId: l.dish.id,
-        variantId: l.variant?.id,
-        quantity: l.quantity,
-        comment: l.comment?.trim() || undefined,
-      }));
+      const items = linesToItems(payload.lines);
       const { data } = await api.post<Order>('/orders', {
         tableId: payload.tableId,
         comment: payload.comment?.trim() || undefined,
@@ -179,12 +191,7 @@ export function useAddItems() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: { orderId: string; idempotencyKey: string; lines: CartLine[] }) => {
-      const items = payload.lines.map((l) => ({
-        dishId: l.dish.id,
-        variantId: l.variant?.id,
-        quantity: l.quantity,
-        comment: l.comment?.trim() || undefined,
-      }));
+      const items = linesToItems(payload.lines);
       const { data } = await api.post<Order>(`/orders/${payload.orderId}/items`, {
         idempotencyKey: payload.idempotencyKey,
         items,
@@ -204,12 +211,7 @@ export function useEditOrder() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: { orderId: string; comment?: string; lines: CartLine[] }) => {
-      const items = payload.lines.map((l) => ({
-        dishId: l.dish.id,
-        variantId: l.variant?.id,
-        quantity: l.quantity,
-        comment: l.comment?.trim() || undefined,
-      }));
+      const items = linesToItems(payload.lines);
       const { data } = await api.patch<Order>(`/orders/${payload.orderId}`, {
         comment: payload.comment?.trim() || undefined,
         items,

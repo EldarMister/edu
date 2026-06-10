@@ -114,30 +114,49 @@ export function KitchenOrderCard({
             it.status === 'ready' || it.status === 'served' || (pending && pendingType === 'ready');
           const selectable = isSelectable(it.status, it.id);
           const itemName = orderItemDisplayName(it);
+          const setParts = it.setComponents ?? [];
           return (
-            <li key={it.id} className="flex items-center gap-2 text-[13.5px]">
-              {canSelect && (
-                selectable ? (
-                  <input
-                    type="checkbox"
-                    checked={selected.has(it.id)}
-                    onChange={() => toggle(it.id)}
-                    className="h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
-                  />
-                ) : (
-                  <span className="h-4 w-4 shrink-0" />
-                )
+            <li key={it.id} className="text-[13.5px]">
+              <div className="flex items-center gap-2">
+                {canSelect && (
+                  selectable ? (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(it.id)}
+                      onChange={() => toggle(it.id)}
+                      className="h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary"
+                    />
+                  ) : (
+                    <span className="h-4 w-4 shrink-0" />
+                  )
+                )}
+                <span
+                  className={`min-w-0 flex-1 truncate ${
+                    rejected ? 'text-danger line-through' : isReady ? 'text-text-muted' : 'text-text-primary'
+                  }`}
+                >
+                  <span className="font-medium">{it.quantity}×</span> {itemName}
+                  {it.comment && <span className="text-warning"> · {it.comment}</span>}
+                </span>
+                {isReady && <span className="shrink-0 text-xs font-semibold text-green-600">✓ Готово</span>}
+                {rejected && <span className="shrink-0 text-xs font-medium text-danger">Отказ</span>}
+              </div>
+              {setParts.length > 0 && (
+                <ul className={`mt-0.5 space-y-0.5 text-[12px] ${canSelect ? 'pl-6' : 'pl-3'}`}>
+                  {setParts.map((sc) => (
+                    <li
+                      key={sc.id}
+                      className={sc.action === 'removed' ? 'text-danger' : 'text-text-muted'}
+                    >
+                      {sc.action === 'replaced'
+                        ? `Замена: ${sc.originalNameSnapshot} → ${sc.finalNameSnapshot}`
+                        : sc.action === 'removed'
+                          ? `Без ${sc.originalNameSnapshot}`
+                          : `• ${sc.originalNameSnapshot}`}
+                    </li>
+                  ))}
+                </ul>
               )}
-              <span
-                className={`min-w-0 flex-1 truncate ${
-                  rejected ? 'text-danger line-through' : isReady ? 'text-text-muted' : 'text-text-primary'
-                }`}
-              >
-                <span className="font-medium">{it.quantity}×</span> {itemName}
-                {it.comment && <span className="text-warning"> · {it.comment}</span>}
-              </span>
-              {isReady && <span className="shrink-0 text-xs font-semibold text-green-600">✓ Готово</span>}
-              {rejected && <span className="shrink-0 text-xs font-medium text-danger">Отказ</span>}
             </li>
           );
         })}

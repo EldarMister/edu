@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMinSize,
   IsBoolean,
   IsEnum,
   IsInt,
@@ -203,6 +204,47 @@ export class UpdateDishDto {
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
   variants?: DishVariantDto[];
+}
+
+// ---------- Сеты ----------
+export class SetComponentDto {
+  @IsString() @IsNotEmpty()
+  dishId: string;
+
+  @IsOptional() @IsInt() @Min(1)
+  quantity?: number;
+
+  @IsOptional() @IsBoolean()
+  removable?: boolean;
+
+  @IsOptional() @IsBoolean()
+  replaceable?: boolean;
+}
+
+export class CreateSetDto {
+  @IsString() @IsNotEmpty() @MaxLength(120)
+  name: string;
+
+  @IsNumber() @Min(0.01)
+  price: number;
+
+  @IsArray() @ArrayMinSize(1, { message: 'Добавьте хотя бы одно блюдо в состав' })
+  @ValidateNested({ each: true }) @Type(() => SetComponentDto)
+  components: SetComponentDto[];
+}
+
+export class UpdateSetDto {
+  @IsOptional() @IsString() @MaxLength(120)
+  name?: string;
+
+  @IsOptional() @IsNumber() @Min(0.01)
+  price?: number;
+
+  @IsOptional() @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => SetComponentDto)
+  components?: SetComponentDto[];
 }
 
 // ---------- Персонал ----------

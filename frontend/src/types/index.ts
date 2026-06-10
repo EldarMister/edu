@@ -76,7 +76,32 @@ export interface Dish {
   unit?: string;
   /** null/undefined = брать направление из категории. */
   prepStation?: PrepStation | null;
+  /** true — это сет (состав в setComponents). */
+  isSet?: boolean;
+  setComponents?: SetComponentDef[];
   variants: DishVariant[];
+}
+
+/** Блюдо в составе сета (из меню). */
+export interface SetComponentDef {
+  id: string;
+  quantity: number;
+  removable: boolean;
+  replaceable: boolean;
+  dish: { id: string; name: string; price: string };
+}
+
+export type SetComponentAction = 'default' | 'removed' | 'replaced';
+
+/** Состав сета в позиции заказа (для корзины/кухни). */
+export interface OrderSetComponent {
+  id: string;
+  action: SetComponentAction;
+  originalDishId: string;
+  originalNameSnapshot: string;
+  finalDishId: string | null;
+  finalNameSnapshot: string | null;
+  quantity: number;
 }
 
 export type OrderStatus =
@@ -135,6 +160,7 @@ export interface OrderItem {
   prepStation: PrepStation;
   comment: string | null;
   rejectReason: string | null;
+  setComponents?: OrderSetComponent[];
 }
 
 export interface Order {
@@ -201,11 +227,27 @@ export interface ReceiptPrintRequest {
 }
 
 /** Локальная позиция корзины (до отправки на кухню). */
+/** Компонент сета в корзине (с применённым изменением). */
+export interface CartSetComponent {
+  componentId: string;
+  originalDishId: string;
+  originalName: string;
+  quantity: number;
+  removable: boolean;
+  replaceable: boolean;
+  action: SetComponentAction;
+  finalDishId?: string;
+  finalName?: string;
+}
+
 export interface CartLine {
   dish: Dish;
   variant?: DishVariant;
   quantity: number;
   comment?: string;
+  /** Для сетов: уникальный id линии (сеты не сливаются) и изменённый состав. */
+  lineId?: string;
+  set?: { components: CartSetComponent[] };
 }
 
 export type NotificationType = 'info' | 'success' | 'error';

@@ -44,7 +44,16 @@ export interface AdminDish {
   initialStock?: number;
   unit?: string;
   prepStation: PrepStation | null;
+  isSet?: boolean;
+  setComponents?: AdminSetComponent[];
   variants: AdminDishVariant[];
+}
+export interface AdminSetComponent {
+  id: string;
+  quantity: number;
+  removable: boolean;
+  replaceable: boolean;
+  dish: { id: string; name: string; price: string };
 }
 export interface AdminDishVariant {
   id: string;
@@ -392,6 +401,47 @@ export function useDishMutations() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/admin/dishes/${id}`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove };
+}
+
+// ---------- Сеты ----------
+export interface SetComponentInput {
+  dishId: string;
+  quantity?: number;
+  removable?: boolean;
+  replaceable?: boolean;
+}
+export interface SetInput {
+  name: string;
+  price: number;
+  components: SetComponentInput[];
+}
+export function useAdminSets() {
+  return useQuery({
+    queryKey: ['admin', 'sets'],
+    queryFn: () => get<AdminDish[]>('/admin/sets'),
+  });
+}
+export function useSetMutations() {
+  const invalidate = useInvalidate([
+    ['admin', 'sets'],
+    ['admin', 'dishes'],
+    ['admin', 'menu', 'overview'],
+    ['admin', 'categories'],
+  ]);
+  const create = useMutation({
+    mutationFn: (b: SetInput) => api.post('/admin/sets', b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...b }: { id: string } & Partial<SetInput> & { isActive?: boolean }) =>
+      api.patch(`/admin/sets/${id}`, b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/sets/${id}`).then((r) => r.data),
     onSuccess: invalidate,
   });
   return { create, update, remove };

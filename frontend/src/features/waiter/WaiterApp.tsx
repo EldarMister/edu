@@ -187,6 +187,30 @@ export function WaiterApp() {
       .map((it) => {
         const dish = dishById.get(it.dishId);
         if (!dish) return null;
+        // Сет — восстанавливаем линию с изменённым составом.
+        if (dish.isSet && it.setComponents?.length) {
+          const defs = new Map((dish.setComponents ?? []).map((sc) => [sc.dish.id, sc]));
+          const components = it.setComponents.map((sc) => {
+            const def = defs.get(sc.originalDishId);
+            return {
+              componentId: def?.id ?? sc.id,
+              originalDishId: sc.originalDishId,
+              originalName: sc.originalNameSnapshot,
+              quantity: sc.quantity,
+              removable: def?.removable ?? true,
+              replaceable: def?.replaceable ?? true,
+              action: sc.action,
+              finalDishId: sc.finalDishId ?? undefined,
+              finalName: sc.finalNameSnapshot ?? undefined,
+            };
+          });
+          return {
+            dish,
+            quantity: it.quantity,
+            lineId: `set-edit-${it.id}`,
+            set: { components },
+          } as CartLine;
+        }
         const variant = it.dishVariantId
           ? dish.variants.find((candidate) => candidate.id === it.dishVariantId)
           : undefined;
@@ -268,6 +292,11 @@ export function WaiterApp() {
     cart.add(dish, variant);
     const name = variant ? `${dish.name} · ${variant.name}` : dish.name;
     push({ message: `${name} ×${nextQuantity} добавлено`, at: new Date().toISOString() });
+  }
+
+  function addSetToCart(set: Parameters<typeof cart.addSet>[0], components: Parameters<typeof cart.addSet>[1]) {
+    cart.addSet(set, components);
+    push({ message: `${set.name} добавлен`, at: new Date().toISOString() });
   }
 
   async function goToPayment(order: Order) {
@@ -427,6 +456,7 @@ export function WaiterApp() {
         dishes={dishesQ.data ?? []}
         quantities={cartQuantities}
         onAdd={addDishToCart}
+        onAddSet={addSetToCart}
         onDec={(d) => cart.dec(cartLineKeyFromParts(d.id))}
         disabled={!selectedTable}
       />
@@ -441,6 +471,7 @@ export function WaiterApp() {
         dishes={dishesQ.data ?? []}
         quantities={cartQuantities}
         onAdd={addDishToCart}
+        onAddSet={addSetToCart}
         onDec={(d) => cart.dec(cartLineKeyFromParts(d.id))}
         disabled={!selectedTable}
         tableSlot={

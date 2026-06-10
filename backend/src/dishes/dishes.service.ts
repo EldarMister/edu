@@ -29,6 +29,7 @@ export class DishesService {
         discountType: true,
         discountValue: true,
         isAvailable: true,
+        isSet: true,
         variants: {
           orderBy: { sortOrder: 'asc' },
           select: {
@@ -36,6 +37,16 @@ export class DishesService {
             name: true,
             price: true,
             sortOrder: true,
+          },
+        },
+        setComponents: {
+          orderBy: { sortOrder: 'asc' },
+          select: {
+            id: true,
+            quantity: true,
+            removable: true,
+            replaceable: true,
+            dish: { select: { id: true, name: true, price: true } },
           },
         },
       },
