@@ -1,0 +1,7 @@
+# Silero Kitchen TTS — зависимости.
+# torch (CPU) ставится отдельно в Dockerfile через CPU-индекс, чтобы не тянуть CUDA.
+fastapi>=0.110
+uvicorn[standard]>=0.27
+soundfile>=0.12
+numpy>=1.24
+pydantic>=2.5

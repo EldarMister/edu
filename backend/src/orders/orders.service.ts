@@ -26,6 +26,7 @@ import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
+import { buildNewOrderText, buildChangedText, buildCancelText } from '../tts/kitchen-voice';
 
 /** Статусы «живого» заказа, который занимает стол. */
 const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
@@ -232,7 +233,10 @@ export class OrdersService {
 
     // Real-time: кухня получает новый заказ только если есть что готовить.
     if (hasPrep) {
-      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, order);
+      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
+        ...order,
+        voice: { text: buildNewOrderText(order) },
+      });
       this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
       void this.notifyKitchenNewOrder(order);
     }
@@ -392,7 +396,10 @@ export class OrdersService {
 
     // Уведомляем кухню — звук + обновление списка, только если есть что готовить.
     if (hasPrep) {
-      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
+      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
+        ...updated,
+        voice: { text: buildChangedText(updated) },
+      });
       void this.notifyKitchenNewOrder(updated);
     }
     if (nextTableStatus) {
@@ -525,7 +532,10 @@ export class OrdersService {
     const updated = await this.findById(orderId);
     if (applied) {
       if (hasPrepAdded) {
-        this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, updated);
+        this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
+          ...updated,
+          voice: { text: buildChangedText(updated) },
+        });
         void this.notifyKitchenNewOrder(updated);
       }
       this.emitStatusChanged(updated);
@@ -1413,6 +1423,7 @@ export class OrdersService {
         dishVariantId: variant?.id,
         dishNameSnapshot: dish.name,
         dishVariantNameSnapshot: variant?.name,
+        dishVoiceSnapshot: dish.voiceName ?? null,
         priceSnapshot: new Prisma.Decimal(unit),
         quantity: i.quantity,
         discountAmount: new Prisma.Decimal(round2(unitDiscount * i.quantity)),
@@ -1887,9 +1898,15 @@ export class OrdersService {
   }
 
   private emitStatusChanged(order: { waiterId: string } & Record<string, unknown>) {
-    this.events.emitToWaiter(order.waiterId, SERVER_EVENTS.ORDER_STATUS_CHANGED, order);
-    this.events.emitToKitchen(SERVER_EVENTS.ORDER_STATUS_CHANGED, order);
-    this.events.emitToAdmin(SERVER_EVENTS.ORDER_STATUS_CHANGED, order);
+    // Полная отмена/отказ — добавляем озвучку «Заказ номер … отменён» (ТЗ §4).
+    const status = order.status as OrderStatus | undefined;
+    let payload = order;
+    if (status === OrderStatus.cancelled || status === OrderStatus.rejected) {
+      payload = { ...order, voice: { text: buildCancelText({ orderNumber: String(order.orderNumber) }) } };
+    }
+    this.events.emitToWaiter(order.waiterId, SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
+    this.events.emitToKitchen(SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
+    this.events.emitToAdmin(SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
   }
 
   private emitTableStatus(id: string, number: number, status: TableStatus, hallId: string) {
