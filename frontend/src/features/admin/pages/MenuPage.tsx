@@ -125,6 +125,11 @@ export function MenuPage() {
                             Бар
                           </span>
                         )}
+                        {dishStation(d) === 'none' && (
+                          <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+                            Без отправки
+                          </span>
+                        )}
                       </p>
                       {d.variants.length > 0 && (
                         <p className="text-xs font-medium text-primary">{variantNamesLine(d.variants)}</p>
@@ -243,7 +248,7 @@ function DishModal({
   const [description, setDescription] = useState(dish?.description ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
   // '' = брать направление из категории; иначе приоритет блюда.
-  const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar'>(dish?.prepStation ?? '');
+  const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar' | 'none'>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -365,11 +370,12 @@ function DishModal({
             <Select
               className="h-11 w-full"
               value={prepStation}
-              onChange={(v) => setPrepStation(v as '' | 'kitchen' | 'bar')}
+              onChange={(v) => setPrepStation(v as '' | 'kitchen' | 'bar' | 'none')}
               options={[
                 { value: '', label: 'По категории' },
                 { value: 'kitchen', label: 'Кухня' },
                 { value: 'bar', label: 'Бар' },
+                { value: 'none', label: 'Без отправки' },
               ]}
             />
           </Field>
@@ -500,7 +506,7 @@ function CategoryModal({
   const { create, update, remove } = useCategoryMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState('');
-  const [prepStation, setPrepStation] = useState<'kitchen' | 'bar'>('kitchen');
+  const [prepStation, setPrepStation] = useState<'kitchen' | 'bar' | 'none'>('kitchen');
   const [error, setError] = useState('');
 
   async function add() {
@@ -516,7 +522,7 @@ function CategoryModal({
     }
   }
 
-  async function changeStation(id: string, value: 'kitchen' | 'bar') {
+  async function changeStation(id: string, value: 'kitchen' | 'bar' | 'none') {
     try {
       await update.mutateAsync({ id, prepStation: value });
     } catch (err) {
@@ -544,12 +550,13 @@ function CategoryModal({
           onKeyDown={(e) => e.key === 'Enter' && add()}
         />
         <Select
-          className="h-11 w-32 shrink-0"
+          className="h-11 w-40 shrink-0"
           value={prepStation}
-          onChange={(v) => setPrepStation(v as 'kitchen' | 'bar')}
+          onChange={(v) => setPrepStation(v as 'kitchen' | 'bar' | 'none')}
           options={[
             { value: 'kitchen', label: 'Кухня' },
             { value: 'bar', label: 'Бар' },
+            { value: 'none', label: 'Без отправки' },
           ]}
         />
         <button className="btn-primary btn-md shrink-0" disabled={create.isPending} onClick={add}>
@@ -563,12 +570,13 @@ function CategoryModal({
             <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{c.name}</span>
             <div className="flex shrink-0 items-center gap-3">
               <Select
-                className="h-9 w-28"
+                className="h-9 w-36"
                 value={c.prepStation ?? 'kitchen'}
-                onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar')}
+                onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar' | 'none')}
                 options={[
                   { value: 'kitchen', label: 'Кухня' },
                   { value: 'bar', label: 'Бар' },
+                  { value: 'none', label: 'Без отправки' },
                 ]}
               />
               <span className="text-xs text-text-muted">{c._count.dishes} блюд</span>

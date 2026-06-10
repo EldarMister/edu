@@ -27,6 +27,8 @@ enum Role {
 enum PrepStation {
   kitchen
   bar
+  // «Без отправки» — официант забирает сам: позиция не уходит на кухню/бар.
+  none
 }
 
 enum TableStatus {
