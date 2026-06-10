@@ -126,7 +126,9 @@ export function KitchenOrderCard({
                       type="checkbox"
                       checked={selected.has(it.id)}
                       onChange={() => toggle(it.id)}
-                      className="h-[22px] w-[22px] shrink-0 cursor-pointer rounded-[6px] border-border accent-primary"
+                      className={`h-[22px] w-[22px] shrink-0 cursor-pointer rounded-[6px] border-border accent-primary transition-opacity ${
+                        selected.has(it.id) ? 'opacity-100' : 'opacity-0'
+                      }`}
                     />
                   ) : (
                     <span className="h-[22px] w-[22px] shrink-0" />
