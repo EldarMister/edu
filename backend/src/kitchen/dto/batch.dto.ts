@@ -1,17 +1,29 @@
-import { ArrayNotEmpty, IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class ReadyItemsDto {
+  @IsOptional()
   @IsArray()
-  @ArrayNotEmpty({ message: 'Выберите хотя бы одно блюдо' })
   @IsString({ each: true })
-  itemIds: string[];
+  itemIds?: string[];
+
+  /** id блюд внутри сетов — кухня отмечает их по отдельности. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  setComponentIds?: string[];
 }
 
 export class RejectItemsDto {
+  @IsOptional()
   @IsArray()
-  @ArrayNotEmpty({ message: 'Выберите хотя бы одно блюдо' })
   @IsString({ each: true })
-  itemIds: string[];
+  itemIds?: string[];
+
+  /** id блюд внутри сетов — кухня отказывает их по отдельности. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  setComponentIds?: string[];
 
   @IsOptional()
   @IsString()

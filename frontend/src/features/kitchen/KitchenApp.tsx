@@ -26,6 +26,7 @@ type PendingAction = {
   orderId: string;
   type: 'reject' | 'ready';
   itemIds: string[];
+  setComponentIds: string[];
   deadline: number;
 };
 
@@ -77,10 +78,8 @@ export function KitchenApp({
 
   // Отправляет отложенное действие на сервер (= «уходит официанту»).
   function commit(p: PendingAction) {
-    const run =
-      p.type === 'reject'
-        ? rejectItems.mutateAsync({ orderId: p.orderId, itemIds: p.itemIds })
-        : readyItems.mutateAsync({ orderId: p.orderId, itemIds: p.itemIds });
+    const payload = { orderId: p.orderId, itemIds: p.itemIds, setComponentIds: p.setComponentIds };
+    const run = p.type === 'reject' ? rejectItems.mutateAsync(payload) : readyItems.mutateAsync(payload);
     run.catch((err) => push({ message: apiError(err), at: new Date().toISOString() }));
   }
 
@@ -95,10 +94,14 @@ export function KitchenApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pending]);
 
-  function onBatch(orderId: string, type: 'reject' | 'ready', itemIds: string[]) {
+  function onBatch(
+    orderId: string,
+    type: 'reject' | 'ready',
+    ids: { itemIds: string[]; setComponentIds: string[] },
+  ) {
     // Новое действие, пока предыдущее не подтверждено — фиксируем предыдущее сразу.
     if (pending) commit(pending);
-    setPending({ orderId, type, itemIds, deadline: Date.now() + UNDO_SECONDS * 1000 });
+    setPending({ orderId, type, ...ids, deadline: Date.now() + UNDO_SECONDS * 1000 });
   }
 
   function cancelPending() {
@@ -199,10 +202,12 @@ export function KitchenApp({
                 tab={tab}
                 now={now}
                 submitting={actingId === o.id}
-                pendingItemIds={pending?.orderId === o.id ? pending.itemIds : []}
+                pendingItemIds={
+                  pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []
+                }
                 pendingType={pending?.orderId === o.id ? pending.type : null}
                 onAccept={() => act(o.id, () => accept.mutateAsync(o.id))}
-                onBatch={(type, itemIds) => onBatch(o.id, type, itemIds)}
+                onBatch={(type, ids) => onBatch(o.id, type, ids)}
               />
             ))}
           </div>
@@ -221,7 +226,8 @@ export function KitchenApp({
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-[15px] font-semibold text-text-primary">
-                {pending.itemIds.length} {pluralPositions(pending.itemIds.length)}{' '}
+                {pending.itemIds.length + pending.setComponentIds.length}{' '}
+                {pluralPositions(pending.itemIds.length + pending.setComponentIds.length)}{' '}
                 {pending.type === 'reject' ? 'помечены как отказ' : 'помечены как готовые'}
               </p>
               <p className="text-[13px] text-text-muted">

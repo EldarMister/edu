@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import type { Order, OrderItemStatus } from '@/types';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
 import type { KitchenTab } from './api';
 import { OrderBadge } from '@/components/StatusBadge';
 import { displayOrderNumber, timeHM, elapsed, orderItemDisplayName } from '@/lib/format';
@@ -28,7 +28,10 @@ export function KitchenOrderCard({
   pendingItemIds: string[];
   pendingType: 'reject' | 'ready' | null;
   onAccept: () => void;
-  onBatch: (type: 'reject' | 'ready', itemIds: string[]) => void;
+  onBatch: (
+    type: 'reject' | 'ready',
+    ids: { itemIds: string[]; setComponentIds: string[] },
+  ) => void;
 }) {
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
   const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
@@ -40,21 +43,38 @@ export function KitchenOrderCard({
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  // Блюдо можно выбрать, если оно ещё «живое» и по нему нет отложенного действия.
+  // Карта статусов по id — и обычные позиции, и блюда внутри сетов.
+  // id блюд состава нужны, чтобы при отправке разделить их от обычных позиций.
+  const { statusById, componentIds } = useMemo(() => {
+    const statusById = new Map<string, OrderItemStatus>();
+    const componentIds = new Set<string>();
+    for (const it of order.items) {
+      statusById.set(it.id, it.status);
+      for (const sc of it.setComponents ?? []) {
+        statusById.set(sc.id, sc.status);
+        componentIds.add(sc.id);
+      }
+    }
+    return { statusById, componentIds };
+  }, [order.items]);
+
+  // Позицию можно выбрать, если она ещё «живая» и по ней нет отложенного действия.
   const isSelectable = (status: OrderItemStatus, id: string) =>
     canSelect && !FINAL_ITEM_STATUSES.includes(status) && !pendingItemIds.includes(id);
 
   // Чистим выбор от позиций, которые стали невыбираемыми (обновление по сокету / отложенное действие).
   useEffect(() => {
     setSelected((prev) => {
-      const next = new Set([...prev].filter((id) => {
-        const it = order.items.find((i) => i.id === id);
-        return it && isSelectable(it.status, id);
-      }));
+      const next = new Set(
+        [...prev].filter((id) => {
+          const status = statusById.get(id);
+          return status !== undefined && isSelectable(status, id);
+        }),
+      );
       return next.size === prev.size ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [order.items, pendingItemIds]);
+  }, [statusById, pendingItemIds]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -66,8 +86,57 @@ export function KitchenOrderCard({
 
   function runBatch(type: 'reject' | 'ready') {
     if (selected.size === 0) return;
-    onBatch(type, [...selected]);
+    const itemIds: string[] = [];
+    const setComponentIds: string[] = [];
+    for (const id of selected) (componentIds.has(id) ? setComponentIds : itemIds).push(id);
+    onBatch(type, { itemIds, setComponentIds });
     setSelected(new Set());
+  }
+
+  /** Подпись блюда состава сета для кухни. */
+  const componentLabel = (sc: OrderSetComponent) =>
+    sc.action === 'replaced'
+      ? `Замена: ${sc.originalNameSnapshot} → ${sc.finalNameSnapshot}`
+      : sc.originalNameSnapshot;
+
+  // Единая строка позиции — и для обычных блюд, и для блюд внутри сета.
+  // Сам сет — контейнер (container), его нельзя выбрать целиком: действия идут по составу.
+  function renderLine(
+    id: string,
+    status: OrderItemStatus,
+    content: ReactNode,
+    opts?: { container?: boolean },
+  ) {
+    const selectable = !opts?.container && isSelectable(status, id);
+    const pending = pendingItemIds.includes(id);
+    const rejected = status === 'rejected' || (pending && pendingType === 'reject');
+    const isReady = status === 'ready' || status === 'served' || (pending && pendingType === 'ready');
+    return (
+      <div
+        className={`flex items-center gap-3 ${selectable ? 'cursor-pointer' : ''}`}
+        onClick={() => {
+          if (selectable) toggle(id);
+        }}
+      >
+        {canSelect && selectable && selected.has(id) && (
+          <input
+            type="checkbox"
+            checked={true}
+            readOnly
+            className="h-[22px] w-[22px] shrink-0 cursor-pointer rounded-[6px] border-border accent-primary pointer-events-none"
+          />
+        )}
+        <span
+          className={`min-w-0 flex-1 ${
+            rejected ? 'text-danger line-through' : isReady ? 'text-text-muted' : 'text-text-primary'
+          }`}
+        >
+          {content}
+        </span>
+        {isReady && <span className="shrink-0 text-[13px] font-bold text-green-600">✓ Готово</span>}
+        {rejected && <span className="shrink-0 text-[13px] font-bold text-danger">Отказ</span>}
+      </div>
+    );
   }
 
   return (
@@ -108,55 +177,33 @@ export function KitchenOrderCard({
       )}
 
       {/* Позиции */}
-      <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
+      <ul className="mt-4 space-y-3 border-t border-border pt-4">
         {order.items.map((it) => {
-          const pending = pendingItemIds.includes(it.id);
-          const rejected = it.status === 'rejected' || (pending && pendingType === 'reject');
-          const isReady =
-            it.status === 'ready' || it.status === 'served' || (pending && pendingType === 'ready');
-          const selectable = isSelectable(it.status, it.id);
           const itemName = orderItemDisplayName(it);
           const setParts = it.setComponents ?? [];
+          const isSet = setParts.length > 0;
+          const header = (
+            <>
+              <span className="font-semibold">{it.quantity}×</span> {itemName}
+              {it.comment && <span className="text-warning font-medium"> · {it.comment}</span>}
+            </>
+          );
           return (
-            <li key={it.id} className="text-[13.5px]">
-              <div className="flex items-center gap-2">
-                {canSelect && (
-                  selectable ? (
-                    <input
-                      type="checkbox"
-                      checked={selected.has(it.id)}
-                      onChange={() => toggle(it.id)}
-                      className="h-[18px] w-[18px] shrink-0 cursor-pointer rounded-[5px] border-border accent-primary"
-                    />
-                  ) : (
-                    <span className="h-[18px] w-[18px] shrink-0" />
-                  )
-                )}
-                <span
-                  className={`min-w-0 flex-1 truncate ${
-                    rejected ? 'text-danger line-through' : isReady ? 'text-text-muted' : 'text-text-primary'
-                  }`}
-                >
-                  <span className="font-medium">{it.quantity}×</span> {itemName}
-                  {it.comment && <span className="text-warning"> · {it.comment}</span>}
-                </span>
-                {isReady && <span className="shrink-0 text-xs font-semibold text-green-600">✓ Готово</span>}
-                {rejected && <span className="shrink-0 text-xs font-medium text-danger">Отказ</span>}
-              </div>
-              {setParts.length > 0 && (
-                <ul className={`mt-0.5 space-y-0.5 text-[12px] ${canSelect ? 'pl-6' : 'pl-3'}`}>
-                  {setParts.map((sc) => (
-                    <li
-                      key={sc.id}
-                      className={sc.action === 'removed' ? 'text-danger' : 'text-text-muted'}
-                    >
-                      {sc.action === 'replaced'
-                        ? `Замена: ${sc.originalNameSnapshot} → ${sc.finalNameSnapshot}`
-                        : sc.action === 'removed'
-                          ? `Без ${sc.originalNameSnapshot}`
-                          : `• ${sc.originalNameSnapshot}`}
-                    </li>
-                  ))}
+            <li key={it.id} className="text-[15px]">
+              {/* Обычное блюдо — выбираемая строка. Сет — заголовок-контейнер. */}
+              {renderLine(it.id, it.status, header, { container: isSet })}
+              {isSet && (
+                <ul className="mt-1.5 space-y-1.5 pl-3 text-[14px]">
+                  {setParts.map((sc) =>
+                    sc.action === 'removed' ? (
+                      <li key={sc.id} className="text-danger font-medium">
+                        Без {sc.originalNameSnapshot}
+                      </li>
+                    ) : (
+                      // Каждое блюдо внутри сета — отдельная выбираемая позиция.
+                      <li key={sc.id}>{renderLine(sc.id, sc.status, componentLabel(sc))}</li>
+                    ),
+                  )}
                 </ul>
               )}
             </li>

@@ -382,6 +382,9 @@ model OrderItemSetComponent {
   finalDishId          String?            @map("final_dish_id")
   finalNameSnapshot    String?            @map("final_name_snapshot")
   action               SetComponentAction @default(default)
+  // Кухня отмечает каждое блюдо состава сета отдельно (как обычную позицию).
+  status               OrderItemStatus    @default(new)
+  rejectReason         String?            @map("reject_reason")
   quantity             Int                @default(1)
   sortOrder            Int                @default(0) @map("sort_order")
   comment              String?

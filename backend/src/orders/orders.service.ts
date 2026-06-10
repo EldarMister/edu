@@ -540,9 +540,16 @@ export class OrdersService {
         where: { id: { in: targetIds }, orderId },
         data: { status: OrderItemStatus.cooking },
       });
+      // Состав сетов этой станции тоже уходит в работу, чтобы кухня могла
+      // отмечать каждое блюдо внутри сета по отдельности.
+      await tx.orderItemSetComponent.updateMany({
+        where: { status: OrderItemStatus.new, orderItem: { orderId, prepStation: station } },
+        data: { status: OrderItemStatus.cooking },
+      });
       await tx.kitchenEvent.create({
         data: { orderId, type: KitchenEventType.accept, createdById: kitchenUserId },
       });
+      await this.recalcSetParents(tx, orderId);
       const nextStatus = await this.statusFromActiveItems(tx, orderId);
       if (nextStatus !== order.status) {
         const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
@@ -798,6 +805,7 @@ export class OrdersService {
     itemIds: string[],
     kitchenUserId: string,
     station: PrepStation = PrepStation.kitchen,
+    setComponentIds: string[] = [],
   ) {
     const order = await this.getMutableOrder(orderId);
     this.ensureStationDecision(order, station);
@@ -812,24 +820,49 @@ export class OrdersService {
       )
       .map((it) => it.id);
 
-    if (targetIds.length === 0) {
+    // Блюда внутри сетов — отдельные позиции для кухни.
+    const targetComponents = await this.resolveSetComponents(orderId, setComponentIds, [
+      OrderItemStatus.rejected,
+      OrderItemStatus.cancelled,
+      OrderItemStatus.ready,
+      OrderItemStatus.served,
+    ]);
+
+    const doneCount = targetIds.length + targetComponents.length;
+    if (doneCount === 0) {
       throw new BadRequestException('Нет блюд, которые можно отметить готовыми');
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.orderItem.updateMany({
-        where: { id: { in: targetIds }, orderId },
-        data: { status: OrderItemStatus.ready },
-      });
+      if (targetIds.length > 0) {
+        await tx.orderItem.updateMany({
+          where: { id: { in: targetIds }, orderId },
+          data: { status: OrderItemStatus.ready },
+        });
+        // Если среди выбранных есть сет целиком — синхронизируем его состав.
+        await tx.orderItemSetComponent.updateMany({
+          where: {
+            orderItemId: { in: targetIds },
+            status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] },
+          },
+          data: { status: OrderItemStatus.ready },
+        });
+      }
+      if (targetComponents.length > 0) {
+        await tx.orderItemSetComponent.updateMany({
+          where: { id: { in: targetComponents.map((c) => c.id) } },
+          data: { status: OrderItemStatus.ready },
+        });
+      }
       await tx.kitchenEvent.createMany({
-        data: targetIds.map((id) => ({
-          orderId,
-          orderItemId: id,
-          type: KitchenEventType.ready_item,
-          createdById: kitchenUserId,
-        })),
+        data: [
+          ...targetIds.map((id) => ({ orderId, orderItemId: id })),
+          ...targetComponents.map((c) => ({ orderId, orderItemId: c.orderItemId })),
+        ].map((e) => ({ ...e, type: KitchenEventType.ready_item, createdById: kitchenUserId })),
       });
 
+      // Статус сета выводим из его состава (готов только когда готовы все блюда).
+      await this.recalcSetParents(tx, orderId);
       const nextStatus = await this.statusFromActiveItems(tx, orderId);
       if (nextStatus !== order.status) {
         const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
@@ -859,13 +892,39 @@ export class OrdersService {
     } else {
       this.notifyWaiter(
         updated.waiterId,
-        `Заказ ${updated.orderNumber}: готово позиций — ${targetIds.length}`,
+        `Заказ ${updated.orderNumber}: готово позиций — ${doneCount}`,
         updated,
         'success',
       );
     }
 
     return updated;
+  }
+
+  /**
+   * Возвращает блюда состава сетов заказа по их id, отсекая позиции в финальных
+   * статусах (нельзя повторно отметить готовыми/отказанными).
+   */
+  private async resolveSetComponents(
+    orderId: string,
+    componentIds: string[],
+    excludeStatuses: OrderItemStatus[],
+  ) {
+    if (!componentIds?.length) return [];
+    return this.prisma.orderItemSetComponent.findMany({
+      where: {
+        id: { in: componentIds },
+        status: { notIn: excludeStatuses },
+        orderItem: { orderId },
+      },
+      select: {
+        id: true,
+        orderItemId: true,
+        action: true,
+        originalNameSnapshot: true,
+        finalNameSnapshot: true,
+      },
+    });
   }
 
   /**
@@ -879,6 +938,7 @@ export class OrdersService {
     reason: string,
     comment?: string,
     station: PrepStation = PrepStation.kitchen,
+    setComponentIds: string[] = [],
   ) {
     const order = await this.getMutableOrder(orderId);
     this.ensureStationDecision(order, station);
@@ -888,27 +948,48 @@ export class OrdersService {
         itemIds.includes(it.id) &&
         ![OrderItemStatus.rejected, OrderItemStatus.cancelled].includes(it.status as any),
     );
-    if (items.length === 0) {
+    // Блюда внутри сетов — отдельные позиции для кухни.
+    const components = await this.resolveSetComponents(orderId, setComponentIds, [
+      OrderItemStatus.rejected,
+      OrderItemStatus.cancelled,
+    ]);
+    if (items.length === 0 && components.length === 0) {
       throw new BadRequestException('Нет блюд, которые можно отказать');
     }
     const targetIds = items.map((it) => it.id);
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, items);
-      await tx.orderItem.updateMany({
-        where: { id: { in: targetIds }, orderId },
-        data: { status: OrderItemStatus.rejected, rejectReason: reason },
-      });
+      if (targetIds.length > 0) {
+        await tx.orderItem.updateMany({
+          where: { id: { in: targetIds }, orderId },
+          data: { status: OrderItemStatus.rejected, rejectReason: reason },
+        });
+        // Сет целиком — отказываем и его состав.
+        await tx.orderItemSetComponent.updateMany({
+          where: {
+            orderItemId: { in: targetIds },
+            status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] },
+          },
+          data: { status: OrderItemStatus.rejected, rejectReason: reason },
+        });
+      }
+      if (components.length > 0) {
+        await tx.orderItemSetComponent.updateMany({
+          where: { id: { in: components.map((c) => c.id) } },
+          data: { status: OrderItemStatus.rejected, rejectReason: reason },
+        });
+      }
       await tx.kitchenEvent.createMany({
-        data: targetIds.map((id) => ({
-          orderId,
-          orderItemId: id,
-          type: KitchenEventType.reject_item,
-          reason,
-          comment,
-          createdById: kitchenUserId,
-        })),
+        data: [
+          ...targetIds.map((id) => ({ orderId, orderItemId: id })),
+          ...components.map((c) => ({ orderId, orderItemId: c.orderItemId })),
+        ].map((e) => ({ ...e, type: KitchenEventType.reject_item, reason, comment, createdById: kitchenUserId })),
       });
+
+      // Статус сета выводим из состава; сет, отказанный целиком, возвращает остатки.
+      const setsRejected = await this.recalcSetParents(tx, orderId);
+      await this.restoreInventory(tx, setsRejected);
 
       // Если отказаны все блюда — заказ rejected, иначе partially_rejected.
       const remaining = await tx.orderItem.count({
@@ -933,7 +1014,10 @@ export class OrdersService {
       this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
     }
     this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
-    const names = items.map((it) => this.orderItemName(it)).join(', ');
+    const componentNames = components.map((c) =>
+      c.action === 'replaced' && c.finalNameSnapshot ? c.finalNameSnapshot : c.originalNameSnapshot,
+    );
+    const names = [...items.map((it) => this.orderItemName(it)), ...componentNames].join(', ');
     const stationLabel = station === PrepStation.bar ? 'Бар' : 'Кухня';
     const partialText =
       updated.status === OrderStatus.partially_rejected
@@ -1244,6 +1328,8 @@ export class OrdersService {
             finalDishId,
             finalNameSnapshot,
             action: c.action,
+            // Удалённое из сета блюдо («без X») кухня не готовит.
+            status: c.action === 'removed' ? OrderItemStatus.cancelled : OrderItemStatus.new,
             quantity: qty,
             sortOrder: idx,
             priceDelta: new Prisma.Decimal(round2(priceDelta)),
@@ -1418,6 +1504,62 @@ export class OrdersService {
     if (statuses.has(OrderItemStatus.ready)) return OrderStatus.ready;
     if (statuses.has(OrderItemStatus.served)) return OrderStatus.served;
     return OrderStatus.partially_rejected;
+  }
+
+  /**
+   * Статус блюда-сета как агрегат статусов его состава: сет готов только когда
+   * готовы все блюда внутри, и отказан только когда отказаны все.
+   */
+  private aggregateItemStatus(componentStatuses: OrderItemStatus[]): OrderItemStatus {
+    const active = componentStatuses.filter(
+      (s) => s !== OrderItemStatus.rejected && s !== OrderItemStatus.cancelled,
+    );
+    if (active.length === 0) {
+      return componentStatuses.includes(OrderItemStatus.rejected)
+        ? OrderItemStatus.rejected
+        : OrderItemStatus.cancelled;
+    }
+    if (active.includes(OrderItemStatus.cooking)) return OrderItemStatus.cooking;
+    if (active.includes(OrderItemStatus.accepted)) return OrderItemStatus.accepted;
+    if (active.includes(OrderItemStatus.new)) return OrderItemStatus.new;
+    if (active.every((s) => s === OrderItemStatus.served)) return OrderItemStatus.served;
+    return OrderItemStatus.ready;
+  }
+
+  /**
+   * Пересчитывает статус блюд-сетов из статусов их состава. Возвращает позиции,
+   * которые при этом стали отказанными (нужно вернуть остатки на склад).
+   */
+  private async recalcSetParents(tx: Prisma.TransactionClient, orderId: string) {
+    const setItems = await tx.orderItem.findMany({
+      where: { orderId, setComponents: { some: {} } },
+      select: {
+        id: true,
+        status: true,
+        dishId: true,
+        dishVariantId: true,
+        quantity: true,
+        setComponents: { select: { status: true } },
+      },
+    });
+    const becameRejected: { dishId: string; dishVariantId: string | null; quantity: number }[] = [];
+    for (const item of setItems) {
+      const next = this.aggregateItemStatus(item.setComponents.map((c) => c.status));
+      if (next === item.status) continue;
+      await tx.orderItem.update({ where: { id: item.id }, data: { status: next } });
+      if (
+        next === OrderItemStatus.rejected &&
+        item.status !== OrderItemStatus.rejected &&
+        item.status !== OrderItemStatus.cancelled
+      ) {
+        becameRejected.push({
+          dishId: item.dishId,
+          dishVariantId: item.dishVariantId,
+          quantity: item.quantity,
+        });
+      }
+    }
+    return becameRejected;
   }
 
   private tableStatusForOrderStatus(status: OrderStatus): TableStatus | null {
