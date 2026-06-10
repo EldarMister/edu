@@ -1,6 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CartSetComponent, Category, Dish } from '@/types';
 import { money } from '@/lib/format';
+
+const SHEET_MS = 440;
+const SHEET_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
 /** Состав сета по умолчанию (все позиции без изменений). */
 export function defaultSetComponents(set: Dish): CartSetComponent[] {
@@ -29,48 +32,100 @@ function calcSetPrice(basePrice: string, components: CartSetComponent[]): number
   return Math.max(0, Number(basePrice) + delta);
 }
 
+/**
+ * Основа для bottom sheet с анимацией входа/выхода и свайпом вниз.
+ * open=true  → анимируется вверх из translateY(100%)
+ * open=false → анимируется вниз, затем компонент размонтируется
+ */
 function SheetShell({
+  open,
   onClose,
   title,
   subtitle,
   children,
 }: {
+  open: boolean;
   onClose: () => void;
   title: string;
   subtitle?: string;
   children: React.ReactNode;
 }) {
+  const [render, setRender] = useState(open);
+  const [visible, setVisible] = useState(false);
   const [drag, setDrag] = useState(0);
   const [dragging, setDragging] = useState(false);
-  const [startY, setStartY] = useState<number | null>(null);
+  const startY = useRef<number | null>(null);
+  const dragRef = useRef(0);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (open) {
+      setRender(true);
+      setDrag(0);
+      dragRef.current = 0;
+      let raf2 = 0;
+      const raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => setVisible(true));
+      });
+      return () => {
+        cancelAnimationFrame(raf1);
+        cancelAnimationFrame(raf2);
+      };
+    }
+    setVisible(false);
+    const id = setTimeout(() => {
+      setRender(false);
+      setDrag(0);
+      dragRef.current = 0;
+    }, SHEET_MS);
+    return () => clearTimeout(id);
+  }, [open]);
+
+  if (!render) return null;
+
+  const sheetTransform = visible ? `translateY(${drag}px)` : 'translateY(100%)';
 
   function onPointerDown(e: React.PointerEvent) {
-    setStartY(e.clientY);
+    startY.current = e.clientY;
     setDragging(true);
     e.currentTarget.setPointerCapture(e.pointerId);
   }
   function onPointerMove(e: React.PointerEvent) {
-    if (startY === null) return;
-    const dy = e.clientY - startY;
-    setDrag(dy > 0 ? dy : 0);
+    if (startY.current === null) return;
+    const dy = e.clientY - startY.current;
+    const next = dy > 0 ? dy : 0;
+    dragRef.current = next;
+    setDrag(next);
   }
   function onPointerUp(e: React.PointerEvent) {
-    if (startY === null) return;
-    setStartY(null);
+    if (startY.current === null) return;
+    startY.current = null;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
     setDragging(false);
-    if (drag > 110) onClose();
-    else requestAnimationFrame(() => setDrag(0));
+    if (dragRef.current > 110) onCloseRef.current();
+    else requestAnimationFrame(() => { dragRef.current = 0; setDrag(0); });
   }
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
+      {/* Затемнение */}
+      <div
+        className="absolute inset-0 bg-black/40"
+        style={{ transition: `opacity ${SHEET_MS}ms ease`, opacity: visible ? 1 : 0 }}
+        onClick={onClose}
+        aria-hidden
+      />
+      {/* Лист */}
       <div
         className="relative z-10 flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft"
-        style={{ transform: `translateY(${drag}px)`, transition: dragging ? 'none' : 'transform 0.3s cubic-bezier(0.4,0,0.2,1)' }}
+        style={{
+          transform: sheetTransform,
+          transition: dragging ? 'none' : `transform ${SHEET_MS}ms ${SHEET_EASE}`,
+        }}
+        role="dialog"
       >
-        {/* Drag handle */}
+        {/* Drag handle + заголовок */}
         <div
           className="shrink-0 cursor-grab touch-none px-4 pb-1 pt-2.5"
           onPointerDown={onPointerDown}
@@ -88,16 +143,15 @@ function SheetShell({
   );
 }
 
-
-
-
 /** Bottom sheet «Выберите сет»: radio-список с глазком настройки. */
 export function SetPickerSheet({
+  open,
   sets,
   onClose,
   onPick,
   onConfigure,
 }: {
+  open: boolean;
   sets: Dish[];
   onClose: () => void;
   onPick: (set: Dish) => void;
@@ -107,7 +161,7 @@ export function SetPickerSheet({
   const selected = sets.find((s) => s.id === selectedId) ?? null;
 
   return (
-    <SheetShell onClose={onClose} title="Сеты" subtitle="Выберите сет">
+    <SheetShell open={open} onClose={onClose} title="Сеты" subtitle="Выберите сет">
       <div className="no-scrollbar min-h-0 flex-1 space-y-1.5 overflow-y-auto px-4 pb-3 pt-1">
         {sets.map((s) => {
           const isSel = s.id === selectedId;
@@ -179,25 +233,40 @@ export function SetPickerSheet({
  * таким же, как при выборе обычного блюда в меню.
  */
 export function SetConfigSheet({
+  open,
   set,
   menuDishes,
   categories,
   onClose,
   onAdd,
 }: {
-  set: Dish;
+  open: boolean;
+  set: Dish | null;
   /** Обычные блюда меню для замены (без сетов). */
   menuDishes: Dish[];
   categories: Category[];
   onClose: () => void;
   onAdd: (components: CartSetComponent[]) => void;
 }) {
-  const [components, setComponents] = useState<CartSetComponent[]>(() => defaultSetComponents(set));
+  const [components, setComponents] = useState<CartSetComponent[]>([]);
   const [replacingId, setReplacingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [activeCat, setActiveCat] = useState<string>('all');
 
-  const currentPrice = useMemo(() => calcSetPrice(set.price, components), [set.price, components]);
+  // При открытии нового сета — сбрасываем состав
+  useEffect(() => {
+    if (set && open) {
+      setComponents(defaultSetComponents(set));
+      setReplacingId(null);
+      setSearch('');
+      setActiveCat('all');
+    }
+  }, [set?.id, open]);
+
+  const currentPrice = useMemo(
+    () => (set ? calcSetPrice(set.price, components) : 0),
+    [set?.price, components],
+  );
 
   function patch(componentId: string, p: Partial<CartSetComponent>) {
     setComponents((cur) => cur.map((c) => (c.componentId === componentId ? { ...c, ...p } : c)));
@@ -225,7 +294,7 @@ export function SetConfigSheet({
     patch(componentId, { action: 'default', finalDishId: undefined, finalName: undefined, finalPrice: undefined });
   }
 
-  // Список категорий для фильтрации в режиме замены (только те, у которых есть блюда в menuDishes).
+  // Список категорий для фильтрации в режиме замены
   const availableCats = useMemo(() => {
     const catIdsInMenu = new Set(menuDishes.map((d) => d.categoryId));
     return categories.filter((c) => catIdsInMenu.has(c.id));
@@ -241,7 +310,7 @@ export function SetConfigSheet({
     });
   }, [menuDishes, search, activeCat]);
 
-  // Режим выбора блюда замены — открываем поверх основного sheet как полноэкранный режим.
+  // Режим выбора блюда замены — полноэкранный overlay поверх sheet
   if (replacingId) {
     const replacingComp = components.find((c) => c.componentId === replacingId);
     return (
@@ -337,13 +406,13 @@ export function SetConfigSheet({
   const hasChanges = components.some((c) => c.action !== 'default');
 
   return (
-    <SheetShell onClose={onClose} title="Настроить сет">
+    <SheetShell open={open} onClose={onClose} title="Настроить сет">
       {/* Инфо-блок: название + актуальная цена */}
       <div className="shrink-0 px-4">
         <div className="flex items-center justify-between gap-3 rounded-xl bg-background px-3 py-2.5">
-          <span className="text-[15px] font-semibold text-text-primary">{set.name}</span>
+          <span className="text-[15px] font-semibold text-text-primary">{set?.name}</span>
           <div className="flex items-baseline gap-1.5">
-            {hasChanges && Number(set.price) !== currentPrice && (
+            {hasChanges && set && Number(set.price) !== currentPrice && (
               <span className="text-[13px] text-text-light line-through">{money(set.price)}</span>
             )}
             <span
@@ -435,7 +504,7 @@ export function SetConfigSheet({
         <button
           type="button"
           className="btn-primary h-12 w-full rounded-lg font-semibold"
-          onClick={() => onAdd(components)}
+          onClick={() => set && onAdd(components)}
         >
           {hasChanges ? `Добавить · ${money(currentPrice)}` : 'Добавить в заказ'}
         </button>
