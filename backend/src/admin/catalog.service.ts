@@ -369,6 +369,7 @@ export class CatalogService {
         initialStock: dto.initialStock,
         unit: dto.unit,
         prepStation: dto.prepStation ?? null,
+        voiceName: dto.voiceName?.trim() || null,
         variants: variants.length
           ? {
               create: variants.map((variant) => ({
@@ -414,6 +415,7 @@ export class CatalogService {
       data.price = new Prisma.Decimal(this.resolveDishPrice(dto.price, variants ?? [], dish.price));
     }
     if (dto.discountValue !== undefined) data.discountValue = new Prisma.Decimal(dto.discountValue);
+    if (dto.voiceName !== undefined) data.voiceName = dto.voiceName?.trim() || null;
     if (dto.categoryId) await this.ensureCategory(dto.categoryId);
     const updated = await this.prisma.$transaction(async (tx) => {
       if (variants !== undefined) {

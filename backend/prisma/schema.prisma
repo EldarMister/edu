@@ -220,6 +220,8 @@ model Dish {
   prepStation   PrepStation? @map("prep_station")
   // true — это «шапка» сета (состав в SetComponent), а не обычное блюдо.
   isSet         Boolean      @default(false) @map("is_set")
+  // Отдельное название для озвучки кухни (если задано — используется вместо name).
+  voiceName     String?      @map("voice_name")
   createdAt     DateTime     @default(now()) @map("created_at")
   updatedAt     DateTime     @updatedAt @map("updated_at")
 
@@ -354,6 +356,8 @@ model OrderItem {
   dishVariantId    String?         @map("dish_variant_id")
   dishNameSnapshot String          @map("dish_name_snapshot")
   dishVariantNameSnapshot String?  @map("dish_variant_name_snapshot")
+  // Снимок названия для озвучки (voiceName блюда на момент заказа).
+  dishVoiceSnapshot String?        @map("dish_voice_snapshot")
   priceSnapshot    Decimal         @map("price_snapshot") @db.Decimal(10, 2)
   quantity         Int             @default(1)
   discountAmount   Decimal         @default(0) @map("discount_amount") @db.Decimal(10, 2)

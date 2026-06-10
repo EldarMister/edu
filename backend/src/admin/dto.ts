@@ -177,6 +177,10 @@ export class CreateDishDto {
   @IsOptional() @IsEnum(PrepStation)
   prepStation?: PrepStation | null;
 
+  // Отдельное название для озвучки кухни (если задано — используется вместо name).
+  @IsOptional() @IsString() @MaxLength(120)
+  voiceName?: string | null;
+
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
   variants?: DishVariantDto[];
 }
@@ -226,6 +230,10 @@ export class UpdateDishDto {
   // null = брать направление из категории; задано — приоритет блюда.
   @IsOptional() @IsEnum(PrepStation)
   prepStation?: PrepStation | null;
+
+  // Отдельное название для озвучки кухни.
+  @IsOptional() @IsString() @MaxLength(120)
+  voiceName?: string | null;
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
   variants?: DishVariantDto[];

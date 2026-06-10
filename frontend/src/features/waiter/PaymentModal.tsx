@@ -75,6 +75,23 @@ export function PaymentModal({
   const over = remaining < -0.01;
   const mixedValid = mixedSelected && Math.abs(remaining) < 0.01;
 
+  // Остаток от введённой суммы (для автоподстановки во второе поле).
+  const complement = (value: string) => {
+    const v = value.trim();
+    if (v === '') return '';
+    const rest = Math.round((total - (Number(v) || 0)) * 100) / 100;
+    return String(Math.max(0, rest));
+  };
+  // Ввод в одно поле автоматически подставляет остаток в другое (не 50/50).
+  const onCashChange = (value: string) => {
+    setCashInput(value);
+    setQrInput(complement(value));
+  };
+  const onQrChange = (value: string) => {
+    setQrInput(value);
+    setCashInput(complement(value));
+  };
+
   // После показа success-окна автоматически переходим к окну печати чека.
   useEffect(() => {
     if (!showSuccess) return;
@@ -291,7 +308,7 @@ export function PaymentModal({
                 min="0"
                 className="input h-11 w-40 text-right"
                 value={cashInput}
-                onChange={(e) => setCashInput(e.target.value)}
+                onChange={(e) => onCashChange(e.target.value)}
                 placeholder="0"
               />
             </label>
@@ -303,7 +320,7 @@ export function PaymentModal({
                 min="0"
                 className="input h-11 w-40 text-right"
                 value={qrInput}
-                onChange={(e) => setQrInput(e.target.value)}
+                onChange={(e) => onQrChange(e.target.value)}
                 placeholder="0"
               />
             </label>

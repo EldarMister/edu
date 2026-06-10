@@ -246,6 +246,7 @@ function DishModal({
   const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : '');
   const [unit] = useState(dish?.unit ?? 'шт');
   const [description, setDescription] = useState(dish?.description ?? '');
+  const [voiceName, setVoiceName] = useState(dish?.voiceName ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
   // '' = брать направление из категории; иначе приоритет блюда.
   const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar' | 'none'>(dish?.prepStation ?? '');
@@ -313,6 +314,7 @@ function DishModal({
         categoryId,
         price: priceValue,
         description: description.trim() || undefined,
+        voiceName: voiceName.trim() || null,
         isAvailable,
         prepStation: prepStation === '' ? null : prepStation,
         trackInventory: filledVariants.length > 0 ? filledVariants.some(v => v.stock.trim() !== '') : stock.trim() !== '',
@@ -409,6 +411,14 @@ function DishModal({
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Необязательно"
+          />
+        </Field>
+        <Field label="Название для озвучки">
+          <input
+            className="input"
+            value={voiceName}
+            onChange={(e) => setVoiceName(e.target.value)}
+            placeholder={name.trim() ? `Напр. «Пепперрони» (на экране — ${name.trim()})` : 'Как произносить вслух (необязательно)'}
           />
         </Field>
         <label className="flex items-center gap-2.5 pt-1 text-sm text-text-secondary">

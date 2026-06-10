@@ -12,6 +12,7 @@ export const orderInclude = {
       dishVariantId: true,
       dishNameSnapshot: true,
       dishVariantNameSnapshot: true,
+      dishVoiceSnapshot: true,
       priceSnapshot: true,
       quantity: true,
       discountAmount: true,

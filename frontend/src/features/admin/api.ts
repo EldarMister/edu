@@ -44,6 +44,7 @@ export interface AdminDish {
   initialStock?: number;
   unit?: string;
   prepStation: PrepStation | null;
+  voiceName?: string | null;
   isSet?: boolean;
   setComponents?: AdminSetComponent[];
   variants: AdminDishVariant[];
@@ -398,6 +399,7 @@ export interface DishInput {
   initialStock?: number;
   unit?: string;
   prepStation?: PrepStation | null;
+  voiceName?: string | null;
   variants?: { id?: string; name: string; price: number; stock?: number; initialStock?: number; unit?: string }[];
 }
 export function useDishMutations() {

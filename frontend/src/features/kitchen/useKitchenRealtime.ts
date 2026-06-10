@@ -4,30 +4,27 @@ import { useNotifications } from '@/store/notifications';
 import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/lib/format';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
-import tts from '@/services/ttsService';
+import { kitchenVoice } from '@/services/kitchenVoice';
 import type { Order } from '@/types';
 
-/** Задержка голоса для нового заказа (мс) — звук new-order.mp3 ≈ 1 сек + 150 мс запаса. */
-const VOICE_DELAY_MS = 1050;
+/** Заказ из сокета может нести готовый текст озвучки (формирует backend). */
+type VoicedOrder = Order & { voice?: { text?: string } | null };
 
-/** Задержка голоса при отмене (+150 мс запаса — notify.mp3 чуть длиннее). */
-const CANCEL_VOICE_DELAY_MS = 1150;
-
-/** Подписки кухни: новый заказ — звук + тост, любые изменения — обновление списков. */
+/** Подписки кухни: новый заказ — звук + тост + озвучка, любые изменения — обновление списков. */
 export function useKitchenRealtime() {
   const qc = useQueryClient();
   const push = useNotifications((s) => s.push);
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['kitchen'] });
 
-  useSocketEvent<Order>('kitchen:new_order', (order) => {
+  useSocketEvent<VoicedOrder>('kitchen:new_order', (order) => {
     // Список тянем заново с сервера — он отфильтрует позиции по станции экрана.
     invalidate();
 
-    // 1. Сначала — звук уведомления
+    // 1. Звук уведомления.
     beep('newOrder');
 
-    // 2. Тост
+    // 2. Тост.
     const orderNumber = displayOrderNumber(order.orderNumber);
     push({
       message: `Новый заказ ${orderNumber} · Стол ${order.table?.number}`,
@@ -36,23 +33,18 @@ export function useKitchenRealtime() {
       at: new Date().toISOString(),
     });
 
-    // 3. Голос — ПОСЛЕ звука уведомления
-    tts.speakAfterDelay('Новый заказ.', VOICE_DELAY_MS);
+    // 3. Озвучка — текст уже сформирован backend (номер прописью, состав, voiceName).
+    kitchenVoice.enqueue(order.voice?.text);
   });
 
-  useSocketEvent<Order>('order:status_changed', (order) => {
+  useSocketEvent<VoicedOrder>('order:status_changed', (order) => {
     applyOrderStatusToCache(qc, order);
     invalidate();
 
-    if (order.status === 'cancelled' || order.status === 'rejected') {
-      const orderNumber = displayOrderNumber(order.orderNumber).replace(/^№\s*/, '');
-
-      // Срочный звук + голос после него
+    // Backend добавляет voice.text только для полной отмены/отказа — озвучиваем.
+    if (order.voice?.text) {
       beep('notify');
-      tts.speakUrgentAfterDelay(
-        `Внимание! Отмена заказа. Заказ номер ${orderNumber}.`,
-        CANCEL_VOICE_DELAY_MS,
-      );
+      kitchenVoice.enqueue(order.voice.text);
     }
   });
 }
