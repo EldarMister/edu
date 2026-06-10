@@ -1673,8 +1673,9 @@ export class OrdersService {
   }
 
   private async nextOrderNumber(tx: Prisma.TransactionClient): Promise<string> {
-    const count = await tx.order.count();
-    const next = count + 1;
+    const result: any[] = await tx.$queryRaw`SELECT COALESCE(MAX(CAST(REGEXP_REPLACE(order_number, '[^0-9]', '', 'g') AS INTEGER)), 0) as max_num FROM orders`;
+    const max = Number(result[0]?.max_num || 0);
+    const next = max + 1;
     return `№${next}`;
   }
 
