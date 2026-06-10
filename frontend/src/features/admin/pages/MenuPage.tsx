@@ -503,11 +503,18 @@ function CategoryModal({
   categories: AdminCategory[];
   onClose: () => void;
 }) {
-  const { create, update, remove } = useCategoryMutations();
+  const { create, update, reorder } = useCategoryMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState('');
   const [prepStation, setPrepStation] = useState<'kitchen' | 'bar' | 'none'>('kitchen');
   const [error, setError] = useState('');
+  // Инлайн-переименование.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  // Категория, которую удаляем (открывает выбор: перенести блюда или удалить вместе).
+  const [deleteTarget, setDeleteTarget] = useState<AdminCategory | null>(null);
+
+  const sorted = [...categories].sort((a, b) => a.sortOrder - b.sortOrder);
 
   async function add() {
     setError('');
@@ -530,10 +537,25 @@ function CategoryModal({
     }
   }
 
-  async function onDelete(id: string, label: string) {
-    if (!confirm(`Удалить категорию «${label}»?`)) return;
+  async function saveRename(id: string) {
+    const newName = editName.trim();
+    setEditingId(null);
+    if (!newName || newName === sorted.find((c) => c.id === id)?.name) return;
     try {
-      await remove.mutateAsync(id);
+      await update.mutateAsync({ id, name: newName });
+      push({ message: 'Категория переименована', at: new Date().toISOString() });
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
+    }
+  }
+
+  async function move(index: number, dir: -1 | 1) {
+    const next = index + dir;
+    if (next < 0 || next >= sorted.length) return;
+    const ids = sorted.map((c) => c.id);
+    [ids[index], ids[next]] = [ids[next], ids[index]];
+    try {
+      await reorder.mutateAsync(ids);
     } catch (err) {
       push({ message: apiError(err), at: new Date().toISOString() });
     }
@@ -565,12 +587,54 @@ function CategoryModal({
       </div>
       {error && <p className="mb-2 text-sm text-danger">{error}</p>}
       <ul className="space-y-2">
-        {categories.map((c) => (
-          <li key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5">
-            <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{c.name}</span>
-            <div className="flex shrink-0 items-center gap-3">
+        {sorted.map((c, index) => (
+          <li key={c.id} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5">
+            {/* Порядок */}
+            <div className="flex shrink-0 flex-col">
+              <button
+                onClick={() => move(index, -1)}
+                disabled={index === 0 || reorder.isPending}
+                className="text-text-muted hover:text-primary disabled:opacity-30"
+                title="Выше"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 15-6-6-6 6" /></svg>
+              </button>
+              <button
+                onClick={() => move(index, 1)}
+                disabled={index === sorted.length - 1 || reorder.isPending}
+                className="text-text-muted hover:text-primary disabled:opacity-30"
+                title="Ниже"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+            </div>
+
+            {/* Название / инлайн-правка */}
+            {editingId === c.id ? (
+              <input
+                className="input h-9 min-w-0 flex-1"
+                value={editName}
+                autoFocus
+                onChange={(e) => setEditName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveRename(c.id);
+                  if (e.key === 'Escape') setEditingId(null);
+                }}
+                onBlur={() => saveRename(c.id)}
+              />
+            ) : (
+              <button
+                className="min-w-0 flex-1 truncate text-left text-[15px] text-text-primary hover:text-primary"
+                onClick={() => { setEditingId(c.id); setEditName(c.name); }}
+                title="Переименовать"
+              >
+                {c.name}
+              </button>
+            )}
+
+            <div className="flex shrink-0 items-center gap-2">
               <Select
-                className="h-9 w-36"
+                className="h-9 w-32"
                 value={c.prepStation ?? 'kitchen'}
                 onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar' | 'none')}
                 options={[
@@ -579,9 +643,16 @@ function CategoryModal({
                   { value: 'none', label: 'Без отправки' },
                 ]}
               />
-              <span className="text-xs text-text-muted">{c._count.dishes} блюд</span>
+              <span className="w-14 text-right text-xs text-text-muted">{c._count.dishes} бл.</span>
               <button
-                onClick={() => onDelete(c.id, c.name)}
+                onClick={() => { setEditingId(c.id); setEditName(c.name); }}
+                className="text-text-muted hover:text-primary"
+                title="Переименовать"
+              >
+                <IconEdit className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setDeleteTarget(c)}
                 className="text-danger hover:opacity-80"
                 title="Удалить"
               >
@@ -591,6 +662,97 @@ function CategoryModal({
           </li>
         ))}
       </ul>
+
+      {deleteTarget && (
+        <DeleteCategorySheet
+          category={deleteTarget}
+          categories={sorted}
+          onDone={() => setDeleteTarget(null)}
+        />
+      )}
+    </Modal>
+  );
+}
+
+/** Подтверждение удаления категории: перенести блюда или удалить вместе с блюдами. */
+function DeleteCategorySheet({
+  category,
+  categories,
+  onDone,
+}: {
+  category: AdminCategory;
+  categories: AdminCategory[];
+  onDone: () => void;
+}) {
+  const { remove } = useCategoryMutations();
+  const push = useNotifications((s) => s.push);
+  const others = categories.filter((c) => c.id !== category.id);
+  const [targetId, setTargetId] = useState(others[0]?.id ?? '');
+  const hasDishes = category._count.dishes > 0;
+
+  async function run(strategy?: 'move' | 'delete', targetCategoryId?: string) {
+    try {
+      await remove.mutateAsync({ id: category.id, strategy, targetCategoryId });
+      push({ message: 'Категория удалена', at: new Date().toISOString() });
+      onDone();
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
+    }
+  }
+
+  return (
+    <Modal open onClose={onDone} title={`Удалить «${category.name}»`} panelClassName="max-w-md">
+      {!hasDishes ? (
+        <div className="space-y-3">
+          <p className="text-sm text-text-secondary">В категории нет блюд. Удалить её?</p>
+          <button className="btn-danger btn-lg w-full font-semibold" disabled={remove.isPending} onClick={() => run()}>
+            {remove.isPending ? <Spinner /> : 'Удалить категорию'}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-sm text-text-secondary">
+            В категории {category._count.dishes} блюд. Что сделать с ними?
+          </p>
+
+          <div className="space-y-2 rounded-xl border border-border p-3">
+            <p className="text-sm font-medium text-text-primary">Перенести блюда в другую категорию</p>
+            {others.length === 0 ? (
+              <p className="text-xs text-text-muted">Нет другой категории для переноса.</p>
+            ) : (
+              <div className="flex gap-2">
+                <Select
+                  className="h-10 min-w-0 flex-1"
+                  value={targetId}
+                  onChange={setTargetId}
+                  options={others.map((c) => ({ value: c.id, label: c.name }))}
+                />
+                <button
+                  className="btn-primary btn-md shrink-0"
+                  disabled={remove.isPending || !targetId}
+                  onClick={() => run('move', targetId)}
+                >
+                  {remove.isPending ? <Spinner /> : 'Перенести и удалить'}
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2 rounded-xl border border-danger/30 bg-danger/5 p-3">
+            <p className="text-sm font-medium text-danger">Удалить категорию вместе с блюдами</p>
+            <p className="text-xs text-text-muted">
+              Блюда полностью удалятся из меню. История заказов и чеки сохранятся.
+            </p>
+            <button
+              className="btn-danger btn-md w-full font-semibold"
+              disabled={remove.isPending}
+              onClick={() => run('delete')}
+            >
+              {remove.isPending ? <Spinner /> : 'Удалить вместе с блюдами'}
+            </button>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -598,6 +760,7 @@ function CategoryModal({
 interface SetCompDraft {
   uid: string;
   dishId: string;
+  dishVariantId?: string;
   name: string;
   quantity: number;
   removable: boolean;
@@ -614,7 +777,8 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
     (set?.setComponents ?? []).map((c) => ({
       uid: c.id,
       dishId: c.dish.id,
-      name: c.dish.name,
+      dishVariantId: c.dishVariant?.id,
+      name: c.dishVariant ? `${c.dish.name} ${c.dishVariant.name}` : c.dish.name,
       quantity: c.quantity,
       removable: c.removable,
       replaceable: c.replaceable,
@@ -625,14 +789,29 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
-  const candidates = (dishesQ.data ?? []).filter(
-    (d) => !d.isSet && d.isActive && !components.some((c) => c.dishId === d.id),
-  );
+  // Каждый вариант блюда — отдельный кандидат: «Coca-Cola 0.5 л» и «Coca-Cola 1 л» — разные строки.
+  type Candidate = { dishId: string; dishVariantId?: string; name: string };
+  const candidates: Candidate[] = (dishesQ.data ?? [])
+    .filter((d) => !d.isSet && d.isActive)
+    .flatMap((d): Candidate[] =>
+      d.variants.length > 0
+        ? d.variants.map((v) => ({ dishId: d.id, dishVariantId: v.id, name: `${d.name} ${v.name}` }))
+        : [{ dishId: d.id, name: d.name }],
+    )
+    .filter((c) => !components.some((x) => x.dishId === c.dishId && x.dishVariantId === c.dishVariantId));
 
-  function addComp(d: AdminDish) {
+  function addComp(c: Candidate) {
     setComponents((cur) => [
       ...cur,
-      { uid: `tmp-${d.id}-${Date.now()}`, dishId: d.id, name: d.name, quantity: 1, removable: true, replaceable: true },
+      {
+        uid: `tmp-${c.dishId}-${c.dishVariantId ?? ''}-${Date.now()}`,
+        dishId: c.dishId,
+        dishVariantId: c.dishVariantId,
+        name: c.name,
+        quantity: 1,
+        removable: true,
+        replaceable: true,
+      },
     ]);
   }
   function patch(uid: string, p: Partial<SetCompDraft>) {
@@ -650,6 +829,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
       price: priceNum,
       components: components.map((c) => ({
         dishId: c.dishId,
+        dishVariantId: c.dishVariantId,
         quantity: c.quantity,
         removable: c.removable,
         replaceable: c.replaceable,
@@ -754,14 +934,14 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
             onChange={(e) => setSearch(e.target.value)}
           />
           <div className="max-h-48 space-y-1 overflow-y-auto">
-            {candidates.map((d) => (
+            {candidates.map((c) => (
               <button
-                key={d.id}
+                key={`${c.dishId}-${c.dishVariantId ?? ''}`}
                 type="button"
-                onClick={() => addComp(d)}
+                onClick={() => addComp(c)}
                 className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-left transition-colors hover:border-primary/40"
               >
-                <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{d.name}</span>
+                <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{c.name}</span>
                 <IconPlus className="h-4 w-4 shrink-0 text-primary" />
               </button>
             ))}

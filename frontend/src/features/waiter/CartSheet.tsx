@@ -20,6 +20,7 @@ export function CartSheet({
   onSubmit,
   submitting,
   canSubmit,
+  submitLabel,
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,6 +29,8 @@ export function CartSheet({
   submitting: boolean;
   /** Есть ли активная смена (иначе отправка заблокирована вышестоящей логикой). */
   canSubmit: boolean;
+  /** Текст основной кнопки (зависит от режима и направления позиций). */
+  submitLabel: string;
 }) {
   const t = useT();
   const { lines, inc, dec, clear } = useCart();
@@ -161,7 +164,7 @@ export function CartSheet({
             disabled={!hasLines || submitting || !canSubmit}
             onClick={onSubmit}
           >
-            {submitting ? <Spinner /> : t('Отправить на кухню')}
+            {submitting ? <Spinner /> : submitLabel}
           </button>
 
           {hasLines && (

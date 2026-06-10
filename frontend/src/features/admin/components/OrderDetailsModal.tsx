@@ -1,7 +1,7 @@
 import { Modal } from '@/components/Modal';
 import { OrderBadge } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
-import { displayOrderNumber, money, orderItemDisplayName, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName, paymentMethodLabel, timeHM } from '@/lib/format';
 
 const ITEM_STATUS: Record<OrderItemStatus, string> = {
   new: 'Новое',
@@ -39,6 +39,7 @@ export function OrderDetailsModal({
           <Info label="Официант" value={order.waiter.name} />
           <Info label="Сумма" value={money(order.finalAmount)} strong />
           <Info label="Скидка" value={money(order.discountAmount)} />
+          <Info label="Способ оплаты" value={paymentMethodLabel(order.paymentMethod)} />
         </div>
 
         {order.comment && (

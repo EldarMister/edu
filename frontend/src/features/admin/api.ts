@@ -53,7 +53,9 @@ export interface AdminSetComponent {
   quantity: number;
   removable: boolean;
   replaceable: boolean;
+  dishVariantId?: string | null;
   dish: { id: string; name: string; price: string };
+  dishVariant?: { id: string; name: string; price: string } | null;
 }
 export interface AdminDishVariant {
   id: string;
@@ -361,15 +363,25 @@ export function useCategoryMutations() {
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation }) =>
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number }) =>
       api.patch(`/admin/categories/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete(`/admin/categories/${id}`).then((r) => r.data),
+    mutationFn: ({ id, strategy, targetCategoryId }: { id: string; strategy?: 'move' | 'delete'; targetCategoryId?: string }) =>
+      api.delete(`/admin/categories/${id}`, { data: { strategy, targetCategoryId } }).then((r) => r.data),
     onSuccess: invalidate,
   });
-  return { create, update, remove };
+  const reorder = useMutation({
+    mutationFn: (ids: string[]) => api.patch('/admin/categories/reorder', { ids }).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const moveDishes = useMutation({
+    mutationFn: (b: { fromCategoryId: string; toCategoryId: string }) =>
+      api.post('/admin/categories/move-dishes', b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove, reorder, moveDishes };
 }
 
 export interface DishInput {
@@ -409,6 +421,7 @@ export function useDishMutations() {
 // ---------- Сеты ----------
 export interface SetComponentInput {
   dishId: string;
+  dishVariantId?: string;
   quantity?: number;
   removable?: boolean;
   replaceable?: boolean;

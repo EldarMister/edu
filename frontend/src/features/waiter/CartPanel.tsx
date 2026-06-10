@@ -12,6 +12,7 @@ export function CartPanel({
   orderNumber,
   submitting,
   canSubmit,
+  allNone,
   onSubmit,
   onBlockedSubmit,
   onCancelEdit,
@@ -21,6 +22,8 @@ export function CartPanel({
   orderNumber?: string;
   submitting: boolean;
   canSubmit: boolean;
+  /** Все позиции корзины — «Без отправки»: создаём заказ без кухни/бара. */
+  allNone: boolean;
   onSubmit: () => void;
   onBlockedSubmit: () => void;
   onCancelEdit?: () => void;
@@ -108,6 +111,8 @@ export function CartPanel({
             t('Сохранить изменения')
           ) : mode === 'add' ? (
             `${t('Добавить к заказу')} · ${totals.count} ${t('шт')}.`
+          ) : allNone ? (
+            t('Создать заказ')
           ) : (
             t('Отправить на кухню')
           )}

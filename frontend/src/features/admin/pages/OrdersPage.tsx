@@ -4,7 +4,7 @@ import { OrderBadge } from '@/components/StatusBadge';
 import { Spinner } from '@/components/Spinner';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
-import { displayOrderNumber, money, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, paymentMethodLabel, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconOrders, IconClock, IconCheck, IconX } from '../components/icons';
@@ -109,6 +109,7 @@ export function OrdersPage() {
                     <Th>{tr('Стол')}</Th>
                     <Th>{tr('Официант')}</Th>
                     <Th className="text-right">{tr('Сумма')}</Th>
+                    <Th>{tr('Оплата')}</Th>
                     <Th>{tr('Статус')}</Th>
                     <Th className="text-right">{tr('Действия')}</Th>
                   </tr>
@@ -135,6 +136,9 @@ export function OrdersPage() {
                       <Td className="text-text-secondary">{tr('Стол')} {ord.table.number}</Td>
                       <Td className="text-text-secondary">{ord.waiter.name}</Td>
                       <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
+                      <Td className="text-text-secondary">
+                        {ord.paymentMethod ? tr(paymentMethodLabel(ord.paymentMethod)) : '—'}
+                      </Td>
                       <Td>
                         <OrderBadge status={ord.status} />
                       </Td>
