@@ -18,6 +18,11 @@ export class SetComponentInputDto {
   @IsNotEmpty()
   originalDishId: string;
 
+  /** Вариант оригинального блюда состава (например, «1 л»), если он был выбран в сете. */
+  @IsOptional()
+  @IsString()
+  originalVariantId?: string;
+
   @IsOptional()
   @IsString()
   finalDishId?: string;

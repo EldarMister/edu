@@ -9,6 +9,9 @@ import {
   CreateSetDto,
   CreateHallDto,
   CreateTableDto,
+  DeleteCategoryDto,
+  MoveCategoryDishesDto,
+  ReorderCategoriesDto,
   UpdateCategoryDto,
   UpdateDishDto,
   UpdateSetDto,
@@ -78,14 +81,24 @@ export class CatalogController {
     return this.catalog.createCategory(dto, user);
   }
 
+  @Patch('categories/reorder')
+  reorderCategories(@Body() dto: ReorderCategoriesDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.reorderCategories(dto.ids, user);
+  }
+
+  @Post('categories/move-dishes')
+  moveCategoryDishes(@Body() dto: MoveCategoryDishesDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.moveCategoryDishes(dto.fromCategoryId, dto.toCategoryId, user);
+  }
+
   @Patch('categories/:id')
   updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto, @CurrentUser() user: AuthUser) {
     return this.catalog.updateCategory(id, dto, user);
   }
 
   @Delete('categories/:id')
-  deleteCategory(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.catalog.deleteCategory(id, user);
+  deleteCategory(@Param('id') id: string, @Body() dto: DeleteCategoryDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.deleteCategory(id, dto ?? {}, user);
   }
 
   @Get('dishes')

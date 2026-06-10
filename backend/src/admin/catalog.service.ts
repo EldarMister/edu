@@ -9,6 +9,7 @@ import {
   CreateCategoryDto,
   CreateDishDto,
   CreateSetDto,
+  DeleteCategoryDto,
   DishVariantDto,
   CreateHallDto,
   CreateTableDto,
@@ -196,22 +197,86 @@ export class CatalogService {
     return updated;
   }
 
-  async deleteCategory(id: string, actor: AuditActor) {
+  async deleteCategory(id: string, dto: DeleteCategoryDto, actor: AuditActor) {
     const before = await this.ensureCategory(id);
     const dishes = await this.prisma.dish.count({ where: { categoryId: id } });
+
     if (dishes > 0) {
-      throw new BadRequestException('В категории есть блюда. Сначала перенесите или удалите их.');
+      if (dto.strategy === 'move') {
+        // Переносим блюда в другую категорию, затем удаляем пустую.
+        if (!dto.targetCategoryId || dto.targetCategoryId === id) {
+          throw new BadRequestException('Выберите категорию, в которую перенести блюда');
+        }
+        await this.ensureCategory(dto.targetCategoryId);
+        await this.prisma.dish.updateMany({
+          where: { categoryId: id },
+          data: { categoryId: dto.targetCategoryId },
+        });
+      } else if (dto.strategy === 'delete') {
+        // Удаляем категорию вместе с блюдами (каскад удалит блюда; история заказов
+        // сохраняется по снимкам, ссылки обнуляются).
+      } else {
+        throw new BadRequestException('В категории есть блюда. Выберите: перенести их или удалить вместе с категорией.');
+      }
     }
+
+    // Каскад: при удалении категории удалятся её блюда (если их не перенесли).
     await this.prisma.category.delete({ where: { id } });
     await this.audit.log({
       actor,
       actionType: AuditAction.CATEGORY_DELETED,
       entityType: AuditEntity.CATEGORY,
       entityId: id,
-      description: `${actor.name ?? 'Сотрудник'} удалил категорию «${before.name}»`,
+      description:
+        `${actor.name ?? 'Сотрудник'} удалил категорию «${before.name}»` +
+        (dishes > 0 ? (dto.strategy === 'move' ? ' (блюда перенесены)' : ' (вместе с блюдами)') : ''),
       oldValue: { name: before.name },
+      metadata: { dishes, strategy: dishes > 0 ? dto.strategy : undefined },
     });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: id });
     return { ok: true };
+  }
+
+  /** Меняет порядок категорий по переданному списку id. */
+  async reorderCategories(ids: string[], actor: AuditActor) {
+    const categories = await this.prisma.category.findMany({ where: { id: { in: ids } }, select: { id: true } });
+    if (categories.length !== ids.length) throw new BadRequestException('Категория не найдена');
+    await this.prisma.$transaction(
+      ids.map((catId, index) =>
+        this.prisma.category.update({ where: { id: catId }, data: { sortOrder: index } }),
+      ),
+    );
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.CATEGORY_UPDATED,
+      entityType: AuditEntity.CATEGORY,
+      entityId: ids[0] ?? '',
+      description: `${actor.name ?? 'Сотрудник'} изменил порядок категорий`,
+      newValue: { order: ids },
+    });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { reorder: true });
+    return this.categoriesAll();
+  }
+
+  /** Массовый перенос всех блюд из одной категории в другую. */
+  async moveCategoryDishes(fromCategoryId: string, toCategoryId: string, actor: AuditActor) {
+    if (fromCategoryId === toCategoryId) throw new BadRequestException('Категории совпадают');
+    const from = await this.ensureCategory(fromCategoryId);
+    const to = await this.ensureCategory(toCategoryId);
+    const res = await this.prisma.dish.updateMany({
+      where: { categoryId: fromCategoryId },
+      data: { categoryId: toCategoryId },
+    });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.CATEGORY_UPDATED,
+      entityType: AuditEntity.CATEGORY,
+      entityId: fromCategoryId,
+      description: `${actor.name ?? 'Сотрудник'} перенёс блюда (${res.count}) из «${from.name}» в «${to.name}»`,
+      newValue: { from: from.name, to: to.name, count: res.count },
+    });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { moved: res.count });
+    return { ok: true, moved: res.count };
   }
 
   /** Все блюда (включая неактивные) с категорией — для управления меню. */
@@ -276,7 +341,9 @@ export class CatalogService {
           quantity: true,
           removable: true,
           replaceable: true,
+          dishVariantId: true,
           dish: { select: { id: true, name: true, price: true } },
+          dishVariant: { select: { id: true, name: true, price: true } },
         },
       },
     };
@@ -445,29 +512,20 @@ export class CatalogService {
     const dish = await this.prisma.dish.findUnique({ where: { id } });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
     const used = await this.prisma.orderItem.count({ where: { dishId: id } });
-    let result: unknown;
-    if (used > 0) {
-      // Блюдо в истории заказов — мягко отключаем.
-      result = await this.prisma.dish.update({
-        where: { id },
-        data: { isActive: false, isAvailable: false },
-        include: { category: { select: { id: true, name: true } } },
-      });
-    } else {
-      await this.prisma.dish.delete({ where: { id } });
-      result = { ok: true };
-    }
+    // Полностью убираем блюдо из меню. История заказов не ломается: позиции
+    // хранят снимок названия/цены, а ссылки на блюдо обнуляются (ON DELETE SET NULL).
+    await this.prisma.dish.delete({ where: { id } });
     await this.audit.log({
       actor,
       actionType: AuditAction.MENU_ITEM_DELETED,
       entityType: AuditEntity.MENU_ITEM,
       entityId: id,
-      description: `${actor.name ?? 'Сотрудник'} удалил блюдо «${dish.name}»${used > 0 ? ' (отключено, есть в истории заказов)' : ''}`,
+      description: `${actor.name ?? 'Сотрудник'} удалил блюдо «${dish.name}»`,
       oldValue: { name: dish.name, price: Number(dish.price) },
-      metadata: { softDeleted: used > 0 },
+      metadata: { hadOrderHistory: used > 0 },
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: id });
-    return result;
+    return { ok: true };
   }
 
   // ===================== СЕТЫ =====================
@@ -546,6 +604,7 @@ export class CatalogService {
   private mapSetComponents(components: SetComponentDto[]) {
     return components.map((c, idx) => ({
       dishId: c.dishId,
+      dishVariantId: c.dishVariantId ?? null,
       quantity: c.quantity ?? 1,
       sortOrder: idx,
       removable: c.removable ?? true,
@@ -553,17 +612,31 @@ export class CatalogService {
     }));
   }
 
-  /** Компоненты сета должны быть существующими активными обычными блюдами (не сетами). */
+  /**
+   * Компоненты сета должны быть существующими активными обычными блюдами (не сетами).
+   * Вариант (если указан) должен принадлежать своему блюду.
+   */
   private async validateSetComponents(components: SetComponentDto[]) {
     const ids = [...new Set(components.map((c) => c.dishId))];
     if (ids.length === 0) throw new BadRequestException('Добавьте блюда в состав сета');
     const dishes = await this.prisma.dish.findMany({
       where: { id: { in: ids } },
-      select: { id: true, isSet: true, isActive: true },
+      select: { id: true, isSet: true, isActive: true, variants: { select: { id: true } } },
     });
     if (dishes.length !== ids.length) throw new BadRequestException('Блюдо состава не найдено');
     if (dishes.some((d) => d.isSet)) throw new BadRequestException('Нельзя добавить сет внутрь сета');
     if (dishes.some((d) => !d.isActive)) throw new BadRequestException('Блюдо состава отключено');
+    const byId = new Map(dishes.map((d) => [d.id, d]));
+    for (const c of components) {
+      const dish = byId.get(c.dishId)!;
+      if (c.dishVariantId) {
+        if (!dish.variants.some((v) => v.id === c.dishVariantId)) {
+          throw new BadRequestException('Вариант блюда состава не найден');
+        }
+      } else if (dish.variants.length > 0) {
+        throw new BadRequestException('Выберите вариант блюда состава');
+      }
+    }
   }
 
   /** Категория «Сеты» (создаётся при необходимости). */
