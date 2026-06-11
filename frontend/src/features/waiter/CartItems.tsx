@@ -35,22 +35,36 @@ export function CartLinesList({
         const changed = isSet && cartSetChanged(l);
         const open = expanded[key];
         return (
-          <div key={key} className="py-2.5">
+          <div key={key} className="py-2">
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => isSet && setExpanded((e) => ({ ...e, [key]: !e[key] }))}
-                className="min-w-0 flex-1 text-left"
-                disabled={!isSet}
-              >
-                <span className="block truncate text-[15px] text-text-primary">{cartLineName(l)}</span>
-                {isSet && (
-                  <span className="text-xs text-text-muted">
-                    {changed ? t('Состав изменён') : `${l.set!.components.length} ${t('блюд')}`}
-                    <span className="ml-1 text-primary">{open ? '▴' : '▾'}</span>
-                  </span>
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => isSet && setExpanded((e) => ({ ...e, [key]: !e[key] }))}
+                  className="block w-full text-left"
+                  disabled={!isSet}
+                >
+                  <span className="block truncate text-[15px] text-text-primary">{cartLineName(l)}</span>
+                  {isSet && (
+                    <span className="text-xs text-text-muted">
+                      {changed ? t('Состав изменён') : `${l.set!.components.length} ${t('блюд')}`}
+                      <span className="ml-1 text-primary">{open ? '▴' : '▾'}</span>
+                    </span>
+                  )}
+                </button>
+                {/* Компактная метка «С собой» — только если позиция навынос. Тап снимает отметку. */}
+                {l.takeaway && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleTakeaway?.(key, false)}
+                    aria-label={t('Снять «с собой»')}
+                    className="mt-1 inline-flex items-center gap-1 rounded-md border border-border bg-white px-1.5 py-0.5 text-[11px] leading-none text-text-secondary"
+                  >
+                    <BagIcon className="h-3 w-3" />
+                    {t('С собой')}
+                  </button>
                 )}
-              </button>
+              </div>
               <div className="flex shrink-0 items-center gap-2.5">
                 <RoundBtn variant="dec" onClick={() => dec(key)} label={t('Уменьшить количество')} />
                 <span className="w-5 text-center text-[15px] font-medium text-text-primary">{l.quantity}</span>
@@ -61,21 +75,6 @@ export function CartLinesList({
                 className={`${priceWidth} shrink-0 justify-end text-[15px] font-semibold text-text-primary`}
               />
             </div>
-            {onToggleTakeaway && (
-              <button
-                type="button"
-                onClick={() => onToggleTakeaway(key, !l.takeaway)}
-                aria-pressed={!!l.takeaway}
-                className={`mt-1.5 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                  l.takeaway
-                    ? 'border-primary bg-primary/10 text-primary'
-                    : 'border-border text-text-muted hover:border-primary/40'
-                }`}
-              >
-                <BagIcon />
-                {t('С собой')}
-              </button>
-            )}
             {isSet && open && (
               <ul className="mt-1.5 space-y-0.5 pl-1 text-[13px]">
                 {l.set!.components.map((c) => (
@@ -98,6 +97,32 @@ export function CartLinesList({
         );
       })}
     </div>
+  );
+}
+
+/** Маленький тумблер «С собой» для шапки корзины (весь заказ навынос). */
+export function TakeawaySwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => onChange(!on)}
+      className="inline-flex items-center gap-2 text-sm text-text-secondary"
+    >
+      <span>С собой</span>
+      <span
+        className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+          on ? 'bg-primary' : 'bg-slate-300'
+        }`}
+      >
+        <span
+          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+            on ? 'translate-x-[18px]' : 'translate-x-0.5'
+          }`}
+        />
+      </span>
+    </button>
   );
 }
 

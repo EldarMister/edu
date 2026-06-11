@@ -4,7 +4,7 @@ import { displayOrderNumber, money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { NumberTicker } from '@/components/NumberTicker';
-import { CartLinesList, BagIcon } from './CartItems';
+import { CartLinesList, TakeawaySwitch } from './CartItems';
 
 export function CartPanel({
   table,
@@ -49,14 +49,17 @@ export function CartPanel({
           </h2>
           <p className="mt-0.5 text-sm text-text-muted">{t('Стол')} {table.number}</p>
         </div>
-        {mode === 'edit' && onCancelEdit && (
-          <button
-            onClick={onCancelEdit}
-            className="shrink-0 text-sm font-medium text-text-muted hover:text-text-secondary"
-          >
-            {t('Отмена')}
-          </button>
-        )}
+        <div className="flex shrink-0 items-center gap-4">
+          {hasLines && <TakeawaySwitch on={allTakeaway} onChange={setAllTakeaway} />}
+          {mode === 'edit' && onCancelEdit && (
+            <button
+              onClick={onCancelEdit}
+              className="text-sm font-medium text-text-muted hover:text-text-secondary"
+            >
+              {t('Отмена')}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Позиции — компактный список как в мобильной корзине */}
@@ -70,28 +73,8 @@ export function CartPanel({
         )}
       </div>
 
-      {/* Низ: «весь заказ с собой» + общий комментарий + итоги + кнопки */}
+      {/* Низ: общий комментарий + итоги + кнопки */}
       <div className="border-t border-border pt-3">
-        {hasLines && (
-          <button
-            type="button"
-            onClick={() => setAllTakeaway(!allTakeaway)}
-            aria-pressed={allTakeaway}
-            className={`mb-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
-              allTakeaway ? 'border-primary bg-primary/10 text-primary' : 'border-border text-text-secondary hover:border-primary/40'
-            }`}
-          >
-            <BagIcon className="h-4 w-4" />
-            {t('Весь заказ — с собой')}
-            <span
-              className={`ml-auto flex h-5 w-9 items-center rounded-full p-0.5 transition-colors ${
-                allTakeaway ? 'bg-primary' : 'bg-slate-300'
-              }`}
-            >
-              <span className={`h-4 w-4 rounded-full bg-white transition-transform ${allTakeaway ? 'translate-x-4' : ''}`} />
-            </span>
-          </button>
-        )}
         <input
           className="input mb-3 h-10 text-sm"
           placeholder={t('Комментарий к заказу')}
