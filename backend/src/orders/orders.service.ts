@@ -328,11 +328,90 @@ export class OrdersService {
     return updated;
   }
 
+  /** Подпись позиции для сопоставления старого и нового состава при редактировании. */
+  private editItemSig(
+    dishId: string | null | undefined,
+    variantId: string | null | undefined,
+    comment: string | null | undefined,
+    comps:
+      | {
+          action: string;
+          originalDishId: string | null;
+          finalDishId: string | null;
+          originalVariantNameSnapshot: string | null;
+          quantity: number;
+        }[]
+      | undefined,
+  ): string {
+    const base = `${dishId ?? ''}|${variantId ?? ''}|${(comment ?? '').trim()}`;
+    if (!comps || comps.length === 0) return base;
+    const sig = comps
+      .map(
+        (c) =>
+          `${c.action}:${c.originalDishId ?? ''}:${c.finalDishId ?? ''}:${c.originalVariantNameSnapshot ?? ''}:${c.quantity}`,
+      )
+      .sort()
+      .join(',');
+    return `${base}|set[${sig}]`;
+  }
+
+  /**
+   * Переносит статус кухни (принято/готовится/готово/подано) с неизменных старых позиций
+   * на соответствующие новые. Реально новые/заменённые позиции остаются «new». Мутирует
+   * статусы внутри itemsData (и блюд состава сета).
+   */
+  private carryItemProgress(
+    oldItems: {
+      dishId: string | null;
+      dishVariantId: string | null;
+      comment: string | null;
+      status: OrderItemStatus;
+      setComponents: {
+        action: string;
+        originalDishId: string | null;
+        finalDishId: string | null;
+        originalVariantNameSnapshot: string | null;
+        quantity: number;
+      }[];
+    }[],
+    itemsData: Prisma.OrderItemUncheckedCreateWithoutOrderInput[],
+  ) {
+    const PROGRESS: OrderItemStatus[] = [
+      OrderItemStatus.accepted,
+      OrderItemStatus.cooking,
+      OrderItemStatus.ready,
+      OrderItemStatus.served,
+    ];
+    // Пул статусов старых позиций по подписи (может быть несколько одинаковых).
+    const pool = new Map<string, OrderItemStatus[]>();
+    for (const it of oldItems) {
+      const sig = this.editItemSig(it.dishId, it.dishVariantId, it.comment, it.setComponents);
+      const arr = pool.get(sig) ?? [];
+      arr.push(it.status);
+      pool.set(sig, arr);
+    }
+    for (const data of itemsData) {
+      if (data.prepStation === PrepStation.none) continue; // «без отправки» всегда готово
+      const create = (data.setComponents as { create?: any[] } | undefined)?.create;
+      const sig = this.editItemSig(data.dishId, data.dishVariantId, data.comment, create as any);
+      const arr = pool.get(sig);
+      if (!arr || arr.length === 0) continue;
+      const carried = arr.shift()!;
+      if (!PROGRESS.includes(carried)) continue;
+      data.status = carried;
+      // Неизменный сет: переносим статус и на блюда состава (кроме удалённых).
+      if (Array.isArray(create)) {
+        for (const r of create) {
+          if (r.status !== OrderItemStatus.cancelled) r.status = carried;
+        }
+      }
+    }
+  }
+
   /**
    * Полное редактирование состава заказа официантом.
    * Разрешено в статусах: sent_to_kitchen, accepted_by_kitchen, cooking.
-   * После редактирования статус сбрасывается в sent_to_kitchen,
-   * кухня получает уведомление о новом/обновлённом заказе.
+   * Неизменные позиции сохраняют статус кухни; заказ в работе не возвращается в «Новые».
    */
   async editOrder(
     orderId: string,
@@ -365,7 +444,21 @@ export class OrdersService {
 
     // Заказ только из «Без отправки» сразу готов — на кухню/бар не уходит.
     const hasPrep = itemsData.some((i) => i.prepStation !== PrepStation.none);
-    const nextStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
+
+    // Переносим прогресс кухни на неизменные позиции: блюда, которые остались в составе
+    // как были, сохраняют свой статус (принято/готовится/готово), а не сбрасываются в «новое».
+    // Так заказ, который уже в работе, не возвращается на вкладку «Новые» — туда попадает
+    // (как «новое») только реально добавленное / заменённое блюдо.
+    this.carryItemProgress(order.items, itemsData);
+
+    // Статус заказа: если он уже был в работе — оставляем как есть (не возвращаем в «Новые»).
+    const wasInWork =
+      order.status === OrderStatus.accepted_by_kitchen || order.status === OrderStatus.cooking;
+    const nextStatus = !hasPrep
+      ? OrderStatus.ready
+      : wasInWork
+        ? order.status
+        : OrderStatus.sent_to_kitchen;
     const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -381,7 +474,6 @@ export class OrdersService {
           serviceChargeAmount: totals.serviceCharge,
           finalAmount: totals.final,
           requiresWaiterDecision: false,
-          // Сбрасываем статус — кухня должна принять обновлённый состав заново.
           status: nextStatus,
         },
       });

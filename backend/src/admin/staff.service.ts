@@ -287,17 +287,19 @@ export class StaffService {
    * Отчёт по сменам сотрудников за выбранную дату: смена, оборот, касса (должен/сдал),
    * разница, товарная разбивка по категориям и список отмен.
    */
-  async shiftReport(dateStr?: string) {
+  async shiftReport(dateStr: string | undefined, actor?: AuditActor) {
     const { from, to } = this.dayBounds(dateStr);
     const dateKey = this.dateOnly(dateStr);
 
-    const waiters = await this.prisma.user.findMany({
-      where: { role: Role.WAITER },
+    // В таблице — все сотрудники. Владельцев видит только владелец (как в списке персонала).
+    const where = actor && actor.role !== Role.OWNER ? { role: { not: Role.OWNER } } : {};
+    const users = await this.prisma.user.findMany({
+      where,
       select: { id: true, name: true, role: true },
       orderBy: { name: 'asc' },
     });
-    const waiterIds = waiters.map((w) => w.id);
-    if (waiterIds.length === 0) return [];
+    // Финансовый отчёт по смене считаем только для официантов.
+    const waiterIds = users.filter((u) => u.role === Role.WAITER).map((u) => u.id);
 
     const [shifts, paidOrders, cancelledOrders, rejectedItems, cashReports] = await Promise.all([
       // Смены, пересекающие выбранный день.
@@ -452,11 +454,12 @@ export class StaffService {
       }
     }
 
-    return waiters.map((w) => {
-      const a = acc.get(w.id);
-      const sh = shiftByWaiter.get(w.id);
+    const rows = users.map((u) => {
+      const isWaiter = u.role === Role.WAITER;
+      const a = isWaiter ? acc.get(u.id) : undefined;
+      const sh = isWaiter ? shiftByWaiter.get(u.id) : undefined;
       const cashDue = a?.cashDue ?? 0;
-      const cashHanded = cashHandedByWaiter.get(w.id) ?? 0;
+      const cashHanded = isWaiter ? cashHandedByWaiter.get(u.id) ?? 0 : 0;
       const durationMin =
         sh && sh.end ? Math.max(0, Math.round((sh.end.getTime() - sh.start.getTime()) / 60000)) : null;
       const categories = a
@@ -472,9 +475,11 @@ export class StaffService {
         : [];
       const cancellations = (a?.cancellations ?? []).sort((x, y) => y.time.localeCompare(x.time));
       return {
-        waiterId: w.id,
-        name: w.name,
-        role: w.role,
+        waiterId: u.id,
+        name: u.name,
+        role: u.role,
+        // Подробный отчёт по смене — только для официантов.
+        isWaiter,
         shiftStart: sh ? sh.start.toISOString() : null,
         shiftEnd: sh?.end ? sh.end.toISOString() : null,
         shiftOpen: sh?.open ?? false,
@@ -487,6 +492,11 @@ export class StaffService {
         cancellations,
       };
     });
+
+    // Официанты — первыми (у них развёрнутый отчёт), затем остальные; внутри — по имени.
+    return rows.sort(
+      (x, y) => Number(y.isWaiter) - Number(x.isWaiter) || x.name.localeCompare(y.name),
+    );
   }
 
   /** Записать факт сдачи наличных сотрудником за дату. */

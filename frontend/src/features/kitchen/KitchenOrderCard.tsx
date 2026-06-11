@@ -149,6 +149,9 @@ export function KitchenOrderCard({
     const pending = pendingItemIds.includes(id);
     const rejected = status === 'rejected' || (pending && pendingType === 'reject');
     const isReady = status === 'ready' || status === 'served' || (pending && pendingType === 'ready');
+    // Заказ уже в работе, а позиция всё ещё «new» — значит её добавили/заменили при
+    // редактировании. Подсвечиваем, чтобы повар видел, какое блюдо изменилось.
+    const isFresh = tab === 'in_work' && status === 'new' && !opts?.container && !pending;
     return (
       <div
         className={`flex items-center gap-3 ${selectable ? 'cursor-pointer' : ''}`}
@@ -166,11 +169,16 @@ export function KitchenOrderCard({
         )}
         <span
           className={`min-w-0 flex-1 ${
-            rejected ? 'text-danger line-through' : isReady ? 'text-text-muted' : 'text-text-primary'
+            rejected ? 'text-danger line-through' : isReady ? 'text-text-muted' : isFresh ? 'font-semibold text-primary' : 'text-text-primary'
           }`}
         >
           {content}
         </span>
+        {isFresh && (
+          <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+            Новое
+          </span>
+        )}
         {isReady && <span className="shrink-0 text-[13px] font-bold text-green-600">✓ Готово</span>}
         {rejected && <span className="shrink-0 text-[13px] font-bold text-danger">Отказ</span>}
       </div>

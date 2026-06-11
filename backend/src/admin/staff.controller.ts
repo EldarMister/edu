@@ -24,8 +24,8 @@ export class StaffController {
   }
 
   @Get('shift-report')
-  shiftReport(@Query('date') date?: string) {
-    return this.staff.shiftReport(date);
+  shiftReport(@CurrentUser() actor: AuthUser, @Query('date') date?: string) {
+    return this.staff.shiftReport(date, actor);
   }
 
   @Post('cash-handed')

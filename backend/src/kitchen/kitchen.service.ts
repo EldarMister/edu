@@ -32,10 +32,16 @@ function stationTabOf(items: StationItem[]): Exclude<KitchenTab, 'rejected'> | n
     (i) => i.status !== OrderItemStatus.rejected && i.status !== OrderItemStatus.cancelled,
   );
   if (active.length === 0) return null;
-  const statuses = new Set(active.map((i) => i.status));
-  if (statuses.has(OrderItemStatus.new)) return 'new';
-  if (statuses.has(OrderItemStatus.cooking) || statuses.has(OrderItemStatus.accepted)) return 'in_work';
-  return 'ready';
+  // Все позиции «новые» → «Новые». Все готовы → «Завершённые».
+  // Иначе заказ уже в работе (в т.ч. если при редактировании добавили новое блюдо
+  // к уже принятым) → остаётся в «В работе», а не возвращается в «Новые».
+  const allNew = active.every((i) => i.status === OrderItemStatus.new);
+  if (allNew) return 'new';
+  const allReady = active.every(
+    (i) => i.status === OrderItemStatus.ready || i.status === OrderItemStatus.served,
+  );
+  if (allReady) return 'ready';
+  return 'in_work';
 }
 
 @Injectable()
@@ -56,9 +62,23 @@ export class KitchenService {
       return orders.map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }));
     }
 
+    // На вкладке «Завершённые» оплаченные заказы не должны пропадать — показываем
+    // оплаченные за сегодня вместе с активными готовыми.
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const statusWhere =
+      tab === 'ready'
+        ? {
+            OR: [
+              { status: { in: ACTIVE_TAB_STATUSES } },
+              { status: OrderStatus.paid, closedAt: { gte: startOfDay } },
+            ],
+          }
+        : { status: { in: ACTIVE_TAB_STATUSES } };
+
     const orders = await this.prisma.order.findMany({
       where: {
-        status: { in: ACTIVE_TAB_STATUSES },
+        ...statusWhere,
         items: {
           some: {
             prepStation: station,
@@ -71,9 +91,10 @@ export class KitchenService {
     });
 
     // Оставляем только позиции станции и раскладываем по вкладке станции.
+    // Оплаченные заказы (все позиции готовы/поданы) попадают в «Завершённые».
     return orders
       .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }))
-      .filter((o) => stationTabOf(o.items) === tab);
+      .filter((o) => o.status === OrderStatus.paid ? tab === 'ready' : stationTabOf(o.items) === tab);
   }
 
   /**
