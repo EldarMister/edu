@@ -11,6 +11,7 @@ import type { PrepStation } from '@/types';
 import { useKitchenOrders, useAccept, useReadyItems, useRejectItems, type KitchenTab } from './api';
 import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
+import { useVoiceCommands } from './useVoiceCommands';
 
 const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'new', label: 'Новые' },
@@ -60,6 +61,20 @@ export function KitchenApp({
   const accept = useAccept(station);
   const readyItems = useReadyItems(station);
   const rejectItems = useRejectItems(station);
+
+  // Голосовое управление: нужны заказы «новые» (принять) и «в работе» (готово по блюду)
+  // независимо от текущей вкладки. Запросы шарят кэш с ordersQ, когда вкладка совпадает.
+  const newOrdersQ = useKitchenOrders('new', station);
+  const inWorkOrdersQ = useKitchenOrders('in_work', station);
+  const voice = useVoiceCommands({
+    newOrders: newOrdersQ.data ?? [],
+    inWorkOrders: inWorkOrdersQ.data ?? [],
+    onAccept: (orderId) => act(orderId, () => accept.mutateAsync(orderId)),
+    onReadyItem: (t) =>
+      readyItems
+        .mutateAsync(t)
+        .catch((err) => push({ message: apiError(err), at: new Date().toISOString() })),
+  });
 
   // Тикающий таймер (ожидание заказов + обратный отсчёт блока отмены).
   useEffect(() => {
@@ -137,6 +152,28 @@ export function KitchenApp({
         </div>
         <div className="flex items-center gap-4 text-sm">
           <ConnectionStatus />
+          {voice.supported && (
+            <button
+              onClick={voice.toggle}
+              title="Голосовое управление: «принять заказ», «<блюдо> готово», «повтори заказ», «замолчи»"
+              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 font-medium transition-colors ${
+                voice.active
+                  ? 'border-primary bg-primary/5 text-primary'
+                  : 'border-border text-text-muted hover:text-primary'
+              }`}
+            >
+              <span className="relative flex h-4 w-4 items-center justify-center">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="2" width="6" height="12" rx="3" />
+                  <path d="M5 10a7 7 0 0 0 14 0M12 17v4" />
+                </svg>
+                {voice.active && voice.listening && (
+                  <span className="absolute -right-1 -top-1 h-2 w-2 animate-pulse rounded-full bg-danger" />
+                )}
+              </span>
+              {voice.active ? (voice.listening ? 'Слушаю' : 'Голос вкл') : 'Голос'}
+            </button>
+          )}
           {pushNotifications.status !== 'subscribed' && pushNotifications.status !== 'unsupported' && (
             <button onClick={pushNotifications.enable} className="text-text-muted hover:text-primary">
               Уведомления

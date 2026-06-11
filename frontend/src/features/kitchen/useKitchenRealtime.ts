@@ -34,6 +34,7 @@ export function useKitchenRealtime() {
     });
 
     // 3. Озвучка — текст уже сформирован backend (номер прописью, состав, voiceName).
+    kitchenVoice.remember(order.voice?.text); // для голосовой команды «повтори заказ»
     kitchenVoice.enqueue(order.voice?.text);
   });
 

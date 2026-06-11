@@ -13,6 +13,8 @@ class KitchenVoice {
   private queue: string[] = [];
   private pumping = false;
   private current: HTMLAudioElement | null = null;
+  /** Текст последнего озвученного заказа — для голосовой команды «повтори заказ». */
+  private lastOrderText = '';
 
   /** Добавить текст в очередь озвучки. Текст формирует backend. */
   enqueue(text: string | null | undefined) {
@@ -20,6 +22,40 @@ class KitchenVoice {
     if (!t) return;
     this.queue.push(t);
     void this.pump();
+  }
+
+  /** Запомнить текст заказа (для «повтори заказ»). */
+  remember(text: string | null | undefined) {
+    const t = (text ?? '').trim();
+    if (t) this.lastOrderText = t;
+  }
+
+  /** Повторить последний озвученный заказ. true — если было что повторять. */
+  repeatLast(): boolean {
+    if (!this.lastOrderText) return false;
+    this.enqueue(this.lastOrderText);
+    return true;
+  }
+
+  /** Немедленно остановить речь и очистить очередь («замолчи» / «заткнись»). */
+  stopAll() {
+    this.queue = [];
+    if (this.current) {
+      try {
+        this.current.pause();
+        this.current.currentTime = 0;
+      } catch {
+        // элемент уже мог быть освобождён
+      }
+      this.current = null;
+    }
+  }
+
+  /** Произнести фразу немедленно (вне очереди), дождаться окончания — для голосовых подсказок. */
+  async say(text: string): Promise<void> {
+    const t = (text ?? '').trim();
+    if (!t) return;
+    await this.playText(t);
   }
 
   private async pump() {
