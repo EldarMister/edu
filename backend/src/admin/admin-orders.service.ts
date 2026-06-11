@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { OrderStatus, Prisma } from '@prisma/client';
+import { OrderStatus, PaymentMethod, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { orderInclude } from '../orders/order.helpers';
 import { OrderQueryDto } from './dto';
@@ -14,6 +14,14 @@ const ACTIVE_STATUSES: OrderStatus[] = [
   OrderStatus.waiting_payment,
   OrderStatus.partially_rejected,
 ];
+
+const CANCELLED_STATUSES: OrderStatus[] = [OrderStatus.cancelled, OrderStatus.rejected];
+
+// Список заказов отдаёт ещё и разбивку оплат — чтобы показать «Смешанная (нал / QR)».
+const listInclude = {
+  ...orderInclude,
+  payments: { select: { method: true, amount: true } },
+} satisfies Prisma.OrderInclude;
 
 function dayBounds(date = new Date()) {
   const start = new Date(date);
@@ -45,16 +53,23 @@ export class AdminOrdersService {
     return { ordersToday, activeCount: active, paidCount: paid, cancelledCount: cancelled };
   }
 
-  async list(query: OrderQueryDto) {
-    const page = query.page ?? 1;
-    const pageSize = Math.min(query.pageSize ?? 10, 50);
-
+  /**
+   * Собирает условие выборки заказов из фильтров.
+   * @param withStatus учитывать ли фильтр по статусу (tab) — для сводки он не нужен.
+   */
+  private buildWhere(query: OrderQueryDto, withStatus = true): Prisma.OrderWhereInput {
     const where: Prisma.OrderWhereInput = {};
 
-    if (query.tab === 'active') where.status = { in: ACTIVE_STATUSES };
-    else if (query.tab === 'paid') where.status = OrderStatus.paid;
-    else if (query.tab === 'cancelled')
-      where.status = { in: [OrderStatus.cancelled, OrderStatus.rejected] };
+    if (withStatus) {
+      if (query.tab === 'active') where.status = { in: ACTIVE_STATUSES };
+      else if (query.tab === 'paid') where.status = OrderStatus.paid;
+      else if (query.tab === 'cancelled') where.status = { in: CANCELLED_STATUSES };
+    }
+
+    if (query.paymentMethod && query.paymentMethod in PaymentMethod) {
+      where.paymentMethod = query.paymentMethod as PaymentMethod;
+    }
+    if (query.waiterId) where.waiterId = query.waiterId;
 
     if (query.search) {
       where.OR = [
@@ -73,18 +88,51 @@ export class AdminOrdersService {
       }
     }
 
+    return where;
+  }
+
+  async list(query: OrderQueryDto) {
+    const page = query.page ?? 1;
+    const pageSize = Math.min(query.pageSize ?? 10, 50);
+    const where = this.buildWhere(query);
+
     const [items, total] = await Promise.all([
       this.prisma.order.findMany({
         where,
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: orderInclude,
+        include: listInclude,
       }),
       this.prisma.order.count({ where }),
     ]);
 
     return { items, total, page, pageSize, pages: Math.ceil(total / pageSize) };
+  }
+
+  /**
+   * Сводка по выбранному периоду/фильтрам (для строки итогов под заголовком и внизу таблицы).
+   * Статус-фильтр (tab) здесь не применяется — нужна полная разбивка по статусам.
+   */
+  async summary(query: OrderQueryDto) {
+    const base = this.buildWhere(query, false);
+    const [total, paid, cancelled, unpaid, revenueAgg] = await Promise.all([
+      this.prisma.order.count({ where: base }),
+      this.prisma.order.count({ where: { ...base, status: OrderStatus.paid } }),
+      this.prisma.order.count({ where: { ...base, status: { in: CANCELLED_STATUSES } } }),
+      this.prisma.order.count({ where: { ...base, status: { in: ACTIVE_STATUSES } } }),
+      this.prisma.order.aggregate({
+        where: { ...base, status: OrderStatus.paid },
+        _sum: { finalAmount: true },
+      }),
+    ]);
+    return {
+      total,
+      paid,
+      unpaid,
+      cancelled,
+      revenue: Number(revenueAgg._sum.finalAmount ?? 0),
+    };
   }
 
   async findOne(id: string) {

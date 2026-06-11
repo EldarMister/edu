@@ -14,6 +14,11 @@ export class AdminOrdersController {
     return this.orders.overview();
   }
 
+  @Get('summary')
+  summary(@Query() query: OrderQueryDto) {
+    return this.orders.summary(query);
+  }
+
   @Get()
   list(@Query() query: OrderQueryDto) {
     return this.orders.list(query);

@@ -211,23 +211,51 @@ export function useOrdersOverview() {
       ),
   });
 }
-export function useAdminOrders(params: {
+export interface OrdersFilter {
   tab: string;
   search: string;
   page: number;
   dateFrom?: string;
   dateTo?: string;
-}) {
+  paymentMethod?: string;
+  waiterId?: string;
+}
+
+function ordersQueryString(params: Partial<OrdersFilter>) {
   const q = new URLSearchParams();
-  q.set('tab', params.tab);
+  if (params.tab && params.tab !== 'all') q.set('tab', params.tab);
   if (params.search) q.set('search', params.search);
   if (params.dateFrom) q.set('dateFrom', params.dateFrom);
   if (params.dateTo) q.set('dateTo', params.dateTo);
+  if (params.paymentMethod) q.set('paymentMethod', params.paymentMethod);
+  if (params.waiterId) q.set('waiterId', params.waiterId);
+  return q;
+}
+
+export function useAdminOrders(params: OrdersFilter) {
+  const q = ordersQueryString(params);
   q.set('page', String(params.page));
   q.set('pageSize', '10');
   return useQuery({
     queryKey: ['admin', 'orders', 'list', params],
     queryFn: () => get<OrdersPage>(`/admin/orders?${q.toString()}`),
+  });
+}
+
+export interface OrdersSummary {
+  total: number;
+  paid: number;
+  unpaid: number;
+  cancelled: number;
+  revenue: number;
+}
+
+/** Сводка по периоду/фильтрам — для строки итогов (статус-фильтр игнорируется). */
+export function useOrdersSummary(params: Omit<OrdersFilter, 'page' | 'tab'>) {
+  const q = ordersQueryString(params);
+  return useQuery({
+    queryKey: ['admin', 'orders', 'summary', params],
+    queryFn: () => get<OrdersSummary>(`/admin/orders/summary?${q.toString()}`),
   });
 }
 

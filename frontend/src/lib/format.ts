@@ -14,6 +14,42 @@ export function paymentMethodLabel(method: string | null | undefined): string {
   }
 }
 
+/** Короткое название способа оплаты для таблицы заказов: qr → «QR». */
+export function paymentMethodShort(method: string | null | undefined): string {
+  switch (method) {
+    case 'qr':
+      return 'QR';
+    case 'cash':
+      return 'Наличные';
+    case 'card':
+      return 'Карта';
+    case 'mixed':
+      return 'Смешанная';
+    default:
+      return '—';
+  }
+}
+
+/**
+ * Ячейка способа оплаты для заказа. Для смешанной показывает разбивку:
+ * «Смешанная (1 000 с / 1 300 с)» — сначала наличные, затем QR.
+ */
+export function paymentCell(order: {
+  paymentMethod: string | null;
+  payments?: { method: string; amount: string }[];
+}): string {
+  if (!order.paymentMethod) return '—';
+  if (order.paymentMethod !== 'mixed') return paymentMethodShort(order.paymentMethod);
+  const sumBy = (m: string) =>
+    (order.payments ?? [])
+      .filter((p) => p.method === m)
+      .reduce((acc, p) => acc + Number(p.amount), 0);
+  const cash = sumBy('cash');
+  const qr = sumBy('qr');
+  if (!order.payments?.length) return 'Смешанная';
+  return `Смешанная (${money(cash)} / ${money(qr)})`;
+}
+
 /** Форматирование суммы: 1063 → «1 063 с» (сом). */
 export function money(value: string | number): string {
   const n = typeof value === 'string' ? Number(value) : value;

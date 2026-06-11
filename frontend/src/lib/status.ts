@@ -31,7 +31,7 @@ export const ORDER_STATUS: Record<OrderStatus, StatusMeta> = {
   picked_up: { label: 'Забран', badge: 'bg-primary/10 text-primary', dot: 'bg-primary' },
   served: { label: 'Подан гостям', badge: 'bg-warning/10 text-warning', dot: 'bg-warning' },
   waiting_payment: { label: 'Ожидает оплаты', badge: 'bg-purple-100 text-purple-600', dot: 'bg-purple-500' },
-  paid: { label: 'Оплачен', badge: 'bg-slate-100 text-text-muted', dot: 'bg-text-light' },
+  paid: { label: 'Оплачен', badge: 'bg-success/10 text-success', dot: 'bg-success' },
   rejected: { label: 'Отказан', badge: 'bg-danger/10 text-danger', dot: 'bg-danger' },
   partially_rejected: { label: 'Частичный отказ', badge: 'bg-danger/10 text-danger', dot: 'bg-danger' },
   cancelled: { label: 'Отменён', badge: 'bg-slate-100 text-text-muted', dot: 'bg-text-light' },
