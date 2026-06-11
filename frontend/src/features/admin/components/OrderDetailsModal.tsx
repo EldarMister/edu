@@ -31,43 +31,43 @@ export function OrderDetailsModal({
       title={`Заказ ${displayOrderNumber(order.orderNumber)}`}
       panelClassName="max-w-2xl"
     >
-      <div className="space-y-5">
-        <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
           <Info label="Статус" value={<OrderBadge status={order.status} />} />
-          <Info label="Дата и время" value={`${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`} />
+          <Info label="Дата" value={`${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`} />
           <Info label="Стол" value={`Стол ${order.table.number}`} />
           <Info label="Официант" value={order.waiter.name} />
           <Info label="Сумма" value={money(order.finalAmount)} strong />
-          <Info label="Скидка" value={money(order.discountAmount)} />
-          <Info label="Способ оплаты" value={paymentMethodLabel(order.paymentMethod)} />
+          {Number(order.discountAmount) > 0 && <Info label="Скидка" value={money(order.discountAmount)} />}
+          {order.paymentMethod && <Info label="Оплата" value={paymentMethodLabel(order.paymentMethod)} />}
         </div>
 
         {order.comment && (
-          <div className="rounded-xl border border-border bg-background px-4 py-3">
-            <p className="text-xs font-medium uppercase tracking-wide text-text-muted">Комментарий</p>
-            <p className="mt-1 text-sm text-text-primary">{order.comment}</p>
+          <div className="rounded-lg border border-border bg-background px-3 py-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">Комментарий</p>
+            <p className="mt-0.5 text-sm text-text-primary">{order.comment}</p>
           </div>
         )}
 
         <div>
-          <div className="mb-2 flex items-center justify-between">
-            <h4 className="font-semibold text-text-primary">Блюда</h4>
-            <span className="text-sm text-text-muted">{order.items.length} поз.</span>
+          <div className="mb-1.5 flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-text-primary">Блюда</h4>
+            <span className="text-xs text-text-muted">{order.items.length} поз.</span>
           </div>
           <div className="overflow-hidden rounded-xl border border-border">
             {order.items.map((item) => (
-              <div key={item.id} className="border-b border-border px-4 py-3 last:border-0">
-                <div className="flex items-start justify-between gap-3">
+              <div key={item.id} className="border-b border-border px-3 py-2 last:border-0">
+                <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="font-medium text-text-primary">
+                    <p className="text-sm font-medium text-text-primary">
                       {item.quantity}× {orderItemDisplayName(item)}
                     </p>
-                    {item.comment && <p className="mt-1 text-sm text-warning">{item.comment}</p>}
-                    {item.rejectReason && <p className="mt-1 text-sm text-danger">Отказ: {item.rejectReason}</p>}
+                    {item.comment && <p className="mt-0.5 text-xs text-warning">{item.comment}</p>}
+                    {item.rejectReason && <p className="mt-0.5 text-xs text-danger">Отказ: {item.rejectReason}</p>}
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="font-semibold text-text-primary">{money(item.finalPrice)}</p>
-                    <p className="mt-1 text-xs text-text-muted">{ITEM_STATUS[item.status]}</p>
+                    <p className="text-sm font-semibold text-text-primary">{money(item.finalPrice)}</p>
+                    <p className="mt-0.5 text-[11px] text-text-muted">{ITEM_STATUS[item.status]}</p>
                   </div>
                 </div>
               </div>
@@ -75,9 +75,9 @@ export function OrderDetailsModal({
           </div>
         </div>
 
-        <div className="grid gap-2 border-t border-border pt-4 text-sm">
+        <div className="grid gap-1.5 border-t border-border pt-3 text-sm">
           <Total label="Итого" value={money(order.totalAmount)} />
-          <Total label="Скидка" value={money(order.discountAmount)} />
+          {Number(order.discountAmount) > 0 && <Total label="Скидка" value={money(order.discountAmount)} />}
           {Number(order.serviceChargeAmount) > 0 && (
             <Total label="Обслуживание" value={money(order.serviceChargeAmount)} />
           )}
@@ -98,9 +98,9 @@ function Info({
   strong?: boolean;
 }) {
   return (
-    <div className="rounded-xl border border-border px-4 py-3">
-      <p className="text-xs font-medium uppercase tracking-wide text-text-muted">{label}</p>
-      <div className={`mt-1 text-sm ${strong ? 'font-semibold text-text-primary' : 'text-text-secondary'}`}>
+    <div className="rounded-lg border border-border px-3 py-2">
+      <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">{label}</p>
+      <div className={`mt-0.5 text-sm ${strong ? 'font-semibold text-text-primary' : 'text-text-secondary'}`}>
         {value}
       </div>
     </div>

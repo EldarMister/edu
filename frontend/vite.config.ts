@@ -1,9 +1,11 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 import { execSync } from 'node:child_process';
 import { fileURLToPath, URL } from 'node:url';
 import { createRequire } from 'node:module';
+import { writeFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const pkg = createRequire(import.meta.url)('./package.json') as { version: string };
 
@@ -58,6 +60,15 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    /** Записывает /public/version.json при каждой сборке для механизма авто-обновления. */
+    {
+      name: 'write-version-json',
+      buildStart() {
+        const commit = buildCommit();
+        const json = JSON.stringify({ commit, builtAt: new Date().toISOString() }, null, 2);
+        writeFileSync(resolve('./public/version.json'), json, 'utf-8');
+      },
+    } as Plugin,
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon.png', 'sounds/*.mp3', 'sounds/*.wav', 'sounds/*.ogg'],

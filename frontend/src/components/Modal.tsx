@@ -37,10 +37,13 @@ export function Modal({
         onClick={onClose}
         aria-hidden
       />
-      <div className={`card relative z-10 flex max-h-[92vh] w-full flex-col rounded-b-none sm:rounded-2xl ${panelClassName}`}>
+      <div
+        className={`card relative z-10 flex w-full flex-col rounded-b-none sm:rounded-2xl ${panelClassName}`}
+        style={{ maxHeight: 'calc(82vh - env(safe-area-inset-bottom, 0px))' }}
+      >
         {title && (
-          <div className="flex items-center justify-between border-b border-border px-5 py-4">
-            <h3 className="text-lg font-semibold text-text-primary">{title}</h3>
+          <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
+            <h3 className="text-base font-semibold text-text-primary">{title}</h3>
             <button onClick={onClose} className="text-text-light hover:text-text-secondary" aria-label="Закрыть">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M18 6 6 18M6 6l12 12" />
@@ -48,8 +51,8 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
-        {footer && <div className="border-t border-border px-5 py-4">{footer}</div>}
+        <div className="flex-1 overflow-y-auto px-4 py-3">{children}</div>
+        {footer && <div className="shrink-0 border-t border-border px-4 py-3">{footer}</div>}
       </div>
     </div>
   );

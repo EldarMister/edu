@@ -218,7 +218,6 @@ function ActionButton({
   // Кухонная/барная логика — только по позициям, реально отправленным на станцию.
   // Позиции «Без отправки» (prepStation === 'none') не участвуют в кухне/баре.
   const stationItems = order.items.filter((item) => item.prepStation !== 'none');
-  const hasStationItems = stationItems.length > 0;
   const hasReadyStationItem = stationItems.some((item) => item.status === 'ready');
   const cooldownActive = actionCooldown > 0;
 
@@ -259,7 +258,7 @@ function ActionButton({
   // «Забрал с кухни» — только если есть готовая позиция, реально отправленная на станцию.
   if (
     hasReadyStationItem &&
-    !['paid', 'cancelled', 'rejected', 'waiting_payment', 'picked_up', 'served'].includes(s)
+    !['paid', 'cancelled', 'rejected', 'waiting_payment', 'picked_up', 'served', 'ready'].includes(s)
   ) {
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onPickedUp)}>
@@ -268,9 +267,8 @@ function ActionButton({
     );
   }
 
-  // Заказ без кухни/бара (все позиции «Без отправки») создаётся сразу готовым —
-  // забирать с кухни нечего, официант просто выносит гостям и переходит к оплате.
-  if (!hasStationItems && s === 'ready') {
+  // Заказ готов (ready) — независимо от того, есть ли кухонные позиции, показываем «Вынес гостям».
+  if (s === 'ready') {
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onServed)}>
         {cooldownActive ? actionCooldown : spin ?? t('Вынес гостям')}
