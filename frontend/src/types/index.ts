@@ -187,6 +187,8 @@ export interface Order {
   table: { id: string; number: number; seats: number; hallId: string; status: TableStatus };
   waiter: { id: string; name: string };
   items: OrderItem[];
+  /** Разбивка оплат (для смешанной — наличные + QR). Приходит в списке заказов админки. */
+  payments?: { method: PaymentMethod; amount: string }[];
 }
 
 export interface Receipt {

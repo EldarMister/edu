@@ -329,6 +329,14 @@ export class OrderQueryDto {
   @IsOptional() @IsString()
   dateTo?: string;
 
+  // Фильтр по способу оплаты (qr|cash|card|mixed).
+  @IsOptional() @IsString()
+  paymentMethod?: string;
+
+  // Фильтр по официанту.
+  @IsOptional() @IsString()
+  waiterId?: string;
+
   @IsOptional() @Type(() => Number) @IsInt() @Min(1)
   page?: number;
 
