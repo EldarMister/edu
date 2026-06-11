@@ -191,7 +191,8 @@ export class OrdersService {
         const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
         const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
         const totals = this.calcTotals(itemsData, serviceChargeAmount);
-        const orderNumber = await this.nextOrderNumber(tx);
+        const businessDate = this.businessDateOf();
+        const orderNumber = await this.nextOrderNumber(tx, businessDate);
         await tx.table.update({
           where: { id: dto.tableId },
           data: { status: initialTableStatus },
@@ -200,6 +201,7 @@ export class OrdersService {
         return tx.order.create({
           data: {
             orderNumber,
+            businessDate,
             tableId: dto.tableId,
             waiterId,
             waiterShiftId: activeShift.id,
@@ -1778,11 +1780,20 @@ export class OrdersService {
     }
   }
 
-  private async nextOrderNumber(tx: Prisma.TransactionClient): Promise<string> {
-    const result: any[] = await tx.$queryRaw`SELECT COALESCE(MAX(CAST(REGEXP_REPLACE(order_number, '[^0-9]', '', 'g') AS INTEGER)), 0) as max_num FROM orders`;
+  /** Локальная полночь — бизнес-день заказа (для дневной нумерации). */
+  private businessDateOf(date = new Date()): Date {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  /** Следующий номер заказа в пределах бизнес-дня (каждый день начинается с №1). */
+  private async nextOrderNumber(tx: Prisma.TransactionClient, businessDate: Date): Promise<string> {
+    const result: any[] = await tx.$queryRaw`
+      SELECT COALESCE(MAX(CAST(REGEXP_REPLACE(order_number, '[^0-9]', '', 'g') AS INTEGER)), 0) as max_num
+      FROM orders WHERE business_date = ${businessDate}`;
     const max = Number(result[0]?.max_num || 0);
-    const next = max + 1;
-    return `№${next}`;
+    return `№${max + 1}`;
   }
 
   private async getMutableOrder(orderId: string) {

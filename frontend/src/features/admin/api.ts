@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import type { Order, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
@@ -239,6 +239,22 @@ export function useAdminOrders(params: OrdersFilter) {
   return useQuery({
     queryKey: ['admin', 'orders', 'list', params],
     queryFn: () => get<OrdersPage>(`/admin/orders?${q.toString()}`),
+  });
+}
+
+/** Бесконечная подгрузка заказов (длинный список вместо страниц). */
+export function useAdminOrdersInfinite(filters: Omit<OrdersFilter, 'page'> & { tab: string }) {
+  const PAGE_SIZE = 30;
+  return useInfiniteQuery({
+    queryKey: ['admin', 'orders', 'infinite', filters],
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) => {
+      const q = ordersQueryString(filters);
+      q.set('page', String(pageParam));
+      q.set('pageSize', String(PAGE_SIZE));
+      return get<OrdersPage>(`/admin/orders?${q.toString()}`);
+    },
+    getNextPageParam: (last) => (last.page < last.pages ? last.page + 1 : undefined),
   });
 }
 

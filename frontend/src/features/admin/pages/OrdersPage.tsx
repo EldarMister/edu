@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { Select } from '@/components/Select';
@@ -10,7 +10,7 @@ import { useT } from '@/lib/i18n';
 import { IconEye, IconX } from '../components/icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
-import { useAdminOrders, useOrdersSummary, useCancelOrder, useStaff } from '../api';
+import { useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff } from '../api';
 
 /** Заказ можно отменить, пока он не оплачен/не отменён/не отклонён. */
 const CANCELLABLE = new Set([
@@ -80,10 +80,10 @@ export function OrdersPage() {
   const [period, setPeriod] = useState('all');
   const [customDate, setCustomDate] = useState('');
   const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement>(null);
 
   const tr = useT();
   const push = useNotifications((s) => s.push);
@@ -98,17 +98,29 @@ export function OrdersPage() {
   const dateFilter = periodRange(period, customDate);
   const filters = { search, paymentMethod, waiterId, ...dateFilter };
 
-  const ordersQ = useAdminOrders({ tab, page, ...filters });
+  const ordersQ = useAdminOrdersInfinite({ tab, ...filters });
   const summaryQ = useOrdersSummary(filters);
-  const data = ordersQ.data;
+  const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
   const s = summaryQ.data;
 
-  // Любая смена фильтра сбрасывает страницу.
+  // Бесконечная подгрузка: тянем следующую страницу, когда «маяк» внизу появляется в зоне видимости.
+  const { fetchNextPage, hasNextPage, isFetchingNextPage } = ordersQ;
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el || !hasNextPage) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isFetchingNextPage) fetchNextPage();
+      },
+      { rootMargin: '200px' },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage, items.length]);
+
+  // Смена фильтра — просто меняет queryKey, список перезагружается с начала.
   function reset<T>(setter: (v: T) => void) {
-    return (v: T) => {
-      setter(v);
-      setPage(1);
-    };
+    return setter;
   }
 
   async function confirmCancel(reason: string) {
@@ -187,13 +199,13 @@ export function OrdersPage() {
           <div className="flex justify-center py-12 text-primary">
             <Spinner className="h-6 w-6" />
           </div>
-        ) : !data || data.items.length === 0 ? (
+        ) : items.length === 0 ? (
           <p className="py-12 text-center text-text-muted">{tr('Заказы не найдены')}</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="max-h-[calc(100vh-260px)] overflow-auto">
             <table className="w-full min-w-[820px] text-sm">
-              <thead>
-                <tr className="border-b border-border bg-background/40 text-left text-xs text-text-muted">
+              <thead className="sticky top-0 z-10">
+                <tr className="border-b border-border bg-background text-left text-xs text-text-muted">
                   <Th>{tr('№ заказа')}</Th>
                   <Th>{tr('Дата и время')}</Th>
                   <Th>{tr('Стол')}</Th>
@@ -205,7 +217,7 @@ export function OrdersPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.items.map((ord) => (
+                {items.map((ord) => (
                   <tr
                     key={ord.id}
                     className="cursor-pointer border-b border-border last:border-0 hover:bg-background/60 focus-within:bg-background/60"
@@ -265,13 +277,16 @@ export function OrdersPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-        )}
-
-        {/* Нижняя строка: пагинация (итоги уже показаны в сводке под заголовком) */}
-        {data && data.items.length > 0 && data.pages > 1 && (
-          <div className="flex justify-end border-t border-border px-4 py-2.5">
-            <Pagination page={data.page} pages={data.pages} onChange={setPage} />
+            {/* Маяк бесконечной подгрузки + индикатор */}
+            <div ref={loadMoreRef} />
+            {isFetchingNextPage && (
+              <div className="flex justify-center py-3 text-primary">
+                <Spinner className="h-5 w-5" />
+              </div>
+            )}
+            {!hasNextPage && (
+              <p className="py-3 text-center text-xs text-text-light">{tr('Все заказы загружены')}</p>
+            )}
           </div>
         )}
       </div>
@@ -308,47 +323,4 @@ function Th({ children, className = '' }: { children: React.ReactNode; className
 }
 function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-3 py-2 ${className}`}>{children}</td>;
-}
-
-/** Компактная пагинация: ‹ 1 2 3 … 5 › */
-function Pagination({ page, pages, onChange }: { page: number; pages: number; onChange: (p: number) => void }) {
-  if (pages <= 1) return null;
-
-  const items: (number | '…')[] = [];
-  const push = (n: number | '…') => items.push(n);
-  const window = 1; // соседей с каждой стороны от текущей
-  for (let p = 1; p <= pages; p++) {
-    if (p === 1 || p === pages || (p >= page - window && p <= page + window)) push(p);
-    else if (items[items.length - 1] !== '…') push('…');
-  }
-
-  const arrow = 'flex h-7 min-w-7 items-center justify-center rounded-lg px-1.5 text-text-secondary transition-colors hover:bg-background disabled:opacity-40 disabled:hover:bg-transparent';
-
-  return (
-    <div className="flex items-center gap-1">
-      <button className={arrow} disabled={page <= 1} onClick={() => onChange(page - 1)} aria-label="Назад">
-        ‹
-      </button>
-      {items.map((it, i) =>
-        it === '…' ? (
-          <span key={`e${i}`} className="px-1 text-text-light">
-            …
-          </span>
-        ) : (
-          <button
-            key={it}
-            onClick={() => onChange(it)}
-            className={`flex h-7 min-w-7 items-center justify-center rounded-lg px-1.5 transition-colors ${
-              it === page ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-            }`}
-          >
-            {it}
-          </button>
-        ),
-      )}
-      <button className={arrow} disabled={page >= pages} onClick={() => onChange(page + 1)} aria-label="Вперёд">
-        ›
-      </button>
-    </div>
-  );
 }

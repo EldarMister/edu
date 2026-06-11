@@ -283,7 +283,10 @@ model DishVariant {
 
 model Order {
   id             String         @id @default(uuid())
-  orderNumber    String         @unique @map("order_number")
+  // Номер заказа сбрасывается каждый день (нумерация в пределах businessDate).
+  orderNumber    String         @map("order_number")
+  // Бизнес-день заказа (локальная полночь) — для дневной нумерации и уникальности номера в дне.
+  businessDate   DateTime       @default(now()) @map("business_date")
   tableId        String         @map("table_id")
   waiterId       String         @map("waiter_id")
   waiterShiftId  String?        @map("waiter_shift_id")
@@ -311,6 +314,7 @@ model Order {
   actions       OrderAction[]
   receiptPrintRequests ReceiptPrintRequest[]
 
+  @@unique([businessDate, orderNumber])
   @@index([status])
   @@index([tableId])
   @@index([waiterId])
