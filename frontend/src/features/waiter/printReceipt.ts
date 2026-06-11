@@ -46,15 +46,21 @@ export function printReceipt(
     .r { text-align: right; white-space: nowrap; }
     .total { font-size: 18px; font-weight: 700; margin-top: 6px; }
     .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .row-inline { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; }
+    .sep { color: #999; margin: 0 3px; }
   </style></head><body>
     <h1>${escapeHtml(r.cafeName)}</h1>
     ${r.address ? `<div class="center muted">${escapeHtml(r.address)}</div>` : ''}
     ${r.phone ? `<div class="center muted">${escapeHtml(r.phone)}${r.phone2 ? ', ' + escapeHtml(r.phone2) : ''}</div>` : ''}
     <div class="center muted">${dateStr}</div>
     <hr/>
-    <div class="row muted"><span>Заказ</span><span>${escapeHtml(orderNumber)}</span></div>
-    <div class="row muted"><span>Стол</span><span>${r.tableNumber}</span></div>
-    <div class="row muted"><span>Официант</span><span>${escapeHtml(r.waiter)}</span></div>
+    <div class="row muted" style="font-size:12px">
+      <span>${escapeHtml(orderNumber)}</span>
+      <span style="color:#999;margin:0 4px">·</span>
+      <span>Стол ${r.tableNumber}</span>
+      <span style="color:#999;margin:0 4px">·</span>
+      <span style="flex:1;text-align:right">${escapeHtml(r.waiter)}</span>
+    </div>
     <hr/>
     <table>${rows}</table>
     <hr/>
@@ -76,15 +82,12 @@ export function printReceipt(
   }, 300);
 }
 
-/** Блок оплаты: для смешанной — построчно наличные + QR, иначе один способ. */
+/** Блок оплаты: для смешанной — в одну строку через «·», иначе один способ. */
 function paymentBlock(r: Receipt): string {
   if (r.payments && r.payments.length > 1) {
-    return r.payments
-      .map(
-        (p) =>
-          `<div class="row muted"><span>${METHOD_LABEL[p.method]}</span><span>${money(p.amount)}</span></div>`,
-      )
-      .join('');
+    // Все способы в одну строку: «QR-код 2 100 с · Наличные 1 500 с»
+    const parts = r.payments.map((p) => `${METHOD_LABEL[p.method]}: ${money(p.amount)}`).join(' · ');
+    return `<div class="row muted" style="font-size:12px"><span>Оплата</span><span>${parts}</span></div>`;
   }
   const label = r.paymentMethod ? METHOD_LABEL[r.paymentMethod] : '—';
   return `<div class="row muted"><span>Оплата</span><span>${label}</span></div>`;
