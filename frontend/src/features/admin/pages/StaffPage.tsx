@@ -7,7 +7,7 @@ import { apiError } from '@/lib/api';
 import { money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
-import { IconPlus } from '../components/icons';
+import { IconPlus, IconEdit, IconTrash } from '../components/icons';
 import {
   useShiftReport,
   useSetCashHanded,
@@ -73,18 +73,33 @@ export function StaffPage() {
 
   const reportQ = useShiftReport(date);
   const staffQ = useStaff('', '');
+  const { remove } = useStaffMutations();
+  const push = useNotifications((s) => s.push);
   const tr = useT();
 
   const rows = reportQ.data ?? [];
   const memberById = new Map((staffQ.data ?? []).map((m) => [m.id, m]));
 
+  async function onDelete(id: string, name: string) {
+    if (!confirm(`Удалить сотрудника «${name}»?`)) return;
+    try {
+      await remove.mutateAsync(id);
+      push({ message: 'Сотрудник удалён', at: new Date().toISOString() });
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
+    }
+  }
+
   function exportCsv() {
     const head = ['Сотрудник', 'Роль', 'Смена', 'Оборот', 'Касса (должен)', 'Касса (сдал)', 'Разница'];
-    const lines = rows.map((r) =>
-      [r.name, tr(ROLE_LABEL[r.role]), shiftLabel(r), r.turnover, r.cashDue, r.cashHanded, r.difference]
+    const lines = rows.map((r) => {
+      const fin = r.isWaiter
+        ? [shiftLabel(r), r.turnover, r.cashDue, r.cashHanded, r.difference]
+        : ['—', '—', '—', '—', '—'];
+      return [r.name, tr(ROLE_LABEL[r.role]), ...fin]
         .map((c) => `"${String(c).replace(/"/g, '""')}"`)
-        .join(';'),
-    );
+        .join(';');
+    });
     const csv = '﻿' + [head.join(';'), ...lines].join('\r\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -151,48 +166,67 @@ export function StaffPage() {
                   <th className="px-3 py-2.5 text-right font-medium">{tr('Касса (должен)')}</th>
                   <th className="px-3 py-2.5 text-right font-medium">{tr('Касса (сдал)')}</th>
                   <th className="px-3 py-2.5 text-right font-medium">{tr('Разница')}</th>
+                  <th className="px-3 py-2.5 text-right font-medium">{tr('Действия')}</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => {
-                  const open = expanded === row.waiterId;
+                  const isWaiter = row.isWaiter;
+                  const open = isWaiter && expanded === row.waiterId;
                   const diffCls =
                     Math.round(row.difference) === 0
                       ? 'text-text-secondary'
                       : row.difference > 0
                         ? 'text-success'
                         : 'text-danger';
+                  const member = memberById.get(row.waiterId);
+                  const openEdit = () => {
+                    if (member) setEditing(member);
+                  };
                   return (
                     <FragmentRow key={row.waiterId}>
                       <tr
-                        className="cursor-pointer border-b border-border hover:bg-background/50"
-                        onClick={() => setExpanded(open ? null : row.waiterId)}
+                        className={`border-b border-border ${isWaiter ? 'cursor-pointer hover:bg-background/50' : ''}`}
+                        onClick={isWaiter ? () => setExpanded(open ? null : row.waiterId) : undefined}
                       >
                         <td className="px-2 py-2.5 align-middle">
-                          <Chevron open={open} />
+                          {isWaiter && <Chevron open={open} />}
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="font-medium text-text-primary">{row.name}</div>
                           <div className="text-xs text-text-muted">{tr(ROLE_LABEL[row.role])}</div>
                         </td>
-                        <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{shiftLabel(row)}</td>
-                        <td className="px-3 py-2.5 text-right font-medium text-text-primary">{money(row.turnover)}</td>
-                        <td className="px-3 py-2.5 text-right text-text-secondary">{money(row.cashDue)}</td>
-                        <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                          <CashHandedCell row={row} date={date} />
+                        {isWaiter ? (
+                          <>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{shiftLabel(row)}</td>
+                            <td className="px-3 py-2.5 text-right font-medium text-text-primary">{money(row.turnover)}</td>
+                            <td className="px-3 py-2.5 text-right text-text-secondary">{money(row.cashDue)}</td>
+                            <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                              <CashHandedCell row={row} date={date} />
+                            </td>
+                            <td className={`px-3 py-2.5 text-right font-medium ${diffCls}`}>{signedMoney(row.difference)}</td>
+                          </>
+                        ) : (
+                          // Кухня / бар / админ / владелец — без официантских финансовых колонок.
+                          <td className="px-3 py-2.5 text-center text-text-light" colSpan={5}>
+                            —
+                          </td>
+                        )}
+                        <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                          <div className="flex justify-end gap-1">
+                            <IconBtn title={tr('Изменить')} onClick={openEdit}>
+                              <IconEdit className="h-4 w-4" />
+                            </IconBtn>
+                            <IconBtn title={tr('Удалить')} danger onClick={() => onDelete(row.waiterId, row.name)}>
+                              <IconTrash className="h-4 w-4" />
+                            </IconBtn>
+                          </div>
                         </td>
-                        <td className={`px-3 py-2.5 text-right font-medium ${diffCls}`}>{signedMoney(row.difference)}</td>
                       </tr>
                       {open && (
                         <tr className="border-b border-border bg-background/30">
-                          <td colSpan={7} className="px-3 py-3">
-                            <ShiftDetails
-                              row={row}
-                              onEdit={() => {
-                                const m = memberById.get(row.waiterId);
-                                if (m) setEditing(m);
-                              }}
-                            />
+                          <td colSpan={8} className="px-3 py-3">
+                            <ShiftDetails row={row} onEdit={openEdit} />
                           </td>
                         </tr>
                       )}
@@ -424,5 +458,30 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <label className="mb-1.5 block text-sm font-medium text-text-secondary">{label}</label>
       {children}
     </div>
+  );
+}
+
+function IconBtn({
+  children,
+  onClick,
+  title,
+  danger,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  title: string;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className={`rounded-lg p-1.5 transition-colors ${
+        danger ? 'text-text-muted hover:bg-danger/10 hover:text-danger' : 'text-text-muted hover:bg-background hover:text-primary'
+      }`}
+    >
+      {children}
+    </button>
   );
 }

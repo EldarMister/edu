@@ -537,6 +537,8 @@ export interface ShiftReportRow {
   waiterId: string;
   name: string;
   role: Role;
+  /** Развёрнутый отчёт по смене (касса, разбивка, отмены) — только для официантов. */
+  isWaiter: boolean;
   shiftStart: string | null;
   shiftEnd: string | null;
   shiftOpen: boolean;
