@@ -3,7 +3,7 @@ import { Role } from '@prisma/client';
 import { StaffService } from './staff.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateStaffDto, UpdateStaffDto } from './dto';
+import { CreateStaffDto, SetCashHandedDto, UpdateStaffDto } from './dto';
 
 @Controller('admin/staff')
 @Roles(Role.ADMIN, Role.OWNER)
@@ -21,6 +21,16 @@ export class StaffController {
     @Query('date') date?: string,
   ) {
     return this.staff.waiterReport(period ?? 'today', date);
+  }
+
+  @Get('shift-report')
+  shiftReport(@Query('date') date?: string) {
+    return this.staff.shiftReport(date);
+  }
+
+  @Post('cash-handed')
+  setCashHanded(@Body() dto: SetCashHandedDto, @CurrentUser() actor: AuthUser) {
+    return this.staff.setCashHanded(dto.waiterId, dto.date, dto.cashHanded, actor);
   }
 
   @Get()

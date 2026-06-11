@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { OrderStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
+import { OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
@@ -263,5 +263,256 @@ export class StaffService {
     }
 
     return report;
+  }
+
+  // ====== Отчёт по сменам за дату ======
+
+  private dayBounds(dateStr?: string) {
+    const base =
+      dateStr && !Number.isNaN(new Date(dateStr).getTime()) ? new Date(dateStr) : new Date();
+    const from = new Date(base);
+    from.setHours(0, 0, 0, 0);
+    const to = new Date(from);
+    to.setDate(to.getDate() + 1);
+    return { from, to };
+  }
+
+  /** Дата без времени (для уникального ключа ShiftCashReport). */
+  private dateOnly(dateStr?: string) {
+    const { from } = this.dayBounds(dateStr);
+    return from;
+  }
+
+  /**
+   * Отчёт по сменам сотрудников за выбранную дату: смена, оборот, касса (должен/сдал),
+   * разница, товарная разбивка по категориям и список отмен.
+   */
+  async shiftReport(dateStr?: string) {
+    const { from, to } = this.dayBounds(dateStr);
+    const dateKey = this.dateOnly(dateStr);
+
+    const waiters = await this.prisma.user.findMany({
+      where: { role: Role.WAITER },
+      select: { id: true, name: true, role: true },
+      orderBy: { name: 'asc' },
+    });
+    const waiterIds = waiters.map((w) => w.id);
+    if (waiterIds.length === 0) return [];
+
+    const [shifts, paidOrders, cancelledOrders, rejectedItems, cashReports] = await Promise.all([
+      // Смены, пересекающие выбранный день.
+      this.prisma.waiterShift.findMany({
+        where: {
+          waiterId: { in: waiterIds },
+          startedAt: { lt: to },
+          OR: [{ endedAt: null }, { endedAt: { gte: from } }],
+        },
+        select: { waiterId: true, startedAt: true, endedAt: true, status: true },
+      }),
+      // Оплаченные заказы за день (с позициями и оплатами).
+      this.prisma.order.findMany({
+        where: { waiterId: { in: waiterIds }, status: OrderStatus.paid, closedAt: { gte: from, lt: to } },
+        select: {
+          waiterId: true,
+          finalAmount: true,
+          payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true } },
+          items: {
+            where: { status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+            select: {
+              dishNameSnapshot: true,
+              dishVariantNameSnapshot: true,
+              quantity: true,
+              finalPrice: true,
+              dish: { select: { categoryId: true, category: { select: { name: true, sortOrder: true } } } },
+            },
+          },
+        },
+      }),
+      // Отменённые заказы за день.
+      this.prisma.order.findMany({
+        where: { waiterId: { in: waiterIds }, status: OrderStatus.cancelled, closedAt: { gte: from, lt: to } },
+        select: { id: true, waiterId: true, orderNumber: true, finalAmount: true, closedAt: true },
+      }),
+      // Отменённые/отклонённые позиции за день (частичные отмены).
+      this.prisma.orderItem.findMany({
+        where: {
+          status: OrderItemStatus.rejected,
+          updatedAt: { gte: from, lt: to },
+          order: { waiterId: { in: waiterIds } },
+        },
+        select: {
+          dishNameSnapshot: true,
+          dishVariantNameSnapshot: true,
+          finalPrice: true,
+          rejectReason: true,
+          updatedAt: true,
+          order: { select: { waiterId: true, orderNumber: true } },
+        },
+      }),
+      this.prisma.shiftCashReport.findMany({
+        where: { waiterId: { in: waiterIds }, date: dateKey },
+        select: { waiterId: true, cashHanded: true },
+      }),
+    ]);
+
+    // Причины отмены заказов — из журнала аудита.
+    const cancelledIds = cancelledOrders.map((o) => o.id);
+    const reasonByOrder = new Map<string, string>();
+    if (cancelledIds.length) {
+      const logs = await this.prisma.auditLog.findMany({
+        where: { actionType: AuditAction.ORDER_CANCELLED, orderId: { in: cancelledIds } },
+        select: { orderId: true, metadata: true },
+      });
+      for (const l of logs) {
+        const reason = (l.metadata as { reason?: string } | null)?.reason;
+        if (l.orderId && reason) reasonByOrder.set(l.orderId, reason);
+      }
+    }
+
+    const cashHandedByWaiter = new Map(cashReports.map((c) => [c.waiterId, Number(c.cashHanded)]));
+
+    type CatAgg = { categoryId: string; name: string; sortOrder: number; qty: number; amount: number; items: Map<string, { name: string; qty: number; amount: number }> };
+    type Cancel = { time: string; name: string; amount: number; reason: string };
+    const acc = new Map<string, {
+      turnover: number;
+      cashDue: number;
+      categories: Map<string, CatAgg>;
+      cancellations: Cancel[];
+    }>();
+    const ensure = (id: string) => {
+      let a = acc.get(id);
+      if (!a) {
+        a = { turnover: 0, cashDue: 0, categories: new Map(), cancellations: [] };
+        acc.set(id, a);
+      }
+      return a;
+    };
+
+    for (const o of paidOrders) {
+      const a = ensure(o.waiterId);
+      a.turnover += Number(o.finalAmount);
+      for (const p of o.payments) {
+        if (p.method === PaymentMethod.cash) a.cashDue += Number(p.amount);
+      }
+      for (const it of o.items) {
+        const catId = it.dish?.categoryId ?? 'other';
+        const catName = it.dish?.category?.name ?? 'Прочее';
+        const sortOrder = it.dish?.category?.sortOrder ?? 9999;
+        let cat = a.categories.get(catId);
+        if (!cat) {
+          cat = { categoryId: catId, name: catName, sortOrder, qty: 0, amount: 0, items: new Map() };
+          a.categories.set(catId, cat);
+        }
+        const lineName = it.dishVariantNameSnapshot
+          ? `${it.dishNameSnapshot} · ${it.dishVariantNameSnapshot}`
+          : it.dishNameSnapshot;
+        cat.qty += it.quantity;
+        cat.amount += Number(it.finalPrice);
+        let line = cat.items.get(lineName);
+        if (!line) {
+          line = { name: lineName, qty: 0, amount: 0 };
+          cat.items.set(lineName, line);
+        }
+        line.qty += it.quantity;
+        line.amount += Number(it.finalPrice);
+      }
+    }
+
+    for (const o of cancelledOrders) {
+      ensure(o.waiterId).cancellations.push({
+        time: (o.closedAt ?? from).toISOString(),
+        name: `Заказ ${o.orderNumber}`,
+        amount: Number(o.finalAmount),
+        reason: reasonByOrder.get(o.id) ?? '—',
+      });
+    }
+    for (const it of rejectedItems) {
+      const name = it.dishVariantNameSnapshot
+        ? `${it.dishNameSnapshot} · ${it.dishVariantNameSnapshot}`
+        : it.dishNameSnapshot;
+      ensure(it.order.waiterId).cancellations.push({
+        time: it.updatedAt.toISOString(),
+        name,
+        amount: Number(it.finalPrice),
+        reason: it.rejectReason ?? '—',
+      });
+    }
+
+    // Смены: самое раннее начало и самое позднее завершение за день.
+    const shiftByWaiter = new Map<string, { start: Date; end: Date | null; open: boolean }>();
+    for (const s of shifts) {
+      const cur = shiftByWaiter.get(s.waiterId);
+      const open = s.status === WaiterShiftStatus.active || !s.endedAt;
+      if (!cur) {
+        shiftByWaiter.set(s.waiterId, { start: s.startedAt, end: s.endedAt, open });
+      } else {
+        if (s.startedAt < cur.start) cur.start = s.startedAt;
+        if (open) cur.open = true;
+        if (s.endedAt && (!cur.end || s.endedAt > cur.end)) cur.end = s.endedAt;
+      }
+    }
+
+    return waiters.map((w) => {
+      const a = acc.get(w.id);
+      const sh = shiftByWaiter.get(w.id);
+      const cashDue = a?.cashDue ?? 0;
+      const cashHanded = cashHandedByWaiter.get(w.id) ?? 0;
+      const durationMin =
+        sh && sh.end ? Math.max(0, Math.round((sh.end.getTime() - sh.start.getTime()) / 60000)) : null;
+      const categories = a
+        ? [...a.categories.values()]
+            .sort((x, y) => x.sortOrder - y.sortOrder || y.amount - x.amount)
+            .map((c) => ({
+              categoryId: c.categoryId,
+              name: c.name,
+              qty: c.qty,
+              amount: c.amount,
+              items: [...c.items.values()].sort((x, y) => y.amount - x.amount),
+            }))
+        : [];
+      const cancellations = (a?.cancellations ?? []).sort((x, y) => y.time.localeCompare(x.time));
+      return {
+        waiterId: w.id,
+        name: w.name,
+        role: w.role,
+        shiftStart: sh ? sh.start.toISOString() : null,
+        shiftEnd: sh?.end ? sh.end.toISOString() : null,
+        shiftOpen: sh?.open ?? false,
+        durationMin,
+        turnover: a?.turnover ?? 0,
+        cashDue,
+        cashHanded,
+        difference: cashHanded - cashDue,
+        categories,
+        cancellations,
+      };
+    });
+  }
+
+  /** Записать факт сдачи наличных сотрудником за дату. */
+  async setCashHanded(waiterId: string, dateStr: string | undefined, amount: number, actor: AuditActor) {
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new BadRequestException('Некорректная сумма');
+    }
+    const waiter = await this.prisma.user.findUnique({ where: { id: waiterId }, select: { id: true, name: true } });
+    if (!waiter) throw new NotFoundException('Сотрудник не найден');
+    const date = this.dateOnly(dateStr);
+
+    const saved = await this.prisma.shiftCashReport.upsert({
+      where: { waiterId_date: { waiterId, date } },
+      create: { waiterId, date, cashHanded: amount, updatedById: actor.id },
+      update: { cashHanded: amount, updatedById: actor.id },
+    });
+
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.STAFF_UPDATED,
+      entityType: AuditEntity.STAFF,
+      entityId: waiterId,
+      description: `${actor.name ?? 'Администратор'} зафиксировал сдачу наличных сотрудником ${waiter.name}: ${amount} с (${date.toISOString().slice(0, 10)})`,
+      metadata: { cashHanded: amount, date: date.toISOString().slice(0, 10) },
+    });
+
+    return { waiterId, cashHanded: Number(saved.cashHanded) };
   }
 }

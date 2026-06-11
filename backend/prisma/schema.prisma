@@ -149,6 +149,7 @@ model User {
   auditLogs       AuditLog[]
   pushSubscriptions PushSubscription[]
   receiptPrintRequests ReceiptPrintRequest[] @relation("WaiterReceiptPrints")
+  cashReports     ShiftCashReport[] @relation("WaiterCashReports")
 
   @@map("users")
 }
@@ -346,6 +347,23 @@ model WaiterShift {
 
   @@index([waiterId, status])
   @@map("waiter_shifts")
+}
+
+// Факт сдачи наличных сотрудником за смену (на конкретную дату).
+// «Касса (сдал)» в отчёте по сменам — вводится администратором, не расчётное.
+model ShiftCashReport {
+  id          String   @id @default(uuid())
+  waiterId    String   @map("waiter_id")
+  date        DateTime @db.Date
+  cashHanded  Decimal  @default(0) @map("cash_handed") @db.Decimal(10, 2)
+  updatedById String?  @map("updated_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  waiter User @relation("WaiterCashReports", fields: [waiterId], references: [id], onDelete: Cascade)
+
+  @@unique([waiterId, date])
+  @@map("shift_cash_reports")
 }
 
 model OrderItem {
