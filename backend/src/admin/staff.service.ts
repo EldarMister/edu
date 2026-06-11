@@ -283,6 +283,45 @@ export class StaffService {
     return from;
   }
 
+  private loadPaidOrders(waiterIds: string[], from: Date, to: Date) {
+    return this.prisma.order.findMany({
+      where: { waiterId: { in: waiterIds }, status: OrderStatus.paid, closedAt: { gte: from, lt: to } },
+      select: {
+        waiterId: true,
+        finalAmount: true,
+        payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true } },
+        items: {
+          where: { status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+          select: {
+            dishNameSnapshot: true,
+            dishVariantNameSnapshot: true,
+            quantity: true,
+            finalPrice: true,
+            dish: { select: { categoryId: true, category: { select: { name: true, sortOrder: true } } } },
+          },
+        },
+      },
+    });
+  }
+
+  private loadRejectedItems(waiterIds: string[], from: Date, to: Date) {
+    return this.prisma.orderItem.findMany({
+      where: {
+        status: OrderItemStatus.rejected,
+        updatedAt: { gte: from, lt: to },
+        order: { waiterId: { in: waiterIds } },
+      },
+      select: {
+        dishNameSnapshot: true,
+        dishVariantNameSnapshot: true,
+        finalPrice: true,
+        rejectReason: true,
+        updatedAt: true,
+        order: { select: { waiterId: true, orderNumber: true } },
+      },
+    });
+  }
+
   /**
    * Отчёт по сменам сотрудников за выбранную дату: смена, оборот, касса (должен/сдал),
    * разница, товарная разбивка по категориям и список отмен.
@@ -301,61 +340,40 @@ export class StaffService {
     // Финансовый отчёт по смене считаем только для официантов.
     const waiterIds = users.filter((u) => u.role === Role.WAITER).map((u) => u.id);
 
-    const [shifts, paidOrders, cancelledOrders, rejectedItems, cashReports] = await Promise.all([
-      // Смены, пересекающие выбранный день.
-      this.prisma.waiterShift.findMany({
-        where: {
-          waiterId: { in: waiterIds },
-          startedAt: { lt: to },
-          OR: [{ endedAt: null }, { endedAt: { gte: from } }],
-        },
-        select: { waiterId: true, startedAt: true, endedAt: true, status: true },
-      }),
-      // Оплаченные заказы за день (с позициями и оплатами).
-      this.prisma.order.findMany({
-        where: { waiterId: { in: waiterIds }, status: OrderStatus.paid, closedAt: { gte: from, lt: to } },
-        select: {
-          waiterId: true,
-          finalAmount: true,
-          payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true } },
-          items: {
-            where: { status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
-            select: {
-              dishNameSnapshot: true,
-              dishVariantNameSnapshot: true,
-              quantity: true,
-              finalPrice: true,
-              dish: { select: { categoryId: true, category: { select: { name: true, sortOrder: true } } } },
+    // Финансовая агрегация. Если что-то из неё упадёт (напр. отсутствует таблица/колонка
+    // на ещё не мигрированной БД) — НЕ роняем весь отчёт: показываем список сотрудников
+    // с нулевыми финансами, а не пустую страницу «нет данных».
+    let shifts: { waiterId: string; startedAt: Date; endedAt: Date | null; status: WaiterShiftStatus }[] = [];
+    let paidOrders: Awaited<ReturnType<typeof this.loadPaidOrders>> = [];
+    let cancelledOrders: { id: string; waiterId: string; orderNumber: string; finalAmount: Prisma.Decimal; closedAt: Date | null }[] = [];
+    let rejectedItems: Awaited<ReturnType<typeof this.loadRejectedItems>> = [];
+    let cashReports: { waiterId: string; cashHanded: Prisma.Decimal }[] = [];
+    if (waiterIds.length > 0) {
+      try {
+        [shifts, paidOrders, cancelledOrders, rejectedItems, cashReports] = await Promise.all([
+          this.prisma.waiterShift.findMany({
+            where: {
+              waiterId: { in: waiterIds },
+              startedAt: { lt: to },
+              OR: [{ endedAt: null }, { endedAt: { gte: from } }],
             },
-          },
-        },
-      }),
-      // Отменённые заказы за день.
-      this.prisma.order.findMany({
-        where: { waiterId: { in: waiterIds }, status: OrderStatus.cancelled, closedAt: { gte: from, lt: to } },
-        select: { id: true, waiterId: true, orderNumber: true, finalAmount: true, closedAt: true },
-      }),
-      // Отменённые/отклонённые позиции за день (частичные отмены).
-      this.prisma.orderItem.findMany({
-        where: {
-          status: OrderItemStatus.rejected,
-          updatedAt: { gte: from, lt: to },
-          order: { waiterId: { in: waiterIds } },
-        },
-        select: {
-          dishNameSnapshot: true,
-          dishVariantNameSnapshot: true,
-          finalPrice: true,
-          rejectReason: true,
-          updatedAt: true,
-          order: { select: { waiterId: true, orderNumber: true } },
-        },
-      }),
-      this.prisma.shiftCashReport.findMany({
-        where: { waiterId: { in: waiterIds }, date: dateKey },
-        select: { waiterId: true, cashHanded: true },
-      }),
-    ]);
+            select: { waiterId: true, startedAt: true, endedAt: true, status: true },
+          }),
+          this.loadPaidOrders(waiterIds, from, to),
+          this.prisma.order.findMany({
+            where: { waiterId: { in: waiterIds }, status: OrderStatus.cancelled, closedAt: { gte: from, lt: to } },
+            select: { id: true, waiterId: true, orderNumber: true, finalAmount: true, closedAt: true },
+          }),
+          this.loadRejectedItems(waiterIds, from, to),
+          this.prisma.shiftCashReport.findMany({
+            where: { waiterId: { in: waiterIds }, date: dateKey },
+            select: { waiterId: true, cashHanded: true },
+          }),
+        ]);
+      } catch (err) {
+        console.error('[shiftReport] финансовая агрегация не удалась:', err);
+      }
+    }
 
     // Причины отмены заказов — из журнала аудита.
     const cancelledIds = cancelledOrders.map((o) => o.id);
