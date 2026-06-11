@@ -7,7 +7,7 @@ import { SynthesizeDto } from './dto/synthesize.dto';
 
 /** Озвучка кухни. Текст формирует backend, аудио отдаёт self-hosted Silero. */
 @Controller('tts')
-@Roles(Role.KITCHEN, Role.BAR, Role.ADMIN, Role.OWNER)
+@Roles(Role.KITCHEN, Role.BAR, Role.WAITER, Role.ADMIN, Role.OWNER)
 export class TtsController {
   constructor(private readonly tts: TtsService) {}
 
