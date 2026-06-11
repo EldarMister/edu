@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Order, CartLine, DishVariant, WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
@@ -65,6 +65,10 @@ import {
 type Tab = 'tables' | 'menu' | 'cart' | 'orders' | 'profile';
 type DesktopTab = 'tables' | 'orders' | 'profile';
 
+/** Сколько секунд показывается блок отмены действия, прежде чем отмена заказа уйдёт на сервер. */
+const CANCEL_UNDO_SECONDS = 6;
+type PendingCancel = { order: Order; reason: string; deadline: number };
+
 export function WaiterApp() {
   useWaiterRealtime();
   const user = useAuth((s) => s.user);
@@ -100,6 +104,8 @@ export function WaiterApp() {
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
+  const [pendingCancel, setPendingCancel] = useState<PendingCancel | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   const [cabinetOpen, setCabinetOpen] = useState(false);
   const [shiftSummary, setShiftSummary] = useState<WaiterShift | null>(null);
   const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
@@ -269,16 +275,43 @@ export function WaiterApp() {
     setTab('orders');
   }
 
-  async function confirmCancelOrder(reason: string) {
+  // Отмена заказа происходит не сразу: показываем блок отмены действия с таймером,
+  // и официант может вернуть заказ, пока отмена не ушла на сервер.
+  function confirmCancelOrder(reason: string) {
     if (!cancelTarget) return;
-    try {
-      await cancelOrder.mutateAsync({ orderId: cancelTarget.id, reason });
-      setCancelTarget(null);
-      push({ message: t('Заказ отменён'), type: 'success', at: new Date().toISOString() });
-    } catch (err) {
-      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
-    }
+    if (pendingCancel) commitCancel(pendingCancel); // незавершённую предыдущую — фиксируем сразу
+    setPendingCancel({ order: cancelTarget, reason, deadline: Date.now() + CANCEL_UNDO_SECONDS * 1000 });
+    setCancelTarget(null);
   }
+
+  function commitCancel(p: PendingCancel) {
+    cancelOrder
+      .mutateAsync({ orderId: p.order.id, reason: p.reason })
+      .then(() => push({ message: t('Заказ отменён'), type: 'success', at: new Date().toISOString() }))
+      .catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }));
+  }
+
+  function undoCancel() {
+    setPendingCancel(null);
+    push({ message: t('Отмена заказа отменена'), type: 'info', at: new Date().toISOString() });
+  }
+
+  // Пока ждём окончания таймера отмены — тикаем раз в секунду (для обратного отсчёта)
+  // и по истечении дедлайна фиксируем отмену на сервере.
+  useEffect(() => {
+    if (!pendingCancel) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    const commit = setTimeout(() => {
+      commitCancel(pendingCancel);
+      setPendingCancel(null);
+    }, Math.max(0, pendingCancel.deadline - Date.now()));
+    return () => {
+      clearInterval(tick);
+      clearTimeout(commit);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCancel]);
 
   function changeTab(next: Tab) {
     setViewingOrderId(null);
@@ -683,6 +716,37 @@ export function WaiterApp() {
           setCartSheetOpen(false);
         }}
       />
+
+      {/* Блок отмены действия с таймером — пока отмена заказа не ушла на сервер */}
+      {pendingCancel && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 lg:bottom-6 lg:px-5">
+          <div className="pointer-events-auto flex w-full max-w-2xl items-center gap-3.5 rounded-2xl border border-border bg-white px-4 py-3.5 shadow-soft sm:px-5">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger/10 text-danger">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7v6h6" />
+                <path d="M3 13a9 9 0 1 0 3-7.7L3 8" />
+              </svg>
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[15px] font-semibold text-text-primary">
+                {displayOrderNumber(pendingCancel.order.orderNumber)} · {t('Стол')} {pendingCancel.order.table.number} — {t('отмена заказа')}
+              </p>
+              <p className="text-[13px] text-text-muted">
+                {t('Отменится через')}{' '}
+                <span className="font-semibold text-danger">
+                  {String(Math.max(0, Math.ceil((pendingCancel.deadline - now) / 1000))).padStart(2, '0')} {t('сек')}
+                </span>
+              </p>
+            </div>
+            <button
+              onClick={undoCancel}
+              className="shrink-0 rounded-xl border border-primary bg-white px-5 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/5"
+            >
+              {t('Вернуть')}
+            </button>
+          </div>
+        </div>
+      )}
 
       <BottomNav tab={activeNavTab} setTab={changeTab} ordersCount={ordersAttentionCount} />
 
