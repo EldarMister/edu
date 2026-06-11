@@ -170,6 +170,8 @@ export interface OrderItem {
   status: OrderItemStatus;
   prepStation: PrepStation;
   comment: string | null;
+  /** «С собой» (навынос) — кухне нужно упаковать позицию. */
+  takeaway?: boolean;
   rejectReason: string | null;
   setComponents?: OrderSetComponent[];
 }
@@ -262,6 +264,8 @@ export interface CartLine {
   variant?: DishVariant;
   quantity: number;
   comment?: string;
+  /** «С собой» (навынос) для этой позиции. */
+  takeaway?: boolean;
   /** Для сетов: уникальный id линии (сеты не сливаются) и изменённый состав. */
   lineId?: string;
   set?: { components: CartSetComponent[] };

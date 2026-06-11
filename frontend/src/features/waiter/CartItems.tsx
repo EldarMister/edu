@@ -13,11 +13,14 @@ export function CartLinesList({
   lines,
   inc,
   dec,
+  onToggleTakeaway,
   priceWidth = 'w-[68px]',
 }: {
   lines: CartLine[];
   inc: (lineKey: string) => void;
   dec: (lineKey: string) => void;
+  /** Переключение «с собой» для позиции. Если не передан — чип не показывается. */
+  onToggleTakeaway?: (lineKey: string, takeaway: boolean) => void;
   /** Ширина колонки цены (на desktop чуть шире). */
   priceWidth?: string;
 }) {
@@ -58,6 +61,21 @@ export function CartLinesList({
                 className={`${priceWidth} shrink-0 justify-end text-[15px] font-semibold text-text-primary`}
               />
             </div>
+            {onToggleTakeaway && (
+              <button
+                type="button"
+                onClick={() => onToggleTakeaway(key, !l.takeaway)}
+                aria-pressed={!!l.takeaway}
+                className={`mt-1.5 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  l.takeaway
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border text-text-muted hover:border-primary/40'
+                }`}
+              >
+                <BagIcon />
+                {t('С собой')}
+              </button>
+            )}
             {isSet && open && (
               <ul className="mt-1.5 space-y-0.5 pl-1 text-[13px]">
                 {l.set!.components.map((c) => (
@@ -80,6 +98,16 @@ export function CartLinesList({
         );
       })}
     </div>
+  );
+}
+
+/** Иконка пакета для отметки «с собой». */
+export function BagIcon({ className = 'h-3.5 w-3.5' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+      <path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6l-2-4Z" />
+      <path d="M4 6h16M16 10a4 4 0 0 1-8 0" />
+    </svg>
   );
 }
 

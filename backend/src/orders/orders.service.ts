@@ -1525,6 +1525,7 @@ export class OrdersService {
         status: initialStatus,
         prepStation,
         comment: i.comment,
+        takeaway: i.takeaway ?? false,
         setComponents,
       };
     });

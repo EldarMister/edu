@@ -3,7 +3,7 @@ import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { NumberTicker } from '@/components/NumberTicker';
 import { useCart, cartTotals } from './cart';
-import { CartLinesList } from './CartItems';
+import { CartLinesList, BagIcon } from './CartItems';
 
 // Длительность и плавность открытия/закрытия листа.
 // Мягкий старт и плавное замедление (без резкого рывка в начале).
@@ -33,9 +33,10 @@ export function CartSheet({
   submitLabel: string;
 }) {
   const t = useT();
-  const { lines, inc, dec, clear } = useCart();
+  const { lines, inc, dec, setLineTakeaway, setAllTakeaway, clear } = useCart();
   const totals = cartTotals(lines);
   const hasLines = lines.length > 0;
+  const allTakeaway = hasLines && lines.every((l) => l.takeaway);
 
   // Монтирование + анимация входа/выхода.
   const [render, setRender] = useState(open);
@@ -148,12 +149,32 @@ export function CartSheet({
           {!hasLines ? (
             <p className="py-12 text-center text-sm text-text-muted">{t('Корзина пуста')}</p>
           ) : (
-            <CartLinesList lines={lines} inc={inc} dec={dec} />
+            <CartLinesList lines={lines} inc={inc} dec={dec} onToggleTakeaway={setLineTakeaway} />
           )}
         </div>
 
         {/* Итог + действия */}
         <div className="shrink-0 px-4 pt-3">
+          {hasLines && (
+            <button
+              type="button"
+              onClick={() => setAllTakeaway(!allTakeaway)}
+              aria-pressed={allTakeaway}
+              className={`mb-3 flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+                allTakeaway ? 'border-primary bg-primary/10 text-primary' : 'border-border text-text-secondary hover:border-primary/40'
+              }`}
+            >
+              <BagIcon className="h-4 w-4" />
+              {t('Весь заказ — с собой')}
+              <span
+                className={`ml-auto flex h-5 w-9 items-center rounded-full p-0.5 transition-colors ${
+                  allTakeaway ? 'bg-primary' : 'bg-slate-300'
+                }`}
+              >
+                <span className={`h-4 w-4 rounded-full bg-white transition-transform ${allTakeaway ? 'translate-x-4' : ''}`} />
+              </span>
+            </button>
+          )}
           <div className="flex items-center justify-between border-t border-border pt-3">
             <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
             <NumberTicker value={totals.final} className="text-lg font-semibold text-text-primary" />

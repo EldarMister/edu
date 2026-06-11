@@ -20,6 +20,7 @@ export const orderInclude = {
       status: true,
       prepStation: true,
       comment: true,
+      takeaway: true,
       rejectReason: true,
       setComponents: {
         orderBy: { sortOrder: 'asc' as const },

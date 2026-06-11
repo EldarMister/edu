@@ -274,6 +274,7 @@ export function WaiterApp() {
           return {
             dish,
             quantity: it.quantity,
+            takeaway: it.takeaway ?? undefined,
             lineId: `set-edit-${it.id}`,
             set: { components },
           } as CartLine;
@@ -286,6 +287,7 @@ export function WaiterApp() {
           variant,
           quantity: it.quantity,
           comment: it.comment ?? undefined,
+          takeaway: it.takeaway ?? undefined,
         } as CartLine;
       })
       .filter((l): l is CartLine => l !== null);

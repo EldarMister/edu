@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsBoolean,
   IsEnum,
   IsInt,
   IsNotEmpty,
@@ -48,6 +49,11 @@ export class CreateOrderItemDto {
   @IsString()
   @MaxLength(200)
   comment?: string;
+
+  /** «С собой» (навынос) — кухня видит, что позицию нужно упаковать. */
+  @IsOptional()
+  @IsBoolean()
+  takeaway?: boolean;
 
   /** Состав сета с изменениями (только для блюд-сетов). */
   @IsOptional()

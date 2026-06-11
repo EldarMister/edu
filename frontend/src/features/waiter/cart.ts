@@ -25,6 +25,9 @@ interface CartState {
   dec: (lineKey: string) => void;
   remove: (lineKey: string) => void;
   setLineComment: (lineKey: string, comment: string) => void;
+  setLineTakeaway: (lineKey: string, takeaway: boolean) => void;
+  /** Пометить «с собой» все позиции (тумблер на весь заказ). */
+  setAllTakeaway: (takeaway: boolean) => void;
   setComment: (comment: string) => void;
   clear: () => void;
 }
@@ -154,6 +157,17 @@ export const useCart = create<CartState>((set) => ({
         lines: c.lines.map((l) => (cartLineKey(l) === lineKey ? { ...l, comment } : l)),
       })),
     ),
+
+  setLineTakeaway: (lineKey, takeaway) =>
+    set((s) =>
+      mutate(s, (c) => ({
+        ...c,
+        lines: c.lines.map((l) => (cartLineKey(l) === lineKey ? { ...l, takeaway } : l)),
+      })),
+    ),
+
+  setAllTakeaway: (takeaway) =>
+    set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.map((l) => ({ ...l, takeaway })) }))),
 
   setComment: (comment) => set((s) => mutate(s, (c) => ({ ...c, comment }))),
 

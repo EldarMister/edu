@@ -150,6 +150,7 @@ function linesToItems(lines: CartLine[]) {
     variantId: l.variant?.id,
     quantity: l.quantity,
     comment: l.comment?.trim() || undefined,
+    takeaway: l.takeaway || undefined,
     setComponents: l.set
       ? l.set.components.map((c) => ({
           originalDishId: c.originalDishId,

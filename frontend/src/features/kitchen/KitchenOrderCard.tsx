@@ -41,6 +41,10 @@ export function KitchenOrderCard({
   const waitingDecision = order.requiresWaiterDecision && stationRejected;
   const canSelect = (tab === 'new' || tab === 'in_work') && !waitingDecision;
 
+  // «С собой»: если все живые позиции навынос — бейдж на весь заказ, иначе помечаем точечно.
+  const liveItems = order.items.filter((it) => it.status !== 'rejected' && it.status !== 'cancelled');
+  const allTakeaway = liveItems.length > 0 && liveItems.every((it) => it.takeaway);
+
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   // Карта статусов по id — и обычные позиции, и блюда внутри сетов.
@@ -209,6 +213,14 @@ export function KitchenOrderCard({
 
       <p className="mt-0.5 text-[13px] text-text-muted">Официант: {order.waiter.name}</p>
 
+      {allTakeaway && (
+        <div className="mt-2">
+          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+            <TakeawayIcon /> Весь заказ с собой
+          </span>
+        </div>
+      )}
+
       {stationRejected && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger">
@@ -232,6 +244,12 @@ export function KitchenOrderCard({
             <>
               <span className="font-semibold">{it.quantity}×</span> {itemName}
               {it.comment && <span className="text-warning font-medium"> · {it.comment}</span>}
+              {/* Точечная метка «с собой» — только если весь заказ не навынос. */}
+              {it.takeaway && !allTakeaway && (
+                <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 align-middle text-[11px] font-semibold text-primary">
+                  <TakeawayIcon /> с собой
+                </span>
+              )}
             </>
           );
           return (
@@ -327,6 +345,16 @@ export function KitchenOrderCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Иконка пакета — метка «с собой» (навынос). */
+function TakeawayIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden>
+      <path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6l-2-4Z" />
+      <path d="M4 6h16M16 10a4 4 0 0 1-8 0" />
+    </svg>
   );
 }
 

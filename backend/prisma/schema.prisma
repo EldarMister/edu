@@ -383,6 +383,8 @@ model OrderItem {
   status           OrderItemStatus @default(new)
   prepStation      PrepStation     @default(kitchen) @map("prep_station")
   comment          String?
+  // «С собой» (навынос) — кухня видит, что позицию нужно упаковать.
+  takeaway         Boolean         @default(false)
   rejectReason     String?         @map("reject_reason")
   createdAt        DateTime        @default(now()) @map("created_at")
   updatedAt        DateTime        @updatedAt @map("updated_at")
