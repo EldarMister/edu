@@ -315,6 +315,19 @@ export class UpdateStaffDto {
   password?: string;
 }
 
+// ---------- Отчёт по сменам: фиксация сдачи наличных ----------
+export class SetCashHandedDto {
+  @IsString() @IsNotEmpty()
+  waiterId: string;
+
+  // Дата смены (YYYY-MM-DD); по умолчанию — сегодня.
+  @IsOptional() @IsString()
+  date?: string;
+
+  @IsNumber() @Min(0)
+  cashHanded: number;
+}
+
 // ---------- Заказы (фильтр/пагинация) ----------
 export class OrderQueryDto {
   @IsOptional() @IsString()

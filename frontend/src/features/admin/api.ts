@@ -514,6 +514,59 @@ export function useWaiterReport(period: 'today' | 'week' | 'month', date?: strin
     queryFn: () => get<WaiterReportItem[]>(`/admin/staff/waiter-report?${q.toString()}`),
   });
 }
+// ---------- Отчёт по сменам ----------
+export interface ShiftReportItem {
+  name: string;
+  qty: number;
+  amount: number;
+}
+export interface ShiftReportCategory {
+  categoryId: string;
+  name: string;
+  qty: number;
+  amount: number;
+  items: ShiftReportItem[];
+}
+export interface ShiftReportCancellation {
+  time: string;
+  name: string;
+  amount: number;
+  reason: string;
+}
+export interface ShiftReportRow {
+  waiterId: string;
+  name: string;
+  role: Role;
+  shiftStart: string | null;
+  shiftEnd: string | null;
+  shiftOpen: boolean;
+  durationMin: number | null;
+  turnover: number;
+  cashDue: number;
+  cashHanded: number;
+  difference: number;
+  categories: ShiftReportCategory[];
+  cancellations: ShiftReportCancellation[];
+}
+
+export function useShiftReport(date: string) {
+  const q = new URLSearchParams();
+  if (date) q.set('date', date);
+  return useQuery({
+    queryKey: ['admin', 'staff', 'shift-report', date],
+    queryFn: () => get<ShiftReportRow[]>(`/admin/staff/shift-report?${q.toString()}`),
+  });
+}
+
+export function useSetCashHanded() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { waiterId: string; date?: string; cashHanded: number }) =>
+      api.post('/admin/staff/cash-handed', b).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-report'] }),
+  });
+}
+
 export function useStaff(role: string, search: string) {
   const q = new URLSearchParams();
   if (role) q.set('role', role);

@@ -1,49 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Role } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
+import { money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
-import { IconStaff, IconClock, IconEdit, IconTrash, IconPlus } from '../components/icons';
+import { IconPlus } from '../components/icons';
 import {
+  useShiftReport,
+  useSetCashHanded,
   useStaff,
-  useStaffOverview,
   useStaffMutations,
-  useWaiterReport,
+  type ShiftReportCategory,
+  type ShiftReportRow,
   type StaffMember,
 } from '../api';
-import { money } from '@/lib/format';
-
-function IconRefresh(p: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
-      <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-    </svg>
-  );
-}
-
-function SummaryItem({ label, value, icon, tone }: { label: string; value: React.ReactNode; icon: React.ReactNode; tone: 'primary' | 'success' | 'warning' | 'danger' | 'muted' }) {
-  const iconColors = {
-    primary: 'bg-primary/10 text-primary',
-    success: 'bg-success/10 text-success',
-    warning: 'bg-warning/10 text-warning',
-    danger: 'bg-danger/10 text-danger',
-    muted: 'bg-slate-100 text-slate-500',
-  };
-  return (
-    <div className="flex items-center justify-between rounded-xl border border-border bg-white px-4 py-3">
-      <div className="flex items-center gap-3">
-        <div className={`flex h-9 w-9 items-center justify-center rounded-full ${iconColors[tone]}`}>
-          {icon}
-        </div>
-        <span className="text-[15px] font-medium text-text-secondary">{label}</span>
-      </div>
-      <span className="text-lg font-bold text-text-primary">{value}</span>
-    </div>
-  );
-}
 
 const ROLE_LABEL: Record<Role, string> = {
   OWNER: 'Владелец',
@@ -52,217 +25,301 @@ const ROLE_LABEL: Record<Role, string> = {
   KITCHEN: 'Кухня',
   BAR: 'Бар',
 };
-const ROLE_FILTERS: { value: string; label: string }[] = [
-  { value: '', label: 'Все роли' },
-  { value: 'WAITER', label: 'Официанты' },
-  { value: 'KITCHEN', label: 'Кухня' },
-  { value: 'BAR', label: 'Бар' },
-  { value: 'ADMIN', label: 'Администраторы' },
-  { value: 'OWNER', label: 'Владельцы' },
-];
+
+function IconRefresh(p: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
+      <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  );
+}
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`h-4 w-4 shrink-0 text-text-light transition-transform ${open ? 'rotate-90' : ''}`}
+      viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+    >
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+const todayYmd = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+function durationLabel(min: number) {
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return `${h} ч. ${String(m).padStart(2, '0')} мин.`;
+}
+function shiftLabel(row: ShiftReportRow) {
+  if (!row.shiftStart) return '—';
+  const start = timeHM(row.shiftStart);
+  const end = row.shiftEnd ? timeHM(row.shiftEnd) : '…';
+  const tail = row.durationMin != null ? durationLabel(row.durationMin) : row.shiftOpen ? 'в смене' : '';
+  return `${start} — ${end}${tail ? ` (${tail})` : ''}`;
+}
+function signedMoney(n: number) {
+  if (Math.round(n) === 0) return '0 с';
+  return `${n > 0 ? '+' : '−'}${money(Math.abs(n))}`;
+}
 
 export function StaffPage() {
-  const [role, setRole] = useState('');
-  const [search, setSearch] = useState('');
+  const [date, setDate] = useState(todayYmd());
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<StaffMember | null | 'new'>(null);
 
-  const overview = useStaffOverview();
-  const staffQ = useStaff(role, search);
-  const [reportPeriod, setReportPeriod] = useState<'today' | 'week' | 'month'>('today');
-  const reportQ = useWaiterReport(reportPeriod);
-  const { remove } = useStaffMutations();
-  const push = useNotifications((s) => s.push);
+  const reportQ = useShiftReport(date);
+  const staffQ = useStaff('', '');
   const tr = useT();
-  const o = overview.data;
 
-  async function onDelete(m: StaffMember) {
-    if (!confirm(`Удалить сотрудника «${m.name}»?`)) return;
-    try {
-      await remove.mutateAsync(m.id);
-      push({ message: 'Сотрудник удалён', at: new Date().toISOString() });
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
-    }
+  const rows = reportQ.data ?? [];
+  const memberById = new Map((staffQ.data ?? []).map((m) => [m.id, m]));
+
+  function exportCsv() {
+    const head = ['Сотрудник', 'Роль', 'Смена', 'Оборот', 'Касса (должен)', 'Касса (сдал)', 'Разница'];
+    const lines = rows.map((r) =>
+      [r.name, tr(ROLE_LABEL[r.role]), shiftLabel(r), r.turnover, r.cashDue, r.cashHanded, r.difference]
+        .map((c) => `"${String(c).replace(/"/g, '""')}"`)
+        .join(';'),
+    );
+    const csv = '﻿' + [head.join(';'), ...lines].join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `shift-report-${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-6 lg:flex-row">
-        {/* Left: Summary */}
-        <div className="w-full shrink-0 lg:w-72">
-          <h2 className="mb-3 text-lg font-semibold text-text-primary">{tr('Сводка по персоналу')}</h2>
-          <div className="flex flex-col gap-2">
-            <SummaryItem label={tr('Всего сотрудников')} value={o?.totalStaff ?? '—'} icon={<IconStaff />} tone="primary" />
-            <SummaryItem label={tr('На смене')} value={o?.onShiftCount ?? '—'} icon={<IconClock />} tone="success" />
-            <SummaryItem label={tr('Администраторов')} value={o?.adminsCount ?? '—'} icon={<IconStaff />} tone="warning" />
-            <SummaryItem label={tr('Официантов')} value={o?.waitersCount ?? '—'} icon={<IconStaff />} tone="muted" />
-          </div>
-        </div>
-
-        {/* Right: Waiter Report */}
-        <div className="min-w-0 flex-1">
-          <h2 className="mb-3 text-lg font-semibold text-text-primary">{tr('Отчет по официантам')}</h2>
-          <div className="card overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border p-4">
-              <div className="flex items-center gap-2 rounded-lg bg-slate-100 p-1">
-                {(['today', 'week', 'month'] as const).map((p) => (
-                  <button
-                    key={p}
-                    className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                      reportPeriod === p ? 'bg-white text-text-primary shadow-sm' : 'text-text-secondary hover:text-text-primary'
-                    }`}
-                    onClick={() => setReportPeriod(p)}
-                  >
-                    {tr(p === 'today' ? 'День' : p === 'week' ? 'Неделя' : 'Месяц')}
-                  </button>
-                ))}
-              </div>
-              <div className="flex items-center gap-3">
-                {reportQ.data && (
-                  <span className="text-xs text-text-muted">
-                    {tr('Обновлено:')} {new Date().toLocaleTimeString().slice(0, 5)}
-                  </span>
-                )}
-                <button
-                  onClick={() => reportQ.refetch()}
-                  disabled={reportQ.isFetching}
-                  className="rounded-lg p-1.5 text-text-secondary hover:bg-slate-100"
-                >
-                  <IconRefresh className={`h-5 w-5 ${reportQ.isFetching ? 'animate-spin' : ''}`} />
-                </button>
-              </div>
-            </div>
-
-            <div className="overflow-x-auto">
-              {reportQ.isLoading ? (
-                <div className="flex justify-center py-12 text-primary">
-                  <Spinner className="h-6 w-6" />
-                </div>
-              ) : reportQ.data?.length === 0 ? (
-                <div className="py-12 text-center text-sm text-text-muted">
-                  {tr('За выбранный период данных нет')}
-                </div>
-              ) : (
-                <table className="w-full min-w-[500px] text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs text-text-muted bg-slate-50">
-                      <th className="px-4 py-3 font-medium">{tr('Официант')}</th>
-                      <th className="px-4 py-3 text-right font-medium">{tr('Выручка')}</th>
-                      <th className="px-4 py-3 text-center font-medium">{tr('Закрыто заказов')}</th>
-                      <th className="px-4 py-3 text-center font-medium">{tr('Отмененные')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {reportQ.data?.map(r => (
-                      <tr key={r.id} className="border-b border-border last:border-0 hover:bg-slate-50/50 transition-colors">
-                        <td className="px-4 py-3 font-medium text-text-primary">{r.name}</td>
-                        <td className="px-4 py-3 text-right font-semibold text-text-primary">{money(r.revenue)}</td>
-                        <td className="px-4 py-3 text-center text-text-secondary">{r.closedOrders}</td>
-                        <td className="px-4 py-3 text-center text-text-secondary">{r.cancelledOrders}</td>
-                      </tr>
-                    ))}
-                    <tr className="bg-slate-50 font-medium">
-                      <td className="px-4 py-3 text-text-primary">{tr('Итого')}</td>
-                      <td className="px-4 py-3 text-right text-text-primary">
-                        {money(reportQ.data?.reduce((s, r) => s + r.revenue, 0) ?? 0)}
-                      </td>
-                      <td className="px-4 py-3 text-center text-text-primary">
-                        {reportQ.data?.reduce((s, r) => s + r.closedOrders, 0) ?? 0}
-                      </td>
-                      <td className="px-4 py-3 text-center text-text-primary">
-                        {reportQ.data?.reduce((s, r) => s + r.cancelledOrders, 0) ?? 0}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div>
-        <h2 className="mb-3 text-lg font-semibold text-text-primary">{tr('Сотрудники')}</h2>
-        <div className="card overflow-hidden">
-          <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-1 gap-2">
-            <input
-              className="input h-10 sm:max-w-xs"
-              placeholder={tr('Поиск сотрудника')}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <Select
-              className="h-10 w-full sm:w-48"
-              value={role}
-              onChange={setRole}
-              options={ROLE_FILTERS.map((r) => ({ value: r.value, label: tr(r.label) }))}
-            />
-          </div>
-          <button className="btn-primary btn-md font-medium" onClick={() => setEditing('new')}>
+    <div className="space-y-3">
+      {/* Шапка: заголовок + управление в одну строку */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold text-text-primary">{tr('Персонал и отчет по сменам')}</h2>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-text-secondary">{tr('Дата смены:')}</span>
+          <input
+            type="date"
+            className="h-9 rounded-lg border border-border bg-white px-2.5 text-sm text-text-primary outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
+          <button
+            onClick={() => reportQ.refetch()}
+            disabled={reportQ.isFetching}
+            className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background"
+          >
+            <IconRefresh className={`h-4 w-4 ${reportQ.isFetching ? 'animate-spin' : ''}`} />
+            {tr('Обновить')}
+          </button>
+          <button
+            onClick={exportCsv}
+            className="h-9 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background"
+          >
+            {tr('Экспорт')}
+          </button>
+          <button
+            className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
+            onClick={() => setEditing('new')}
+          >
             <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
           </button>
         </div>
+      </div>
 
-        {staffQ.isLoading ? (
+      {/* Основная таблица сотрудников по смене */}
+      <div className="overflow-hidden rounded-xl border border-border bg-white">
+        {reportQ.isLoading ? (
           <div className="flex justify-center py-12 text-primary">
             <Spinner className="h-6 w-6" />
           </div>
+        ) : rows.length === 0 ? (
+          <p className="py-12 text-center text-text-muted">{tr('Нет данных за выбранную дату')}</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
+            <table className="w-full min-w-[860px] text-sm">
               <thead>
-                <tr className="border-b border-border text-left text-xs text-text-muted">
-                  <th className="px-4 py-3 font-medium">{tr('Имя')}</th>
-                  <th className="px-4 py-3 font-medium">{tr('Роль')}</th>
-                  <th className="px-4 py-3 font-medium">{tr('Телефон')}</th>
-                  <th className="px-4 py-3 font-medium">{tr('Статус')}</th>
-                  <th className="px-4 py-3 text-right font-medium">{tr('Действия')}</th>
+                <tr className="border-b border-border bg-background/40 text-left text-xs text-text-muted">
+                  <th className="w-9 px-2 py-2.5" />
+                  <th className="px-3 py-2.5 font-medium">{tr('Сотрудник / Роль')}</th>
+                  <th className="px-3 py-2.5 font-medium">{tr('Смена')}</th>
+                  <th className="px-3 py-2.5 text-right font-medium">{tr('Оборот')}</th>
+                  <th className="px-3 py-2.5 text-right font-medium">{tr('Касса (должен)')}</th>
+                  <th className="px-3 py-2.5 text-right font-medium">{tr('Касса (сдал)')}</th>
+                  <th className="px-3 py-2.5 text-right font-medium">{tr('Разница')}</th>
                 </tr>
               </thead>
               <tbody>
-                {staffQ.data?.map((m) => (
-                  <tr key={m.id} className="border-b border-border last:border-0 hover:bg-background/60">
-                    <td className="px-4 py-3 font-medium text-text-primary">{m.name}</td>
-                    <td className="px-4 py-3 text-text-secondary">{tr(ROLE_LABEL[m.role])}</td>
-                    <td className="px-4 py-3 text-text-secondary">{m.phone}</td>
-                    <td className="px-4 py-3">
-                      {!m.isActive ? (
-                        <Badge tone="muted">{tr('Отключён')}</Badge>
-                      ) : m.onShift ? (
-                        <Badge tone="success">{tr('На смене')}</Badge>
-                      ) : (
-                        <Badge tone="muted">{tr('Не на смене')}</Badge>
+                {rows.map((row) => {
+                  const open = expanded === row.waiterId;
+                  const diffCls =
+                    Math.round(row.difference) === 0
+                      ? 'text-text-secondary'
+                      : row.difference > 0
+                        ? 'text-success'
+                        : 'text-danger';
+                  return (
+                    <FragmentRow key={row.waiterId}>
+                      <tr
+                        className="cursor-pointer border-b border-border hover:bg-background/50"
+                        onClick={() => setExpanded(open ? null : row.waiterId)}
+                      >
+                        <td className="px-2 py-2.5 align-middle">
+                          <Chevron open={open} />
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <div className="font-medium text-text-primary">{row.name}</div>
+                          <div className="text-xs text-text-muted">{tr(ROLE_LABEL[row.role])}</div>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{shiftLabel(row)}</td>
+                        <td className="px-3 py-2.5 text-right font-medium text-text-primary">{money(row.turnover)}</td>
+                        <td className="px-3 py-2.5 text-right text-text-secondary">{money(row.cashDue)}</td>
+                        <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                          <CashHandedCell row={row} date={date} />
+                        </td>
+                        <td className={`px-3 py-2.5 text-right font-medium ${diffCls}`}>{signedMoney(row.difference)}</td>
+                      </tr>
+                      {open && (
+                        <tr className="border-b border-border bg-background/30">
+                          <td colSpan={7} className="px-3 py-3">
+                            <ShiftDetails
+                              row={row}
+                              onEdit={() => {
+                                const m = memberById.get(row.waiterId);
+                                if (m) setEditing(m);
+                              }}
+                            />
+                          </td>
+                        </tr>
                       )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        <IconBtn onClick={() => setEditing(m)} title="Изменить">
-                          <IconEdit className="h-4 w-4" />
-                        </IconBtn>
-                        <IconBtn onClick={() => onDelete(m)} title="Удалить" danger>
-                          <IconTrash className="h-4 w-4" />
-                        </IconBtn>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {staffQ.data?.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-10 text-center text-text-muted">
-                      {tr('Сотрудники не найдены')}
-                    </td>
-                  </tr>
-                )}
+                    </FragmentRow>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
-      </div>
 
       {editing !== null && (
         <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+      )}
+    </div>
+  );
+}
+
+/** Обёртка, чтобы вернуть две <tr> из map без лишнего DOM-узла. */
+function FragmentRow({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
+
+function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
+  const setCash = useSetCashHanded();
+  const [val, setVal] = useState(row.cashHanded ? String(row.cashHanded) : '');
+  useEffect(() => {
+    setVal(row.cashHanded ? String(row.cashHanded) : '');
+  }, [row.cashHanded]);
+
+  function commit() {
+    const num = Number(val.replace(/\s/g, '').replace(',', '.')) || 0;
+    if (num === row.cashHanded) return;
+    setCash.mutate({ waiterId: row.waiterId, date, cashHanded: num });
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <input
+        inputMode="decimal"
+        className="w-20 rounded-lg border border-border bg-white px-2 py-1 text-right text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+        value={val}
+        placeholder="0"
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+      />
+      <span className="text-xs text-text-muted">с</span>
+    </span>
+  );
+}
+
+function ShiftDetails({ row, onEdit }: { row: ShiftReportRow; onEdit: () => void }) {
+  const tr = useT();
+  return (
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {/* Левая колонка: товарная разбивка */}
+      <div className="min-w-0">
+        <div className="mb-2 text-sm font-medium text-text-primary">{tr('Товарная разбивка:')}</div>
+        {row.categories.length === 0 ? (
+          <p className="text-sm text-text-muted">{tr('Продаж нет')}</p>
+        ) : (
+          <div className="max-h-64 space-y-0.5 overflow-y-auto pr-1">
+            {row.categories.map((cat) => (
+              <CategoryRow key={cat.categoryId} cat={cat} />
+            ))}
+          </div>
+        )}
+        <button
+          onClick={onEdit}
+          className="mt-3 text-sm font-medium text-primary hover:underline"
+        >
+          {tr('Редактировать профиль')}
+        </button>
+      </div>
+
+      {/* Правая колонка: отменённые чеки */}
+      <div className="min-w-0 lg:border-l lg:border-border lg:pl-6">
+        <div className="mb-2 text-sm font-medium text-text-primary">
+          {tr('Отмененные чеки')} ({row.cancellations.length}):
+        </div>
+        {row.cancellations.length === 0 ? (
+          <p className="text-sm text-text-muted">{tr('Отмен нет')}</p>
+        ) : (
+          <div className="max-h-64 space-y-1.5 overflow-y-auto pr-1">
+            {row.cancellations.map((c, i) => (
+              <div key={i} className="text-sm text-text-secondary">
+                <span className="text-text-muted">{timeHM(c.time)}</span> — {c.name}{' '}
+                <span className="text-text-primary">({money(c.amount)})</span>
+                <span className="text-text-muted"> — {tr('Причина')}: {c.reason}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left text-sm hover:bg-background"
+      >
+        <Chevron open={open} />
+        <span className="text-text-primary">{cat.name}</span>
+        <span className="ml-auto whitespace-nowrap text-text-secondary">
+          {cat.qty} шт. <span className="text-text-muted">({money(cat.amount)})</span>
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-0.5 py-0.5 pl-7">
+          {cat.items.map((it, i) => (
+            <div key={i} className="flex items-center gap-2 text-sm text-text-secondary">
+              <span className="truncate">{it.name}</span>
+              <span className="ml-auto whitespace-nowrap">
+                {it.qty} шт. <span className="text-text-muted">({money(it.amount)})</span>
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -367,32 +424,5 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       <label className="mb-1.5 block text-sm font-medium text-text-secondary">{label}</label>
       {children}
     </div>
-  );
-}
-function Badge({ children, tone }: { children: React.ReactNode; tone: 'success' | 'muted' }) {
-  const cls = tone === 'success' ? 'bg-success/10 text-success' : 'bg-slate-100 text-text-muted';
-  return <span className={`inline-flex rounded-lg px-2.5 py-1 text-xs font-medium ${cls}`}>{children}</span>;
-}
-function IconBtn({
-  children,
-  onClick,
-  title,
-  danger,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  title: string;
-  danger?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className={`rounded-lg p-2 transition-colors hover:bg-background ${
-        danger ? 'text-danger hover:bg-danger/5' : 'text-text-light hover:text-primary'
-      }`}
-    >
-      {children}
-    </button>
   );
 }
