@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from '@/store/auth';
 import { ProtectedRoute, homeForRole } from '@/routes/ProtectedRoute';
 import { Toaster } from '@/components/Toaster';
+import { UpdateModal } from '@/components/UpdateModal';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { WaiterApp } from '@/features/waiter/WaiterApp';
 import { KitchenApp } from '@/features/kitchen/KitchenApp';
@@ -70,6 +71,7 @@ export function App() {
         />
       </Routes>
       <Toaster />
+      <UpdateModal />
     </>
   );
 }

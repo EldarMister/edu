@@ -218,7 +218,6 @@ function ActionButton({
   // Кухонная/барная логика — только по позициям, реально отправленным на станцию.
   // Позиции «Без отправки» (prepStation === 'none') не участвуют в кухне/баре.
   const stationItems = order.items.filter((item) => item.prepStation !== 'none');
-  const hasStationItems = stationItems.length > 0;
   const hasReadyStationItem = stationItems.some((item) => item.status === 'ready');
   const cooldownActive = actionCooldown > 0;
 
