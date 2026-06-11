@@ -33,6 +33,8 @@ export interface TableItem {
   seats: number;
   status: TableStatus;
   hallId: string;
+  /** Официант, занимающий стол (активный заказ), либо null — для блокировки чужого стола. */
+  occupiedBy?: { id: string; name: string } | null;
 }
 
 export interface Hall {

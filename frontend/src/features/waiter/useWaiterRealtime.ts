@@ -1,16 +1,39 @@
+import { useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSocketEvent } from '@/lib/socket';
+import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/lib/format';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
+import { waiterVoice } from '@/services/waiterVoice';
 import type { AppNotification, Order, ReceiptPrintRequest } from '@/types';
 import { useReceiptPrint } from './receiptPrint';
+
+/** Текст голосового уведомления официанту по статусу заказа (с номером стола). */
+function waiterVoiceText(order: Order): string | null {
+  const table = `Стол ${order.table?.number}`;
+  switch (order.status) {
+    case 'accepted_by_kitchen':
+      return `Кухня приняла ваш заказ. ${table}.`;
+    case 'ready':
+      return `Ваш заказ готов. ${table}. Заберите.`;
+    case 'rejected':
+      return `Кухня отменила заказ. ${table}.`;
+    case 'partially_rejected':
+      return `Кухня отменила блюдо. ${table}.`;
+    default:
+      return null;
+  }
+}
 
 /** Подписки официанта на real-time события сервера. */
 export function useWaiterRealtime() {
   const qc = useQueryClient();
   const push = useNotifications((s) => s.push);
+  const userId = useAuth((s) => s.user?.id);
+  // Защита от повторной озвучки одного и того же статуса заказа.
+  const voicedRef = useRef<Map<string, string>>(new Map());
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['orders'] });
@@ -28,6 +51,15 @@ export function useWaiterRealtime() {
   useSocketEvent<Order>('order:status_changed', (order) => {
     applyOrderStatusToCache(qc, order);
     invalidate();
+
+    // Голосовое уведомление — только по своим заказам и только на новый статус.
+    if (order.waiter?.id && order.waiter.id === userId) {
+      const text = waiterVoiceText(order);
+      if (text && voicedRef.current.get(order.id) !== order.status) {
+        voicedRef.current.set(order.id, order.status);
+        waiterVoice.enqueue(text);
+      }
+    }
   });
   useSocketEvent('waiter:order_ready', invalidate);
   useSocketEvent('waiter:order_rejected', invalidate);

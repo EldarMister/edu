@@ -188,7 +188,23 @@ export function WaiterApp() {
     return <FullScreenLoader />;
   }
 
+  // Стол занят другим официантом → нельзя заходить. Возвращает имя владельца или null.
+  function blockedByOther(tableId: string): string | null {
+    const table = halls.flatMap((h) => h.tables).find((tbl) => tbl.id === tableId);
+    const owner = table?.occupiedBy;
+    return owner && owner.id !== user?.id ? owner.name : null;
+  }
+
   function selectTable(tableId: string) {
+    const otherWaiter = blockedByOther(tableId);
+    if (otherWaiter) {
+      push({
+        message: `Этот стол занят другим официантом: ${otherWaiter}`,
+        type: 'error',
+        at: new Date().toISOString(),
+      });
+      return;
+    }
     setViewingOrderId(null);
     setEditingOrderId(null);
     cart.selectTable(tableId);
@@ -199,6 +215,15 @@ export function WaiterApp() {
   function pickMenuTable(tableId: string) {
     setTablePickerOpen(false);
     if (tableId === cart.tableId) return;
+    const otherWaiter = blockedByOther(tableId);
+    if (otherWaiter) {
+      push({
+        message: `Этот стол занят другим официантом: ${otherWaiter}`,
+        type: 'error',
+        at: new Date().toISOString(),
+      });
+      return;
+    }
     if (cart.lines.length === 0) {
       cart.selectTable(tableId);
     } else {
@@ -722,7 +747,7 @@ export function WaiterApp() {
       {pendingCancel && (
         <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 lg:bottom-6 lg:px-5">
           <div className="pointer-events-auto flex w-full max-w-2xl items-center gap-3.5 rounded-2xl border border-border bg-white px-4 py-3.5 shadow-soft sm:px-5">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger/10 text-danger">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger text-white">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 7v6h6" />
                 <path d="M3 13a9 9 0 1 0 3-7.7L3 8" />

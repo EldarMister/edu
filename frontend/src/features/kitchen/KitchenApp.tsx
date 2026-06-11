@@ -215,7 +215,7 @@ export function KitchenApp({
       {pending && (
         <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pb-4 sm:px-5 sm:pb-5">
           <div className="pointer-events-auto flex w-full max-w-5xl items-center gap-3.5 rounded-2xl border border-border bg-white px-4 py-3.5 shadow-soft sm:px-5">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger/10 text-danger">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger text-white">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 7v6h6" />
                 <path d="M3 13a9 9 0 1 0 3-7.7L3 8" />
