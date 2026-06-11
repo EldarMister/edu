@@ -166,6 +166,24 @@ export function WaiterApp() {
     pickedUp.isPending || served.isPending || toPayment.isPending || resolvePartialRejection.isPending || cancelOrder.isPending;
   const shiftPending = startShift.isPending || endShift.isPending;
 
+  // Пока ждём окончания таймера отмены — тикаем раз в секунду (для обратного отсчёта)
+  // и по истечении дедлайна фиксируем отмену на сервере. Хук должен идти ДО раннего
+  // return ниже, иначе порядок хуков нарушится (белый экран).
+  useEffect(() => {
+    if (!pendingCancel) return;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    const commit = setTimeout(() => {
+      commitCancel(pendingCancel);
+      setPendingCancel(null);
+    }, Math.max(0, pendingCancel.deadline - Date.now()));
+    return () => {
+      clearInterval(tick);
+      clearTimeout(commit);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingCancel]);
+
   if (hallsQ.isLoading || categoriesQ.isLoading || dishesQ.isLoading || currentShiftQ.isLoading) {
     return <FullScreenLoader />;
   }
@@ -295,23 +313,6 @@ export function WaiterApp() {
     setPendingCancel(null);
     push({ message: t('Отмена заказа отменена'), type: 'info', at: new Date().toISOString() });
   }
-
-  // Пока ждём окончания таймера отмены — тикаем раз в секунду (для обратного отсчёта)
-  // и по истечении дедлайна фиксируем отмену на сервере.
-  useEffect(() => {
-    if (!pendingCancel) return;
-    setNow(Date.now());
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    const commit = setTimeout(() => {
-      commitCancel(pendingCancel);
-      setPendingCancel(null);
-    }, Math.max(0, pendingCancel.deadline - Date.now()));
-    return () => {
-      clearInterval(tick);
-      clearTimeout(commit);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingCancel]);
 
   function changeTab(next: Tab) {
     setViewingOrderId(null);
