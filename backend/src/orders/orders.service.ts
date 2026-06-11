@@ -26,7 +26,7 @@ import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
-import { buildNewOrderText, buildChangedText, buildCancelText } from '../tts/kitchen-voice';
+import { buildNewOrderText, buildChangedText, buildCancelText, buildEditVoiceText } from '../tts/kitchen-voice';
 
 /** Статусы «живого» заказа, который занимает стол. */
 const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
@@ -396,9 +396,11 @@ export class OrdersService {
 
     // Уведомляем кухню — звук + обновление списка, только если есть что готовить.
     if (hasPrep) {
+      // Конкретная озвучка изменения: что заменили / убрали / добавили.
+      const voiceText = buildEditVoiceText(updated.orderNumber, order.items, updated.items);
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
         ...updated,
-        voice: { text: buildChangedText(updated) },
+        voice: { text: voiceText },
       });
       void this.notifyKitchenNewOrder(updated);
     }

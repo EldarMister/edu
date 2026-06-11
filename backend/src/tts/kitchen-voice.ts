@@ -104,3 +104,45 @@ export function buildCancelText(order: { orderNumber: string }): string {
 export function buildChangedText(order: { orderNumber: string }): string {
   return `Заказ номер ${orderNumberWords(order.orderNumber)} изменён. Проверьте состав заказа.`;
 }
+
+/** Озвучиваемое имя блюда позиции для диффа изменений. */
+function diffVoiceName(it: VoiceItem): string {
+  return dishVoice(it);
+}
+
+/**
+ * Текст озвучки изменения заказа с конкретикой: что заменили / убрали / добавили.
+ * «Заказ номер N. Заменили борщ на солянку.» / «… Отменили колу.» / «… Добавили чай.»
+ */
+export function buildEditVoiceText(orderNumber: string, before: VoiceItem[], after: VoiceItem[]): string {
+  const head = `Заказ номер ${orderNumberWords(orderNumber)}.`;
+  const count = (items: VoiceItem[]) => {
+    const m = new Map<string, number>();
+    for (const it of items) {
+      if (it.status === 'rejected' || it.status === 'cancelled') continue;
+      const name = diffVoiceName(it).trim();
+      if (name) m.set(name, (m.get(name) ?? 0) + 1);
+    }
+    return m;
+  };
+  const bMap = count(before);
+  const aMap = count(after);
+  const removed: string[] = [];
+  const added: string[] = [];
+  for (const name of new Set([...bMap.keys(), ...aMap.keys()])) {
+    const delta = (aMap.get(name) ?? 0) - (bMap.get(name) ?? 0);
+    if (delta > 0) added.push(name);
+    else if (delta < 0) removed.push(name);
+  }
+  if (removed.length === 0 && added.length === 0) {
+    return `${head} Состав изменён. Проверьте заказ.`;
+  }
+  // Ровно одно убрали и одно добавили — это замена блюда.
+  if (removed.length === 1 && added.length === 1) {
+    return `${head} Заменили ${removed[0]} на ${added[0]}.`;
+  }
+  const parts: string[] = [];
+  if (removed.length) parts.push(`Отменили ${removed.join('. ')}`);
+  if (added.length) parts.push(`Добавили ${added.join('. ')}`);
+  return `${head} ${parts.join('. ')}.`;
+}

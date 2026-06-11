@@ -119,12 +119,22 @@ export function KitchenOrderCard({
     setSelected(new Set());
   }
 
-  /** Подпись блюда состава сета для кухни (с вариантом, например «Coca-Cola 1 л»). */
-  const componentLabel = (sc: OrderSetComponent) => {
+  /**
+   * Подпись блюда состава сета для кухни (с вариантом, например «Coca-Cola 1 л»).
+   * Для замены показываем наглядно: старое блюдо зачёркнуто → новое выделено.
+   */
+  const componentLabel = (sc: OrderSetComponent): ReactNode => {
     const orig = sc.originalVariantNameSnapshot
       ? `${sc.originalNameSnapshot} ${sc.originalVariantNameSnapshot}`
       : sc.originalNameSnapshot;
-    return sc.action === 'replaced' ? `Замена: ${orig} → ${sc.finalNameSnapshot}` : orig;
+    if (sc.action !== 'replaced') return orig;
+    return (
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <span className="text-text-muted line-through">{orig}</span>
+        <ArrowRightIcon />
+        <span className="font-semibold text-primary">{sc.finalNameSnapshot}</span>
+      </span>
+    );
   };
 
   // Единая строка позиции — и для обычных блюд, и для блюд внутри сета.
@@ -224,8 +234,9 @@ export function KitchenOrderCard({
                 <ul className="mt-1.5 space-y-1.5 pl-3 text-[14px]">
                   {setParts.map((sc) =>
                     sc.action === 'removed' ? (
-                      <li key={sc.id} className="text-danger font-medium">
-                        Без {sc.originalNameSnapshot}
+                      <li key={sc.id} className="flex flex-wrap items-center gap-1.5 font-medium text-danger">
+                        <span className="line-through">{sc.originalNameSnapshot}</span>
+                        <span className="text-[12px]">— убрали</span>
                       </li>
                     ) : (
                       // Каждое блюдо внутри сета — отдельная выбираемая позиция.
@@ -308,5 +319,25 @@ export function KitchenOrderCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Стрелка «заменили на» для наглядной замены блюда в составе сета. */
+function ArrowRightIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0 text-text-light"
+      aria-hidden
+    >
+      <path d="M5 12h14M13 6l6 6-6 6" />
+    </svg>
   );
 }
