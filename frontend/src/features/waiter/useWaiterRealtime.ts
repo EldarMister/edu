@@ -10,16 +10,86 @@ import { waiterVoice } from '@/services/waiterVoice';
 import type { AppNotification, Order, ReceiptPrintRequest } from '@/types';
 import { useReceiptPrint } from './receiptPrint';
 
+type VoicedOrder = Order & { voice?: { text?: string } | null };
+
+const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
+const TEENS = [
+  'десять',
+  'одиннадцать',
+  'двенадцать',
+  'тринадцать',
+  'четырнадцать',
+  'пятнадцать',
+  'шестнадцать',
+  'семнадцать',
+  'восемнадцать',
+  'девятнадцать',
+];
+const TENS = ['', '', 'двадцать', 'тридцать', 'сорок', 'пятьдесят', 'шестьдесят', 'семьдесят', 'восемьдесят', 'девяносто'];
+const HUNDREDS = ['', 'сто', 'двести', 'триста', 'четыреста', 'пятьсот', 'шестьсот', 'семьсот', 'восемьсот', 'девятьсот'];
+
+function numberToWords(n: number): string {
+  if (!Number.isFinite(n) || n < 0 || n >= 1000) return String(n);
+  if (n === 0) return UNITS[0];
+  const parts: string[] = [];
+  const h = Math.floor(n / 100);
+  const rest = n % 100;
+  if (h) parts.push(HUNDREDS[h]);
+  if (rest >= 10 && rest < 20) {
+    parts.push(TEENS[rest - 10]);
+  } else {
+    const t = Math.floor(rest / 10);
+    const u = rest % 10;
+    if (t) parts.push(TENS[t]);
+    if (u) parts.push(UNITS[u]);
+  }
+  return parts.join(' ');
+}
+
+function tableNumberVoice(value: unknown): string {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  return /^\d+$/.test(raw) ? numberToWords(Number(raw)) : raw;
+}
+
 function waiterLocationText(order: Order): string {
   const hall = order.table?.hall?.name?.trim();
   const tableNumber = order.table?.number;
-  const table = typeof tableNumber === 'number' ? `Стол номер ${tableNumber}.` : 'Стол не указан.';
+  const tableNumberText =
+    typeof tableNumber === 'number' || typeof tableNumber === 'string'
+      ? tableNumberVoice(tableNumber)
+      : '';
+  const table = tableNumberText ? `Стол номер ${tableNumberText}.` : 'Стол не указан.';
   return [hall ? `Зал ${hall}` : null, table].filter(Boolean).join('. ');
 }
 
+function itemName(item: Order['items'][number]): string {
+  return item.dishVariantNameSnapshot
+    ? `${item.dishNameSnapshot} ${item.dishVariantNameSnapshot}`
+    : item.dishNameSnapshot;
+}
+
+function rejectedDishNames(order: Order): string[] {
+  const names: string[] = [];
+  for (const item of order.items ?? []) {
+    if (item.status === 'rejected') names.push(itemName(item));
+    for (const component of item.setComponents ?? []) {
+      if (component.status !== 'rejected') continue;
+      names.push(
+        component.action === 'replaced' && component.finalNameSnapshot
+          ? component.finalNameSnapshot
+          : component.originalNameSnapshot,
+      );
+    }
+  }
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+}
+
 /** Текст голосового уведомления официанту по статусу заказа (с номером стола). */
-function waiterVoiceText(order: Order): string | null {
+function waiterVoiceText(order: VoicedOrder): string | null {
   const location = waiterLocationText(order);
+  const rejectedNames = rejectedDishNames(order);
+  const rejectedText = rejectedNames.length ? `: ${rejectedNames.join(', ')}` : '';
   switch (order.status) {
     case 'accepted_by_kitchen':
     case 'cooking':
@@ -27,9 +97,9 @@ function waiterVoiceText(order: Order): string | null {
     case 'ready':
       return `Ваш заказ готов. ${location} Заберите.`;
     case 'rejected':
-      return `Кухня отменила заказ. ${location}`;
+      return `Кухня отказала${rejectedText}. ${location}`;
     case 'partially_rejected':
-      return `Кухня отменила блюдо. ${location}`;
+      return `Кухня отказала блюдо${rejectedText}. ${location}`;
     default:
       return null;
   }
@@ -49,11 +119,12 @@ export function useWaiterRealtime() {
     qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
   };
 
-  const speakWaiterOrder = (order: Order) => {
+  const speakWaiterOrder = (order: VoicedOrder) => {
     if (!order.waiter?.id || order.waiter.id !== userId) return;
     const text = waiterVoiceText(order);
-    if (!text || voicedRef.current.get(order.id) === order.status) return;
-    voicedRef.current.set(order.id, order.status);
+    const voiceKey = `${order.status}:${text}`;
+    if (!text || voicedRef.current.get(order.id) === voiceKey) return;
+    voicedRef.current.set(order.id, voiceKey);
     waiterVoice.enqueue(text);
   };
 
@@ -64,18 +135,18 @@ export function useWaiterRealtime() {
     beep('notify');
   });
 
-  useSocketEvent<Order>('order:status_changed', (order) => {
+  useSocketEvent<VoicedOrder>('order:status_changed', (order) => {
     applyOrderStatusToCache(qc, order);
     invalidate();
 
     // Голосовое уведомление — только по своим заказам и только на новый статус.
     speakWaiterOrder(order);
   });
-  useSocketEvent<Order>('waiter:order_ready', (order) => {
+  useSocketEvent<VoicedOrder>('waiter:order_ready', (order) => {
     invalidate();
     speakWaiterOrder(order);
   });
-  useSocketEvent<Order>('waiter:order_rejected', (order) => {
+  useSocketEvent<VoicedOrder>('waiter:order_rejected', (order) => {
     invalidate();
     speakWaiterOrder(order);
   });

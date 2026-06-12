@@ -135,7 +135,7 @@ export function KitchenOrderCard({
     return (
       <span className="inline-flex flex-wrap items-center gap-1.5">
         <span className="text-text-muted line-through">{orig}</span>
-        <ArrowRightIcon />
+        <span className="font-semibold text-text-muted">&gt;</span>
         <span className="font-semibold text-primary">{sc.finalNameSnapshot}</span>
       </span>
     );
@@ -354,26 +354,6 @@ function TakeawayIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden>
       <path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6l-2-4Z" />
       <path d="M4 6h16M16 10a4 4 0 0 1-8 0" />
-    </svg>
-  );
-}
-
-/** Стрелка «заменили на» для наглядной замены блюда в составе сета. */
-function ArrowRightIcon() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="shrink-0 text-text-light"
-      aria-hidden
-    >
-      <path d="M5 12h14M13 6l6 6-6 6" />
     </svg>
   );
 }
