@@ -41,6 +41,7 @@ import {
   type AvailableWaiter,
 } from './api';
 import { useReceiptPrint } from './receiptPrint';
+import { usePublicSettings } from '@/features/settings/api';
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
 import { CartPanel } from './CartPanel';
@@ -84,6 +85,7 @@ export function WaiterApp() {
   const dishesQ = useDishes();
   const ordersQ = useActiveOrders();
   const currentShiftQ = useCurrentShift();
+  const publicSettingsQ = usePublicSettings();
 
   const cart = useCart();
   const create = useCreateOrder();
@@ -126,6 +128,7 @@ export function WaiterApp() {
   const halls = hallsQ.data ?? [];
   const orders = ordersQ.data ?? [];
   const activeShift = currentShiftQ.data ?? null;
+  const publicSettings = publicSettingsQ.data ?? null;
 
   // Самый свежий активный заказ по каждому столу (бэкенд отдаёт по убыванию даты).
   const ordersByTable = useMemo(() => {
@@ -476,6 +479,46 @@ export function WaiterApp() {
     });
   }
 
+  function getCurrentPosition(): Promise<GeolocationPosition> {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error('Геолокация не поддерживается этим устройством'));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(resolve, reject, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 30000,
+      });
+    });
+  }
+
+  async function startShiftWithLocationCheck() {
+    try {
+      let location: { latitude: number; longitude: number; accuracy?: number } | undefined;
+      if (publicSettings?.shiftLocationEnabled) {
+        const pos = await getCurrentPosition();
+        location = {
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+        };
+      }
+      await startShift.mutateAsync(location);
+      push({ message: t('Смена начата'), type: 'success', at: new Date().toISOString() });
+    } catch (err) {
+      const message =
+        err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'
+          ? err.message
+          : apiError(err);
+      push({
+        message,
+        type: 'error',
+        at: new Date().toISOString(),
+      });
+    }
+  }
+
   async function removeRejectedFromOrder(order: Order, item: Order['items'][number]) {
     try {
       const updated = await removeRejectedItem.mutateAsync({ orderId: order.id, itemId: item.id });
@@ -684,10 +727,7 @@ export function WaiterApp() {
       shiftLoading={currentShiftQ.isFetching}
       shiftPending={shiftPending}
       onStartShift={() =>
-        runAction(async () => {
-          await startShift.mutateAsync();
-          push({ message: t('Смена начата'), type: 'success', at: new Date().toISOString() });
-        })
+        runAction(startShiftWithLocationCheck)
       }
       onEndShift={() =>
         runAction(async () => {

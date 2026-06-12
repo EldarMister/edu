@@ -563,6 +563,10 @@ model Settings {
   payCard             Boolean  @default(true) @map("pay_card")
   qrImageUrl          String?  @map("qr_image_url") // data URL загруженного QR-кода (один на заведение)
   printerConnected    Boolean  @default(false) @map("printer_connected")
+  shiftLocationEnabled Boolean @default(false) @map("shift_location_enabled")
+  cafeLatitude        Float?   @map("cafe_latitude")
+  cafeLongitude       Float?   @map("cafe_longitude")
+  shiftLocationRadiusMeters Int @default(100) @map("shift_location_radius_meters")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
   @@map("settings")

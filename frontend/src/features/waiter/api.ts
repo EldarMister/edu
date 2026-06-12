@@ -125,7 +125,8 @@ export function useTransferTable() {
 export function useStartShift() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async () => (await api.post<WaiterShift>('/waiter/shifts/start')).data,
+    mutationFn: async (location?: { latitude: number; longitude: number; accuracy?: number }) =>
+      (await api.post<WaiterShift>('/waiter/shifts/start', location ?? {})).data,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },

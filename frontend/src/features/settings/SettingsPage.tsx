@@ -26,6 +26,10 @@ interface Form {
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
+  shiftLocationEnabled: boolean;
+  cafeLatitude: string;
+  cafeLongitude: string;
+  shiftLocationRadiusMeters: string;
 }
 
 const RECEIPT_LIMIT = 120;
@@ -53,6 +57,10 @@ export function SettingsPage() {
         payQr: data.payQr,
         payCash: data.payCash,
         payCard: data.payCard,
+        shiftLocationEnabled: data.shiftLocationEnabled,
+        cafeLatitude: data.cafeLatitude === null ? '' : String(data.cafeLatitude),
+        cafeLongitude: data.cafeLongitude === null ? '' : String(data.cafeLongitude),
+        shiftLocationRadiusMeters: String(data.shiftLocationRadiusMeters ?? 100),
       });
     }
   }, [data?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -90,6 +98,10 @@ export function SettingsPage() {
       payQr: data.payQr,
       payCash: data.payCash,
       payCard: data.payCard,
+      shiftLocationEnabled: data.shiftLocationEnabled,
+      cafeLatitude: data.cafeLatitude === null ? '' : String(data.cafeLatitude),
+      cafeLongitude: data.cafeLongitude === null ? '' : String(data.cafeLongitude),
+      shiftLocationRadiusMeters: String(data.shiftLocationRadiusMeters ?? 100),
     });
     setLocale(data.language);
     setError('');
@@ -102,9 +114,23 @@ export function SettingsPage() {
       return;
     }
     try {
+      const cafeLatitude = form.cafeLatitude.trim() ? Number(form.cafeLatitude) : undefined;
+      const cafeLongitude = form.cafeLongitude.trim() ? Number(form.cafeLongitude) : undefined;
+      const hasInvalidLocation =
+        cafeLatitude === undefined ||
+        cafeLongitude === undefined ||
+        !Number.isFinite(cafeLatitude) ||
+        !Number.isFinite(cafeLongitude);
+      if (form.shiftLocationEnabled && hasInvalidLocation) {
+        setError('Сначала укажите местоположение кафе');
+        return;
+      }
       await update.mutateAsync({
         ...form,
         serviceChargeAmount: Math.max(0, Number(form.serviceChargeAmount) || 0),
+        cafeLatitude,
+        cafeLongitude,
+        shiftLocationRadiusMeters: Math.max(20, Number(form.shiftLocationRadiusMeters) || 100),
       });
       setLocale(form.language);
       push({ message: 'Настройки успешно сохранены', type: 'success', at: new Date().toISOString() });
@@ -113,6 +139,35 @@ export function SettingsPage() {
       setError(msg);
       push({ message: msg, type: 'error', at: new Date().toISOString() });
     }
+  }
+
+  function captureCafeLocation() {
+    if (!navigator.geolocation) {
+      setError('Геолокация не поддерживается этим устройством');
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setForm((f) =>
+          f
+            ? {
+                ...f,
+                cafeLatitude: String(pos.coords.latitude),
+                cafeLongitude: String(pos.coords.longitude),
+                shiftLocationEnabled: true,
+              }
+            : f,
+        );
+        setError('');
+        push({ message: 'Местоположение кафе указано', type: 'success', at: new Date().toISOString() });
+      },
+      (err) => {
+        const msg = err.message || 'Не удалось получить местоположение';
+        setError(msg);
+        push({ message: msg, type: 'error', at: new Date().toISOString() });
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
+    );
   }
 
   return (
@@ -253,6 +308,45 @@ export function SettingsPage() {
 
           {/* QR-оплата */}
           <QrPaymentCard qrImageUrl={data.qrImageUrl} />
+
+          {/* Геолокация смены */}
+          <div className="card p-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="text-[15px] font-semibold text-text-primary">{t('Геолокация смены')}</h3>
+                <p className="mt-1 text-xs leading-5 text-text-muted">
+                  {t('Официанты смогут начать смену только рядом с кафе')}
+                </p>
+              </div>
+              <Toggle checked={form.shiftLocationEnabled} onChange={(v) => set('shiftLocationEnabled', v)} />
+            </div>
+            <button type="button" className="btn-secondary btn-md w-full" onClick={captureCafeLocation}>
+              {form.cafeLatitude && form.cafeLongitude
+                ? t('Обновить местоположение кафе')
+                : t('Указать местоположение кафе')}
+            </button>
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg border border-border bg-background px-3 py-2">
+                <p className="text-text-muted">{t('Широта')}</p>
+                <p className="mt-1 truncate font-medium text-text-primary">{form.cafeLatitude || '—'}</p>
+              </div>
+              <div className="rounded-lg border border-border bg-background px-3 py-2">
+                <p className="text-text-muted">{t('Долгота')}</p>
+                <p className="mt-1 truncate font-medium text-text-primary">{form.cafeLongitude || '—'}</p>
+              </div>
+            </div>
+            <Field label={t('Радиус, м')} className="mt-3">
+              <input
+                className="input"
+                type="number"
+                min={20}
+                max={1000}
+                step={10}
+                value={form.shiftLocationRadiusMeters}
+                onChange={(e) => set('shiftLocationRadiusMeters', e.target.value)}
+              />
+            </Field>
+          </div>
 
           {/* Статус принтера */}
           <div className="card p-5">

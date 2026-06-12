@@ -24,6 +24,10 @@ export interface Settings {
   payCard: boolean;
   qrImageUrl: string | null;
   printerConnected: boolean;
+  shiftLocationEnabled: boolean;
+  cafeLatitude: number | null;
+  cafeLongitude: number | null;
+  shiftLocationRadiusMeters: number;
   updatedAt: string;
 }
 
@@ -38,6 +42,8 @@ export interface PublicSettings {
   paymentMethods: PaymentMethod[];
   qrImageUrl: string | null;
   printerConnected: boolean;
+  shiftLocationEnabled: boolean;
+  shiftLocationRadiusMeters: number;
 }
 
 /** Публичные настройки (реквизиты + включённые способы оплаты) — для всех ролей. */
