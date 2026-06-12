@@ -13,6 +13,12 @@ type VoiceItem = {
   status: string;
   dishNameSnapshot: string;
   dishVoiceSnapshot?: string | null;
+  setComponents?: {
+    action: string;
+    status: string;
+    originalNameSnapshot: string;
+    finalNameSnapshot?: string | null;
+  }[];
 };
 
 type VoiceOrder = {
@@ -110,6 +116,17 @@ function diffVoiceName(it: VoiceItem): string {
   return dishVoice(it);
 }
 
+function diffActiveNames(item: VoiceItem): string[] {
+  const components = item.setComponents ?? [];
+  if (components.length === 0) return [diffVoiceName(item)];
+
+  return components
+    .filter((c) => c.status !== 'rejected' && c.status !== 'cancelled' && c.action !== 'removed')
+    .map((c) => (c.action === 'replaced' && c.finalNameSnapshot ? c.finalNameSnapshot : c.originalNameSnapshot))
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 /**
  * Текст озвучки изменения заказа с конкретикой: что заменили / убрали / добавили.
  * «Заказ номер N. Заменили борщ на солянку.» / «… Отменили колу.» / «… Добавили чай.»
@@ -120,8 +137,9 @@ export function buildEditVoiceText(orderNumber: string, before: VoiceItem[], aft
     const m = new Map<string, number>();
     for (const it of items) {
       if (it.status === 'rejected' || it.status === 'cancelled') continue;
-      const name = diffVoiceName(it).trim();
-      if (name) m.set(name, (m.get(name) ?? 0) + 1);
+      for (const name of diffActiveNames(it)) {
+        m.set(name, (m.get(name) ?? 0) + 1);
+      }
     }
     return m;
   };

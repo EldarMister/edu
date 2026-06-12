@@ -27,7 +27,7 @@ import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
-import { buildNewOrderText, buildChangedText, buildCancelText, buildEditVoiceText } from '../tts/kitchen-voice';
+import { buildNewOrderText, buildCancelText, buildEditVoiceText } from '../tts/kitchen-voice';
 
 /** Статусы «живого» заказа, который занимает стол. */
 const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
@@ -562,7 +562,7 @@ export class OrdersService {
   /** Добавить блюда к существующему заказу того же стола. */
   async addItems(orderId: string, actor: AuditActor, items: CreateOrderItemDto[], idempotencyKey?: string) {
     const waiterId = actor.id;
-    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
     if (order.waiterId !== waiterId) {
       throw new ForbiddenException('Это не ваш заказ');
@@ -629,9 +629,10 @@ export class OrdersService {
     const updated = await this.findById(orderId);
     if (applied) {
       if (hasPrepAdded) {
+        const voiceText = buildEditVoiceText(updated.orderNumber, order.items, updated.items);
         this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
           ...updated,
-          voice: { text: buildChangedText(updated) },
+          voice: { text: voiceText },
         });
         void this.notifyKitchenNewOrder(updated);
       }
