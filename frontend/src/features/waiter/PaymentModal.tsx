@@ -95,6 +95,20 @@ export function PaymentModal({
     setCashInput(complement(value));
   };
 
+  async function completePayment(
+    payload:
+      | { orderId: string; method: PaymentMethod }
+      | { orderId: string; method: 'mixed'; cashAmount: number; qrAmount: number },
+  ) {
+    await pay.mutateAsync(payload);
+    beep('payment');
+    push({ message: t('Оплата принята'), type: 'success', at: new Date().toISOString() });
+    const r = await fetchReceipt(order.id);
+    setSplitOpen(false);
+    setReceipt(r);
+    setShowSuccess(true);
+  }
+
   // После показа success-окна автоматически переходим к окну печати чека.
   useEffect(() => {
     if (!showSuccess) return;
@@ -106,16 +120,11 @@ export function PaymentModal({
     setError('');
     if (mixedSelected && !mixedValid) return;
     try {
-      await pay.mutateAsync(
+      await completePayment(
         mixedSelected
           ? { orderId: order.id, method: 'mixed', cashAmount: cashNum, qrAmount: qrNum }
           : { orderId: order.id, method: selected },
       );
-      beep('payment');
-      push({ message: t('Оплата принята'), type: 'success', at: new Date().toISOString() });
-      const r = await fetchReceipt(order.id);
-      setReceipt(r);
-      setShowSuccess(true);
     } catch (err) {
       setError(apiError(err));
     }
@@ -132,13 +141,7 @@ export function PaymentModal({
           : qr > 0
             ? ({ orderId: order.id, method: 'qr' as PaymentMethod })
             : ({ orderId: order.id, method: 'cash' as PaymentMethod });
-      await pay.mutateAsync(payload);
-      beep('payment');
-      push({ message: t('Оплата принята'), type: 'success', at: new Date().toISOString() });
-      const r = await fetchReceipt(order.id);
-      setSplitOpen(false);
-      setReceipt(r);
-      setShowSuccess(true);
+      await completePayment(payload);
     } catch (err) {
       setSplitOpen(false);
       setError(apiError(err));
@@ -262,16 +265,16 @@ export function PaymentModal({
       onClose={close}
       title={t('Оплата заказа')}
       footer={
-        <div className="space-y-2">
+        <div className="flex items-center gap-2.5">
           <button
-            className="btn-secondary btn-lg w-full font-medium"
+            className="btn-secondary btn-lg min-w-[126px] max-w-[158px] shrink-0 basis-[34%] whitespace-nowrap border-primary bg-white px-3 text-sm font-medium text-primary"
             disabled={pay.isPending}
             onClick={() => setSplitOpen(true)}
           >
             {t('Разделить счёт')}
           </button>
           <button
-            className="btn-primary btn-lg w-full font-semibold"
+            className="btn-primary btn-lg min-w-0 flex-1 font-semibold"
             disabled={pay.isPending || qrMissing || (mixedSelected && !mixedValid)}
             onClick={onConfirm}
           >

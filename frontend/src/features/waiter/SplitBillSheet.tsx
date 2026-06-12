@@ -42,10 +42,11 @@ export function SplitBillSheet({
   total: number;
   submitting: boolean;
   onClose: () => void;
-  onComplete: (totals: { cash: number; qr: number }) => void;
+  onComplete: (totals: { cash: number; qr: number }) => void | Promise<void>;
 }) {
   const t = useT();
   const [count, setCount] = useState(2);
+  const [completing, setCompleting] = useState(false);
   const [payments, setPayments] = useState<SplitPayment[]>(() =>
     Array.from({ length: 2 }, () => ({ method: 'qr', cash: '', qr: '', paid: false })),
   );
@@ -90,8 +91,8 @@ export function SplitBillSheet({
     return Math.abs(num(p.cash) + num(p.qr) - amounts[i]) < 0.01 && num(p.cash) > 0 && num(p.qr) > 0;
   }
 
-  function payOne(i: number) {
-    if (!canPay(i)) return;
+  async function payOne(i: number) {
+    if (!canPay(i) || completing) return;
     const next = payments.map((p, idx) => (idx === i ? { ...p, paid: true } : p));
     setPayments(next);
     if (next.every((p) => p.paid)) {
@@ -105,9 +106,16 @@ export function SplitBillSheet({
           qr += num(p.qr);
         }
       });
-      onComplete({ cash: round2(cash), qr: round2(qr) });
+      setCompleting(true);
+      try {
+        await onComplete({ cash: round2(cash), qr: round2(qr) });
+      } finally {
+        setCompleting(false);
+      }
     }
   }
+
+  const busy = submitting || completing;
 
   return (
     <div className={`fixed inset-0 z-[60] ${open ? '' : 'pointer-events-none'}`} aria-hidden={!open}>
@@ -225,10 +233,10 @@ export function SplitBillSheet({
 
                     <button
                       onClick={() => payOne(i)}
-                      disabled={!canPay(i) || submitting}
+                      disabled={!canPay(i) || busy}
                       className="btn-primary btn-md mt-2.5 w-full font-semibold disabled:opacity-50"
                     >
-                      {t('Оплатить')} · {money(amounts[i])}
+                      {busy && i === payments.findIndex((p) => !p.paid) ? <Spinner /> : `${t('Оплатить')} · ${money(amounts[i])}`}
                     </button>
                   </>
                 )}
@@ -241,7 +249,7 @@ export function SplitBillSheet({
         <div className="flex shrink-0 items-center justify-between border-t border-border px-5 py-3">
           <span className="text-sm text-text-muted">{t('Осталось к оплате')}</span>
           <span className={`text-lg font-semibold ${remaining <= 0 ? 'text-success' : 'text-text-primary'}`}>
-            {submitting ? <Spinner className="h-5 w-5" /> : money(Math.max(0, remaining))}
+            {busy ? <Spinner className="h-5 w-5" /> : money(Math.max(0, remaining))}
           </span>
         </div>
       </div>
