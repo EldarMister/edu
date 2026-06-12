@@ -101,6 +101,7 @@ export function OrdersPage() {
   const ordersQ = useAdminOrdersInfinite({ tab, ...filters });
   const summaryQ = useOrdersSummary(filters);
   const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
+  const ordersError = ordersQ.isError ? apiError(ordersQ.error) : null;
   const s = summaryQ.data;
 
   // Бесконечная подгрузка: тянем следующую страницу, когда «маяк» внизу появляется в зоне видимости.
@@ -198,6 +199,11 @@ export function OrdersPage() {
         {ordersQ.isLoading ? (
           <div className="flex justify-center py-12 text-primary">
             <Spinner className="h-6 w-6" />
+          </div>
+        ) : ordersError ? (
+          <div className="px-4 py-12 text-center">
+            <p className="font-medium text-danger">{tr('Не удалось загрузить заказы')}</p>
+            <p className="mt-1 text-sm text-text-muted">{ordersError}</p>
           </div>
         ) : items.length === 0 ? (
           <p className="py-12 text-center text-text-muted">{tr('Заказы не найдены')}</p>
