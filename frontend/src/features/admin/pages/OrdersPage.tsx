@@ -208,7 +208,7 @@ export function OrdersPage() {
         ) : items.length === 0 ? (
           <p className="py-12 text-center text-text-muted">{tr('Заказы не найдены')}</p>
         ) : (
-          <div className="menu-scrollbar max-h-[calc(100vh-260px)] overflow-auto">
+          <div className="menu-scrollbar max-h-[calc(100vh-160px)] overflow-auto">
             <table className="w-full min-w-[820px] text-sm">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-border bg-background text-left text-xs text-text-muted">

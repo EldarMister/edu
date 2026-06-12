@@ -162,15 +162,22 @@ export function useWaiterRealtime() {
   // Кухня изменила стоп-лист / меню — обновляем доступность блюд без перезагрузки.
   useSocketEvent('menu:updated', () => qc.invalidateQueries({ queryKey: ['dishes'] }));
 
-  // Печать чека: администратор подтвердил → печатаем; отклонил → показываем отказ.
+  // Печать чека/счёта: подтверждение администратора ещё не означает фактическую печать.
+  useSocketEvent<ReceiptPrintRequest>('receipt_print_request_approved', (req) => {
+    const st = useReceiptPrint.getState();
+    if (st.request?.id !== req.id) return;
+    if (st.sheetOpen) st.resolve('pending');
+  });
+
   useSocketEvent<ReceiptPrintRequest>('receipt_print_request_printed', (req) => {
     const st = useReceiptPrint.getState();
     if (st.request?.id !== req.id) return;
     if (st.sheetOpen) {
       st.resolve('printed');
     } else {
+      const label = req.type === 'preliminary' ? 'Счёт' : 'Чек';
       push({
-        message: `Чек ${displayOrderNumber(req.orderNumber)} распечатан. Заберите чек.`,
+        message: `${label} ${displayOrderNumber(req.orderNumber)} распечатан. Заберите ${label.toLowerCase()}.`,
         type: 'success',
         at: new Date().toISOString(),
       });

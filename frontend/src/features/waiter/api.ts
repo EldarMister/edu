@@ -316,7 +316,7 @@ export async function fetchReceipt(orderId: string): Promise<Receipt> {
 
 /**
  * Официант создаёт запрос на печать чека (уходит администратору).
- * Тип `receipt` — обычный чек, `preliminary` — предварительный (предчек).
+ * Тип `receipt` — обычный чек, `preliminary` — счёт.
  */
 export function useCreateReceiptPrintRequest() {
   return useMutation({

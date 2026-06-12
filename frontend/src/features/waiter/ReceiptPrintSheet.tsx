@@ -16,7 +16,7 @@ export function ReceiptPrintSheet() {
   const { request, receipt, status, sheetOpen, closeSheet, dismiss } = useReceiptPrint();
   const open = !!request && sheetOpen;
   const isPrelim = request?.type === 'preliminary';
-  const title = isPrelim ? t('Печать предчека') : t('Печать чека');
+  const title = isPrelim ? t('Печать счёта') : t('Печать чека');
 
   const [render, setRender] = useState(open);
   const [visible, setVisible] = useState(false);
@@ -132,7 +132,7 @@ export function ReceiptPrintSheet() {
         <PrinterAnimation />
         <p className="mt-2 max-w-[280px] text-sm text-text-secondary">
           {isPrelim
-            ? t('Ожидаем подтверждение печати предчека администратором')
+            ? t('Ожидаем подтверждение печати счёта администратором')
             : t('Ожидаем подтверждение печати чека администратором')}
         </p>
         {receipt && <OrderCard />}
@@ -149,9 +149,9 @@ export function ReceiptPrintSheet() {
           </svg>
         </div>
         <h3 className="mt-4 text-xl font-semibold text-text-primary">
-          {isPrelim ? t('Ваш предчек распечатан') : t('Ваш чек распечатан')}
+          {isPrelim ? t('Ваш счёт распечатан') : t('Ваш чек распечатан')}
         </h3>
-        <p className="mt-1 text-sm text-text-muted">{isPrelim ? t('Заберите предчек') : t('Заберите чек')}</p>
+        <p className="mt-1 text-sm text-text-muted">{isPrelim ? t('Заберите счёт') : t('Заберите чек')}</p>
       </div>
     );
   }
@@ -165,7 +165,7 @@ export function ReceiptPrintSheet() {
           </svg>
         </div>
         <h3 className="mt-4 text-xl font-semibold text-text-primary">
-          {isPrelim ? t('Печать предчека отклонена') : t('Печать чека отклонена')}
+          {isPrelim ? t('Печать счёта отклонена') : t('Печать чека отклонена')}
         </h3>
         <p className="mt-1 text-sm text-text-muted">{t('Администратором')}</p>
       </div>

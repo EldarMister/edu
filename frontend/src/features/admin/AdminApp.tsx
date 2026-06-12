@@ -79,6 +79,7 @@ export function AdminApp() {
   const invalidateReceipts = () =>
     qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
   useSocketEvent('receipt_print_request_created', invalidateReceipts);
+  useSocketEvent('receipt_print_request_approved', invalidateReceipts);
   useSocketEvent('receipt_print_request_printed', invalidateReceipts);
   useSocketEvent('receipt_print_request_rejected', invalidateReceipts);
 
