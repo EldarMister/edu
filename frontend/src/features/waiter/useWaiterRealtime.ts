@@ -41,6 +41,14 @@ export function useWaiterRealtime() {
     qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
   };
 
+  const speakWaiterOrder = (order: Order) => {
+    if (!order.waiter?.id || order.waiter.id !== userId) return;
+    const text = waiterVoiceText(order);
+    if (!text || voicedRef.current.get(order.id) === order.status) return;
+    voicedRef.current.set(order.id, order.status);
+    waiterVoice.enqueue(text);
+  };
+
   useSocketEvent<AppNotification>('notification:new', (n) => {
     const orderNumber = n.orderNumber ? displayOrderNumber(n.orderNumber) : undefined;
     const message = n.orderNumber && orderNumber ? n.message.replace(n.orderNumber, orderNumber) : n.message;
@@ -53,16 +61,16 @@ export function useWaiterRealtime() {
     invalidate();
 
     // Голосовое уведомление — только по своим заказам и только на новый статус.
-    if (order.waiter?.id && order.waiter.id === userId) {
-      const text = waiterVoiceText(order);
-      if (text && voicedRef.current.get(order.id) !== order.status) {
-        voicedRef.current.set(order.id, order.status);
-        waiterVoice.enqueue(text);
-      }
-    }
+    speakWaiterOrder(order);
   });
-  useSocketEvent('waiter:order_ready', invalidate);
-  useSocketEvent('waiter:order_rejected', invalidate);
+  useSocketEvent<Order>('waiter:order_ready', (order) => {
+    invalidate();
+    speakWaiterOrder(order);
+  });
+  useSocketEvent<Order>('waiter:order_rejected', (order) => {
+    invalidate();
+    speakWaiterOrder(order);
+  });
   useSocketEvent('waiter:shift_started', () =>
     qc.invalidateQueries({ queryKey: ['waiter', 'shift'] }),
   );

@@ -186,20 +186,41 @@ export function SplitBillSheet({
                   </div>
                 ) : (
                   <>
-                    <div className="mt-2 grid grid-cols-3 gap-1.5">
-                      {METHODS.map((m) => (
-                        <button
-                          key={m.value}
-                          onClick={() => patch(i, { method: m.value })}
-                          className={`rounded-lg border px-2 py-1.5 text-[13px] font-medium transition-colors ${
-                            p.method === m.value
-                              ? 'border-primary bg-primary/5 text-primary'
-                              : 'border-border text-text-secondary hover:border-primary/40'
-                          }`}
+                    <div className="mt-2 flex items-center gap-2">
+                      <label className="relative min-w-[118px] shrink-0 basis-[36%]">
+                        <span className="sr-only">{t('Способ оплаты')}</span>
+                        <select
+                          value={p.method}
+                          onChange={(e) => patch(i, { method: e.target.value as Method })}
+                          disabled={busy}
+                          className="h-12 w-full appearance-none rounded-lg border border-border bg-white py-0 pl-3 pr-8 text-sm font-medium text-text-secondary outline-none transition-colors hover:border-primary/40 focus:border-primary focus:text-primary disabled:opacity-50"
                         >
-                          {t(m.label)}
-                        </button>
-                      ))}
+                          {METHODS.map((m) => (
+                            <option key={m.value} value={m.value}>
+                              {t(m.label)}
+                            </option>
+                          ))}
+                        </select>
+                        <svg
+                          className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-light"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="m6 9 6 6 6-6" />
+                        </svg>
+                      </label>
+                      <button
+                        onClick={() => payOne(i)}
+                        disabled={!canPay(i) || busy}
+                        className="btn-primary btn-md h-12 min-w-0 flex-1 font-semibold disabled:opacity-50"
+                      >
+                        {busy && i === payments.findIndex((p) => !p.paid) ? <Spinner /> : `${t('Оплатить')} · ${money(amounts[i])}`}
+                      </button>
                     </div>
 
                     {p.method === 'mixed' && (
@@ -230,14 +251,6 @@ export function SplitBillSheet({
                         </label>
                       </div>
                     )}
-
-                    <button
-                      onClick={() => payOne(i)}
-                      disabled={!canPay(i) || busy}
-                      className="btn-primary btn-md mt-2.5 w-full font-semibold disabled:opacity-50"
-                    >
-                      {busy && i === payments.findIndex((p) => !p.paid) ? <Spinner /> : `${t('Оплатить')} · ${money(amounts[i])}`}
-                    </button>
                   </>
                 )}
               </div>
