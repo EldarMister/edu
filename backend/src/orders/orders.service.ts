@@ -8,6 +8,7 @@ import {
   OrderItemStatus,
   OrderStatus,
   PaymentMethod,
+  PaymentSource,
   PaymentStatus,
   Prisma,
   PrepStation,
@@ -1276,6 +1277,7 @@ export class OrdersService {
     actor: AuditActor,
     method: PaymentMethod,
     parts?: { method: PaymentMethod; amount: number }[],
+    source: PaymentSource = PaymentSource.normal,
   ) {
     const cashierId = actor.id;
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
@@ -1287,13 +1289,15 @@ export class OrdersService {
       return order;
     }
 
-    // Смешанная оплата: суммы частей должны точно совпадать с итогом заказа.
+    // Смешанная/раздельная оплата: суммы частей должны точно совпадать с итогом заказа.
     const final = Number(order.finalAmount);
     let paymentParts: { method: PaymentMethod; amount: number }[];
-    if (method === PaymentMethod.mixed) {
+    if (source === PaymentSource.split || method === PaymentMethod.mixed) {
       paymentParts = (parts ?? []).filter((p) => p.amount > 0);
-      if (paymentParts.length < 2) {
+      if (source === PaymentSource.normal && paymentParts.length < 2) {
         throw new BadRequestException('Для смешанной оплаты укажите суммы наличными и по QR');
+      } else if (source === PaymentSource.split && paymentParts.length < 2) {
+        throw new BadRequestException('Для раздельной оплаты укажите минимум два платежа');
       }
       const sum = paymentParts.reduce((acc, p) => acc + p.amount, 0);
       if (Math.abs(sum - final) > 0.01) {
@@ -1311,6 +1315,7 @@ export class OrdersService {
             orderId,
             amount: p.amount,
             method: p.method,
+            source,
             status: PaymentStatus.paid,
             cashierId,
           })),

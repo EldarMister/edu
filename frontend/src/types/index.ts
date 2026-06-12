@@ -138,6 +138,7 @@ export type OrderItemStatus =
   | 'cancelled';
 
 export type PaymentMethod = 'qr' | 'cash' | 'card' | 'mixed';
+export type PaymentSource = 'normal' | 'split';
 
 export type WaiterShiftStatus = 'active' | 'closed';
 
@@ -192,7 +193,7 @@ export interface Order {
   waiter: { id: string; name: string };
   items: OrderItem[];
   /** Разбивка оплат (для смешанной — наличные + QR). Приходит в списке заказов админки. */
-  payments?: { method: PaymentMethod; amount: string }[];
+  payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
 }
 
 export interface Receipt {
@@ -217,7 +218,7 @@ export interface Receipt {
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
   /** Разбивка по способам оплаты (для смешанной — наличные + QR). */
-  payments?: { method: PaymentMethod; amount: string }[];
+  payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
   thanks: string;
 }
 

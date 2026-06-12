@@ -1,7 +1,7 @@
 import { Modal } from '@/components/Modal';
 import { OrderBadge } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
-import { displayOrderNumber, money, orderItemDisplayName, paymentMethodLabel, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel } from '@/lib/format';
 
 const ITEM_STATUS: Record<OrderItemStatus, string> = {
   new: 'Новое',
@@ -39,8 +39,24 @@ export function OrderDetailsModal({
           <Info label="Официант" value={order.waiter.name} />
           <Info label="Сумма" value={money(order.finalAmount)} strong />
           {Number(order.discountAmount) > 0 && <Info label="Скидка" value={money(order.discountAmount)} />}
-          {order.paymentMethod && <Info label="Оплата" value={paymentMethodLabel(order.paymentMethod)} />}
+          {order.paymentMethod && <Info label="Оплата" value={paymentDisplayLabel(order)} />}
         </div>
+
+        {isSplitPayment(order) && !!order.payments?.length && (
+          <div className="rounded-lg border border-border bg-background px-3 py-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">Платежи</p>
+            <div className="mt-1.5 space-y-1">
+              {order.payments.map((payment, index) => (
+                <div key={index} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="text-text-secondary">
+                    Платеж {index + 1} — {paymentMethodLabel(payment.method)}
+                  </span>
+                  <span className="font-medium text-text-primary">{money(payment.amount)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {order.comment && (
           <div className="rounded-lg border border-border bg-background px-3 py-2">

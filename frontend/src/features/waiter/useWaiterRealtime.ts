@@ -13,7 +13,7 @@ import { useReceiptPrint } from './receiptPrint';
 function waiterLocationText(order: Order): string {
   const hall = order.table?.hall?.name?.trim();
   const tableNumber = order.table?.number;
-  const table = typeof tableNumber === 'number' ? `Стол номер ${tableNumber}` : 'Стол не указан';
+  const table = typeof tableNumber === 'number' ? `Стол номер ${tableNumber}.` : 'Стол не указан.';
   return [hall ? `Зал ${hall}` : null, table].filter(Boolean).join('. ');
 }
 
@@ -22,13 +22,14 @@ function waiterVoiceText(order: Order): string | null {
   const location = waiterLocationText(order);
   switch (order.status) {
     case 'accepted_by_kitchen':
-      return `Кухня приняла ваш заказ. ${location}.`;
+    case 'cooking':
+      return `Кухня приняла ваш заказ. ${location}`;
     case 'ready':
-      return `Ваш заказ готов. ${location}. Заберите.`;
+      return `Ваш заказ готов. ${location} Заберите.`;
     case 'rejected':
-      return `Кухня отменила заказ. ${location}.`;
+      return `Кухня отменила заказ. ${location}`;
     case 'partially_rejected':
-      return `Кухня отменила блюдо. ${location}.`;
+      return `Кухня отменила блюдо. ${location}`;
     default:
       return null;
   }

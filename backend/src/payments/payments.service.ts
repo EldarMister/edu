@@ -1,9 +1,10 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
-import { PaymentMethod, Role } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { PaymentMethod, PaymentSource, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
 import type { AuditActor } from '../audit/audit.service';
+import type { PaymentPartDto } from './dto/pay.dto';
 
 @Injectable()
 export class PaymentsService {
@@ -20,7 +21,24 @@ export class PaymentsService {
     method: PaymentMethod,
     cashAmount?: number,
     qrAmount?: number,
+    splitPayments?: PaymentPartDto[],
   ) {
+    if (splitPayments?.length) {
+      const parts = splitPayments.filter((p) => p.amount > 0);
+      if (parts.length < 2) {
+        throw new BadRequestException('Для раздельной оплаты укажите минимум два платежа');
+      }
+      for (const part of parts) {
+        if (part.method === PaymentMethod.mixed) {
+          throw new BadRequestException('В строке раздельной оплаты укажите конкретный способ оплаты');
+        }
+        await this.settings.assertMethodEnabled(part.method);
+      }
+      const unique = [...new Set(parts.map((p) => p.method))];
+      const orderMethod = unique.length === 1 ? unique[0] : PaymentMethod.mixed;
+      return this.orders.markPaid(orderId, actor, orderMethod, parts, PaymentSource.split);
+    }
+
     if (method === PaymentMethod.mixed) {
       // Смешанная складывается из наличных и QR — оба способа должны быть включены.
       await this.settings.assertMethodEnabled(PaymentMethod.cash);
@@ -55,7 +73,7 @@ export class PaymentsService {
           },
           payments: {
             where: { status: 'paid' },
-            select: { method: true, amount: true },
+            select: { method: true, amount: true, source: true },
             orderBy: { paidAt: 'asc' },
           },
         },
@@ -82,7 +100,7 @@ export class PaymentsService {
       finalAmount: order.finalAmount,
       paymentMethod: order.paymentMethod,
       // Разбивка по способам (для смешанной оплаты — наличные + QR).
-      payments: order.payments.map((p) => ({ method: p.method, amount: String(p.amount) })),
+      payments: order.payments.map((p) => ({ method: p.method, amount: String(p.amount), source: p.source })),
       thanks: settings.receiptText,
     };
   }

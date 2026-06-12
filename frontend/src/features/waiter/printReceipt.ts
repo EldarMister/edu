@@ -1,5 +1,5 @@
 import type { Receipt, PaymentMethod } from '@/types';
-import { displayOrderNumber, money, orderItemDisplayName, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName, timeHM, isSplitPayment } from '@/lib/format';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   qr: 'QR-код',
@@ -84,6 +84,12 @@ export function printReceipt(
 
 /** Блок оплаты: для смешанной — в одну строку через «·», иначе один способ. */
 function paymentBlock(r: Receipt): string {
+  if (isSplitPayment(r)) {
+    const parts = (r.payments ?? []).map((p, i) => `Платеж ${i + 1}: ${METHOD_LABEL[p.method]} ${money(p.amount)}`);
+    return `<div class="row muted" style="font-size:12px"><span>Оплата</span><span>Раздельная оплата</span></div>${
+      parts.length ? `<div class="muted" style="font-size:12px">${parts.map(escapeHtml).join('<br/>')}</div>` : ''
+    }`;
+  }
   if (r.payments && r.payments.length > 1) {
     // Все способы в одну строку: «QR-код 2 100 с · Наличные 1 500 с»
     const parts = r.payments.map((p) => `${METHOD_LABEL[p.method]}: ${money(p.amount)}`).join(' · ');

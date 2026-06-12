@@ -269,6 +269,7 @@ export function usePay() {
       method: PaymentMethod;
       cashAmount?: number;
       qrAmount?: number;
+      splitPayments?: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[];
     }) => (await api.post<Order>('/payments', payload)).data,
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });

@@ -20,7 +20,7 @@ const CANCELLED_STATUSES: OrderStatus[] = [OrderStatus.cancelled, OrderStatus.re
 // Список заказов отдаёт ещё и разбивку оплат — чтобы показать «Смешанная (нал / QR)».
 const listInclude = {
   ...orderInclude,
-  payments: { select: { method: true, amount: true } },
+  payments: { select: { method: true, amount: true, source: true } },
 } satisfies Prisma.OrderInclude;
 
 function dayBounds(date = new Date()) {

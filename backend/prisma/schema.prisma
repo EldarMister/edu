@@ -88,6 +88,11 @@ enum PaymentStatus {
   cancelled
 }
 
+enum PaymentSource {
+  normal
+  split
+}
+
 enum WaiterShiftStatus {
   active
   closed
@@ -443,6 +448,7 @@ model Payment {
   orderId   String        @map("order_id")
   amount    Decimal       @db.Decimal(10, 2)
   method    PaymentMethod
+  source    PaymentSource @default(normal)
   status    PaymentStatus @default(paid)
   paidAt    DateTime      @default(now()) @map("paid_at")
   cashierId String        @map("cashier_id")

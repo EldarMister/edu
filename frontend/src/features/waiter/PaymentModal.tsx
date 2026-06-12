@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
-import { displayOrderNumber, money, orderItemDisplayName } from '@/lib/format';
+import { displayOrderNumber, isSplitPayment, money, orderItemDisplayName, paymentMethodLabel } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
@@ -98,7 +98,8 @@ export function PaymentModal({
   async function completePayment(
     payload:
       | { orderId: string; method: PaymentMethod }
-      | { orderId: string; method: 'mixed'; cashAmount: number; qrAmount: number },
+      | { orderId: string; method: 'mixed'; cashAmount: number; qrAmount: number }
+      | { orderId: string; method: PaymentMethod; splitPayments: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[] },
   ) {
     await pay.mutateAsync(payload);
     beep('payment');
@@ -132,12 +133,22 @@ export function PaymentModal({
 
   // Завершение разделения счёта: все платежи оплачены → проводим оплату заказа
   // суммарными наличными/QR (как обычная/смешанная оплата) и идём к чеку.
-  async function handleSplitComplete({ cash, qr }: { cash: number; qr: number }) {
+  async function handleSplitComplete({
+    cash,
+    qr,
+    payments,
+  }: {
+    cash: number;
+    qr: number;
+    payments: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[];
+  }) {
     setError('');
     try {
+      const splitMethod =
+        cash > 0 && qr > 0 ? ('mixed' as PaymentMethod) : qr > 0 ? ('qr' as PaymentMethod) : ('cash' as PaymentMethod);
       const payload =
-        cash > 0 && qr > 0
-          ? ({ orderId: order.id, method: 'mixed' as PaymentMethod, cashAmount: cash, qrAmount: qr })
+        payments.length > 1
+          ? ({ orderId: order.id, method: splitMethod, splitPayments: payments })
           : qr > 0
             ? ({ orderId: order.id, method: 'qr' as PaymentMethod })
             : ({ orderId: order.id, method: 'cash' as PaymentMethod });
@@ -242,7 +253,22 @@ export function PaymentModal({
             <span>{t('Итого')}</span>
             <span>{money(receipt.finalAmount)}</span>
           </div>
-          {receipt.payments && receipt.payments.length > 1 && (
+          {isSplitPayment(receipt) && receipt.payments?.length ? (
+            <div className="mt-2 space-y-1 border-t border-border pt-2 text-sm">
+              <div className="flex justify-between font-medium text-text-primary">
+                <span>{t('Раздельная оплата')}</span>
+                <span>{money(receipt.finalAmount)}</span>
+              </div>
+              {receipt.payments.map((p, i) => (
+                <div key={i} className="flex justify-between text-text-secondary">
+                  <span>
+                    {t('Платёж')} {i + 1} — {t(paymentMethodLabel(p.method))}
+                  </span>
+                  <span>{money(p.amount)}</span>
+                </div>
+              ))}
+            </div>
+          ) : receipt.payments && receipt.payments.length > 1 ? (
             <div className="mt-2 space-y-1 border-t border-border pt-2 text-sm">
               {receipt.payments.map((p, i) => (
                 <div key={i} className="flex justify-between text-text-secondary">
@@ -251,7 +277,7 @@ export function PaymentModal({
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
       </Modal>
     );

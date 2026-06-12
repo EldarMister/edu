@@ -30,15 +30,37 @@ export function paymentMethodShort(method: string | null | undefined): string {
   }
 }
 
+export function isSplitPayment(order: {
+  payments?: { source?: string | null }[];
+}): boolean {
+  return (order.payments ?? []).some((p) => p.source === 'split');
+}
+
+export function splitPaymentSummary(order: {
+  payments?: { amount: string }[];
+}): string {
+  const parts = (order.payments ?? []).map((p) => money(p.amount));
+  return parts.length ? `Раздельная оплата: ${parts.join(' / ')}` : 'Раздельная оплата';
+}
+
+export function paymentDisplayLabel(order: {
+  paymentMethod: string | null;
+  payments?: { method: string; amount: string; source?: string | null }[];
+}): string {
+  if (isSplitPayment(order)) return 'Раздельная оплата';
+  return paymentMethodLabel(order.paymentMethod);
+}
+
 /**
  * Ячейка способа оплаты для заказа. Для смешанной показывает разбивку:
  * «Смешанная (1 000 с / 1 300 с)» — сначала наличные, затем QR.
  */
 export function paymentCell(order: {
   paymentMethod: string | null;
-  payments?: { method: string; amount: string }[];
+  payments?: { method: string; amount: string; source?: string | null }[];
 }): string {
   if (!order.paymentMethod) return '—';
+  if (isSplitPayment(order)) return splitPaymentSummary(order);
   if (order.paymentMethod !== 'mixed') return paymentMethodShort(order.paymentMethod);
   const sumBy = (m: string) =>
     (order.payments ?? [])

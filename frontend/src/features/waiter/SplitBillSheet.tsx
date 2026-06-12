@@ -16,6 +16,7 @@ const SHEET_MS = 300;
 const SHEET_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
 type Method = 'qr' | 'cash' | 'mixed';
+type SplitPaymentPart = { method: Exclude<Method, 'mixed'>; amount: number };
 interface SplitPayment {
   method: Method;
   cash: string; // для «Смешанная»
@@ -51,7 +52,7 @@ export function SplitBillSheet({
   total: number;
   submitting: boolean;
   onClose: () => void;
-  onComplete: (totals: { cash: number; qr: number }) => void | Promise<void>;
+  onComplete: (totals: { cash: number; qr: number; payments: SplitPaymentPart[] }) => void | Promise<void>;
 }) {
   const t = useT();
   const [count, setCount] = useState(2);
@@ -127,17 +128,27 @@ export function SplitBillSheet({
     if (next.every((p) => p.paid)) {
       let cash = 0;
       let qr = 0;
+      const splitParts: SplitPaymentPart[] = [];
       next.forEach((p, idx) => {
-        if (p.method === 'qr') qr += amounts[idx];
-        else if (p.method === 'cash') cash += amounts[idx];
-        else {
-          cash += num(p.cash);
-          qr += num(p.qr);
+        const amount = amounts[idx];
+        if (p.method === 'qr') {
+          qr += amount;
+          splitParts.push({ method: 'qr', amount });
+        } else if (p.method === 'cash') {
+          cash += amount;
+          splitParts.push({ method: 'cash', amount });
+        } else {
+          const cashPart = round2(num(p.cash));
+          const qrPart = round2(num(p.qr));
+          cash += cashPart;
+          qr += qrPart;
+          if (cashPart > 0) splitParts.push({ method: 'cash', amount: cashPart });
+          if (qrPart > 0) splitParts.push({ method: 'qr', amount: qrPart });
         }
       });
       setCompleting(true);
       try {
-        await onComplete({ cash: round2(cash), qr: round2(qr) });
+        await onComplete({ cash: round2(cash), qr: round2(qr), payments: splitParts });
       } finally {
         setCompleting(false);
       }
