@@ -318,16 +318,13 @@ export function PaymentModal({
       {qrSelected && (
         <div className="mt-4">
           {qrImageUrl ? (
-            <div className="flex flex-col items-center rounded-xl border border-border bg-white p-4">
+            <div className="flex flex-col items-center rounded-xl border border-border bg-white p-5">
               <p className="mb-3 text-sm text-text-secondary">{t('Покажите QR-код клиенту для оплаты')}</p>
               <img
                 src={qrImageUrl}
                 alt={t('QR-код для оплаты')}
-                className="h-56 w-56 object-contain"
+                className="h-72 max-h-[56vh] w-72 max-w-full object-contain"
               />
-              <p className="mt-3 text-center text-xs text-text-muted">
-                {t('После оплаты клиентом нажмите «Оплачено»')}
-              </p>
             </div>
           ) : (
             <div className="rounded-xl border border-warning/30 bg-warning/5 p-4 text-center text-sm text-warning">

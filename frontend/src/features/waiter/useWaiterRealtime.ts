@@ -10,18 +10,25 @@ import { waiterVoice } from '@/services/waiterVoice';
 import type { AppNotification, Order, ReceiptPrintRequest } from '@/types';
 import { useReceiptPrint } from './receiptPrint';
 
+function waiterLocationText(order: Order): string {
+  const hall = order.table?.hall?.name?.trim();
+  const tableNumber = order.table?.number;
+  const table = typeof tableNumber === 'number' ? `Стол номер ${tableNumber}` : 'Стол не указан';
+  return [hall ? `Зал ${hall}` : null, table].filter(Boolean).join('. ');
+}
+
 /** Текст голосового уведомления официанту по статусу заказа (с номером стола). */
 function waiterVoiceText(order: Order): string | null {
-  const table = `Стол ${order.table?.number}`;
+  const location = waiterLocationText(order);
   switch (order.status) {
     case 'accepted_by_kitchen':
-      return `Кухня приняла ваш заказ. ${table}.`;
+      return `Кухня приняла ваш заказ. ${location}.`;
     case 'ready':
-      return `Ваш заказ готов. ${table}. Заберите.`;
+      return `Ваш заказ готов. ${location}. Заберите.`;
     case 'rejected':
-      return `Кухня отменила заказ. ${table}.`;
+      return `Кухня отменила заказ. ${location}.`;
     case 'partially_rejected':
-      return `Кухня отменила блюдо. ${table}.`;
+      return `Кухня отменила блюдо. ${location}.`;
     default:
       return null;
   }

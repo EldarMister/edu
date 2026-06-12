@@ -188,7 +188,7 @@ export interface Order {
   comment: string | null;
   requiresWaiterDecision: boolean;
   createdAt: string;
-  table: { id: string; number: number; seats: number; hallId: string; status: TableStatus };
+  table: { id: string; number: number; seats: number; hallId: string; status: TableStatus; hall?: { name: string } };
   waiter: { id: string; name: string };
   items: OrderItem[];
   /** Разбивка оплат (для смешанной — наличные + QR). Приходит в списке заказов админки. */

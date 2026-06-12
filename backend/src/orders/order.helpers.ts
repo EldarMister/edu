@@ -2,7 +2,7 @@ import { Prisma, DiscountType } from '@prisma/client';
 
 /** Полный набор связей заказа для ответа API и real-time payload. */
 export const orderInclude = {
-  table: { select: { id: true, number: true, seats: true, hallId: true, status: true } },
+  table: { select: { id: true, number: true, seats: true, hallId: true, status: true, hall: { select: { name: true } } } },
   waiter: { select: { id: true, name: true } },
   items: {
     orderBy: { createdAt: 'asc' as const },

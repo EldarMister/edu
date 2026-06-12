@@ -17,12 +17,14 @@ export function Select({
   options,
   placeholder = 'Выберите',
   className = '',
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   options: SelectOption[];
   placeholder?: string;
   className?: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -73,10 +75,11 @@ export function Select({
       <button
         type="button"
         ref={triggerRef}
+        disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={`flex items-center justify-between gap-2 rounded-xl border bg-white px-3.5 text-left text-[15px] outline-none transition-colors ${
           open ? 'border-primary ring-2 ring-primary/15' : 'border-border hover:border-primary/40'
-        } ${className}`}
+        } disabled:cursor-not-allowed disabled:opacity-50 ${className}`}
       >
         <span className={`truncate ${selected ? 'text-text-primary' : 'text-text-light'}`}>
           {selected ? selected.label : placeholder}

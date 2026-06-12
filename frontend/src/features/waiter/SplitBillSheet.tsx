@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
+import { Select } from '@/components/Select';
 
 /**
  * Разделение счёта: делим сумму заказа на N платежей, каждый оплачивается
@@ -31,6 +32,14 @@ const METHODS: { value: Method; label: string }[] = [
 const num = (s: string) => Number(s) || 0;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
+function splitAmounts(total: number, count: number): string[] {
+  const totalC = Math.round(total * 100);
+  const base = Math.floor(totalC / count);
+  return Array.from({ length: count }, (_, i) =>
+    String((i === count - 1 ? totalC - base * (count - 1) : base) / 100),
+  );
+}
+
 export function SplitBillSheet({
   open,
   total,
@@ -50,29 +59,48 @@ export function SplitBillSheet({
   const [payments, setPayments] = useState<SplitPayment[]>(() =>
     Array.from({ length: 2 }, () => ({ method: 'qr', cash: '', qr: '', paid: false })),
   );
+  const [amountInputs, setAmountInputs] = useState<string[]>(() => splitAmounts(total, 2));
 
-  // Суммы платежей (в копейках, остаток — последнему).
-  const amounts = useMemo(() => {
-    const totalC = Math.round(total * 100);
-    const base = Math.floor(totalC / count);
-    return Array.from({ length: count }, (_, i) =>
-      (i === count - 1 ? totalC - base * (count - 1) : base) / 100,
-    );
-  }, [total, count]);
+  const amounts = useMemo(() => amountInputs.map((value) => round2(num(value))), [amountInputs]);
+  const assignedSum = round2(amounts.reduce((sum, amount) => sum + amount, 0));
+  const assignedValid = Math.abs(assignedSum - total) < 0.01;
 
   const anyPaid = payments.some((p) => p.paid);
   const paidSum = payments.reduce((s, p, i) => (p.paid ? s + amounts[i] : s), 0);
   const remaining = round2(total - paidSum);
+
+  useEffect(() => {
+    if (anyPaid) return;
+    setAmountInputs(splitAmounts(total, count));
+  }, [anyPaid, count, total]);
 
   function changeCount(next: number) {
     if (anyPaid) return; // менять число платежей можно только пока ничего не оплачено
     const n = Math.max(2, Math.min(10, next));
     setCount(n);
     setPayments(Array.from({ length: n }, () => ({ method: 'qr', cash: '', qr: '', paid: false })));
+    setAmountInputs(splitAmounts(total, n));
   }
 
   function patch(i: number, upd: Partial<SplitPayment>) {
     setPayments((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...upd } : p)));
+  }
+
+  function onAmountChange(i: number, value: string) {
+    if (payments[i]?.paid) return;
+    const clean = value.replace(',', '.');
+    setAmountInputs((prev) => {
+      const next = [...prev];
+      next[i] = clean;
+      const adjustIndex =
+        [...payments.keys()].find((idx) => idx !== i && !payments[idx].paid && idx > i) ??
+        [...payments.keys()].reverse().find((idx) => idx !== i && !payments[idx].paid);
+      if (adjustIndex !== undefined) {
+        const others = next.reduce((sum, amount, idx) => (idx === adjustIndex ? sum : sum + num(amount)), 0);
+        next[adjustIndex] = String(Math.max(0, round2(total - others)));
+      }
+      return next;
+    });
   }
 
   // Ввод одной части «Смешанной» автоподставляет остаток до суммы платежа.
@@ -87,6 +115,7 @@ export function SplitBillSheet({
 
   function canPay(i: number): boolean {
     const p = payments[i];
+    if (amounts[i] <= 0 || !assignedValid) return false;
     if (p.method !== 'mixed') return true;
     return Math.abs(num(p.cash) + num(p.qr) - amounts[i]) < 0.01 && num(p.cash) > 0 && num(p.qr) > 0;
   }
@@ -174,7 +203,22 @@ export function SplitBillSheet({
                   <span className="text-[15px] font-medium text-text-primary">
                     {t('Платёж')} {i + 1}
                   </span>
-                  <span className="text-[15px] font-semibold text-text-primary">{money(amounts[i])}</span>
+                  {p.paid ? (
+                    <span className="text-[15px] font-semibold text-text-primary">{money(amounts[i])}</span>
+                  ) : (
+                    <label className="flex items-center gap-1">
+                      <span className="sr-only">{t('Сумма платежа')}</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        className="h-9 w-28 rounded-lg border border-border bg-white px-2 text-right text-[15px] font-semibold text-text-primary outline-none transition-colors focus:border-primary"
+                        value={amountInputs[i] ?? ''}
+                        onChange={(e) => onAmountChange(i, e.target.value)}
+                      />
+                      <span className="text-[15px] font-semibold text-text-primary">с</span>
+                    </label>
+                  )}
                 </div>
 
                 {p.paid ? (
@@ -187,33 +231,13 @@ export function SplitBillSheet({
                 ) : (
                   <>
                     <div className="mt-2 flex items-center gap-2">
-                      <label className="relative min-w-[118px] shrink-0 basis-[36%]">
-                        <span className="sr-only">{t('Способ оплаты')}</span>
-                        <select
-                          value={p.method}
-                          onChange={(e) => patch(i, { method: e.target.value as Method })}
-                          disabled={busy}
-                          className="h-12 w-full appearance-none rounded-lg border border-border bg-white py-0 pl-3 pr-8 text-sm font-medium text-text-secondary outline-none transition-colors hover:border-primary/40 focus:border-primary focus:text-primary disabled:opacity-50"
-                        >
-                          {METHODS.map((m) => (
-                            <option key={m.value} value={m.value}>
-                              {t(m.label)}
-                            </option>
-                          ))}
-                        </select>
-                        <svg
-                          className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-text-light"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="m6 9 6 6 6-6" />
-                        </svg>
-                      </label>
+                      <Select
+                        value={p.method}
+                        onChange={(value) => patch(i, { method: value as Method })}
+                        options={METHODS.map((m) => ({ value: m.value, label: t(m.label) }))}
+                        disabled={busy}
+                        className="h-12 min-w-[118px] shrink-0 basis-[36%] rounded-lg px-3 text-sm font-medium"
+                      />
                       <button
                         onClick={() => payOne(i)}
                         disabled={!canPay(i) || busy}
