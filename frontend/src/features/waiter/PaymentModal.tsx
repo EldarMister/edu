@@ -10,6 +10,7 @@ import { usePublicSettings, resolveQrSrc } from '@/features/settings/api';
 import { beep } from '@/lib/sound';
 import { usePay, fetchReceipt, useCreateReceiptPrintRequest } from './api';
 import { useReceiptPrint } from './receiptPrint';
+import { SplitBillSheet } from './SplitBillSheet';
 
 const ALL_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'qr', label: 'QR-код' },
@@ -49,6 +50,8 @@ export function PaymentModal({
   // Суммы для смешанной оплаты (как строки из инпутов).
   const [cashInput, setCashInput] = useState('');
   const [qrInput, setQrInput] = useState('');
+  // Окно «Разделение счёта».
+  const [splitOpen, setSplitOpen] = useState(false);
 
   // Только включённые в настройках способы оплаты. «Смешанная» доступна,
   // если включены и наличные, и QR (она из них и складывается).
@@ -118,6 +121,30 @@ export function PaymentModal({
     }
   }
 
+  // Завершение разделения счёта: все платежи оплачены → проводим оплату заказа
+  // суммарными наличными/QR (как обычная/смешанная оплата) и идём к чеку.
+  async function handleSplitComplete({ cash, qr }: { cash: number; qr: number }) {
+    setError('');
+    try {
+      const payload =
+        cash > 0 && qr > 0
+          ? ({ orderId: order.id, method: 'mixed' as PaymentMethod, cashAmount: cash, qrAmount: qr })
+          : qr > 0
+            ? ({ orderId: order.id, method: 'qr' as PaymentMethod })
+            : ({ orderId: order.id, method: 'cash' as PaymentMethod });
+      await pay.mutateAsync(payload);
+      beep('payment');
+      push({ message: t('Оплата принята'), type: 'success', at: new Date().toISOString() });
+      const r = await fetchReceipt(order.id);
+      setSplitOpen(false);
+      setReceipt(r);
+      setShowSuccess(true);
+    } catch (err) {
+      setSplitOpen(false);
+      setError(apiError(err));
+    }
+  }
+
   function close() {
     setReceipt(null);
     setShowSuccess(false);
@@ -125,6 +152,7 @@ export function PaymentModal({
     setMethod(null);
     setCashInput('');
     setQrInput('');
+    setSplitOpen(false);
     onClose();
     if (receipt) onPaid();
   }
@@ -228,24 +256,34 @@ export function PaymentModal({
 
   // Шаг 1 — выбор способа оплаты
   return (
+    <>
     <Modal
       open={open}
       onClose={close}
       title={t('Оплата заказа')}
       footer={
-        <button
-          className="btn-primary btn-lg w-full font-semibold"
-          disabled={pay.isPending || qrMissing || (mixedSelected && !mixedValid)}
-          onClick={onConfirm}
-        >
-          {pay.isPending ? (
-            <Spinner />
-          ) : qrSelected || mixedSelected ? (
-            `${t('Оплачено')} · ${money(order.finalAmount)}`
-          ) : (
-            `${t('Принять оплату')} · ${money(order.finalAmount)}`
-          )}
-        </button>
+        <div className="space-y-2">
+          <button
+            className="btn-secondary btn-lg w-full font-medium"
+            disabled={pay.isPending}
+            onClick={() => setSplitOpen(true)}
+          >
+            {t('Разделить счёт')}
+          </button>
+          <button
+            className="btn-primary btn-lg w-full font-semibold"
+            disabled={pay.isPending || qrMissing || (mixedSelected && !mixedValid)}
+            onClick={onConfirm}
+          >
+            {pay.isPending ? (
+              <Spinner />
+            ) : qrSelected || mixedSelected ? (
+              `${t('Оплачено')} · ${money(order.finalAmount)}`
+            ) : (
+              `${t('Принять оплату')} · ${money(order.finalAmount)}`
+            )}
+          </button>
+        </div>
       }
     >
       <p className="mb-1 text-sm text-text-muted">
@@ -353,5 +391,15 @@ export function PaymentModal({
 
       {error && <p className="mt-3 text-sm text-danger">{error}</p>}
     </Modal>
+
+    {/* Разделение счёта — открывается поверх окна оплаты, состояние не сбрасывается */}
+    <SplitBillSheet
+      open={splitOpen}
+      total={total}
+      submitting={pay.isPending}
+      onClose={() => setSplitOpen(false)}
+      onComplete={handleSplitComplete}
+    />
+    </>
   );
 }
