@@ -10,7 +10,9 @@ import type { TtsProvider } from './tts-provider.interface';
 export class SileroTtsProvider implements TtsProvider {
   private readonly log = new Logger('SileroTts');
   private readonly baseUrl = (process.env.TTS_SERVICE_URL ?? '').replace(/\/$/, '');
-  private readonly timeoutMs = Number(process.env.TTS_TIMEOUT_MS ?? 15000);
+  // 30 c: на слабом CPU (Railway) первый/холодный синтез бывает долгим; 15 c рвало
+  // запрос до готовности аудио → озвучка молчала. Лучше подождать, чем потерять голос.
+  private readonly timeoutMs = Number(process.env.TTS_TIMEOUT_MS ?? 30000);
 
   isConfigured(): boolean {
     return !!this.baseUrl;

@@ -41,7 +41,12 @@ DEFAULT_SPEAKER = os.environ.get("TTS_SPEAKER", "baya")
 # вокодер-апсемплинг), а для кухонных колонок качества 24 кГц достаточно.
 DEFAULT_SAMPLE_RATE = int(os.environ.get("TTS_SAMPLE_RATE", "24000"))
 # Количество потоков CPU для torch — критично для скорости на сервере.
-THREADS = int(os.environ.get("TTS_THREADS", str(os.cpu_count() or 4)))
+# ВАЖНО: на сервере (Railway/контейнер) os.cpu_count() возвращает число ядер ХОСТА
+# (часто 32+), хотя контейнеру выделена доля CPU. Если отдать torch столько потоков —
+# начинается жёсткая конкуренция за CPU и синтез замедляется в десятки раз
+# (наблюдалось 22–26 c вместо <1 c). Поэтому ограничиваем разумным числом.
+_cpu = os.cpu_count() or 2
+THREADS = int(os.environ.get("TTS_THREADS", str(min(_cpu, 4))))
 
 # Разрешённые русские модели. v5* намеренно НЕ поддерживаются (см. ТЗ).
 MODEL_URLS = {
