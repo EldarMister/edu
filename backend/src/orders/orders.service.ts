@@ -12,6 +12,7 @@ import {
   PaymentStatus,
   Prisma,
   PrepStation,
+  RejectionDecision,
   Role,
   TableStatus,
   KitchenEventType,
@@ -27,7 +28,7 @@ import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
-import { buildNewOrderText, buildCancelText, buildEditVoiceText } from '../tts/kitchen-voice';
+import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText } from '../tts/kitchen-voice';
 
 /** Статусы «живого» заказа, который занимает стол. */
 const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
@@ -765,7 +766,7 @@ export class OrdersService {
       await this.restoreInventory(tx, itemsToReject);
       await tx.orderItem.updateMany({
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
-        data: { status: OrderItemStatus.rejected, rejectReason: reason },
+        data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
       });
       await tx.kitchenEvent.create({
         data: { orderId, type: KitchenEventType.reject_order, reason, comment, createdById: kitchenUserId },
@@ -809,7 +810,7 @@ export class OrdersService {
       await this.restoreInventory(tx, [item]);
       await tx.orderItem.update({
         where: { id: itemId },
-        data: { status: OrderItemStatus.rejected, rejectReason: reason },
+        data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
       });
       await tx.kitchenEvent.create({
         data: {
@@ -1101,7 +1102,7 @@ export class OrdersService {
       if (targetIds.length > 0) {
         await tx.orderItem.updateMany({
           where: { id: { in: targetIds }, orderId },
-          data: { status: OrderItemStatus.rejected, rejectReason: reason },
+          data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
         });
         // Сет целиком — отказываем и его состав.
         await tx.orderItemSetComponent.updateMany({
@@ -1127,6 +1128,12 @@ export class OrdersService {
 
       // Статус сета выводим из состава; сет, отказанный целиком, возвращает остатки.
       const setsRejected = await this.recalcSetParents(tx, orderId);
+      if (setsRejected.length > 0) {
+        await tx.orderItem.updateMany({
+          where: { id: { in: setsRejected.map((it) => it.id) } },
+          data: { rejectionDecision: RejectionDecision.pending },
+        });
+      }
       await this.restoreInventory(tx, setsRejected);
 
       // Если отказаны все блюда — заказ rejected, иначе partially_rejected.
@@ -1179,6 +1186,14 @@ export class OrdersService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.updateMany({
+        where: {
+          orderId,
+          status: OrderItemStatus.rejected,
+          OR: [{ rejectionDecision: null }, { rejectionDecision: RejectionDecision.pending }],
+        },
+        data: { rejectionDecision: RejectionDecision.removed },
+      });
       const nextStatus = await this.statusFromActiveItems(tx, orderId);
       const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
       if (nextTableStatus) {
@@ -1191,6 +1206,101 @@ export class OrdersService {
       });
     });
 
+    this.emitStatusChanged(updated);
+    const tableStatus = this.tableStatusForOrderStatus(updated.status);
+    if (tableStatus) {
+      this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+    }
+    return updated;
+  }
+
+  async removeRejectedItem(orderId: string, itemId: string, waiterId: string) {
+    const order = await this.assertOwnedOrder(orderId, waiterId);
+    if (order.status !== OrderStatus.partially_rejected || !order.requiresWaiterDecision) {
+      throw new BadRequestException('По этому заказу нет ожидающего решения по частичному отказу');
+    }
+    const item = await this.prisma.orderItem.findFirst({
+      where: { id: itemId, orderId, status: OrderItemStatus.rejected },
+    });
+    if (!item) throw new NotFoundException('Отказанное блюдо не найдено');
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.update({
+        where: { id: itemId },
+        data: { rejectionDecision: RejectionDecision.removed },
+      });
+      await this.recalcOrder(tx, orderId);
+      const pending = await this.pendingRejectedDecisions(tx, orderId);
+      const nextStatus = pending > 0 ? OrderStatus.partially_rejected : await this.statusFromActiveItems(tx, orderId);
+      const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
+      if (nextTableStatus) {
+        await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: nextStatus, requiresWaiterDecision: pending > 0 },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    const tableStatus = this.tableStatusForOrderStatus(updated.status);
+    if (tableStatus) {
+      this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+    }
+    return updated;
+  }
+
+  async replaceRejectedItem(orderId: string, itemId: string, waiterId: string, replacement: CreateOrderItemDto) {
+    const order = await this.assertOwnedOrder(orderId, waiterId);
+    if (order.status !== OrderStatus.partially_rejected || !order.requiresWaiterDecision) {
+      throw new BadRequestException('По этому заказу нет ожидающего решения по частичному отказу');
+    }
+    const item = await this.prisma.orderItem.findFirst({
+      where: { id: itemId, orderId, status: OrderItemStatus.rejected },
+    });
+    if (!item) throw new NotFoundException('Отказанное блюдо не найдено');
+
+    const activeShift = await this.shifts.getRequiredActiveShift(waiterId);
+    const oldName = this.orderItemName(item);
+    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData([replacement]);
+    const replacementData = itemsData[0];
+    replacementData.comment = [replacementData.comment, `Замена вместо ${oldName}`].filter(Boolean).join(' · ');
+    replacementData.replacementForItemId = itemId;
+    const replacementName = this.orderItemName({
+      dishNameSnapshot: String(replacementData.dishNameSnapshot),
+      dishVariantNameSnapshot: replacementData.dishVariantNameSnapshot ? String(replacementData.dishVariantNameSnapshot) : null,
+    });
+    const hasPrepAdded = itemsData.some((i) => i.prepStation !== PrepStation.none);
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.update({
+        where: { id: itemId },
+        data: { rejectionDecision: RejectionDecision.replaced },
+      });
+      await this.createOrderItems(tx, orderId, itemsData);
+      await this.deductInventory(tx, dishDeductions, variantDeductions);
+      await this.recalcOrder(tx, orderId);
+      const pending = await this.pendingRejectedDecisions(tx, orderId);
+      const nextStatus = pending > 0 ? OrderStatus.partially_rejected : await this.statusFromActiveItems(tx, orderId);
+      const nextTableStatus = this.tableStatusForOrderStatus(nextStatus);
+      if (nextTableStatus) {
+        await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: { status: nextStatus, requiresWaiterDecision: pending > 0, waiterShiftId: activeShift.id },
+        include: orderInclude,
+      });
+    });
+
+    if (hasPrepAdded) {
+      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
+        ...updated,
+        voice: { text: buildReplacementText(updated.orderNumber, oldName, replacementName) },
+      });
+      void this.notifyKitchenNewOrder(updated);
+    }
     this.emitStatusChanged(updated);
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
@@ -1684,6 +1794,16 @@ export class OrdersService {
     return OrderStatus.partially_rejected;
   }
 
+  private pendingRejectedDecisions(tx: Prisma.TransactionClient, orderId: string) {
+    return tx.orderItem.count({
+      where: {
+        orderId,
+        status: OrderItemStatus.rejected,
+        OR: [{ rejectionDecision: null }, { rejectionDecision: RejectionDecision.pending }],
+      },
+    });
+  }
+
   /**
    * Статус блюда-сета как агрегат статусов его состава: сет готов только когда
    * готовы все блюда внутри, и отказан только когда отказаны все.
@@ -1720,7 +1840,7 @@ export class OrdersService {
         setComponents: { select: { status: true } },
       },
     });
-    const becameRejected: { dishId: string | null; dishVariantId: string | null; quantity: number }[] = [];
+    const becameRejected: { id: string; dishId: string | null; dishVariantId: string | null; quantity: number }[] = [];
     for (const item of setItems) {
       const next = this.aggregateItemStatus(item.setComponents.map((c) => c.status));
       if (next === item.status) continue;
@@ -1731,6 +1851,7 @@ export class OrdersService {
         item.status !== OrderItemStatus.cancelled
       ) {
         becameRejected.push({
+          id: item.id,
           dishId: item.dishId,
           dishVariantId: item.dishVariantId,
           quantity: item.quantity,

@@ -26,6 +26,27 @@ function InfoIcon() {
   );
 }
 
+function WarningIcon() {
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+      aria-hidden
+    >
+      <path d="m21.7 18.6-8.5-15a1.4 1.4 0 0 0-2.4 0l-8.5 15A1.4 1.4 0 0 0 3.5 21h17a1.4 1.4 0 0 0 1.2-2.4Z" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </svg>
+  );
+}
+
 /** Возвращает null если строка состоит только из U+FFFD (кракозябры из bash-тестов). */
 function safeComment(s: string | null | undefined): string | null {
   if (!s) return null;
@@ -42,7 +63,8 @@ export function OrderPanel({
   onToPayment,
   onPreliminaryReceipt,
   onContinueAfterRejection,
-  onAddReplacement,
+  onReplaceRejectedItem,
+  onRemoveRejectedItem,
   onCancelOrder,
   onEdit,
 }: {
@@ -54,7 +76,8 @@ export function OrderPanel({
   onToPayment: () => void;
   onPreliminaryReceipt: () => void;
   onContinueAfterRejection: () => void;
-  onAddReplacement: () => void;
+  onReplaceRejectedItem: (item: Order['items'][number]) => void;
+  onRemoveRejectedItem: (item: Order['items'][number]) => void;
   onCancelOrder: () => void;
   /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
   onEdit?: () => void;
@@ -63,6 +86,19 @@ export function OrderPanel({
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
   // Редактирование доступно, пока кухня не завершила заказ (как в списке заказов).
   const editable = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'].includes(order.status);
+
+  if (waitingDecision) {
+    return (
+      <PartialRejectionPanel
+        order={order}
+        submitting={submitting}
+        onContinueAfterRejection={onContinueAfterRejection}
+        onReplaceRejectedItem={onReplaceRejectedItem}
+        onRemoveRejectedItem={onRemoveRejectedItem}
+        onCancelOrder={onCancelOrder}
+      />
+    );
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -178,10 +214,134 @@ export function OrderPanel({
             onToPayment={onToPayment}
             onPreliminaryReceipt={onPreliminaryReceipt}
             onContinueAfterRejection={onContinueAfterRejection}
-            onAddReplacement={onAddReplacement}
             onCancelOrder={onCancelOrder}
           />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function PartialRejectionPanel({
+  order,
+  submitting,
+  onContinueAfterRejection,
+  onReplaceRejectedItem,
+  onRemoveRejectedItem,
+  onCancelOrder,
+}: {
+  order: Order;
+  submitting: boolean;
+  onContinueAfterRejection: () => void;
+  onReplaceRejectedItem: (item: Order['items'][number]) => void;
+  onRemoveRejectedItem: (item: Order['items'][number]) => void;
+  onCancelOrder: () => void;
+}) {
+  const t = useT();
+  const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
+  const rejectedItems = order.items.filter(
+    (item) =>
+      item.status === 'rejected' &&
+      (item.rejectionDecision === undefined || item.rejectionDecision === null || item.rejectionDecision === 'pending'),
+  );
+  const activeTotal = activeItems.reduce((sum, item) => sum + Number(item.finalPrice), 0);
+
+  return (
+    <div className="flex h-full flex-col bg-white">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-1 pb-3 pt-1">
+        <div className="min-w-0">
+          <h2 className="truncate text-[24px] font-bold leading-tight text-text-primary sm:text-[28px]">
+            {t('Заказ')} {displayOrderNumber(order.orderNumber)}
+            <span className="ml-3 text-[16px] font-normal text-text-muted">{t('Стол')} {order.table.number}</span>
+          </h2>
+        </div>
+        <span className="shrink-0 rounded-lg border border-danger/25 bg-danger/5 px-3 py-1.5 text-[14px] font-medium text-danger">
+          {t('Отказ кухни')}
+        </span>
+      </div>
+
+      <div className="no-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto px-1 py-4">
+        <section>
+          <h3 className="mb-3 text-[19px] font-semibold text-text-primary">{t('1. Активные блюда')}</h3>
+          <div className="space-y-2.5">
+            {activeItems.map((item) => (
+              <div key={item.id} className="flex items-center gap-3 rounded-xl border border-border bg-white px-4 py-3">
+                <span className="min-w-0 flex-1 truncate text-[18px] font-medium text-text-primary">
+                  {orderItemDisplayName(item)}
+                </span>
+                <span className="w-12 shrink-0 text-right text-[16px] text-text-muted">×{item.quantity}</span>
+                <span className="w-24 shrink-0 text-right text-[20px] font-semibold text-text-primary">
+                  {money(item.finalPrice)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section>
+          <h3 className="mb-3 text-[19px] font-semibold text-text-primary">{t('2. Требуют решения')}</h3>
+          <div className="space-y-3">
+            {rejectedItems.map((item) => (
+              <div key={item.id} className="rounded-xl border border-danger/25 bg-danger/[0.04] px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <span className="min-w-0 flex-1 truncate text-[17px] font-medium text-text-muted line-through">
+                    {orderItemDisplayName(item)}
+                  </span>
+                  <span className="w-10 shrink-0 text-right text-[15px] font-semibold text-text-primary">×{item.quantity}</span>
+                  <span className="w-20 shrink-0 text-right text-[17px] font-semibold text-text-primary">
+                    {money(item.finalPrice)}
+                  </span>
+                  <span className="shrink-0 text-[14px] font-medium text-danger">{t('Отказано')}</span>
+                </div>
+                <div className="mt-3 flex gap-2">
+                  <button
+                    className="h-10 rounded-lg border border-primary px-5 text-[15px] font-semibold text-primary transition-colors hover:bg-primary/5 disabled:opacity-50"
+                    disabled={submitting}
+                    onClick={() => onReplaceRejectedItem(item)}
+                  >
+                    {t('Заменить')}
+                  </button>
+                  <button
+                    className="h-10 rounded-lg border border-danger/60 px-5 text-[15px] font-semibold text-danger transition-colors hover:bg-danger/5 disabled:opacity-50"
+                    disabled={submitting}
+                    onClick={() => onRemoveRejectedItem(item)}
+                  >
+                    {t('Убрать')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="border-y border-border py-4">
+          <div className="flex items-center justify-between">
+            <span className="text-[18px] font-medium text-text-primary">{t('Итого')}</span>
+            <span className="text-[28px] font-bold text-text-primary">{money(activeTotal)}</span>
+          </div>
+        </div>
+
+        <section className="space-y-3">
+          <h3 className="text-[19px] font-semibold text-text-primary">{t('3. Решение')}</h3>
+          <div className="flex items-center gap-3 rounded-xl border border-warning/35 bg-warning/10 px-4 py-3 text-[15px] text-warning">
+            <WarningIcon />
+            <span>{t('Кухня отказала часть заказа. Решите по каждой отказанной позиции.')}</span>
+          </div>
+          <button
+            className="btn-primary h-14 w-full rounded-xl text-[17px] font-semibold"
+            disabled={submitting}
+            onClick={onContinueAfterRejection}
+          >
+            {submitting ? <Spinner /> : t('Продолжить без отказанных блюд')}
+          </button>
+          <button
+            className="h-11 w-full rounded-xl text-[17px] font-medium text-danger transition-colors hover:bg-danger/5 disabled:opacity-50"
+            disabled={submitting}
+            onClick={onCancelOrder}
+          >
+            {t('Отменить весь заказ')}
+          </button>
+        </section>
       </div>
     </div>
   );
@@ -196,7 +356,6 @@ function ActionButton({
   onToPayment,
   onPreliminaryReceipt,
   onContinueAfterRejection,
-  onAddReplacement,
   onCancelOrder,
 }: {
   order: Order;
@@ -207,7 +366,6 @@ function ActionButton({
   onToPayment: () => void;
   onPreliminaryReceipt: () => void;
   onContinueAfterRejection: () => void;
-  onAddReplacement: () => void;
   onCancelOrder: () => void;
 }) {
   const t = useT();
@@ -244,9 +402,6 @@ function ActionButton({
         </div>
         <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onContinueAfterRejection}>
           {spin ?? t('Продолжить без отказанного блюда')}
-        </button>
-        <button className="btn-secondary btn-lg w-full font-semibold" disabled={submitting} onClick={onAddReplacement}>
-          {t('Добавить замену')}
         </button>
         <button className="btn-danger btn-lg w-full font-semibold" disabled={submitting} onClick={onCancelOrder}>
           {t('Отменить весь заказ')}
