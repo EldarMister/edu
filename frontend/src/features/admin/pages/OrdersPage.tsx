@@ -7,7 +7,7 @@ import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, paymentCell, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
-import { IconEye, IconX } from '../components/icons';
+import { IconX } from '../components/icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff } from '../api';
@@ -208,7 +208,7 @@ export function OrdersPage() {
         ) : items.length === 0 ? (
           <p className="py-12 text-center text-text-muted">{tr('Заказы не найдены')}</p>
         ) : (
-          <div className="max-h-[calc(100vh-260px)] overflow-auto">
+          <div className="menu-scrollbar max-h-[calc(100vh-260px)] overflow-auto">
             <table className="w-full min-w-[820px] text-sm">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-border bg-background text-left text-xs text-text-muted">
@@ -252,7 +252,7 @@ export function OrdersPage() {
                     <Td className="whitespace-nowrap text-text-secondary">{paymentCell(ord)}</Td>
                     <Td>
                       <div className="flex items-center justify-end gap-1">
-                        {CANCELLABLE.has(ord.status) ? (
+                        {CANCELLABLE.has(ord.status) && (
                           <button
                             className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-danger/10 hover:text-danger"
                             title={tr('Отменить')}
@@ -263,18 +263,6 @@ export function OrdersPage() {
                             }}
                           >
                             <IconX className="h-4 w-4" />
-                          </button>
-                        ) : (
-                          <button
-                            className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-background hover:text-primary"
-                            title={tr('Детали заказа')}
-                            aria-label={tr('Детали заказа')}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDetailsOrder(ord);
-                            }}
-                          >
-                            <IconEye className="h-4 w-4" />
                           </button>
                         )}
                       </div>
