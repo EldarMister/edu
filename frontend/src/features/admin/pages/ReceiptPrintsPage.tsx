@@ -11,12 +11,12 @@ import { useReceiptPrintRequests, useReceiptPrintActions } from '../api';
 export function ReceiptPrintsPage() {
   const t = useT();
   const q = useReceiptPrintRequests();
-  const { approve, reject } = useReceiptPrintActions();
+  const { approve, printed, reject } = useReceiptPrintActions();
   const push = useNotifications((s) => s.push);
 
   const items = q.data ?? [];
   const pendingId =
-    approve.isPending ? (approve.variables as string) : reject.isPending ? (reject.variables as string) : null;
+    approve.isPending ? (approve.variables as string) : printed.isPending ? (printed.variables as string) : reject.isPending ? (reject.variables as string) : null;
 
   async function run(
     action: typeof approve | typeof reject,
@@ -31,13 +31,22 @@ export function ReceiptPrintsPage() {
     }
   }
 
-  async function approveAndPrint(id: string, okMessage: string) {
+  async function approveAndPrint(id: string, alreadyApproved: boolean, okMessage: string) {
     const printWindow = window.open('', '_blank', 'width=380,height=640');
     try {
-      const request = await approve.mutateAsync(id);
+      const request = alreadyApproved ? items.find((item) => item.id === id)! : await approve.mutateAsync(id);
       const receipt = (await api.get<Receipt>(`/payments/${request.orderId}/receipt`)).data;
-      printReceipt(receipt, printWindow, { preliminary: request.type === 'preliminary' });
-      push({ message: okMessage, type: 'success', at: new Date().toISOString() });
+      printReceipt(receipt, printWindow, {
+        preliminary: request.type === 'preliminary',
+        onAfterPrint: async () => {
+          try {
+            await printed.mutateAsync(id);
+            push({ message: okMessage, type: 'success', at: new Date().toISOString() });
+          } catch (err) {
+            push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+          }
+        },
+      });
     } catch (err) {
       printWindow?.close();
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
@@ -70,6 +79,7 @@ export function ReceiptPrintsPage() {
               {items.map((r) => {
                 const busy = pendingId === r.id;
                 const prelim = r.type === 'preliminary';
+                const approved = r.status === 'approved';
                 return (
                   <tr key={r.id} className="border-b border-border last:border-0">
                     <td className="px-4 py-3 font-medium text-text-primary">
@@ -78,7 +88,7 @@ export function ReceiptPrintsPage() {
                     <td className="px-4 py-3">
                       {prelim ? (
                         <span className="inline-block rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-700">
-                          {t('Предчек')}
+                          {t('Счёт')}
                         </span>
                       ) : (
                         <span className="inline-block rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
@@ -93,10 +103,10 @@ export function ReceiptPrintsPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-2">
                         <button
-                          aria-label={t('Принять')}
-                          title={t('Принять')}
+                          aria-label={approved ? t('Печать') : t('Принять')}
+                          title={approved ? t('Печать') : t('Принять')}
                           disabled={busy}
-                          onClick={() => approveAndPrint(r.id, `${prelim ? 'Предчек' : 'Чек'} ${displayOrderNumber(r.orderNumber)} распечатан`)}
+                          onClick={() => approveAndPrint(r.id, approved, `${prelim ? 'Счёт' : 'Чек'} ${displayOrderNumber(r.orderNumber)} распечатан`)}
                           className="flex h-9 w-9 items-center justify-center rounded-lg border border-success/40 text-success transition-colors hover:bg-success/10 disabled:opacity-50"
                         >
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

@@ -10,19 +10,19 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
 
 /**
  * Открывает окно печати с компактным чеком (подходит для термопринтера 58–80мм).
- * `preliminary: true` печатает предварительный чек (предчек) — без блока оплаты,
+ * `preliminary: true` печатает счёт — без блока оплаты,
  * с пометкой, что это не фискальный документ.
  */
 export function printReceipt(
   r: Receipt,
   targetWindow?: Window | null,
-  opts: { preliminary?: boolean } = {},
+  opts: { preliminary?: boolean; onAfterPrint?: () => void } = {},
 ) {
   const preliminary = opts.preliminary ?? false;
   const date = new Date(r.date);
   const dateStr = `${date.toLocaleDateString('ru-RU')} ${timeHM(r.date)}`;
   const orderNumber = displayOrderNumber(r.orderNumber);
-  const docTitle = preliminary ? 'Предчек' : 'Чек';
+  const docTitle = preliminary ? 'Счёт' : 'Чек';
   const rows = r.items
     .map(
       (it) =>
@@ -69,13 +69,20 @@ export function printReceipt(
     <div class="row total"><span>Итого</span><span>${money(r.finalAmount)}</span></div>
     ${preliminary ? '' : paymentBlock(r)}
     <hr/>
-    <div class="center muted">${preliminary ? 'Предварительный расчёт. Не является фискальным документом.' : escapeHtml(r.thanks)}</div>
+    <div class="center muted">${preliminary ? 'Счёт. Не является фискальным документом.' : escapeHtml(r.thanks)}</div>
   </body></html>`;
 
   const w = targetWindow ?? window.open('', '_blank', 'width=380,height=640');
   if (!w) return;
   w.document.write(html);
   w.document.close();
+  let afterPrintHandled = false;
+  const handleAfterPrint = () => {
+    if (afterPrintHandled) return;
+    afterPrintHandled = true;
+    opts.onAfterPrint?.();
+  };
+  w.addEventListener?.('afterprint', handleAfterPrint, { once: true });
   w.focus();
   setTimeout(() => {
     w.print();

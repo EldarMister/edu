@@ -633,9 +633,13 @@ export function useReceiptPrintActions() {
     mutationFn: (id: string) => api.post<ReceiptPrintRequest>(`/receipt-prints/${id}/approve`).then((r) => r.data),
     onSuccess: invalidate,
   });
+  const printed = useMutation({
+    mutationFn: (id: string) => api.post<ReceiptPrintRequest>(`/receipt-prints/${id}/printed`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
   const reject = useMutation({
     mutationFn: (id: string) => api.post<ReceiptPrintRequest>(`/receipt-prints/${id}/reject`).then((r) => r.data),
     onSuccess: invalidate,
   });
-  return { approve, reject };
+  return { approve, printed, reject };
 }

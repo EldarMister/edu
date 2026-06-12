@@ -80,26 +80,24 @@ export class ReceiptPrintsService {
     return dto;
   }
 
-  /** Список ожидающих заявок для администратора. */
+  /** Список заявок для администратора: ожидают решения или уже подтверждены, но ещё не отмечены распечатанными. */
   async listPending() {
     const items = await this.prisma.receiptPrintRequest.findMany({
-      where: { status: ReceiptPrintStatus.pending },
+      where: { status: { in: [ReceiptPrintStatus.pending, ReceiptPrintStatus.approved] } },
       orderBy: { createdAt: 'asc' },
       include: withWaiter,
     });
     return items.map((r) => this.serialize(r));
   }
 
-  /** Администратор принимает заявку: чек печатается → статус printed. */
+  /** Администратор принимает заявку: дальше админское устройство печатает документ. */
   async approve(actor: AuditActor, id: string) {
     const request = await this.getPending(id);
 
-    // Печать выполняется на устройстве официанта (window.print). Считаем,
-    // что отправка на печать успешна → статус printed.
     const updated = await this.prisma.receiptPrintRequest.update({
       where: { id },
       data: {
-        status: ReceiptPrintStatus.printed,
+        status: ReceiptPrintStatus.approved,
         decidedById: actor.id,
         decidedAt: new Date(),
       },
@@ -107,10 +105,35 @@ export class ReceiptPrintsService {
     });
     const dto = this.serialize(updated);
 
-    // Официанту: сначала «подтверждено», затем «распечатано».
     this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, dto);
+    this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, dto);
+    return dto;
+  }
+
+  /** Администраторское устройство подтвердило фактическую печать. */
+  async markPrinted(actor: AuditActor, id: string) {
+    const request = await this.prisma.receiptPrintRequest.findUnique({ where: { id } });
+    if (!request) throw new NotFoundException('Заявка не найдена');
+    if (request.status === ReceiptPrintStatus.printed) {
+      const printed = await this.prisma.receiptPrintRequest.findUniqueOrThrow({ where: { id }, include: withWaiter });
+      return this.serialize(printed);
+    }
+    if (request.status !== ReceiptPrintStatus.approved) {
+      throw new BadRequestException('Заявка ещё не подтверждена');
+    }
+
+    const updated = await this.prisma.receiptPrintRequest.update({
+      where: { id },
+      data: {
+        status: ReceiptPrintStatus.printed,
+        decidedById: request.decidedById ?? actor.id,
+        decidedAt: request.decidedAt ?? new Date(),
+      },
+      include: withWaiter,
+    });
+    const dto = this.serialize(updated);
+
     this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
-    // Другим админам — убрать заявку из списка.
     this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
     return dto;
   }

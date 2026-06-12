@@ -32,6 +32,13 @@ export class ReceiptPrintsController {
     return this.service.approve(user, id);
   }
 
+  /** Администраторское устройство подтвердило, что печать действительно завершилась. */
+  @Post(':id/printed')
+  @Roles(Role.ADMIN)
+  printed(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.service.markPrinted(user, id);
+  }
+
   /** Администратор отклоняет заявку — чек не печатается. */
   @Post(':id/reject')
   @Roles(Role.ADMIN)

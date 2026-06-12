@@ -227,7 +227,7 @@ export interface Receipt {
 
 export type ReceiptPrintStatus = 'pending' | 'approved' | 'rejected' | 'printed';
 
-/** Тип печати: обычный (финальный) чек или предварительный (предчек). */
+/** Тип печати: обычный (финальный) чек или счёт. */
 export type ReceiptPrintType = 'receipt' | 'preliminary';
 
 /** Запрос официанта на печать чека (подтверждается администратором). */
