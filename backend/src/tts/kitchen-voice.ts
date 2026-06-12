@@ -111,6 +111,10 @@ export function buildChangedText(order: { orderNumber: string }): string {
   return `Заказ номер ${orderNumberWords(order.orderNumber)} изменён. Проверьте состав заказа.`;
 }
 
+export function buildReplacementText(orderNumber: string, oldName: string, newName: string): string {
+  return `Заказ номер ${orderNumberWords(orderNumber)}. Заменили ${oldName} на ${newName}.`;
+}
+
 /** Озвучиваемое имя блюда позиции для диффа изменений. */
 function diffVoiceName(it: VoiceItem): string {
   return dishVoice(it);

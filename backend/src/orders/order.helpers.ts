@@ -27,6 +27,8 @@ export const orderInclude = {
       comment: true,
       takeaway: true,
       rejectReason: true,
+      rejectionDecision: true,
+      replacementForItemId: true,
       setComponents: {
         orderBy: { sortOrder: 'asc' as const },
         select: {

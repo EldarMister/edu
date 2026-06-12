@@ -5,6 +5,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { AddItemsDto } from './dto/add-items.dto';
 import { EditOrderDto } from './dto/edit-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
+import { ReplaceRejectedItemDto } from './dto/resolve-rejected-item.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
@@ -64,6 +65,23 @@ export class OrdersController {
   @Roles(Role.WAITER)
   resolvePartialRejection(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.orders.resolvePartialRejection(id, user.id);
+  }
+
+  @Post(':id/rejected-items/:itemId/remove')
+  @Roles(Role.WAITER)
+  removeRejectedItem(@Param('id') id: string, @Param('itemId') itemId: string, @CurrentUser() user: AuthUser) {
+    return this.orders.removeRejectedItem(id, itemId, user.id);
+  }
+
+  @Post(':id/rejected-items/:itemId/replace')
+  @Roles(Role.WAITER)
+  replaceRejectedItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ReplaceRejectedItemDto,
+  ) {
+    return this.orders.replaceRejectedItem(id, itemId, user.id, dto.item);
   }
 
   @Post(':id/served')

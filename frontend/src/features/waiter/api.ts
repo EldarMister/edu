@@ -247,6 +247,37 @@ export const useServed = () => useOrderAction((id) => `/orders/${id}/served`);
 export const useToPayment = () => useOrderAction((id) => `/orders/${id}/to-payment`);
 export const useResolvePartialRejection = () => useOrderAction((id) => `/orders/${id}/resolve-partial-rejection`);
 
+export function useRemoveRejectedItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { orderId: string; itemId: string }) =>
+      (await api.post<Order>(`/orders/${payload.orderId}/rejected-items/${payload.itemId}/remove`)).data,
+    retry: networkRetry,
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
+
+export function useReplaceRejectedItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { orderId: string; itemId: string; line: CartLine }) => {
+      const [item] = linesToItems([payload.line]);
+      const { data } = await api.post<Order>(`/orders/${payload.orderId}/rejected-items/${payload.itemId}/replace`, { item });
+      return data;
+    },
+    retry: networkRetry,
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
+
 export function useCancelOrder() {
   const qc = useQueryClient();
   return useMutation({

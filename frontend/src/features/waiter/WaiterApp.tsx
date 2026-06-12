@@ -27,6 +27,8 @@ import {
   useServed,
   useToPayment,
   useResolvePartialRejection,
+  useRemoveRejectedItem,
+  useReplaceRejectedItem,
   useCancelOrder,
   useStartShift,
   useEndShift,
@@ -68,6 +70,7 @@ type DesktopTab = 'tables' | 'orders' | 'profile';
 /** Сколько секунд показывается блок отмены действия, прежде чем отмена заказа уйдёт на сервер. */
 const CANCEL_UNDO_SECONDS = 6;
 type PendingCancel = { order: Order; reason: string; deadline: number };
+type ReplacementTarget = { order: Order; item: Order['items'][number] };
 
 export function WaiterApp() {
   useWaiterRealtime();
@@ -90,6 +93,8 @@ export function WaiterApp() {
   const served = useServed();
   const toPayment = useToPayment();
   const resolvePartialRejection = useResolvePartialRejection();
+  const removeRejectedItem = useRemoveRejectedItem();
+  const replaceRejectedItem = useReplaceRejectedItem();
   const cancelOrder = useCancelOrder();
   const startShift = useStartShift();
   const endShift = useEndShift();
@@ -112,6 +117,7 @@ export function WaiterApp() {
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [pendingTableId, setPendingTableId] = useState<string | null>(null);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
+  const [replacementTarget, setReplacementTarget] = useState<ReplacementTarget | null>(null);
   const [idemKey, setIdemKey] = useState(() => clientId());
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
 
@@ -163,7 +169,13 @@ export function WaiterApp() {
   const showPushBanner = ['default', 'error'].includes(pushNotifications.status);
 
   const actionPending =
-    pickedUp.isPending || served.isPending || toPayment.isPending || resolvePartialRejection.isPending || cancelOrder.isPending;
+    pickedUp.isPending ||
+    served.isPending ||
+    toPayment.isPending ||
+    resolvePartialRejection.isPending ||
+    removeRejectedItem.isPending ||
+    replaceRejectedItem.isPending ||
+    cancelOrder.isPending;
   const shiftPending = startShift.isPending || endShift.isPending;
 
   // Пока ждём окончания таймера отмены — тикаем раз в секунду (для обратного отсчёта)
@@ -350,9 +362,37 @@ export function WaiterApp() {
   function openExistingOrder(order: Order) {
     setViewingOrderId(order.id);
     cart.selectTable(order.table.id);
-    setTab('cart');
+    setTab(order.requiresWaiterDecision ? 'orders' : 'cart');
     if (order.status === 'waiting_payment') {
       setPaymentOrder(order);
+    }
+  }
+
+  function orderItemName(item: Order['items'][number]) {
+    return item.dishVariantNameSnapshot
+      ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
+      : item.dishNameSnapshot;
+  }
+
+  async function replaceRejectedWithLine(line: CartLine) {
+    if (!replacementTarget) return;
+    try {
+      const updated = await replaceRejectedItem.mutateAsync({
+        orderId: replacementTarget.order.id,
+        itemId: replacementTarget.item.id,
+        line,
+      });
+      setReplacementTarget(null);
+      setViewingOrderId(updated.id);
+      cart.selectTable(updated.table.id);
+      setTab('orders');
+      push({
+        message: `${orderItemName(replacementTarget.item)} заменено`,
+        type: 'success',
+        at: new Date().toISOString(),
+      });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -366,6 +406,11 @@ export function WaiterApp() {
       }
     }
 
+    if (replacementTarget) {
+      void replaceRejectedWithLine({ dish, variant, quantity: 1 });
+      return;
+    }
+
     const key = cartLineKeyFromParts(dish.id, variant?.id);
     const nextQuantity = (cart.lines.find((line) => cartLineKeyFromParts(line.dish.id, line.variant?.id) === key)?.quantity ?? 0) + 1;
     cart.add(dish, variant);
@@ -374,6 +419,15 @@ export function WaiterApp() {
   }
 
   function addSetToCart(set: Parameters<typeof cart.addSet>[0], components: Parameters<typeof cart.addSet>[1]) {
+    if (replacementTarget) {
+      void replaceRejectedWithLine({
+        dish: set,
+        quantity: 1,
+        lineId: `set-replacement-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        set: { components },
+      });
+      return;
+    }
     cart.addSet(set, components);
     push({ message: `${set.name} добавлен`, at: new Date().toISOString() });
   }
@@ -410,11 +464,28 @@ export function WaiterApp() {
     }
   }
 
-  function addReplacement(order: Order) {
+  function replaceRejectedFromOrder(order: Order, item: Order['items'][number]) {
+    setReplacementTarget({ order, item });
     setViewingOrderId(null);
     cart.selectTable(order.table.id);
     setTab('menu');
-    push({ message: t('Выберите блюдо на замену и отправьте его на кухню'), type: 'info', at: new Date().toISOString() });
+    push({
+      message: `${t('Выберите блюдо на замену')}: ${orderItemName(item)}`,
+      type: 'info',
+      at: new Date().toISOString(),
+    });
+  }
+
+  async function removeRejectedFromOrder(order: Order, item: Order['items'][number]) {
+    try {
+      const updated = await removeRejectedItem.mutateAsync({ orderId: order.id, itemId: item.id });
+      setViewingOrderId(updated.id);
+      cart.selectTable(updated.table.id);
+      setTab('orders');
+      push({ message: `${orderItemName(item)} убрано из заказа`, type: 'success', at: new Date().toISOString() });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
   }
 
   async function cancelAfterPartialRejection(order: Order) {
@@ -584,7 +655,8 @@ export function WaiterApp() {
           onToPayment={() => goToPayment(displayedOrder)}
           onPreliminaryReceipt={() => requestPreliminaryReceipt(displayedOrder)}
           onContinueAfterRejection={() => continueAfterPartialRejection(displayedOrder)}
-          onAddReplacement={() => addReplacement(displayedOrder)}
+          onReplaceRejectedItem={(item) => replaceRejectedFromOrder(displayedOrder, item)}
+          onRemoveRejectedItem={(item) => removeRejectedFromOrder(displayedOrder, item)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}
         />
@@ -699,16 +771,20 @@ export function WaiterApp() {
         {tab === 'menu' && mobileMenuNode}
         {tab === 'cart' && rightPanel}
         {tab === 'orders' && (
-          <Panel title={t('Активные заказы')}>
-            <div className="no-scrollbar overflow-y-auto">
-              <OrdersList
-                orders={orders}
-                onOpen={openExistingOrder}
-                onEdit={startEditOrder}
-                onCancel={(o) => setCancelTarget(o)}
-              />
-            </div>
-          </Panel>
+          viewingOrder ? (
+            rightPanel
+          ) : (
+            <Panel title={t('Активные заказы')}>
+              <div className="no-scrollbar overflow-y-auto">
+                <OrdersList
+                  orders={orders}
+                  onOpen={openExistingOrder}
+                  onEdit={startEditOrder}
+                  onCancel={(o) => setCancelTarget(o)}
+                />
+              </div>
+            </Panel>
+          )
         )}
         {tab === 'profile' &&
           (cabinetOpen ? (
@@ -721,7 +797,7 @@ export function WaiterApp() {
       </main>
 
       {/* Корзина над нижней навигацией (только на экране меню) */}
-      {tab === 'menu' && (
+      {tab === 'menu' && !replacementTarget && (
         <MenuCartBar
           count={cart.lines.length}
           total={cartTotals(cart.lines).final}
@@ -734,7 +810,7 @@ export function WaiterApp() {
 
       {/* Корзина как bottom sheet поверх меню */}
       <CartSheet
-        open={cartSheetOpen && tab === 'menu'}
+        open={cartSheetOpen && tab === 'menu' && !replacementTarget}
         onClose={() => setCartSheetOpen(false)}
         submitting={create.isPending || addItems.isPending || editOrder.isPending}
         canSubmit={!!activeShift}

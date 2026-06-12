@@ -139,6 +139,7 @@ export type OrderItemStatus =
 
 export type PaymentMethod = 'qr' | 'cash' | 'card' | 'mixed';
 export type PaymentSource = 'normal' | 'split';
+export type RejectionDecision = 'pending' | 'removed' | 'replaced';
 
 export type WaiterShiftStatus = 'active' | 'closed';
 
@@ -174,6 +175,8 @@ export interface OrderItem {
   /** «С собой» (навынос) — кухне нужно упаковать позицию. */
   takeaway?: boolean;
   rejectReason: string | null;
+  rejectionDecision?: RejectionDecision | null;
+  replacementForItemId?: string | null;
   setComponents?: OrderSetComponent[];
 }
 
