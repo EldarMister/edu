@@ -77,13 +77,17 @@ export class CatalogService {
     });
   }
 
-  createHall(dto: CreateHallDto) {
-    return this.prisma.hall.create({ data: { name: dto.name, sortOrder: dto.sortOrder ?? 0 } });
+  async createHall(dto: CreateHallDto) {
+    const hall = await this.prisma.hall.create({ data: { name: dto.name, sortOrder: dto.sortOrder ?? 0 } });
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { hallId: hall.id, action: 'create-hall' });
+    return hall;
   }
 
   async updateHall(id: string, dto: UpdateHallDto) {
     await this.ensureHall(id);
-    return this.prisma.hall.update({ where: { id }, data: dto });
+    const hall = await this.prisma.hall.update({ where: { id }, data: dto });
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { hallId: id, action: 'update-hall' });
+    return hall;
   }
 
   async deleteHall(id: string) {
@@ -93,6 +97,7 @@ export class CatalogService {
       throw new BadRequestException('Нельзя удалить зал со столами. Сначала удалите столы.');
     }
     await this.prisma.hall.delete({ where: { id } });
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { hallId: id, action: 'delete-hall' });
     return { ok: true };
   }
 
@@ -107,6 +112,7 @@ export class CatalogService {
     const table = await this.prisma.table.create({
       data: { hallId: dto.hallId, number: dto.number, seats: dto.seats, sortOrder: dto.number },
     });
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: table.id, hallId: table.hallId, action: 'create-table' });
     return table;
   }
 
@@ -122,6 +128,7 @@ export class CatalogService {
         hallId: updated.hallId,
       });
     }
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: updated.id, hallId: updated.hallId, action: 'update-table' });
     return updated;
   }
 
@@ -131,9 +138,12 @@ export class CatalogService {
     const orders = await this.prisma.order.count({ where: { tableId: id } });
     if (orders > 0) {
       // У стола есть история заказов — деактивируем вместо удаления.
-      return this.prisma.table.update({ where: { id }, data: { isActive: false } });
+      const updated = await this.prisma.table.update({ where: { id }, data: { isActive: false } });
+      this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: id, hallId: updated.hallId, action: 'deactivate-table' });
+      return updated;
     }
     await this.prisma.table.delete({ where: { id } });
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: id, hallId: table.hallId, action: 'delete-table' });
     return { ok: true };
   }
 
@@ -179,6 +189,7 @@ export class CatalogService {
       description: `${actor.name ?? 'Сотрудник'} добавил категорию «${category.name}»`,
       newValue: { name: category.name },
     });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: category.id, action: 'create-category' });
     return category;
   }
 
@@ -194,6 +205,7 @@ export class CatalogService {
       oldValue: { name: before.name, isActive: before.isActive },
       newValue: { name: updated.name, isActive: updated.isActive },
     });
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: id, action: 'update-category' });
     return updated;
   }
 

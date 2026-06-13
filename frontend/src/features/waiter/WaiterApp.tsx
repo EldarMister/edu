@@ -41,7 +41,6 @@ import {
   type AvailableWaiter,
 } from './api';
 import { useReceiptPrint } from './receiptPrint';
-import { usePublicSettings } from '@/features/settings/api';
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
 import { CartPanel } from './CartPanel';
@@ -85,7 +84,6 @@ export function WaiterApp() {
   const dishesQ = useDishes();
   const ordersQ = useActiveOrders();
   const currentShiftQ = useCurrentShift();
-  const publicSettingsQ = usePublicSettings();
 
   const cart = useCart();
   const create = useCreateOrder();
@@ -128,7 +126,6 @@ export function WaiterApp() {
   const halls = hallsQ.data ?? [];
   const orders = ordersQ.data ?? [];
   const activeShift = currentShiftQ.data ?? null;
-  const publicSettings = publicSettingsQ.data ?? null;
 
   // Самый свежий активный заказ по каждому столу (бэкенд отдаёт по убыванию даты).
   const ordersByTable = useMemo(() => {
@@ -479,83 +476,6 @@ export function WaiterApp() {
     });
   }
 
-  function geolocationErrorMessage(err: unknown): string {
-    if (err && typeof err === 'object' && 'code' in err) {
-      const code = Number((err as GeolocationPositionError).code);
-      if (code === 1) return 'Разрешите доступ к геолокации, чтобы начать смену';
-      if (code === 2) return 'Не удалось определить местоположение. Проверьте GPS или интернет';
-      if (code === 3) return 'Не удалось быстро определить местоположение. Включите GPS и попробуйте ещё раз';
-    }
-    return 'Не удалось определить местоположение';
-  }
-
-  function requestCurrentPosition(options: PositionOptions): Promise<GeolocationPosition> {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error('Геолокация не поддерживается этим устройством'));
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(resolve, reject, options);
-    });
-  }
-
-  async function getCurrentPosition(): Promise<GeolocationPosition> {
-    if (!navigator.geolocation) {
-      throw new Error('Геолокация не поддерживается этим устройством');
-    }
-    try {
-      return await requestCurrentPosition({
-        enableHighAccuracy: false,
-        timeout: 5000,
-        maximumAge: 300000,
-      });
-    } catch {
-      try {
-        return await requestCurrentPosition({
-          enableHighAccuracy: true,
-          timeout: 25000,
-          maximumAge: 0,
-        });
-      } catch (err) {
-        try {
-          return await requestCurrentPosition({
-            enableHighAccuracy: false,
-            timeout: 15000,
-            maximumAge: 600000,
-          });
-        } catch {
-          throw new Error(geolocationErrorMessage(err));
-        }
-      }
-    }
-  }
-
-  async function startShiftWithLocationCheck() {
-    try {
-      let location: { latitude: number; longitude: number; accuracy?: number } | undefined;
-      if (publicSettings?.shiftLocationEnabled) {
-        const pos = await getCurrentPosition();
-        location = {
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        };
-      }
-      await startShift.mutateAsync(location);
-      push({ message: t('Смена начата'), type: 'success', at: new Date().toISOString() });
-    } catch (err) {
-      const message =
-        err && typeof err === 'object' && 'message' in err && typeof err.message === 'string'
-          ? err.message
-          : apiError(err);
-      push({
-        message,
-        type: 'error',
-        at: new Date().toISOString(),
-      });
-    }
-  }
-
   async function removeRejectedFromOrder(order: Order, item: Order['items'][number]) {
     try {
       const updated = await removeRejectedItem.mutateAsync({ orderId: order.id, itemId: item.id });
@@ -764,7 +684,10 @@ export function WaiterApp() {
       shiftLoading={currentShiftQ.isFetching}
       shiftPending={shiftPending}
       onStartShift={() =>
-        runAction(startShiftWithLocationCheck)
+        runAction(async () => {
+          await startShift.mutateAsync();
+          push({ message: t('Смена начата'), type: 'success', at: new Date().toISOString() });
+        })
       }
       onEndShift={() =>
         runAction(async () => {

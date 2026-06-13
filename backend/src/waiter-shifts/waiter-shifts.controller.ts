@@ -1,9 +1,8 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Controller, Get, Post } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { WaiterShiftsService } from './waiter-shifts.service';
-import { StartShiftDto } from './dto';
 
 @Controller('waiter/shifts')
 @Roles(Role.WAITER)
@@ -16,8 +15,8 @@ export class WaiterShiftsController {
   }
 
   @Post('start')
-  start(@CurrentUser() user: AuthUser, @Body() dto: StartShiftDto) {
-    return this.shifts.start(user.id, dto);
+  start(@CurrentUser() user: AuthUser) {
+    return this.shifts.start(user.id);
   }
 
   @Post('end')

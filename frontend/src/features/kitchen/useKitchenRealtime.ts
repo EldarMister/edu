@@ -60,4 +60,10 @@ export function useKitchenRealtime(station: PrepStation = 'kitchen') {
       kitchenVoice.enqueue(text);
     }
   });
+
+  // Админ изменил меню/категории/сеты или стоп-лист — кухня и бар обновляют экраны без перезахода.
+  useSocketEvent('menu:updated', () => {
+    qc.invalidateQueries({ queryKey: ['kitchen'] });
+    qc.invalidateQueries({ queryKey: ['kitchen', 'stop-list'] });
+  });
 }

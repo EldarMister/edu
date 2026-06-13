@@ -3,6 +3,8 @@ import { PaymentMethod, Prisma, Settings } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
+import { EventsGateway } from '../realtime/events.gateway';
+import { SERVER_EVENTS } from '../realtime/events';
 import { UpdateSettingsDto } from './dto';
 
 const SINGLETON_ID = 'default';
@@ -21,10 +23,6 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   payCard: 'оплата картой',
   qrImageUrl: 'QR-код',
   printerConnected: 'принтер',
-  shiftLocationEnabled: 'проверка геолокации смены',
-  cafeLatitude: 'широта кафе',
-  cafeLongitude: 'долгота кафе',
-  shiftLocationRadiusMeters: 'радиус геолокации смены',
 };
 
 /** Разрешённые форматы загружаемого QR-кода. */
@@ -35,6 +33,7 @@ export class SettingsService {
   constructor(
     private prisma: PrismaService,
     private audit: AuditService,
+    private events: EventsGateway,
   ) {}
 
   /** Возвращает singleton-настройки, создавая их при первом обращении. */
@@ -67,8 +66,6 @@ export class SettingsService {
       // Лёгкая версионированная ссылка вместо тяжёлого base64 — кэшируется браузером.
       qrImageUrl: s.qrImageUrl ? `/settings/qr?v=${s.updatedAt.getTime()}` : null,
       printerConnected: s.printerConnected,
-      shiftLocationEnabled: s.shiftLocationEnabled,
-      shiftLocationRadiusMeters: s.shiftLocationRadiusMeters,
     };
   }
 
@@ -92,19 +89,9 @@ export class SettingsService {
       throw new BadRequestException('Должен быть включён хотя бы один способ оплаты');
     }
 
-    const shiftLocationEnabled = dto.shiftLocationEnabled ?? current.shiftLocationEnabled;
-    const cafeLatitude = dto.cafeLatitude ?? current.cafeLatitude;
-    const cafeLongitude = dto.cafeLongitude ?? current.cafeLongitude;
-    if (shiftLocationEnabled && (cafeLatitude === null || cafeLatitude === undefined || cafeLongitude === null || cafeLongitude === undefined)) {
-      throw new BadRequestException('Сначала укажите местоположение кафе');
-    }
-
     const data: Prisma.SettingsUpdateInput = { ...dto };
     if (dto.serviceChargeAmount !== undefined) {
       data.serviceChargeAmount = new Prisma.Decimal(round2(dto.serviceChargeAmount));
-    }
-    if (dto.shiftLocationRadiusMeters !== undefined) {
-      data.shiftLocationRadiusMeters = Math.round(dto.shiftLocationRadiusMeters);
     }
 
     // QR-код: пустая строка = удалить; иначе проверяем формат data URL.
@@ -152,6 +139,10 @@ export class SettingsService {
         description: `${actor.name ?? 'Владелец'} изменил настройки: ${changed.join(', ')}`,
         oldValue,
         newValue,
+      });
+      this.events.emitBroadcast(SERVER_EVENTS.SETTINGS_UPDATED, {
+        changed: Object.keys(newValue),
+        updatedAt: updated.updatedAt,
       });
     }
 

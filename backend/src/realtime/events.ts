@@ -18,7 +18,9 @@ export const SERVER_EVENTS = {
   WAITER_SHIFT_STARTED: 'waiter:shift_started',
   WAITER_SHIFT_ENDED: 'waiter:shift_ended',
   TABLE_STATUS_CHANGED: 'table:status_changed',
+  TABLES_UPDATED: 'tables:updated',
   MENU_UPDATED: 'menu:updated',
+  SETTINGS_UPDATED: 'settings:updated',
   NOTIFICATION_NEW: 'notification:new',
   // Печать чека: официант ⇄ администратор.
   RECEIPT_PRINT_REQUEST_CREATED: 'receipt_print_request_created',

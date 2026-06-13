@@ -35,15 +35,4 @@ export class UpdateSettingsDto {
   @IsOptional() @IsString() @MaxLength(5_000_000)
   qrImageUrl?: string;
 
-  @IsOptional() @IsBoolean()
-  shiftLocationEnabled?: boolean;
-
-  @IsOptional() @IsNumber() @Min(-90) @Max(90)
-  cafeLatitude?: number;
-
-  @IsOptional() @IsNumber() @Min(-180) @Max(180)
-  cafeLongitude?: number;
-
-  @IsOptional() @IsNumber() @Min(20) @Max(1000)
-  shiftLocationRadiusMeters?: number;
 }

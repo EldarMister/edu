@@ -75,6 +75,23 @@ export function AdminApp() {
     qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
     qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
   });
+  useSocketEvent('tables:updated', () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
+    qc.invalidateQueries({ queryKey: ['audit'] });
+  });
+  useSocketEvent('menu:updated', () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'menu'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'categories'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'dishes'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'sets'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] });
+    qc.invalidateQueries({ queryKey: ['audit'] });
+  });
+  useSocketEvent('settings:updated', () => {
+    qc.invalidateQueries({ queryKey: ['settings'] });
+    qc.invalidateQueries({ queryKey: ['audit'] });
+  });
   // Печать чека: новая заявка / решение по ней — обновляем список без перезагрузки.
   const invalidateReceipts = () =>
     qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });

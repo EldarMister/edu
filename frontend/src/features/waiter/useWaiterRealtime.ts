@@ -156,11 +156,21 @@ export function useWaiterRealtime() {
   useSocketEvent('waiter:shift_ended', () =>
     qc.invalidateQueries({ queryKey: ['waiter', 'shift'] }),
   );
-  useSocketEvent('table:status_changed', () =>
-    qc.invalidateQueries({ queryKey: ['halls'] }),
-  );
-  // Кухня изменила стоп-лист / меню — обновляем доступность блюд без перезагрузки.
-  useSocketEvent('menu:updated', () => qc.invalidateQueries({ queryKey: ['dishes'] }));
+  const invalidateTables = () => {
+    qc.invalidateQueries({ queryKey: ['halls'] });
+    qc.invalidateQueries({ queryKey: ['orders'] });
+  };
+  useSocketEvent('table:status_changed', invalidateTables);
+  useSocketEvent('tables:updated', invalidateTables);
+  // Админ изменил меню/категории/сеты — обновляем меню официанта без перезагрузки.
+  useSocketEvent('menu:updated', () => {
+    qc.invalidateQueries({ queryKey: ['categories'] });
+    qc.invalidateQueries({ queryKey: ['dishes'] });
+  });
+  // Владелец изменил QR, способы оплаты или другие публичные настройки.
+  useSocketEvent('settings:updated', () => {
+    qc.invalidateQueries({ queryKey: ['settings'] });
+  });
 
   // Печать чека/счёта: подтверждение администратора ещё не означает фактическую печать.
   useSocketEvent<ReceiptPrintRequest>('receipt_print_request_approved', (req) => {
