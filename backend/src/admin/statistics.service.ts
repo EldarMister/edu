@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { OrderStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatsQueryDto } from './dto';
+import { SettingsService } from '../settings/settings.service';
 
 type StatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
 
@@ -38,7 +39,10 @@ function addMonths(d: Date, months: number) {
 /** Статистика владельца. */
 @Injectable()
 export class StatisticsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private settings: SettingsService,
+  ) {}
 
   async dashboard(query: StatsQueryDto = {}) {
     const period = query.period ?? 'today';
@@ -46,7 +50,7 @@ export class StatisticsService {
     const previousRange = this.previousRange(range.from, range.to);
     const paidWhere = { status: OrderStatus.paid as OrderStatus };
 
-    const [currentOrders, previousOrders, todayAgg] = await Promise.all([
+    const [currentOrders, previousOrders, todayAgg, enabledMethods] = await Promise.all([
       this.prisma.order.findMany({
         where: {
           ...paidWhere,
@@ -73,6 +77,7 @@ export class StatisticsService {
         _sum: { finalAmount: true },
         _count: true,
       }),
+      this.settings.enabledMethods(),
     ]);
 
     const revenuePeriod = currentOrders.reduce((s, o) => s + Number(o.finalAmount), 0);
@@ -87,8 +92,12 @@ export class StatisticsService {
     for (const o of currentOrders) {
       for (const p of o.payments) methodTotals[p.method] += Number(p.amount);
     }
-    const methodsSum = methodTotals.qr + methodTotals.cash + methodTotals.card || 1;
-    const paymentMethods = (['qr', 'cash', 'card'] as PaymentMethod[]).map((m) => ({
+    const visibleMethods = enabledMethods.filter(
+      (method): method is Extract<PaymentMethod, 'qr' | 'cash' | 'card'> =>
+        method === PaymentMethod.qr || method === PaymentMethod.cash || method === PaymentMethod.card,
+    );
+    const methodsSum = visibleMethods.reduce((sum, method) => sum + methodTotals[method], 0) || 1;
+    const paymentMethods = visibleMethods.map((m) => ({
       method: m,
       amount: methodTotals[m],
       percent: Math.round((methodTotals[m] / methodsSum) * 100),

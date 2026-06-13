@@ -66,8 +66,10 @@ export function useUpdateSettings() {
   return useMutation({
     mutationFn: async (body: SettingsInput) =>
       (await api.patch<Settings>('/admin/settings', body)).data,
-    onSuccess: () => {
+    onSuccess: (data) => {
+      qc.setQueryData(['settings', 'admin'], data);
       qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
     },
   });
 }

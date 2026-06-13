@@ -38,7 +38,8 @@ export function SettingsPage() {
   const t = useT();
 
   const [form, setForm] = useState<Form | null>(null);
-  const [error, setError] = useState('');
+  const saveTimer = useRef<number | null>(null);
+  const hydrateRef = useRef(true);
 
   useEffect(() => {
     if (data) {
@@ -65,40 +66,8 @@ export function SettingsPage() {
     );
   }
 
-  const set = <K extends keyof Form>(k: K, v: Form[K]) => {
-    setForm((f) => (f ? { ...f, [k]: v } : f));
-    setError('');
-  };
-
-  const selectLanguage = (language: Locale) => {
-    set('language', language);
-    setLocale(language);
-  };
-
-  const noMethod = !form.payQr && !form.payCash && !form.payCard;
-
-  function onCancel() {
-    if (!data) return;
-    setForm({
-      cafeName: data.cafeName,
-      address: data.address,
-      phone: data.phone,
-      phone2: data.phone2,
-      receiptText: data.receiptText,
-      serviceChargeAmount: String(data.serviceChargeAmount ?? 0),
-      language: data.language,
-      payQr: data.payQr,
-      payCash: data.payCash,
-      payCard: data.payCard,
-    });
-    setLocale(data.language);
-    setError('');
-  }
-
-  async function onSave() {
-    if (!form) return;
-    if (noMethod) {
-      setError('Должен быть включён хотя бы один способ оплаты');
+  const persist = async (next: Form) => {
+    if (!next.payQr && !next.payCash && !next.payCard) {
       return;
     }
     try {
@@ -106,14 +75,54 @@ export function SettingsPage() {
         ...form,
         serviceChargeAmount: Math.max(0, Number(form.serviceChargeAmount) || 0),
       });
-      setLocale(form.language);
-      push({ message: 'Настройки успешно сохранены', type: 'success', at: new Date().toISOString() });
+      setLocale(next.language);
     } catch (err) {
       const msg = apiError(err);
-      setError(msg);
       push({ message: msg, type: 'error', at: new Date().toISOString() });
     }
-  }
+  };
+
+  const schedulePersist = (next: Form) => {
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      void persist(next);
+    }, 700);
+  };
+
+  const set = <K extends keyof Form>(k: K, v: Form[K], mode: 'debounce' | 'instant' = 'debounce') => {
+    let nextForm: Form | null = null;
+    let blockedNoMethod = false;
+    setForm((f) => {
+      if (!f) return f;
+      nextForm = { ...f, [k]: v };
+      if (!nextForm.payQr && !nextForm.payCash && !nextForm.payCard) {
+        nextForm = f;
+        blockedNoMethod = true;
+        return f;
+      }
+      return nextForm;
+    });
+    if (blockedNoMethod) {
+      return;
+    }
+    if (!nextForm || nextForm[k] !== v) return;
+    if (nextForm && !hydrateRef.current) {
+      if (mode === 'instant') {
+        if (saveTimer.current) window.clearTimeout(saveTimer.current);
+        void persist(nextForm);
+      } else {
+        schedulePersist(nextForm);
+      }
+    }
+  };
+
+  const selectLanguage = (language: Locale) => {
+    set('language', language, 'instant');
+    setLocale(language);
+  };
+
+  const noMethod = !form.payQr && !form.payCash && !form.payCard;
 
   return (
     <div className="space-y-4">
@@ -166,17 +175,37 @@ export function SettingsPage() {
                 {form.receiptText.length}/{RECEIPT_LIMIT}
               </p>
             </Field>
-            <Field label={t('Обслуживание, сом')}>
-              <input
-                className="input"
-                type="number"
-                min={0}
-                step="1"
-                value={form.serviceChargeAmount}
-                onChange={(e) => set('serviceChargeAmount', e.target.value)}
-                placeholder="10"
-              />
-            </Field>
+            {/* Статус принтера */}
+            <div className="pt-2">
+              <div className="mb-3 flex items-center gap-2">
+                <IconPrinter className="h-5 w-5 text-text-secondary" />
+                <h3 className="text-[15px] font-semibold text-text-primary">{t('Статус принтера')}</h3>
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-border p-3">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    data.printerConnected ? 'bg-success/10 text-success' : 'bg-slate-100 text-text-muted'
+                  }`}
+                >
+                  <IconPrinter className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p
+                    className={`text-[15px] font-medium ${
+                      data.printerConnected ? 'text-success' : 'text-text-muted'
+                    }`}
+                  >
+                    {data.printerConnected ? t('Подключен') : t('Не подключен')}
+                  </p>
+                  <p className="text-xs text-text-muted">
+                    {data.printerConnected
+                      ? t('Принтер чеков подключен и готов к печати')
+                      : t('Принтер чеков не подключен')}
+                  </p>
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -285,21 +314,6 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Кнопки действий */}
-      <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
-        {error && <p className="mr-auto self-center text-sm text-danger">{error}</p>}
-        <button className="btn-secondary btn-lg sm:w-auto sm:px-6" onClick={onCancel} disabled={update.isPending}>
-          {t('Отмена')}
-        </button>
-        <button
-          className="btn-primary btn-lg font-semibold sm:w-auto sm:px-6"
-          onClick={onSave}
-          disabled={update.isPending}
-        >
-          {update.isPending ? <Spinner /> : t('Сохранить изменения')}
-        </button>
       </div>
     </div>
   );

@@ -119,6 +119,36 @@
     border-radius: 999px;
   }
 
+  .app-scrollbar-subtle {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(148 163 184 / 0.28) transparent;
+  }
+  .app-scrollbar-subtle::-webkit-scrollbar {
+    width: 3px;
+    height: 3px;
+  }
+  .app-scrollbar-subtle::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .app-scrollbar-subtle::-webkit-scrollbar-thumb {
+    background: rgb(148 163 184 / 0.28);
+    border-radius: 999px;
+  }
+  .app-scrollbar-subtle::-webkit-scrollbar-thumb:hover {
+    background: rgb(148 163 184 / 0.38);
+  }
+
+  @media (max-width: 767px) {
+    .app-scrollbar-subtle {
+      scrollbar-width: none;
+    }
+    .app-scrollbar-subtle::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+      display: none;
+    }
+  }
+
   .toast-shell {
     max-height: 72px;
     margin-bottom: 8px;

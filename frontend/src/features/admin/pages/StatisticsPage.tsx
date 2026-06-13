@@ -4,6 +4,7 @@ import { money } from '@/lib/format';
 import type { PaymentMethod } from '@/types';
 import { IconCard, IconCash, IconCheck, IconOrders, IconQr } from '../components/icons';
 import { useStatistics, type StatsPeriod } from '../api';
+import { usePublicSettings } from '@/features/settings/api';
 
 const PERIODS: { value: StatsPeriod; label: string }[] = [
   { value: 'today', label: 'Сегодня' },
@@ -36,13 +37,22 @@ export function StatisticsPage() {
     from: period === 'custom' ? from : undefined,
     to: period === 'custom' ? to : undefined,
   });
+  const publicSettingsQ = usePublicSettings();
   const d = statsQ.data;
+  const visiblePaymentMethods = (() => {
+    if (!d) return [];
+    const enabled = (publicSettingsQ.data?.paymentMethods ?? d.paymentMethods.map((m) => m.method)).filter(
+      (method): method is Extract<PaymentMethod, 'qr' | 'cash' | 'card'> =>
+        method === 'qr' || method === 'cash' || method === 'card',
+    );
+    return enabled.map((method) => d.paymentMethods.find((item) => item.method === method) ?? { method, amount: 0, percent: 0 });
+  })();
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 overflow-x-hidden">
       {/* Переключатель периода */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="inline-flex rounded-xl bg-background p-1">
+        <div className="grid w-full grid-cols-3 gap-1 rounded-xl bg-background p-1 sm:inline-flex sm:w-auto sm:flex-wrap">
           {PERIODS.map((p) => (
             <button
               key={p.value}
@@ -106,7 +116,7 @@ export function StatisticsPage() {
 
           {/* Аналитические блоки */}
           <div className="grid gap-4 xl:grid-cols-3">
-            <PaymentMethodsCard methods={d.paymentMethods} />
+            <PaymentMethodsCard methods={visiblePaymentMethods} />
             <Leaderboard
               title="Топ блюд"
               items={d.topDishes.map((x) => ({ name: x.name, sub: `${x.count} заказов`, amount: x.amount }))}
