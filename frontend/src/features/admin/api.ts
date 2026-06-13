@@ -258,6 +258,14 @@ export function useAdminOrdersInfinite(filters: Omit<OrdersFilter, 'page'> & { t
   });
 }
 
+export function useAdminOrderDetails(id: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'orders', 'detail', id],
+    queryFn: () => get<Order>(`/orders/${id}`),
+    enabled: !!id,
+  });
+}
+
 export interface OrdersSummary {
   total: number;
   paid: number;
