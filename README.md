@@ -500,27 +500,16 @@ Socket.IO используется для синхронизации ролей 
 - `receipt_print_request_rejected`
 - `receipt_print_request_printed`
 
-## Health и Telegram мониторинг
+## Health и Status Page
 
 Backend имеет публичные endpoints для проверки состояния:
 
 - `GET /api/health` - текущий backend, БД и миграции.
 - `GET /api/health/migrations` - миграции текущей среды.
 - `GET /api/health/project` - текущая среда плюс optional-сравнение dev/main.
+- `GET /api/health/status` - простой HTML-экран со статусом backend, БД и миграций.
 
-Telegram-бот работает через webhook:
-
-- `POST /api/telegram/webhook/:secret`
-
-Команды бота:
-
-- `/status` - общий статус проекта.
-- `/dev` - состояние dev БД и миграций.
-- `/main` или `/prod` - состояние main/prod БД и миграций.
-- `/migrations` - миграции текущего backend.
-- `/help` - список команд.
-
-Backend также запускает проверку каждые 5 минут и отправляет Telegram-алерт, если статус стал проблемным или восстановился.
+Status page обновляется раз в минуту и показывает ошибки подключения к БД, непримененные миграции и последние примененные migration names.
 
 ## Основные модели данных
 
@@ -613,11 +602,6 @@ VAPID_SUBJECT=mailto:admin@example.com
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 
-TELEGRAM_BOT_TOKEN=
-TELEGRAM_CHAT_ID=
-TELEGRAM_ALLOWED_CHAT_IDS=
-TELEGRAM_WEBHOOK_SECRET=
-
 MONITOR_DEV_DATABASE_URL=
 MONITOR_MAIN_DATABASE_URL=
 ```
@@ -641,15 +625,15 @@ TTS_SAMPLE_RATE=24000
 TTS_THREADS=4
 ```
 
-### Telegram webhook
+### Status page
 
-После деплоя backend webhook задается через Telegram Bot API:
+Страница доступна по адресу:
 
-```bash
-curl "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/setWebhook?url=https://YOUR_BACKEND_DOMAIN/api/telegram/webhook/<TELEGRAM_WEBHOOK_SECRET>"
+```text
+https://YOUR_BACKEND_DOMAIN/api/health/status
 ```
 
-Для сравнения миграций `dev/main` нужно задать `MONITOR_DEV_DATABASE_URL` и `MONITOR_MAIN_DATABASE_URL` в переменных окружения backend.
+Для сравнения миграций `dev/main` задайте `MONITOR_DEV_DATABASE_URL` и `MONITOR_MAIN_DATABASE_URL` в переменных окружения backend. Если их не задать, страница покажет только текущую среду.
 
 ## Установка и запуск
 

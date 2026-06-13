@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Header } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
 import { HealthService } from './health.service';
 
@@ -20,5 +20,11 @@ export class HealthController {
   @Get('project')
   project() {
     return this.health.project();
+  }
+
+  @Get('status')
+  @Header('Content-Type', 'text/html; charset=utf-8')
+  statusPage() {
+    return this.health.statusPage();
   }
 }
