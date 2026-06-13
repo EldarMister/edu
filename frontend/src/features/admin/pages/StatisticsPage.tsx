@@ -124,7 +124,6 @@ export function StatisticsPage() {
             />
             <Leaderboard
               title="Лучшие официанты"
-              withAvatar
               items={d.topWaiters.map((x) => ({
                 name: x.name,
                 sub: `${x.orders} закрыто · ср. чек ${money(x.avgCheck)}`,
@@ -388,12 +387,10 @@ function Leaderboard({
   title,
   items,
   empty,
-  withAvatar = false,
 }: {
   title: string;
   items: { name: string; sub: string; amount: number }[];
   empty: string;
-  withAvatar?: boolean;
 }) {
   return (
     <section className="card p-5 sm:p-6">
@@ -414,11 +411,6 @@ function Leaderboard({
               >
                 {i + 1}
               </span>
-              {withAvatar && (
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
-                  {it.name[0] ?? '?'}
-                </span>
-              )}
               <div className="min-w-0 flex-1">
                 <p className={`truncate text-sm ${i === 0 ? 'font-semibold' : 'font-medium'} text-text-primary`}>
                   {it.name}
