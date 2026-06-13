@@ -261,6 +261,20 @@ export function useRemoveRejectedItem() {
   });
 }
 
+export function useCancelReadyItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { orderId: string; itemId: string; reason: string }) =>
+      (await api.post<Order>(`/orders/${payload.orderId}/items/${payload.itemId}/cancel`, { reason: payload.reason })).data,
+    retry: networkRetry,
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
+
 export function useReplaceRejectedItem() {
   const qc = useQueryClient();
   return useMutation({
