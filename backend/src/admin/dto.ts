@@ -13,7 +13,7 @@ import {
   IsArray,
   ValidateNested,
 } from 'class-validator';
-import { Role, DiscountType, TableStatus, PrepStation } from '@prisma/client';
+import { Role, DiscountType, TableStatus, PrepStation, OrderStatus } from '@prisma/client';
 
 // ---------- Залы ----------
 export class CreateHallDto {
@@ -355,6 +355,14 @@ export class OrderQueryDto {
 
   @IsOptional() @Type(() => Number) @IsInt() @Min(1)
   pageSize?: number;
+}
+
+export class UpdateOrderStatusDto {
+  @IsEnum(OrderStatus)
+  status: OrderStatus;
+
+  @IsOptional() @IsString() @MaxLength(240)
+  reason?: string;
 }
 
 // ---------- Статистика ----------

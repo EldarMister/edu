@@ -1533,6 +1533,124 @@ export class OrdersService {
     return updated;
   }
 
+  /** Ручная корректировка статуса заказа администратором/владельцем. */
+  async adminUpdateStatus(orderId: string, actor: AuditActor, targetStatus: OrderStatus, reason?: string) {
+    if (actor.role !== Role.ADMIN && actor.role !== Role.OWNER) {
+      throw new ForbiddenException('Недостаточно прав');
+    }
+
+    const allowed: OrderStatus[] = [
+      OrderStatus.sent_to_kitchen,
+      OrderStatus.accepted_by_kitchen,
+      OrderStatus.cooking,
+      OrderStatus.ready,
+      OrderStatus.picked_up,
+      OrderStatus.served,
+      OrderStatus.waiting_payment,
+      OrderStatus.cancelled,
+    ];
+    if (!allowed.includes(targetStatus)) {
+      throw new BadRequestException('Этот статус нельзя выставить вручную');
+    }
+
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    if (order.status === targetStatus) return order;
+
+    const targetTableStatus = this.tableStatusForOrderStatus(targetStatus);
+    if (!targetTableStatus) {
+      throw new BadRequestException('Для выбранного статуса нет статуса стола');
+    }
+
+    const targetIsActive = ACTIVE_ORDER_STATUSES.includes(targetStatus);
+    if (targetIsActive) {
+      const activeOrder = await this.activeOrderForTable(order.tableId);
+      if (activeOrder && activeOrder.id !== order.id) {
+        throw new BadRequestException('На этом столе уже есть активный заказ');
+      }
+    }
+
+    const fromClosedCancelled = ([OrderStatus.cancelled, OrderStatus.rejected] as OrderStatus[]).includes(order.status);
+    const toClosedCancelled = targetStatus === OrderStatus.cancelled;
+    const targetItemStatus = this.itemStatusForManualOrderStatus(targetStatus);
+    const cleanReason = reason?.trim();
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (fromClosedCancelled && targetIsActive) {
+        await this.deductExistingInventory(tx, order.items);
+      }
+
+      if (!fromClosedCancelled && toClosedCancelled) {
+        await this.restoreInventory(
+          tx,
+          order.items.filter((item) => {
+            const closedItemStatuses: OrderItemStatus[] = [
+              OrderItemStatus.rejected,
+              OrderItemStatus.cancelled,
+              OrderItemStatus.served,
+            ];
+            return !closedItemStatuses.includes(item.status);
+          }),
+        );
+      }
+
+      if (targetItemStatus) {
+        await tx.orderItem.updateMany({
+          where: { orderId },
+          data: { status: targetItemStatus, rejectionDecision: null },
+        });
+        await tx.orderItemSetComponent.updateMany({
+          where: { orderItem: { orderId } },
+          data: { status: targetItemStatus },
+        });
+      }
+
+      if (targetStatus !== OrderStatus.paid) {
+        await tx.payment.updateMany({
+          where: { orderId, status: PaymentStatus.paid },
+          data: { status: PaymentStatus.cancelled },
+        });
+      }
+
+      await tx.table.update({ where: { id: order.tableId }, data: { status: targetTableStatus } });
+      return tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: targetStatus,
+          requiresWaiterDecision: false,
+          paymentStatus: targetStatus === OrderStatus.paid ? PaymentStatus.paid : PaymentStatus.pending,
+          paymentMethod: targetStatus === OrderStatus.paid ? order.paymentMethod : null,
+          closedAt: toClosedCancelled ? new Date() : null,
+        },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    this.emitTableStatus(updated.table.id, updated.table.number, targetTableStatus, updated.table.hallId);
+
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.ORDER_UPDATED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId: order.id,
+      tableId: order.tableId,
+      description:
+        `${actor.name ?? 'Сотрудник'} вручную изменил статус заказа ${order.orderNumber}: ${order.status} → ${targetStatus}` +
+        (cleanReason ? ` · причина: ${cleanReason}` : ''),
+      oldValue: { status: order.status, paymentMethod: order.paymentMethod },
+      newValue: { status: targetStatus, paymentMethod: updated.paymentMethod },
+      metadata: {
+        reason: cleanReason ?? null,
+        tableNumber: order.table.number,
+        orderNumber: order.orderNumber,
+      },
+    });
+
+    return updated;
+  }
+
   // ---------- Внутренние помощники ----------
 
   private async buildItemsData(items: CreateOrderItemDto[]): Promise<{
@@ -1788,6 +1906,41 @@ export class OrdersService {
     }
   }
 
+  private async deductExistingInventory(
+    tx: Prisma.TransactionClient,
+    items: { dishId: string | null; dishVariantId: string | null; quantity: number }[],
+  ) {
+    if (!items.length) return;
+    const dishIds = [...new Set(items.map((i) => i.dishId).filter((id): id is string => !!id))];
+    const variantIds = items.map((i) => i.dishVariantId).filter((id): id is string => !!id);
+    const variants = variantIds.length
+      ? await tx.dishVariant.findMany({ where: { id: { in: variantIds } }, select: { id: true, stock: true } })
+      : [];
+    const nonNullVariantIds = new Set(variants.filter((v) => v.stock !== null).map((v) => v.id));
+
+    const dishes = await tx.dish.findMany({
+      where: { id: { in: dishIds }, trackInventory: true },
+      select: { id: true, stock: true },
+    });
+    const trackedDishIds = new Set(dishes.map((d) => d.id));
+    const dishesWithStock = new Set(dishes.filter((d) => d.stock !== null).map((d) => d.id));
+
+    const dishDeductions = new Map<string, number>();
+    const variantDeductions = new Map<string, number>();
+    for (const item of items) {
+      if (!item.dishId || !trackedDishIds.has(item.dishId)) continue;
+      if (item.dishVariantId) {
+        if (nonNullVariantIds.has(item.dishVariantId)) {
+          variantDeductions.set(item.dishVariantId, (variantDeductions.get(item.dishVariantId) ?? 0) + item.quantity);
+        }
+      } else if (dishesWithStock.has(item.dishId)) {
+        dishDeductions.set(item.dishId, (dishDeductions.get(item.dishId) ?? 0) + item.quantity);
+      }
+    }
+
+    await this.deductInventory(tx, dishDeductions, variantDeductions);
+  }
+
   private calcTotals(
     items: {
       priceSnapshot: string | number | Prisma.Decimal | Prisma.DecimalJsLike;
@@ -1950,6 +2103,27 @@ export class OrdersService {
       case OrderStatus.rejected:
       case OrderStatus.cancelled:
         return TableStatus.free;
+      default:
+        return null;
+    }
+  }
+
+  private itemStatusForManualOrderStatus(status: OrderStatus): OrderItemStatus | null {
+    switch (status) {
+      case OrderStatus.sent_to_kitchen:
+        return OrderItemStatus.new;
+      case OrderStatus.accepted_by_kitchen:
+        return OrderItemStatus.accepted;
+      case OrderStatus.cooking:
+        return OrderItemStatus.cooking;
+      case OrderStatus.ready:
+      case OrderStatus.picked_up:
+        return OrderItemStatus.ready;
+      case OrderStatus.served:
+      case OrderStatus.waiting_payment:
+        return OrderItemStatus.served;
+      case OrderStatus.cancelled:
+        return OrderItemStatus.cancelled;
       default:
         return null;
     }
