@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
 import { apiError } from '@/lib/api';
@@ -39,6 +39,9 @@ export function SettingsPage() {
 
   const [form, setForm] = useState<Form | null>(null);
   const [error, setError] = useState('');
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const saveTimer = useRef<number | null>(null);
+  const hydrateRef = useRef(true);
 
   useEffect(() => {
     if (data) {
@@ -54,8 +57,13 @@ export function SettingsPage() {
         payCash: data.payCash,
         payCard: data.payCard,
       });
+      hydrateRef.current = false;
     }
   }, [data?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => {
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+  }, []);
 
   if (isLoading || !form || !data) {
     return (
@@ -65,55 +73,76 @@ export function SettingsPage() {
     );
   }
 
-  const set = <K extends keyof Form>(k: K, v: Form[K]) => {
-    setForm((f) => (f ? { ...f, [k]: v } : f));
-    setError('');
-  };
-
-  const selectLanguage = (language: Locale) => {
-    set('language', language);
-    setLocale(language);
-  };
-
-  const noMethod = !form.payQr && !form.payCash && !form.payCard;
-
-  function onCancel() {
-    if (!data) return;
-    setForm({
-      cafeName: data.cafeName,
-      address: data.address,
-      phone: data.phone,
-      phone2: data.phone2,
-      receiptText: data.receiptText,
-      serviceChargeAmount: '0',
-      language: data.language,
-      payQr: data.payQr,
-      payCash: data.payCash,
-      payCard: data.payCard,
-    });
-    setLocale(data.language);
-    setError('');
-  }
-
-  async function onSave() {
-    if (!form) return;
-    if (noMethod) {
+  const persist = async (next: Form) => {
+    if (!next.payQr && !next.payCash && !next.payCard) {
       setError('Должен быть включён хотя бы один способ оплаты');
       return;
     }
     try {
       await update.mutateAsync({
-        ...form,
+        ...next,
         serviceChargeAmount: 0,
       });
-      setLocale(form.language);
-      push({ message: 'Настройки успешно сохранены', type: 'success', at: new Date().toISOString() });
+      setLocale(next.language);
+      setSavedAt(new Date().toISOString());
+      setError('');
     } catch (err) {
       const msg = apiError(err);
       setError(msg);
       push({ message: msg, type: 'error', at: new Date().toISOString() });
     }
-  }
+  };
+
+  const schedulePersist = (next: Form) => {
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      void persist(next);
+    }, 700);
+  };
+
+  const set = <K extends keyof Form>(k: K, v: Form[K], mode: 'debounce' | 'instant' = 'debounce') => {
+    let nextForm: Form | null = null;
+    let blockedNoMethod = false;
+    setForm((f) => {
+      if (!f) return f;
+      nextForm = { ...f, [k]: v };
+      if (!nextForm.payQr && !nextForm.payCash && !nextForm.payCard) {
+        nextForm = f;
+        blockedNoMethod = true;
+        return f;
+      }
+      return nextForm;
+    });
+    if (blockedNoMethod) {
+      setError('Должен быть включён хотя бы один способ оплаты');
+      return;
+    }
+    if (!nextForm || nextForm[k] !== v) return;
+    setError('');
+    if (nextForm && !hydrateRef.current) {
+      if (mode === 'instant') {
+        if (saveTimer.current) window.clearTimeout(saveTimer.current);
+        void persist(nextForm);
+      } else {
+        schedulePersist(nextForm);
+      }
+    }
+  };
+
+  const selectLanguage = (language: Locale) => {
+    set('language', language, 'instant');
+    setLocale(language);
+  };
+
+  const noMethod = !form.payQr && !form.payCash && !form.payCard;
+  const saveStateText = error
+    ? error
+    : update.isPending
+      ? t('Сохраняется...')
+      : savedAt
+        ? t('Изменения сохранены')
+        : t('Изменения сохраняются автоматически');
 
   return (
     <div className="space-y-4">
@@ -240,7 +269,7 @@ export function SettingsPage() {
                 title={t('QR-код')}
                 desc={t('Оплата через QR-код')}
                 checked={form.payQr}
-                onChange={(v) => set('payQr', v)}
+                onChange={(v) => set('payQr', v, 'instant')}
               />
               <PayRow
                 icon={<IconCash className="h-5 w-5" />}
@@ -248,7 +277,7 @@ export function SettingsPage() {
                 title={t('Наличные')}
                 desc={t('Оплата наличными средствами')}
                 checked={form.payCash}
-                onChange={(v) => set('payCash', v)}
+                onChange={(v) => set('payCash', v, 'instant')}
               />
               <PayRow
                 icon={<IconCard className="h-5 w-5" />}
@@ -256,7 +285,7 @@ export function SettingsPage() {
                 title={t('Карта')}
                 desc={t('Оплата банковской картой')}
                 checked={form.payCard}
-                onChange={(v) => set('payCard', v)}
+                onChange={(v) => set('payCard', v, 'instant')}
               />
             </div>
             <p className={`mt-3 text-xs ${noMethod ? 'text-danger' : 'text-text-muted'}`}>
@@ -277,19 +306,8 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {/* Кнопки действий */}
-      <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
-        {error && <p className="mr-auto self-center text-sm text-danger">{error}</p>}
-        <button className="btn-secondary btn-lg sm:w-auto sm:px-6" onClick={onCancel} disabled={update.isPending}>
-          {t('Отмена')}
-        </button>
-        <button
-          className="btn-primary btn-lg font-semibold sm:w-auto sm:px-6"
-          onClick={onSave}
-          disabled={update.isPending}
-        >
-          {update.isPending ? <Spinner /> : t('Сохранить изменения')}
-        </button>
+      <div className="flex justify-end">
+        <p className={`text-sm ${error ? 'text-danger' : 'text-text-muted'}`}>{saveStateText}</p>
       </div>
     </div>
   );
