@@ -78,36 +78,87 @@ export class HealthService {
     return { current, dev, main };
   }
 
-  async statusText(target?: 'current' | 'dev' | 'main' | 'project' | 'migrations'): Promise<string> {
-    if (target === 'dev') return this.externalText('dev', process.env.MONITOR_DEV_DATABASE_URL);
-    if (target === 'main') return this.externalText('main', process.env.MONITOR_MAIN_DATABASE_URL);
-    if (target === 'project') return this.projectText();
-    if (target === 'migrations') {
-      const status = await this.currentMigrations();
-      return this.formatMigrations('current', status);
+  async statusPage() {
+    const project = await this.project();
+    const cards = [
+      this.renderCurrentCard('Current backend', project.current),
+      project.dev
+        ? this.renderExternalCard('Dev database', project.dev)
+        : this.renderEmptyCard('Dev database', 'Set MONITOR_DEV_DATABASE_URL to show dev DB status.'),
+      project.main
+        ? this.renderExternalCard('Main database', project.main)
+        : this.renderEmptyCard('Main database', 'Set MONITOR_MAIN_DATABASE_URL to show main DB status.'),
+    ].join('');
+    const overall = [project.current, project.dev, project.main].some((item) => item?.status === 'degraded')
+      ? 'degraded'
+      : 'ok';
+
+    return `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="refresh" content="60" />
+  <title>EDU POS Status</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --card: #ffffff;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #dbe3ef;
+      --ok: #16a34a;
+      --bad: #dc2626;
+      --warn-bg: #fff7ed;
+      --ok-bg: #ecfdf5;
+      --bad-bg: #fef2f2;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    return this.formatHealth(await this.current());
-  }
-
-  async hasProblem(): Promise<boolean> {
-    const project = await this.project();
-    return [project.current, project.dev, project.main].some((item) => item?.status === 'degraded');
-  }
-
-  private async projectText() {
-    const project = await this.project();
-    const parts = [
-      this.formatHealth(project.current),
-      project.dev ? this.formatExternal(project.dev) : 'dev: not configured',
-      project.main ? this.formatExternal(project.main) : 'main: not configured',
-    ];
-    return parts.join('\n\n');
-  }
-
-  private async externalText(name: 'dev' | 'main', url?: string) {
-    const status = await this.externalEnvironment(name, url);
-    if (!status) return `${name}: not configured. Set MONITOR_${name.toUpperCase()}_DATABASE_URL.`;
-    return this.formatExternal(status);
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    main { max-width: 1120px; margin: 0 auto; padding: 32px 18px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
+    h1 { margin: 0; font-size: 30px; line-height: 1.15; }
+    p { margin: 0; }
+    .muted { color: var(--muted); }
+    .pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 8px 12px; font-weight: 700; font-size: 14px; }
+    .pill.ok { background: var(--ok-bg); color: var(--ok); }
+    .pill.degraded { background: var(--bad-bg); color: var(--bad); }
+    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .card { min-width: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--card); padding: 18px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04); }
+    .card h2 { margin: 0 0 12px; font-size: 18px; }
+    .row { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-top: 1px solid #edf2f7; }
+    .row:first-of-type { border-top: 0; }
+    .label { color: var(--muted); }
+    .value { font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+    .status { margin-bottom: 12px; }
+    .status.ok { color: var(--ok); }
+    .status.degraded { color: var(--bad); }
+    .list { margin-top: 10px; border-radius: 10px; background: var(--bad-bg); padding: 10px; color: #991b1b; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .empty { background: var(--warn-bg); color: #9a3412; }
+    footer { margin-top: 18px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 900px) {
+      header { flex-direction: column; }
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 25px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>EDU POS Status</h1>
+        <p class="muted">Backend, database and Prisma migrations. Auto-refresh: 60s.</p>
+      </div>
+      <span class="pill ${overall}">${overall === 'ok' ? 'OK' : 'NEEDS ATTENTION'}</span>
+    </header>
+    <section class="grid">${cards}</section>
+    <footer>Updated: ${this.escapeHtml(new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Bishkek' }))} Bishkek time</footer>
+  </main>
+</body>
+</html>`;
   }
 
   private async externalEnvironment(name: 'dev' | 'main', url?: string) {
@@ -195,45 +246,90 @@ export class HealthService {
     };
   }
 
-  private formatHealth(status: AppHealth) {
-    return [
-      `EDU POS ${status.env}: ${status.status.toUpperCase()}`,
-      `DB: ${status.database}`,
-      `Commit: ${status.commit ?? 'unknown'}`,
-      this.formatMigrations('migrations', status.migrations),
-      status.error ? `Error: ${status.error}` : null,
-    ].filter(Boolean).join('\n');
+  private renderCurrentCard(title: string, status: AppHealth) {
+    return this.renderCard({
+      title,
+      status: status.status,
+      database: status.database,
+      env: status.env,
+      commit: status.commit,
+      migrations: status.migrations,
+      error: status.error,
+    });
   }
 
-  private formatExternal(status: {
+  private renderExternalCard(title: string, status: {
     name: string;
     status: HealthStatus;
     database: DbStatus;
     migrations: MigrationStatus;
     error?: string;
   }) {
-    return [
-      `${status.name}: ${status.status.toUpperCase()}`,
-      `DB: ${status.database}`,
-      this.formatMigrations('migrations', status.migrations),
-      status.error ? `Error: ${status.error}` : null,
-    ].filter(Boolean).join('\n');
+    return this.renderCard({
+      title,
+      status: status.status,
+      database: status.database,
+      env: status.name,
+      commit: null,
+      migrations: status.migrations,
+      error: status.error,
+    });
   }
 
-  private formatMigrations(label: string, status: MigrationStatus) {
-    const lines = [
-      `${label}: ${status.status.toUpperCase()}`,
-      `Local: ${status.localCount}`,
-      `Applied: ${status.appliedCount}`,
-      `Latest local: ${status.latestLocal ?? 'none'}`,
-      `Latest applied: ${status.latestApplied ?? 'none'}`,
-    ];
+  private renderCard(input: {
+    title: string;
+    status: HealthStatus;
+    database: DbStatus;
+    env: string;
+    commit: string | null;
+    migrations: MigrationStatus;
+    error?: string;
+  }) {
+    const migrationProblem = input.migrations.missing.length > 0 || input.migrations.failed.length > 0;
+    return `<article class="card">
+  <h2>${this.escapeHtml(input.title)}</h2>
+  <div class="status ${input.status}">${input.status === 'ok' ? 'OK' : 'Needs attention'}</div>
+  ${this.row('Environment', input.env)}
+  ${this.row('Database', input.database)}
+  ${input.commit ? this.row('Commit', input.commit.slice(0, 8)) : ''}
+  ${this.row('Local migrations', String(input.migrations.localCount))}
+  ${this.row('Applied migrations', String(input.migrations.appliedCount))}
+  ${this.row('Latest local', input.migrations.latestLocal ?? 'none')}
+  ${this.row('Latest applied', input.migrations.latestApplied ?? 'none')}
+  ${migrationProblem ? this.renderProblems(input.migrations) : ''}
+  ${input.error ? `<div class="list">${this.escapeHtml(input.error)}</div>` : ''}
+</article>`;
+  }
+
+  private renderEmptyCard(title: string, message: string) {
+    return `<article class="card">
+  <h2>${this.escapeHtml(title)}</h2>
+  <div class="status degraded">Not configured</div>
+  <div class="list empty">${this.escapeHtml(message)}</div>
+</article>`;
+  }
+
+  private row(label: string, value: string) {
+    return `<div class="row"><span class="label">${this.escapeHtml(label)}</span><span class="value">${this.escapeHtml(value)}</span></div>`;
+  }
+
+  private renderProblems(status: MigrationStatus) {
+    const parts: string[] = [];
     if (status.missing.length > 0) {
-      lines.push(`Missing: ${status.missing.slice(0, 8).join(', ')}`);
-      if (status.missing.length > 8) lines.push(`...and ${status.missing.length - 8} more`);
+      parts.push(`Missing: ${status.missing.slice(0, 12).join(', ')}`);
+      if (status.missing.length > 12) parts.push(`and ${status.missing.length - 12} more`);
     }
-    if (status.failed.length > 0) lines.push(`Failed: ${status.failed.join(', ')}`);
-    return lines.join('\n');
+    if (status.failed.length > 0) parts.push(`Failed: ${status.failed.join(', ')}`);
+    return `<div class="list">${this.escapeHtml(parts.join('\n'))}</div>`;
+  }
+
+  private escapeHtml(value: string) {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
   }
 
   private envName() {
