@@ -33,7 +33,7 @@ interface Form {
 const RECEIPT_LIMIT = 120;
 
 export function SettingsPage() {
-  const { data, isLoading } = useAdminSettings();
+  const { data, isLoading, isError, error } = useAdminSettings();
   const update = useUpdateSettings();
   const push = useNotifications((s) => s.push);
   const setLocale = useLocale((s) => s.setLocale);
@@ -62,10 +62,22 @@ export function SettingsPage() {
     }
   }, [data?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (isLoading || !form || !data) {
+  useEffect(() => () => {
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+  }, []);
+
+  if (isLoading) {
     return (
       <div className="flex justify-center py-16 text-primary">
         <Spinner className="h-7 w-7" />
+      </div>
+    );
+  }
+
+  if (isError || !form || !data) {
+    return (
+      <div className="rounded-xl border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
+        {apiError(error)}
       </div>
     );
   }

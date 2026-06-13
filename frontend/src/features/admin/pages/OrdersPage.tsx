@@ -209,7 +209,17 @@ export function OrdersPage() {
           <p className="py-12 text-center text-text-muted">{tr('Заказы не найдены')}</p>
         ) : (
           <div className="menu-scrollbar max-h-[calc(100vh-160px)] overflow-auto">
-            <table className="w-full min-w-[820px] text-sm">
+            <table className="w-full min-w-[860px] table-fixed text-sm">
+              <colgroup>
+                <col className="w-[9%]" />
+                <col className="w-[16%]" />
+                <col className="w-[8%]" />
+                <col className="w-[14%]" />
+                <col className="w-[10%]" />
+                <col className="w-[13%]" />
+                <col className="w-[20%]" />
+                <col className="w-[56px]" />
+              </colgroup>
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-border bg-background text-left text-xs text-text-muted">
                   <Th>{tr('№ заказа')}</Th>
@@ -219,7 +229,7 @@ export function OrdersPage() {
                   <Th className="text-right">{tr('Сумма')}</Th>
                   <Th>{tr('Статус заказа')}</Th>
                   <Th>{tr('Способ оплаты')}</Th>
-                  <Th className="text-right">{tr('Действия')}</Th>
+                  <Th className="px-1 text-center">{tr('Действия')}</Th>
                 </tr>
               </thead>
               <tbody>
@@ -250,8 +260,8 @@ export function OrdersPage() {
                       <OrderBadge status={ord.status} size="sm" />
                     </Td>
                     <Td className="whitespace-nowrap text-text-secondary">{paymentCell(ord)}</Td>
-                    <Td>
-                      <div className="flex items-center justify-end gap-1">
+                    <Td className="px-1">
+                      <div className="flex items-center justify-center">
                         {CANCELLABLE.has(ord.status) && (
                           <button
                             className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-danger/10 hover:text-danger"
