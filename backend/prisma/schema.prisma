@@ -555,6 +555,8 @@ model Settings {
   address             String   @default("г. Бишкек, ул. Киевская 120")
   phone               String   @default("+996 500 123 456")
   phone2              String   @default("+996 700 123 456")
+  instagram           String?
+  website             String?
   receiptText         String   @default("Спасибо за покупку!") @map("receipt_text")
   serviceChargeAmount Decimal  @default(0) @map("service_charge_amount") @db.Decimal(10, 2)
   language            String   @default("ru") // ru | ky

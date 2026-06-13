@@ -204,6 +204,8 @@ export interface Receipt {
   address?: string;
   phone?: string;
   phone2?: string;
+  instagram?: string | null;
+  website?: string | null;
   orderNumber: string;
   tableNumber: number;
   waiter: string;

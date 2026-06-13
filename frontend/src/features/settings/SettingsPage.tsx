@@ -20,6 +20,8 @@ interface Form {
   address: string;
   phone: string;
   phone2: string;
+  instagram: string;
+  website: string;
   receiptText: string;
   serviceChargeAmount: string;
   language: Locale;
@@ -48,6 +50,8 @@ export function SettingsPage() {
         address: data.address,
         phone: data.phone,
         phone2: data.phone2,
+        instagram: data.instagram ?? '',
+        website: data.website ?? '',
         receiptText: data.receiptText,
         serviceChargeAmount: String(data.serviceChargeAmount ?? 0),
         language: data.language,
@@ -163,6 +167,22 @@ export function SettingsPage() {
                 placeholder="+996 700 123 456"
               />
             </Field>
+            <Field label="Instagram">
+              <input
+                className="input"
+                value={form.instagram}
+                onChange={(e) => set('instagram', e.target.value)}
+                placeholder="@edu_cafe"
+              />
+            </Field>
+            <Field label={t('Сайт')}>
+              <input
+                className="input"
+                value={form.website}
+                onChange={(e) => set('website', e.target.value)}
+                placeholder="edu-cafe.kg"
+              />
+            </Field>
             <Field label={t('Текст в чеке')} className="sm:col-span-2">
               <textarea
                 className="input h-24 resize-none py-2.5"
@@ -175,6 +195,10 @@ export function SettingsPage() {
                 {form.receiptText.length}/{RECEIPT_LIMIT}
               </p>
             </Field>
+            <div className="sm:col-span-2 rounded-xl border border-border bg-background px-4 py-3 text-sm leading-6 text-text-secondary">
+              <p>EDU POS печатает предчек / внутренний товарный чек.</p>
+              <p>Фискальный чек формируется только через подключенную ККМ или онлайн-кассу.</p>
+            </div>
             {/* Статус принтера */}
             <div className="pt-2">
               <div className="mb-3 flex items-center gap-2">

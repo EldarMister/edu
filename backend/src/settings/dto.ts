@@ -14,6 +14,12 @@ export class UpdateSettingsDto {
   phone2?: string;
 
   @IsOptional() @IsString() @MaxLength(120)
+  instagram?: string;
+
+  @IsOptional() @IsString() @MaxLength(120)
+  website?: string;
+
+  @IsOptional() @IsString() @MaxLength(120)
   receiptText?: string;
 
   @IsOptional() @IsNumber() @Min(0) @Max(100000)
