@@ -415,11 +415,6 @@ function StatusEditorModal({
             onChange={(e) => onReasonChange(e.target.value)}
             maxLength={240}
           />
-          {order.status === 'paid' && value !== 'paid' && (
-            <p className="rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
-              {tr('Оплата будет сброшена, заказ вернётся в неоплаченный статус.')}
-            </p>
-          )}
           {order.status === 'cancelled' && value !== 'cancelled' && (
             <p className="rounded-lg bg-primary/10 px-3 py-2 text-xs text-primary">
               {tr('Отменённые позиции будут восстановлены в выбранный статус.')}

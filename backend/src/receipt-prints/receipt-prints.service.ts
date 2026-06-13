@@ -54,7 +54,7 @@ export class ReceiptPrintsService {
     return {
       ...dto,
       voice: {
-        text: `Официант ${dto.waiterName} отправил заявку на печать ${documentName}. Стол номер ${dto.tableNumber}.`,
+        text: `Официант ${dto.waiterName} отправил заявку на печать ${documentName}. Стол ${dto.tableNumber}.`,
       },
     };
   }
