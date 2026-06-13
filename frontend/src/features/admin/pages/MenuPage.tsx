@@ -6,8 +6,7 @@ import { minDishUnitPrice, money, variantNamesLine } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
-import { StatCard, StatCardsRow } from '../components/StatCard';
-import { IconMenu, IconCategory, IconCheck, IconEdit, IconTrash, IconPlus } from '../components/icons';
+import { IconEdit, IconTrash, IconPlus } from '../components/icons';
 import {
   useMenuOverview,
   useAdminCategories,
@@ -50,12 +49,14 @@ export function MenuPage() {
   }
 
   return (
-    <div className="space-y-4">
-      <StatCardsRow>
-        <StatCard label={tr('Всего блюд')} value={o?.dishesCount ?? '—'} icon={<IconMenu />} tone="primary" />
-        <StatCard label={tr('Категорий')} value={o?.categoriesCount ?? '—'} icon={<IconCategory />} tone="warning" />
-        <StatCard label={tr('Активных блюд')} value={o?.activeDishesCount ?? '—'} icon={<IconCheck />} tone="success" />
-      </StatCardsRow>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
+        <Sum label={tr('Блюд')} value={o?.dishesCount ?? '—'} />
+        <Sep />
+        <Sum label={tr('Категорий')} value={o?.categoriesCount ?? '—'} />
+        <Sep />
+        <Sum label={tr('Активных')} value={o?.activeDishesCount ?? '—'} />
+      </div>
 
       <div className="card overflow-hidden">
         {/* Категории + действия */}
@@ -202,6 +203,18 @@ export function MenuPage() {
       )}
     </div>
   );
+}
+
+function Sum({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <span>
+      {label}: <span className="font-medium text-text-primary">{value}</span>
+    </span>
+  );
+}
+
+function Sep() {
+  return <span className="text-text-light">|</span>;
 }
 
 interface DishVariantDraft {
