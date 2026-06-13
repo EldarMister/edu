@@ -7,7 +7,9 @@ import { BrandLogo } from '@/components/BrandLogo';
 import { AppVersion } from '@/components/AppVersion';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
-import type { Order } from '@/types';
+import { beep } from '@/lib/sound';
+import { adminVoice } from '@/services/adminVoice';
+import type { Order, ReceiptPrintRequest } from '@/types';
 import {
   IconStats,
   IconOrders,
@@ -64,12 +66,15 @@ export function AdminApp() {
   const sections = SECTIONS.filter((s) => (!s.ownerOnly || isOwner) && (!s.adminOnly || isAdmin));
   const [section, setSection] = useState<Section>(isOwner ? 'stats' : 'orders');
   const [mobileNav, setMobileNav] = useState(false);
+  const invalidateReceipts = () =>
+    qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
 
   // Живое обновление: при изменении статуса заказа обновляем admin-данные.
   useSocketEvent<Order>('order:status_changed', (order) => {
     applyOrderStatusToCache(qc, order);
     qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
     qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
+    invalidateReceipts();
   });
   useSocketEvent('table:status_changed', () => {
     qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
@@ -94,9 +99,11 @@ export function AdminApp() {
     qc.invalidateQueries({ queryKey: ['audit'] });
   });
   // Печать чека: новая заявка / решение по ней — обновляем список без перезагрузки.
-  const invalidateReceipts = () =>
-    qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
-  useSocketEvent('receipt_print_request_created', invalidateReceipts);
+  useSocketEvent<ReceiptPrintRequest>('receipt_print_request_created', (request) => {
+    invalidateReceipts();
+    beep('notify');
+    adminVoice.enqueue(request.voice?.text);
+  });
   useSocketEvent('receipt_print_request_approved', invalidateReceipts);
   useSocketEvent('receipt_print_request_printed', invalidateReceipts);
   useSocketEvent('receipt_print_request_rejected', invalidateReceipts);

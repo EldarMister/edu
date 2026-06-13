@@ -247,6 +247,7 @@ export interface ReceiptPrintRequest {
   status: ReceiptPrintStatus | null;
   createdAt: string;
   decidedAt?: string | null;
+  voice?: { text?: string | null } | null;
 }
 
 /** Локальная позиция корзины (до отправки на кухню). */

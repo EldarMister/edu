@@ -48,6 +48,16 @@ export class ReceiptPrintsService {
     };
   }
 
+  private withRequestVoice(dto: ReturnType<ReceiptPrintsService['serialize']>) {
+    const documentName = dto.type === ReceiptPrintType.preliminary ? 'счёта' : 'чека';
+    return {
+      ...dto,
+      voice: {
+        text: `Официант ${dto.waiterName} отправил заявку на печать ${documentName}. Стол номер ${dto.tableNumber}.`,
+      },
+    };
+  }
+
   private serializeOrder(order: PrintableOrder) {
     const type =
       order.status === OrderStatus.waiting_payment ? ReceiptPrintType.preliminary : ReceiptPrintType.receipt;
@@ -114,7 +124,7 @@ export class ReceiptPrintsService {
       include: withWaiter,
     });
 
-    const dto = this.serialize(request);
+    const dto = this.withRequestVoice(this.serialize(request));
     // Заявка сразу появляется только у администраторов.
     this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, dto);
     return dto;
