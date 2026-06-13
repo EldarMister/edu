@@ -71,25 +71,19 @@ export class HealthService {
 
   async project() {
     const current = await this.current();
-    const [dev, main] = await Promise.all([
-      this.externalEnvironment('dev', process.env.MONITOR_DEV_DATABASE_URL),
-      this.externalEnvironment('main', process.env.MONITOR_MAIN_DATABASE_URL),
-    ]);
-    return { current, dev, main };
+    const dev = await this.externalEnvironment('dev', process.env.MONITOR_DEV_DATABASE_URL);
+    return { current, dev };
   }
 
   async statusPage() {
     const project = await this.project();
     const cards = [
-      this.renderCurrentCard('Current backend', project.current),
+      this.renderCurrentCard('Main database', project.current),
       project.dev
         ? this.renderExternalCard('Dev database', project.dev)
         : this.renderEmptyCard('Dev database', 'Set MONITOR_DEV_DATABASE_URL to show dev DB status.'),
-      project.main
-        ? this.renderExternalCard('Main database', project.main)
-        : this.renderEmptyCard('Main database', 'Set MONITOR_MAIN_DATABASE_URL to show main DB status.'),
     ].join('');
-    const overall = [project.current, project.dev, project.main].some((item) => item?.status === 'degraded')
+    const overall = [project.current, project.dev].some((item) => item?.status === 'degraded')
       ? 'degraded'
       : 'ok';
 
@@ -125,7 +119,7 @@ export class HealthService {
     .pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 8px 12px; font-weight: 700; font-size: 14px; }
     .pill.ok { background: var(--ok-bg); color: var(--ok); }
     .pill.degraded { background: var(--bad-bg); color: var(--bad); }
-    .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
     .card { min-width: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--card); padding: 18px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04); }
     .card h2 { margin: 0 0 12px; font-size: 18px; }
     .row { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-top: 1px solid #edf2f7; }
