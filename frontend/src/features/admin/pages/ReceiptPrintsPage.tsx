@@ -104,11 +104,6 @@ export function ReceiptPrintsPage() {
                   {t('Чек')}
                 </span>
               )}
-              {isRequest && (
-                <span className="inline-block rounded-full bg-success/10 px-2.5 py-0.5 text-xs font-medium text-success">
-                  {t('Приоритет')}
-                </span>
-              )}
             </div>
           </td>
           <td className="px-4 py-3 text-text-secondary">{r.tableNumber}</td>
@@ -162,7 +157,16 @@ export function ReceiptPrintsPage() {
         <p className="px-4 py-10 text-center text-sm text-text-muted">{emptyText}</p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[860px] table-fixed text-sm">
+            <colgroup>
+              <col className="w-[14%]" />
+              <col className="w-[14%]" />
+              <col className="w-[10%]" />
+              <col className="w-[18%]" />
+              <col className="w-[14%]" />
+              <col className="w-[14%]" />
+              <col className="w-[16%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-border bg-background text-left text-xs font-medium uppercase tracking-wide text-text-muted">
                 <th className="px-4 py-3">{t('№ заказа')}</th>
