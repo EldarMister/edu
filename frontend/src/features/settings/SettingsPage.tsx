@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
 import { apiError } from '@/lib/api';
