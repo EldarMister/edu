@@ -5,13 +5,23 @@ import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/lib/format';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import { kitchenVoice } from '@/services/kitchenVoice';
-import type { Order } from '@/types';
+import type { Order, PrepStation } from '@/types';
 
 /** Заказ из сокета может нести готовый текст озвучки (формирует backend). */
-type VoicedOrder = Order & { voice?: { text?: string } | null };
+type VoicedOrder = Order & {
+  voice?: {
+    text?: string | null;
+    byStation?: Partial<Record<Exclude<PrepStation, 'none'>, string | null>>;
+  } | null;
+};
+
+function stationVoice(order: VoicedOrder, station: PrepStation): string | null {
+  if (station === 'none') return null;
+  return order.voice?.byStation?.[station] ?? order.voice?.text ?? null;
+}
 
 /** Подписки кухни: новый заказ — звук + тост + озвучка, любые изменения — обновление списков. */
-export function useKitchenRealtime() {
+export function useKitchenRealtime(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   const push = useNotifications((s) => s.push);
 
@@ -20,6 +30,8 @@ export function useKitchenRealtime() {
   useSocketEvent<VoicedOrder>('kitchen:new_order', (order) => {
     // Список тянем заново с сервера — он отфильтрует позиции по станции экрана.
     invalidate();
+    const text = stationVoice(order, station);
+    if (!text) return;
 
     // 1. Звук уведомления.
     beep('newOrder');
@@ -33,8 +45,8 @@ export function useKitchenRealtime() {
       at: new Date().toISOString(),
     });
 
-    // 3. Озвучка — текст уже сформирован backend (номер прописью, состав, voiceName).
-    kitchenVoice.enqueue(order.voice?.text);
+    // 3. Озвучка — текст уже сформирован backend для конкретной станции.
+    kitchenVoice.enqueue(text);
   });
 
   useSocketEvent<VoicedOrder>('order:status_changed', (order) => {
@@ -42,9 +54,10 @@ export function useKitchenRealtime() {
     invalidate();
 
     // Backend добавляет voice.text только для полной отмены/отказа — озвучиваем.
-    if (order.voice?.text) {
+    const text = stationVoice(order, station);
+    if (text) {
       beep('notify');
-      kitchenVoice.enqueue(order.voice.text);
+      kitchenVoice.enqueue(text);
     }
   });
 }

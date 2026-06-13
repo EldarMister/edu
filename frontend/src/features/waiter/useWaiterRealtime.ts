@@ -10,7 +10,7 @@ import { waiterVoice } from '@/services/waiterVoice';
 import type { AppNotification, Order, ReceiptPrintRequest } from '@/types';
 import { useReceiptPrint } from './receiptPrint';
 
-type VoicedOrder = Order & { voice?: { text?: string } | null };
+type VoicedOrder = Order & { voice?: { text?: string | null; waiterText?: string | null } | null };
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -93,7 +93,7 @@ function waiterVoiceText(order: VoicedOrder): string | null {
   switch (order.status) {
     case 'accepted_by_kitchen':
     case 'cooking':
-      return `Кухня приняла ваш заказ. ${location}`;
+      return order.voice?.waiterText ?? null;
     case 'ready':
       return `Ваш заказ готов. ${location} Заберите.`;
     case 'rejected':

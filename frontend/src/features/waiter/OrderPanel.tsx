@@ -248,29 +248,29 @@ function PartialRejectionPanel({
 
   return (
     <div className="flex h-full flex-col bg-white">
-      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-1 pb-2 pt-1">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-1 pb-1.5 pt-0.5">
         <div className="min-w-0">
-          <h2 className="truncate text-[20px] font-bold leading-tight text-text-primary sm:text-[22px]">
+          <h2 className="truncate text-[18px] font-semibold leading-tight text-text-primary sm:text-[20px]">
             {t('Заказ')} {displayOrderNumber(order.orderNumber)}
-            <span className="ml-2 text-[15px] font-normal text-text-muted">{t('Стол')} {order.table.number}</span>
+            <span className="ml-2 text-[14px] font-normal text-text-muted">{t('Стол')} {order.table.number}</span>
           </h2>
         </div>
-        <span className="shrink-0 rounded-lg border border-danger/25 bg-danger/5 px-2.5 py-1 text-[13px] font-medium text-danger">
+        <span className="shrink-0 rounded-lg border border-danger/25 bg-danger/5 px-2.5 py-1 text-[12px] font-medium text-danger">
           {t('Отказ кухни')}
         </span>
       </div>
 
-      <div className="no-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-1 py-3">
+      <div className="no-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto px-1 py-2.5">
         <section>
-          <h3 className="mb-2.5 text-[17px] font-semibold text-text-primary">{t('1. Активные блюда')}</h3>
+          <h3 className="mb-2 text-[15px] font-semibold text-text-primary">{t('1. Активные блюда')}</h3>
           <div className="space-y-2">
             {activeItems.map((item) => (
-              <div key={item.id} className="flex items-center gap-3 rounded-xl border border-border bg-white px-3 py-2.5">
-                <span className="min-w-0 flex-1 truncate text-[16px] font-medium text-text-primary">
+              <div key={item.id} className="flex items-center gap-3 rounded-lg border border-border bg-white px-3 py-2">
+                <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-text-primary">
                   {orderItemDisplayName(item)}
                 </span>
-                <span className="w-10 shrink-0 text-right text-[14px] text-text-muted">×{item.quantity}</span>
-                <span className="w-20 shrink-0 text-right text-[18px] font-semibold text-text-primary">
+                <span className="w-9 shrink-0 text-right text-[13px] text-text-muted">×{item.quantity}</span>
+                <span className="w-[72px] shrink-0 text-right text-[16px] font-semibold text-text-primary">
                   {money(item.finalPrice)}
                 </span>
               </div>
@@ -279,30 +279,30 @@ function PartialRejectionPanel({
         </section>
 
         <section>
-          <h3 className="mb-2.5 text-[17px] font-semibold text-text-primary">{t('2. Требуют решения')}</h3>
-          <div className="space-y-2.5">
+          <h3 className="mb-2 text-[15px] font-semibold text-text-primary">{t('2. Требуют решения')}</h3>
+          <div className="space-y-2">
             {rejectedItems.map((item) => (
-              <div key={item.id} className="rounded-xl border border-danger/25 bg-danger/[0.04] px-3 py-2.5">
+              <div key={item.id} className="rounded-lg border border-danger/25 bg-danger/[0.04] px-3 py-2">
                 <div className="flex items-center gap-3">
-                  <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-text-muted line-through">
+                  <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-text-muted line-through">
                     {orderItemDisplayName(item)}
                   </span>
-                  <span className="w-8 shrink-0 text-right text-[14px] font-semibold text-text-primary">×{item.quantity}</span>
-                  <span className="w-16 shrink-0 text-right text-[16px] font-semibold text-text-primary">
+                  <span className="w-8 shrink-0 text-right text-[13px] font-semibold text-text-primary">×{item.quantity}</span>
+                  <span className="w-16 shrink-0 text-right text-[15px] font-semibold text-text-primary">
                     {money(item.finalPrice)}
                   </span>
-                  <span className="shrink-0 text-[13px] font-medium text-danger">{t('Отказано')}</span>
+                  <span className="shrink-0 text-[12px] font-medium text-danger">{t('Отказано')}</span>
                 </div>
-                <div className="mt-2.5 flex gap-2">
+                <div className="mt-2 flex gap-2">
                   <button
-                    className="h-9 rounded-lg border border-primary px-4 text-[14px] font-semibold text-primary transition-colors hover:bg-primary/5 disabled:opacity-50"
+                    className="h-8 rounded-lg border border-primary px-3.5 text-[13px] font-semibold text-primary transition-colors hover:bg-primary/5 disabled:opacity-50"
                     disabled={submitting}
                     onClick={() => onReplaceRejectedItem(item)}
                   >
                     {t('Заменить')}
                   </button>
                   <button
-                    className="h-9 rounded-lg border border-danger/60 px-4 text-[14px] font-semibold text-danger transition-colors hover:bg-danger/5 disabled:opacity-50"
+                    className="h-8 rounded-lg border border-danger/60 px-3.5 text-[13px] font-semibold text-danger transition-colors hover:bg-danger/5 disabled:opacity-50"
                     disabled={submitting}
                     onClick={() => onRemoveRejectedItem(item)}
                   >
@@ -314,28 +314,28 @@ function PartialRejectionPanel({
           </div>
         </section>
 
-        <div className="border-y border-border py-4">
+        <div className="border-y border-border py-3">
           <div className="flex items-center justify-between">
-            <span className="text-[16px] font-medium text-text-primary">{t('Итого')}</span>
-            <span className="text-[24px] font-bold text-text-primary">{money(activeTotal)}</span>
+            <span className="text-[15px] font-medium text-text-primary">{t('Итого')}</span>
+            <span className="text-[22px] font-semibold text-text-primary">{money(activeTotal)}</span>
           </div>
         </div>
 
-        <section className="space-y-2.5">
-          <h3 className="text-[17px] font-semibold text-text-primary">{t('3. Решение')}</h3>
-          <div className="flex items-center gap-2.5 rounded-xl border border-warning/35 bg-warning/10 px-3 py-2.5 text-[14px] text-warning">
+        <section className="space-y-2">
+          <h3 className="text-[15px] font-semibold text-text-primary">{t('3. Решение')}</h3>
+          <div className="flex items-center gap-2.5 rounded-lg border border-warning/35 bg-warning/10 px-3 py-2 text-[13px] leading-5 text-warning">
             <WarningIcon />
             <span>{t('Кухня отказала часть заказа. Решите по каждой отказанной позиции.')}</span>
           </div>
           <button
-            className="btn-primary h-12 w-full rounded-xl text-[16px] font-semibold"
+            className="btn-primary h-11 w-full rounded-xl text-[15px] font-semibold"
             disabled={submitting}
             onClick={onContinueAfterRejection}
           >
             {submitting ? <Spinner /> : t('Продолжить без отказанных блюд')}
           </button>
           <button
-            className="h-10 w-full rounded-xl text-[16px] font-medium text-danger transition-colors hover:bg-danger/5 disabled:opacity-50"
+            className="h-9 w-full rounded-xl text-[14px] font-medium text-danger transition-colors hover:bg-danger/5 disabled:opacity-50"
             disabled={submitting}
             onClick={onCancelOrder}
           >

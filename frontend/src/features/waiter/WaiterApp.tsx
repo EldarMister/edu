@@ -479,18 +479,55 @@ export function WaiterApp() {
     });
   }
 
-  function getCurrentPosition(): Promise<GeolocationPosition> {
+  function geolocationErrorMessage(err: unknown): string {
+    if (err && typeof err === 'object' && 'code' in err) {
+      const code = Number((err as GeolocationPositionError).code);
+      if (code === 1) return 'Разрешите доступ к геолокации, чтобы начать смену';
+      if (code === 2) return 'Не удалось определить местоположение. Проверьте GPS или интернет';
+      if (code === 3) return 'Не удалось быстро определить местоположение. Включите GPS и попробуйте ещё раз';
+    }
+    return 'Не удалось определить местоположение';
+  }
+
+  function requestCurrentPosition(options: PositionOptions): Promise<GeolocationPosition> {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
         reject(new Error('Геолокация не поддерживается этим устройством'));
         return;
       }
-      navigator.geolocation.getCurrentPosition(resolve, reject, {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 30000,
-      });
+      navigator.geolocation.getCurrentPosition(resolve, reject, options);
     });
+  }
+
+  async function getCurrentPosition(): Promise<GeolocationPosition> {
+    if (!navigator.geolocation) {
+      throw new Error('Геолокация не поддерживается этим устройством');
+    }
+    try {
+      return await requestCurrentPosition({
+        enableHighAccuracy: false,
+        timeout: 5000,
+        maximumAge: 300000,
+      });
+    } catch {
+      try {
+        return await requestCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 25000,
+          maximumAge: 0,
+        });
+      } catch (err) {
+        try {
+          return await requestCurrentPosition({
+            enableHighAccuracy: false,
+            timeout: 15000,
+            maximumAge: 600000,
+          });
+        } catch {
+          throw new Error(geolocationErrorMessage(err));
+        }
+      }
+    }
   }
 
   async function startShiftWithLocationCheck() {

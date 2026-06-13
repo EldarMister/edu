@@ -11,6 +11,7 @@
 
 type VoiceItem = {
   status: string;
+  prepStation?: 'kitchen' | 'bar' | 'none' | string | null;
   dishNameSnapshot: string;
   dishVoiceSnapshot?: string | null;
   setComponents?: {
@@ -25,6 +26,8 @@ type VoiceOrder = {
   orderNumber: string;
   items: VoiceItem[];
 };
+
+type VoiceStation = 'kitchen' | 'bar';
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -84,20 +87,20 @@ function dishVoice(item: VoiceItem): string {
 }
 
 /** Блюда заказа (без отказанных/отменённых) для озвучки. */
-function activeDishNames(order: VoiceOrder): string[] {
+function activeDishNames(order: VoiceOrder, station: VoiceStation = 'kitchen'): string[] {
   return order.items
-    .filter((it) => it.status !== 'rejected' && it.status !== 'cancelled')
+    .filter((it) => it.prepStation === station && it.status !== 'rejected' && it.status !== 'cancelled')
     .map(dishVoice)
     .map((s) => s.trim())
     .filter(Boolean);
 }
 
 /** «Новый заказ. Номер пятьдесят четыре. Состав заказа: борщ. Маргарита. …» */
-export function buildNewOrderText(order: VoiceOrder): string {
+export function buildNewOrderText(order: VoiceOrder, station: VoiceStation = 'kitchen'): string | null {
   const num = orderNumberWords(order.orderNumber);
-  const dishes = activeDishNames(order);
+  const dishes = activeDishNames(order, station);
+  if (dishes.length === 0) return null;
   const head = `Новый заказ. Номер ${num}.`;
-  if (dishes.length === 0) return head;
   return `${head} Состав заказа: ${dishes.join('. ')}.`;
 }
 
@@ -135,11 +138,17 @@ function diffActiveNames(item: VoiceItem): string[] {
  * Текст озвучки изменения заказа с конкретикой: что заменили / убрали / добавили.
  * «Заказ номер N. Заменили борщ на солянку.» / «… Отменили колу.» / «… Добавили чай.»
  */
-export function buildEditVoiceText(orderNumber: string, before: VoiceItem[], after: VoiceItem[]): string {
+export function buildEditVoiceText(
+  orderNumber: string,
+  before: VoiceItem[],
+  after: VoiceItem[],
+  station: VoiceStation = 'kitchen',
+): string | null {
   const head = `Заказ номер ${orderNumberWords(orderNumber)}.`;
   const count = (items: VoiceItem[]) => {
     const m = new Map<string, number>();
     for (const it of items) {
+      if (it.prepStation !== station) continue;
       if (it.status === 'rejected' || it.status === 'cancelled') continue;
       for (const name of diffActiveNames(it)) {
         m.set(name, (m.get(name) ?? 0) + 1);
@@ -157,7 +166,7 @@ export function buildEditVoiceText(orderNumber: string, before: VoiceItem[], aft
     else if (delta < 0) removed.push(name);
   }
   if (removed.length === 0 && added.length === 0) {
-    return `${head} Состав изменён. Проверьте заказ.`;
+    return null;
   }
   // Ровно одно убрали и одно добавили — это замена блюда.
   if (removed.length === 1 && added.length === 1) {

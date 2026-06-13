@@ -45,7 +45,7 @@ export function KitchenApp({
 }: {
   station?: PrepStation;
 } = {}) {
-  useKitchenRealtime();
+  useKitchenRealtime(station);
   const { user, logout } = useAuth();
   const push = useNotifications((s) => s.push);
   const pushNotifications = usePushNotifications(user?.role === 'KITCHEN' || user?.role === 'BAR');

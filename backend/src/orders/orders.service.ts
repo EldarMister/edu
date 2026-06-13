@@ -239,7 +239,12 @@ export class OrdersService {
     if (hasPrep) {
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
         ...order,
-        voice: { text: buildNewOrderText(order) },
+        voice: {
+          byStation: {
+            kitchen: buildNewOrderText(order, PrepStation.kitchen),
+            bar: buildNewOrderText(order, PrepStation.bar),
+          },
+        },
       });
       this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
       void this.notifyKitchenNewOrder(order);
@@ -493,10 +498,14 @@ export class OrdersService {
     // Уведомляем кухню — звук + обновление списка, только если есть что готовить.
     if (hasPrep) {
       // Конкретная озвучка изменения: что заменили / убрали / добавили.
-      const voiceText = buildEditVoiceText(updated.orderNumber, order.items, updated.items);
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
         ...updated,
-        voice: { text: voiceText },
+        voice: {
+          byStation: {
+            kitchen: buildEditVoiceText(updated.orderNumber, order.items, updated.items, PrepStation.kitchen),
+            bar: buildEditVoiceText(updated.orderNumber, order.items, updated.items, PrepStation.bar),
+          },
+        },
       });
       void this.notifyKitchenNewOrder(updated);
     }
@@ -630,10 +639,14 @@ export class OrdersService {
     const updated = await this.findById(orderId);
     if (applied) {
       if (hasPrepAdded) {
-        const voiceText = buildEditVoiceText(updated.orderNumber, order.items, updated.items);
         this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
           ...updated,
-          voice: { text: voiceText },
+          voice: {
+            byStation: {
+              kitchen: buildEditVoiceText(updated.orderNumber, order.items, updated.items, PrepStation.kitchen),
+              bar: buildEditVoiceText(updated.orderNumber, order.items, updated.items, PrepStation.bar),
+            },
+          },
         });
         void this.notifyKitchenNewOrder(updated);
       }
@@ -704,7 +717,10 @@ export class OrdersService {
     });
 
     if (applied) {
-      this.emitStatusChanged(updated);
+      const acceptedText = station === PrepStation.bar ? 'Бар принял ваш заказ' : 'Кухня приняла ваш заказ';
+      this.emitStatusChanged(updated, {
+        waiterText: `${acceptedText}. Стол номер ${updated.table.number}.`,
+      });
       if (updated.status !== order.status) {
         const tableStatus = this.tableStatusForOrderStatus(updated.status);
         if (tableStatus) {
@@ -1295,9 +1311,15 @@ export class OrdersService {
     });
 
     if (hasPrepAdded) {
+      const replacementStation = replacementData.prepStation as PrepStation;
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
         ...updated,
-        voice: { text: buildReplacementText(updated.orderNumber, oldName, replacementName) },
+        voice: {
+          byStation: {
+            kitchen: replacementStation === PrepStation.kitchen ? buildReplacementText(updated.orderNumber, oldName, replacementName) : null,
+            bar: replacementStation === PrepStation.bar ? buildReplacementText(updated.orderNumber, oldName, replacementName) : null,
+          },
+        },
       });
       void this.notifyKitchenNewOrder(updated);
     }
@@ -2130,12 +2152,17 @@ export class OrdersService {
     return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
   }
 
-  private emitStatusChanged(order: { waiterId: string } & Record<string, unknown>) {
+  private emitStatusChanged(
+    order: { waiterId: string } & Record<string, unknown>,
+    voice?: { waiterText?: string },
+  ) {
     // Полная отмена/отказ — добавляем озвучку «Заказ номер … отменён» (ТЗ §4).
     const status = order.status as OrderStatus | undefined;
     let payload = order;
     if (status === OrderStatus.cancelled || status === OrderStatus.rejected) {
       payload = { ...order, voice: { text: buildCancelText({ orderNumber: String(order.orderNumber) }) } };
+    } else if (voice?.waiterText) {
+      payload = { ...order, voice: { ...(order.voice as Record<string, unknown> | undefined), waiterText: voice.waiterText } };
     }
     this.events.emitToWaiter(order.waiterId, SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
     this.events.emitToKitchen(SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);

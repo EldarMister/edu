@@ -52,7 +52,7 @@ export function SettingsPage() {
         phone: data.phone,
         phone2: data.phone2,
         receiptText: data.receiptText,
-        serviceChargeAmount: String(data.serviceChargeAmount ?? 0),
+        serviceChargeAmount: '0',
         language: data.language,
         payQr: data.payQr,
         payCash: data.payCash,
@@ -93,7 +93,7 @@ export function SettingsPage() {
       phone: data.phone,
       phone2: data.phone2,
       receiptText: data.receiptText,
-      serviceChargeAmount: String(data.serviceChargeAmount ?? 0),
+      serviceChargeAmount: '0',
       language: data.language,
       payQr: data.payQr,
       payCash: data.payCash,
@@ -127,7 +127,7 @@ export function SettingsPage() {
       }
       await update.mutateAsync({
         ...form,
-        serviceChargeAmount: Math.max(0, Number(form.serviceChargeAmount) || 0),
+        serviceChargeAmount: 0,
         cafeLatitude,
         cafeLongitude,
         shiftLocationRadiusMeters: Math.max(20, Number(form.shiftLocationRadiusMeters) || 100),
@@ -169,6 +169,8 @@ export function SettingsPage() {
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 },
     );
   }
+
+  const hasCafeLocation = Boolean(form.cafeLatitude && form.cafeLongitude);
 
   return (
     <div className="space-y-4">
@@ -221,17 +223,69 @@ export function SettingsPage() {
                 {form.receiptText.length}/{RECEIPT_LIMIT}
               </p>
             </Field>
-            <Field label={t('Обслуживание, сом')}>
-              <input
-                className="input"
-                type="number"
-                min={0}
-                step="1"
-                value={form.serviceChargeAmount}
-                onChange={(e) => set('serviceChargeAmount', e.target.value)}
-                placeholder="10"
-              />
-            </Field>
+            {/* Статус принтера */}
+            <div className="rounded-xl border border-border p-4">
+              <div className="mb-3 flex items-center gap-2">
+                <IconPrinter className="h-5 w-5 text-text-secondary" />
+                <h3 className="text-[15px] font-semibold text-text-primary">{t('Статус принтера')}</h3>
+              </div>
+              <div className="flex items-center gap-3 rounded-xl border border-border p-3">
+                <div
+                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                    data.printerConnected ? 'bg-success/10 text-success' : 'bg-slate-100 text-text-muted'
+                  }`}
+                >
+                  <IconPrinter className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                  <p
+                    className={`text-[15px] font-medium ${
+                      data.printerConnected ? 'text-success' : 'text-text-muted'
+                    }`}
+                  >
+                    {data.printerConnected ? t('Подключен') : t('Не подключен')}
+                  </p>
+                  <p className="text-xs text-text-muted">
+                    {data.printerConnected
+                      ? t('Принтер чеков подключен и готов к печати')
+                      : t('Принтер чеков не подключен')}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Геолокация смены */}
+            <div className="rounded-xl border border-border p-4">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h3 className="text-[15px] font-semibold text-text-primary">{t('Геолокация смены')}</h3>
+                  <p className="mt-1 text-xs leading-5 text-text-muted">
+                    {t('Официанты смогут начать смену только рядом с кафе')}
+                  </p>
+                </div>
+                <Toggle checked={form.shiftLocationEnabled} onChange={(v) => set('shiftLocationEnabled', v)} />
+              </div>
+              <button type="button" className="btn-secondary btn-md w-full" onClick={captureCafeLocation}>
+                {hasCafeLocation ? t('Обновить местоположение кафе') : t('Указать местоположение кафе')}
+              </button>
+              <div className="mt-3 flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 text-sm">
+                <span className="text-text-muted">{t('Местоположение')}</span>
+                <span className={`font-medium ${hasCafeLocation ? 'text-success' : 'text-text-muted'}`}>
+                  {hasCafeLocation ? t('Указано') : t('Не указано')}
+                </span>
+              </div>
+              <Field label={t('Радиус, м')} className="mt-3">
+                <input
+                  className="input"
+                  type="number"
+                  min={20}
+                  max={1000}
+                  step={10}
+                  value={form.shiftLocationRadiusMeters}
+                  onChange={(e) => set('shiftLocationRadiusMeters', e.target.value)}
+                />
+              </Field>
+            </div>
           </div>
         </div>
 
@@ -309,75 +363,6 @@ export function SettingsPage() {
           {/* QR-оплата */}
           <QrPaymentCard qrImageUrl={data.qrImageUrl} />
 
-          {/* Геолокация смены */}
-          <div className="card p-5">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <h3 className="text-[15px] font-semibold text-text-primary">{t('Геолокация смены')}</h3>
-                <p className="mt-1 text-xs leading-5 text-text-muted">
-                  {t('Официанты смогут начать смену только рядом с кафе')}
-                </p>
-              </div>
-              <Toggle checked={form.shiftLocationEnabled} onChange={(v) => set('shiftLocationEnabled', v)} />
-            </div>
-            <button type="button" className="btn-secondary btn-md w-full" onClick={captureCafeLocation}>
-              {form.cafeLatitude && form.cafeLongitude
-                ? t('Обновить местоположение кафе')
-                : t('Указать местоположение кафе')}
-            </button>
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-lg border border-border bg-background px-3 py-2">
-                <p className="text-text-muted">{t('Широта')}</p>
-                <p className="mt-1 truncate font-medium text-text-primary">{form.cafeLatitude || '—'}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-background px-3 py-2">
-                <p className="text-text-muted">{t('Долгота')}</p>
-                <p className="mt-1 truncate font-medium text-text-primary">{form.cafeLongitude || '—'}</p>
-              </div>
-            </div>
-            <Field label={t('Радиус, м')} className="mt-3">
-              <input
-                className="input"
-                type="number"
-                min={20}
-                max={1000}
-                step={10}
-                value={form.shiftLocationRadiusMeters}
-                onChange={(e) => set('shiftLocationRadiusMeters', e.target.value)}
-              />
-            </Field>
-          </div>
-
-          {/* Статус принтера */}
-          <div className="card p-5">
-            <div className="mb-3 flex items-center gap-2">
-              <IconPrinter className="h-5 w-5 text-text-secondary" />
-              <h3 className="text-[15px] font-semibold text-text-primary">{t('Статус принтера')}</h3>
-            </div>
-            <div className="flex items-center gap-3 rounded-xl border border-border p-3">
-              <div
-                className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                  data.printerConnected ? 'bg-success/10 text-success' : 'bg-slate-100 text-text-muted'
-                }`}
-              >
-                <IconPrinter className="h-5 w-5" />
-              </div>
-              <div className="min-w-0">
-                <p
-                  className={`text-[15px] font-medium ${
-                    data.printerConnected ? 'text-success' : 'text-text-muted'
-                  }`}
-                >
-                  {data.printerConnected ? t('Подключен') : t('Не подключен')}
-                </p>
-                <p className="text-xs text-text-muted">
-                  {data.printerConnected
-                    ? t('Принтер чеков подключен и готов к печати')
-                    : t('Принтер чеков не подключен')}
-                </p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
