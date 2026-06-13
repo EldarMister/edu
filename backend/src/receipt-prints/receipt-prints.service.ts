@@ -22,6 +22,7 @@ type PrintableOrder = Prisma.OrderGetPayload<{
   };
 }>;
 const REQUEST_TTL_MS = 2 * 60 * 60 * 1000;
+const PRINTABLE_ORDER_TTL_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class ReceiptPrintsService {
@@ -130,12 +131,11 @@ export class ReceiptPrintsService {
     return dto;
   }
 
-  /** Список для администратора: приоритетные заявки официантов + сегодняшние заказы, доступные к печати. */
+  /** Список для администратора: приоритетные заявки официантов + заказы, доступные к печати 24 часа. */
   async listPending() {
     await this.purgeExpired();
 
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
+    const printableCutoff = new Date(Date.now() - PRINTABLE_ORDER_TTL_MS);
 
     const [requests, orders] = await Promise.all([
       this.prisma.receiptPrintRequest.findMany({
@@ -145,8 +145,11 @@ export class ReceiptPrintsService {
       }),
       this.prisma.order.findMany({
         where: {
-          businessDate: { gte: startOfDay },
-          status: { in: [OrderStatus.waiting_payment, OrderStatus.paid] },
+          OR: [
+            { status: OrderStatus.waiting_payment, updatedAt: { gte: printableCutoff } },
+            { status: OrderStatus.paid, closedAt: { gte: printableCutoff } },
+            { status: OrderStatus.paid, closedAt: null, updatedAt: { gte: printableCutoff } },
+          ],
         },
         orderBy: { createdAt: 'desc' },
         take: 100,
