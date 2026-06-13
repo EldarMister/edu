@@ -49,6 +49,12 @@ function appVersion(): string {
     env.GITHUB_RUN_NUMBER ?? // GitHub Actions
     env.BUILD_NUMBER ??
     patch;
+  const buildNumber = Number(build);
+  if (Number.isFinite(buildNumber) && buildNumber > 0) {
+    const release = Math.floor((buildNumber - 1) / 100) + 1;
+    const releasePatch = buildNumber - (release - 1) * 100;
+    return `${major}.${release}.${releasePatch}`;
+  }
   return `${major}.${minor}.${build}`;
 }
 
