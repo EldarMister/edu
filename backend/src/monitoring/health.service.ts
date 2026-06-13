@@ -35,6 +35,17 @@ export interface AppHealth {
   error?: string;
 }
 
+export interface ExternalEnvironmentStatus {
+  name: 'dev' | 'main';
+  status: HealthStatus;
+  database: DbStatus;
+  migrations: MigrationStatus;
+  error?: string;
+  commit?: string | null;
+  backend?: DbStatus;
+  backendError?: string;
+}
+
 @Injectable()
 export class HealthService {
   constructor(private prisma: PrismaService) {}
@@ -73,6 +84,9 @@ export class HealthService {
   async project() {
     const current = await this.current();
     const dev = await this.externalEnvironment('dev', process.env.MONITOR_DEV_DATABASE_URL);
+    if (dev) {
+      await this.attachExternalBackendHealth(dev, process.env.MONITOR_DEV_HEALTH_URL);
+    }
     return { current, dev };
   }
 
@@ -185,7 +199,7 @@ export class HealthService {
 </html>`;
   }
 
-  private async externalEnvironment(name: 'dev' | 'main', url?: string) {
+  private async externalEnvironment(name: 'dev' | 'main', url?: string): Promise<ExternalEnvironmentStatus | null> {
     if (!url) return null;
     const prisma = new PrismaClient({ datasources: { db: { url } } });
     try {
@@ -210,6 +224,43 @@ export class HealthService {
     } finally {
       await prisma.$disconnect().catch(() => undefined);
     }
+  }
+
+  private async attachExternalBackendHealth(status: ExternalEnvironmentStatus, url?: string) {
+    if (!url) {
+      status.backend = 'error';
+      status.backendError = 'MONITOR_DEV_HEALTH_URL не задан, поэтому коммит dev backend не отображается.';
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(this.normalizeHealthUrl(url), { signal: controller.signal });
+      if (!response.ok) {
+        status.backend = 'error';
+        status.backendError = `Dev backend ответил HTTP ${response.status}`;
+        status.status = status.status === 'degraded' ? 'degraded' : 'warning';
+        return;
+      }
+      const health = await response.json() as Partial<AppHealth>;
+      status.backend = 'ok';
+      status.commit = health.commit ?? null;
+      if (health.status === 'degraded') status.status = 'degraded';
+      if (health.status === 'warning' && status.status === 'ok') status.status = 'warning';
+    } catch (err) {
+      status.backend = 'error';
+      status.backendError = `Dev backend недоступен: ${this.errorMessage(err)}`;
+      status.status = status.status === 'degraded' ? 'degraded' : 'warning';
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private normalizeHealthUrl(url: string) {
+    const trimmed = url.trim().replace(/\/+$/, '');
+    if (trimmed.endsWith('/api/health') || trimmed.endsWith('/health')) return trimmed;
+    return `${trimmed}/api/health`;
   }
 
   private async localMigrationNames() {
@@ -292,15 +343,21 @@ export class HealthService {
     database: DbStatus;
     migrations: MigrationStatus;
     error?: string;
+    commit?: string | null;
+    backend?: DbStatus;
+    backendError?: string;
   }) {
     return this.renderCard({
       title,
       status: status.status,
       database: status.database,
       env: status.name,
-      commit: null,
+      commit: status.commit ?? null,
+      commitHint: status.backendError ? 'не подключен' : null,
+      backend: status.backend,
       migrations: status.migrations,
       error: status.error,
+      backendError: status.backendError,
     });
   }
 
@@ -310,8 +367,11 @@ export class HealthService {
     database: DbStatus;
     env: string;
     commit: string | null;
+    commitHint?: string | null;
+    backend?: DbStatus;
     migrations: MigrationStatus;
     error?: string;
+    backendError?: string;
   }) {
     const migrationProblem = input.migrations.missing.length > 0 || input.migrations.failed.length > 0;
     const migrationWarning = !migrationProblem && input.migrations.extraApplied.length > 0;
@@ -322,8 +382,9 @@ export class HealthService {
   </div>
   <div class="rows">
     ${this.row('Окружение', this.envLabel(input.env))}
+    ${input.backend ? this.row('Backend', input.backend === 'ok' ? 'доступен' : 'не подключен') : ''}
     ${this.row('База данных', input.database === 'ok' ? 'доступна' : 'недоступна')}
-    ${input.commit ? this.row('Коммит', input.commit.slice(0, 8)) : ''}
+    ${input.commit ? this.row('Коммит', input.commit.slice(0, 8)) : input.commitHint ? this.row('Коммит', input.commitHint) : ''}
     ${this.row('Миграций в коде', String(input.migrations.localCount))}
     ${this.row('Миграций в базе', String(input.migrations.appliedCount))}
     ${this.row('Последняя в коде', input.migrations.latestLocal ?? 'нет')}
@@ -332,6 +393,7 @@ export class HealthService {
   ${migrationProblem ? this.renderProblems(input.migrations) : ''}
   ${migrationWarning ? this.renderWarnings(input.migrations) : ''}
   ${input.error ? `<div class="list degraded">${this.escapeHtml(input.error)}</div>` : ''}
+  ${input.backendError ? `<div class="list warning">${this.escapeHtml(input.backendError)}</div>` : ''}
 </article>`;
   }
 
