@@ -603,7 +603,6 @@ VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 
 MONITOR_DEV_DATABASE_URL=
-MONITOR_MAIN_DATABASE_URL=
 ```
 
 ### Frontend: `frontend/.env`
@@ -633,7 +632,7 @@ TTS_THREADS=4
 https://YOUR_BACKEND_DOMAIN/api/health/status
 ```
 
-Для сравнения миграций `dev/main` задайте `MONITOR_DEV_DATABASE_URL` и `MONITOR_MAIN_DATABASE_URL` в переменных окружения backend. Если их не задать, страница покажет только текущую среду.
+Для твоей схемы Railway ставьте `MONITOR_DEV_DATABASE_URL` только в `backend` main-сервис. Main/prod база берется из обычного `DATABASE_URL`, а dev база проверяется через `MONITOR_DEV_DATABASE_URL`. Если его не задать, страница покажет только текущую main/prod среду.
 
 ## Установка и запуск
 
