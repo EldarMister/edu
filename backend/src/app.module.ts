@@ -20,6 +20,7 @@ import { SettingsModule } from './settings/settings.module';
 import { PushModule } from './push/push.module';
 import { AuditModule } from './audit/audit.module';
 import { TtsModule } from './tts/tts.module';
+import { MonitoringModule } from './monitoring/monitoring.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 
@@ -45,6 +46,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     PushModule,
     AuditModule,
     TtsModule,
+    MonitoringModule,
   ],
   providers: [
     // Глобально: сначала проверка JWT, затем проверка роли.
