@@ -1331,6 +1331,74 @@ export class OrdersService {
     return updated;
   }
 
+  async cancelReadyItem(orderId: string, itemId: string, waiterId: string, reason: string) {
+    const cleanReason = reason.trim();
+    if (!cleanReason) {
+      throw new BadRequestException('Укажите причину отмены блюда');
+    }
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    if (order.waiterId !== waiterId) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
+    if (!([OrderStatus.ready, OrderStatus.picked_up, OrderStatus.served] as OrderStatus[]).includes(order.status)) {
+      throw new BadRequestException('Отменить блюдо можно только после готовности и до оплаты');
+    }
+    const item = order.items.find((it) => it.id === itemId);
+    if (!item) throw new NotFoundException('Блюдо не найдено');
+    if (!([OrderItemStatus.ready, OrderItemStatus.served] as OrderItemStatus[]).includes(item.status)) {
+      throw new BadRequestException('Это блюдо нельзя отменить на текущем этапе');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.orderItem.update({
+        where: { id: itemId },
+        data: { status: OrderItemStatus.cancelled, rejectReason: cleanReason },
+      });
+      await tx.orderItemSetComponent.updateMany({
+        where: { orderItemId: itemId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+        data: { status: OrderItemStatus.cancelled },
+      });
+      await this.recalcOrder(tx, orderId);
+      const activeCount = await tx.orderItem.count({
+        where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+      });
+      const nextStatus = activeCount === 0 ? OrderStatus.cancelled : await this.statusFromActiveItems(tx, orderId);
+      const nextTableStatus = activeCount === 0 ? TableStatus.free : this.tableStatusForOrderStatus(nextStatus);
+      if (nextTableStatus) {
+        await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
+      }
+      return tx.order.update({
+        where: { id: orderId },
+        data: {
+          status: nextStatus,
+          requiresWaiterDecision: false,
+          ...(activeCount === 0 ? { closedAt: new Date() } : {}),
+        },
+        include: orderInclude,
+      });
+    });
+
+    this.emitStatusChanged(updated);
+    const tableStatus = this.tableStatusForOrderStatus(updated.status);
+    if (tableStatus) {
+      this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
+    }
+    await this.audit.log({
+      actor: { id: waiterId, role: Role.WAITER, name: order.waiter.name },
+      actionType: AuditAction.ORDER_UPDATED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId,
+      tableId: order.tableId,
+      description: `${order.waiter.name ?? 'Официант'} отменил блюдо «${this.orderItemName(item)}» в заказе ${order.orderNumber}: ${cleanReason}`,
+      oldValue: { itemId, status: item.status, finalAmount: Number(order.finalAmount) },
+      newValue: { itemId, status: OrderItemStatus.cancelled, finalAmount: Number(updated.finalAmount), reason: cleanReason },
+      metadata: { tableNumber: order.table.number, itemName: this.orderItemName(item) },
+    });
+    return updated;
+  }
+
   async pickedUp(orderId: string, waiterId: string) {
     const order = await this.assertOwnedOrder(orderId, waiterId);
     if (order.requiresWaiterDecision) {

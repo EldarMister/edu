@@ -5,6 +5,7 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { AddItemsDto } from './dto/add-items.dto';
 import { EditOrderDto } from './dto/edit-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
+import { CancelOrderItemDto } from './dto/cancel-order-item.dto';
 import { ReplaceRejectedItemDto } from './dto/resolve-rejected-item.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -82,6 +83,17 @@ export class OrdersController {
     @Body() dto: ReplaceRejectedItemDto,
   ) {
     return this.orders.replaceRejectedItem(id, itemId, user.id, dto.item);
+  }
+
+  @Post(':id/items/:itemId/cancel')
+  @Roles(Role.WAITER)
+  cancelItem(
+    @Param('id') id: string,
+    @Param('itemId') itemId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CancelOrderItemDto,
+  ) {
+    return this.orders.cancelReadyItem(id, itemId, user.id, dto.reason);
   }
 
   @Post(':id/served')

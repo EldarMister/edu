@@ -5,6 +5,7 @@ import { ORDER_STATUS } from '@/lib/status';
 import { displayOrderNumber, money, orderItemDisplayName } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
+import { Modal } from '@/components/Modal';
 
 function InfoIcon() {
   return (
@@ -65,6 +66,7 @@ export function OrderPanel({
   onContinueAfterRejection,
   onReplaceRejectedItem,
   onRemoveRejectedItem,
+  onCancelReadyItem,
   onCancelOrder,
   onEdit,
 }: {
@@ -78,14 +80,18 @@ export function OrderPanel({
   onContinueAfterRejection: () => void;
   onReplaceRejectedItem: (item: Order['items'][number]) => void;
   onRemoveRejectedItem: (item: Order['items'][number]) => void;
+  onCancelReadyItem: (item: Order['items'][number], reason: string) => void;
   onCancelOrder: () => void;
   /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
   onEdit?: () => void;
 }) {
   const t = useT();
+  const [billItem, setBillItem] = useState<Order['items'][number] | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
   // Редактирование доступно, пока кухня не завершила заказ (как в списке заказов).
   const editable = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'].includes(order.status);
+  const billCorrection = ['ready', 'picked_up', 'served'].includes(order.status);
 
   if (waitingDecision) {
     return (
@@ -136,24 +142,34 @@ export function OrderPanel({
       <div className="no-scrollbar flex-1 space-y-1.5 overflow-y-auto py-3">
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
+          const cancelled = it.status === 'cancelled';
           const waitingItem = waitingDecision && !rejected;
           const comment = safeComment(it.comment);
-          const hasExtra = comment || (rejected && it.rejectReason) || waitingItem;
+          const clickable = billCorrection && (it.status === 'ready' || it.status === 'served');
+          const hasExtra = comment || ((rejected || cancelled) && it.rejectReason) || waitingItem;
           return (
-            <div
+            <button
               key={it.id}
-              className={`rounded-lg border px-3 py-2 ${
-                rejected
+              type="button"
+              disabled={!clickable || submitting}
+              onClick={() => {
+                setBillItem(it);
+                setCancelReason('');
+              }}
+              className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
+                rejected || cancelled
                   ? 'border-danger/30 bg-danger/5'
                   : waitingItem
                     ? 'border-warning/20 bg-warning/5'
-                    : 'border-border'
+                    : clickable
+                      ? 'border-border hover:border-primary/40 hover:bg-primary/[0.03] active:bg-primary/[0.06]'
+                      : 'border-border'
               }`}
             >
               <div className="flex items-center justify-between gap-3">
                 <span
                   className={`min-w-0 flex-1 truncate text-[15px] ${
-                    rejected ? 'text-danger line-through' : 'text-text-primary'
+                    rejected || cancelled ? 'text-danger line-through' : 'text-text-primary'
                   }`}
                 >
                   {orderItemDisplayName(it)}
@@ -173,7 +189,12 @@ export function OrderPanel({
                       {t('Готовится')}
                     </span>
                   )}
-                  {(rejected || it.status === 'cancelled') && (
+                  {cancelled && (
+                    <span className="text-xs font-medium text-danger mt-0.5">
+                      {t('Отменено')}
+                    </span>
+                  )}
+                  {rejected && (
                     <span className="text-xs font-medium text-danger mt-0.5">
                       {t('Отказано')}
                     </span>
@@ -184,10 +205,11 @@ export function OrderPanel({
                 <div className="mt-0.5 text-xs">
                   {comment && <p className="text-text-muted">{comment}</p>}
                   {rejected && it.rejectReason && <p className="text-danger">{t('Отказ')}: {it.rejectReason}</p>}
+                  {cancelled && it.rejectReason && <p className="text-danger">{t('Причина')}: {it.rejectReason}</p>}
                   {waitingItem && <p className="text-warning">{t('Ожидает решения клиента')}</p>}
                 </div>
               )}
-            </div>
+            </button>
           );
         })}
       </div>
@@ -218,6 +240,54 @@ export function OrderPanel({
           />
         </div>
       </div>
+      <Modal
+        open={!!billItem}
+        onClose={() => setBillItem(null)}
+        title={t('Действие с блюдом')}
+        panelClassName="max-w-md"
+        footer={
+          <div className="space-y-2">
+            <button
+              className="btn-danger btn-lg w-full font-semibold"
+              disabled={submitting || cancelReason.trim().length < 2}
+              onClick={() => {
+                if (!billItem) return;
+                onCancelReadyItem(billItem, cancelReason.trim());
+                setBillItem(null);
+              }}
+            >
+              {submitting ? <Spinner /> : t('Отменить блюдо')}
+            </button>
+            <button className="btn-secondary btn-lg w-full" disabled={submitting} onClick={() => setBillItem(null)}>
+              {t('Закрыть')}
+            </button>
+          </div>
+        }
+      >
+        {billItem && (
+          <div className="space-y-3">
+            <div className="rounded-xl border border-border bg-background px-3 py-2">
+              <p className="font-medium text-text-primary">{orderItemDisplayName(billItem)}</p>
+              <p className="mt-1 text-sm text-text-muted">
+                ×{billItem.quantity} · {money(billItem.finalPrice)}
+              </p>
+            </div>
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium text-text-secondary">{t('Причина отмены')}</span>
+              <textarea
+                className="input h-24 resize-none py-2.5"
+                value={cancelReason}
+                maxLength={160}
+                placeholder={t('Например: клиент отказался')}
+                onChange={(e) => setCancelReason(e.target.value)}
+              />
+            </label>
+            <p className="text-xs text-text-muted">
+              {t('После отмены блюдо не будет входить в итоговую сумму.')}
+            </p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -28,6 +28,7 @@ import {
   useToPayment,
   useResolvePartialRejection,
   useRemoveRejectedItem,
+  useCancelReadyItem,
   useReplaceRejectedItem,
   useCancelOrder,
   useStartShift,
@@ -94,6 +95,7 @@ export function WaiterApp() {
   const toPayment = useToPayment();
   const resolvePartialRejection = useResolvePartialRejection();
   const removeRejectedItem = useRemoveRejectedItem();
+  const cancelReadyItem = useCancelReadyItem();
   const replaceRejectedItem = useReplaceRejectedItem();
   const cancelOrder = useCancelOrder();
   const startShift = useStartShift();
@@ -174,6 +176,7 @@ export function WaiterApp() {
     toPayment.isPending ||
     resolvePartialRejection.isPending ||
     removeRejectedItem.isPending ||
+    cancelReadyItem.isPending ||
     replaceRejectedItem.isPending ||
     cancelOrder.isPending;
   const shiftPending = startShift.isPending || endShift.isPending;
@@ -488,6 +491,18 @@ export function WaiterApp() {
     }
   }
 
+  async function cancelReadyItemFromOrder(order: Order, item: Order['items'][number], reason: string) {
+    try {
+      const updated = await cancelReadyItem.mutateAsync({ orderId: order.id, itemId: item.id, reason });
+      setViewingOrderId(updated.id);
+      cart.selectTable(updated.table.id);
+      setTab('orders');
+      push({ message: `${orderItemName(item)} отменено`, type: 'success', at: new Date().toISOString() });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
+
   async function cancelAfterPartialRejection(order: Order) {
     try {
       await cancelOrder.mutateAsync({
@@ -657,6 +672,7 @@ export function WaiterApp() {
           onContinueAfterRejection={() => continueAfterPartialRejection(displayedOrder)}
           onReplaceRejectedItem={(item) => replaceRejectedFromOrder(displayedOrder, item)}
           onRemoveRejectedItem={(item) => removeRejectedFromOrder(displayedOrder, item)}
+          onCancelReadyItem={(item, reason) => cancelReadyItemFromOrder(displayedOrder, item, reason)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}
         />
