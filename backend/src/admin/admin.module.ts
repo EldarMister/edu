@@ -11,9 +11,11 @@ import { ReconciliationController } from './reconciliation/reconciliation.contro
 import { ReconciliationService } from './reconciliation/reconciliation.service';
 import { AdminWarehouseController } from './warehouse.controller';
 import { AdminWarehouseService } from './warehouse.service';
+import { OrdersModule } from '../orders/orders.module';
 
 /** Этапы 6–7: административная часть и статистика владельца. */
 @Module({
+  imports: [OrdersModule],
   controllers: [
     CatalogController,
     StaffController,

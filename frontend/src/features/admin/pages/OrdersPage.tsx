@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Order } from '@/types';
+import type { Order, OrderStatus } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -7,10 +7,10 @@ import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, paymentCell, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
-import { IconX } from '../components/icons';
+import { IconEdit, IconX } from '../components/icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
-import { useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff } from '../api';
+import { useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff, useUpdateOrderStatus } from '../api';
 
 /** Заказ можно отменить, пока он не оплачен/не отменён/не отклонён. */
 const CANCELLABLE = new Set([
@@ -29,6 +29,17 @@ const STATUS_OPTIONS = [
   { value: 'all', label: 'Все статусы' },
   { value: 'paid', label: 'Оплачен' },
   { value: 'active', label: 'Не оплачен' },
+  { value: 'cancelled', label: 'Отменён' },
+];
+
+const MANUAL_STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
+  { value: 'sent_to_kitchen', label: 'Активный' },
+  { value: 'accepted_by_kitchen', label: 'Принят кухней' },
+  { value: 'cooking', label: 'Готовится' },
+  { value: 'ready', label: 'Готов' },
+  { value: 'picked_up', label: 'Забран' },
+  { value: 'served', label: 'Подан гостям' },
+  { value: 'waiting_payment', label: 'Ожидает оплаты' },
   { value: 'cancelled', label: 'Отменён' },
 ];
 
@@ -83,11 +94,15 @@ export function OrdersPage() {
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
+  const [statusTarget, setStatusTarget] = useState<Order | null>(null);
+  const [manualStatus, setManualStatus] = useState<OrderStatus>('served');
+  const [manualReason, setManualReason] = useState('');
   const loadMoreRef = useRef<HTMLDivElement>(null);
 
   const tr = useT();
   const push = useNotifications((s) => s.push);
   const cancelOrder = useCancelOrder();
+  const updateStatus = useUpdateOrderStatus();
 
   const waiters = useStaff('WAITER', '');
   const waiterOptions = [
@@ -130,6 +145,27 @@ export function OrdersPage() {
       await cancelOrder.mutateAsync({ orderId: cancelTarget.id, reason });
       push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
       setCancelTarget(null);
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
+
+  function openStatusEditor(order: Order) {
+    setStatusTarget(order);
+    setManualStatus(order.status === 'paid' || order.status === 'rejected' ? 'waiting_payment' : order.status);
+    setManualReason('');
+  }
+
+  async function confirmStatusChange() {
+    if (!statusTarget) return;
+    try {
+      await updateStatus.mutateAsync({
+        orderId: statusTarget.id,
+        status: manualStatus,
+        reason: manualReason.trim() || undefined,
+      });
+      push({ message: 'Статус заказа изменён', type: 'success', at: new Date().toISOString() });
+      setStatusTarget(null);
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
@@ -218,7 +254,7 @@ export function OrdersPage() {
                 <col className="w-[10%]" />
                 <col className="w-[13%]" />
                 <col className="w-[20%]" />
-                <col className="w-[56px]" />
+                <col className="w-[76px]" />
               </colgroup>
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-border bg-background text-left text-xs text-text-muted">
@@ -261,7 +297,18 @@ export function OrdersPage() {
                     </Td>
                     <Td className="whitespace-nowrap text-text-secondary">{paymentCell(ord)}</Td>
                     <Td className="px-1">
-                      <div className="flex items-center justify-center">
+                      <div className="flex items-center justify-center gap-1">
+                        <button
+                          className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-primary/10 hover:text-primary"
+                          title={tr('Изменить статус')}
+                          aria-label={tr('Изменить статус')}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openStatusEditor(ord);
+                          }}
+                        >
+                          <IconEdit className="h-4 w-4" />
+                        </button>
                         {CANCELLABLE.has(ord.status) && (
                           <button
                             className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-danger/10 hover:text-danger"
@@ -306,7 +353,98 @@ export function OrdersPage() {
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancel}
       />
+      <StatusEditorModal
+        open={!!statusTarget}
+        order={statusTarget}
+        value={manualStatus}
+        reason={manualReason}
+        submitting={updateStatus.isPending}
+        onValueChange={setManualStatus}
+        onReasonChange={setManualReason}
+        onClose={() => setStatusTarget(null)}
+        onConfirm={confirmStatusChange}
+      />
       <OrderDetailsModal order={detailsOrder} onClose={() => setDetailsOrder(null)} />
+    </div>
+  );
+}
+
+function StatusEditorModal({
+  open,
+  order,
+  value,
+  reason,
+  submitting,
+  onValueChange,
+  onReasonChange,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  order: Order | null;
+  value: OrderStatus;
+  reason: string;
+  submitting: boolean;
+  onValueChange: (value: OrderStatus) => void;
+  onReasonChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const tr = useT();
+  if (!open || !order) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
+      <div className="w-full max-w-md rounded-xl border border-border bg-white shadow-soft">
+        <div className="border-b border-border px-4 py-3">
+          <h3 className="font-semibold text-text-primary">{tr('Изменить статус заказа')}</h3>
+          <p className="mt-0.5 text-sm text-text-muted">
+            {displayOrderNumber(order.orderNumber)} · {tr('Стол')} {order.table.number}
+          </p>
+        </div>
+        <div className="space-y-3 px-4 py-4">
+          <Select
+            className="h-10 w-full text-sm"
+            value={value}
+            onChange={(next) => onValueChange(next as OrderStatus)}
+            options={MANUAL_STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
+          />
+          <textarea
+            className="min-h-[84px] w-full resize-none rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+            placeholder={tr('Причина изменения')}
+            value={reason}
+            onChange={(e) => onReasonChange(e.target.value)}
+            maxLength={240}
+          />
+          {order.status === 'paid' && value !== 'paid' && (
+            <p className="rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
+              {tr('Оплата будет сброшена, заказ вернётся в неоплаченный статус.')}
+            </p>
+          )}
+          {order.status === 'cancelled' && value !== 'cancelled' && (
+            <p className="rounded-lg bg-primary/10 px-3 py-2 text-xs text-primary">
+              {tr('Отменённые позиции будут восстановлены в выбранный статус.')}
+            </p>
+          )}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+          <button
+            type="button"
+            className="h-10 rounded-xl border border-border bg-white px-4 text-sm text-text-secondary transition hover:border-primary/40 hover:text-text-primary"
+            onClick={onClose}
+            disabled={submitting}
+          >
+            {tr('Отмена')}
+          </button>
+          <button
+            type="button"
+            className="flex h-10 items-center justify-center rounded-xl bg-primary px-4 text-sm font-medium text-white transition hover:bg-primary-dark disabled:opacity-60"
+            onClick={onConfirm}
+            disabled={submitting || order.status === value}
+          >
+            {submitting ? <Spinner className="h-4 w-4" /> : tr('Сохранить')}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

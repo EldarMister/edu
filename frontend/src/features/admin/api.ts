@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
-import type { Order, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
+import type { Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
 
 // ---------- Типы ответов ----------
 export interface AdminTableItem {
@@ -294,6 +294,22 @@ export function useCancelOrder() {
       qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
       qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
       qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
+    },
+  });
+}
+
+export function useUpdateOrderStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId, status, reason }: { orderId: string; status: OrderStatus; reason?: string }) =>
+      api.patch<Order>(`/admin/orders/${orderId}/status`, { status, reason }).then((r) => r.data),
+    onSuccess: (order) => {
+      applyOrderStatusToCache(qc, order);
+      qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
       qc.invalidateQueries({ queryKey: ['audit'] });
     },
   });
