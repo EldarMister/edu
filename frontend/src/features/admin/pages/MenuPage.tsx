@@ -668,13 +668,6 @@ function CategoryModal({
               />
               <span className="w-14 text-right text-xs text-text-muted">{c._count.dishes} бл.</span>
               <button
-                onClick={() => { setEditingId(c.id); setEditName(c.name); }}
-                className="text-text-muted hover:text-primary"
-                title="Переименовать"
-              >
-                <IconEdit className="h-4 w-4" />
-              </button>
-              <button
                 onClick={() => setDeleteTarget(c)}
                 className="text-danger hover:opacity-80"
                 title="Удалить"
