@@ -1821,13 +1821,15 @@ export class OrdersService {
     let total = 0;
     let discount = 0;
     let final = 0;
+    let activeItems = 0;
     for (const i of items) {
       if (i.status === OrderItemStatus.rejected || i.status === OrderItemStatus.cancelled) continue;
+      activeItems += 1;
       total += Number(i.priceSnapshot) * i.quantity;
       discount += Number(i.discountAmount);
       final += Number(i.finalPrice);
     }
-    const serviceCharge = await this.currentServiceChargeAmount(tx);
+    const serviceCharge = activeItems > 0 ? await this.currentServiceChargeAmount(tx) : 0;
     await tx.order.update({
       where: { id: orderId },
       data: {

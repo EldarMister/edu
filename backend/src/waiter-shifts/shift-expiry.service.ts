@@ -3,7 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
-import { WaiterShiftStatus } from '@prisma/client';
+import { OrderStatus, WaiterShiftStatus } from '@prisma/client';
 
 /** Максимальная длительность смены (20 часов в миллисекундах). */
 const MAX_SHIFT_MS = 20 * 60 * 60 * 1000;
@@ -42,6 +42,21 @@ export class ShiftExpiryService {
 
     for (const shift of expired) {
       try {
+        const activeOrders = await this.prisma.order.count({
+          where: {
+            waiterId: shift.waiterId,
+            status: {
+              notIn: [OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected],
+            },
+          },
+        });
+        if (activeOrders > 0) {
+          this.logger.warn(
+            `Смена ${shift.id} не закрыта автоматически: у официанта ${shift.waiterId} есть ${activeOrders} активных заказ(а/ов).`,
+          );
+          continue;
+        }
+
         const closed = await this.prisma.waiterShift.update({
           where: { id: shift.id },
           data: { status: WaiterShiftStatus.closed, endedAt: new Date() },
