@@ -90,6 +90,7 @@ export function AdminApp() {
   });
   useSocketEvent('settings:updated', () => {
     qc.invalidateQueries({ queryKey: ['settings'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
     qc.invalidateQueries({ queryKey: ['audit'] });
   });
   // Печать чека: новая заявка / решение по ней — обновляем список без перезагрузки.
@@ -182,7 +183,7 @@ export function AdminApp() {
           </div>
         </header>
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">
           {section === 'stats' && isOwner && <StatisticsPage />}
           {section === 'orders' && <OrdersPage />}
           {section === 'receipts' && isAdmin && <ReceiptPrintsPage />}

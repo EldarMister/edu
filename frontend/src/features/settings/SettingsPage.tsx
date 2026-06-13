@@ -38,8 +38,6 @@ export function SettingsPage() {
   const t = useT();
 
   const [form, setForm] = useState<Form | null>(null);
-  const [error, setError] = useState('');
-  const [savedAt, setSavedAt] = useState<string | null>(null);
   const saveTimer = useRef<number | null>(null);
   const hydrateRef = useRef(true);
 
@@ -75,7 +73,6 @@ export function SettingsPage() {
 
   const persist = async (next: Form) => {
     if (!next.payQr && !next.payCash && !next.payCard) {
-      setError('Должен быть включён хотя бы один способ оплаты');
       return;
     }
     try {
@@ -84,11 +81,8 @@ export function SettingsPage() {
         serviceChargeAmount: 0,
       });
       setLocale(next.language);
-      setSavedAt(new Date().toISOString());
-      setError('');
     } catch (err) {
       const msg = apiError(err);
-      setError(msg);
       push({ message: msg, type: 'error', at: new Date().toISOString() });
     }
   };
@@ -115,11 +109,9 @@ export function SettingsPage() {
       return nextForm;
     });
     if (blockedNoMethod) {
-      setError('Должен быть включён хотя бы один способ оплаты');
       return;
     }
     if (!nextForm || nextForm[k] !== v) return;
-    setError('');
     if (nextForm && !hydrateRef.current) {
       if (mode === 'instant') {
         if (saveTimer.current) window.clearTimeout(saveTimer.current);
@@ -136,13 +128,6 @@ export function SettingsPage() {
   };
 
   const noMethod = !form.payQr && !form.payCash && !form.payCard;
-  const saveStateText = error
-    ? error
-    : update.isPending
-      ? t('Сохраняется...')
-      : savedAt
-        ? t('Изменения сохранены')
-        : t('Изменения сохраняются автоматически');
 
   return (
     <div className="space-y-4">
@@ -196,7 +181,7 @@ export function SettingsPage() {
               </p>
             </Field>
             {/* Статус принтера */}
-            <div className="rounded-xl border border-border p-4">
+            <div className="pt-2">
               <div className="mb-3 flex items-center gap-2">
                 <IconPrinter className="h-5 w-5 text-text-secondary" />
                 <h3 className="text-[15px] font-semibold text-text-primary">{t('Статус принтера')}</h3>
@@ -304,10 +289,6 @@ export function SettingsPage() {
           <QrPaymentCard qrImageUrl={data.qrImageUrl} />
 
         </div>
-      </div>
-
-      <div className="flex justify-end">
-        <p className={`text-sm ${error ? 'text-danger' : 'text-text-muted'}`}>{saveStateText}</p>
       </div>
     </div>
   );
