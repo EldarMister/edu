@@ -100,9 +100,10 @@ export interface StatsDashboard {
   };
   trends: { revenue: number; orders: number; avgCheck: number };
   revenueSeries: { label: string; amount: number }[];
+  peakHours: { hour: string; amount: number; orders: number }[];
   paymentMethods: { method: PaymentMethod; amount: number; percent: number }[];
   topDishes: { name: string; amount: number; count: number }[];
-  topWaiters: { name: string; amount: number; orders: number }[];
+  topWaiters: { name: string; amount: number; orders: number; avgCheck: number }[];
   period: StatsPeriod;
   range: { from: string | null; to: string | null };
 }

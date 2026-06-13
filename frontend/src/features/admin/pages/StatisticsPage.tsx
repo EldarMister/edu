@@ -115,7 +115,7 @@ export function StatisticsPage() {
           </section>
 
           {/* Аналитические блоки */}
-          <div className="grid gap-4 xl:grid-cols-3">
+          <div className="grid gap-4 xl:grid-cols-4">
             <PaymentMethodsCard methods={visiblePaymentMethods} />
             <Leaderboard
               title="Топ блюд"
@@ -125,9 +125,14 @@ export function StatisticsPage() {
             <Leaderboard
               title="Лучшие официанты"
               withAvatar
-              items={d.topWaiters.map((x) => ({ name: x.name, sub: `${x.orders} заказов`, amount: x.amount }))}
+              items={d.topWaiters.map((x) => ({
+                name: x.name,
+                sub: `${x.orders} закрыто · ср. чек ${money(x.avgCheck)}`,
+                amount: x.amount,
+              }))}
               empty="Нет данных за период"
             />
+            <PeakHoursCard items={d.peakHours} />
           </div>
         </>
       )}
@@ -429,6 +434,31 @@ function Leaderboard({
   );
 }
 
+function PeakHoursCard({ items }: { items: { hour: string; amount: number; orders: number }[] }) {
+  return (
+    <section className="card p-5 sm:p-6">
+      <h3 className="mb-4 text-[15px] font-semibold text-text-primary">Часы пик</h3>
+      {items.length === 0 ? (
+        <p className="py-10 text-center text-sm text-text-muted">Нет оплаченных заказов за период</p>
+      ) : (
+        <ul className="space-y-2">
+          {items.map((item, index) => (
+            <li key={item.hour} className={`rounded-xl border border-border px-3 py-3 ${index === 0 ? 'bg-primary/5' : ''}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-text-primary">{item.hour} - {nextHourLabel(item.hour)}</p>
+                  <p className="mt-0.5 text-xs text-text-muted">{item.orders} закрытых заказов</p>
+                </div>
+                <span className="shrink-0 text-sm font-semibold text-text-primary">{money(item.amount)}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 /* ---------- Утилиты ---------- */
 
 /** Сглаженный путь (monotone cubic) по точкам. */
@@ -459,6 +489,11 @@ function shortMoney(value: number): string {
 }
 function trim(n: number) {
   return Number(n.toFixed(1)).toString();
+}
+
+function nextHourLabel(hour: string) {
+  const value = Number(hour.slice(0, 2));
+  return `${String((value + 1) % 24).padStart(2, '0')}:00`;
 }
 
 /** Короткая подпись оси: "12:00" | "6 июн" | "июн 26". Без Invalid Date. */
