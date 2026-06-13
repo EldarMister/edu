@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, ReceiptPrintStatus, ReceiptPrintType, Role } from '@prisma/client';
+import { OrderStatus, Prisma, ReceiptPrintStatus, ReceiptPrintType, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
@@ -15,6 +15,12 @@ const withWaiter = {
 } satisfies Prisma.ReceiptPrintRequestInclude;
 
 type RequestWithWaiter = Prisma.ReceiptPrintRequestGetPayload<{ include: typeof withWaiter }>;
+type PrintableOrder = Prisma.OrderGetPayload<{
+  include: {
+    table: { select: { number: true } };
+    waiter: { select: { id: true; name: true } };
+  };
+}>;
 const REQUEST_TTL_MS = 2 * 60 * 60 * 1000;
 
 @Injectable()
@@ -27,6 +33,8 @@ export class ReceiptPrintsService {
   private serialize(r: RequestWithWaiter) {
     return {
       id: r.id,
+      source: 'request',
+      priority: true,
       orderId: r.orderId,
       orderNumber: r.orderNumber,
       tableNumber: r.tableNumber,
@@ -37,6 +45,26 @@ export class ReceiptPrintsService {
       status: r.status,
       createdAt: r.createdAt.toISOString(),
       decidedAt: r.decidedAt ? r.decidedAt.toISOString() : null,
+    };
+  }
+
+  private serializeOrder(order: PrintableOrder) {
+    const type =
+      order.status === OrderStatus.waiting_payment ? ReceiptPrintType.preliminary : ReceiptPrintType.receipt;
+    return {
+      id: `order:${type}:${order.id}`,
+      source: 'order',
+      priority: false,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      tableNumber: order.table.number,
+      type,
+      waiterId: order.waiterId,
+      waiterName: order.waiter?.name ?? '',
+      amount: String(order.finalAmount),
+      status: null,
+      createdAt: order.createdAt.toISOString(),
+      decidedAt: null,
     };
   }
 
@@ -92,16 +120,44 @@ export class ReceiptPrintsService {
     return dto;
   }
 
-  /** Список заявок для администратора: ожидают решения или уже подтверждены, но ещё не отмечены распечатанными. */
+  /** Список для администратора: приоритетные заявки официантов + сегодняшние заказы, доступные к печати. */
   async listPending() {
     await this.purgeExpired();
 
-    const items = await this.prisma.receiptPrintRequest.findMany({
-      where: { status: { in: [ReceiptPrintStatus.pending, ReceiptPrintStatus.approved] } },
-      orderBy: { createdAt: 'asc' },
-      include: withWaiter,
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const [requests, orders] = await Promise.all([
+      this.prisma.receiptPrintRequest.findMany({
+        where: { status: { in: [ReceiptPrintStatus.pending, ReceiptPrintStatus.approved] } },
+        orderBy: { createdAt: 'asc' },
+        include: withWaiter,
+      }),
+      this.prisma.order.findMany({
+        where: {
+          businessDate: { gte: startOfDay },
+          status: { in: [OrderStatus.waiting_payment, OrderStatus.paid] },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        include: {
+          table: { select: { number: true } },
+          waiter: { select: { id: true, name: true } },
+        },
+      }),
+    ]);
+
+    const activeRequestKeys = new Set(requests.map((r) => `${r.orderId}:${r.type}`));
+    const printableOrders = orders.filter((order) => {
+      const type =
+        order.status === OrderStatus.waiting_payment ? ReceiptPrintType.preliminary : ReceiptPrintType.receipt;
+      return !activeRequestKeys.has(`${order.id}:${type}`);
     });
-    return items.map((r) => this.serialize(r));
+
+    return [
+      ...requests.map((r) => this.serialize(r)),
+      ...printableOrders.map((order) => this.serializeOrder(order)),
+    ];
   }
 
   /** Администратор принимает заявку: дальше админское устройство печатает документ. */

@@ -235,6 +235,8 @@ export type ReceiptPrintType = 'receipt' | 'preliminary';
 /** Запрос официанта на печать чека (подтверждается администратором). */
 export interface ReceiptPrintRequest {
   id: string;
+  source?: 'request' | 'order';
+  priority?: boolean;
   orderId: string;
   orderNumber: string;
   tableNumber: number;
@@ -242,7 +244,7 @@ export interface ReceiptPrintRequest {
   waiterId: string;
   waiterName: string;
   amount: string;
-  status: ReceiptPrintStatus;
+  status: ReceiptPrintStatus | null;
   createdAt: string;
   decidedAt?: string | null;
 }
