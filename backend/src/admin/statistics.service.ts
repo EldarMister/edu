@@ -103,12 +103,15 @@ export class StatisticsService {
       percent: Math.round((methodTotals[m] / methodsSum) * 100),
     }));
 
-    const waiterMap = new Map<string, { name: string; amount: number; orders: number }>();
+    const waiterMap = new Map<string, { name: string; amount: number; orders: number; avgCheck: number }>();
     for (const o of currentOrders) {
-      const cur = waiterMap.get(o.waiterId) ?? { name: o.waiter.name, amount: 0, orders: 0 };
+      const cur = waiterMap.get(o.waiterId) ?? { name: o.waiter.name, amount: 0, orders: 0, avgCheck: 0 };
       cur.amount += Number(o.finalAmount);
       cur.orders += 1;
       waiterMap.set(o.waiterId, cur);
+    }
+    for (const item of waiterMap.values()) {
+      item.avgCheck = item.orders > 0 ? item.amount / item.orders : 0;
     }
     const topWaiters = [...waiterMap.values()].sort((a, b) => b.amount - a.amount).slice(0, 5);
 
@@ -148,6 +151,7 @@ export class StatisticsService {
         avgCheck: percentChange(avgCheck, previousAvg),
       },
       revenueSeries: this.revenueSeries(currentOrders, range.from ?? startOfDay(), range.to, period),
+      peakHours: this.peakHours(currentOrders),
       paymentMethods,
       topDishes,
       topWaiters,
@@ -226,6 +230,28 @@ export class StatisticsService {
       }
     }
     return [...series.entries()].map(([label, amount]) => ({ label, amount }));
+  }
+
+  private peakHours(orders: { closedAt: Date | null; finalAmount: unknown }[]) {
+    const hours = new Map<string, { hour: string; amount: number; orders: number }>();
+    for (let hour = 0; hour < 24; hour += 1) {
+      const label = `${String(hour).padStart(2, '0')}:00`;
+      hours.set(label, { hour: label, amount: 0, orders: 0 });
+    }
+
+    for (const order of orders) {
+      if (!order.closedAt) continue;
+      const label = `${String(order.closedAt.getHours()).padStart(2, '0')}:00`;
+      const current = hours.get(label);
+      if (!current) continue;
+      current.amount += Number(order.finalAmount);
+      current.orders += 1;
+    }
+
+    return [...hours.values()]
+      .filter((hour) => hour.orders > 0)
+      .sort((a, b) => b.orders - a.orders || b.amount - a.amount)
+      .slice(0, 3);
   }
 }
 
