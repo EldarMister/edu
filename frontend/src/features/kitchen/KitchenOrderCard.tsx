@@ -156,20 +156,39 @@ export function KitchenOrderCard({
     // Заказ уже в работе, а позиция всё ещё «new» — значит её добавили/заменили при
     // редактировании. Подсвечиваем, чтобы повар видел, какое блюдо изменилось.
     const isFresh = tab === 'in_work' && status === 'new' && !opts?.container && !pending;
-    return (
-      <div
-        className={`flex items-center gap-3 ${selectable ? 'cursor-pointer' : ''}`}
-        onClick={() => {
-          if (selectable) toggle(id);
-        }}
-      >
-        {canSelect && selectable && selected.has(id) && (
-          <input
-            type="checkbox"
-            checked={true}
-            readOnly
-            className="h-[22px] w-[22px] shrink-0 cursor-pointer rounded-[6px] border-border accent-primary pointer-events-none"
-          />
+    const checked = selected.has(id);
+    const body = (
+      <>
+        {selectable && (
+          <>
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => toggle(id)}
+              className="peer sr-only"
+            />
+            <span
+              aria-hidden="true"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] border border-slate-300 bg-white text-white transition-all duration-150 ease-out peer-checked:border-primary peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary/25 group-hover:border-primary/70"
+            >
+              <svg
+                width="13"
+                height="10"
+                viewBox="0 0 13 10"
+                fill="none"
+                className={`transition-opacity duration-150 ${checked ? 'opacity-100' : 'opacity-0'}`}
+                aria-hidden="true"
+              >
+                <path
+                  d="M1.5 5.1 4.8 8.2 11.5 1.5"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+          </>
         )}
         <span
           className={`min-w-0 flex-1 ${
@@ -185,6 +204,16 @@ export function KitchenOrderCard({
         )}
         {isReady && <span className="shrink-0 text-[13px] font-bold text-green-600">✓ Готово</span>}
         {rejected && <span className="shrink-0 text-[13px] font-bold text-danger">Отказ</span>}
+      </>
+    );
+
+    return selectable ? (
+      <label className="group flex cursor-pointer items-center gap-2.5 rounded-lg transition-colors active:bg-primary/5">
+        {body}
+      </label>
+    ) : (
+      <div className="flex items-center gap-2.5">
+        {body}
       </div>
     );
   }
