@@ -89,6 +89,8 @@ export class PaymentsService {
       address: settings.address,
       phone: settings.phone,
       phone2: settings.phone2,
+      instagram: settings.instagram,
+      website: settings.website,
       orderNumber: order.orderNumber,
       tableNumber: order.table.number,
       waiter: order.waiter.name,

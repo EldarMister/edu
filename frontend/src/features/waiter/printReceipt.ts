@@ -37,6 +37,7 @@ export function printReceipt(
     @page { margin: 0; }
     body { width: 80mm; margin: 0 auto; padding: 8mm 4mm; font-family: 'Inter', monospace, sans-serif; color: #000; font-size: 14px; }
     h1 { font-size: 20px; text-align: center; margin: 0 0 6px; font-weight: 600; }
+    .receipt-kind { text-align: center; font-size: 13px; font-weight: 700; margin: 2px 0 6px; }
     .muted { color: #333; font-size: 13px; }
     .center { text-align: center; }
     hr { border: none; border-top: 1px dashed #999; margin: 12px 0; }
@@ -50,8 +51,11 @@ export function printReceipt(
     .sep { color: #999; margin: 0 3px; }
   </style></head><body>
     <h1>${escapeHtml(r.cafeName)}</h1>
+    ${preliminary ? '' : '<div class="receipt-kind">Внутренний товарный чек</div>'}
     ${r.address ? `<div class="center muted">${escapeHtml(r.address)}</div>` : ''}
     ${r.phone ? `<div class="center muted">${escapeHtml(r.phone)}${r.phone2 ? ', ' + escapeHtml(r.phone2) : ''}</div>` : ''}
+    ${r.instagram ? `<div class="center muted">Instagram: ${escapeHtml(r.instagram)}</div>` : ''}
+    ${r.website ? `<div class="center muted">Сайт: ${escapeHtml(r.website)}</div>` : ''}
     <div class="center muted">${dateStr}</div>
     <hr/>
     <div class="row muted" style="font-size:12px">

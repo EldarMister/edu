@@ -16,6 +16,8 @@ export interface Settings {
   address: string;
   phone: string;
   phone2: string;
+  instagram: string | null;
+  website: string | null;
   receiptText: string;
   serviceChargeAmount: string;
   language: 'ru' | 'ky';
@@ -32,6 +34,8 @@ export interface PublicSettings {
   address: string;
   phone: string;
   phone2: string;
+  instagram: string | null;
+  website: string | null;
   receiptText: string;
   serviceChargeAmount: string;
   language: 'ru' | 'ky';
