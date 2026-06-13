@@ -8,6 +8,7 @@ import { disconnectSocket } from '@/lib/socket';
 import { timeHM } from '@/lib/format';
 import { beep } from '@/lib/sound';
 import { useT } from '@/lib/i18n';
+import type { PushStatus } from '@/lib/push';
 
 export function WaiterProfile({
   shift,
@@ -24,7 +25,7 @@ export function WaiterProfile({
   shiftPending: boolean;
   onStartShift: () => void;
   onEndShift: () => void;
-  pushStatus: 'unsupported' | 'unavailable' | 'default' | 'denied' | 'subscribed' | 'error';
+  pushStatus: PushStatus;
   onEnablePush: () => void;
   onOpenCabinet: () => void;
 }) {
@@ -114,11 +115,14 @@ export function WaiterProfile({
                   <p className="text-sm font-medium text-text-primary">{t('Системные уведомления')}</p>
                   <p className="mt-1 text-xs text-text-muted">{pushStatusText(pushStatus, t)}</p>
                 </div>
-                {pushStatus !== 'subscribed' && pushStatus !== 'unsupported' && pushStatus !== 'denied' && (
+                {pushStatus !== 'subscribed' &&
+                  pushStatus !== 'unsupported' &&
+                  pushStatus !== 'denied' &&
+                  pushStatus !== 'checking' && (
                   <button className="btn-primary btn-md shrink-0" onClick={onEnablePush}>
                     {t('Включить')}
                   </button>
-                )}
+                  )}
               </div>
               <button className="btn-secondary btn-md mt-3 w-full" onClick={() => beep('notify')}>
                 {t('Проверить звук')}
@@ -172,7 +176,7 @@ export function WaiterProfile({
 }
 
 function pushStatusText(
-  status: 'unsupported' | 'unavailable' | 'default' | 'denied' | 'subscribed' | 'error',
+  status: PushStatus,
   t: (value: string) => string,
 ) {
   switch (status) {
@@ -184,6 +188,8 @@ function pushStatusText(
       return t('Серверные push-ключи ещё не настроены.');
     case 'unsupported':
       return t('Этот браузер не поддерживает push-уведомления.');
+    case 'checking':
+      return 'Проверяем статус уведомлений…';
     case 'error':
       return t('Не удалось включить. Проверьте HTTPS, service worker и настройки сервера.');
     default:
