@@ -15,6 +15,7 @@ const withWaiter = {
 } satisfies Prisma.ReceiptPrintRequestInclude;
 
 type RequestWithWaiter = Prisma.ReceiptPrintRequestGetPayload<{ include: typeof withWaiter }>;
+const REQUEST_TTL_MS = 2 * 60 * 60 * 1000;
 
 @Injectable()
 export class ReceiptPrintsService {
@@ -39,12 +40,23 @@ export class ReceiptPrintsService {
     };
   }
 
+  private async purgeExpired() {
+    const cutoff = new Date(Date.now() - REQUEST_TTL_MS);
+    await this.prisma.receiptPrintRequest.deleteMany({
+      where: {
+        createdAt: { lt: cutoff },
+      },
+    });
+  }
+
   /** Официант создаёт запрос на печать чека. Запрос уходит администратору. */
   async create(
     actor: AuditActor,
     orderId: string,
     type: ReceiptPrintType = ReceiptPrintType.receipt,
   ) {
+    await this.purgeExpired();
+
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { table: { select: { number: true } } },
@@ -82,6 +94,8 @@ export class ReceiptPrintsService {
 
   /** Список заявок для администратора: ожидают решения или уже подтверждены, но ещё не отмечены распечатанными. */
   async listPending() {
+    await this.purgeExpired();
+
     const items = await this.prisma.receiptPrintRequest.findMany({
       where: { status: { in: [ReceiptPrintStatus.pending, ReceiptPrintStatus.approved] } },
       orderBy: { createdAt: 'asc' },
@@ -92,6 +106,7 @@ export class ReceiptPrintsService {
 
   /** Администратор принимает заявку: дальше админское устройство печатает документ. */
   async approve(actor: AuditActor, id: string) {
+    await this.purgeExpired();
     const request = await this.getPending(id);
 
     const updated = await this.prisma.receiptPrintRequest.update({
@@ -112,6 +127,7 @@ export class ReceiptPrintsService {
 
   /** Администраторское устройство подтвердило фактическую печать. */
   async markPrinted(actor: AuditActor, id: string) {
+    await this.purgeExpired();
     const request = await this.prisma.receiptPrintRequest.findUnique({ where: { id } });
     if (!request) throw new NotFoundException('Заявка не найдена');
     if (request.status === ReceiptPrintStatus.printed) {
@@ -140,6 +156,7 @@ export class ReceiptPrintsService {
 
   /** Администратор отклоняет заявку: чек не печатается → статус rejected. */
   async reject(actor: AuditActor, id: string) {
+    await this.purgeExpired();
     const request = await this.getPending(id);
 
     const updated = await this.prisma.receiptPrintRequest.update({
