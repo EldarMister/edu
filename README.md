@@ -560,6 +560,7 @@ VAPID_PRIVATE_KEY=
 
 REDIS_URL=
 MONITOR_DEV_DATABASE_URL=
+MONITOR_DEV_HEALTH_URL=
 ```
 
 Примечания:
@@ -592,7 +593,10 @@ VITE_API_URL=http://localhost:3000
 https://YOUR_BACKEND_DOMAIN/api/health/status
 ```
 
-Для твоей схемы Railway ставьте `MONITOR_DEV_DATABASE_URL` только в `backend` main-сервис. Main/prod база берется из обычного `DATABASE_URL`, а dev база проверяется через `MONITOR_DEV_DATABASE_URL`. Если его не задать, страница покажет только текущую main/prod среду.
+Для твоей схемы Railway ставьте переменные мониторинга только в `backend` main-сервис.
+Main/prod база берется из обычного `DATABASE_URL`, а dev база проверяется через `MONITOR_DEV_DATABASE_URL`.
+Коммит dev backend показывается через `MONITOR_DEV_HEALTH_URL`, например `https://BACKEND_DEV_DOMAIN/api/health`.
+Если указать только dev базу без dev backend URL, миграции dev будут видны, но текущий коммит dev backend показать невозможно.
 
 ## Установка и запуск
 
