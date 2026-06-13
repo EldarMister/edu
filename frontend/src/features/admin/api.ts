@@ -624,6 +624,7 @@ export function useReceiptPrintRequests() {
   return useQuery({
     queryKey: ['admin', 'receipt-prints'],
     queryFn: () => get<ReceiptPrintRequest[]>('/receipt-prints'),
+    refetchInterval: 60_000,
   });
 }
 
