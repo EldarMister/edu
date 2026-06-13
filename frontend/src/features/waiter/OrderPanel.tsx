@@ -282,9 +282,6 @@ export function OrderPanel({
                 onChange={(e) => setCancelReason(e.target.value)}
               />
             </label>
-            <p className="text-xs text-text-muted">
-              {t('После отмены блюдо не будет входить в итоговую сумму.')}
-            </p>
           </div>
         )}
       </Modal>
