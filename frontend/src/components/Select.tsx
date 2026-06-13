@@ -57,7 +57,11 @@ export function Select({
         setOpen(false);
       }
     };
-    const close = () => setOpen(false);
+    const close = (e?: Event) => {
+      const t = e?.target as Node | null;
+      if (t && (triggerRef.current?.contains(t) || menuRef.current?.contains(t))) return;
+      setOpen(false);
+    };
     document.addEventListener('mousedown', onDoc);
     document.addEventListener('keydown', onKey, true);
     window.addEventListener('resize', close);

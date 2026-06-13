@@ -15,7 +15,11 @@ function builtAtShort(): string {
   return `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** Строка для отображения: «v0.1.38 · a1b2c3d · 08.06.2026 15:30» (пустые части опускаются). */
-export const APP_VERSION_LABEL = [`v${APP_VERSION}`, APP_COMMIT, builtAtShort()]
+function displayVersion(version: string): string {
+  return version.startsWith('0.') ? version.slice(2) : version;
+}
+
+/** Строка для отображения: «v1.38 · a1b2c3d · 08.06.2026 15:30» (пустые части опускаются). */
+export const APP_VERSION_LABEL = [`v${displayVersion(APP_VERSION)}`, APP_COMMIT, builtAtShort()]
   .filter(Boolean)
   .join(' · ');
