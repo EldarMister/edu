@@ -5,7 +5,7 @@ import path from 'path';
 import { PrismaService } from '../prisma/prisma.service';
 
 type DbStatus = 'ok' | 'error';
-type HealthStatus = 'ok' | 'degraded';
+type HealthStatus = 'ok' | 'warning' | 'degraded';
 
 interface AppliedMigrationRow {
   migration_name: string;
@@ -19,6 +19,7 @@ export interface MigrationStatus {
   appliedCount: number;
   behind: boolean;
   missing: string[];
+  extraApplied: string[];
   latestLocal: string | null;
   latestApplied: string | null;
   failed: string[];
@@ -78,13 +79,15 @@ export class HealthService {
   async statusPage() {
     const project = await this.project();
     const cards = [
-      this.renderCurrentCard('Main database', project.current),
+      this.renderCurrentCard('Продакшен', project.current),
       project.dev
-        ? this.renderExternalCard('Dev database', project.dev)
-        : this.renderEmptyCard('Dev database', 'Set MONITOR_DEV_DATABASE_URL to show dev DB status.'),
+        ? this.renderExternalCard('Dev', project.dev)
+        : this.renderEmptyCard('Dev', 'Добавьте MONITOR_DEV_DATABASE_URL в main backend, чтобы видеть dev базу.'),
     ].join('');
     const overall = [project.current, project.dev].some((item) => item?.status === 'degraded')
       ? 'degraded'
+      : [project.current, project.dev].some((item) => item?.status === 'warning')
+        ? 'warning'
       : 'ok';
 
     return `<!doctype html>
@@ -93,45 +96,72 @@ export class HealthService {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="refresh" content="60" />
-  <title>EDU POS Status</title>
+  <title>Статус EDU POS</title>
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f8fb;
+      --bg: #eef3f8;
       --card: #ffffff;
       --text: #0f172a;
       --muted: #64748b;
       --border: #dbe3ef;
       --ok: #16a34a;
       --bad: #dc2626;
+      --warn: #d97706;
       --warn-bg: #fff7ed;
       --ok-bg: #ecfdf5;
       --bad-bg: #fef2f2;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      --panel: #f8fafc;
+      font-family: "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
     }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); }
-    main { max-width: 1120px; margin: 0 auto; padding: 32px 18px; }
-    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 22px; }
-    h1 { margin: 0; font-size: 30px; line-height: 1.15; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background:
+        linear-gradient(135deg, rgba(15, 98, 254, 0.08), transparent 32%),
+        radial-gradient(circle at 85% 12%, rgba(22, 163, 74, 0.10), transparent 30%),
+        var(--bg);
+    }
+    main { max-width: 1180px; margin: 0 auto; padding: 34px 22px 42px; }
+    header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 22px;
+      border: 1px solid rgba(219, 227, 239, 0.85);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.74);
+      padding: 22px;
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.07);
+      backdrop-filter: blur(12px);
+    }
+    h1 { margin: 0; font-size: 32px; line-height: 1.1; letter-spacing: 0; }
     p { margin: 0; }
     .muted { color: var(--muted); }
     .pill { display: inline-flex; align-items: center; gap: 8px; border-radius: 999px; padding: 8px 12px; font-weight: 700; font-size: 14px; }
     .pill.ok { background: var(--ok-bg); color: var(--ok); }
+    .pill.warning { background: var(--warn-bg); color: var(--warn); }
     .pill.degraded { background: var(--bad-bg); color: var(--bad); }
     .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-    .card { min-width: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--card); padding: 18px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04); }
-    .card h2 { margin: 0 0 12px; font-size: 18px; }
-    .row { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-top: 1px solid #edf2f7; }
+    .card { min-width: 0; border: 1px solid var(--border); border-radius: 18px; background: var(--card); padding: 20px; box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06); }
+    .card h2 { margin: 0; font-size: 20px; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .badge { border-radius: 999px; padding: 6px 10px; font-size: 12px; font-weight: 800; }
+    .badge.ok { background: var(--ok-bg); color: var(--ok); }
+    .badge.warning { background: var(--warn-bg); color: var(--warn); }
+    .badge.degraded { background: var(--bad-bg); color: var(--bad); }
+    .rows { border: 1px solid #e8eef6; border-radius: 14px; overflow: hidden; background: var(--panel); }
+    .row { display: flex; justify-content: space-between; gap: 14px; padding: 12px 14px; border-top: 1px solid #e8eef6; }
     .row:first-of-type { border-top: 0; }
     .label { color: var(--muted); }
     .value { font-weight: 700; text-align: right; overflow-wrap: anywhere; }
-    .status { margin-bottom: 12px; }
-    .status.ok { color: var(--ok); }
-    .status.degraded { color: var(--bad); }
-    .list { margin-top: 10px; border-radius: 10px; background: var(--bad-bg); padding: 10px; color: #991b1b; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+    .list { margin-top: 12px; border-radius: 14px; padding: 12px; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; white-space: pre-line; }
+    .list.degraded { background: var(--bad-bg); color: #991b1b; }
+    .list.warning { background: var(--warn-bg); color: #9a3412; }
     .empty { background: var(--warn-bg); color: #9a3412; }
-    footer { margin-top: 18px; color: var(--muted); font-size: 13px; }
+    footer { margin-top: 18px; color: var(--muted); font-size: 13px; padding-left: 4px; }
     @media (max-width: 900px) {
       header { flex-direction: column; }
       .grid { grid-template-columns: 1fr; }
@@ -143,13 +173,13 @@ export class HealthService {
   <main>
     <header>
       <div>
-        <h1>EDU POS Status</h1>
-        <p class="muted">Backend, database and Prisma migrations. Auto-refresh: 60s.</p>
+        <h1>Статус EDU POS</h1>
+        <p class="muted">Бэкенд, база данных и миграции Prisma. Автообновление: 60 сек.</p>
       </div>
-      <span class="pill ${overall}">${overall === 'ok' ? 'OK' : 'NEEDS ATTENTION'}</span>
+      <span class="pill ${overall}">${this.overallLabel(overall)}</span>
     </header>
     <section class="grid">${cards}</section>
-    <footer>Updated: ${this.escapeHtml(new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Bishkek' }))} Bishkek time</footer>
+    <footer>Обновлено: ${this.escapeHtml(new Date().toLocaleString('ru-RU', { timeZone: 'Asia/Bishkek' }))}, Бишкек</footer>
   </main>
 </body>
 </html>`;
@@ -210,16 +240,19 @@ export class HealthService {
       .sort((a, b) => a.localeCompare(b));
     const appliedSet = new Set(applied);
     const missing = local.filter((name) => !appliedSet.has(name));
+    const extraApplied = applied.filter((name) => !local.includes(name));
     const failed = appliedRows
-      .filter((row) => !row.finished_at || row.rolled_back_at)
+      .filter((row) => (!row.finished_at || row.rolled_back_at) && !appliedSet.has(row.migration_name))
       .map((row) => row.migration_name);
     const behind = missing.length > 0 || failed.length > 0;
+    const warning = !behind && extraApplied.length > 0;
     return {
-      status: behind ? 'degraded' : 'ok',
+      status: behind ? 'degraded' : warning ? 'warning' : 'ok',
       localCount: local.length,
       appliedCount: applied.length,
       behind,
       missing,
+      extraApplied,
       latestLocal: local.at(-1) ?? null,
       latestApplied: applied.at(-1) ?? null,
       failed,
@@ -234,6 +267,7 @@ export class HealthService {
       appliedCount: 0,
       behind: true,
       missing: local,
+      extraApplied: [],
       latestLocal: local.at(-1) ?? null,
       latestApplied: null,
       failed: [],
@@ -280,25 +314,33 @@ export class HealthService {
     error?: string;
   }) {
     const migrationProblem = input.migrations.missing.length > 0 || input.migrations.failed.length > 0;
+    const migrationWarning = !migrationProblem && input.migrations.extraApplied.length > 0;
     return `<article class="card">
-  <h2>${this.escapeHtml(input.title)}</h2>
-  <div class="status ${input.status}">${input.status === 'ok' ? 'OK' : 'Needs attention'}</div>
-  ${this.row('Environment', input.env)}
-  ${this.row('Database', input.database)}
-  ${input.commit ? this.row('Commit', input.commit.slice(0, 8)) : ''}
-  ${this.row('Local migrations', String(input.migrations.localCount))}
-  ${this.row('Applied migrations', String(input.migrations.appliedCount))}
-  ${this.row('Latest local', input.migrations.latestLocal ?? 'none')}
-  ${this.row('Latest applied', input.migrations.latestApplied ?? 'none')}
+  <div class="card-head">
+    <h2>${this.escapeHtml(input.title)}</h2>
+    <span class="badge ${input.status}">${this.statusLabel(input.status)}</span>
+  </div>
+  <div class="rows">
+    ${this.row('Окружение', this.envLabel(input.env))}
+    ${this.row('База данных', input.database === 'ok' ? 'доступна' : 'недоступна')}
+    ${input.commit ? this.row('Коммит', input.commit.slice(0, 8)) : ''}
+    ${this.row('Миграций в коде', String(input.migrations.localCount))}
+    ${this.row('Миграций в базе', String(input.migrations.appliedCount))}
+    ${this.row('Последняя в коде', input.migrations.latestLocal ?? 'нет')}
+    ${this.row('Последняя в базе', input.migrations.latestApplied ?? 'нет')}
+  </div>
   ${migrationProblem ? this.renderProblems(input.migrations) : ''}
-  ${input.error ? `<div class="list">${this.escapeHtml(input.error)}</div>` : ''}
+  ${migrationWarning ? this.renderWarnings(input.migrations) : ''}
+  ${input.error ? `<div class="list degraded">${this.escapeHtml(input.error)}</div>` : ''}
 </article>`;
   }
 
   private renderEmptyCard(title: string, message: string) {
     return `<article class="card">
-  <h2>${this.escapeHtml(title)}</h2>
-  <div class="status degraded">Not configured</div>
+  <div class="card-head">
+    <h2>${this.escapeHtml(title)}</h2>
+    <span class="badge warning">не настроено</span>
+  </div>
   <div class="list empty">${this.escapeHtml(message)}</div>
 </article>`;
   }
@@ -310,11 +352,38 @@ export class HealthService {
   private renderProblems(status: MigrationStatus) {
     const parts: string[] = [];
     if (status.missing.length > 0) {
-      parts.push(`Missing: ${status.missing.slice(0, 12).join(', ')}`);
-      if (status.missing.length > 12) parts.push(`and ${status.missing.length - 12} more`);
+      parts.push(`Не применены: ${status.missing.slice(0, 12).join(', ')}`);
+      if (status.missing.length > 12) parts.push(`и еще ${status.missing.length - 12}`);
     }
-    if (status.failed.length > 0) parts.push(`Failed: ${status.failed.join(', ')}`);
-    return `<div class="list">${this.escapeHtml(parts.join('\n'))}</div>`;
+    if (status.failed.length > 0) parts.push(`Активные ошибки миграций: ${status.failed.join(', ')}`);
+    return `<div class="list degraded">${this.escapeHtml(parts.join('\n'))}</div>`;
+  }
+
+  private renderWarnings(status: MigrationStatus) {
+    const text = [
+      'В базе есть миграции, которых нет в текущем коде:',
+      status.extraApplied.slice(0, 12).join(', '),
+      status.extraApplied.length > 12 ? `и еще ${status.extraApplied.length - 12}` : '',
+    ].filter(Boolean).join('\n');
+    return `<div class="list warning">${this.escapeHtml(text)}</div>`;
+  }
+
+  private statusLabel(status: HealthStatus) {
+    if (status === 'ok') return 'все нормально';
+    if (status === 'warning') return 'предупреждение';
+    return 'требует внимания';
+  }
+
+  private overallLabel(status: HealthStatus) {
+    if (status === 'ok') return 'ВСЕ НОРМАЛЬНО';
+    if (status === 'warning') return 'ЕСТЬ ПРЕДУПРЕЖДЕНИЕ';
+    return 'ТРЕБУЕТ ВНИМАНИЯ';
+  }
+
+  private envLabel(env: string) {
+    if (env === 'production') return 'production';
+    if (env === 'dev') return 'dev';
+    return env;
   }
 
   private escapeHtml(value: string) {
