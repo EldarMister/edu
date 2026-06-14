@@ -12,7 +12,7 @@ import {
   IconCard,
   IconPrinter,
 } from '../admin/components/icons';
-import { useAdminSettings, useUpdateSettings } from './api';
+import { useAdminSettings, useUpdateSettings, type SettingsInput } from './api';
 import { QrPaymentCard } from './QrPaymentCard';
 
 interface Form {
@@ -41,6 +41,7 @@ export function SettingsPage() {
 
   const [form, setForm] = useState<Form | null>(null);
   const saveTimer = useRef<number | null>(null);
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const hydrateRef = useRef(true);
 
   useEffect(() => {
@@ -83,27 +84,26 @@ export function SettingsPage() {
     );
   }
 
-  const persist = async (next: Form) => {
-    if (!next.payQr && !next.payCash && !next.payCard) {
-      return;
-    }
-    try {
-      await update.mutateAsync({
-        ...next,
-        serviceChargeAmount: 0,
+  const enqueuePersist = (patch: SettingsInput) => {
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await update.mutateAsync(patch);
+          if (patch.language) setLocale(patch.language as Locale);
+        } catch (err) {
+          const msg = apiError(err);
+          push({ message: msg, type: 'error', at: new Date().toISOString() });
+        }
       });
-      setLocale(next.language);
-    } catch (err) {
-      const msg = apiError(err);
-      push({ message: msg, type: 'error', at: new Date().toISOString() });
-    }
+    return saveQueue.current;
   };
 
-  const schedulePersist = (next: Form) => {
+  const schedulePersist = (patch: SettingsInput) => {
     if (saveTimer.current) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
       saveTimer.current = null;
-      void persist(next);
+      void enqueuePersist(patch);
     }, 700);
   };
 
@@ -124,12 +124,13 @@ export function SettingsPage() {
       return;
     }
     if (!nextForm || nextForm[k] !== v) return;
+    const patch = { [k]: v } as SettingsInput;
     if (nextForm && !hydrateRef.current) {
       if (mode === 'instant') {
         if (saveTimer.current) window.clearTimeout(saveTimer.current);
-        void persist(nextForm);
+        void enqueuePersist(patch);
       } else {
-        schedulePersist(nextForm);
+        schedulePersist(patch);
       }
     }
   };

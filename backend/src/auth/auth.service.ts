@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
+import { getJwtAccessSecret, getJwtRefreshSecret } from './jwt.config';
 
 @Injectable()
 export class AuthService {
@@ -43,7 +44,7 @@ export class AuthService {
     let payload: JwtPayload;
     try {
       payload = await this.jwt.verifyAsync<JwtPayload>(refreshToken, {
-        secret: process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh-secret',
+        secret: getJwtRefreshSecret(),
       });
     } catch {
       throw new UnauthorizedException('Сессия истекла, войдите заново');
@@ -72,11 +73,11 @@ export class AuthService {
     const payload: JwtPayload = { sub: userId, role };
     const [accessToken, refreshToken] = await Promise.all([
       this.jwt.signAsync(payload, {
-        secret: process.env.JWT_ACCESS_SECRET ?? 'change-me-access-secret',
+        secret: getJwtAccessSecret(),
         expiresIn: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
       }),
       this.jwt.signAsync(payload, {
-        secret: process.env.JWT_REFRESH_SECRET ?? 'change-me-refresh-secret',
+        secret: getJwtRefreshSecret(),
         expiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? '7d',
       }),
     ]);

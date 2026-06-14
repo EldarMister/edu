@@ -8,6 +8,7 @@ import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { ROOMS } from './events';
+import { getJwtAccessSecret } from '../auth/jwt.config';
 
 interface SocketUser {
   id: string;
@@ -48,7 +49,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     try {
       const payload = await this.jwt.verifyAsync<{ sub: string; role: string }>(token, {
-        secret: process.env.JWT_ACCESS_SECRET ?? 'change-me-access-secret',
+        secret: getJwtAccessSecret(),
       });
       const user: SocketUser = { id: payload.sub, role: payload.role };
       client.data.user = user;

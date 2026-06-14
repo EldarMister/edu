@@ -70,6 +70,7 @@ export function StaffPage() {
   const [date, setDate] = useState(todayYmd());
   const [expanded, setExpanded] = useState<string | null>(null);
   const [editing, setEditing] = useState<StaffMember | null | 'new'>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
 
   const reportQ = useShiftReport(date);
   const staffQ = useStaff('', '');
@@ -80,11 +81,12 @@ export function StaffPage() {
   const rows = reportQ.data ?? [];
   const memberById = new Map((staffQ.data ?? []).map((m) => [m.id, m]));
 
-  async function onDelete(id: string, name: string) {
-    if (!confirm(`Удалить сотрудника «${name}»?`)) return;
+  async function confirmDelete() {
+    if (!pendingDelete) return;
     try {
-      await remove.mutateAsync(id);
+      await remove.mutateAsync(pendingDelete.id);
       push({ message: 'Сотрудник удалён', at: new Date().toISOString() });
+      setPendingDelete(null);
     } catch (err) {
       push({ message: apiError(err), at: new Date().toISOString() });
     }
@@ -217,7 +219,7 @@ export function StaffPage() {
                             <IconBtn title={tr('Изменить')} onClick={openEdit}>
                               <IconEdit className="h-4 w-4" />
                             </IconBtn>
-                            <IconBtn title={tr('Удалить')} danger onClick={() => onDelete(row.waiterId, row.name)}>
+                            <IconBtn title={tr('Удалить')} danger onClick={() => setPendingDelete({ id: row.waiterId, name: row.name })}>
                               <IconTrash className="h-4 w-4" />
                             </IconBtn>
                           </div>
@@ -241,6 +243,35 @@ export function StaffPage() {
 
       {editing !== null && (
         <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+      )}
+      {pendingDelete && (
+        <Modal
+          open
+          onClose={() => !remove.isPending && setPendingDelete(null)}
+          title="Удалить сотрудника"
+          footer={
+            <div className="flex gap-2">
+              <button
+                className="btn-secondary btn-lg flex-1"
+                disabled={remove.isPending}
+                onClick={() => setPendingDelete(null)}
+              >
+                Отмена
+              </button>
+              <button
+                className="btn-danger btn-lg flex-1 font-semibold"
+                disabled={remove.isPending}
+                onClick={confirmDelete}
+              >
+                {remove.isPending ? <Spinner /> : 'Удалить'}
+              </button>
+            </div>
+          }
+        >
+          <p className="text-sm text-text-secondary">
+            Удалить сотрудника «{pendingDelete.name}»?
+          </p>
+        </Modal>
       )}
     </div>
   );
