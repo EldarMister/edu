@@ -653,12 +653,19 @@ function ShiftHistoryDetails({ row }: { row: ShiftHistoryRow }) {
         <DetailLine label="Оборот за смену" value={money(row.turnover)} />
         {row.orders.length > 0 && (
           <div className="mt-1 max-h-28 max-w-xl overflow-y-auto rounded-lg border border-border bg-white">
-            {row.orders.slice(0, 8).map((o) => (
-              <div key={o.id} className="flex items-center justify-between gap-3 border-b border-border px-2 py-1.5 last:border-b-0">
-                <span className="text-text-secondary">{displayOrderNumber(o.orderNumber)}</span>
-                <span className="font-medium text-text-primary">{money(o.amount)}</span>
-              </div>
-            ))}
+            <div className="grid grid-cols-2">
+              {row.orders.slice(0, 12).map((o, i) => (
+                <div
+                  key={o.id}
+                  className={`flex items-center justify-between gap-3 px-2 py-1.5 ${
+                    i % 2 === 0 ? 'border-r border-border' : ''
+                  } border-b border-border`}
+                >
+                  <span className="text-text-secondary">{displayOrderNumber(o.orderNumber)}</span>
+                  <span className="font-medium text-text-primary">{money(o.amount)}</span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
