@@ -28,7 +28,7 @@ import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
-import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText } from '../tts/kitchen-voice';
+import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu } from '../tts/kitchen-voice';
 
 /** Статусы «живого» заказа, который занимает стол. */
 const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
@@ -48,6 +48,10 @@ const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   [PaymentMethod.card]: 'Карта',
   [PaymentMethod.mixed]: 'Смешанная',
 };
+
+function tableNumberVoice(value: number): string {
+  return Number.isInteger(value) ? numberToWordsRu(value) : String(value);
+}
 
 const PARTIAL_REJECTION_PENDING_MESSAGE =
   'Ожидается решение официанта по частичному отказу';
@@ -719,7 +723,7 @@ export class OrdersService {
     if (applied) {
       const acceptedText = station === PrepStation.bar ? 'Бар принял ваш заказ' : 'Кухня приняла ваш заказ';
       this.emitStatusChanged(updated, {
-        waiterText: `${acceptedText}. Стол номер ${updated.table.number}.`,
+        waiterText: `${acceptedText}. Стол номер ${tableNumberVoice(updated.table.number)}.`,
       });
       if (updated.status !== order.status) {
         const tableStatus = this.tableStatusForOrderStatus(updated.status);

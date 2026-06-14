@@ -93,7 +93,7 @@ function waiterVoiceText(order: VoicedOrder): string | null {
   switch (order.status) {
     case 'accepted_by_kitchen':
     case 'cooking':
-      return order.voice?.waiterText ?? null;
+      return order.voice?.waiterText ?? `Кухня приняла ваш заказ. ${location}`;
     case 'ready':
       return `Ваш заказ готов. ${location} Заберите.`;
     case 'rejected':
