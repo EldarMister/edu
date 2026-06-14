@@ -58,6 +58,8 @@ export function useAdminSettings() {
   return useQuery({
     queryKey: ['settings', 'admin'],
     queryFn: async () => (await api.get<Settings>('/admin/settings')).data,
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 }
 
@@ -68,10 +70,36 @@ export type SettingsInput = Partial<Omit<Settings, 'id' | 'updatedAt' | 'printer
 export function useUpdateSettings() {
   const qc = useQueryClient();
   return useMutation({
+    onMutate: async (patch) => {
+      await qc.cancelQueries({ queryKey: ['settings', 'admin'] });
+      const previous = qc.getQueryData<Settings>(['settings', 'admin']);
+      if (previous) {
+        const { serviceChargeAmount, ...restPatch } = patch;
+        const optimisticPatch: Partial<Settings> = {
+          ...restPatch,
+          ...(serviceChargeAmount !== undefined
+            ? { serviceChargeAmount: String(serviceChargeAmount) }
+            : {}),
+        };
+        qc.setQueryData<Settings>(['settings', 'admin'], {
+          ...previous,
+          ...optimisticPatch,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+      return { previous };
+    },
     mutationFn: async (body: SettingsInput) =>
       (await api.patch<Settings>('/admin/settings', body)).data,
+    onError: (_error, _patch, context) => {
+      if (context?.previous) {
+        qc.setQueryData(['settings', 'admin'], context.previous);
+      }
+    },
     onSuccess: (data) => {
       qc.setQueryData(['settings', 'admin'], data);
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: ['settings'] });
       qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
     },
