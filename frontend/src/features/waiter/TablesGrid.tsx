@@ -36,7 +36,7 @@ export function TablesGrid({
   const gridFlowClass =
     fullscreenSingle || splitVertical || roomyTwoColumn ? 'auto-rows-fr' : 'content-start auto-rows-max';
   const cardSizeClass = fullscreenSingle
-    ? 'h-full min-h-0 text-[54px] sm:text-6xl'
+    ? 'min-h-[300px] h-full max-h-[460px] text-[54px] sm:min-h-[340px] sm:max-h-[520px] sm:text-6xl'
     : splitVertical
       ? 'h-full min-h-0 text-[44px] sm:text-[52px]'
       : roomyTwoColumn
