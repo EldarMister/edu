@@ -1,0 +1,66 @@
+name: Backup production database
+
+on:
+  schedule:
+    # 03:10 Asia/Bishkek daily. GitHub schedules run in UTC.
+    - cron: '10 21 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: prod-db-backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client openssl
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run backup
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.PROD_DATABASE_URL }}
+          GOOGLE_DRIVE_FOLDER_ID: ${{ secrets.GOOGLE_DRIVE_FOLDER_ID }}
+          GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON }}
+          BACKUP_RETENTION_DAYS: ${{ vars.BACKUP_RETENTION_DAYS || '30' }}
+          BACKUP_PREFIX: ${{ vars.BACKUP_PREFIX || 'edu-pos-prod' }}
+          BACKUP_PGSSLMODE: ${{ vars.BACKUP_PGSSLMODE || 'require' }}
+          BACKUP_ENCRYPTION_PASSWORD: ${{ secrets.BACKUP_ENCRYPTION_PASSWORD }}
+          BACKUP_FAILURE_WEBHOOK_URL: ${{ secrets.BACKUP_FAILURE_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          set -o pipefail
+          npm run backup:prod 2>&1 | tee ../backup-prod-db.log
+
+      - name: Upload backup log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-prod-db-log-${{ github.run_id }}
+          path: backup-prod-db.log
+          retention-days: 30

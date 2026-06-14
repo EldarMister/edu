@@ -19,6 +19,7 @@ frontend/.env
 logs/
 *.log
 npm-debug.log*
+backend/tmp/
 
 # misc
 .DS_Store
