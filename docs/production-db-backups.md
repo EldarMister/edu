@@ -99,6 +99,7 @@ Optional repository variables:
 BACKUP_RETENTION_DAYS=30
 BACKUP_PREFIX=edu-pos-prod
 BACKUP_PGSSLMODE=require
+BACKUP_NOTIFY_ON_SUCCESS=1
 ```
 
 The backup script prefers personal Google Drive OAuth when `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, and `GOOGLE_DRIVE_REFRESH_TOKEN` are set. If they are absent, it falls back to `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`.
@@ -218,6 +219,12 @@ For external notifications, configure one of these:
 ```text
 TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
 BACKUP_FAILURE_WEBHOOK_URL
+```
+
+Success notifications are disabled by default. To receive Telegram or webhook notifications after successful backups too, add repository variable:
+
+```text
+BACKUP_NOTIFY_ON_SUCCESS=1
 ```
 
 The webhook receives JSON:

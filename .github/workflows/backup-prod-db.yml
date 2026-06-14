@@ -56,6 +56,7 @@ jobs:
           BACKUP_RETENTION_DAYS: ${{ vars.BACKUP_RETENTION_DAYS || '30' }}
           BACKUP_PREFIX: ${{ vars.BACKUP_PREFIX || 'edu-pos-prod' }}
           BACKUP_PGSSLMODE: ${{ vars.BACKUP_PGSSLMODE || 'require' }}
+          BACKUP_NOTIFY_ON_SUCCESS: ${{ vars.BACKUP_NOTIFY_ON_SUCCESS || '0' }}
           BACKUP_ENCRYPTION_PASSWORD: ${{ secrets.BACKUP_ENCRYPTION_PASSWORD }}
           BACKUP_FAILURE_WEBHOOK_URL: ${{ secrets.BACKUP_FAILURE_WEBHOOK_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
