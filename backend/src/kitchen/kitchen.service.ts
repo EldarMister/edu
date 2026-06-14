@@ -21,7 +21,16 @@ const ACTIVE_TAB_STATUSES: OrderStatus[] = [
   OrderStatus.served,
 ];
 
+/** История кухни: завершённые и отказанные заказы видны только последние 24 часа. */
+const KITCHEN_HISTORY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 type StationItem = { status: OrderItemStatus };
+
+type HistoryOrder = {
+  status: OrderStatus;
+  updatedAt: Date;
+  closedAt: Date | null;
+};
 
 /**
  * Вкладка станции вычисляется по её собственным позициям — независимо от другой
@@ -44,6 +53,14 @@ function stationTabOf(items: StationItem[]): Exclude<KitchenTab, 'rejected'> | n
   return 'in_work';
 }
 
+function isRecentKitchenHistory(order: HistoryOrder, cutoff: Date) {
+  const historyAt =
+    order.status === OrderStatus.paid
+      ? (order.closedAt ?? order.updatedAt)
+      : order.updatedAt;
+  return historyAt >= cutoff;
+}
+
 @Injectable()
 export class KitchenService {
   constructor(
@@ -53,25 +70,25 @@ export class KitchenService {
   ) {}
 
   async findByTab(tab: KitchenTab, station: PrepStation = PrepStation.kitchen) {
+    const historyCutoff = new Date(Date.now() - KITCHEN_HISTORY_WINDOW_MS);
+
     if (tab === 'rejected') {
       const orders = await this.prisma.order.findMany({
         where: { status: OrderStatus.rejected, items: { some: { prepStation: station } } },
         orderBy: { createdAt: 'asc' },
         include: orderInclude,
       });
-      return orders.map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }));
+      return orders
+        .filter((o) => isRecentKitchenHistory(o, historyCutoff))
+        .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }));
     }
 
-    // На вкладке «Завершённые» оплаченные заказы не должны пропадать — показываем
-    // оплаченные за сегодня вместе с активными готовыми.
-    const startOfDay = new Date();
-    startOfDay.setHours(0, 0, 0, 0);
     const statusWhere =
       tab === 'ready'
         ? {
             OR: [
               { status: { in: ACTIVE_TAB_STATUSES } },
-              { status: OrderStatus.paid, closedAt: { gte: startOfDay } },
+              { status: OrderStatus.paid },
             ],
           }
         : { status: { in: ACTIVE_TAB_STATUSES } };
@@ -92,9 +109,11 @@ export class KitchenService {
 
     // Оставляем только позиции станции и раскладываем по вкладке станции.
     // Оплаченные заказы (все позиции готовы/поданы) попадают в «Завершённые».
+    // Завершённые храним в ленте кухни только 24 часа.
     return orders
       .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }))
-      .filter((o) => o.status === OrderStatus.paid ? tab === 'ready' : stationTabOf(o.items) === tab);
+      .filter((o) => o.status === OrderStatus.paid ? tab === 'ready' : stationTabOf(o.items) === tab)
+      .filter((o) => tab === 'ready' ? isRecentKitchenHistory(o, historyCutoff) : true);
   }
 
   /**
