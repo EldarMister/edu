@@ -230,7 +230,8 @@ export function AdminApp() {
           </div>
         </header>
 
-        <main className="app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6">
+        <main className={`app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${section === 'receipts' ? 'lg:pt-3' : ''}`}>
+
           {section === 'stats' && isOwner && <StatisticsPage />}
           {section === 'orders' && <OrdersPage />}
           {section === 'receipts' && isAdmin && <ReceiptPrintsPage />}

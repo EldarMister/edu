@@ -137,11 +137,13 @@ export function KitchenApp({
         </div>
         <div className="flex items-center gap-4 text-sm">
           <ConnectionStatus />
-          {pushNotifications.status !== 'subscribed' && pushNotifications.status !== 'unsupported' && (
+          {pushNotifications.status !== 'subscribed' &&
+            pushNotifications.status !== 'unsupported' &&
+            pushNotifications.status !== 'checking' && (
             <button onClick={pushNotifications.enable} className="text-text-muted hover:text-primary">
               Уведомления
             </button>
-          )}
+            )}
           <button onClick={onLogout} className="text-text-muted hover:text-text-primary">
             Выйти
           </button>

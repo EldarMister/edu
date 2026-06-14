@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 
-type PushStatus = 'unsupported' | 'unavailable' | 'default' | 'denied' | 'subscribed' | 'error';
+export type PushStatus =
+  | 'unsupported'
+  | 'unavailable'
+  | 'default'
+  | 'denied'
+  | 'checking'
+  | 'subscribed'
+  | 'error';
 
 function urlBase64ToUint8Array(value: string) {
   const padding = '='.repeat((4 - (value.length % 4)) % 4);
@@ -52,12 +59,28 @@ async function subscribeBrowser(publicKey: string) {
   });
 }
 
+async function syncSubscription(subscription: PushSubscription) {
+  const json = subscription.toJSON();
+  await api.post('/push/subscribe', {
+    endpoint: json.endpoint,
+    keys: json.keys,
+  });
+}
+
+function initialStatus(supported: boolean): PushStatus {
+  if (!supported) return 'unsupported';
+  if (typeof Notification === 'undefined') return 'unsupported';
+  if (Notification.permission === 'granted') return 'checking';
+  if (Notification.permission === 'denied') return 'denied';
+  return 'default';
+}
+
 export function usePushNotifications(enabled: boolean) {
   const supported = useMemo(
     () => typeof window !== 'undefined' && 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window,
     [],
   );
-  const [status, setStatus] = useState<PushStatus>(supported ? 'default' : 'unsupported');
+  const [status, setStatus] = useState<PushStatus>(() => initialStatus(supported));
 
   const enable = useCallback(async () => {
     if (!enabled || !supported) {
@@ -97,8 +120,50 @@ export function usePushNotifications(enabled: boolean) {
   }, [enabled, supported]);
 
   useEffect(() => {
-    if (!enabled || !supported || Notification.permission !== 'granted') return;
-    void enable();
+    if (!enabled || !supported) return;
+
+    if (Notification.permission === 'denied') {
+      setStatus('denied');
+      return;
+    }
+    if (Notification.permission !== 'granted') {
+      setStatus('default');
+      return;
+    }
+
+    let cancelled = false;
+    setStatus('checking');
+
+    void (async () => {
+      try {
+        const { data } = await api.get<{ enabled: boolean; publicKey: string | null }>('/push/public-key');
+        if (!data.enabled || !data.publicKey) {
+          if (!cancelled) setStatus('unavailable');
+          return;
+        }
+
+        const registration = await getServiceWorkerRegistration();
+        await navigator.serviceWorker.ready;
+        const existing = await registration.pushManager.getSubscription();
+
+        if (existing && sameKey(existing, data.publicKey)) {
+          if (!cancelled) setStatus('subscribed');
+          void syncSubscription(existing).catch((err) => {
+            console.error('[push] не удалось синхронизировать подписку:', err);
+          });
+          return;
+        }
+
+        if (!cancelled) await enable();
+      } catch (err) {
+        console.error('[push] не удалось проверить подписку:', err);
+        if (!cancelled) setStatus('error');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [enable, enabled, supported]);
 
   return { status, enable };
