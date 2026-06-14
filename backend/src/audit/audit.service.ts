@@ -1,7 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditAction, AuditEntity } from './audit.constants';
+
+const AUDIT_LOG_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Кто совершил действие. name/role можно не передавать — подтянутся по userId. */
 export interface AuditActor {
@@ -40,6 +43,22 @@ export class AuditService {
   private readonly logger = new Logger('AuditService');
 
   constructor(private prisma: PrismaService) {}
+
+  private async purgeExpired() {
+    const cutoff = new Date(Date.now() - AUDIT_LOG_TTL_MS);
+    const { count } = await this.prisma.auditLog.deleteMany({
+      where: { createdAt: { lt: cutoff } },
+    });
+
+    if (count > 0) {
+      this.logger.log(`Удалено ${count} записей журнала старше 7 дней.`);
+    }
+  }
+
+  @Cron(CronExpression.EVERY_HOUR)
+  async purgeExpiredLogs() {
+    await this.purgeExpired();
+  }
 
   /**
    * Записывает событие в журнал. Вызывать ТОЛЬКО после успешной бизнес-операции.
@@ -83,6 +102,8 @@ export class AuditService {
 
   /** Журнал для владельца: фильтры + пагинация. По умолчанию последние 50. */
   async findMany(query: AuditQuery) {
+    await this.purgeExpired();
+
     const page = Math.max(1, Number(query.page) || 1);
     const limit = Math.min(200, Math.max(1, Number(query.limit) || 50));
 
@@ -117,6 +138,8 @@ export class AuditService {
 
   /** Список значений фильтров для UI (сотрудники, типы действий, встречающиеся в логах). */
   async filters() {
+    await this.purgeExpired();
+
     const [users, actions] = await Promise.all([
       this.prisma.auditLog.findMany({
         where: { userId: { not: null } },
