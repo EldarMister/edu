@@ -96,18 +96,18 @@ export function StatisticsPage() {
           </div>
 
           {/* График — главный элемент */}
-          <section className="card p-4 sm:p-6">
-            <div className="mb-3 flex items-start justify-between gap-3 sm:mb-5">
-              <div>
-                <h3 className="text-[14px] font-medium text-text-muted">Выручка за период</h3>
-                <div className="mt-1 flex flex-wrap items-center gap-2.5">
-                  <span className="text-[32px] font-bold leading-none text-text-primary sm:text-[28px] sm:font-semibold">
+          <section className="rounded-[24px] border border-[#E8EEF6] bg-white p-5 shadow-[0_18px_45px_rgba(15,23,42,0.055),0_2px_8px_rgba(15,23,42,0.035)] sm:p-7">
+            <div className="mb-6 flex items-start justify-between gap-4 sm:mb-7">
+              <div className="min-w-0">
+                <h3 className="text-[13px] font-medium leading-none text-text-muted">Выручка за период</h3>
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <span className="text-[34px] font-bold leading-[0.95] tracking-[-0.01em] text-text-primary sm:text-[38px]">
                     {money(d.cards.revenuePeriod)}
                   </span>
                   <TrendPill value={d.trends.revenue} />
                 </div>
               </div>
-              <div className="hidden text-right text-sm text-text-muted sm:block">
+              <div className="hidden pt-1 text-right text-[13px] font-medium leading-none text-text-muted sm:block">
                 {d.cards.ordersPeriod} заказов
               </div>
             </div>
@@ -203,9 +203,9 @@ function TrendPill({ value }: { value: number }) {
       ? 'bg-success/10 text-success'
       : 'bg-danger/10 text-danger';
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${cls}`}>
+    <span className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold leading-none ring-1 ring-inset ring-current/10 ${cls}`}>
       {!flat && (
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={positive ? '' : 'rotate-180'}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round" className={positive ? '' : 'rotate-180'}>
           <path d="M12 19V5M5 12l7-7 7 7" />
         </svg>
       )}
@@ -236,11 +236,11 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
 
   const W = Math.max(280, Math.round(width));
   // Компактная высота на мобильном, чуть выше на десктопе.
-  const H = W < 480 ? 240 : 280;
-  const padL = 46;
-  const padR = 14;
-  const padT = 14;
-  const padB = 30;
+  const H = W < 480 ? 246 : 292;
+  const padL = 50;
+  const padR = 18;
+  const padT = 20;
+  const padB = 36;
 
   const n = data.length;
   if (n === 0) return <p className="py-20 text-center text-text-muted">Нет данных за период</p>;
@@ -286,15 +286,28 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
         viewBox={`0 0 ${W} ${H}`}
         width="100%"
         height={H}
-        className="touch-none"
+        className="revenue-chart-svg touch-none overflow-visible"
         onPointerMove={onMove}
         onPointerLeave={() => setHover(null)}
       >
         <defs>
           <linearGradient id="rev-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#005BFF" stopOpacity="0.16" />
+            <stop offset="0%" stopColor="#005BFF" stopOpacity="0.18" />
+            <stop offset="58%" stopColor="#005BFF" stopOpacity="0.055" />
             <stop offset="100%" stopColor="#005BFF" stopOpacity="0" />
           </linearGradient>
+          <filter id="rev-active-glow" x="-70%" y="-70%" width="240%" height="240%">
+            <feGaussianBlur stdDeviation="3.2" result="blur" />
+            <feColorMatrix
+              in="blur"
+              type="matrix"
+              values="0 0 0 0 0 0 0 0 0 0.356 0 0 0 0 1 0 0 0 0.24 0"
+            />
+            <feMerge>
+              <feMergeNode />
+              <feMergeNode in="SourceGraphic" />
+            </feMerge>
+          </filter>
         </defs>
 
         {/* Сетка + подписи значений */}
@@ -302,8 +315,8 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
           const yy = y(t);
           return (
             <g key={t}>
-              <line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="#EEF2F7" strokeWidth="1" />
-              <text x={padL - 10} y={yy + 4} textAnchor="end" className="fill-text-light text-[12px]">
+              <line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="#F1F5F9" strokeWidth="0.8" />
+              <text x={padL - 12} y={yy + 4} textAnchor="end" className="fill-text-light text-[11px] font-medium">
                 {shortMoney(t)}
               </text>
             </g>
@@ -311,21 +324,31 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
         })}
 
         {/* Область + линия */}
-        <path d={area} fill="url(#rev-fill)" />
-        <path d={line} fill="none" stroke="#005BFF" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={area} fill="url(#rev-fill)" className="revenue-area" />
+        <path
+          d={line}
+          fill="none"
+          stroke="#005BFF"
+          strokeWidth="2.8"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          pathLength={1}
+          className="revenue-line"
+        />
 
         {/* Подписи по оси X */}
         {xLabelIdx.map((i) => (
-          <text key={i} x={x(i)} y={H - 8} textAnchor="middle" className="fill-text-light text-[12px]">
+          <text key={i} x={x(i)} y={H - 10} textAnchor="middle" className="fill-text-light text-[11px] font-medium">
             {formatAxisLabel(data[i].label)}
           </text>
         ))}
 
         {/* Hover: crosshair + точка */}
         {hi && hover != null && (
-          <g>
-            <line x1={x(hover)} x2={x(hover)} y1={padT} y2={H - padB} stroke="#CBD5E1" strokeWidth="1" strokeDasharray="4 4" />
-            <circle cx={x(hover)} cy={y(hi.amount)} r="5" fill="#fff" stroke="#005BFF" strokeWidth="3" />
+          <g className="revenue-active-point">
+            <line x1={x(hover)} x2={x(hover)} y1={padT} y2={H - padB} stroke="#D8E2F0" strokeWidth="0.9" strokeDasharray="3 6" />
+            <circle cx={x(hover)} cy={y(hi.amount)} r="9" fill="#005BFF" opacity="0.1" />
+            <circle cx={x(hover)} cy={y(hi.amount)} r="5.4" fill="#fff" stroke="#005BFF" strokeWidth="2.6" filter="url(#rev-active-glow)" />
           </g>
         )}
       </svg>
@@ -333,11 +356,11 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
       {/* Тултип */}
       {hi && hover != null && (
         <div
-          className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-lg border border-border bg-white px-3 py-2 shadow-card"
-          style={{ left: `${(x(hover) / W) * 100}%`, top: `${(y(hi.amount) / H) * 100}%`, transform: 'translate(-50%, calc(-100% - 12px))' }}
+          className="revenue-tooltip pointer-events-none absolute z-10 -translate-x-1/2 rounded-xl border border-[#E6ECF5] bg-white px-3.5 py-2.5 shadow-[0_16px_36px_rgba(15,23,42,0.12),0_2px_8px_rgba(15,23,42,0.06)]"
+          style={{ left: `clamp(76px, ${(x(hover) / W) * 100}%, calc(100% - 76px))`, top: `${(y(hi.amount) / H) * 100}%`, transform: 'translate(-50%, calc(-100% - 14px))' }}
         >
-          <p className="whitespace-nowrap text-[11px] text-text-muted">{formatTooltipLabel(hi.label)}</p>
-          <p className="whitespace-nowrap text-sm font-semibold text-text-primary">{money(hi.amount)}</p>
+          <p className="whitespace-nowrap text-[11px] font-medium leading-none text-text-muted">{formatTooltipLabel(hi.label)}</p>
+          <p className="mt-1.5 whitespace-nowrap text-[15px] font-semibold leading-none text-text-primary">{money(hi.amount)}</p>
         </div>
       )}
     </div>
