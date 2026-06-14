@@ -88,8 +88,8 @@ export function SettingsPage() {
     }
     try {
       await update.mutateAsync({
-        ...form,
-        serviceChargeAmount: Math.max(0, Number(form.serviceChargeAmount) || 0),
+        ...next,
+        serviceChargeAmount: Math.max(0, Number(next.serviceChargeAmount) || 0),
       });
       setLocale(next.language);
     } catch (err) {
