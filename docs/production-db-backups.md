@@ -36,6 +36,12 @@ It also supports manual runs from GitHub:
 GitHub -> Actions -> Backup production database -> Run workflow
 ```
 
+It can also be started from Telegram with:
+
+```text
+/backup
+```
+
 ## Required secrets and variables
 
 Configure these in:
@@ -64,6 +70,18 @@ Optional notification secrets:
 TELEGRAM_BOT_TOKEN=...
 TELEGRAM_CHAT_ID=...
 BACKUP_FAILURE_WEBHOOK_URL=https://...
+```
+
+Required Railway variables for Telegram `/backup` command:
+
+```text
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_ALLOWED_CHAT_ID=...
+TELEGRAM_WEBHOOK_SECRET=long-random-string
+GITHUB_BACKUP_DISPATCH_TOKEN=github-token-with-actions-write
+GITHUB_BACKUP_REPO=EldarMister/edu
+GITHUB_BACKUP_WORKFLOW_ID=backup-prod-db.yml
+GITHUB_BACKUP_REF=main
 ```
 
 Optional repository variables:
@@ -149,6 +167,59 @@ The webhook receives JSON:
   "message": "Database backup failed: ...",
   "timestamp": "2026-06-15T21:10:00.000Z"
 }
+```
+
+## Telegram manual backup command
+
+The backend exposes a public Telegram webhook:
+
+```text
+POST /api/telegram/backup/webhook
+```
+
+The route is not protected by JWT because Telegram calls it directly. It is protected by:
+
+```text
+TELEGRAM_WEBHOOK_SECRET
+TELEGRAM_ALLOWED_CHAT_ID
+```
+
+Create a GitHub token for `GITHUB_BACKUP_DISPATCH_TOKEN`:
+
+1. Open GitHub -> Settings -> Developer settings -> Personal access tokens.
+2. Prefer a fine-grained token.
+3. Select repository `EldarMister/edu`.
+4. Grant Actions read/write access.
+5. Add the token to Railway variable `GITHUB_BACKUP_DISPATCH_TOKEN`.
+
+Set the Telegram webhook after the backend is deployed:
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/setWebhook" \
+  -H "content-type: application/json" \
+  -d '{
+    "url": "https://YOUR_BACKEND_DOMAIN/api/telegram/backup/webhook",
+    "secret_token": "YOUR_TELEGRAM_WEBHOOK_SECRET",
+    "allowed_updates": ["message"]
+  }'
+```
+
+Check the webhook:
+
+```bash
+curl "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/getWebhookInfo"
+```
+
+Then send this command to the bot from the allowed chat:
+
+```text
+/backup
+```
+
+The bot should reply that the GitHub backup workflow was started. The workflow result is visible in:
+
+```text
+GitHub -> Actions -> Backup production database
 ```
 
 ## Manual local run
