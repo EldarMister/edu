@@ -116,7 +116,6 @@ export function StatisticsPage() {
 
           {/* Аналитические блоки */}
           <div className="grid gap-4 xl:grid-cols-4">
-          <div className="grid gap-4 xl:grid-cols-4">
             <PaymentMethodsCard methods={visiblePaymentMethods} />
             <Leaderboard
               title="Топ блюд"
