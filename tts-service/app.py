@@ -47,6 +47,12 @@ DEFAULT_SAMPLE_RATE = int(os.environ.get("TTS_SAMPLE_RATE", "24000"))
 # (наблюдалось 22–26 c вместо <1 c). Поэтому ограничиваем разумным числом.
 _cpu = os.cpu_count() or 2
 THREADS = int(os.environ.get("TTS_THREADS", str(min(_cpu, 4))))
+# Silero v3/v4 имеют предел длины одного синтеза (~1000 симв.): на длинном тексте
+# apply_tts падает или режет фразу. Длинные заказы (много блюд) бьём на куски по
+# границам предложений и склеиваем аудио — иначе озвучка таких заказов молчит.
+MAX_CHUNK_CHARS = int(os.environ.get("TTS_MAX_CHUNK_CHARS", "800"))
+# Пауза между склеенными кусками (сек), чтобы речь не «слипалась».
+CHUNK_GAP_SEC = float(os.environ.get("TTS_CHUNK_GAP_SEC", "0.25"))
 
 # Разрешённые русские модели. v5* намеренно НЕ поддерживаются (см. ТЗ).
 MODEL_URLS = {
@@ -90,11 +96,60 @@ def _load_model(name: str) -> torch.nn.Module:
     return model
 
 
+def _split_text(text: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
+    """Делит длинный текст на куски ≤ limit символов по границам предложений.
+
+    Текст озвучки строится backend-ом с точками между блюдами («борщ. салат. суп»),
+    поэтому режем по «. ». Если одно предложение длиннее лимита — режем по словам.
+    """
+    text = text.strip()
+    if len(text) <= limit:
+        return [text]
+
+    # Восстанавливаем точку после split, чтобы интонация конца фразы сохранялась.
+    sentences = [s.strip() for s in text.split(". ") if s.strip()]
+    chunks: list[str] = []
+    current = ""
+    for i, sentence in enumerate(sentences):
+        piece = sentence if i == len(sentences) - 1 else f"{sentence}."
+        # Одно предложение длиннее лимита — дробим по словам.
+        if len(piece) > limit:
+            if current:
+                chunks.append(current.strip())
+                current = ""
+            words = piece.split(" ")
+            buf = ""
+            for w in words:
+                if len(buf) + len(w) + 1 > limit and buf:
+                    chunks.append(buf.strip())
+                    buf = ""
+                buf = f"{buf} {w}".strip()
+            if buf:
+                current = buf
+            continue
+        if len(current) + len(piece) + 1 > limit and current:
+            chunks.append(current.strip())
+            current = ""
+        current = f"{current} {piece}".strip()
+    if current:
+        chunks.append(current.strip())
+    return chunks or [text]
+
+
 def _synthesize(text: str, model_name: str, speaker: str, sample_rate: int) -> bytes:
     model = _load_model(model_name)
-    audio = model.apply_tts(text=text, speaker=speaker, sample_rate=sample_rate)
-    # audio — это 1D torch.Tensor float32 в диапазоне [-1, 1].
     import soundfile as sf
+
+    chunks = _split_text(text)
+    # apply_tts возвращает 1D torch.Tensor float32 в диапазоне [-1, 1].
+    pieces: list[torch.Tensor] = []
+    gap = torch.zeros(int(sample_rate * CHUNK_GAP_SEC))
+    for i, chunk in enumerate(chunks):
+        audio = model.apply_tts(text=chunk, speaker=speaker, sample_rate=sample_rate)
+        if i > 0:
+            pieces.append(gap)
+        pieces.append(audio)
+    audio = pieces[0] if len(pieces) == 1 else torch.cat(pieces)
 
     buf = io.BytesIO()
     sf.write(buf, audio.numpy(), sample_rate, format="WAV", subtype="PCM_16")
