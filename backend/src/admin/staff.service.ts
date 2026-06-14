@@ -4,7 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
-import { CreateStaffDto, UpdateStaffDto } from './dto';
+import { CreateStaffDto, ShiftHistoryQueryDto, UpdateShiftHistoryDto, UpdateStaffDto } from './dto';
 
 const STAFF_SELECT = {
   id: true,
@@ -542,5 +542,175 @@ export class StaffService {
     });
 
     return { waiterId, cashHanded: Number(saved.cashHanded) };
+  }
+
+  private rangeForShiftHistory(params: ShiftHistoryQueryDto) {
+    const startOfDay = (d = new Date()) => {
+      const x = new Date(d);
+      x.setHours(0, 0, 0, 0);
+      return x;
+    };
+    const addDays = (d: Date, days: number) => {
+      const x = new Date(d);
+      x.setDate(x.getDate() + days);
+      return x;
+    };
+    const endExclusive = (d: Date) => addDays(startOfDay(d), 1);
+    const today = startOfDay();
+    const period = params.period ?? 'today';
+
+    if (period === 'custom' && params.from && params.to) {
+      const from = startOfDay(new Date(params.from));
+      const to = endExclusive(new Date(params.to));
+      return { from, to };
+    }
+    if (period === 'week') return { from: addDays(today, -6), to: endExclusive(today) };
+    if (period === 'month') return { from: addDays(today, -29), to: endExclusive(today) };
+    return { from: today, to: endExclusive(today) };
+  }
+
+  private shiftStatus(startedAt: Date, endedAt: Date | null, now = new Date()) {
+    if (endedAt) return 'closed';
+    const startDay = new Date(startedAt);
+    startDay.setHours(0, 0, 0, 0);
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    return startDay < today ? 'unclosed' : 'active';
+  }
+
+  async shiftHistory(params: ShiftHistoryQueryDto, actor: AuditActor) {
+    const { from, to } = this.rangeForShiftHistory(params);
+    const userWhere: Prisma.UserWhereInput = {
+      ...(!this.isOwner(actor) ? { role: { not: Role.OWNER } } : {}),
+      ...(params.employeeId ? { id: params.employeeId } : {}),
+      ...(params.role ? { role: params.role } : {}),
+    };
+
+    const shifts = await this.prisma.waiterShift.findMany({
+      where: {
+        startedAt: { lt: to },
+        OR: [{ endedAt: null }, { endedAt: { gte: from } }],
+        waiter: userWhere,
+      },
+      orderBy: { startedAt: 'desc' },
+      include: {
+        waiter: { select: { id: true, name: true, role: true } },
+        orders: {
+          where: { status: OrderStatus.paid },
+          select: { id: true, orderNumber: true, finalAmount: true },
+        },
+      },
+    });
+
+    const now = new Date();
+    const rows = shifts.map((s) => {
+      const effectiveEnd = s.endedAt ?? now;
+      const durationMin = Math.max(0, Math.round((effectiveEnd.getTime() - s.startedAt.getTime()) / 60000));
+      const turnover = s.orders.reduce((sum, o) => sum + Number(o.finalAmount), 0);
+      return {
+        id: s.id,
+        employeeId: s.waiterId,
+        employeeName: s.waiter.name,
+        role: s.waiter.role,
+        startedAt: s.startedAt.toISOString(),
+        endedAt: s.endedAt ? s.endedAt.toISOString() : null,
+        durationMin,
+        status: this.shiftStatus(s.startedAt, s.endedAt, now),
+        closedBy: null,
+        adminComment: null,
+        ordersCount: s.orders.length,
+        turnover,
+        orders: s.orders.map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          amount: Number(o.finalAmount),
+        })),
+      };
+    });
+
+    return {
+      items: rows,
+      summary: {
+        shiftsCount: rows.length,
+        totalDurationMin: rows.reduce((sum, r) => sum + r.durationMin, 0),
+        activeCount: rows.filter((r) => r.status === 'active').length,
+      },
+      range: { from: from.toISOString(), to: to.toISOString() },
+    };
+  }
+
+  async updateShiftHistory(id: string, dto: UpdateShiftHistoryDto, actor: AuditActor) {
+    const shift = await this.prisma.waiterShift.findUnique({
+      where: { id },
+      include: { waiter: { select: { name: true } } },
+    });
+    if (!shift) throw new NotFoundException('Смена не найдена');
+
+    const data: Prisma.WaiterShiftUpdateInput = {};
+    const startedAt = dto.startedAt !== undefined ? new Date(dto.startedAt) : shift.startedAt;
+    const endedAt =
+      dto.endedAt !== undefined
+        ? dto.endedAt
+          ? new Date(dto.endedAt)
+          : null
+        : shift.endedAt;
+    if (Number.isNaN(startedAt.getTime()) || (endedAt && Number.isNaN(endedAt.getTime()))) {
+      throw new BadRequestException('Некорректное время смены');
+    }
+    if (endedAt && endedAt < startedAt) {
+      throw new BadRequestException('Время окончания не может быть раньше начала');
+    }
+    if (dto.startedAt !== undefined) data.startedAt = startedAt;
+    if (dto.endedAt !== undefined) {
+      data.endedAt = endedAt;
+      data.status = endedAt ? WaiterShiftStatus.closed : WaiterShiftStatus.active;
+    }
+
+    const updated = await this.prisma.waiterShift.update({ where: { id }, data });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.STAFF_UPDATED,
+      entityType: AuditEntity.STAFF,
+      entityId: shift.waiterId,
+      description: `${actor.name ?? 'Администратор'} изменил время смены сотрудника ${shift.waiter.name}`,
+      oldValue: {
+        startedAt: shift.startedAt.toISOString(),
+        endedAt: shift.endedAt ? shift.endedAt.toISOString() : null,
+      },
+      newValue: {
+        startedAt: updated.startedAt.toISOString(),
+        endedAt: updated.endedAt ? updated.endedAt.toISOString() : null,
+      },
+    });
+    return { ok: true };
+  }
+
+  async closeShiftHistory(id: string, actor: AuditActor) {
+    const shift = await this.prisma.waiterShift.findUnique({
+      where: { id },
+      include: { waiter: { select: { name: true } } },
+    });
+    if (!shift) throw new NotFoundException('Смена не найдена');
+    if (shift.endedAt || shift.status === WaiterShiftStatus.closed) {
+      return { ok: true };
+    }
+    const endedAt = new Date();
+    if (endedAt < shift.startedAt) {
+      throw new BadRequestException('Нельзя закрыть смену раньше начала');
+    }
+    await this.prisma.waiterShift.update({
+      where: { id },
+      data: { endedAt, status: WaiterShiftStatus.closed },
+    });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.STAFF_UPDATED,
+      entityType: AuditEntity.STAFF,
+      entityId: shift.waiterId,
+      description: `${actor.name ?? 'Администратор'} вручную закрыл смену сотрудника ${shift.waiter.name}`,
+      oldValue: { endedAt: null, status: shift.status },
+      newValue: { endedAt: endedAt.toISOString(), status: WaiterShiftStatus.closed },
+    });
+    return { ok: true };
   }
 }

@@ -328,6 +328,31 @@ export class SetCashHandedDto {
   cashHanded: number;
 }
 
+export class ShiftHistoryQueryDto {
+  @IsOptional() @IsString()
+  period?: 'today' | 'week' | 'month' | 'custom';
+
+  @IsOptional() @IsString()
+  from?: string;
+
+  @IsOptional() @IsString()
+  to?: string;
+
+  @IsOptional() @IsString()
+  employeeId?: string;
+
+  @IsOptional() @IsEnum(Role)
+  role?: Role;
+}
+
+export class UpdateShiftHistoryDto {
+  @IsOptional() @IsString()
+  startedAt?: string;
+
+  @IsOptional() @IsString()
+  endedAt?: string | null;
+}
+
 // ---------- Заказы (фильтр/пагинация) ----------
 export class OrderQueryDto {
   @IsOptional() @IsString()

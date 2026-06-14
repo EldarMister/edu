@@ -3,7 +3,7 @@ import { Role } from '@prisma/client';
 import { StaffService } from './staff.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateStaffDto, SetCashHandedDto, UpdateStaffDto } from './dto';
+import { CreateStaffDto, SetCashHandedDto, ShiftHistoryQueryDto, UpdateShiftHistoryDto, UpdateStaffDto } from './dto';
 
 @Controller('admin/staff')
 @Roles(Role.ADMIN, Role.OWNER)
@@ -31,6 +31,21 @@ export class StaffController {
   @Post('cash-handed')
   setCashHanded(@Body() dto: SetCashHandedDto, @CurrentUser() actor: AuthUser) {
     return this.staff.setCashHanded(dto.waiterId, dto.date, dto.cashHanded, actor);
+  }
+
+  @Get('shift-history')
+  shiftHistory(@Query() query: ShiftHistoryQueryDto, @CurrentUser() actor: AuthUser) {
+    return this.staff.shiftHistory(query, actor);
+  }
+
+  @Patch('shift-history/:id')
+  updateShiftHistory(@Param('id') id: string, @Body() dto: UpdateShiftHistoryDto, @CurrentUser() actor: AuthUser) {
+    return this.staff.updateShiftHistory(id, dto, actor);
+  }
+
+  @Post('shift-history/:id/close')
+  closeShiftHistory(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.staff.closeShiftHistory(id, actor);
   }
 
   @Get()

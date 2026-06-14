@@ -601,6 +601,73 @@ export function useShiftReport(date: string) {
   });
 }
 
+export type ShiftHistoryPeriod = 'today' | 'week' | 'month' | 'custom';
+export type ShiftHistoryStatus = 'active' | 'closed' | 'unclosed';
+export interface ShiftHistoryFilters {
+  period: ShiftHistoryPeriod;
+  from?: string;
+  to?: string;
+  employeeId?: string;
+  role?: Role | '';
+}
+export interface ShiftHistoryOrder {
+  id: string;
+  orderNumber: string;
+  amount: number;
+}
+export interface ShiftHistoryRow {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  role: Role;
+  startedAt: string;
+  endedAt: string | null;
+  durationMin: number;
+  status: ShiftHistoryStatus;
+  closedBy: string | null;
+  adminComment: string | null;
+  ordersCount: number;
+  turnover: number;
+  orders: ShiftHistoryOrder[];
+}
+export interface ShiftHistoryResponse {
+  items: ShiftHistoryRow[];
+  summary: {
+    shiftsCount: number;
+    totalDurationMin: number;
+    activeCount: number;
+  };
+  range: { from: string; to: string };
+}
+
+export function useShiftHistory(filters: ShiftHistoryFilters) {
+  const q = new URLSearchParams();
+  q.set('period', filters.period);
+  if (filters.from) q.set('from', filters.from);
+  if (filters.to) q.set('to', filters.to);
+  if (filters.employeeId) q.set('employeeId', filters.employeeId);
+  if (filters.role) q.set('role', filters.role);
+  return useQuery({
+    queryKey: ['admin', 'staff', 'shift-history', filters],
+    queryFn: () => get<ShiftHistoryResponse>(`/admin/staff/shift-history?${q.toString()}`),
+  });
+}
+
+export function useShiftHistoryActions() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-history'] });
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; startedAt?: string; endedAt?: string | null }) =>
+      api.patch(`/admin/staff/shift-history/${id}`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const close = useMutation({
+    mutationFn: (id: string) => api.post(`/admin/staff/shift-history/${id}/close`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { update, close };
+}
+
 export function useSetCashHanded() {
   const qc = useQueryClient();
   return useMutation({
