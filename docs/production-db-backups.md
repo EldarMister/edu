@@ -20,6 +20,7 @@ GitHub Actions schedule
 ```text
 .github/workflows/backup-prod-db.yml
 backend/scripts/backup-postgres-to-drive.ts
+backend/scripts/google-drive-oauth.ts
 backend/package.json
 backend/package-lock.json
 backend/.env.example
@@ -50,11 +51,19 @@ Configure these in:
 GitHub repository -> Settings -> Secrets and variables -> Actions
 ```
 
-Required repository secrets:
+Required repository secrets for personal Google Drive:
 
 ```text
 PROD_DATABASE_URL=postgresql://USER:PASSWORD@HOST:PORT/DBNAME
 GOOGLE_DRIVE_FOLDER_ID=...
+GOOGLE_DRIVE_CLIENT_ID=...
+GOOGLE_DRIVE_CLIENT_SECRET=...
+GOOGLE_DRIVE_REFRESH_TOKEN=...
+```
+
+Alternative secret for Shared Drive / Google Workspace setups:
+
+```text
 GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON=...
 ```
 
@@ -92,27 +101,80 @@ BACKUP_PREFIX=edu-pos-prod
 BACKUP_PGSSLMODE=require
 ```
 
-`GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` can be either raw service account JSON or base64-encoded JSON. Base64 is easier to paste safely into GitHub Secrets.
+The backup script prefers personal Google Drive OAuth when `GOOGLE_DRIVE_CLIENT_ID`, `GOOGLE_DRIVE_CLIENT_SECRET`, and `GOOGLE_DRIVE_REFRESH_TOKEN` are set. If they are absent, it falls back to `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`.
 
-## Google Drive setup
+## Personal Google Drive setup
 
 1. Open Google Cloud Console.
 2. Create or select a project.
 3. Enable Google Drive API.
-4. Create a service account.
-5. Create a JSON key for the service account.
-6. Create a folder in Google Drive for database backups.
-7. Share that folder with the service account `client_email` from the JSON key.
-8. Give the service account `Editor` access to that folder.
+4. Open `APIs & Services -> Credentials`.
+5. Create an `OAuth client ID`.
+6. Application type: `Desktop app`.
+7. Copy the generated client ID and client secret.
+8. Create a folder in your personal Google Drive for database backups.
 9. Copy the folder ID from the Google Drive URL.
-10. Add the folder ID to `GOOGLE_DRIVE_FOLDER_ID`.
-11. Add the service account JSON to `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`.
+10. Add these GitHub repository secrets:
+
+```text
+GOOGLE_DRIVE_FOLDER_ID
+GOOGLE_DRIVE_CLIENT_ID
+GOOGLE_DRIVE_CLIENT_SECRET
+```
+
+11. Generate an authorization URL locally:
+
+```bash
+cd backend
+
+$env:GOOGLE_DRIVE_CLIENT_ID="..."
+$env:GOOGLE_DRIVE_CLIENT_SECRET="..."
+npm run drive:oauth:url
+```
+
+12. Open the printed URL in your browser and allow access.
+13. After Google redirects you, copy the `code` query parameter from the redirect URL.
+14. Exchange the code for a refresh token:
+
+```bash
+$env:GOOGLE_DRIVE_CLIENT_ID="..."
+$env:GOOGLE_DRIVE_CLIENT_SECRET="..."
+$env:GOOGLE_DRIVE_OAUTH_CODE="paste-code-here"
+npm run drive:oauth:token
+```
+
+15. Save the printed value as repository secret `GOOGLE_DRIVE_REFRESH_TOKEN`.
+
+Default redirect URI for the helper is:
+
+```text
+http://localhost
+```
+
+If you configure a different redirect URI in Google Cloud, set it locally before running the helper:
+
+```bash
+$env:GOOGLE_DRIVE_OAUTH_REDIRECT_URI="http://localhost"
+```
 
 Folder URL example:
 
 ```text
 https://drive.google.com/drive/folders/<GOOGLE_DRIVE_FOLDER_ID>
 ```
+
+## Service account setup (optional)
+
+Use this only if you have a Shared Drive / Google Workspace setup.
+
+1. Create a service account.
+2. Create a JSON key for the service account.
+3. Create a Drive folder for backups.
+4. Share that folder with the service account `client_email`.
+5. Add the folder ID to `GOOGLE_DRIVE_FOLDER_ID`.
+6. Add the JSON to `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON`.
+
+`GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` can be either raw service account JSON or base64-encoded JSON.
 
 ## Backup file names
 
@@ -231,7 +293,22 @@ sudo apt-get update
 sudo apt-get install -y postgresql-client openssl
 ```
 
-Run:
+Run with personal Google Drive:
+
+```bash
+cd backend
+BACKUP_DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/DBNAME" \
+GOOGLE_DRIVE_FOLDER_ID="..." \
+GOOGLE_DRIVE_CLIENT_ID="..." \
+GOOGLE_DRIVE_CLIENT_SECRET="..." \
+GOOGLE_DRIVE_REFRESH_TOKEN="..." \
+BACKUP_RETENTION_DAYS="30" \
+BACKUP_PREFIX="edu-pos-prod" \
+BACKUP_PGSSLMODE="require" \
+npm run backup:prod
+```
+
+Service account local run remains supported:
 
 ```bash
 cd backend
@@ -329,7 +406,7 @@ select count(*) from payments;
 
 `pg_dump` is a logical backup, not point-in-time recovery. Enable Railway native backups/PITR for faster recovery from accidental writes between daily backups.
 
-Google Drive is external storage, but a service account with broad access can still delete backups. Share only one dedicated backup folder with the service account.
+Google Drive is external storage. Restrict access to one dedicated backup folder and use a dedicated OAuth app for backups.
 
 Backups contain production data. Use `BACKUP_ENCRYPTION_PASSWORD`, restrict Drive folder permissions, and keep GitHub Secrets limited to admins.
 

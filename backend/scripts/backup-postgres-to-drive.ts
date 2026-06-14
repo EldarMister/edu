@@ -10,6 +10,12 @@ type ServiceAccountKey = {
   private_key: string;
 };
 
+type PersonalDriveOAuthConfig = {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+};
+
 type Logger = {
   info: (message: string) => void;
   warn: (message: string) => void;
@@ -113,15 +119,46 @@ function loadServiceAccountKey(): ServiceAccountKey {
   };
 }
 
+function loadPersonalDriveOAuthConfig(): PersonalDriveOAuthConfig | null {
+  const clientId = process.env.GOOGLE_DRIVE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_DRIVE_CLIENT_SECRET;
+  const refreshToken = process.env.GOOGLE_DRIVE_REFRESH_TOKEN;
+
+  if (!clientId && !clientSecret && !refreshToken) {
+    return null;
+  }
+
+  if (!clientId || !clientSecret || !refreshToken) {
+    throw new Error(
+      'GOOGLE_DRIVE_CLIENT_ID, GOOGLE_DRIVE_CLIENT_SECRET, and GOOGLE_DRIVE_REFRESH_TOKEN must all be set for personal Google Drive backups',
+    );
+  }
+
+  return {
+    clientId,
+    clientSecret,
+    refreshToken,
+  };
+}
+
 async function createDriveClient() {
-  const key = loadServiceAccountKey();
-  const auth = new google.auth.JWT({
-    email: key.client_email,
-    key: key.private_key,
-    scopes: ['https://www.googleapis.com/auth/drive'],
-  });
-  await auth.authorize();
-  return google.drive({ version: 'v3', auth });
+  const personalOAuth = loadPersonalDriveOAuthConfig();
+
+  if (personalOAuth) {
+    const auth = new google.auth.OAuth2(personalOAuth.clientId, personalOAuth.clientSecret);
+    auth.setCredentials({ refresh_token: personalOAuth.refreshToken });
+    await auth.getAccessToken();
+    return google.drive({ version: 'v3', auth });
+  } else {
+    const key = loadServiceAccountKey();
+    const auth = new google.auth.JWT({
+      email: key.client_email,
+      key: key.private_key,
+      scopes: ['https://www.googleapis.com/auth/drive'],
+    });
+    await auth.authorize();
+    return google.drive({ version: 'v3', auth });
+  }
 }
 
 async function uploadToDrive(filePath: string, fileName: string, driveFolderId: string, logger: Logger) {
