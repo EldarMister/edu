@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
+import type { Order, OrderItemStatus, OrderSetComponent, OrderStatus } from '@/types';
 import type { KitchenTab } from './api';
 import { OrderBadge } from '@/components/StatusBadge';
 import { displayOrderNumber, timeHM, dateDM, elapsed, orderItemDisplayName } from '@/lib/format';
@@ -9,6 +9,16 @@ import { Spinner } from '@/components/Spinner';
 const SLOW_AFTER = 20 * 60;
 
 const FINAL_ITEM_STATUSES: OrderItemStatus[] = ['rejected', 'cancelled', 'ready', 'served'];
+
+function kitchenCardBadgeStatus(order: Order, tab: KitchenTab): OrderStatus {
+  if (tab !== 'ready' || order.status === 'paid') return order.status;
+
+  const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
+  if (activeItems.length === 0) return order.status;
+  if (activeItems.every((item) => item.status === 'served')) return 'served';
+  if (activeItems.every((item) => item.status === 'ready' || item.status === 'served')) return 'ready';
+  return order.status;
+}
 
 export function KitchenOrderCard({
   order,
@@ -35,6 +45,7 @@ export function KitchenOrderCard({
 }) {
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
   const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
+  const badgeStatus = kitchenCardBadgeStatus(order, tab);
   // Частичный отказ/ожидание решения — только если отказ есть среди позиций ЭТОЙ станции.
   // Станции независимы: отказ на баре не блокирует кухню и наоборот.
   const stationRejected = order.items.some((it) => it.status === 'rejected');
@@ -274,7 +285,7 @@ export function KitchenOrderCard({
             </p>
           ) : (
             <div className="mt-0.5">
-              <OrderBadge status={order.status} />
+              <OrderBadge status={badgeStatus} />
             </div>
           )}
         </div>
