@@ -47,6 +47,8 @@ export function PaymentModal({
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   // Промежуточное окно успешной оплаты: показывается ~1.3с, затем открывается чек.
   const [showSuccess, setShowSuccess] = useState(false);
+  // Анимация успеха отыграла минимальную длительность (чек уже мог не догрузиться).
+  const [successDone, setSuccessDone] = useState(false);
   // Суммы для смешанной оплаты (как строки из инпутов).
   const [cashInput, setCashInput] = useState('');
   const [qrInput, setQrInput] = useState('');
@@ -104,18 +106,30 @@ export function PaymentModal({
     await pay.mutateAsync(payload);
     beep('payment');
     push({ message: t('Оплата принята'), type: 'success', at: new Date().toISOString() });
-    const r = await fetchReceipt(order.id);
+    // Анимацию успеха показываем сразу после оплаты, не дожидаясь чека —
+    // чек подгружаем параллельно, пока крутится анимация.
     setSplitOpen(false);
-    setReceipt(r);
+    setSuccessDone(false);
     setShowSuccess(true);
+    try {
+      setReceipt(await fetchReceipt(order.id));
+    } catch (err) {
+      setShowSuccess(false);
+      setError(apiError(err));
+    }
   }
 
-  // После показа success-окна автоматически переходим к окну печати чека.
+  // Минимальная длительность анимации успеха (~1.3с).
   useEffect(() => {
     if (!showSuccess) return;
-    const t = setTimeout(() => setShowSuccess(false), 1300);
-    return () => clearTimeout(t);
+    const id = setTimeout(() => setSuccessDone(true), 1300);
+    return () => clearTimeout(id);
   }, [showSuccess]);
+
+  // Переходим к чеку, когда и анимация отыграла, и чек загружен.
+  useEffect(() => {
+    if (showSuccess && successDone && receipt) setShowSuccess(false);
+  }, [showSuccess, successDone, receipt]);
 
   async function onConfirm() {
     setError('');
@@ -162,6 +176,7 @@ export function PaymentModal({
   function close() {
     setReceipt(null);
     setShowSuccess(false);
+    setSuccessDone(false);
     setError('');
     setMethod(null);
     setCashInput('');

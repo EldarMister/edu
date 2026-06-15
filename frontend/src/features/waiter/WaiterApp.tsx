@@ -42,6 +42,8 @@ import {
   type AvailableWaiter,
 } from './api';
 import { useReceiptPrint } from './receiptPrint';
+import { usePublicSettings } from '@/features/settings/api';
+import waiterVoice from '@/services/waiterVoice';
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
 import { CartPanel } from './CartPanel';
@@ -100,6 +102,7 @@ export function WaiterApp() {
   const cancelOrder = useCancelOrder();
   const startShift = useStartShift();
   const endShift = useEndShift();
+  const publicSettingsQ = usePublicSettings();
   const closeTable = useCloseTable();
   const moveTable = useMoveTable();
   const transferTable = useTransferTable();
@@ -709,6 +712,10 @@ export function WaiterApp() {
         runAction(async () => {
           const ended = await endShift.mutateAsync();
           setShiftSummary(ended);
+          const cafeName = publicSettingsQ.data?.cafeName?.trim();
+          waiterVoice.enqueue(
+            `Вы успешно завершили смену. ${cafeName ? `${cafeName} благодарит` : 'Благодарим'} вас за работу!`,
+          );
         })
       }
       pushStatus={pushNotifications.status}
