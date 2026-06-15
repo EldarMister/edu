@@ -289,4 +289,6 @@ export interface AppNotification {
   orderId?: string;
   orderNumber?: string;
   at: string;
+  /** Сколько мс держать тост на экране (по умолчанию — по типу). */
+  durationMs?: number;
 }

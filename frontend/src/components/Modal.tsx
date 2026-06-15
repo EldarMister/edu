@@ -39,7 +39,9 @@ export function Modal({
       />
       <div
         className={`card relative z-10 flex w-full flex-col rounded-b-none sm:rounded-2xl ${panelClassName}`}
-        style={{ maxHeight: 'calc(82vh - env(safe-area-inset-bottom, 0px))' }}
+        // dvh (динамическая высота вьюпорта) учитывает адресную строку браузера —
+        // иначе на низких телефонах низ модалки с кнопками уезжает за экран.
+        style={{ maxHeight: 'calc(92dvh - env(safe-area-inset-bottom, 0px))' }}
       >
         {title && (
           <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
@@ -51,8 +53,12 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto px-4 py-3">{children}</div>
-        {footer && <div className="shrink-0 border-t border-border px-4 py-3">{footer}</div>}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{children}</div>
+        {footer && (
+          <div className="shrink-0 border-t border-border px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+            {footer}
+          </div>
+        )}
       </div>
     </div>
   );
