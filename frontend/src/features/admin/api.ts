@@ -560,6 +560,8 @@ export interface ShiftReportItem {
   name: string;
   qty: number;
   amount: number;
+  /** Состав сета (если позиция — сет): что входит и сколько. */
+  components?: { name: string; qty: number }[];
 }
 export interface ShiftReportCategory {
   categoryId: string;

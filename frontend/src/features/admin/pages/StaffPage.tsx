@@ -841,11 +841,24 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
       {open && (
         <div className="space-y-0.5 py-0.5 pl-7">
           {cat.items.map((it, i) => (
-            <div key={i} className="flex items-center gap-2 text-sm text-text-secondary">
-              <span className="truncate">{it.name}</span>
-              <span className="ml-auto whitespace-nowrap">
-                {it.qty} шт. <span className="text-text-muted">({money(it.amount)})</span>
-              </span>
+            <div key={i}>
+              <div className="flex items-center gap-2 text-sm text-text-secondary">
+                <span className="truncate">{it.name}</span>
+                <span className="ml-auto whitespace-nowrap">
+                  {it.qty} шт. <span className="text-text-muted">({money(it.amount)})</span>
+                </span>
+              </div>
+              {/* Состав сета — показываем, что внутри (на счёт категорий не влияет). */}
+              {it.components && it.components.length > 0 && (
+                <div className="mt-0.5 space-y-0.5 border-l border-border pl-3">
+                  {it.components.map((c, j) => (
+                    <div key={j} className="flex items-center gap-2 text-xs text-text-muted">
+                      <span className="truncate">{c.name}</span>
+                      <span className="ml-auto whitespace-nowrap">{c.qty} шт.</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
