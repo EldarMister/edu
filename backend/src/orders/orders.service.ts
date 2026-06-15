@@ -1098,6 +1098,7 @@ export class OrdersService {
     comment?: string,
     station: PrepStation = PrepStation.kitchen,
     setComponentIds: string[] = [],
+    partial: { itemId: string; quantity: number }[] = [],
   ) {
     const order = await this.getMutableOrder(orderId);
     this.ensureStationDecision(order, station);
@@ -1115,22 +1116,80 @@ export class OrdersService {
     if (items.length === 0 && components.length === 0) {
       throw new BadRequestException('Нет блюд, которые можно отказать');
     }
-    const targetIds = items.map((it) => it.id);
+
+    // Частичный отказ по количеству — только для обычных позиций (не сетов).
+    // Отказываем меньше, чем заказано → остаток остаётся активным, отказанная часть
+    // выделяется в отдельную позицию (она проходит обычный путь решения официанта).
+    const partialMap = new Map(partial.map((p) => [p.itemId, p.quantity]));
+    const fullItems = items.filter((it) => {
+      const q = partialMap.get(it.id);
+      return !(q && q > 0 && q < it.quantity);
+    });
+    const partialItems = items.filter((it) => {
+      const q = partialMap.get(it.id);
+      return q && q > 0 && q < it.quantity;
+    });
+    const fullIds = fullItems.map((it) => it.id);
+    // Остатки для возврата на склад: полные позиции целиком + отказанная часть частичных.
+    const inventoryToRestore = [
+      ...fullItems,
+      ...partialItems.map((it) => ({
+        dishId: it.dishId,
+        dishVariantId: it.dishVariantId,
+        quantity: partialMap.get(it.id)!,
+      })),
+    ];
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      await this.restoreInventory(tx, items);
-      if (targetIds.length > 0) {
+      await this.restoreInventory(tx, inventoryToRestore);
+      if (fullIds.length > 0) {
         await tx.orderItem.updateMany({
-          where: { id: { in: targetIds }, orderId },
+          where: { id: { in: fullIds }, orderId },
           data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
         });
         // Сет целиком — отказываем и его состав.
         await tx.orderItemSetComponent.updateMany({
           where: {
-            orderItemId: { in: targetIds },
+            orderItemId: { in: fullIds },
             status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] },
           },
           data: { status: OrderItemStatus.rejected, rejectReason: reason },
+        });
+      }
+      // Частичный отказ: уменьшаем количество исходной позиции и заводим
+      // отдельную отказанную позицию на отказанное количество.
+      for (const it of partialItems) {
+        const rejectQty = partialMap.get(it.id)!;
+        const keepQty = it.quantity - rejectQty;
+        const unitDiscount = Number(it.discountAmount) / it.quantity;
+        const unitFinal = Number(it.finalPrice) / it.quantity;
+        await tx.orderItem.update({
+          where: { id: it.id },
+          data: {
+            quantity: keepQty,
+            discountAmount: new Prisma.Decimal(round2(unitDiscount * keepQty)),
+            finalPrice: new Prisma.Decimal(round2(unitFinal * keepQty)),
+          },
+        });
+        await tx.orderItem.create({
+          data: {
+            orderId,
+            dishId: it.dishId,
+            dishVariantId: it.dishVariantId,
+            dishNameSnapshot: it.dishNameSnapshot,
+            dishVariantNameSnapshot: it.dishVariantNameSnapshot,
+            dishVoiceSnapshot: it.dishVoiceSnapshot,
+            priceSnapshot: it.priceSnapshot,
+            quantity: rejectQty,
+            discountAmount: new Prisma.Decimal(round2(unitDiscount * rejectQty)),
+            finalPrice: new Prisma.Decimal(round2(unitFinal * rejectQty)),
+            status: OrderItemStatus.rejected,
+            prepStation: it.prepStation,
+            comment: it.comment,
+            takeaway: it.takeaway,
+            rejectReason: reason,
+            rejectionDecision: RejectionDecision.pending,
+          },
         });
       }
       if (components.length > 0) {
@@ -1141,7 +1200,8 @@ export class OrdersService {
       }
       await tx.kitchenEvent.createMany({
         data: [
-          ...targetIds.map((id) => ({ orderId, orderItemId: id })),
+          ...fullIds.map((id) => ({ orderId, orderItemId: id })),
+          ...partialItems.map((it) => ({ orderId, orderItemId: it.id })),
           ...components.map((c) => ({ orderId, orderItemId: c.orderItemId })),
         ].map((e) => ({ ...e, type: KitchenEventType.reject_item, reason, comment, createdById: kitchenUserId })),
       });
@@ -1182,7 +1242,11 @@ export class OrdersService {
     const componentNames = components.map((c) =>
       c.action === 'replaced' && c.finalNameSnapshot ? c.finalNameSnapshot : c.originalNameSnapshot,
     );
-    const names = [...items.map((it) => this.orderItemName(it)), ...componentNames].join(', ');
+    const names = [
+      ...fullItems.map((it) => this.orderItemName(it)),
+      ...partialItems.map((it) => `${this.orderItemName(it)} (${partialMap.get(it.id)} шт.)`),
+      ...componentNames,
+    ].join(', ');
     const stationLabel = station === PrepStation.bar ? 'Бар' : 'Кухня';
     const partialText =
       updated.status === OrderStatus.partially_rejected

@@ -11,6 +11,7 @@ export function DishMenu({
   categories,
   dishes,
   quantities,
+  lineCounts,
   onAdd,
   onAddSet,
   onDec,
@@ -21,6 +22,8 @@ export function DishMenu({
   dishes: Dish[];
   /** Количество каждого блюда в текущей корзине (dishId → qty). */
   quantities: Record<string, number>;
+  /** Число разных строк корзины у блюда (dishId → count): 1 — можно показать «минус». */
+  lineCounts?: Record<string, number>;
   onAdd: (dish: Dish, variant?: DishVariant) => void;
   onAddSet: (set: Dish, components: CartSetComponent[]) => void;
   onDec: (dish: Dish) => void;
@@ -103,6 +106,9 @@ export function DishMenu({
           const finalUnit = hasVariants ? minDishUnitPrice(d) : dishUnitPrice(d.price, d.discountType, d.discountValue);
           const qty = quantities[d.id] ?? 0;
           const active = qty > 0;
+          // «Минус» доступен, когда уменьшение однозначно: обычное блюдо или
+          // в корзине ровно один выбранный размер. Несколько размеров — счётчик.
+          const canDecrement = !hasVariants || (lineCounts?.[d.id] ?? 0) === 1;
           const isOutOfStock = d.trackInventory && (hasVariants
             ? d.variants.every((v) => typeof v.stock === 'number' && v.stock <= 0)
             : typeof d.stock === 'number' && d.stock <= 0);
@@ -151,26 +157,21 @@ export function DishMenu({
                     </span>
                   )}
                 </span>
-                {active && !hasVariants && (
-                  <span className="flex shrink-0 items-center gap-2.5">
-                    <span className="text-[15px] font-medium text-text-primary">{qty}</span>
-                    <span
-                      role="button"
-                      tabIndex={-1}
-                      aria-label={t('Уменьшить количество')}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDec(d);
-                      }}
-                      className="flex h-7 w-7 items-center justify-center rounded-full border border-red-400 bg-white text-red-500 transition-colors hover:bg-red-50"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                        <path d="M3 7h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                      </svg>
-                    </span>
+                {active && canDecrement && (
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    aria-label={t('Уменьшить количество')}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDec(d);
+                    }}
+                    className="flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full border border-red-400 bg-white px-2.5 text-[14px] font-semibold text-red-500 transition-colors hover:bg-red-50"
+                  >
+                    {qty}
                   </span>
                 )}
-                {active && hasVariants && (
+                {active && !canDecrement && (
                   <span className="flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 px-2 text-[13px] font-semibold text-primary">
                     {qty}
                   </span>

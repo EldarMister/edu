@@ -12,6 +12,7 @@
 type VoiceItem = {
   status: string;
   prepStation?: 'kitchen' | 'bar' | 'none' | string | null;
+  quantity?: number | null;
   dishNameSnapshot: string;
   dishVoiceSnapshot?: string | null;
   setComponents?: {
@@ -19,6 +20,7 @@ type VoiceItem = {
     status: string;
     originalNameSnapshot: string;
     finalNameSnapshot?: string | null;
+    quantity?: number | null;
   }[];
 };
 
@@ -86,6 +88,17 @@ function dishVoice(item: VoiceItem): string {
   return v && v.length > 0 ? v : item.dishNameSnapshot;
 }
 
+/**
+ * Правки произношения: некоторые слова синтезатор читает неестественно.
+ * Применяется к финальному тексту озвучки.
+ */
+const PRONUNCIATION: [RegExp, string][] = [
+  [/Мясной/gi, 'Мяснойй'],
+];
+function applyPronunciation(text: string): string {
+  return PRONUNCIATION.reduce((acc, [re, to]) => acc.replace(re, to), text);
+}
+
 /** Признак позиции-сета: есть компоненты состава. */
 function isSetItem(item: VoiceItem): boolean {
   return (item.setComponents?.length ?? 0) > 0;
@@ -104,33 +117,41 @@ function setHeadVoice(item: VoiceItem): string {
 }
 
 /**
- * Озвучка одной позиции. Обычное блюдо — его имя; сет — имя + состав,
- * с проговариванием заменённых и убранных компонентов (как на карточке кухни).
+ * Озвучка одной позиции. Обычное блюдо — его имя; сет — имя + ИТОГОВЫЙ состав,
+ * где заменённые компоненты дают финальное блюдо, а одинаковые суммируются
+ * («два Запечённый филадельфия»). Убранные компоненты проговариваются отдельно.
  */
 function itemVoiceFragment(item: VoiceItem): string {
-  if (!isSetItem(item)) return dishVoice(item);
+  if (!isSetItem(item)) {
+    const qty = item.quantity && item.quantity > 1 ? `${numberToWordsRu(item.quantity)} ` : '';
+    return `${qty}${dishVoice(item)}`;
+  }
 
   const components = item.setComponents ?? [];
-  const alive = (c: { status: string }) => c.status !== 'rejected' && c.status !== 'cancelled';
+  const alive = (c: { status: string; action: string }) =>
+    c.status !== 'rejected' && c.status !== 'cancelled' && c.action !== 'removed';
 
-  const parts: string[] = [`${setHeadVoice(item)}. Состав`];
-  // Оставшиеся без изменений компоненты.
+  // Итоговый состав: имя финального блюда → суммарное количество (в порядке появления).
+  const counts = new Map<string, number>();
+  const order: string[] = [];
   for (const c of components) {
-    if (!alive(c) || c.action === 'removed' || c.action === 'replaced') continue;
-    const n = c.originalNameSnapshot.trim();
-    if (n) parts.push(n);
+    if (!alive(c)) continue;
+    const name = (c.action === 'replaced' && c.finalNameSnapshot ? c.finalNameSnapshot : c.originalNameSnapshot).trim();
+    if (!name) continue;
+    const qty = c.quantity && c.quantity > 0 ? c.quantity : 1;
+    if (!counts.has(name)) order.push(name);
+    counts.set(name, (counts.get(name) ?? 0) + qty);
   }
-  // Замены: «заменили A на B».
-  for (const c of components) {
-    if (!alive(c) || c.action !== 'replaced') continue;
-    const from = c.originalNameSnapshot.trim();
-    const to = (c.finalNameSnapshot ?? '').trim();
-    if (from && to) parts.push(`заменили ${from} на ${to}`);
-    else if (to) parts.push(to);
+
+  const setQty = item.quantity && item.quantity > 1 ? `${numberToWordsRu(item.quantity)} ` : '';
+  const parts: string[] = [`${setQty}${setHeadVoice(item)}. Состав`];
+  for (const name of order) {
+    const n = counts.get(name)!;
+    parts.push(n > 1 ? `${numberToWordsRu(n)} ${name}` : name);
   }
-  // Убранные компоненты.
+  // Убранные компоненты — отдельно.
   for (const c of components) {
-    const removed = c.action === 'removed' || !alive(c);
+    const removed = c.action === 'removed' || c.status === 'rejected' || c.status === 'cancelled';
     if (!removed) continue;
     const n = c.originalNameSnapshot.trim();
     if (n) parts.push(`убрали ${n}`);
@@ -153,7 +174,7 @@ export function buildNewOrderText(order: VoiceOrder, station: VoiceStation = 'ki
   const dishes = activeDishNames(order, station);
   if (dishes.length === 0) return null;
   const head = `Новый заказ. Номер ${num}.`;
-  return `${head} Состав заказа: ${dishes.join('. ')}.`;
+  return applyPronunciation(`${head} Состав заказа: ${dishes.join('. ')}.`);
 }
 
 /** «Заказ номер пятьдесят четыре отменён.» */
@@ -167,7 +188,7 @@ export function buildChangedText(order: { orderNumber: string }): string {
 }
 
 export function buildReplacementText(orderNumber: string, oldName: string, newName: string): string {
-  return `Заказ номер ${orderNumberWords(orderNumber)}. Заменили ${oldName} на ${newName}.`;
+  return applyPronunciation(`Заказ номер ${orderNumberWords(orderNumber)}. Заменили ${oldName} на ${newName}.`);
 }
 
 /** Озвучиваемое имя блюда позиции для диффа изменений. */
@@ -222,10 +243,10 @@ export function buildEditVoiceText(
   }
   // Ровно одно убрали и одно добавили — это замена блюда.
   if (removed.length === 1 && added.length === 1) {
-    return `${head} Заменили ${removed[0]} на ${added[0]}.`;
+    return applyPronunciation(`${head} Заменили ${removed[0]} на ${added[0]}.`);
   }
   const parts: string[] = [];
   if (removed.length) parts.push(`Отменили ${removed.join('. ')}`);
   if (added.length) parts.push(`Добавили ${added.join('. ')}`);
-  return `${head} ${parts.join('. ')}.`;
+  return applyPronunciation(`${head} ${parts.join('. ')}.`);
 }

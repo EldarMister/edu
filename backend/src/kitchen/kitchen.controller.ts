@@ -103,6 +103,7 @@ export class KitchenController {
       dto.comment,
       st,
       dto.setComponentIds ?? [],
+      dto.partial ?? [],
     );
   }
 }

@@ -12,7 +12,7 @@ import { BrandLogo } from '@/components/BrandLogo';
 import { FullScreenLoader, Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
 import { NumberTicker } from '@/components/NumberTicker';
-import { useCart, cartLineKeyFromParts, cartTotals } from './cart';
+import { useCart, cartLineKey, cartLineKeyFromParts, cartTotals } from './cart';
 import { useWaiterRealtime } from './useWaiterRealtime';
 import {
   useHalls,
@@ -42,13 +42,11 @@ import {
   type AvailableWaiter,
 } from './api';
 import { useReceiptPrint } from './receiptPrint';
-import { usePublicSettings } from '@/features/settings/api';
-import waiterVoice from '@/services/waiterVoice';
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
 import { CartPanel } from './CartPanel';
 import { CartSheet } from './CartSheet';
-import { cartLinesAllNone } from '@/lib/prep-station';
+import { cartStations } from '@/lib/prep-station';
 import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
@@ -102,7 +100,6 @@ export function WaiterApp() {
   const cancelOrder = useCancelOrder();
   const startShift = useStartShift();
   const endShift = useEndShift();
-  const publicSettingsQ = usePublicSettings();
   const closeTable = useCloseTable();
   const moveTable = useMoveTable();
   const transferTable = useTransferTable();
@@ -150,6 +147,21 @@ export function WaiterApp() {
     return map;
   }, [cart.lines]);
 
+  // Сколько разных строк корзины у блюда (для блюд с размерами: одна строка —
+  // можно показать «минус», несколько размеров — убираем их в корзине).
+  const cartLineCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const l of cart.lines) map[l.dish.id] = (map[l.dish.id] ?? 0) + 1;
+    return map;
+  }, [cart.lines]);
+
+  // Уменьшить количество с карточки меню: если у блюда ровно одна строка
+  // в корзине (обычное блюдо или один выбранный размер) — уменьшаем её.
+  const decDishFromMenu = (dishId: string) => {
+    const lines = cart.lines.filter((l) => l.dish.id === dishId);
+    if (lines.length === 1) cart.dec(cartLineKey(lines[0]));
+  };
+
   const selectedTable =
     halls.flatMap((h) => h.tables).find((t) => t.id === cart.tableId) ?? null;
   const activeOrder = cart.tableId ? ordersByTable.get(cart.tableId) : undefined;
@@ -158,16 +170,22 @@ export function WaiterApp() {
   const displayedOrder = viewingOrder ?? activeOrder;
   const showCart = !viewingOrder && (cart.lines.length > 0 || !activeOrder);
   const activeNavTab: Tab = viewingOrder && tab === 'cart' ? 'orders' : tab;
-  // Все позиции корзины — «Без отправки»: заказ создаётся без кухни/бара,
-  // основная кнопка меняется на «Создать заказ».
-  const cartOnlyNone = cartLinesAllNone(cart.lines, categoriesQ.data ?? []);
+  // Направления позиций корзины. Только «Без отправки» → готовить нечего,
+  // кнопка вместо «Отправить на кухню» становится «Добавить в заказ».
+  const cartStationInfo = cartStations(cart.lines, categoriesQ.data ?? []);
+  const cartOnlyNone = cart.lines.length > 0 && !cartStationInfo.hasPrep;
+  // Подпись отправки нового заказа: есть кухня (в т.ч. смешанно) → «на кухню»,
+  // только бар → «в бар», только без отправки → «Добавить в заказ».
+  const cartSendLabel = cartOnlyNone
+    ? t('Добавить в заказ')
+    : cartStationInfo.kitchen
+      ? t('Отправить на кухню')
+      : t('Отправить в бар');
   const cartSubmitLabel = editing
     ? t('Сохранить изменения')
     : activeOrder
       ? t('Добавить к заказу')
-      : cartOnlyNone
-        ? t('Создать заказ')
-        : t('Отправить на кухню');
+      : cartSendLabel;
   const ordersAttentionCount = orders.filter((o) =>
     o.requiresWaiterDecision || ['ready', 'rejected'].includes(o.status),
   ).length;
@@ -631,9 +649,10 @@ export function WaiterApp() {
         categories={categoriesQ.data ?? []}
         dishes={dishesQ.data ?? []}
         quantities={cartQuantities}
+        lineCounts={cartLineCounts}
         onAdd={addDishToCart}
         onAddSet={addSetToCart}
-        onDec={(d) => cart.dec(cartLineKeyFromParts(d.id))}
+        onDec={(d) => decDishFromMenu(d.id)}
         disabled={!selectedTable}
       />
     </Panel>
@@ -646,9 +665,10 @@ export function WaiterApp() {
         categories={categoriesQ.data ?? []}
         dishes={dishesQ.data ?? []}
         quantities={cartQuantities}
+        lineCounts={cartLineCounts}
         onAdd={addDishToCart}
         onAddSet={addSetToCart}
-        onDec={(d) => cart.dec(cartLineKeyFromParts(d.id))}
+        onDec={(d) => decDishFromMenu(d.id)}
         disabled={!selectedTable}
         tableSlot={
           selectedTable ? (
@@ -686,7 +706,7 @@ export function WaiterApp() {
           orderNumber={activeOrder?.orderNumber}
           submitting={create.isPending || addItems.isPending || editOrder.isPending}
           canSubmit={!!activeShift}
-          allNone={cartOnlyNone}
+          sendLabel={cartSendLabel}
           onSubmit={editing ? saveEditOrder : submitCart}
           onCancelEdit={cancelEditing}
           onBlockedSubmit={() =>
@@ -712,10 +732,6 @@ export function WaiterApp() {
         runAction(async () => {
           const ended = await endShift.mutateAsync();
           setShiftSummary(ended);
-          const cafeName = publicSettingsQ.data?.cafeName?.trim();
-          waiterVoice.enqueue(
-            `Вы успешно завершили смену. ${cafeName ? `${cafeName} благодарит` : 'Благодарим'} вас за работу!`,
-          );
         })
       }
       pushStatus={pushNotifications.status}
