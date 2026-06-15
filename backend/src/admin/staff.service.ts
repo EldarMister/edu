@@ -298,6 +298,20 @@ export class StaffService {
             quantity: true,
             finalPrice: true,
             dish: { select: { categoryId: true, category: { select: { name: true, sortOrder: true } } } },
+            // Состав сета — чтобы показать его под строкой сета в разбивке.
+            setComponents: {
+              where: {
+                status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] },
+                action: { not: 'removed' },
+              },
+              select: {
+                quantity: true,
+                action: true,
+                status: true,
+                originalNameSnapshot: true,
+                finalNameSnapshot: true,
+              },
+            },
           },
         },
       },
@@ -391,7 +405,8 @@ export class StaffService {
 
     const cashHandedByWaiter = new Map(cashReports.map((c) => [c.waiterId, Number(c.cashHanded)]));
 
-    type CatAgg = { categoryId: string; name: string; sortOrder: number; qty: number; amount: number; items: Map<string, { name: string; qty: number; amount: number }> };
+    type LineAgg = { name: string; qty: number; amount: number; components: Map<string, number> };
+    type CatAgg = { categoryId: string; name: string; sortOrder: number; qty: number; amount: number; items: Map<string, LineAgg> };
     type Cancel = { time: string; name: string; amount: number; reason: string };
     const acc = new Map<string, {
       turnover: number;
@@ -430,11 +445,20 @@ export class StaffService {
         cat.amount += Number(it.finalPrice);
         let line = cat.items.get(lineName);
         if (!line) {
-          line = { name: lineName, qty: 0, amount: 0 };
+          line = { name: lineName, qty: 0, amount: 0, components: new Map() };
           cat.items.set(lineName, line);
         }
         line.qty += it.quantity;
         line.amount += Number(it.finalPrice);
+        // Сет: показываем СОСТАВ под строкой сета (информативно, на счёт категорий
+        // не влияет — владельцам так понятнее, чем подмешивать блюда в категории).
+        for (const sc of it.setComponents ?? []) {
+          if (sc.action === 'removed' || sc.status === OrderItemStatus.rejected || sc.status === OrderItemStatus.cancelled) {
+            continue;
+          }
+          const compName = (sc.action === 'replaced' ? sc.finalNameSnapshot : sc.originalNameSnapshot) ?? sc.originalNameSnapshot;
+          line.components.set(compName, (line.components.get(compName) ?? 0) + sc.quantity * it.quantity);
+        }
       }
     }
 
@@ -488,7 +512,17 @@ export class StaffService {
               name: c.name,
               qty: c.qty,
               amount: c.amount,
-              items: [...c.items.values()].sort((x, y) => y.amount - x.amount),
+              items: [...c.items.values()]
+                .sort((x, y) => y.amount - x.amount)
+                .map((it) => ({
+                  name: it.name,
+                  qty: it.qty,
+                  amount: it.amount,
+                  // Состав сета (если есть) — для показа под строкой сета.
+                  components: it.components.size
+                    ? [...it.components.entries()].map(([name, qty]) => ({ name, qty }))
+                    : undefined,
+                })),
             }))
         : [];
       const cancellations = (a?.cancellations ?? []).sort((x, y) => y.time.localeCompare(x.time));
