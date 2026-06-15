@@ -365,8 +365,8 @@ export function KitchenOrderCard({
                     {selected.size > 0 && (
                       <span
                         aria-hidden="true"
-                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] border bg-white text-white transition-all duration-150 ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-primary/25 ${
-                          setAllSelected || setSomeSelected ? 'border-primary bg-primary' : 'border-slate-300 group-hover:border-primary/70'
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] border text-white transition-all duration-150 ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-primary/25 ${
+                          setAllSelected || setSomeSelected ? 'border-primary bg-primary' : 'border-slate-300 bg-white group-hover:border-primary/70'
                         }`}
                       >
                         {setAllSelected ? (
