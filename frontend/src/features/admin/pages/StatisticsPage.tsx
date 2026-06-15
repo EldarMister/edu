@@ -203,7 +203,7 @@ function TrendPill({ value }: { value: number }) {
       ? 'bg-success/10 text-success'
       : 'bg-danger/10 text-danger';
   return (
-    <span className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold leading-none ring-1 ring-inset ring-current/10 ${cls}`}>
+    <span className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-semibold leading-none ${cls}`}>
       {!flat && (
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round" className={positive ? '' : 'rotate-180'}>
           <path d="M12 19V5M5 12l7-7 7 7" />

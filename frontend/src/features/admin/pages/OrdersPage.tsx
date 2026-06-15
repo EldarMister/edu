@@ -98,6 +98,7 @@ export function OrdersPage() {
   const [manualStatus, setManualStatus] = useState<OrderStatus>('served');
   const [manualReason, setManualReason] = useState('');
   const loadMoreRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const tr = useT();
   const push = useNotifications((s) => s.push);
@@ -128,7 +129,9 @@ export function OrdersPage() {
       (entries) => {
         if (entries[0].isIntersecting && !isFetchingNextPage) fetchNextPage();
       },
-      { rootMargin: '200px' },
+      // root — сам прокручиваемый контейнер списка, иначе на телефоне «маяк»
+      // не попадает во вьюпорт и автоподгрузка не срабатывает при скролле.
+      { root: scrollRef.current, rootMargin: '200px' },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -244,7 +247,7 @@ export function OrdersPage() {
         ) : items.length === 0 ? (
           <p className="py-12 text-center text-text-muted">{tr('Заказы не найдены')}</p>
         ) : (
-          <div className="menu-scrollbar max-h-[calc(100vh-160px)] overflow-auto">
+          <div ref={scrollRef} className="menu-scrollbar max-h-[calc(100vh-160px)] overflow-auto">
             <table className="w-full min-w-[860px] table-fixed text-sm">
               <colgroup>
                 <col className="w-[9%]" />

@@ -86,11 +86,63 @@ function dishVoice(item: VoiceItem): string {
   return v && v.length > 0 ? v : item.dishNameSnapshot;
 }
 
+/** Признак позиции-сета: есть компоненты состава. */
+function isSetItem(item: VoiceItem): boolean {
+  return (item.setComponents?.length ?? 0) > 0;
+}
+
+/**
+ * Озвучиваемое имя сета: voiceName, если задано, иначе «Сет-7» → «Сет номер семь»
+ * (дефис с числом плохо читается синтезатором).
+ */
+function setHeadVoice(item: VoiceItem): string {
+  const explicit = item.dishVoiceSnapshot?.trim();
+  if (explicit) return explicit;
+  const name = item.dishNameSnapshot.trim();
+  const m = name.match(/^(.*\S)[\s-]+(\d{1,4})$/);
+  return m ? `${m[1]} номер ${numberToWordsRu(Number(m[2]))}` : name;
+}
+
+/**
+ * Озвучка одной позиции. Обычное блюдо — его имя; сет — имя + состав,
+ * с проговариванием заменённых и убранных компонентов (как на карточке кухни).
+ */
+function itemVoiceFragment(item: VoiceItem): string {
+  if (!isSetItem(item)) return dishVoice(item);
+
+  const components = item.setComponents ?? [];
+  const alive = (c: { status: string }) => c.status !== 'rejected' && c.status !== 'cancelled';
+
+  const parts: string[] = [`${setHeadVoice(item)}. Состав`];
+  // Оставшиеся без изменений компоненты.
+  for (const c of components) {
+    if (!alive(c) || c.action === 'removed' || c.action === 'replaced') continue;
+    const n = c.originalNameSnapshot.trim();
+    if (n) parts.push(n);
+  }
+  // Замены: «заменили A на B».
+  for (const c of components) {
+    if (!alive(c) || c.action !== 'replaced') continue;
+    const from = c.originalNameSnapshot.trim();
+    const to = (c.finalNameSnapshot ?? '').trim();
+    if (from && to) parts.push(`заменили ${from} на ${to}`);
+    else if (to) parts.push(to);
+  }
+  // Убранные компоненты.
+  for (const c of components) {
+    const removed = c.action === 'removed' || !alive(c);
+    if (!removed) continue;
+    const n = c.originalNameSnapshot.trim();
+    if (n) parts.push(`убрали ${n}`);
+  }
+  return parts.join('. ');
+}
+
 /** Блюда заказа (без отказанных/отменённых) для озвучки. */
 function activeDishNames(order: VoiceOrder, station: VoiceStation = 'kitchen'): string[] {
   return order.items
     .filter((it) => it.prepStation === station && it.status !== 'rejected' && it.status !== 'cancelled')
-    .map(dishVoice)
+    .map(itemVoiceFragment)
     .map((s) => s.trim())
     .filter(Boolean);
 }
