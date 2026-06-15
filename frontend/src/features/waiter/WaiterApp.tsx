@@ -776,7 +776,7 @@ export function WaiterApp() {
         {desktopView === 'tables' ? (
           <>
             <div className="w-[360px] shrink-0">{tablesPanel}</div>
-            <div className="flex-1">{menuPanel}</div>
+            <div className="min-w-0 flex-1">{menuPanel}</div>
             <div className="w-[380px] shrink-0">{rightPanel}</div>
           </>
         ) : desktopView === 'orders' ? (
