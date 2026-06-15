@@ -1,27 +1,6 @@
 import { useRef, useState } from 'react';
+import { refreshAppToLatestVersion } from '@/lib/app-update';
 import { APP_VERSION_LABEL } from '@/lib/version';
-
-/**
- * Принудительное обновление до последней версии: сносим service worker и кэши
- * (иначе PWA может держать старую сборку) и перезагружаем страницу начисто.
- */
-async function forceUpdate() {
-  try {
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-    }
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
-    }
-  } finally {
-    // Перезагрузка с обходом кэша.
-    const url = new URL(window.location.href);
-    url.searchParams.set('v', Date.now().toString());
-    window.location.replace(url.toString());
-  }
-}
 
 const TAPS_TO_UPDATE = 3;
 const TAP_WINDOW_MS = 1500;
@@ -40,7 +19,7 @@ export function AppVersion({ className = '' }: { className?: string }) {
     if (taps.current >= TAPS_TO_UPDATE) {
       taps.current = 0;
       setUpdating(true);
-      void forceUpdate();
+      void refreshAppToLatestVersion();
       return;
     }
     timer.current = setTimeout(() => {
