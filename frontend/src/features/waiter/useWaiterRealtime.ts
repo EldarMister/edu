@@ -126,6 +126,8 @@ export function useWaiterRealtime() {
     void qc.refetchQueries({ queryKey: ['orders'], type: 'active' });
     void qc.refetchQueries({ queryKey: ['halls'], type: 'active' });
     void qc.refetchQueries({ queryKey: ['waiter', 'shift'], type: 'active' });
+    void qc.refetchQueries({ queryKey: ['categories'], type: 'active' });
+    void qc.refetchQueries({ queryKey: ['dishes'], type: 'active' });
   };
 
   const speakWaiterOrder = (order: VoicedOrder) => {
