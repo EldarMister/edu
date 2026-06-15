@@ -4,9 +4,10 @@ import { OrdersController } from './orders.controller';
 import { WaiterShiftsModule } from '../waiter-shifts/waiter-shifts.module';
 import { PushModule } from '../push/push.module';
 import { SettingsModule } from '../settings/settings.module';
+import { DishesModule } from '../dishes/dishes.module';
 
 @Module({
-  imports: [WaiterShiftsModule, PushModule, SettingsModule],
+  imports: [WaiterShiftsModule, PushModule, SettingsModule, DishesModule],
   controllers: [OrdersController],
   providers: [OrdersService],
   exports: [OrdersService],

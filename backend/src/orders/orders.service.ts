@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -24,6 +25,7 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { WaiterShiftsService } from '../waiter-shifts/waiter-shifts.service';
 import { PushService } from '../push/push.service';
 import { SettingsService } from '../settings/settings.service';
+import { DishPopularityService } from '../dishes/dish-popularity.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
@@ -55,15 +57,22 @@ function tableNumberVoice(value: number): string {
 
 const PARTIAL_REJECTION_PENDING_MESSAGE =
   'Ожидается решение официанта по частичному отказу';
+const POPULARITY_EXCLUDED_ITEM_STATUSES = new Set<OrderItemStatus>([
+  OrderItemStatus.rejected,
+  OrderItemStatus.cancelled,
+]);
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     private prisma: PrismaService,
     private events: EventsGateway,
     private shifts: WaiterShiftsService,
     private push: PushService,
     private settings: SettingsService,
+    private dishPopularity: DishPopularityService,
     private audit: AuditService,
   ) {}
 
@@ -1618,6 +1627,16 @@ export class OrdersService {
       description: `${actor.name ?? 'Сотрудник'} принял оплату по заказу ${updated.orderNumber} (стол ${updated.table.number}): ${this.money(updated.finalAmount)} · ${methodLabel}`,
       newValue: { paymentMethod: method, finalAmount: Number(updated.finalAmount) },
       metadata: { method, amount: Number(updated.finalAmount), tableNumber: updated.table.number },
+    });
+
+    const paidDishIds = updated.items
+      .filter((item) => item.dishId && !POPULARITY_EXCLUDED_ITEM_STATUSES.has(item.status))
+      .map((item) => item.dishId!);
+    void this.dishPopularity.recalculateDishes(paidDishIds).catch((err) => {
+      this.logger.error(
+        `Failed to recalculate dish popularity after payment for order ${updated.id}`,
+        err instanceof Error ? err.stack : String(err),
+      );
     });
 
     return updated;

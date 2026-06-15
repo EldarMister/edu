@@ -16,6 +16,7 @@
     "prisma:seed": "ts-node prisma/seed.ts",
     "prisma:studio": "prisma studio",
     "backup:prod": "ts-node --transpile-only scripts/backup-postgres-to-drive.ts",
+    "popularity:recalculate": "ts-node --transpile-only scripts/recalculate-dish-popularity.ts",
     "drive:oauth:url": "ts-node --transpile-only scripts/google-drive-oauth.ts url",
     "drive:oauth:token": "ts-node --transpile-only scripts/google-drive-oauth.ts token",
     "postinstall": "prisma generate"

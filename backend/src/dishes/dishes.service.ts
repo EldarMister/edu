@@ -18,7 +18,7 @@ export class DishesService {
 
     return this.prisma.dish.findMany({
       where,
-      orderBy: [{ categoryId: 'asc' }, { sortOrder: 'asc' }],
+      orderBy: [{ categoryId: 'asc' }, { popularityScore: 'desc' }, { sortOrder: 'asc' }, { name: 'asc' }],
       select: {
         id: true,
         categoryId: true,

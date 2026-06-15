@@ -1,0 +1,3 @@
+ALTER TABLE "dishes"
+ADD COLUMN "popularity_score" DOUBLE PRECISION NOT NULL DEFAULT 0,
+ADD COLUMN "score_updated_at" TIMESTAMP(3);
