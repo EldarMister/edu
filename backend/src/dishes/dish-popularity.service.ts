@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { OrderItemStatus, OrderStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { EventsGateway } from '../realtime/events.gateway';
+import { SERVER_EVENTS } from '../realtime/events';
 
 @Injectable()
 export class DishPopularityService {
@@ -10,11 +12,15 @@ export class DishPopularityService {
   private readonly WINDOW_DAYS = 90;
   private readonly BATCH_SIZE = 100;
 
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private events: EventsGateway,
+  ) {}
 
   @Cron('0 */2 * * *')
   async scheduledRecalculate() {
     await this.recalculateAll();
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { source: 'dish-popularity-cron' });
   }
 
   async recalculateAll(): Promise<void> {
@@ -78,5 +84,11 @@ export class DishPopularityService {
   async recalculateDishes(dishIds: string[]): Promise<void> {
     const uniqueIds = [...new Set(dishIds)];
     await Promise.all(uniqueIds.map((dishId) => this.recalculateDish(dishId)));
+    if (uniqueIds.length > 0) {
+      this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, {
+        source: 'dish-popularity-order',
+        dishIds: uniqueIds,
+      });
+    }
   }
 }
