@@ -99,7 +99,7 @@ export function DishMenu({
       </div>
 
       {/* Блюда */}
-      <div className="no-scrollbar grid flex-1 grid-cols-2 content-start gap-2.5 overflow-y-auto lg:grid-cols-3">
+      <div className="no-scrollbar grid flex-1 grid-cols-2 content-start gap-2.5 overflow-y-auto lg:grid-cols-[repeat(auto-fit,minmax(240px,1fr))] 2xl:grid-cols-[repeat(auto-fit,minmax(260px,1fr))]">
         {filtered.map((d) => {
           const hasVariants = d.variants.length > 0;
           const hasDiscount = !hasVariants && d.discountType !== 'none' && Number(d.discountValue) > 0;
