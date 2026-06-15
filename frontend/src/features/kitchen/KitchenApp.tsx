@@ -27,6 +27,8 @@ type PendingAction = {
   type: 'reject' | 'ready';
   itemIds: string[];
   setComponentIds: string[];
+  /** Частичный отказ по количеству для обычных позиций. */
+  partial?: { itemId: string; quantity: number }[];
   deadline: number;
 };
 
@@ -76,8 +78,19 @@ export function KitchenApp({
 
   // Отправляет отложенное действие на сервер (= «уходит официанту»).
   function commit(p: PendingAction) {
-    const payload = { orderId: p.orderId, itemIds: p.itemIds, setComponentIds: p.setComponentIds };
-    const run = p.type === 'reject' ? rejectItems.mutateAsync(payload) : readyItems.mutateAsync(payload);
+    const run =
+      p.type === 'reject'
+        ? rejectItems.mutateAsync({
+            orderId: p.orderId,
+            itemIds: p.itemIds,
+            setComponentIds: p.setComponentIds,
+            partial: p.partial,
+          })
+        : readyItems.mutateAsync({
+            orderId: p.orderId,
+            itemIds: p.itemIds,
+            setComponentIds: p.setComponentIds,
+          });
     run.catch((err) => push({ message: apiError(err), at: new Date().toISOString() }));
   }
 
@@ -95,7 +108,7 @@ export function KitchenApp({
   function onBatch(
     orderId: string,
     type: 'reject' | 'ready',
-    ids: { itemIds: string[]; setComponentIds: string[] },
+    ids: { itemIds: string[]; setComponentIds: string[]; partial?: { itemId: string; quantity: number }[] },
   ) {
     // Новое действие, пока предыдущее не подтверждено — фиксируем предыдущее сразу.
     if (pending) commit(pending);

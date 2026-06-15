@@ -1,4 +1,15 @@
-import { IsArray, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsArray, IsInt, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+
+/** Частичный отказ по количеству: отказать `quantity` штук из позиции `itemId`. */
+export class RejectItemQuantityDto {
+  @IsString()
+  itemId!: string;
+
+  @IsInt()
+  @Min(1)
+  quantity!: number;
+}
 
 export class ReadyItemsDto {
   @IsOptional()
@@ -24,6 +35,13 @@ export class RejectItemsDto {
   @IsArray()
   @IsString({ each: true })
   setComponentIds?: string[];
+
+  /** Частичный отказ по количеству для обычных позиций (остаток остаётся активным). */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => RejectItemQuantityDto)
+  partial?: RejectItemQuantityDto[];
 
   @IsOptional()
   @IsString()

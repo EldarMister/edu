@@ -22,3 +22,21 @@ export function cartLinesAllNone(lines: CartLine[], categories: Category[]): boo
   const byCat = stationByCategory(categories);
   return lines.every((l) => dishStation(l.dish, byCat) === 'none');
 }
+
+/** Какие направления встречаются в корзине (для подписи кнопки отправки). */
+export function cartStations(
+  lines: CartLine[],
+  categories: Category[],
+): { kitchen: boolean; bar: boolean; none: boolean; hasPrep: boolean } {
+  const byCat = stationByCategory(categories);
+  let kitchen = false;
+  let bar = false;
+  let none = false;
+  for (const l of lines) {
+    const s = dishStation(l.dish, byCat);
+    if (s === 'kitchen') kitchen = true;
+    else if (s === 'bar') bar = true;
+    else none = true;
+  }
+  return { kitchen, bar, none, hasPrep: kitchen || bar };
+}

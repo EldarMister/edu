@@ -30,7 +30,7 @@ export function KitchenOrderCard({
   onAccept: () => void;
   onBatch: (
     type: 'reject' | 'ready',
-    ids: { itemIds: string[]; setComponentIds: string[] },
+    ids: { itemIds: string[]; setComponentIds: string[]; partial?: { itemId: string; quantity: number }[] },
   ) => void;
 }) {
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
@@ -46,6 +46,17 @@ export function KitchenOrderCard({
   const allTakeaway = liveItems.length > 0 && liveItems.every((it) => it.takeaway);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Сколько штук отказать у выбранной позиции (по умолчанию — всё количество).
+  const [rejectQtys, setRejectQtys] = useState<Record<string, number>>({});
+  // Свёрнутые сеты (по id позиции-сета): по умолчанию состав раскрыт.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const toggleCollapsed = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   // Карта статусов по id — и обычные позиции, и блюда внутри сетов.
   // id блюд состава нужны, чтобы при отправке разделить их от обычных позиций.
@@ -88,13 +99,38 @@ export function KitchenOrderCard({
     });
   }
 
+  // Выбор/снятие всего сета сразу: добавляем или убираем все его выбираемые блюда.
+  function toggleSet(ids: string[], allSelected: boolean) {
+    if (ids.length === 0) return;
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) (allSelected ? next.delete(id) : next.add(id));
+      return next;
+    });
+  }
+
   function runBatch(type: 'reject' | 'ready') {
     if (selected.size === 0) return;
     const itemIds: string[] = [];
     const setComponentIds: string[] = [];
     for (const id of selected) (componentIds.has(id) ? setComponentIds : itemIds).push(id);
-    onBatch(type, { itemIds, setComponentIds });
+    // Частичный отказ по количеству — только для обычных позиций и только при отказе.
+    const partial: { itemId: string; quantity: number }[] = [];
+    if (type === 'reject') {
+      for (const id of itemIds) {
+        const it = order.items.find((i) => i.id === id);
+        if (!it) continue;
+        const qty = rejectQtys[id] ?? it.quantity;
+        if (qty > 0 && qty < it.quantity) partial.push({ itemId: id, quantity: qty });
+      }
+    }
+    onBatch(type, { itemIds, setComponentIds, partial: partial.length > 0 ? partial : undefined });
+    clearSelection();
+  }
+
+  function clearSelection() {
     setSelected(new Set());
+    setRejectQtys({});
   }
 
   // Все ещё «живые» позиции станции (для действий по всему заказу).
@@ -120,7 +156,7 @@ export function KitchenOrderCard({
     const ids = collectAllActive();
     if (ids.itemIds.length === 0 && ids.setComponentIds.length === 0) return;
     onBatch(type, ids);
-    setSelected(new Set());
+    clearSelection();
   }
 
   /**
@@ -282,11 +318,97 @@ export function KitchenOrderCard({
               )}
             </>
           );
+          if (!isSet) {
+            // Степпер «сколько отказать» — у выбранной обычной позиции с количеством > 1.
+            const showStepper =
+              tab !== 'ready' && selected.has(it.id) && it.quantity > 1 && isSelectable(it.status, it.id);
+            const rejectQty = rejectQtys[it.id] ?? it.quantity;
+            return (
+              <li key={it.id} className="text-[15px]">
+                {renderLine(it.id, it.status, header)}
+                {showStepper && (
+                  <div className="mt-1.5 flex items-center gap-2 pl-9 text-[13px] text-text-secondary">
+                    <span>Отказать:</span>
+                    <QtyStepper
+                      value={rejectQty}
+                      min={1}
+                      max={it.quantity}
+                      onChange={(v) => setRejectQtys((prev) => ({ ...prev, [it.id]: v }))}
+                    />
+                    <span className="text-text-muted">из {it.quantity}</span>
+                  </div>
+                )}
+              </li>
+            );
+          }
+
+          // Сет: заголовок выбирается целиком (вся начинка), рядом — стрелка
+          // раскрытия/сворачивания состава.
+          const setSelectableIds = setParts
+            .filter((sc) => sc.action !== 'removed' && isSelectable(sc.status, sc.id))
+            .map((sc) => sc.id);
+          const setSelectable = canSelect && setSelectableIds.length > 0;
+          const setAllSelected = setSelectableIds.length > 0 && setSelectableIds.every((id) => selected.has(id));
+          const setSomeSelected = setSelectableIds.some((id) => selected.has(id));
+          const isCollapsed = collapsed.has(it.id);
           return (
             <li key={it.id} className="text-[15px]">
-              {/* Обычное блюдо — выбираемая строка. Сет — заголовок-контейнер. */}
-              {renderLine(it.id, it.status, header, { container: isSet })}
-              {isSet && (
+              <div className="flex items-center gap-2.5">
+                {setSelectable ? (
+                  <label className="group flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 rounded-lg transition-colors focus-within:bg-primary/5 active:bg-primary/5">
+                    <input
+                      type="checkbox"
+                      checked={setAllSelected}
+                      onChange={() => toggleSet(setSelectableIds, setAllSelected)}
+                      className="peer sr-only"
+                    />
+                    {selected.size > 0 && (
+                      <span
+                        aria-hidden="true"
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-[7px] border bg-white text-white transition-all duration-150 ease-out peer-focus-visible:ring-2 peer-focus-visible:ring-primary/25 ${
+                          setAllSelected || setSomeSelected ? 'border-primary bg-primary' : 'border-slate-300 group-hover:border-primary/70'
+                        }`}
+                      >
+                        {setAllSelected ? (
+                          <svg width="13" height="10" viewBox="0 0 13 10" fill="none" aria-hidden="true">
+                            <path d="M1.5 5.1 4.8 8.2 11.5 1.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        ) : setSomeSelected ? (
+                          <svg width="12" height="3" viewBox="0 0 12 3" fill="none" aria-hidden="true">
+                            <path d="M1.5 1.5h9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                          </svg>
+                        ) : null}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1 text-text-primary">{header}</span>
+                  </label>
+                ) : (
+                  <span className="min-w-0 flex-1 text-text-primary">{header}</span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => toggleCollapsed(it.id)}
+                  aria-label={isCollapsed ? 'Раскрыть состав' : 'Свернуть состав'}
+                  aria-expanded={!isCollapsed}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-text-muted transition-colors hover:bg-background hover:text-text-secondary"
+                >
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
+                    aria-hidden
+                  >
+                    <path d="m6 15 6-6 6 6" />
+                  </svg>
+                </button>
+              </div>
+              {!isCollapsed && (
                 <ul className="mt-1.5 space-y-1.5 pl-3 text-[14px]">
                   {setParts.map((sc) =>
                     sc.action === 'removed' ? (
@@ -340,7 +462,7 @@ export function KitchenOrderCard({
             </div>
           </div>
           <button
-            onClick={() => setSelected(new Set())}
+            onClick={clearSelection}
             className="mt-2 self-start text-[12px] font-medium text-primary hover:text-primary-hover"
           >
             Снять выбор
@@ -375,6 +497,34 @@ export function KitchenOrderCard({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Степпер выбора количества (например, сколько штук отказать). */
+function QtyStepper({
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  value: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
+}) {
+  const clamp = (v: number) => Math.max(min, Math.min(max, v));
+  const btn =
+    'flex h-7 w-7 items-center justify-center rounded-lg border border-border bg-white text-text-secondary transition-colors hover:border-primary/50 hover:text-primary disabled:opacity-40 disabled:hover:border-border disabled:hover:text-text-secondary';
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <button type="button" className={btn} disabled={value <= min} onClick={() => onChange(clamp(value - 1))} aria-label="Меньше">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M3 7h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+      </button>
+      <span className="min-w-[1.5rem] text-center text-[14px] font-semibold text-text-primary">{value}</span>
+      <button type="button" className={btn} disabled={value >= max} onClick={() => onChange(clamp(value + 1))} aria-label="Больше">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 3v8M3 7h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+      </button>
+    </span>
   );
 }
 

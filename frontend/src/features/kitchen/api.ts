@@ -129,12 +129,14 @@ export function useRejectItems(station: PrepStation = 'kitchen') {
       orderId: string;
       itemIds: string[];
       setComponentIds: string[];
+      partial?: { itemId: string; quantity: number }[];
       reason?: string;
       comment?: string;
     }) =>
       (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/reject-batch?station=${station}`, {
         itemIds: p.itemIds,
         setComponentIds: p.setComponentIds,
+        partial: p.partial,
         reason: p.reason,
         comment: p.comment,
       })).data,
