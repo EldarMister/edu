@@ -96,6 +96,12 @@ export function timeHM(iso: string): string {
   return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Дата DD.MM из ISO (для завершённых/отказанных заказов на кухне). */
+export function dateDM(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+}
+
 /** Прошедшее время mm:ss с момента iso (для таймера кухни). */
 export function elapsed(iso: string, nowMs: number): string {
   const diff = Math.max(0, Math.floor((nowMs - new Date(iso).getTime()) / 1000));

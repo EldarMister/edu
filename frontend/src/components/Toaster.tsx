@@ -10,19 +10,22 @@ function Toast({
   id,
   message,
   type = 'info',
+  durationMs,
   exiting = false,
 }: {
   id: string;
   message: string;
   type?: NotificationType;
+  durationMs?: number;
   exiting?: boolean;
 }) {
   const dismiss = useNotifications((s) => s.dismiss);
   useEffect(() => {
     if (exiting) return;
-    const t = setTimeout(() => dismiss(id), type === 'error' ? 4000 : 2800);
+    const ms = durationMs ?? (type === 'error' ? 4000 : 2800);
+    const t = setTimeout(() => dismiss(id), ms);
     return () => clearTimeout(t);
-  }, [id, dismiss, exiting, type]);
+  }, [id, dismiss, exiting, type, durationMs]);
 
   return (
     <div
@@ -76,7 +79,7 @@ export function Toaster() {
   return (
     <div className="pointer-events-none fixed right-3 top-3 z-50 flex max-w-[calc(100vw-24px)] flex-col items-end sm:max-w-sm">
       {rendered.map((t) => (
-        <Toast key={t.id} id={t.id} message={t.message} type={t.type} exiting={t.exiting} />
+        <Toast key={t.id} id={t.id} message={t.message} type={t.type} durationMs={t.durationMs} exiting={t.exiting} />
       ))}
     </div>
   );

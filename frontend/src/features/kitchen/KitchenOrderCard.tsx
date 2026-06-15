@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
 import type { KitchenTab } from './api';
 import { OrderBadge } from '@/components/StatusBadge';
-import { displayOrderNumber, timeHM, elapsed, orderItemDisplayName } from '@/lib/format';
+import { displayOrderNumber, timeHM, dateDM, elapsed, orderItemDisplayName } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 
 /** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
@@ -264,7 +264,10 @@ export function KitchenOrderCard({
           <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}</p>
         </div>
         <div className="text-right">
-          <p className="text-[13px] text-text-muted">{timeHM(order.createdAt)}</p>
+          <p className="text-[13px] text-text-muted">
+            {/* Завершённые/отказанные показываем с датой — их смотрят позже. */}
+            {tab === 'new' || tab === 'in_work' ? timeHM(order.createdAt) : `${dateDM(order.createdAt)} ${timeHM(order.createdAt)}`}
+          </p>
           {tab === 'new' || tab === 'in_work' ? (
             <p className={`text-[15px] font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
               {elapsed(order.createdAt, now)}

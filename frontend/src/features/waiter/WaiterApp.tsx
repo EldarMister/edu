@@ -439,7 +439,7 @@ export function WaiterApp() {
     const nextQuantity = (cart.lines.find((line) => cartLineKeyFromParts(line.dish.id, line.variant?.id) === key)?.quantity ?? 0) + 1;
     cart.add(dish, variant);
     const name = variant ? `${dish.name} · ${variant.name}` : dish.name;
-    push({ message: `${name} ×${nextQuantity} добавлено`, at: new Date().toISOString() });
+    push({ message: `${name} ×${nextQuantity} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
   }
 
   function addSetToCart(set: Parameters<typeof cart.addSet>[0], components: Parameters<typeof cart.addSet>[1]) {
@@ -453,7 +453,7 @@ export function WaiterApp() {
       return;
     }
     cart.addSet(set, components);
-    push({ message: `${set.name} добавлен`, at: new Date().toISOString() });
+    push({ message: `${set.name} добавлен`, at: new Date().toISOString(), durationMs: 1800 });
   }
 
   async function goToPayment(order: Order) {
