@@ -228,6 +228,8 @@ model Dish {
   isSet          Boolean      @default(false) @map("is_set")
   // Отдельное название для озвучки кухни (если задано — используется вместо name).
   voiceName      String?      @map("voice_name")
+  popularityScore Float       @default(0) @map("popularity_score")
+  scoreUpdatedAt  DateTime?   @map("score_updated_at")
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
 
