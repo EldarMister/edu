@@ -1,24 +1,5 @@
 import { useUpdateNotifier } from '@/hooks/useUpdateNotifier';
-
-/**
- * Принудительное обновление: сносим service worker + кэши, перезагружаем.
- */
-async function forceUpdate() {
-  try {
-    if ('serviceWorker' in navigator) {
-      const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
-    }
-    if ('caches' in window) {
-      const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
-    }
-  } finally {
-    const url = new URL(window.location.href);
-    url.searchParams.set('v', Date.now().toString());
-    window.location.replace(url.toString());
-  }
-}
+import { refreshAppToLatestVersion } from '@/lib/app-update';
 
 /**
  * Модальное уведомление об обновлении.
@@ -71,7 +52,7 @@ export function UpdateModal() {
           <div className="flex flex-col gap-2.5">
             <button
               className="btn-primary btn-lg w-full font-semibold"
-              onClick={() => void forceUpdate()}
+              onClick={() => void refreshAppToLatestVersion()}
             >
               Обновить сейчас
             </button>
