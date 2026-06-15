@@ -1,6 +1,6 @@
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { useSocketEvent } from '@/lib/socket';
+import { getSocket, useSocketEvent } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { beep } from '@/lib/sound';
@@ -112,11 +112,20 @@ export function useWaiterRealtime() {
   const userId = useAuth((s) => s.user?.id);
   // Защита от повторной озвучки одного и того же статуса заказа.
   const voicedRef = useRef<Map<string, string>>(new Map());
+  const lastSyncAtRef = useRef(0);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['orders'] });
     qc.invalidateQueries({ queryKey: ['halls'] });
     qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+  };
+  const syncVisibleData = () => {
+    const now = Date.now();
+    if (now - lastSyncAtRef.current < 1_500) return;
+    lastSyncAtRef.current = now;
+    void qc.refetchQueries({ queryKey: ['orders'], type: 'active' });
+    void qc.refetchQueries({ queryKey: ['halls'], type: 'active' });
+    void qc.refetchQueries({ queryKey: ['waiter', 'shift'], type: 'active' });
   };
 
   const speakWaiterOrder = (order: VoicedOrder) => {
@@ -171,6 +180,33 @@ export function useWaiterRealtime() {
   useSocketEvent('settings:updated', () => {
     qc.invalidateQueries({ queryKey: ['settings'] });
   });
+
+  useEffect(() => {
+    const sock = getSocket();
+
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return;
+      syncVisibleData();
+    };
+    const onFocus = () => syncVisibleData();
+    const onPageShow = () => syncVisibleData();
+    const onOnline = () => syncVisibleData();
+    const onSocketConnect = () => syncVisibleData();
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onPageShow);
+    window.addEventListener('online', onOnline);
+    sock.on('connect', onSocketConnect);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onPageShow);
+      window.removeEventListener('online', onOnline);
+      sock.off('connect', onSocketConnect);
+    };
+  }, [qc]);
 
   // Печать чека/счёта: подтверждение администратора ещё не означает фактическую печать.
   useSocketEvent<ReceiptPrintRequest>('receipt_print_request_approved', (req) => {
