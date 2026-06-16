@@ -197,6 +197,12 @@ export interface Order {
   items: OrderItem[];
   /** Разбивка оплат (для смешанной — наличные + QR). Приходит в списке заказов админки. */
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
+  // ККМ / фискализация (null = ККМ выключена или чек ещё не пробит).
+  fiscalReceiptNumber?: string | null;
+  fiscalSign?: string | null;
+  fiscalQrCode?: string | null;
+  fiscalError?: string | null;
+  fiscalizedAt?: string | null;
 }
 
 export interface Receipt {

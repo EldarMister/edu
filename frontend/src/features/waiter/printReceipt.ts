@@ -1,3 +1,4 @@
+import QRCode from 'qrcode';
 import type { Receipt, PaymentMethod } from '@/types';
 import { displayOrderNumber, money, orderItemDisplayName, timeHM, isSplitPayment } from '@/lib/format';
 
@@ -8,21 +9,31 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
   mixed: 'Смешанная',
 };
 
+/** Данные фискального чека от ККМ — если переданы, печатается фискальный чек, а не товарный. */
+export interface FiscalPrintData {
+  receiptNumber?: string;
+  sign?: string;
+  /** QR ГНС: data URL картинки или строка/ссылка для проверки (тогда QR рисуется локально). */
+  qrCode?: string;
+}
+
 /**
  * Открывает окно печати с компактным чеком (подходит для термопринтера 58–80мм).
- * `preliminary: true` печатает счёт — без блока оплаты,
- * с пометкой, что это не фискальный документ.
+ * `preliminary: true` печатает счёт — без блока оплаты, с пометкой, что это не фискальный документ.
+ * `fiscal` задан — печатается фискальный чек (заголовок, номер, ФП и QR ГНС) вместо товарного.
  */
-export function printReceipt(
+export async function printReceipt(
   r: Receipt,
   targetWindow?: Window | null,
-  opts: { preliminary?: boolean; onAfterPrint?: () => void } = {},
+  opts: { preliminary?: boolean; fiscal?: FiscalPrintData; onAfterPrint?: () => void } = {},
 ) {
   const preliminary = opts.preliminary ?? false;
+  const fiscal = preliminary ? undefined : opts.fiscal;
   const date = new Date(r.date);
   const dateStr = `${date.toLocaleDateString('ru-RU')} ${timeHM(r.date)}`;
   const orderNumber = displayOrderNumber(r.orderNumber);
-  const docTitle = preliminary ? 'Счёт' : 'Чек';
+  const docTitle = preliminary ? 'Счёт' : fiscal ? 'Фискальный чек' : 'Чек';
+  const receiptKind = preliminary ? '' : fiscal ? 'Фискальный чек' : 'Внутренний товарный чек';
   const rows = r.items
     .map(
       (it) =>
@@ -31,6 +42,9 @@ export function printReceipt(
         )}</td></tr>`,
     )
     .join('');
+
+  // Блок фискального чека: номер, фискальный признак и QR ГНС (рисуем локально из ссылки/строки).
+  const fiscalBlock = fiscal ? await buildFiscalBlock(fiscal) : '';
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${docTitle} ${orderNumber}</title>
   <style>
@@ -51,7 +65,7 @@ export function printReceipt(
     .sep { color: #999; margin: 0 3px; }
   </style></head><body>
     <h1>${escapeHtml(r.cafeName)}</h1>
-    ${preliminary ? '' : '<div class="receipt-kind">Внутренний товарный чек</div>'}
+    ${receiptKind ? `<div class="receipt-kind">${receiptKind}</div>` : ''}
     ${r.address ? `<div class="center muted">${escapeHtml(r.address)}</div>` : ''}
     ${r.phone ? `<div class="center muted">${escapeHtml(r.phone)}${r.phone2 ? ', ' + escapeHtml(r.phone2) : ''}</div>` : ''}
     ${r.instagram ? `<div class="center muted">Instagram: ${escapeHtml(r.instagram)}</div>` : ''}
@@ -72,6 +86,7 @@ export function printReceipt(
     ${Number(r.serviceChargeAmount) > 0 ? `<div class="row"><span>Обслуживание</span><span>${money(r.serviceChargeAmount)}</span></div>` : ''}
     <div class="row total"><span>Итого</span><span>${money(r.finalAmount)}</span></div>
     ${preliminary ? '' : paymentBlock(r)}
+    ${fiscalBlock}
     <hr/>
     <div class="center muted">${preliminary ? 'Счёт. Не является фискальным документом.' : escapeHtml(r.thanks)}</div>
   </body></html>`;
@@ -91,6 +106,34 @@ export function printReceipt(
   setTimeout(() => {
     w.print();
   }, 300);
+}
+
+/** Фискальный блок чека: номер, ФП и QR ГНС (картинка генерируется из ссылки/строки). */
+async function buildFiscalBlock(fiscal: FiscalPrintData): Promise<string> {
+  const lines: string[] = ['<hr/>'];
+  if (fiscal.receiptNumber) {
+    lines.push(`<div class="row"><span>Фискальный чек №</span><span>${escapeHtml(fiscal.receiptNumber)}</span></div>`);
+  }
+  if (fiscal.sign) {
+    lines.push(`<div class="row-inline"><span>ФП</span><span>${escapeHtml(fiscal.sign)}</span></div>`);
+  }
+  const qrSrc = await fiscalQrSrc(fiscal.qrCode);
+  if (qrSrc) {
+    lines.push(`<div class="center" style="margin-top:8px"><img src="${qrSrc}" width="150" height="150" alt="QR ГНС"/></div>`);
+    lines.push('<div class="center muted" style="font-size:11px">Проверка чека в ГНС по QR-коду</div>');
+  }
+  return lines.join('');
+}
+
+/** Готовый src картинки QR: data URL — как есть; ссылка/строка — рисуем QR локально. */
+async function fiscalQrSrc(qrCode?: string): Promise<string | null> {
+  if (!qrCode) return null;
+  if (qrCode.startsWith('data:image')) return qrCode;
+  try {
+    return await QRCode.toDataURL(qrCode, { margin: 1, width: 300 });
+  } catch {
+    return null;
+  }
 }
 
 /** Блок оплаты: для смешанной — в одну строку через «·», иначе один способ. */

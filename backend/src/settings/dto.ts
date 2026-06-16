@@ -41,4 +41,23 @@ export class UpdateSettingsDto {
   @IsOptional() @IsString() @MaxLength(5_000_000)
   qrImageUrl?: string;
 
+  // ---- ККМ / фискализация ----
+  // Пустая строка = выключить ККМ (нормализуется в null в сервисе). mock — режим эмуляции.
+  @IsOptional() @IsIn(['ekassa', 'yakassa', 'mock', ''])
+  fiscalProvider?: string;
+
+  @IsOptional() @IsString() @MaxLength(255)
+  fiscalEkassaApiKey?: string;
+
+  @IsOptional() @IsString() @MaxLength(255)
+  fiscalEkassaUrl?: string;
+
+  @IsOptional() @IsString() @MaxLength(32)
+  fiscalEkassaInn?: string;
+
+  @IsOptional() @IsString() @MaxLength(255)
+  fiscalYakassaApiKey?: string;
+
+  @IsOptional() @IsString() @MaxLength(255)
+  fiscalYakassaUrl?: string;
 }

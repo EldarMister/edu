@@ -27,4 +27,6 @@ export const SERVER_EVENTS = {
   RECEIPT_PRINT_REQUEST_APPROVED: 'receipt_print_request_approved',
   RECEIPT_PRINT_REQUEST_REJECTED: 'receipt_print_request_rejected',
   RECEIPT_PRINT_REQUEST_PRINTED: 'receipt_print_request_printed',
+  // ККМ: фискальный чек по заказу пробит или вернул ошибку.
+  FISCAL_RECEIPT_UPDATED: 'fiscal_receipt_updated',
 } as const;

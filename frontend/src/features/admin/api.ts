@@ -267,6 +267,40 @@ export function useAdminOrderDetails(id: string | null) {
   });
 }
 
+/** Результат пробития фискального чека (ответ /fiscal/...). */
+export interface FiscalResult {
+  success: boolean;
+  fiscalReceiptNumber?: string;
+  fiscalSign?: string;
+  qrCode?: string;
+  error?: string;
+}
+
+/** Повторить (или впервые пробить) фискальный чек ККМ по заказу — кнопка «Повторить». */
+export function useRetryFiscal() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (orderId: string) =>
+      api.post<FiscalResult>(`/fiscal/orders/${orderId}/retry`).then((r) => r.data),
+    onSuccess: (_data, orderId) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'orders', 'detail', orderId] });
+      qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
+    },
+  });
+}
+
+/** Фискализация при печати чека (идемпотентно). Возвращает данные для печати фискального чека. */
+export function useFiscalizeForPrint() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (orderId: string) =>
+      api.post<FiscalResult | null>(`/fiscal/orders/${orderId}/print`).then((r) => r.data),
+    onSuccess: (_data, orderId) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'orders', 'detail', orderId] });
+    },
+  });
+}
+
 export interface OrdersSummary {
   total: number;
   paid: number;

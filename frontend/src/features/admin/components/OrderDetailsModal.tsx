@@ -2,6 +2,9 @@ import { Modal } from '@/components/Modal';
 import { OrderBadge } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
 import { displayOrderNumber, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel } from '@/lib/format';
+import { useNotifications } from '@/store/notifications';
+import { apiError } from '@/lib/api';
+import { useRetryFiscal } from '../api';
 
 const ITEM_STATUS: Record<OrderItemStatus, string> = {
   new: 'Новое',
@@ -99,8 +102,91 @@ export function OrderDetailsModal({
           )}
           <Total label="К оплате" value={money(order.finalAmount)} strong />
         </div>
+
+        <FiscalBlock order={order} />
       </div>
     </Modal>
+  );
+}
+
+/** ККМ / фискальный чек. Ничего не показывает, пока чек не пробит и нет ошибки
+ *  (т.е. при выключенной ККМ). При ошибке — бейдж и кнопка «Повторить». */
+function FiscalBlock({ order }: { order: Order }) {
+  const retry = useRetryFiscal();
+  const push = useNotifications((s) => s.push);
+
+  const hasReceipt = !!order.fiscalReceiptNumber;
+  const hasError = !hasReceipt && !!order.fiscalError;
+  if (!hasReceipt && !hasError) return null;
+
+  const onRetry = async () => {
+    try {
+      const res = await retry.mutateAsync(order.id);
+      if (res?.success) {
+        push({ message: 'Фискальный чек пробит', type: 'success', at: new Date().toISOString() });
+      } else {
+        push({
+          message: res?.error ?? 'ККМ вернул ошибку',
+          type: 'error',
+          at: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  };
+
+  if (hasReceipt) {
+    const qr = order.fiscalQrCode ?? '';
+    const isImage = qr.startsWith('data:image');
+    return (
+      <div className="rounded-lg border border-success/30 bg-success/5 px-3 py-2.5">
+        <div className="flex items-center gap-2">
+          <span className="inline-block rounded-full bg-success/15 px-2.5 py-0.5 text-xs font-medium text-success">
+            Фискальный чек
+          </span>
+          <span className="text-sm font-semibold text-text-primary">№ {order.fiscalReceiptNumber}</span>
+        </div>
+        {order.fiscalSign && (
+          <p className="mt-1 text-xs text-text-muted">Фискальный признак: {order.fiscalSign}</p>
+        )}
+        {qr && (
+          <div className="mt-2">
+            {isImage ? (
+              <img src={qr} alt="QR ГНС" className="h-28 w-28 rounded border border-border bg-white p-1" />
+            ) : (
+              <a
+                href={qr}
+                target="_blank"
+                rel="noreferrer"
+                className="break-all text-xs text-primary underline"
+              >
+                {qr}
+              </a>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-danger/30 bg-danger/5 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="inline-block rounded-full bg-danger/15 px-2.5 py-0.5 text-xs font-medium text-danger">
+          Ошибка ККМ
+        </span>
+        <button
+          type="button"
+          onClick={onRetry}
+          disabled={retry.isPending}
+          className="rounded-lg border border-danger/40 px-3 py-1.5 text-xs font-medium text-danger transition-colors hover:bg-danger/10 disabled:opacity-50"
+        >
+          {retry.isPending ? 'Повтор…' : 'Повторить'}
+        </button>
+      </div>
+      <p className="mt-1.5 text-xs text-danger">{order.fiscalError}</p>
+    </div>
   );
 }
 

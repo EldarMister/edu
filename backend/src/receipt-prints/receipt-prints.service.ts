@@ -8,6 +8,7 @@ import { OrderStatus, Prisma, ReceiptPrintStatus, ReceiptPrintType, Role } from 
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
+import { FiscalService } from '../fiscal/fiscal.service';
 import type { AuditActor } from '../audit/audit.service';
 
 const withWaiter = {
@@ -67,6 +68,7 @@ export class ReceiptPrintsService {
   constructor(
     private prisma: PrismaService,
     private events: EventsGateway,
+    private fiscal: FiscalService,
   ) {}
 
   private serialize(r: RequestWithWaiter) {
@@ -255,6 +257,13 @@ export class ReceiptPrintsService {
       include: withWaiter,
     });
     const dto = this.serialize(updated);
+
+    // ККМ: финальный (товарный) чек пробивается фискально, если подключён провайдер.
+    // Предчек (preliminary) не фискализируется. Ошибка ККМ не блокирует flow печати —
+    // FiscalService сам пишет результат/ошибку в заказ и при выключенной ККМ ничего не делает.
+    if (request.type === ReceiptPrintType.receipt) {
+      this.fiscal.fiscalizeOrder(request.orderId).catch(() => undefined);
+    }
 
     this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
     this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);

@@ -25,6 +25,12 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   payCard: 'оплата картой',
   qrImageUrl: 'QR-код',
   printerConnected: 'принтер',
+  fiscalProvider: 'провайдер ККМ',
+  fiscalEkassaApiKey: 'API-ключ eKassa',
+  fiscalEkassaUrl: 'URL eKassa',
+  fiscalEkassaInn: 'ИНН (eKassa)',
+  fiscalYakassaApiKey: 'API-ключ YaKassa',
+  fiscalYakassaUrl: 'URL YaKassa',
 };
 
 /** Разрешённые форматы загружаемого QR-кода. */
@@ -70,6 +76,8 @@ export class SettingsService {
       // Лёгкая версионированная ссылка вместо тяжёлого base64 — кэшируется браузером.
       qrImageUrl: s.qrImageUrl ? `/settings/qr?v=${s.updatedAt.getTime()}` : null,
       printerConnected: s.printerConnected,
+      // Включена ли ККМ — без раскрытия ключей (нужно фронтенду для подсказок/гейтинга).
+      fiscalEnabled: !!s.fiscalProvider,
     };
   }
 
@@ -96,6 +104,11 @@ export class SettingsService {
     const data: Prisma.SettingsUpdateInput = { ...dto };
     if (dto.serviceChargeAmount !== undefined) {
       data.serviceChargeAmount = new Prisma.Decimal(round2(dto.serviceChargeAmount));
+    }
+
+    // ККМ: пустой провайдер = выключить (храним null, чтобы isEnabled() был false).
+    if (dto.fiscalProvider !== undefined) {
+      data.fiscalProvider = dto.fiscalProvider.trim() === '' ? null : dto.fiscalProvider;
     }
 
     // QR-код: пустая строка = удалить; иначе проверяем формат data URL.
@@ -128,6 +141,10 @@ export class SettingsService {
       if (key === 'qrImageUrl') {
         oldValue[key] = before ? 'загружен' : 'нет';
         newValue[key] = after ? 'загружен' : 'удалён';
+      } else if (key === 'fiscalEkassaApiKey' || key === 'fiscalYakassaApiKey') {
+        // Секретные ключи ККМ не пишем в журнал — только факт изменения.
+        oldValue[key] = before ? 'задан' : 'нет';
+        newValue[key] = after ? 'задан' : 'удалён';
       } else {
         oldValue[key] = before as Prisma.InputJsonValue;
         newValue[key] = after as Prisma.InputJsonValue;
