@@ -7,6 +7,8 @@ export const ROOMS = {
   ADMIN: 'role:admin',
   ADMIN_ONLY: 'role:admin-only',
   waiter: (waiterId: string) => `waiter:${waiterId}`,
+  // Комната QR-меню конкретного стола: все гости стола получают обновления общего заказа.
+  qrTable: (tableId: string) => `qr-table:${tableId}`,
 };
 
 export const SERVER_EVENTS = {
@@ -29,4 +31,19 @@ export const SERVER_EVENTS = {
   RECEIPT_PRINT_REQUEST_PRINTED: 'receipt_print_request_printed',
   // ККМ: фискальный чек по заказу пробит или вернул ошибку.
   FISCAL_RECEIPT_UPDATED: 'fiscal_receipt_updated',
+  // QR-меню стола: realtime для гостей одного стола.
+  QR_GUEST_JOINED: 'qr:guest_joined',
+  QR_GUEST_LEFT: 'qr:guest_left',
+  QR_CART_UPDATED: 'qr:cart_updated',
+  QR_ITEM_ADDED: 'qr:item_added',
+  QR_ITEM_UPDATED: 'qr:item_updated',
+  QR_ITEM_REMOVED: 'qr:item_removed',
+  QR_ORDER_SUBMITTED: 'qr:order_submitted',
+  QR_ORDER_STATUS_CHANGED: 'qr:order_status_changed',
+} as const;
+
+/** Клиентские события, которые шлёт гость QR-меню (вход/выход в комнату стола). */
+export const QR_CLIENT_EVENTS = {
+  JOIN: 'qr:join',
+  LEAVE: 'qr:leave',
 } as const;

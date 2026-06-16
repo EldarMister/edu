@@ -252,7 +252,8 @@ export class StaffService {
     const waiterMap = new Map(report.map(r => [r.id, r]));
 
     for (const o of orders) {
-      const w = waiterMap.get(o.waiterId);
+      // QR-заказы без официанта не относятся к статистике сотрудников.
+      const w = o.waiterId ? waiterMap.get(o.waiterId) : undefined;
       if (!w) continue;
       if (o.status === OrderStatus.paid) {
         w.revenue += Number(o.finalAmount);
@@ -359,7 +360,7 @@ export class StaffService {
     // с нулевыми финансами, а не пустую страницу «нет данных».
     let shifts: { waiterId: string; startedAt: Date; endedAt: Date | null; status: WaiterShiftStatus }[] = [];
     let paidOrders: Awaited<ReturnType<typeof this.loadPaidOrders>> = [];
-    let cancelledOrders: { id: string; waiterId: string; orderNumber: string; finalAmount: Prisma.Decimal; closedAt: Date | null }[] = [];
+    let cancelledOrders: { id: string; waiterId: string | null; orderNumber: string; finalAmount: Prisma.Decimal; closedAt: Date | null }[] = [];
     let rejectedItems: Awaited<ReturnType<typeof this.loadRejectedItems>> = [];
     let cashReports: { waiterId: string; cashHanded: Prisma.Decimal }[] = [];
     if (waiterIds.length > 0) {
@@ -424,6 +425,7 @@ export class StaffService {
     };
 
     for (const o of paidOrders) {
+      if (!o.waiterId) continue; // QR-заказ без официанта в отчёт сотрудника не идёт
       const a = ensure(o.waiterId);
       a.turnover += Number(o.finalAmount);
       for (const p of o.payments) {
@@ -463,6 +465,7 @@ export class StaffService {
     }
 
     for (const o of cancelledOrders) {
+      if (!o.waiterId) continue;
       ensure(o.waiterId).cancellations.push({
         time: (o.closedAt ?? from).toISOString(),
         name: `Заказ ${o.orderNumber}`,
@@ -474,6 +477,7 @@ export class StaffService {
       const name = it.dishVariantNameSnapshot
         ? `${it.dishNameSnapshot} · ${it.dishVariantNameSnapshot}`
         : it.dishNameSnapshot;
+      if (!it.order.waiterId) continue;
       ensure(it.order.waiterId).cancellations.push({
         time: it.updatedAt.toISOString(),
         name,

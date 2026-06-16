@@ -3,11 +3,14 @@ import {
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
+  MessageBody,
+  ConnectedSocket,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
-import { ROOMS } from './events';
+import { ROOMS, SERVER_EVENTS, QR_CLIENT_EVENTS } from './events';
 import { getJwtAccessSecret } from '../auth/jwt.config';
 
 interface SocketUser {
@@ -43,7 +46,10 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       (client.handshake.headers?.authorization as string)?.replace('Bearer ', '');
 
     if (!token) {
-      client.disconnect(true);
+      // Гость QR-меню подключается без JWT. Он не входит ни в одну служебную комнату —
+      // только в комнату своего стола после события qr:join (ниже).
+      client.data.guest = true;
+      this.logger.log(`Connected: QR guest (${client.id})`);
       return;
     }
 
@@ -76,6 +82,45 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (user) {
       this.logger.log(`Disconnected: ${user.role} ${user.id}`);
     }
+    // Гость QR-меню вышел — сообщим столу, чтобы обновили счётчик/онлайн.
+    const qr = client.data.qr as { tableId: string; guestKey?: string } | undefined;
+    if (qr) {
+      this.server.to(ROOMS.qrTable(qr.tableId)).emit(SERVER_EVENTS.QR_GUEST_LEFT, {
+        tableId: qr.tableId,
+        guestKey: qr.guestKey,
+      });
+    }
+  }
+
+  /** Гость QR-меню входит в комнату своего стола (tableId получен из публичного /menu). */
+  @SubscribeMessage(QR_CLIENT_EVENTS.JOIN)
+  handleQrJoin(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() body: { tableId?: string; guestKey?: string },
+  ) {
+    const tableId = body?.tableId;
+    if (!tableId) return { ok: false };
+    client.join(ROOMS.qrTable(tableId));
+    client.data.qr = { tableId, guestKey: body.guestKey };
+    this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_GUEST_JOINED, {
+      tableId,
+      guestKey: body.guestKey,
+    });
+    return { ok: true };
+  }
+
+  /** Гость покидает комнату стола. */
+  @SubscribeMessage(QR_CLIENT_EVENTS.LEAVE)
+  handleQrLeave(@ConnectedSocket() client: Socket, @MessageBody() body: { tableId?: string }) {
+    const tableId = body?.tableId ?? (client.data.qr as { tableId?: string } | undefined)?.tableId;
+    if (!tableId) return { ok: false };
+    client.leave(ROOMS.qrTable(tableId));
+    this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_GUEST_LEFT, {
+      tableId,
+      guestKey: (client.data.qr as { guestKey?: string } | undefined)?.guestKey,
+    });
+    client.data.qr = undefined;
+    return { ok: true };
   }
 
   // ---- API для сервисов ----
@@ -84,7 +129,9 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to(ROOMS.KITCHEN).emit(event, payload);
   }
 
-  emitToWaiter(waiterId: string, event: string, payload: unknown) {
+  emitToWaiter(waiterId: string | null | undefined, event: string, payload: unknown) {
+    // QR-заказ может быть без официанта — тогда персональной комнаты нет.
+    if (!waiterId) return;
     this.server.to(ROOMS.waiter(waiterId)).emit(event, payload);
   }
 
@@ -99,5 +146,10 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   /** Широковещательно (например, изменение статуса стола видят все). */
   emitBroadcast(event: string, payload: unknown) {
     this.server.emit(event, payload);
+  }
+
+  /** Всем гостям QR-меню конкретного стола. */
+  emitToQrTable(tableId: string, event: string, payload: unknown) {
+    this.server.to(ROOMS.qrTable(tableId)).emit(event, payload);
   }
 }

@@ -183,9 +183,13 @@ model Table {
   createdAt DateTime    @default(now()) @map("created_at")
   updatedAt DateTime    @updatedAt @map("updated_at")
 
-  hall      Hall       @relation(fields: [hallId], references: [id], onDelete: Cascade)
-  orders    Order[]
-  incidents Incident[]
+  // Случайный неугадываемый токен для ссылки QR-меню стола (/menu/:qrToken).
+  qrToken   String      @unique @default(uuid()) @map("qr_token")
+
+  hall       Hall             @relation(fields: [hallId], references: [id], onDelete: Cascade)
+  orders     Order[]
+  incidents  Incident[]
+  qrSessions QrTableSession[]
 
   @@unique([hallId, number])
   @@map("tables")
@@ -242,6 +246,7 @@ model Dish {
   // Снимки этого блюда в изменённых составах заказов.
   origOrderSetItems  OrderItemSetComponent[] @relation("OrigDish")
   finalOrderSetItems OrderItemSetComponent[] @relation("FinalDish")
+  qrSessionItems     QrSessionItem[]
 
   @@map("dishes")
 }
@@ -295,7 +300,10 @@ model Order {
   // Бизнес-день заказа (локальная полночь) — для дневной нумерации и уникальности номера в дне.
   businessDate           DateTime       @default(now()) @map("business_date")
   tableId                String         @map("table_id")
-  waiterId               String         @map("waiter_id")
+  // nullable: заказ из QR-меню создаётся без официанта (source=qr).
+  waiterId               String?        @map("waiter_id")
+  // Источник заказа: pos — создан сотрудником, qr — гостем через QR-меню.
+  source                 String         @default("pos")
   waiterShiftId          String?        @map("waiter_shift_id")
   status                 OrderStatus    @default(draft)
   totalAmount            Decimal        @default(0) @map("total_amount") @db.Decimal(10, 2)
@@ -321,7 +329,7 @@ model Order {
   fiscalizedAt           DateTime?      @map("fiscalized_at") // момент успешного пробития
 
   table                Table                 @relation(fields: [tableId], references: [id])
-  waiter               User                  @relation("WaiterOrders", fields: [waiterId], references: [id])
+  waiter               User?                 @relation("WaiterOrders", fields: [waiterId], references: [id])
   waiterShift          WaiterShift?          @relation(fields: [waiterShiftId], references: [id])
   items                OrderItem[]
   payments             Payment[]
@@ -329,6 +337,8 @@ model Order {
   incidents            Incident[]
   actions              OrderAction[]
   receiptPrintRequests ReceiptPrintRequest[]
+  // Заполняется, если заказ создан из QR-сессии стола.
+  qrSession            QrTableSession?
 
   @@unique([businessDate, orderNumber])
   @@index([status])
@@ -627,4 +637,69 @@ model ReceiptPrintRequest {
   @@index([status])
   @@index([waiterId])
   @@map("receipt_print_requests")
+}
+
+// ---------- QR-меню стола ----------
+// Общий заказ стола, который гости наполняют со своих телефонов до отправки в POS.
+// Черновик (draft) живёт до submit; после submit привязывается к реальному Order.
+
+model QrTableSession {
+  id               String   @id @default(uuid())
+  tableId          String   @map("table_id")
+  status           String   @default("draft") // draft | submitted | closed
+  submittedOrderId String?  @unique @map("submitted_order_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  table          Table           @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  submittedOrder Order?          @relation(fields: [submittedOrderId], references: [id], onDelete: SetNull)
+  guests         QrGuest[]
+  items          QrSessionItem[]
+
+  @@index([tableId, status])
+  @@map("qr_table_sessions")
+}
+
+model QrGuest {
+  id         String   @id @default(uuid())
+  sessionId  String   @map("session_id")
+  // Секрет гостя из localStorage — идентифицирует устройство без авторизации.
+  guestKey   String   @map("guest_key")
+  guestLabel String   @map("guest_label") // «Гость 1», «Гость 2», …
+  isOnline   Boolean  @default(true) @map("is_online")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  session QrTableSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  items   QrSessionItem[]
+
+  @@unique([sessionId, guestKey])
+  @@index([sessionId])
+  @@map("qr_guests")
+}
+
+model QrSessionItem {
+  id            String   @id @default(uuid())
+  sessionId     String   @map("session_id")
+  guestId       String   @map("guest_id")
+  // nullable: блюдо может быть удалено из меню — отображение по снимку.
+  dishId        String?  @map("dish_id")
+  variantId     String?  @map("variant_id")
+  quantity      Int      @default(1)
+  snapshotName  String   @map("snapshot_name")
+  variantName   String?  @map("variant_name")
+  snapshotPrice Decimal  @map("snapshot_price") @db.Decimal(10, 2)
+  // Зарезервировано под добавки/модификаторы (в v1 не используется).
+  selectedAddons Json?   @map("selected_addons")
+  comment       String?
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  session QrTableSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  guest   QrGuest        @relation(fields: [guestId], references: [id], onDelete: Cascade)
+  dish    Dish?          @relation(fields: [dishId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([guestId])
+  @@map("qr_session_items")
 }

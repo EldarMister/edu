@@ -285,6 +285,87 @@ export class OrdersService {
     return order;
   }
 
+  /**
+   * Создаёт заказ из QR-сессии стола: без официанта (source=qr) и без требования активной
+   * смены. Переиспользует ту же сборку позиций/итогов/склада, что и обычное создание.
+   * Не накладывает ограничение «один активный заказ на стол» — QR-заказы аддитивны.
+   */
+  async createFromQr(params: { tableId: string; items: CreateOrderItemDto[]; comment?: string }) {
+    const { tableId } = params;
+    const table = await this.prisma.table.findUnique({ where: { id: tableId } });
+    if (!table || !table.isActive) {
+      throw new NotFoundException('Стол не найден');
+    }
+
+    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(params.items);
+    const hasPrep = itemsData.some((i) => i.prepStation !== PrepStation.none);
+    const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
+    const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
+
+    const order = await this.prisma.$transaction(async (tx) => {
+      const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
+      const totals = this.calcTotals(itemsData, serviceChargeAmount);
+      const businessDate = this.businessDateOf();
+      const orderNumber = await this.nextOrderNumber(tx, businessDate);
+      await tx.table.update({ where: { id: tableId }, data: { status: initialTableStatus } });
+      await this.deductInventory(tx, dishDeductions, variantDeductions);
+      return tx.order.create({
+        data: {
+          orderNumber,
+          businessDate,
+          tableId,
+          waiterId: null,
+          waiterShiftId: null,
+          source: 'qr',
+          status: initialStatus,
+          comment: params.comment,
+          totalAmount: totals.total,
+          discountAmount: totals.discount,
+          serviceChargeAmount: totals.serviceCharge,
+          finalAmount: totals.final,
+          items: { create: itemsData },
+        },
+        include: orderInclude,
+      });
+    });
+
+    if (hasPrep) {
+      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
+        ...order,
+        voice: {
+          byStation: {
+            kitchen: buildNewOrderText(order, PrepStation.kitchen),
+            bar: buildNewOrderText(order, PrepStation.bar),
+          },
+        },
+      });
+      this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
+      void this.notifyKitchenNewOrder(order);
+    }
+    this.events.emitBroadcast(SERVER_EVENTS.TABLE_STATUS_CHANGED, {
+      id: table.id,
+      number: table.number,
+      status: initialTableStatus,
+      hallId: table.hallId,
+    });
+    // Админы видят все заказы — сообщим о новом QR-заказе.
+    this.events.emitToAdmin(SERVER_EVENTS.ORDER_NEW, order);
+
+    await this.audit.log({
+      actor: null,
+      actionType: AuditAction.ORDER_CREATED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId: order.id,
+      tableId: order.tableId,
+      description: `QR-меню: заказ ${order.orderNumber} на столе ${table.number}, сумма ${this.money(order.finalAmount)}`,
+      newValue: { orderNumber: order.orderNumber, finalAmount: Number(order.finalAmount), source: 'qr' },
+      metadata: { tableNumber: table.number, itemsCount: order.items.length, source: 'qr' },
+    });
+
+    return order;
+  }
+
   /** Отмена заказа официантом/админом/владельцем с причиной (audit обязателен). */
   async cancelOrder(orderId: string, actor: AuditActor, reason?: string) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
@@ -1462,13 +1543,13 @@ export class OrdersService {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
     }
     await this.audit.log({
-      actor: { id: waiterId, role: Role.WAITER, name: order.waiter.name },
+      actor: { id: waiterId, role: Role.WAITER, name: order.waiter?.name },
       actionType: AuditAction.ORDER_UPDATED,
       entityType: AuditEntity.ORDER,
       entityId: order.id,
       orderId,
       tableId: order.tableId,
-      description: `${order.waiter.name ?? 'Официант'} отменил блюдо «${this.orderItemName(item)}» в заказе ${order.orderNumber}: ${cleanReason}`,
+      description: `${order.waiter?.name ?? 'Официант'} отменил блюдо «${this.orderItemName(item)}» в заказе ${order.orderNumber}: ${cleanReason}`,
       oldValue: { itemId, status: item.status, finalAmount: Number(order.finalAmount) },
       newValue: { itemId, status: OrderItemStatus.cancelled, finalAmount: Number(updated.finalAmount), reason: cleanReason },
       metadata: { tableNumber: order.table.number, itemName: this.orderItemName(item) },
@@ -2422,11 +2503,11 @@ export class OrdersService {
       include: orderInclude,
     });
 
-    // История передачи (ТЗ §18 — audit log).
-    const fromWaiter = await this.prisma.user.findUnique({
-      where: { id: fromWaiterId },
-      select: { name: true },
-    });
+    // История передачи (ТЗ §18 — audit log). fromWaiterId не null: метод доступен только
+    // владельцу заказа-официанту (QR-заказ без официанта сюда не дойдёт).
+    const fromWaiter = fromWaiterId
+      ? await this.prisma.user.findUnique({ where: { id: fromWaiterId }, select: { name: true } })
+      : null;
     await this.audit.log({
       actor,
       actionType: AuditAction.TABLE_TRANSFERRED,
@@ -2484,7 +2565,7 @@ export class OrdersService {
   }
 
   private emitStatusChanged(
-    order: { waiterId: string } & Record<string, unknown>,
+    order: { waiterId: string | null } & Record<string, unknown>,
     voice?: { waiterText?: string },
   ) {
     // Полная отмена/отказ — добавляем озвучку «Заказ номер … отменён» (ТЗ §4).
@@ -2495,9 +2576,21 @@ export class OrdersService {
     } else if (voice?.waiterText) {
       payload = { ...order, voice: { ...(order.voice as Record<string, unknown> | undefined), waiterText: voice.waiterText } };
     }
-    this.events.emitToWaiter(order.waiterId, SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
+    // QR-заказ создаётся без официанта — персональной комнаты официанта нет.
+    if (order.waiterId) {
+      this.events.emitToWaiter(order.waiterId, SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
+    }
     this.events.emitToKitchen(SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
     this.events.emitToAdmin(SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
+    // Гости QR-меню стола видят смену статуса своего заказа.
+    if (order.source === 'qr' && typeof order.tableId === 'string') {
+      this.events.emitToQrTable(order.tableId as string, SERVER_EVENTS.QR_ORDER_STATUS_CHANGED, {
+        tableId: order.tableId,
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+      });
+    }
   }
 
   private emitTableStatus(id: string, number: number, status: TableStatus, hallId: string) {
@@ -2505,11 +2598,13 @@ export class OrdersService {
   }
 
   private notifyWaiter(
-    waiterId: string,
+    waiterId: string | null | undefined,
     message: string,
     order: { id: string; orderNumber: string },
     type: 'info' | 'success' | 'error' = 'info',
   ) {
+    // QR-заказ может быть без официанта — уведомлять некого.
+    if (!waiterId) return;
     const payload = {
       message,
       type,

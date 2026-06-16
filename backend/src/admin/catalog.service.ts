@@ -5,6 +5,7 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
+import { normalizeDishImage, withDishImageRef } from '../dishes/dish-image';
 import {
   CreateCategoryDto,
   CreateDishDto,
@@ -292,16 +293,17 @@ export class CatalogService {
   }
 
   /** Все блюда (включая неактивные) с категорией — для управления меню. */
-  dishesAll(params: { categoryId?: string; search?: string }) {
+  async dishesAll(params: { categoryId?: string; search?: string }) {
     const where: Prisma.DishWhereInput = {
       ...(params.categoryId ? { categoryId: params.categoryId } : {}),
       ...(params.search ? { name: { contains: params.search, mode: 'insensitive' } } : {}),
     };
-    return this.prisma.dish.findMany({
+    const dishes = await this.prisma.dish.findMany({
       where,
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       include: this.dishInclude(),
     });
+    return dishes.map(withDishImageRef);
   }
 
   private normalizeVariants(variants?: DishVariantDto[]): NormalizedDishVariant[] {
@@ -371,7 +373,7 @@ export class CatalogService {
         categoryId: dto.categoryId,
         price: new Prisma.Decimal(price),
         description: dto.description,
-        imageUrl: dto.imageUrl,
+        imageUrl: normalizeDishImage(dto.imageUrl),
         discountType: dto.discountType ?? 'none',
         discountValue: new Prisma.Decimal(dto.discountValue ?? 0),
         cookingTime: dto.cookingTime,
@@ -411,7 +413,7 @@ export class CatalogService {
       },
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId: dish.id });
-    return dish;
+    return withDishImageRef(dish);
   }
 
   async updateDish(id: string, dto: UpdateDishDto, actor: AuditActor) {
@@ -428,6 +430,7 @@ export class CatalogService {
     }
     if (dto.discountValue !== undefined) data.discountValue = new Prisma.Decimal(dto.discountValue);
     if (dto.voiceName !== undefined) data.voiceName = dto.voiceName?.trim() || null;
+    if (dto.imageUrl !== undefined) data.imageUrl = normalizeDishImage(dto.imageUrl);
     if (dto.categoryId) await this.ensureCategory(dto.categoryId);
     const updated = await this.prisma.$transaction(async (tx) => {
       if (variants !== undefined) {
@@ -519,7 +522,7 @@ export class CatalogService {
         variants: updated.variants.map((variant) => ({ name: variant.name, price: Number(variant.price) })),
       },
     });
-    return updated;
+    return withDishImageRef(updated);
   }
 
   async deleteDish(id: string, actor: AuditActor) {

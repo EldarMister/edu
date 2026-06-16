@@ -14,6 +14,7 @@ import { KitchenModule } from './kitchen/kitchen.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ReceiptPrintsModule } from './receipt-prints/receipt-prints.module';
 import { FiscalModule } from './fiscal/fiscal.module';
+import { QrModule } from './qr/qr.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { WaiterShiftsModule } from './waiter-shifts/waiter-shifts.module';
 import { AdminModule } from './admin/admin.module';
@@ -44,6 +45,7 @@ import { RolesGuard } from './common/guards/roles.guard';
     PaymentsModule,
     ReceiptPrintsModule,
     FiscalModule,
+    QrModule,
     AdminModule,
     SettingsModule,
     PushModule,
