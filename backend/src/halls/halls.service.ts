@@ -32,7 +32,8 @@ export class HallsService {
     const ownerByTable = new Map<string, { id: string; name: string }>();
     for (const o of activeOrders) {
       if (!ownerByTable.has(o.tableId)) {
-        ownerByTable.set(o.tableId, { id: o.waiterId, name: o.waiter.name });
+        // QR-заказ занимает стол без официанта — помечаем как «QR-меню».
+        ownerByTable.set(o.tableId, { id: o.waiterId ?? 'qr', name: o.waiter?.name ?? 'QR-меню' });
       }
     }
 

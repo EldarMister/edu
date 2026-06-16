@@ -8,6 +8,7 @@ import { WaiterApp } from '@/features/waiter/WaiterApp';
 import { KitchenApp } from '@/features/kitchen/KitchenApp';
 import { BarApp } from '@/features/bar/BarApp';
 import { AdminApp } from '@/features/admin/AdminApp';
+import { QrMenuApp } from '@/features/qr/QrMenuApp';
 
 export function App() {
   const user = useAuth((s) => s.user);
@@ -15,6 +16,9 @@ export function App() {
   return (
     <>
       <Routes>
+        {/* Публичное QR-меню стола (EDU MENU) — без авторизации. */}
+        <Route path="/menu/:tableToken" element={<QrMenuApp />} />
+
         <Route
           path="/login"
           element={user ? <Navigate to={homeForRole(user.role)} replace /> : <LoginPage />}

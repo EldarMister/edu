@@ -144,6 +144,11 @@ export class ReceiptPrintsService {
     if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
       throw new ForbiddenException('Это не ваш заказ');
     }
+    // Заявку официанта на печать создаёт сам официант — у заказа есть официант.
+    // QR-заказ (без официанта) печатается администратором напрямую, без заявки.
+    if (!order.waiterId) {
+      throw new BadRequestException('У заказа нет официанта — печать через раздел администратора');
+    }
 
     // Уже есть активный (ожидающий) запрос того же типа по заказу — вернём его, не дублируем.
     const existing = await this.prisma.receiptPrintRequest.findFirst({

@@ -76,7 +76,7 @@ export class ReconciliationService {
       time: o.closedAt ?? o.createdAt,
       amount: Number(o.finalAmount),
       paymentMethod: o.paymentMethod,
-      waiter: o.waiter.name,
+      waiter: o.waiter?.name ?? 'QR-меню',
       comment: o.comment,
     }));
 

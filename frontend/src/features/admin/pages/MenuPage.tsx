@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { minDishUnitPrice, money, variantNamesLine } from '@/lib/format';
 import { apiError } from '@/lib/api';
+import { downscaleToDataUrl, resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { IconEdit, IconTrash, IconPlus } from '../components/icons';
@@ -268,6 +269,38 @@ function DishModal({
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
+  // Фото блюда: preview — что показываем; payload — что отправляем (data URL | '' удалить | undefined без изменений).
+  const [photoPreview, setPhotoPreview] = useState<string | null>(resolveApiImage(dish?.imageUrl ?? null));
+  const [photoPayload, setPhotoPayload] = useState<string | undefined>(undefined);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photoRef = useRef<HTMLInputElement>(null);
+
+  async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setError('Фото: только PNG, JPG или WEBP');
+      return;
+    }
+    setPhotoBusy(true);
+    setError('');
+    try {
+      const dataUrl = await downscaleToDataUrl(file);
+      setPhotoPreview(dataUrl);
+      setPhotoPayload(dataUrl);
+    } catch (err) {
+      setError(apiError(err));
+    } finally {
+      setPhotoBusy(false);
+    }
+  }
+
+  function removePhoto() {
+    setPhotoPreview(null);
+    setPhotoPayload('');
+  }
+
   function updateVariant(uid: string, patch: Partial<Pick<DishVariantDraft, 'name' | 'price' | 'stock' | 'unit'>>) {
     setVariants((current) => current.map((variant) => (variant.uid === uid ? { ...variant, ...patch } : variant)));
   }
@@ -329,6 +362,8 @@ function DishModal({
         description: description.trim() || undefined,
         voiceName: voiceName.trim() || null,
         isAvailable,
+        // Фото отправляем только при изменении (новое data URL или '' для удаления).
+        imageUrl: photoPayload,
         prepStation: prepStation === '' ? null : prepStation,
         trackInventory: filledVariants.length > 0 ? filledVariants.some(v => v.stock.trim() !== '') : stock.trim() !== '',
         stock: priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
@@ -369,6 +404,31 @@ function DishModal({
       }
     >
       <div className="space-y-3">
+        <Field label="Фото блюда">
+          <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onPhoto} />
+          <div className="flex items-center gap-3">
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-background">
+              {photoPreview ? (
+                <img src={photoPreview} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="text-text-light">
+                  <path d="M3 7h18v12H3zM3 7l2-3h14l2 3M8 12a2 2 0 1 0 4 0 2 2 0 0 0-4 0" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </div>
+            <div className="flex flex-col gap-2">
+              <button type="button" className="btn-secondary btn-md px-4" disabled={photoBusy} onClick={() => photoRef.current?.click()}>
+                {photoBusy ? <Spinner /> : photoPreview ? 'Заменить' : 'Загрузить фото'}
+              </button>
+              {photoPreview && (
+                <button type="button" className="text-sm font-medium text-danger hover:underline" onClick={removePhoto}>
+                  Удалить фото
+                </button>
+              )}
+              <p className="text-xs text-text-muted">Видно гостям в QR-меню. PNG, JPG или WEBP.</p>
+            </div>
+          </div>
+        </Field>
         <Field label="Название">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>

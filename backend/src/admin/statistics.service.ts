@@ -105,10 +105,12 @@ export class StatisticsService {
 
     const waiterMap = new Map<string, { name: string; amount: number; orders: number; avgCheck: number }>();
     for (const o of currentOrders) {
-      const cur = waiterMap.get(o.waiterId) ?? { name: o.waiter.name, amount: 0, orders: 0, avgCheck: 0 };
+      // QR-заказы без официанта группируем под «QR-меню».
+      const key = o.waiterId ?? 'qr';
+      const cur = waiterMap.get(key) ?? { name: o.waiter?.name ?? 'QR-меню', amount: 0, orders: 0, avgCheck: 0 };
       cur.amount += Number(o.finalAmount);
       cur.orders += 1;
-      waiterMap.set(o.waiterId, cur);
+      waiterMap.set(key, cur);
     }
     for (const item of waiterMap.values()) {
       item.avgCheck = item.orders > 0 ? item.amount / item.orders : 0;

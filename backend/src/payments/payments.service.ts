@@ -93,7 +93,7 @@ export class PaymentsService {
       website: settings.website,
       orderNumber: order.orderNumber,
       tableNumber: order.table.number,
-      waiter: order.waiter.name,
+      waiter: order.waiter?.name ?? 'QR-меню',
       date: (order.closedAt ?? order.createdAt).toISOString(),
       items: order.items,
       totalAmount: order.totalAmount,

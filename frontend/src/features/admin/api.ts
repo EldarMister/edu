@@ -48,6 +48,8 @@ export interface AdminDish {
   isSet?: boolean;
   setComponents?: AdminSetComponent[];
   variants: AdminDishVariant[];
+  // Лёгкая ссылка на фото блюда (/dishes/:id/image?v=…) или null.
+  imageUrl?: string | null;
 }
 export interface AdminSetComponent {
   id: string;
@@ -504,6 +506,8 @@ export interface DishInput {
   prepStation?: PrepStation | null;
   voiceName?: string | null;
   variants?: { id?: string; name: string; price: number; stock?: number; initialStock?: number; unit?: string }[];
+  // Фото: data URL (новое) или '' для удаления. Не передавать — оставить как есть.
+  imageUrl?: string;
 }
 export function useDishMutations() {
   const invalidate = useInvalidate([['admin', 'dishes'], ['admin', 'menu', 'overview']]);
