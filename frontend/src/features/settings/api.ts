@@ -26,6 +26,13 @@ export interface Settings {
   payCard: boolean;
   qrImageUrl: string | null;
   printerConnected: boolean;
+  // ККМ / фискализация
+  fiscalProvider: string | null; // 'ekassa' | 'yakassa' | null
+  fiscalEkassaApiKey: string | null;
+  fiscalEkassaUrl: string | null;
+  fiscalEkassaInn: string | null;
+  fiscalYakassaApiKey: string | null;
+  fiscalYakassaUrl: string | null;
   updatedAt: string;
 }
 
@@ -42,6 +49,7 @@ export interface PublicSettings {
   paymentMethods: PaymentMethod[];
   qrImageUrl: string | null;
   printerConnected: boolean;
+  fiscalEnabled: boolean;
 }
 
 /** Публичные настройки (реквизиты + включённые способы оплаты) — для всех ролей. */
@@ -66,6 +74,13 @@ export function useAdminSettings() {
 export type SettingsInput = Partial<Omit<Settings, 'id' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount'>> & {
   serviceChargeAmount?: number;
 };
+
+/** Проверка соединения с ККМ (кнопка в блоке настроек). */
+export function useTestFiscalConnection() {
+  return useMutation({
+    mutationFn: async () => (await api.post<{ ok: boolean }>('/fiscal/test-connection')).data,
+  });
+}
 
 export function useUpdateSettings() {
   const qc = useQueryClient();

@@ -311,6 +311,15 @@ model Order {
   updatedAt              DateTime       @updatedAt @map("updated_at")
   closedAt               DateTime?      @map("closed_at")
 
+  // ККМ / фискализация (Кыргызстан). Заполняются при пробитии фискального чека через ККМ.
+  // null = ККМ выключена или чек ещё не пробит. Хранятся на заказе: один фискальный чек на
+  // оплаченный заказ (карточка заказа и кнопка «Повторить» работают per-order).
+  fiscalReceiptNumber    String?        @map("fiscal_receipt_number") // номер фискального чека
+  fiscalSign             String?        @map("fiscal_sign") // фискальный признак
+  fiscalQrCode           String?        @map("fiscal_qr_code") // QR ГНС для проверки чека
+  fiscalError            String?        @map("fiscal_error") // текст ошибки ККМ (для бейджа и повтора)
+  fiscalizedAt           DateTime?      @map("fiscalized_at") // момент успешного пробития
+
   table                Table                 @relation(fields: [tableId], references: [id])
   waiter               User                  @relation("WaiterOrders", fields: [waiterId], references: [id])
   waiterShift          WaiterShift?          @relation(fields: [waiterShiftId], references: [id])
@@ -567,6 +576,16 @@ model Settings {
   payCard             Boolean  @default(true) @map("pay_card")
   qrImageUrl          String?  @map("qr_image_url") // data URL загруженного QR-кода (один на заведение)
   printerConnected    Boolean  @default(false) @map("printer_connected")
+
+  // ККМ / фискализация (Кыргызстан). Владелец выбирает провайдера и вводит ключи.
+  // null/пусто в fiscalProvider = ККМ выключена, печать фискального чека недоступна.
+  fiscalProvider      String?  @map("fiscal_provider") // ekassa | yakassa | null
+  fiscalEkassaApiKey  String?  @map("fiscal_ekassa_api_key")
+  fiscalEkassaUrl     String?  @map("fiscal_ekassa_url") // базовый URL eKassa API (из документации)
+  fiscalEkassaInn     String?  @map("fiscal_ekassa_inn") // ИНН заведения
+  fiscalYakassaApiKey String?  @map("fiscal_yakassa_api_key")
+  fiscalYakassaUrl    String?  @map("fiscal_yakassa_url")
+
   updatedAt           DateTime @updatedAt @map("updated_at")
 
   @@map("settings")

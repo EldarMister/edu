@@ -5,15 +5,18 @@ import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import type { Receipt, ReceiptPrintRequest } from '@/types';
-import { printReceipt } from '@/features/waiter/printReceipt';
+import { printReceipt, type FiscalPrintData } from '@/features/waiter/printReceipt';
+import { usePublicSettings } from '@/features/settings/api';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
-import { useAdminOrderDetails, useReceiptPrintRequests, useReceiptPrintActions } from '../api';
+import { useAdminOrderDetails, useReceiptPrintRequests, useReceiptPrintActions, useFiscalizeForPrint } from '../api';
 
 /** Раздел администратора «Печать чека»: заявки официантов на печать. */
 export function ReceiptPrintsPage() {
   const t = useT();
   const q = useReceiptPrintRequests();
   const { approve, printed, reject } = useReceiptPrintActions();
+  const fiscalizeForPrint = useFiscalizeForPrint();
+  const fiscalEnabled = usePublicSettings().data?.fiscalEnabled ?? false;
   const push = useNotifications((s) => s.push);
   const [directPendingId, setDirectPendingId] = useState<string | null>(null);
   const [detailsOrderId, setDetailsOrderId] = useState<string | null>(null);
@@ -47,13 +50,31 @@ export function ReceiptPrintsPage() {
       setDirectPendingId(isRequest ? null : row.id);
       const request = isRequest && !alreadyApproved ? await approve.mutateAsync(row.id) : row;
       const receipt = (await api.get<Receipt>(`/payments/${request.orderId}/receipt`)).data;
-      printReceipt(receipt, printWindow, {
-        preliminary: request.type === 'preliminary',
+      const prelim = request.type === 'preliminary';
+
+      // ККМ: фискализируем ДО печати, чтобы напечатать фискальный чек (номер + QR ГНС).
+      // Предчек не фискализируется. Ошибка ККМ не блокирует — печатаем обычный товарный чек.
+      let fiscal: FiscalPrintData | undefined;
+      if (!prelim && fiscalEnabled) {
+        try {
+          const res = await fiscalizeForPrint.mutateAsync(request.orderId);
+          if (res?.success) {
+            fiscal = { receiptNumber: res.fiscalReceiptNumber, sign: res.fiscalSign, qrCode: res.qrCode };
+          } else if (res?.error) {
+            push({ message: `Чек печатается, но ККМ вернул ошибку: ${res.error}`, type: 'error', at: new Date().toISOString() });
+          }
+        } catch (err) {
+          push({ message: `ККМ недоступна: ${apiError(err)}`, type: 'error', at: new Date().toISOString() });
+        }
+      }
+
+      await printReceipt(receipt, printWindow, {
+        preliminary: prelim,
+        fiscal,
         onAfterPrint: async () => {
           try {
-            if (isRequest) {
-              await printed.mutateAsync(row.id);
-            }
+            // Запрос официанта: подтверждаем печать (backend пометит printed; фискализация идемпотентна).
+            if (isRequest) await printed.mutateAsync(row.id);
             push({ message: okMessage, type: 'success', at: new Date().toISOString() });
           } catch (err) {
             push({ message: apiError(err), type: 'error', at: new Date().toISOString() });

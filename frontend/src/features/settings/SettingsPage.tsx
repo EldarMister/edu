@@ -12,8 +12,10 @@ import {
   IconCard,
   IconPrinter,
 } from '../admin/components/icons';
-import { useAdminSettings, useUpdateSettings, type SettingsInput } from './api';
+import { useAdminSettings, useUpdateSettings, useTestFiscalConnection, type SettingsInput } from './api';
 import { QrPaymentCard } from './QrPaymentCard';
+
+type FiscalProvider = '' | 'ekassa' | 'yakassa' | 'mock';
 
 interface Form {
   cafeName: string;
@@ -28,6 +30,12 @@ interface Form {
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
+  fiscalProvider: FiscalProvider;
+  fiscalEkassaApiKey: string;
+  fiscalEkassaUrl: string;
+  fiscalEkassaInn: string;
+  fiscalYakassaApiKey: string;
+  fiscalYakassaUrl: string;
 }
 
 const RECEIPT_LIMIT = 120;
@@ -35,9 +43,11 @@ const RECEIPT_LIMIT = 120;
 export function SettingsPage() {
   const { data, isLoading, isError, error } = useAdminSettings();
   const update = useUpdateSettings();
+  const testFiscal = useTestFiscalConnection();
   const push = useNotifications((s) => s.push);
   const setLocale = useLocale((s) => s.setLocale);
   const t = useT();
+  const [fiscalCheck, setFiscalCheck] = useState<'ok' | 'fail' | null>(null);
 
   const [form, setForm] = useState<Form | null>(null);
   const saveTimer = useRef<number | null>(null);
@@ -59,6 +69,12 @@ export function SettingsPage() {
         payQr: data.payQr,
         payCash: data.payCash,
         payCard: data.payCard,
+        fiscalProvider: (data.fiscalProvider ?? '') as FiscalProvider,
+        fiscalEkassaApiKey: data.fiscalEkassaApiKey ?? '',
+        fiscalEkassaUrl: data.fiscalEkassaUrl ?? '',
+        fiscalEkassaInn: data.fiscalEkassaInn ?? '',
+        fiscalYakassaApiKey: data.fiscalYakassaApiKey ?? '',
+        fiscalYakassaUrl: data.fiscalYakassaUrl ?? '',
       });
       hydrateRef.current = false;
     }
@@ -141,6 +157,24 @@ export function SettingsPage() {
   };
 
   const noMethod = !form.payQr && !form.payCash && !form.payCard;
+
+  const runFiscalCheck = async () => {
+    setFiscalCheck(null);
+    try {
+      const res = await testFiscal.mutateAsync();
+      setFiscalCheck(res.ok ? 'ok' : 'fail');
+      if (!res.ok) {
+        push({
+          message: t('ККМ не ответила. Проверьте провайдера, URL и ключ.'),
+          type: 'error',
+          at: new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      setFiscalCheck('fail');
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -320,6 +354,118 @@ export function SettingsPage() {
 
           {/* QR-оплата */}
           <QrPaymentCard qrImageUrl={data.qrImageUrl} />
+
+          {/* ККМ / Фискализация */}
+          <div className="card p-5">
+            <h3 className="mb-1 text-[15px] font-semibold text-text-primary">{t('ККМ / Фискализация')}</h3>
+            <p className="mb-3 text-xs text-text-muted">
+              {t('Без подключённой ККМ печатается товарный чек. С ККМ — фискальный чек с QR ГНС.')}
+            </p>
+
+            <p className="mb-1.5 text-sm font-medium text-text-secondary">{t('Провайдер')}</p>
+            <div className="space-y-1.5">
+              {(
+                [
+                  { value: '' as FiscalProvider, label: t('Выключено') },
+                  { value: 'ekassa' as FiscalProvider, label: 'eKassa (Telemedia Group)' },
+                  { value: 'yakassa' as FiscalProvider, label: 'YaKassa' },
+                  { value: 'mock' as FiscalProvider, label: t('Тест (эмуляция)') },
+                ]
+              ).map((p) => (
+                <label
+                  key={p.value || 'off'}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border px-3 py-2 text-sm"
+                >
+                  <input
+                    type="radio"
+                    name="fiscalProvider"
+                    checked={form.fiscalProvider === p.value}
+                    onChange={() => {
+                      setFiscalCheck(null);
+                      set('fiscalProvider', p.value, 'instant');
+                    }}
+                    className="accent-primary"
+                  />
+                  <span className="text-text-primary">{p.label}</span>
+                </label>
+              ))}
+            </div>
+
+            {form.fiscalProvider === 'ekassa' && (
+              <div className="mt-3 grid gap-3">
+                <Field label={t('URL API eKassa')}>
+                  <input
+                    className="input"
+                    value={form.fiscalEkassaUrl}
+                    onChange={(e) => set('fiscalEkassaUrl', e.target.value)}
+                    placeholder="https://api.ekassa.kg"
+                  />
+                </Field>
+                <Field label={t('API-ключ')}>
+                  <input
+                    className="input"
+                    value={form.fiscalEkassaApiKey}
+                    onChange={(e) => set('fiscalEkassaApiKey', e.target.value)}
+                    placeholder="••••••••"
+                  />
+                </Field>
+                <Field label={t('ИНН заведения')}>
+                  <input
+                    className="input"
+                    value={form.fiscalEkassaInn}
+                    onChange={(e) => set('fiscalEkassaInn', e.target.value)}
+                    placeholder="0000000000000"
+                  />
+                </Field>
+              </div>
+            )}
+
+            {form.fiscalProvider === 'yakassa' && (
+              <div className="mt-3 grid gap-3">
+                <Field label={t('URL API YaKassa')}>
+                  <input
+                    className="input"
+                    value={form.fiscalYakassaUrl}
+                    onChange={(e) => set('fiscalYakassaUrl', e.target.value)}
+                    placeholder="https://api.yakassa.kg"
+                  />
+                </Field>
+                <Field label={t('API-ключ')}>
+                  <input
+                    className="input"
+                    value={form.fiscalYakassaApiKey}
+                    onChange={(e) => set('fiscalYakassaApiKey', e.target.value)}
+                    placeholder="••••••••"
+                  />
+                </Field>
+              </div>
+            )}
+
+            {form.fiscalProvider === 'mock' && (
+              <p className="mt-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
+                {t('Режим эмуляции: чек не уходит в ГНС, генерируется тестовый номер и QR. Для проверки сценария без реального ключа.')}
+              </p>
+            )}
+
+            {form.fiscalProvider && (
+              <div className="mt-4 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={runFiscalCheck}
+                  disabled={testFiscal.isPending}
+                  className="rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
+                >
+                  {testFiscal.isPending ? t('Проверка…') : t('Проверить соединение')}
+                </button>
+                {fiscalCheck === 'ok' && (
+                  <span className="text-sm font-medium text-success">{t('✅ Соединение установлено')}</span>
+                )}
+                {fiscalCheck === 'fail' && (
+                  <span className="text-sm font-medium text-danger">{t('❌ Нет соединения')}</span>
+                )}
+              </div>
+            )}
+          </div>
 
         </div>
       </div>
