@@ -1,5 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { resolveApiImage } from '@/lib/image';
+
+const SHEET_MS = 260;
+const SHEET_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
 /** Логотип EDU MENU — картинка из public. */
 export function EduMenuLogo() {
@@ -50,7 +53,7 @@ export function QtyStepper({
         type="button"
         onClick={() => onChange(Math.max(min, value - 1))}
         disabled={value <= min}
-        className={`${btn} flex items-center justify-center rounded-xl border border-border text-text-secondary transition-colors hover:bg-background disabled:opacity-40`}
+        className={`${btn} flex items-center justify-center rounded-full border border-border bg-white font-semibold text-primary transition-colors hover:bg-background disabled:opacity-40`}
         aria-label="Меньше"
       >
         −
@@ -61,7 +64,7 @@ export function QtyStepper({
       <button
         type="button"
         onClick={() => onChange(value + 1)}
-        className={`${btn} flex items-center justify-center rounded-xl border border-border text-text-secondary transition-colors hover:bg-background`}
+        className={`${btn} flex items-center justify-center rounded-full border border-border bg-white font-semibold text-primary transition-colors hover:bg-background`}
         aria-label="Больше"
       >
         +
@@ -80,6 +83,30 @@ export function BottomSheet({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const [render, setRender] = useState(open);
+  const [visible, setVisible] = useState(false);
+  const [drag, setDrag] = useState(0);
+  const [dragging, setDragging] = useState(false);
+  const startY = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setRender(true);
+      setDrag(0);
+      let raf2 = 0;
+      const raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => setVisible(true));
+      });
+      return () => {
+        cancelAnimationFrame(raf1);
+        cancelAnimationFrame(raf2);
+      };
+    }
+    setVisible(false);
+    const id = setTimeout(() => setRender(false), SHEET_MS);
+    return () => clearTimeout(id);
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -87,11 +114,54 @@ export function BottomSheet({
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  if (!render) return null;
+
+  const sheetTransform = visible ? `translateY(${drag}px)` : 'translateY(100%)';
+
+  function onPointerDown(e: React.PointerEvent) {
+    startY.current = e.clientY;
+    setDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function onPointerMove(e: React.PointerEvent) {
+    if (startY.current === null) return;
+    const dy = e.clientY - startY.current;
+    setDrag(dy > 0 ? dy : 0);
+  }
+
+  function onPointerUp(e: React.PointerEvent) {
+    if (startY.current === null) return;
+    startY.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    setDragging(false);
+    if (drag > 110) onClose();
+    else requestAnimationFrame(() => setDrag(0));
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
-      <div className="modal-backdrop animate-fade-in" onClick={onClose} />
-      <div className="animate-sheet-up relative z-10 w-full max-w-md rounded-t-3xl bg-card shadow-soft">
+      <div
+        className="modal-backdrop"
+        style={{ transition: `opacity ${SHEET_MS}ms ease`, opacity: visible ? 1 : 0 }}
+        onClick={onClose}
+      />
+      <div
+        className="relative z-10 flex max-h-[88vh] w-full max-w-md flex-col rounded-t-3xl bg-card shadow-soft"
+        style={{
+          transform: sheetTransform,
+          transition: dragging ? 'none' : `transform ${SHEET_MS}ms ${SHEET_EASE}`,
+        }}
+      >
+        <div
+          className="shrink-0 cursor-grab touch-none px-5 pb-2 pt-2.5"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+        >
+          <div className="mx-auto h-1 w-12 rounded-full bg-slate-300" />
+        </div>
         {children}
       </div>
     </div>

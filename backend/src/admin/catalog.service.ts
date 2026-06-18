@@ -374,7 +374,7 @@ export class CatalogService {
         categoryId: dto.categoryId,
         price: new Prisma.Decimal(price),
         description: dto.description,
-        imageUrl: normalizeDishImage(dto.imageUrl),
+        imageUrl: await normalizeDishImage(dto.imageUrl),
         discountType: dto.discountType ?? 'none',
         discountValue: new Prisma.Decimal(dto.discountValue ?? 0),
         cookingTime: dto.cookingTime,
@@ -431,7 +431,7 @@ export class CatalogService {
     }
     if (dto.discountValue !== undefined) data.discountValue = new Prisma.Decimal(dto.discountValue);
     if (dto.voiceName !== undefined) data.voiceName = dto.voiceName?.trim() || null;
-    if (dto.imageUrl !== undefined) data.imageUrl = normalizeDishImage(dto.imageUrl);
+    if (dto.imageUrl !== undefined) data.imageUrl = await normalizeDishImage(dto.imageUrl);
     if (dto.categoryId) await this.ensureCategory(dto.categoryId);
     const updated = await this.prisma.$transaction(async (tx) => {
       if (variants !== undefined) {

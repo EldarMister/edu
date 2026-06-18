@@ -99,7 +99,7 @@ export function MenuScreen({
           <button
             type="button"
             onClick={onOpenOrder}
-            className="flex w-full items-center gap-3 rounded-2xl bg-primary px-4 py-3 text-left text-white transition-colors hover:bg-primary-hover"
+            className="flex w-full items-center gap-3 rounded-lg bg-primary px-4 py-3 text-left text-white transition-colors hover:bg-primary-hover"
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l-1 11H6L5 9z" strokeLinecap="round" strokeLinejoin="round" />
@@ -110,7 +110,7 @@ export function MenuScreen({
                 {pluralItems(itemCount)} · {money(session?.totalAmount ?? 0)}
               </span>
             </span>
-            <span className="rounded-xl bg-white/15 px-3 py-1.5 text-[14px] font-medium">Смотреть заказ</span>
+            <span className="rounded-lg bg-white/15 px-3 py-1.5 text-[14px] font-bold">Заказ</span>
           </button>
         </div>
       )}

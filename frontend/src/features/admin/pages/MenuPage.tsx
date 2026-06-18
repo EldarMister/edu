@@ -269,7 +269,7 @@ function DishModal({
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
-  // Фото блюда: preview — что показываем; payload — что отправляем (data URL | https URL | '' удалить | undefined без изменений).
+  // Фото блюда: preview — что показываем; payload — что отправляем (data URL | ссылка для загрузки | '' удалить | undefined без изменений).
   const initialImageUrl = dish?.imageUrl ?? null;
   const initialResolved = resolveApiImage(initialImageUrl);
   const [photoPreview, setPhotoPreview] = useState<string | null>(initialResolved);
@@ -277,9 +277,8 @@ function DishModal({
   const [photoBusy, setPhotoBusy] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
   // Поле ввода URL: инициализируем из существующего imageUrl только если это http-ссылка.
-  const [photoUrlInput, setPhotoUrlInput] = useState<string>(
-    initialImageUrl?.startsWith('http') ? initialImageUrl : '',
-  );
+  const initialPhotoUrlInput = initialImageUrl?.startsWith('http') ? initialImageUrl : '';
+  const [photoUrlInput, setPhotoUrlInput] = useState<string>(initialPhotoUrlInput);
 
   async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -303,15 +302,19 @@ function DishModal({
     }
   }
 
+  function isValidPhotoUrl(url: string) {
+    return /^https?:\/\/.+/i.test(url);
+  }
+
   function onPhotoUrlCommit() {
     const url = photoUrlInput.trim();
     if (!url) return;
-    if (!/^https?:\/\/.+/i.test(url)) {
+    if (!isValidPhotoUrl(url)) {
       setError('Ссылка на фото должна начинаться с https://');
       return;
     }
     setPhotoPreview(url);
-    setPhotoPayload(url);
+    setPhotoPayload(url === initialPhotoUrlInput ? undefined : url);
     setError('');
   }
 
@@ -374,6 +377,15 @@ function DishModal({
       setError('Укажите цену блюда или добавьте варианты с ценами');
       return;
     }
+    const typedPhotoUrl = photoUrlInput.trim();
+    let imageUrl = photoPayload;
+    if (typedPhotoUrl && typedPhotoUrl !== initialPhotoUrlInput && typedPhotoUrl !== photoPayload) {
+      if (!isValidPhotoUrl(typedPhotoUrl)) {
+        setError('Ссылка на фото должна начинаться с https://');
+        return;
+      }
+      imageUrl = typedPhotoUrl;
+    }
     try {
       const body = {
         name: name.trim(),
@@ -383,7 +395,7 @@ function DishModal({
         voiceName: voiceName.trim() || null,
         isAvailable,
         // Фото отправляем только при изменении (новое data URL или '' для удаления).
-        imageUrl: photoPayload,
+        imageUrl,
         prepStation: prepStation === '' ? null : prepStation,
         trackInventory: filledVariants.length > 0 ? filledVariants.some(v => v.stock.trim() !== '') : stock.trim() !== '',
         stock: priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
@@ -458,7 +470,11 @@ function DishModal({
               onKeyDown={(e) => e.key === 'Enter' && onPhotoUrlCommit()}
               onBlur={onPhotoUrlCommit}
             />
+            <button type="button" className="btn-secondary btn-md shrink-0" onClick={onPhotoUrlCommit}>
+              По ссылке
+            </button>
           </div>
+          <p className="mt-1 text-xs text-text-muted">Ссылка будет загружена и сохранена в QR-меню.</p>
         </Field>
         <Field label="Название">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
