@@ -303,18 +303,21 @@ export class QrService {
         guests: [],
         items: [],
         itemCount: 0,
+        activeGuestCount: 0,
         totalAmount: '0',
         submittedOrderId: null,
       };
     }
 
     const labelById = new Map(session.guests.map((g) => [g.id, g.guestLabel]));
+    const guestIdsWithItems = new Set<string>();
     let total = 0;
     let count = 0;
     const items = session.items.map((i) => {
       const line = Number(i.snapshotPrice) * i.quantity;
       total += line;
       count += i.quantity;
+      guestIdsWithItems.add(i.guestId);
       return {
         id: i.id,
         guestId: i.guestId,
@@ -341,6 +344,7 @@ export class QrService {
       })),
       items,
       itemCount: count,
+      activeGuestCount: guestIdsWithItems.size,
       totalAmount: String(round2(total)),
       submittedOrderId: session.submittedOrderId,
     };

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { money } from '@/lib/format';
+import { NumberTicker } from '@/components/NumberTicker';
 import type { QrDish, QrMenu, QrSession } from './api';
 import { QrHeader, DishPhoto } from './ui';
 import { pluralItems } from './plural';
@@ -34,6 +35,8 @@ export function MenuScreen({
   }, [dishes, categoryId, search]);
 
   const itemCount = session?.itemCount ?? 0;
+  const activeGuestCount = session?.activeGuestCount ?? 0;
+  const sharedOrder = activeGuestCount > 1;
 
   return (
     <div className="flex h-full flex-col">
@@ -105,12 +108,13 @@ export function MenuScreen({
               <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l-1 11H6L5 9z" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
             <span className="min-w-0 flex-1">
-              <span className="block text-[15px] font-semibold leading-tight">Общий заказ</span>
-              <span className="block text-[13px] text-white/85">
-                {pluralItems(itemCount)} · {money(session?.totalAmount ?? 0)}
+              <span className="block text-[15px] font-semibold leading-tight">{sharedOrder ? 'Общий заказ' : 'Корзина'}</span>
+              <span className="flex items-center gap-1 text-[13px] text-white/85">
+                <span>{pluralItems(itemCount)} ·</span>
+                <NumberTicker value={Number(session?.totalAmount ?? 0)} />
               </span>
             </span>
-            <span className="rounded-lg bg-white/15 px-3 py-1.5 text-[14px] font-bold">Заказ</span>
+            <span className="rounded-lg bg-white/15 px-3 py-1.5 text-[14px] font-bold">{sharedOrder ? 'Заказ' : 'Открыть'}</span>
           </button>
         </div>
       )}
