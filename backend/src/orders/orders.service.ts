@@ -89,17 +89,20 @@ export class OrdersService {
 
   async findByIdForActor(id: string, actor: AuditActor) {
     const order = await this.findById(id);
-    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     return order;
   }
 
-  /** Активные заказы официанта (не закрытые). */
+  /** Активные заказы официанта и QR-заказы без назначенного официанта. */
   findActiveForWaiter(waiterId: string) {
     return this.prisma.order.findMany({
       where: {
-        waiterId,
+        OR: [
+          { waiterId },
+          { source: 'qr', waiterId: null },
+        ],
         // rejected/cancelled заказы завершены и не должны числиться активными за столом.
         status: { notIn: [OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] },
       },
@@ -347,6 +350,14 @@ export class OrdersService {
       number: table.number,
       status: initialTableStatus,
       hallId: table.hallId,
+    });
+    this.events.emitToWaiters(SERVER_EVENTS.ORDER_STATUS_CHANGED, order);
+    this.events.emitToWaiters(SERVER_EVENTS.NOTIFICATION_NEW, {
+      message: `QR-заказ ${order.orderNumber} · Стол ${table.number}`,
+      type: 'info',
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      at: new Date().toISOString(),
     });
     // Админы видят все заказы — сообщим о новом QR-заказе.
     this.events.emitToAdmin(SERVER_EVENTS.ORDER_NEW, order);
@@ -2369,10 +2380,14 @@ export class OrdersService {
   private async assertOwnedOrder(orderId: string, waiterId: string) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (order.waiterId !== waiterId) {
+    if (!this.canWaiterAccessOrder(order, waiterId)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     return order;
+  }
+
+  private canWaiterAccessOrder(order: { waiterId: string | null; source: string }, waiterId: string) {
+    return order.waiterId === waiterId || (order.source === 'qr' && order.waiterId === null);
   }
 
   // ---------- Действия со столом (закрыть / перенести / передать) ----------
