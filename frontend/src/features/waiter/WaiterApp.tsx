@@ -984,7 +984,7 @@ export function WaiterApp() {
         <TransferTableModal
           waiters={availableWaitersQ.data ?? []}
           loading={availableWaitersQ.isLoading}
-          excludeWaiterId={displayedOrder?.waiter.id ?? user?.id ?? null}
+          excludeWaiterId={displayedOrder?.waiter?.id ?? user?.id ?? null}
           pending={transferTable.isPending}
           onConfirm={doTransferTable}
           onClose={() => setTableModal(null)}

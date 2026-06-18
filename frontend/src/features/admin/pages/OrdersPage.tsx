@@ -293,7 +293,7 @@ export function OrdersPage() {
                     <Td className="text-text-secondary">
                       {tr('Стол')} {ord.table.number}{hallSuffix(ord.table)}
                     </Td>
-                    <Td className="text-text-secondary">{ord.waiter.name}</Td>
+                    <Td className="text-text-secondary">{ord.waiter?.name ?? 'QR menu'}</Td>
                     <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
                     <Td>
                       <OrderBadge status={ord.status} size="sm" />
