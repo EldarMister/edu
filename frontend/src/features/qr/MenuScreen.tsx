@@ -41,7 +41,6 @@ export function MenuScreen({
   const itemCount = session?.itemCount ?? 0;
   const activeGuestCount = session?.activeGuestCount ?? 0;
   const sharedOrder = activeGuestCount > 1;
-  const myOrdersBottom = itemCount > 0 ? 'bottom-[5.75rem]' : 'bottom-0';
 
   return (
     <div className="relative flex h-full flex-col">
@@ -101,52 +100,81 @@ export function MenuScreen({
         <div className="h-24" />
       </div>
 
-      {/* Sticky: общий заказ (только если есть позиции) */}
-      {itemCount > 0 && (
-        <div className="shrink-0 px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          <button
-            type="button"
-            onClick={onOpenOrder}
-            className="flex w-full items-center gap-3 rounded-lg bg-primary px-4 py-3 text-left text-white transition-colors hover:bg-primary-hover"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l-1 11H6L5 9z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[15px] font-semibold leading-tight">{sharedOrder ? 'Общий заказ' : 'Корзина'}</span>
-              <span className="flex items-center gap-1 text-[13px] text-white/85">
-                <span>{pluralItems(itemCount)} ·</span>
-                <NumberTicker value={Number(session?.totalAmount ?? 0)} />
-              </span>
-            </span>
-            <span className="rounded-lg bg-white/15 px-3 py-1.5 text-[14px] font-bold">{sharedOrder ? 'Заказ' : 'Открыть'}</span>
-          </button>
-        </div>
-      )}
+      {/* Низ экрана: панель общего заказа + приподнятая по центру кнопка «Мои заказы» */}
+      {(itemCount > 0 || hasSubmittedOrder) && (
+        <div className="relative shrink-0">
+          {/* Панель общего заказа (только если есть позиции) */}
+          {itemCount > 0 && (
+            <div className="bg-primary px-3 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5">
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  onClick={onOpenOrder}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-white"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l-1 11H6L5 9z" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[14px] font-semibold leading-tight">{sharedOrder ? 'Общий заказ' : 'Корзина'}</span>
+                    <span className="flex items-center gap-1 text-[12px] text-white/85">
+                      <span>{pluralItems(itemCount)} ·</span>
+                      <NumberTicker value={Number(session?.totalAmount ?? 0)} />
+                    </span>
+                  </span>
+                </button>
 
-      {hasSubmittedOrder && (
-        <div className={`pointer-events-none absolute left-0 right-0 ${myOrdersBottom} z-20 flex justify-center`}>
-          <button
-            type="button"
-            onClick={onOpenSubmittedOrder}
-            className="pointer-events-auto flex h-[58px] w-[82px] flex-col items-center justify-start rounded-t-full border border-border bg-white pt-1.5 text-text-primary shadow-[0_-1px_14px_rgba(15,23,42,0.14)] transition-transform active:scale-95"
-          >
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
+                {/* Резерв под центральную кнопку, чтобы корзина и «Открыть» не конфликтовали */}
+                {hasSubmittedOrder && <div aria-hidden className="w-[72px] shrink-0" />}
+
+                <div className="flex flex-1 justify-end">
+                  <button
+                    type="button"
+                    onClick={onOpenOrder}
+                    className="rounded-lg bg-white px-4 py-2 text-[14px] font-bold text-primary transition-colors hover:bg-white/90"
+                  >
+                    Открыть
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Кнопка «Мои заказы»: при наличии корзины — приподнята по центру панели;
+              без корзины — обычная по центру внизу. */}
+          {hasSubmittedOrder && (
+            <div
+              className={
+                itemCount > 0
+                  ? 'pointer-events-none absolute inset-x-0 top-0 z-20 flex -translate-y-1/2 justify-center'
+                  : 'flex justify-center pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2'
+              }
             >
-              <path d="M16 10V7a4 4 0 0 0-8 0v3" />
-              <path d="M5.5 9.5h13l-.8 10.5H6.3L5.5 9.5Z" />
-            </svg>
-            <span className="mt-0.5 text-[11px] font-medium leading-none">Мои заказы</span>
-          </button>
+              <button
+                type="button"
+                onClick={onOpenSubmittedOrder}
+                className="pointer-events-auto flex h-[60px] w-[72px] flex-col items-center justify-center gap-1 rounded-2xl border border-border bg-white text-text-primary shadow-[0_4px_16px_rgba(15,23,42,0.18)] transition-transform active:scale-95"
+              >
+                <svg
+                  width="20"
+                  height="20"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M16 10V7a4 4 0 0 0-8 0v3" />
+                  <path d="M5.5 9.5h13l-.8 10.5H6.3L5.5 9.5Z" />
+                </svg>
+                <span className="text-[10px] font-semibold leading-none">Мои заказы</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
