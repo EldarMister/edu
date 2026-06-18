@@ -28,6 +28,7 @@ import { SettingsService } from '../settings/settings.service';
 import { DishPopularityService } from '../dishes/dish-popularity.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
+import { IngredientStockService } from '../warehouse/ingredient-stock.service';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
 import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu } from '../tts/kitchen-voice';
@@ -74,6 +75,7 @@ export class OrdersService {
     private settings: SettingsService,
     private dishPopularity: DishPopularityService,
     private audit: AuditService,
+    private ingredientStock: IngredientStockService,
   ) {}
 
   /** Денежный формат для человекочитаемых описаний аудита. */
@@ -216,7 +218,7 @@ export class OrdersService {
           data: { status: initialTableStatus },
         });
         await this.deductInventory(tx, dishDeductions, variantDeductions);
-        return tx.order.create({
+        const createdOrder = await tx.order.create({
           data: {
             orderNumber,
             businessDate,
@@ -234,6 +236,9 @@ export class OrdersService {
           },
           include: orderInclude,
         });
+        // Списываем сырьё по техкартам блюд заказа (блюда без техкарты пропускаются).
+        await this.ingredientStock.applyDishSale(tx, createdOrder.id, itemsData);
+        return createdOrder;
       });
     } catch (err) {
       if (this.isUniqueConstraintError(err)) {
@@ -323,7 +328,7 @@ export class OrdersService {
           const orderNumber = await this.nextOrderNumber(tx, businessDate);
           await tx.table.update({ where: { id: tableId }, data: { status: initialTableStatus } });
           await this.deductInventory(tx, dishDeductions, variantDeductions);
-          return tx.order.create({
+          const createdOrder = await tx.order.create({
             data: {
               orderNumber,
               businessDate,
@@ -342,6 +347,9 @@ export class OrdersService {
             },
             include: orderInclude,
           });
+          // Списываем сырьё по техкартам блюд заказа (блюда без техкарты пропускаются).
+          await this.ingredientStock.applyDishSale(tx, createdOrder.id, itemsData);
+          return createdOrder;
         });
         break;
       } catch (err) {
@@ -431,6 +439,7 @@ export class OrdersService {
         ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.served].includes(item.status as any)
       );
       await this.restoreInventory(tx, itemsToCancel);
+      await this.ingredientStock.restoreDishSale(tx, orderId, itemsToCancel);
       await tx.orderItem.updateMany({
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.served] } },
         data: { status: OrderItemStatus.cancelled },
@@ -605,6 +614,7 @@ export class OrdersService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, order.items);
+      await this.ingredientStock.restoreDishSale(tx, orderId, order.items);
       const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
       const totals = this.calcTotals(itemsData, serviceChargeAmount);
       await tx.order.update({
@@ -625,6 +635,7 @@ export class OrdersService {
       await tx.orderItem.deleteMany({ where: { orderId } });
       await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
+      await this.ingredientStock.applyDishSale(tx, orderId, itemsData);
       return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
 
@@ -752,6 +763,7 @@ export class OrdersService {
       }
       await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
+      await this.ingredientStock.applyDishSale(tx, orderId, itemsData);
       await this.recalcOrder(tx, orderId);
       // Новые блюда снова уходят на кухню; если добавили только «Без отправки» —
       // статус заказа пересчитываем по составу, кухню не трогаем.
@@ -913,6 +925,7 @@ export class OrdersService {
         ![OrderItemStatus.rejected, OrderItemStatus.cancelled].includes(item.status as any)
       );
       await this.restoreInventory(tx, itemsToReject);
+      await this.ingredientStock.restoreDishSale(tx, orderId, itemsToReject);
       await tx.orderItem.updateMany({
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
         data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
@@ -957,6 +970,7 @@ export class OrdersService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, [item]);
+      await this.ingredientStock.restoreDishSale(tx, orderId, [item]);
       await tx.orderItem.update({
         where: { id: itemId },
         data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
@@ -1271,6 +1285,7 @@ export class OrdersService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, inventoryToRestore);
+      await this.ingredientStock.restoreDishSale(tx, orderId, inventoryToRestore);
       if (fullIds.length > 0) {
         await tx.orderItem.updateMany({
           where: { id: { in: fullIds }, orderId },
@@ -1344,6 +1359,7 @@ export class OrdersService {
         });
       }
       await this.restoreInventory(tx, setsRejected);
+      await this.ingredientStock.restoreDishSale(tx, orderId, setsRejected);
 
       // Если отказаны все блюда — заказ rejected, иначе partially_rejected.
       const remaining = await tx.orderItem.count({
@@ -1493,6 +1509,7 @@ export class OrdersService {
       });
       await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
+      await this.ingredientStock.applyDishSale(tx, orderId, itemsData);
       await this.recalcOrder(tx, orderId);
       const pending = await this.pendingRejectedDecisions(tx, orderId);
       const nextStatus = pending > 0 ? OrderStatus.partially_rejected : await this.statusFromActiveItems(tx, orderId);
@@ -1807,20 +1824,20 @@ export class OrdersService {
     const updated = await this.prisma.$transaction(async (tx) => {
       if (fromClosedCancelled && targetIsActive) {
         await this.deductExistingInventory(tx, order.items);
+        await this.ingredientStock.applyDishSale(tx, order.id, order.items);
       }
 
       if (!fromClosedCancelled && toClosedCancelled) {
-        await this.restoreInventory(
-          tx,
-          order.items.filter((item) => {
-            const closedItemStatuses: OrderItemStatus[] = [
-              OrderItemStatus.rejected,
-              OrderItemStatus.cancelled,
-              OrderItemStatus.served,
-            ];
-            return !closedItemStatuses.includes(item.status);
-          }),
+        const closedItemStatuses: OrderItemStatus[] = [
+          OrderItemStatus.rejected,
+          OrderItemStatus.cancelled,
+          OrderItemStatus.served,
+        ];
+        const itemsToRestore = order.items.filter(
+          (item) => !closedItemStatuses.includes(item.status),
         );
+        await this.restoreInventory(tx, itemsToRestore);
+        await this.ingredientStock.restoreDishSale(tx, order.id, itemsToRestore);
       }
 
       if (targetItemStatus) {

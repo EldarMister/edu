@@ -97,11 +97,7 @@ export function WarehousePage() {
                       >
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            {hasVariants && (
-                              <span className="text-text-muted w-4 flex-shrink-0 text-center">
-                                {isExp ? '▼' : '▶'}
-                              </span>
-                            )}
+                            {hasVariants && <Chevron open={!!isExp} />}
                             <p className="font-medium text-text-primary">{item.name}</p>
                           </div>
                           {hasVariants && (
@@ -396,6 +392,22 @@ function WarehouseItemModal({
 }
 
 
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`h-4 w-4 shrink-0 text-text-light transition-transform ${open ? 'rotate-90' : ''}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

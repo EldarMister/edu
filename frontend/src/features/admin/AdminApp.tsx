@@ -20,6 +20,7 @@ import {
   IconJournal,
   IconReconcile,
   IconPrinter,
+  IconWarehouse,
   IconLogout,
 } from './components/icons';
 import { StatisticsPage } from './pages/StatisticsPage';
@@ -30,6 +31,7 @@ import { StaffPage } from './pages/StaffPage';
 import { AuditPage } from './pages/AuditPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
 import { ReceiptPrintsPage } from './pages/ReceiptPrintsPage';
+import { WarehouseSection } from './pages/warehouse/WarehouseSection';
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -78,6 +80,7 @@ type Section =
   | 'receipts'
   | 'tables'
   | 'menu'
+  | 'warehouse'
   | 'staff'
   | 'audit'
   | 'reconcile'
@@ -89,6 +92,7 @@ const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly
   { key: 'receipts', label: 'Печать чека', icon: IconPrinter, adminOnly: true },
   { key: 'tables', label: 'Столы', icon: IconTables },
   { key: 'menu', label: 'Меню', icon: IconMenu },
+  { key: 'warehouse', label: 'Склад', icon: IconWarehouse },
   { key: 'staff', label: 'Персонал', icon: IconStaff },
   { key: 'audit', label: 'Журнал', icon: IconJournal, ownerOnly: true },
   { key: 'reconcile', label: 'Сверка оплат', icon: IconReconcile, ownerOnly: true },
@@ -237,6 +241,7 @@ export function AdminApp() {
           {section === 'receipts' && isAdmin && <ReceiptPrintsPage />}
           {section === 'tables' && <TablesPage />}
           { section === 'menu' && <MenuPage /> }
+          { section === 'warehouse' && <WarehouseSection /> }
           { section === 'staff' && <StaffPage /> }
           { section === 'audit' && isOwner && <AuditPage /> }
           { section === 'reconcile' && isOwner && <ReconciliationPage /> }

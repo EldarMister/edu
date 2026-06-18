@@ -8,6 +8,7 @@ import { downscaleToDataUrl, resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { IconEdit, IconTrash, IconPlus } from '../components/icons';
+import { RecipeEditor } from './warehouse/RecipeEditor';
 import {
   useMenuOverview,
   useAdminCategories,
@@ -267,6 +268,7 @@ function DishModal({
   const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const [tab, setTab] = useState<'main' | 'recipe'>('main');
   const pending = create.isPending || update.isPending;
 
   // Фото блюда: preview — что показываем; payload — что отправляем (data URL | ссылка для загрузки | '' удалить | undefined без изменений).
@@ -436,6 +438,22 @@ function DishModal({
       }
     >
       <div className="space-y-3">
+        <div className="flex gap-1 border-b border-border">
+          <ModalTab active={tab === 'main'} onClick={() => setTab('main')}>
+            Основное
+          </ModalTab>
+          {isEdit && (
+            <ModalTab active={tab === 'recipe'} onClick={() => setTab('recipe')}>
+              Техкарта
+            </ModalTab>
+          )}
+        </div>
+
+        {tab === 'recipe' && isEdit && (
+          <RecipeEditor dishId={dish!.id} price={Number(dish!.price)} />
+        )}
+
+        <div className={tab === 'main' ? 'space-y-3' : 'hidden'}>
         <Field label="Фото блюда">
           <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onPhoto} />
           <div className="flex items-center gap-3">
@@ -620,9 +638,24 @@ function DishModal({
             )}
           </div>
         </div>
+        </div>
         {error && <p className="text-sm text-danger">{error}</p>}
       </div>
     </Modal>
+  );
+}
+
+function ModalTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`-mb-px shrink-0 border-b-2 px-3.5 py-2 text-sm font-medium transition-colors ${
+        active ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'
+      }`}
+    >
+      {children}
+    </button>
   );
 }
 
