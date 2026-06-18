@@ -84,28 +84,7 @@ export class QrService {
   /** Вход гостя: создаёт/возвращает сессию и гостя (Гость N). */
   async join(tableToken: string, guestKey?: string) {
     const table = await this.resolveTable(tableToken);
-    const session = await this.getOrCreateDraftSession(table.id);
-
-    const key = guestKey?.trim() || randomUUID();
-    let guest = await this.prisma.qrGuest.findUnique({
-      where: { sessionId_guestKey: { sessionId: session.id, guestKey: key } },
-    });
-    if (!guest) {
-      const count = await this.prisma.qrGuest.count({ where: { sessionId: session.id } });
-      guest = await this.prisma.qrGuest.create({
-        data: {
-          sessionId: session.id,
-          guestKey: key,
-          guestLabel: `Гость ${count + 1}`,
-          isOnline: true,
-        },
-      });
-    } else {
-      guest = await this.prisma.qrGuest.update({
-        where: { id: guest.id },
-        data: { isOnline: true, lastSeenAt: new Date() },
-      });
-    }
+    const { session, guest, key } = await this.ensureSessionGuest(table.id, guestKey);
 
     this.events.emitToQrTable(table.id, SERVER_EVENTS.QR_GUEST_JOINED, {
       tableId: table.id,
@@ -122,10 +101,12 @@ export class QrService {
     };
   }
 
-  /** Гость добавляет позицию в общий заказ. */
+  /** Гость добавляет позицию в общий заказ.
+   *  Если прошлый заказ уже отправлен (нет draft-сессии) — начинаем новый круг:
+   *  создаём свежую draft-сессию и заново привязываем гостя по его guestKey. */
   async addItem(tableToken: string, dto: AddItemDto) {
     const table = await this.resolveTable(tableToken);
-    const { session, guest } = await this.requireGuest(table.id, dto.guestKey);
+    const { session, guest } = await this.ensureSessionGuest(table.id, dto.guestKey);
 
     const dish = await this.prisma.dish.findFirst({
       where: { id: dto.dishId, isActive: true },
@@ -214,7 +195,11 @@ export class QrService {
       };
     });
 
-    const order = await this.orders.createFromQr({ tableId: table.id, items });
+    const order = await this.orders.createFromQr({
+      tableId: table.id,
+      items,
+      idempotencyKey: `qr:${session.id}`,
+    });
 
     await this.prisma.qrTableSession.update({
       where: { id: session.id },
@@ -246,6 +231,36 @@ export class QrService {
     });
     if (existing) return existing;
     return this.prisma.qrTableSession.create({ data: { tableId, status: 'draft' } });
+  }
+
+  /**
+   * Гарантирует активную draft-сессию стола и гостя в ней (создаёт при необходимости).
+   * Общая логика входа и добавления позиции: позволяет начать новый круг заказа
+   * после того, как предыдущий общий заказ уже отправлен.
+   */
+  private async ensureSessionGuest(tableId: string, guestKey?: string) {
+    const session = await this.getOrCreateDraftSession(tableId);
+    const key = guestKey?.trim() || randomUUID();
+    let guest = await this.prisma.qrGuest.findUnique({
+      where: { sessionId_guestKey: { sessionId: session.id, guestKey: key } },
+    });
+    if (!guest) {
+      const count = await this.prisma.qrGuest.count({ where: { sessionId: session.id } });
+      guest = await this.prisma.qrGuest.create({
+        data: {
+          sessionId: session.id,
+          guestKey: key,
+          guestLabel: `Гость ${count + 1}`,
+          isOnline: true,
+        },
+      });
+    } else {
+      guest = await this.prisma.qrGuest.update({
+        where: { id: guest.id },
+        data: { isOnline: true, lastSeenAt: new Date() },
+      });
+    }
+    return { session, guest, key };
   }
 
   /** Находит активную сессию и гостя по guestKey; иначе — ошибка. */

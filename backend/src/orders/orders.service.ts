@@ -293,8 +293,16 @@ export class OrdersService {
    * смены. Переиспользует ту же сборку позиций/итогов/склада, что и обычное создание.
    * Не накладывает ограничение «один активный заказ на стол» — QR-заказы аддитивны.
    */
-  async createFromQr(params: { tableId: string; items: CreateOrderItemDto[]; comment?: string }) {
+  async createFromQr(params: { tableId: string; items: CreateOrderItemDto[]; comment?: string; idempotencyKey?: string }) {
     const { tableId } = params;
+    if (params.idempotencyKey) {
+      const existing = await this.prisma.order.findUnique({
+        where: { idempotencyKey: params.idempotencyKey },
+        include: orderInclude,
+      });
+      if (existing) return existing;
+    }
+
     const table = await this.prisma.table.findUnique({ where: { id: tableId } });
     if (!table || !table.isActive) {
       throw new NotFoundException('Стол не найден');
@@ -305,32 +313,52 @@ export class OrdersService {
     const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
     const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
 
-    const order = await this.prisma.$transaction(async (tx) => {
-      const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
-      const totals = this.calcTotals(itemsData, serviceChargeAmount);
-      const businessDate = this.businessDateOf();
-      const orderNumber = await this.nextOrderNumber(tx, businessDate);
-      await tx.table.update({ where: { id: tableId }, data: { status: initialTableStatus } });
-      await this.deductInventory(tx, dishDeductions, variantDeductions);
-      return tx.order.create({
-        data: {
-          orderNumber,
-          businessDate,
-          tableId,
-          waiterId: null,
-          waiterShiftId: null,
-          source: 'qr',
-          status: initialStatus,
-          comment: params.comment,
-          totalAmount: totals.total,
-          discountAmount: totals.discount,
-          serviceChargeAmount: totals.serviceCharge,
-          finalAmount: totals.final,
-          items: { create: itemsData },
-        },
-        include: orderInclude,
-      });
-    });
+    let order: Awaited<ReturnType<typeof this.findById>> | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        order = await this.prisma.$transaction(async (tx) => {
+          const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
+          const totals = this.calcTotals(itemsData, serviceChargeAmount);
+          const businessDate = this.businessDateOf();
+          const orderNumber = await this.nextOrderNumber(tx, businessDate);
+          await tx.table.update({ where: { id: tableId }, data: { status: initialTableStatus } });
+          await this.deductInventory(tx, dishDeductions, variantDeductions);
+          return tx.order.create({
+            data: {
+              orderNumber,
+              businessDate,
+              tableId,
+              waiterId: null,
+              waiterShiftId: null,
+              source: 'qr',
+              status: initialStatus,
+              comment: params.comment,
+              idempotencyKey: params.idempotencyKey,
+              totalAmount: totals.total,
+              discountAmount: totals.discount,
+              serviceChargeAmount: totals.serviceCharge,
+              finalAmount: totals.final,
+              items: { create: itemsData },
+            },
+            include: orderInclude,
+          });
+        });
+        break;
+      } catch (err) {
+        if (!this.isUniqueConstraintError(err)) throw err;
+        if (params.idempotencyKey) {
+          const existing = await this.prisma.order.findUnique({
+            where: { idempotencyKey: params.idempotencyKey },
+            include: orderInclude,
+          });
+          if (existing) return existing;
+        }
+        if (attempt === 2) throw err;
+      }
+    }
+    if (!order) {
+      throw new BadRequestException('Не удалось создать QR-заказ');
+    }
 
     if (hasPrep) {
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {

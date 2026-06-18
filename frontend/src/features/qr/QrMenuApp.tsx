@@ -122,7 +122,16 @@ export function QrMenuApp() {
 
   const backToMenu = () => {
     setScreen('menu');
-    void sessionQ.refetch();
+    // Прошлый заказ отправлен → начинаем новый круг: заново входим, чтобы получить
+    // свежий guestId в новой draft-сессии (иначе свои позиции не отредактировать).
+    joinSession(tableToken)
+      .then((j) => {
+        setJoin(j);
+        qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) });
+      })
+      .catch(() => {
+        void sessionQ.refetch();
+      });
   };
 
   return (
