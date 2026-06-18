@@ -129,11 +129,11 @@ export function MenuScreen({
           <button
             type="button"
             onClick={onOpenSubmittedOrder}
-            className="pointer-events-auto flex h-[72px] w-[86px] flex-col items-center justify-start rounded-t-full border border-border bg-white pt-2 text-text-primary shadow-[0_-1px_14px_rgba(15,23,42,0.14)] transition-transform active:scale-95"
+            className="pointer-events-auto flex h-[58px] w-[82px] flex-col items-center justify-start rounded-t-full border border-border bg-white pt-1.5 text-text-primary shadow-[0_-1px_14px_rgba(15,23,42,0.14)] transition-transform active:scale-95"
           >
             <svg
-              width="24"
-              height="24"
+              width="22"
+              height="22"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -145,7 +145,7 @@ export function MenuScreen({
               <path d="M16 10V7a4 4 0 0 0-8 0v3" />
               <path d="M5.5 9.5h13l-.8 10.5H6.3L5.5 9.5Z" />
             </svg>
-            <span className="mt-1 text-[11px] font-medium leading-none">Мои заказы</span>
+            <span className="mt-0.5 text-[11px] font-medium leading-none">Мои заказы</span>
           </button>
         </div>
       )}
