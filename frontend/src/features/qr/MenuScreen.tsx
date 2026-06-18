@@ -8,13 +8,17 @@ import { pluralItems } from './plural';
 export function MenuScreen({
   menu,
   session,
+  hasSubmittedOrder,
   onOpenDish,
   onOpenOrder,
+  onOpenSubmittedOrder,
 }: {
   menu: QrMenu;
   session: QrSession | undefined;
+  hasSubmittedOrder: boolean;
   onOpenDish: (dish: QrDish) => void;
   onOpenOrder: () => void;
+  onOpenSubmittedOrder: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -37,9 +41,10 @@ export function MenuScreen({
   const itemCount = session?.itemCount ?? 0;
   const activeGuestCount = session?.activeGuestCount ?? 0;
   const sharedOrder = activeGuestCount > 1;
+  const myOrdersBottom = itemCount > 0 ? 'bottom-[5.75rem]' : 'bottom-0';
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <QrHeader tableNumber={menu.table.number} />
 
       <div className="min-h-0 flex-1 overflow-y-auto app-scrollbar-subtle">
@@ -115,6 +120,32 @@ export function MenuScreen({
               </span>
             </span>
             <span className="rounded-lg bg-white/15 px-3 py-1.5 text-[14px] font-bold">{sharedOrder ? 'Заказ' : 'Открыть'}</span>
+          </button>
+        </div>
+      )}
+
+      {hasSubmittedOrder && (
+        <div className={`pointer-events-none absolute left-0 right-0 ${myOrdersBottom} z-20 flex justify-center`}>
+          <button
+            type="button"
+            onClick={onOpenSubmittedOrder}
+            className="pointer-events-auto flex h-[72px] w-[86px] flex-col items-center justify-start rounded-t-full border border-border bg-white pt-2 text-text-primary shadow-[0_-1px_14px_rgba(15,23,42,0.14)] transition-transform active:scale-95"
+          >
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M16 10V7a4 4 0 0 0-8 0v3" />
+              <path d="M5.5 9.5h13l-.8 10.5H6.3L5.5 9.5Z" />
+            </svg>
+            <span className="mt-1 text-[11px] font-medium leading-none">Мои заказы</span>
           </button>
         </div>
       )}

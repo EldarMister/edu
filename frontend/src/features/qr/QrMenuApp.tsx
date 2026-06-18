@@ -27,6 +27,25 @@ interface SubmittedOrder {
   status: string;
 }
 
+const submittedOrderStorageKey = (token: string) => `edu_qr_submitted_order_${token}`;
+
+function readSubmittedOrder(token: string): SubmittedOrder | null {
+  try {
+    const raw = window.localStorage.getItem(submittedOrderStorageKey(token));
+    return raw ? (JSON.parse(raw) as SubmittedOrder) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSubmittedOrder(token: string, order: SubmittedOrder) {
+  try {
+    window.localStorage.setItem(submittedOrderStorageKey(token), JSON.stringify(order));
+  } catch {
+    // localStorage can be unavailable in private mode; in-memory state still works.
+  }
+}
+
 export function QrMenuApp() {
   const { tableToken = '' } = useParams();
   const qc = useQueryClient();
@@ -38,7 +57,7 @@ export function QrMenuApp() {
   const sessionQ = useQrSession(tableToken, !!join);
   const [screen, setScreen] = useState<Screen>('menu');
   const [dish, setDish] = useState<QrDish | null>(null);
-  const [submitted, setSubmitted] = useState<SubmittedOrder | null>(null);
+  const [submitted, setSubmitted] = useState<SubmittedOrder | null>(() => readSubmittedOrder(tableToken));
 
   // Вход гостя один раз после загрузки меню (меню валидирует токен стола).
   useEffect(() => {
@@ -56,12 +75,19 @@ export function QrMenuApp() {
     onCartUpdated: (payload) => qc.setQueryData(qrSessionKey(tableToken), payload as QrSession),
     onGuestChanged: () => qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) }),
     onOrderSubmitted: (p) => {
-      setSubmitted({ orderId: p.orderId, orderNumber: p.orderNumber, status: p.status });
+      const order = { orderId: p.orderId, orderNumber: p.orderNumber, status: p.status };
+      setSubmitted(order);
+      saveSubmittedOrder(tableToken, order);
       setScreen('submitted');
       qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) });
     },
     onOrderStatusChanged: (p) => {
-      setSubmitted((prev) => (prev && prev.orderId === p.orderId ? { ...prev, status: p.status } : prev));
+      setSubmitted((prev) => {
+        if (!prev || prev.orderId !== p.orderId) return prev;
+        const next = { ...prev, status: p.status };
+        saveSubmittedOrder(tableToken, next);
+        return next;
+      });
     },
   });
 
@@ -87,13 +113,14 @@ export function QrMenuApp() {
   const session = sessionQ.data;
 
   const onSubmitted = (r: QrSubmitResult) => {
-    setSubmitted({ orderId: r.orderId, orderNumber: r.orderNumber, status: r.status });
+    const order = { orderId: r.orderId, orderNumber: r.orderNumber, status: r.status };
+    setSubmitted(order);
+    saveSubmittedOrder(tableToken, order);
     setScreen('submitted');
     qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) });
   };
 
   const backToMenu = () => {
-    setSubmitted(null);
     setScreen('menu');
     void sessionQ.refetch();
   };
@@ -120,8 +147,10 @@ export function QrMenuApp() {
         <MenuScreen
           menu={menu}
           session={session}
+          hasSubmittedOrder={!!submitted}
           onOpenDish={setDish}
           onOpenOrder={() => setScreen('order')}
+          onOpenSubmittedOrder={() => submitted && setScreen('submitted')}
         />
       )}
 

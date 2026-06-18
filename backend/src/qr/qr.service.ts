@@ -205,20 +205,16 @@ export class QrService {
       throw new BadRequestException('Общий заказ пуст');
     }
 
-    const guestLabelById = new Map(full.guests.map((g) => [g.id, g.guestLabel]));
     const items = orderable.map((i) => {
-      const label = guestLabelById.get(i.guestId) ?? 'Гость';
-      // Сохраняем «кто добавил» в комментарии позиции (без изменения схемы заказа).
-      const comment = i.comment ? `${label} · ${i.comment}` : label;
       return {
         dishId: i.dishId as string,
         variantId: i.variantId ?? undefined,
         quantity: i.quantity,
-        comment,
+        comment: i.comment ?? undefined,
       };
     });
 
-    const order = await this.orders.createFromQr({ tableId: table.id, items, comment: 'Заказ из QR-меню' });
+    const order = await this.orders.createFromQr({ tableId: table.id, items });
 
     await this.prisma.qrTableSession.update({
       where: { id: session.id },

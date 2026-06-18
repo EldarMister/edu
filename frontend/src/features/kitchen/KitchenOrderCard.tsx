@@ -291,9 +291,7 @@ export function KitchenOrderCard({
         </div>
       </div>
 
-      <p className="mt-0.5 text-[13px] text-text-muted">
-        {order.waiter ? `Официант: ${order.waiter.name}` : 'Источник: QR menu'}
-      </p>
+      {order.waiter && <p className="mt-0.5 text-[13px] text-text-muted">Официант: {order.waiter.name}</p>}
 
       {allTakeaway && (
         <div className="mt-2">
