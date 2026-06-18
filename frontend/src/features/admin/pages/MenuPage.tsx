@@ -269,11 +269,17 @@ function DishModal({
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
-  // Фото блюда: preview — что показываем; payload — что отправляем (data URL | '' удалить | undefined без изменений).
-  const [photoPreview, setPhotoPreview] = useState<string | null>(resolveApiImage(dish?.imageUrl ?? null));
+  // Фото блюда: preview — что показываем; payload — что отправляем (data URL | https URL | '' удалить | undefined без изменений).
+  const initialImageUrl = dish?.imageUrl ?? null;
+  const initialResolved = resolveApiImage(initialImageUrl);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(initialResolved);
   const [photoPayload, setPhotoPayload] = useState<string | undefined>(undefined);
   const [photoBusy, setPhotoBusy] = useState(false);
   const photoRef = useRef<HTMLInputElement>(null);
+  // Поле ввода URL: инициализируем из существующего imageUrl только если это http-ссылка.
+  const [photoUrlInput, setPhotoUrlInput] = useState<string>(
+    initialImageUrl?.startsWith('http') ? initialImageUrl : '',
+  );
 
   async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -289,6 +295,7 @@ function DishModal({
       const dataUrl = await downscaleToDataUrl(file);
       setPhotoPreview(dataUrl);
       setPhotoPayload(dataUrl);
+      setPhotoUrlInput('');
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -296,9 +303,22 @@ function DishModal({
     }
   }
 
+  function onPhotoUrlCommit() {
+    const url = photoUrlInput.trim();
+    if (!url) return;
+    if (!/^https?:\/\/.+/i.test(url)) {
+      setError('Ссылка на фото должна начинаться с https://');
+      return;
+    }
+    setPhotoPreview(url);
+    setPhotoPayload(url);
+    setError('');
+  }
+
   function removePhoto() {
     setPhotoPreview(null);
     setPhotoPayload('');
+    setPhotoUrlInput('');
   }
 
   function updateVariant(uid: string, patch: Partial<Pick<DishVariantDraft, 'name' | 'price' | 'stock' | 'unit'>>) {
@@ -418,15 +438,26 @@ function DishModal({
             </div>
             <div className="flex flex-col gap-2">
               <button type="button" className="btn-secondary btn-md px-4" disabled={photoBusy} onClick={() => photoRef.current?.click()}>
-                {photoBusy ? <Spinner /> : photoPreview ? 'Заменить' : 'Загрузить фото'}
+                {photoBusy ? <Spinner /> : photoPreview ? 'Заменить файлом' : 'Загрузить фото'}
               </button>
               {photoPreview && (
                 <button type="button" className="text-sm font-medium text-danger hover:underline" onClick={removePhoto}>
                   Удалить фото
                 </button>
               )}
-              <p className="text-xs text-text-muted">Видно гостям в QR-меню. PNG, JPG или WEBP.</p>
+              <p className="text-xs text-text-muted">Видно гостям в QR-меню. Файл: PNG, JPG, WEBP.</p>
             </div>
+          </div>
+          {/* Альтернатива: ссылка на фото */}
+          <div className="mt-2 flex gap-2">
+            <input
+              className="input flex-1 text-sm"
+              placeholder="или вставьте ссылку https://..."
+              value={photoUrlInput}
+              onChange={(e) => setPhotoUrlInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && onPhotoUrlCommit()}
+              onBlur={onPhotoUrlCommit}
+            />
           </div>
         </Field>
         <Field label="Название">
