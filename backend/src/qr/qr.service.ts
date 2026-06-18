@@ -199,7 +199,8 @@ export class QrService {
       where: { id: session.id },
       include: sessionInclude,
     });
-    const orderable = full.items.filter((i) => !!i.dishId);
+    const onlineGuestIds = new Set(full.guests.filter((g) => g.isOnline).map((g) => g.id));
+    const orderable = full.items.filter((i) => !!i.dishId && onlineGuestIds.has(i.guestId));
     if (orderable.length === 0) {
       throw new BadRequestException('Общий заказ пуст');
     }
@@ -309,15 +310,15 @@ export class QrService {
       };
     }
 
-    const labelById = new Map(session.guests.map((g) => [g.id, g.guestLabel]));
-    const guestIdsWithItems = new Set<string>();
+    const onlineGuestIds = new Set(session.guests.filter((g) => g.isOnline).map((g) => g.id));
+    const visibleGuests = session.guests.filter((g) => onlineGuestIds.has(g.id));
+    const labelById = new Map(visibleGuests.map((g) => [g.id, g.guestLabel]));
     let total = 0;
     let count = 0;
-    const items = session.items.map((i) => {
+    const items = session.items.filter((i) => onlineGuestIds.has(i.guestId)).map((i) => {
       const line = Number(i.snapshotPrice) * i.quantity;
       total += line;
       count += i.quantity;
-      guestIdsWithItems.add(i.guestId);
       return {
         id: i.id,
         guestId: i.guestId,
@@ -337,14 +338,14 @@ export class QrService {
       sessionId: session.id,
       status: session.status,
       table: { id: table.id, number: table.number, hall: table.hall?.name ?? null },
-      guests: session.guests.map((g) => ({
+      guests: visibleGuests.map((g) => ({
         id: g.id,
         guestLabel: g.guestLabel,
         isOnline: g.isOnline,
       })),
       items,
       itemCount: count,
-      activeGuestCount: guestIdsWithItems.size,
+      activeGuestCount: visibleGuests.length,
       totalAmount: String(round2(total)),
       submittedOrderId: session.submittedOrderId,
     };
