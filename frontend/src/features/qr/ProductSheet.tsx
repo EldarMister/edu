@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { money } from '@/lib/format';
 import { apiError } from '@/lib/api';
+import { NumberTicker } from '@/components/NumberTicker';
 import { useAddItem, type QrDish } from './api';
 import { BottomSheet, DishPhoto, QtyStepper } from './ui';
 
@@ -126,7 +127,14 @@ function ProductSheetBody({ token, dish, onClose }: { token: string; dish: QrDis
       {/* Кнопка добавить */}
       <div className="shrink-0 p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
         <button type="button" onClick={submit} disabled={add.isPending} className="btn-primary btn-lg w-full rounded-lg font-bold">
-          {add.isPending ? 'Добавляем…' : `Добавить · ${money(unitPrice * qty)}`}
+          {add.isPending ? (
+            'Добавляем…'
+          ) : (
+            <>
+              <span>Добавить · </span>
+              <NumberTicker value={unitPrice * qty} />
+            </>
+          )}
         </button>
       </div>
     </div>

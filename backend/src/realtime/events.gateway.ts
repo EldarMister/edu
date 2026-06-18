@@ -12,6 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { ROOMS, SERVER_EVENTS, QR_CLIENT_EVENTS } from './events';
 import { getJwtAccessSecret } from '../auth/jwt.config';
+import { PrismaService } from '../prisma/prisma.service';
 
 interface SocketUser {
   id: string;
@@ -37,8 +38,12 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server: Server;
 
   private readonly logger = new Logger('EventsGateway');
+  private readonly qrPresence = new Map<string, number>();
 
-  constructor(private readonly jwt: JwtService) {}
+  constructor(
+    private readonly jwt: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   async handleConnection(client: Socket) {
     const token =
@@ -77,7 +82,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     const user = client.data.user as SocketUser | undefined;
     if (user) {
       this.logger.log(`Disconnected: ${user.role} ${user.id}`);
@@ -85,41 +90,36 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Гость QR-меню вышел — сообщим столу, чтобы обновили счётчик/онлайн.
     const qr = client.data.qr as { tableId: string; guestKey?: string } | undefined;
     if (qr) {
-      this.server.to(ROOMS.qrTable(qr.tableId)).emit(SERVER_EVENTS.QR_GUEST_LEFT, {
-        tableId: qr.tableId,
-        guestKey: qr.guestKey,
-      });
+      await this.releaseQrGuest(client);
     }
   }
 
   /** Гость QR-меню входит в комнату своего стола (tableId получен из публичного /menu). */
   @SubscribeMessage(QR_CLIENT_EVENTS.JOIN)
-  handleQrJoin(
+  async handleQrJoin(
     @ConnectedSocket() client: Socket,
     @MessageBody() body: { tableId?: string; guestKey?: string },
   ) {
     const tableId = body?.tableId;
     if (!tableId) return { ok: false };
+    if (client.data.qr) await this.releaseQrGuest(client, false);
     client.join(ROOMS.qrTable(tableId));
     client.data.qr = { tableId, guestKey: body.guestKey };
+    await this.retainQrGuest(tableId, body.guestKey);
     this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_GUEST_JOINED, {
       tableId,
       guestKey: body.guestKey,
     });
+    await this.emitQrSessionSnapshot(tableId);
     return { ok: true };
   }
 
   /** Гость покидает комнату стола. */
   @SubscribeMessage(QR_CLIENT_EVENTS.LEAVE)
-  handleQrLeave(@ConnectedSocket() client: Socket, @MessageBody() body: { tableId?: string }) {
+  async handleQrLeave(@ConnectedSocket() client: Socket, @MessageBody() body: { tableId?: string }) {
     const tableId = body?.tableId ?? (client.data.qr as { tableId?: string } | undefined)?.tableId;
     if (!tableId) return { ok: false };
-    client.leave(ROOMS.qrTable(tableId));
-    this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_GUEST_LEFT, {
-      tableId,
-      guestKey: (client.data.qr as { guestKey?: string } | undefined)?.guestKey,
-    });
-    client.data.qr = undefined;
+    await this.releaseQrGuest(client);
     return { ok: true };
   }
 
@@ -152,4 +152,116 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   emitToQrTable(tableId: string, event: string, payload: unknown) {
     this.server.to(ROOMS.qrTable(tableId)).emit(event, payload);
   }
+
+  private presenceKey(tableId: string, guestKey: string) {
+    return `${tableId}:${guestKey}`;
+  }
+
+  private async retainQrGuest(tableId: string, guestKey?: string) {
+    if (!guestKey) return;
+    const key = this.presenceKey(tableId, guestKey);
+    this.qrPresence.set(key, (this.qrPresence.get(key) ?? 0) + 1);
+    const session = await this.prisma.qrTableSession.findFirst({
+      where: { tableId, status: 'draft' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    if (!session) return;
+    await this.prisma.qrGuest.updateMany({
+      where: { sessionId: session.id, guestKey },
+      data: { isOnline: true, lastSeenAt: new Date() },
+    });
+  }
+
+  private async releaseQrGuest(client: Socket, emit = true) {
+    const qr = client.data.qr as { tableId: string; guestKey?: string } | undefined;
+    if (!qr) return;
+    client.leave(ROOMS.qrTable(qr.tableId));
+    client.data.qr = undefined;
+
+    if (qr.guestKey) {
+      const key = this.presenceKey(qr.tableId, qr.guestKey);
+      const next = Math.max(0, (this.qrPresence.get(key) ?? 1) - 1);
+      if (next > 0) {
+        this.qrPresence.set(key, next);
+      } else {
+        this.qrPresence.delete(key);
+        const session = await this.prisma.qrTableSession.findFirst({
+          where: { tableId: qr.tableId, status: 'draft' },
+          orderBy: { createdAt: 'desc' },
+          select: { id: true },
+        });
+        if (session) {
+          await this.prisma.qrGuest.updateMany({
+            where: { sessionId: session.id, guestKey: qr.guestKey },
+            data: { isOnline: false, lastSeenAt: new Date() },
+          });
+        }
+      }
+    }
+
+    if (emit) {
+      this.server.to(ROOMS.qrTable(qr.tableId)).emit(SERVER_EVENTS.QR_GUEST_LEFT, {
+        tableId: qr.tableId,
+        guestKey: qr.guestKey,
+      });
+      await this.emitQrSessionSnapshot(qr.tableId);
+    }
+  }
+
+  private async emitQrSessionSnapshot(tableId: string) {
+    const session = await this.prisma.qrTableSession.findFirst({
+      where: { tableId, status: 'draft' },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        table: { select: { number: true, hall: { select: { name: true } } } },
+        guests: { orderBy: { createdAt: 'asc' } },
+        items: { orderBy: { createdAt: 'asc' } },
+      },
+    });
+    if (!session) return;
+
+    const labelById = new Map(session.guests.map((g) => [g.id, g.guestLabel]));
+    let total = 0;
+    let count = 0;
+    const items = session.items.map((i) => {
+      const line = Number(i.snapshotPrice) * i.quantity;
+      total += line;
+      count += i.quantity;
+      return {
+        id: i.id,
+        guestId: i.guestId,
+        guestLabel: labelById.get(i.guestId) ?? 'Гость',
+        dishId: i.dishId,
+        variantId: i.variantId,
+        name: i.snapshotName,
+        variantName: i.variantName,
+        quantity: i.quantity,
+        price: String(i.snapshotPrice),
+        lineTotal: String(round2(line)),
+        comment: i.comment,
+      };
+    });
+
+    const guests = session.guests.map((g) => {
+      const isOnline = this.qrPresence.has(this.presenceKey(tableId, g.guestKey));
+      return { id: g.id, guestLabel: g.guestLabel, isOnline };
+    });
+
+    this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_CART_UPDATED, {
+      sessionId: session.id,
+      status: session.status,
+      table: { id: tableId, number: session.table.number, hall: session.table.hall?.name ?? null },
+      guests,
+      items,
+      itemCount: count,
+      activeGuestCount: guests.filter((g) => g.isOnline).length,
+      totalAmount: String(round2(total)),
+      submittedOrderId: session.submittedOrderId,
+    });
+  }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }

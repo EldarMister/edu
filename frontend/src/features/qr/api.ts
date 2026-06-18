@@ -70,6 +70,7 @@ export interface QrSession {
   guests: QrGuest[];
   items: QrSessionItem[];
   itemCount: number;
+  activeGuestCount: number;
   totalAmount: string;
   submittedOrderId: string | null;
 }
@@ -139,6 +140,19 @@ export function useUpdateItem(token: string) {
   return useMutation({
     mutationFn: async ({ itemId, quantity }: { itemId: string; quantity: number }) =>
       (await publicApi.patch<QrSession>(`/qr-session/${token}/items/${itemId}`, { guestKey: getGuestKey(), quantity })).data,
+    onMutate: async ({ itemId, quantity }) => {
+      const key = qrSessionKey(token);
+      await qc.cancelQueries({ queryKey: key });
+      const previous = qc.getQueryData<QrSession>(key);
+      qc.setQueryData<QrSession>(key, (current) => (current ? recalcSessionTotals({
+        ...current,
+        items: current.items.map((item) => (item.id === itemId ? { ...item, quantity } : item)),
+      }) : current));
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) qc.setQueryData(qrSessionKey(token), ctx.previous);
+    },
     onSuccess: (session) => qc.setQueryData(qrSessionKey(token), session),
   });
 }
@@ -157,4 +171,21 @@ export function useSubmitOrder(token: string) {
     mutationFn: async () =>
       (await publicApi.post<QrSubmitResult>(`/qr-session/${token}/submit`, { guestKey: getGuestKey() })).data,
   });
+}
+
+function recalcSessionTotals(session: QrSession): QrSession {
+  let itemCount = 0;
+  let totalAmount = 0;
+  const items = session.items.map((item) => {
+    const line = Number(item.price) * item.quantity;
+    itemCount += item.quantity;
+    totalAmount += line;
+    return { ...item, lineTotal: String(round2(line)) };
+  });
+  const activeGuestCount = Math.max(session.activeGuestCount, new Set(items.map((item) => item.guestId)).size);
+  return { ...session, items, itemCount, activeGuestCount, totalAmount: String(round2(totalAmount)) };
+}
+
+function round2(value: number) {
+  return Math.round(value * 100) / 100;
 }

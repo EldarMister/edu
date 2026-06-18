@@ -3,6 +3,7 @@ import { resolveApiImage } from '@/lib/image';
 
 const SHEET_MS = 260;
 const SHEET_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
+const SHEET_CLOSE_DRAG_PX = 190;
 
 /** Логотип EDU MENU — картинка из public. */
 export function EduMenuLogo() {
@@ -135,7 +136,7 @@ export function BottomSheet({
     startY.current = null;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
     setDragging(false);
-    if (drag > 110) onClose();
+    if (drag > SHEET_CLOSE_DRAG_PX) onClose();
     else requestAnimationFrame(() => setDrag(0));
   }
 
