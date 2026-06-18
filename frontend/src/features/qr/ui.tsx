@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { resolveApiImage } from '@/lib/image';
 
 /** Логотип EDU MENU — картинка из public. */
@@ -138,17 +138,26 @@ export function ConfirmModal({
   );
 }
 
-/** Заглушка фото блюда, когда нет imageUrl. */
+const PhotoPlaceholder = ({ className = '' }: { className?: string }) => (
+  <div className={`flex items-center justify-center bg-background text-text-light ${className}`}>
+    <svg width="40%" height="40%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="M3 7h18v12H3zM3 7l2-3h14l2 3M8 12a2 2 0 1 0 4 0 2 2 0 0 0-4 0" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  </div>
+);
+
+/** Фото блюда с fallback-заглушкой при отсутствии или ошибке загрузки. */
 export function DishPhoto({ src, name, className = '' }: { src: string | null; name: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
   const resolved = resolveApiImage(src);
-  if (resolved) {
-    return <img src={resolved} alt={name} className={`object-cover ${className}`} loading="lazy" />;
-  }
+  if (!resolved || failed) return <PhotoPlaceholder className={className} />;
   return (
-    <div className={`flex items-center justify-center bg-background text-text-light ${className}`}>
-      <svg width="40%" height="40%" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-        <path d="M3 7h18v12H3zM3 7l2-3h14l2 3M8 12a2 2 0 1 0 4 0 2 2 0 0 0-4 0" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </div>
+    <img
+      src={resolved}
+      alt={name}
+      className={`object-cover ${className}`}
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
   );
 }

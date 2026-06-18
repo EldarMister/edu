@@ -82,6 +82,13 @@ export function MenuScreen({
           </div>
         )}
 
+        {/* Дисклеймер о фото */}
+        <p className="px-4 pb-3 pt-1 text-center text-[11px] leading-4 text-text-light">
+          Фото блюд могут незначительно отличаться от реального вида.
+          <br />
+          Тамак-аштардын сүрөттөрү чыныгы көрүнүштөн бир аз айырмаланышы мүмкүн.
+        </p>
+
         {/* Запас под sticky-панель */}
         <div className="h-24" />
       </div>

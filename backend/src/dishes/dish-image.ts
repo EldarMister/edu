@@ -6,20 +6,23 @@ import { BadRequestException } from '@nestjs/common';
 const DISH_IMAGE_DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
 // ~1.1 МБ base64 — клиент перед загрузкой сжимает изображение.
 const MAX_DISH_IMAGE_CHARS = 1_500_000;
+const DISH_IMAGE_HTTP_RE = /^https?:\/\/.+/i;
 
 /**
  * Нормализует входящее фото для записи в БД:
  *  - undefined → не трогать (поле не передано);
  *  - '' → очистить (null);
  *  - валидный data URL → строка;
+ *  - https-ссылка → строка;
  *  - иначе — ошибка.
  */
 export function normalizeDishImage(input: string | undefined): string | null | undefined {
   if (input === undefined) return undefined;
   const trimmed = input.trim();
   if (trimmed === '') return null;
+  if (DISH_IMAGE_HTTP_RE.test(trimmed)) return trimmed;
   if (!DISH_IMAGE_DATA_URL_RE.test(trimmed)) {
-    throw new BadRequestException('Фото блюда: поддерживаются только PNG, JPG или WEBP');
+    throw new BadRequestException('Фото блюда: вставьте ссылку (https://...) или загрузите файл PNG, JPG, WEBP');
   }
   if (trimmed.length > MAX_DISH_IMAGE_CHARS) {
     throw new BadRequestException('Фото блюда слишком большое — уменьшите изображение');
@@ -27,9 +30,12 @@ export function normalizeDishImage(input: string | undefined): string | null | u
   return trimmed;
 }
 
-/** Лёгкая ссылка на картинку блюда (с версией для кэша) вместо тяжёлого base64. */
+/** Лёгкая ссылка на картинку блюда (с версией для кэша) вместо тяжёлого base64.
+ *  Если в БД хранится https-ссылка — возвращаем её напрямую; иначе — эндпоинт-картинка. */
 export function dishImageRef(id: string, updatedAt: Date, imageUrl: string | null): string | null {
-  return imageUrl ? `/dishes/${id}/image?v=${updatedAt.getTime()}` : null;
+  if (!imageUrl) return null;
+  if (imageUrl.startsWith('http')) return imageUrl;
+  return `/dishes/${id}/image?v=${updatedAt.getTime()}`;
 }
 
 /** Заменяет imageUrl блюда на лёгкую ссылку (для ответов со списком блюд). */
