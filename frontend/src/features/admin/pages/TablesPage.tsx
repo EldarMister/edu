@@ -4,7 +4,8 @@ import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
-import { IconEdit, IconTrash, IconPlus } from '../components/icons';
+import { IconEdit, IconTrash, IconPlus, IconQr } from '../components/icons';
+import { TableQrModal } from '../components/TableQrModal';
 import {
   useAdminHalls,
   useTablesOverview,
@@ -24,6 +25,7 @@ export function TablesPage() {
 
   const [hallModal, setHallModal] = useState<AdminHall | null | 'new'>(null);
   const [tableModal, setTableModal] = useState<{ hall: AdminHall; table: AdminTableItem | null } | null>(null);
+  const [qrModal, setQrModal] = useState<{ table: AdminTableItem; hallName: string } | null>(null);
   const [collapsedHalls, setCollapsedHalls] = useState<Set<string>>(() => new Set());
   const [accordionReady, setAccordionReady] = useState(false);
 
@@ -145,6 +147,9 @@ export function TablesPage() {
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
                             <AdminTableBadge status={t.status} />
+                            <IconBtn onClick={() => setQrModal({ table: t, hallName: hall.name })} title="QR-код меню">
+                              <IconQr className="h-4 w-4" />
+                            </IconBtn>
                             <IconBtn onClick={() => setTableModal({ hall, table: t })} title="Изменить">
                               <IconEdit className="h-4 w-4" />
                             </IconBtn>
@@ -172,6 +177,9 @@ export function TablesPage() {
           table={tableModal.table}
           onClose={() => setTableModal(null)}
         />
+      )}
+      {qrModal && (
+        <TableQrModal table={qrModal.table} hallName={qrModal.hallName} onClose={() => setQrModal(null)} />
       )}
     </div>
   );

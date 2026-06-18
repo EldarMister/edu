@@ -72,6 +72,7 @@ export class CatalogService {
             status: true,
             isActive: true,
             hallId: true,
+            qrToken: true, // для QR-меню стола (владелец печатает QR)
           },
         },
       },
