@@ -90,6 +90,12 @@ export function displayOrderNumber(value: string): string {
   });
 }
 
+/** Суффикс с названием зала рядом со столом: « · Большой зал». Пусто, если зал неизвестен. */
+export function hallSuffix(table: { hall?: { name?: string } | null } | null | undefined): string {
+  const name = table?.hall?.name;
+  return name ? ` · ${name}` : '';
+}
+
 /** Время HH:MM из ISO. */
 export function timeHM(iso: string): string {
   const d = new Date(iso);

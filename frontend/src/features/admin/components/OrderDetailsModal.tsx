@@ -1,7 +1,7 @@
 import { Modal } from '@/components/Modal';
 import { OrderBadge } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
-import { displayOrderNumber, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 import { useRetryFiscal } from '../api';
@@ -38,7 +38,7 @@ export function OrderDetailsModal({
         <div className="grid grid-cols-2 gap-2">
           <Info label="Статус" value={<OrderBadge status={order.status} />} />
           <Info label="Дата" value={`${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`} />
-          <Info label="Стол" value={`Стол ${order.table.number}`} />
+          <Info label="Стол" value={`Стол ${order.table.number}${hallSuffix(order.table)}`} />
           <Info label="Официант" value={order.waiter.name} />
           <Info label="Сумма" value={money(order.finalAmount)} strong />
           {Number(order.discountAmount) > 0 && <Info label="Скидка" value={money(order.discountAmount)} />}

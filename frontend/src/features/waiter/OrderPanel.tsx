@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
 import { ORDER_STATUS } from '@/lib/status';
-import { displayOrderNumber, money, orderItemDisplayName } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, money, orderItemDisplayName } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
@@ -113,7 +113,7 @@ export function OrderPanel({
         <div className="min-w-0">
           <h2 className="truncate text-[15px] font-semibold leading-tight text-text-primary">
             {t('Заказ')} {displayOrderNumber(order.orderNumber)}
-            <span className="ml-2 text-[13px] font-normal text-text-muted">{t('Стол')} {order.table.number}</span>
+            <span className="ml-2 text-[13px] font-normal text-text-muted">{t('Стол')} {order.table.number}{hallSuffix(order.table)}</span>
           </h2>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -319,7 +319,7 @@ function PartialRejectionPanel({
         <div className="min-w-0">
           <h2 className="truncate text-[18px] font-semibold leading-tight text-text-primary sm:text-[20px]">
             {t('Заказ')} {displayOrderNumber(order.orderNumber)}
-            <span className="ml-2 text-[14px] font-normal text-text-muted">{t('Стол')} {order.table.number}</span>
+            <span className="ml-2 text-[14px] font-normal text-text-muted">{t('Стол')} {order.table.number}{hallSuffix(order.table)}</span>
           </h2>
         </div>
         <span className="shrink-0 rounded-lg border border-danger/25 bg-danger/5 px-2.5 py-1 text-[12px] font-medium text-danger">

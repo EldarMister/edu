@@ -3,7 +3,7 @@ import type { Order, CartLine, DishVariant, WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
-import { displayOrderNumber } from '@/lib/format';
+import { displayOrderNumber, hallSuffix } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useWaiterPushNotifications } from '@/lib/push';
 import { useNotifications } from '@/store/notifications';
@@ -164,6 +164,9 @@ export function WaiterApp() {
 
   const selectedTable =
     halls.flatMap((h) => h.tables).find((t) => t.id === cart.tableId) ?? null;
+  const selectedHallName = selectedTable
+    ? halls.find((h) => h.id === selectedTable.hallId)?.name
+    : undefined;
   const activeOrder = cart.tableId ? ordersByTable.get(cart.tableId) : undefined;
   const editing = !!editingOrderId && !!activeOrder && activeOrder.id === editingOrderId;
   const viewingOrder = viewingOrderId ? orders.find((o) => o.id === viewingOrderId) : undefined;
@@ -644,7 +647,7 @@ export function WaiterApp() {
 
   // Десктоп: меню в панели с заголовком и чипом стола.
   const menuPanel = (
-    <Panel title={t('Меню')} action={selectedTable ? <TableChip number={selectedTable.number} /> : null}>
+    <Panel title={t('Меню')} action={selectedTable ? <TableChip number={selectedTable.number} hallName={selectedHallName} /> : null}>
       <DishMenu
         categories={categoriesQ.data ?? []}
         dishes={dishesQ.data ?? []}
@@ -672,7 +675,7 @@ export function WaiterApp() {
         disabled={!selectedTable}
         tableSlot={
           selectedTable ? (
-            <TableSelectButton number={selectedTable.number} onClick={() => setTablePickerOpen(true)} />
+            <TableSelectButton number={selectedTable.number} hallName={selectedHallName} onClick={() => setTablePickerOpen(true)} />
           ) : null
         }
       />
@@ -702,6 +705,7 @@ export function WaiterApp() {
       ) : (
         <CartPanel
           table={selectedTable}
+          hallName={selectedHallName}
           mode={editing ? 'edit' : activeOrder ? 'add' : 'create'}
           orderNumber={activeOrder?.orderNumber}
           submitting={create.isPending || addItems.isPending || editOrder.isPending}
@@ -872,7 +876,7 @@ export function WaiterApp() {
             </span>
             <div className="min-w-0 flex-1">
               <p className="truncate text-[15px] font-semibold text-text-primary">
-                {displayOrderNumber(pendingCancel.order.orderNumber)} · {t('Стол')} {pendingCancel.order.table.number} — {t('отмена заказа')}
+                {displayOrderNumber(pendingCancel.order.orderNumber)} · {t('Стол')} {pendingCancel.order.table.number}{hallSuffix(pendingCancel.order.table)} — {t('отмена заказа')}
               </p>
               <p className="text-[13px] text-text-muted">
                 {t('Отменится через')}{' '}

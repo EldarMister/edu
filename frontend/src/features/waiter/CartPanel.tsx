@@ -1,6 +1,6 @@
 import type { TableItem } from '@/types';
 import { useCart, cartTotals } from './cart';
-import { displayOrderNumber, money } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { NumberTicker } from '@/components/NumberTicker';
@@ -8,6 +8,7 @@ import { CartLinesList, TakeawaySwitch } from './CartItems';
 
 export function CartPanel({
   table,
+  hallName,
   mode,
   orderNumber,
   submitting,
@@ -18,6 +19,7 @@ export function CartPanel({
   onCancelEdit,
 }: {
   table: TableItem;
+  hallName?: string;
   mode: 'create' | 'add' | 'edit';
   orderNumber?: string;
   submitting: boolean;
@@ -47,7 +49,7 @@ export function CartPanel({
                 ? `${t('Добавление в')} ${displayOrderNumber(orderNumber ?? '')}`
                 : t('Новый заказ')}
           </h2>
-          <p className="mt-0.5 text-sm text-text-muted">{t('Стол')} {table.number}</p>
+          <p className="mt-0.5 text-sm text-text-muted">{t('Стол')} {table.number}{hallSuffix({ hall: hallName ? { name: hallName } : null })}</p>
         </div>
         <div className="flex shrink-0 items-center gap-4">
           {hasLines && <TakeawaySwitch on={allTakeaway} onChange={setAllTakeaway} />}

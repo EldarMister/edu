@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
-import { displayOrderNumber, isSplitPayment, money, orderItemDisplayName, paymentMethodLabel } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, isSplitPayment, money, orderItemDisplayName, paymentMethodLabel } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
@@ -331,7 +331,7 @@ export function PaymentModal({
       }
     >
       <p className="mb-1 text-sm text-text-muted">
-        {t('Стол')} {order.table.number} · {displayOrderNumber(order.orderNumber)}
+        {t('Стол')} {order.table.number}{hallSuffix(order.table)} · {displayOrderNumber(order.orderNumber)}
       </p>
       <div className="mb-4 flex items-baseline justify-between">
         <span className="text-text-secondary">{t('К оплате')}</span>
