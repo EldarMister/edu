@@ -7,12 +7,15 @@ import {
   MessageBody,
   ConnectedSocket,
 } from '@nestjs/websockets';
-import { Logger } from '@nestjs/common';
+import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
 import { ROOMS, SERVER_EVENTS, QR_CLIENT_EVENTS } from './events';
 import { getJwtAccessSecret } from '../auth/jwt.config';
 import { PrismaService } from '../prisma/prisma.service';
+
+const QR_OFFLINE_CART_TTL_MS = 60 * 60 * 1000;
+const QR_OFFLINE_CART_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 
 interface SocketUser {
   id: string;
@@ -33,17 +36,31 @@ interface SocketUser {
     credentials: true,
   },
 })
-export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy {
   @WebSocketServer()
   server: Server;
 
   private readonly logger = new Logger('EventsGateway');
   private readonly qrPresence = new Map<string, number>();
+  private cleanupTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly jwt: JwtService,
     private readonly prisma: PrismaService,
   ) {}
+
+  onModuleInit() {
+    this.cleanupTimer = setInterval(() => {
+      void this.cleanupExpiredOfflineGuestItems().catch((error: unknown) => {
+        this.logger.error('Failed to cleanup expired QR guest items', error);
+      });
+    }, QR_OFFLINE_CART_CLEANUP_INTERVAL_MS);
+    this.cleanupTimer.unref?.();
+  }
+
+  onModuleDestroy() {
+    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+  }
 
   async handleConnection(client: Socket) {
     const token =
@@ -210,6 +227,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private async emitQrSessionSnapshot(tableId: string) {
+    await this.cleanupExpiredOfflineGuestItems(tableId);
+
     const session = await this.prisma.qrTableSession.findFirst({
       where: { tableId, status: 'draft' },
       orderBy: { createdAt: 'desc' },
@@ -221,32 +240,36 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
     if (!session) return;
 
-    const labelById = new Map(session.guests.map((g) => [g.id, g.guestLabel]));
+    const guests = session.guests
+      .map((g) => {
+        const isOnline = this.qrPresence.has(this.presenceKey(tableId, g.guestKey));
+        return { id: g.id, guestLabel: g.guestLabel, isOnline };
+      })
+      .filter((g) => g.isOnline);
+    const onlineGuestIds = new Set(guests.map((g) => g.id));
+    const labelById = new Map(guests.map((g) => [g.id, g.guestLabel]));
     let total = 0;
     let count = 0;
-    const items = session.items.map((i) => {
-      const line = Number(i.snapshotPrice) * i.quantity;
-      total += line;
-      count += i.quantity;
-      return {
-        id: i.id,
-        guestId: i.guestId,
-        guestLabel: labelById.get(i.guestId) ?? 'Гость',
-        dishId: i.dishId,
-        variantId: i.variantId,
-        name: i.snapshotName,
-        variantName: i.variantName,
-        quantity: i.quantity,
-        price: String(i.snapshotPrice),
-        lineTotal: String(round2(line)),
-        comment: i.comment,
-      };
-    });
-
-    const guests = session.guests.map((g) => {
-      const isOnline = this.qrPresence.has(this.presenceKey(tableId, g.guestKey));
-      return { id: g.id, guestLabel: g.guestLabel, isOnline };
-    });
+    const items = session.items
+      .filter((i) => onlineGuestIds.has(i.guestId))
+      .map((i) => {
+        const line = Number(i.snapshotPrice) * i.quantity;
+        total += line;
+        count += i.quantity;
+        return {
+          id: i.id,
+          guestId: i.guestId,
+          guestLabel: labelById.get(i.guestId) ?? 'Гость',
+          dishId: i.dishId,
+          variantId: i.variantId,
+          name: i.snapshotName,
+          variantName: i.variantName,
+          quantity: i.quantity,
+          price: String(i.snapshotPrice),
+          lineTotal: String(round2(line)),
+          comment: i.comment,
+        };
+      });
 
     this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_CART_UPDATED, {
       sessionId: session.id,
@@ -255,9 +278,25 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       guests,
       items,
       itemCount: count,
-      activeGuestCount: guests.filter((g) => g.isOnline).length,
+      activeGuestCount: guests.length,
       totalAmount: String(round2(total)),
       submittedOrderId: session.submittedOrderId,
+    });
+  }
+
+  private async cleanupExpiredOfflineGuestItems(tableId?: string) {
+    const cutoff = new Date(Date.now() - QR_OFFLINE_CART_TTL_MS);
+    await this.prisma.qrSessionItem.deleteMany({
+      where: {
+        guest: {
+          isOnline: false,
+          lastSeenAt: { lt: cutoff },
+          session: {
+            status: 'draft',
+            ...(tableId ? { tableId } : {}),
+          },
+        },
+      },
     });
   }
 }

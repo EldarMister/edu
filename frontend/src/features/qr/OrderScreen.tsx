@@ -145,7 +145,6 @@ export function OrderScreen({
             </>
           )}
         </button>
-        <p className="mt-2 text-center text-[12px] text-text-muted">Заказ отправляется на кухню целиком</p>
       </div>
 
       <ConfirmModal
