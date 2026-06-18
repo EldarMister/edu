@@ -5,7 +5,7 @@ import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
-import { displayOrderNumber, money, paymentCell, timeHM } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, money, paymentCell, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { IconEdit, IconX } from '../components/icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
@@ -291,7 +291,7 @@ export function OrdersPage() {
                       {new Date(ord.createdAt).toLocaleDateString('ru-RU')} {timeHM(ord.createdAt)}
                     </Td>
                     <Td className="text-text-secondary">
-                      {tr('Стол')} {ord.table.number}
+                      {tr('Стол')} {ord.table.number}{hallSuffix(ord.table)}
                     </Td>
                     <Td className="text-text-secondary">{ord.waiter.name}</Td>
                     <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
@@ -349,7 +349,7 @@ export function OrdersPage() {
         open={!!cancelTarget}
         orderLabel={
           cancelTarget
-            ? `${tr('Заказ')} ${displayOrderNumber(cancelTarget.orderNumber)} · ${tr('Стол')} ${cancelTarget.table.number} · ${money(cancelTarget.finalAmount)}`
+            ? `${tr('Заказ')} ${displayOrderNumber(cancelTarget.orderNumber)} · ${tr('Стол')} ${cancelTarget.table.number}${hallSuffix(cancelTarget.table)} · ${money(cancelTarget.finalAmount)}`
             : ''
         }
         submitting={cancelOrder.isPending}
@@ -401,7 +401,7 @@ function StatusEditorModal({
         <div className="border-b border-border px-4 py-3">
           <h3 className="font-semibold text-text-primary">{tr('Изменить статус заказа')}</h3>
           <p className="mt-0.5 text-sm text-text-muted">
-            {displayOrderNumber(order.orderNumber)} · {tr('Стол')} {order.table.number}
+            {displayOrderNumber(order.orderNumber)} · {tr('Стол')} {order.table.number}{hallSuffix(order.table)}
           </p>
         </div>
         <div className="space-y-3 px-4 py-4">

@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent, OrderStatus } from '@/types';
 import type { KitchenTab } from './api';
 import { OrderBadge } from '@/components/StatusBadge';
-import { displayOrderNumber, timeHM, dateDM, elapsed, orderItemDisplayName } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, timeHM, dateDM, elapsed, orderItemDisplayName } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 
 /** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
@@ -272,7 +272,7 @@ export function KitchenOrderCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-lg font-bold leading-tight text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
-          <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}</p>
+          <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}{hallSuffix(order.table)}</p>
         </div>
         <div className="text-right">
           <p className="text-[13px] text-text-muted">

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
-import { displayOrderNumber, money, timeHM } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 
 export function OrdersList({
@@ -55,7 +55,7 @@ export function OrdersList({
                 <span className="text-base font-semibold text-text-primary">
                   {displayOrderNumber(o.orderNumber)}
                 </span>
-                <span className="text-sm text-text-muted">{t('Стол')} {o.table.number}</span>
+                <span className="text-sm text-text-muted">{t('Стол')} {o.table.number}{hallSuffix(o.table)}</span>
               </div>
               <p className="flex items-center gap-1.5 text-xs text-text-light">
                 <ClockIcon />
