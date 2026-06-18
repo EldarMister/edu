@@ -10,6 +10,7 @@ import {
   type QrDish,
   type QrJoinResult,
   type QrSession,
+  type QrSessionItem,
   type QrSubmitResult,
 } from './api';
 import { useQrRealtime } from './socket';
@@ -25,6 +26,9 @@ interface SubmittedOrder {
   orderId: string;
   orderNumber: string;
   status: string;
+  items: QrSessionItem[];
+  totalAmount: string;
+  itemCount: number;
 }
 
 const submittedOrderStorageKey = (token: string) => `edu_qr_submitted_order_${token}`;
@@ -59,6 +63,19 @@ export function QrMenuApp() {
   const [dish, setDish] = useState<QrDish | null>(null);
   const [submitted, setSubmitted] = useState<SubmittedOrder | null>(() => readSubmittedOrder(tableToken));
 
+  // Снимок состава заказа из текущей сессии — чтобы показать его на экране «Мои заказы».
+  const captureSubmitted = (p: { orderId: string; orderNumber: string; status: string }): SubmittedOrder => {
+    const cached = qc.getQueryData<QrSession>(qrSessionKey(tableToken));
+    return {
+      orderId: p.orderId,
+      orderNumber: p.orderNumber,
+      status: p.status,
+      items: cached?.items ?? [],
+      totalAmount: cached?.totalAmount ?? '0',
+      itemCount: cached?.itemCount ?? 0,
+    };
+  };
+
   // Вход гостя один раз после загрузки меню (меню валидирует токен стола).
   useEffect(() => {
     if (!menuQ.data || joinedRef.current) return;
@@ -75,9 +92,13 @@ export function QrMenuApp() {
     onCartUpdated: (payload) => qc.setQueryData(qrSessionKey(tableToken), payload as QrSession),
     onGuestChanged: () => qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) }),
     onOrderSubmitted: (p) => {
-      const order = { orderId: p.orderId, orderNumber: p.orderNumber, status: p.status };
-      setSubmitted(order);
-      saveSubmittedOrder(tableToken, order);
+      setSubmitted((prev) => {
+        // Свой только что отправленный заказ с уже снятым составом — не затираем пустым.
+        if (prev?.orderId === p.orderId && prev.items.length > 0) return prev;
+        const order = captureSubmitted(p);
+        saveSubmittedOrder(tableToken, order);
+        return order;
+      });
       setScreen('submitted');
       qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) });
     },
@@ -113,7 +134,7 @@ export function QrMenuApp() {
   const session = sessionQ.data;
 
   const onSubmitted = (r: QrSubmitResult) => {
-    const order = { orderId: r.orderId, orderNumber: r.orderNumber, status: r.status };
+    const order = captureSubmitted(r);
     setSubmitted(order);
     saveSubmittedOrder(tableToken, order);
     setScreen('submitted');
@@ -141,6 +162,10 @@ export function QrMenuApp() {
           orderNumber={submitted.orderNumber}
           tableNumber={menu.table.number}
           status={submitted.status}
+          items={submitted.items}
+          totalAmount={submitted.totalAmount}
+          itemCount={submitted.itemCount}
+          menu={menu}
           onBackToMenu={backToMenu}
         />
       ) : screen === 'order' && session ? (
