@@ -40,21 +40,8 @@ export function MenuScreen({
       <QrHeader tableNumber={menu.table.number} />
 
       <div className="min-h-0 flex-1 overflow-y-auto app-scrollbar-subtle">
-        {/* Блок заведения */}
-        <div className="flex items-center gap-3 px-4 pb-3 pt-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary/10 text-lg font-semibold text-primary">
-            {menu.cafe.name.trim().charAt(0).toUpperCase() || 'E'}
-          </div>
-          <div className="min-w-0">
-            <h1 className="truncate text-[17px] font-semibold text-text-primary">{menu.cafe.name}</h1>
-            {menu.cafe.address && (
-              <p className="truncate text-[13px] text-text-muted">{menu.cafe.address}</p>
-            )}
-          </div>
-        </div>
-
         {/* Поиск */}
-        <div className="px-4">
+        <div className="px-4 pt-4">
           <div className="relative">
             <svg
               className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-text-light"

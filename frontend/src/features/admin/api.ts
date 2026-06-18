@@ -11,6 +11,7 @@ export interface AdminTableItem {
   status: TableStatus;
   isActive: boolean;
   hallId: string;
+  qrToken?: string;
 }
 export interface AdminHall {
   id: string;

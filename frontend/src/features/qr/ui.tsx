@@ -1,15 +1,9 @@
 import { useEffect, type ReactNode } from 'react';
 import { resolveApiImage } from '@/lib/image';
 
-/** Логотип EDU MENU: «ED» тёмно-синий, «U» синий-акцент, «MENU» тёмно-синий. */
+/** Логотип EDU MENU — картинка из public. */
 export function EduMenuLogo() {
-  return (
-    <div className="select-none text-[19px] font-bold tracking-tight">
-      <span className="text-text-primary">ED</span>
-      <span className="text-primary">U</span>
-      <span className="text-text-primary"> MENU</span>
-    </div>
-  );
+  return <img src="/iconmenu.png" alt="EDU MENU" className="h-5 w-auto select-none" />;
 }
 
 /** Шапка экранов QR-меню: логотип слева, «Стол N» справа. */
