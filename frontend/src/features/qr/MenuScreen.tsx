@@ -100,25 +100,31 @@ export function MenuScreen({
         <div className="h-24" />
       </div>
 
-      {/* Низ экрана: панель общего заказа + приподнятая по центру кнопка «Мои заказы» */}
+      {/* Низ экрана: панель общего заказа + круглая кнопка «Мои заказы» в вырезе панели */}
       {(itemCount > 0 || hasSubmittedOrder) && (
         <div className="relative shrink-0">
-          {/* Панель общего заказа (только если есть позиции) */}
+          {/* Панель общего заказа (только если есть позиции). При наличии «Мои заказы»
+              в верхнем крае делаем полукруглый вырез радиальным градиентом. */}
           {itemCount > 0 && (
-            <div className="bg-primary px-3 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5">
+            <div
+              className="px-4 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-3"
+              style={{
+                background: hasSubmittedOrder
+                  ? 'radial-gradient(circle 36px at 50% 12px, transparent 0 35px, #005BFF 36px)'
+                  : '#005BFF',
+              }}
+            >
               <div className="flex items-center">
                 <button
                   type="button"
                   onClick={onOpenOrder}
                   className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-white"
                 >
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/15">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l-1 11H6L5 9z" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </span>
+                  <svg className="shrink-0" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l-1 11H6L5 9z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                   <span className="min-w-0">
-                    <span className="block truncate text-[14px] font-semibold leading-tight">{sharedOrder ? 'Общий заказ' : 'Корзина'}</span>
+                    <span className="block truncate text-[15px] font-bold leading-tight">{sharedOrder ? 'Общий заказ' : 'Корзина'}</span>
                     <span className="flex items-center gap-1 text-[12px] text-white/85">
                       <span>{pluralItems(itemCount)} ·</span>
                       <NumberTicker value={Number(session?.totalAmount ?? 0)} />
@@ -127,13 +133,13 @@ export function MenuScreen({
                 </button>
 
                 {/* Резерв под центральную кнопку, чтобы корзина и «Открыть» не конфликтовали */}
-                {hasSubmittedOrder && <div aria-hidden className="w-[72px] shrink-0" />}
+                {hasSubmittedOrder && <div aria-hidden className="w-[76px] shrink-0" />}
 
                 <div className="flex flex-1 justify-end">
                   <button
                     type="button"
                     onClick={onOpenOrder}
-                    className="rounded-lg bg-white px-4 py-2 text-[14px] font-bold text-primary transition-colors hover:bg-white/90"
+                    className="text-[15px] font-bold text-white transition-opacity hover:opacity-90"
                   >
                     Открыть
                   </button>
@@ -142,24 +148,25 @@ export function MenuScreen({
             </div>
           )}
 
-          {/* Кнопка «Мои заказы»: при наличии корзины — приподнята по центру панели;
-              без корзины — обычная по центру внизу. */}
+          {/* Кнопка «Мои заказы»: при наличии корзины — круглая, в вырезе панели;
+              без корзины — по центру внизу. */}
           {hasSubmittedOrder && (
             <div
               className={
                 itemCount > 0
-                  ? 'pointer-events-none absolute inset-x-0 top-0 z-20 flex -translate-y-1/2 justify-center'
+                  ? 'pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center'
                   : 'flex justify-center pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2'
               }
+              style={itemCount > 0 ? { transform: 'translateY(-20px)' } : undefined}
             >
               <button
                 type="button"
                 onClick={onOpenSubmittedOrder}
-                className="pointer-events-auto flex h-[60px] w-[72px] flex-col items-center justify-center gap-1 rounded-2xl border border-border bg-white text-text-primary shadow-[0_4px_16px_rgba(15,23,42,0.18)] transition-transform active:scale-95"
+                className="pointer-events-auto flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-full bg-white text-primary shadow-[0_2px_10px_rgba(15,23,42,0.18)] transition-transform active:scale-95"
               >
                 <svg
-                  width="20"
-                  height="20"
+                  width="17"
+                  height="17"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -171,7 +178,7 @@ export function MenuScreen({
                   <path d="M16 10V7a4 4 0 0 0-8 0v3" />
                   <path d="M5.5 9.5h13l-.8 10.5H6.3L5.5 9.5Z" />
                 </svg>
-                <span className="text-[10px] font-semibold leading-none">Мои заказы</span>
+                <span className="whitespace-nowrap text-[10px] font-semibold leading-none text-primary">Мои заказы</span>
               </button>
             </div>
           )}
