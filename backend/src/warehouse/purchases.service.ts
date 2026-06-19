@@ -113,8 +113,15 @@ export class PurchasesService {
   async update(id: string, dto: UpdatePurchaseDto) {
     const purchase = await this.prisma.purchase.findUnique({ where: { id } });
     if (!purchase) throw new NotFoundException('Закупка не найдена');
-    if (purchase.status !== PurchaseStatus.draft) {
-      throw new BadRequestException('Редактировать можно только черновик закупки');
+    if (purchase.status === PurchaseStatus.cancelled) {
+      throw new BadRequestException('Отменённую закупку нельзя редактировать');
+    }
+    // У проведённой закупки можно менять только поставщика и дату — состав
+    // трогать нельзя, иначе разъедутся остатки и средневзвешенная себестоимость.
+    if (purchase.status === PurchaseStatus.completed && dto.items !== undefined) {
+      throw new BadRequestException(
+        'Состав проведённой закупки изменить нельзя. Можно изменить поставщика и дату.',
+      );
     }
 
     const items = dto.items ? this.normalizeItems(dto.items) : undefined;

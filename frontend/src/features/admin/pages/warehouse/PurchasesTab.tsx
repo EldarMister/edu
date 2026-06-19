@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -6,7 +6,7 @@ import { apiError } from '@/lib/api';
 import { money } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { StatCard, StatCardsRow } from '../../components/StatCard';
-import { IconCart, IconUsers, IconMoney, IconPlus, IconTrash, IconCheck, IconEye } from '../../components/icons';
+import { IconCart, IconUsers, IconMoney, IconPlus, IconTrash, IconCheck, IconEdit } from '../../components/icons';
 import {
   usePurchases,
   usePurchase,
@@ -17,6 +17,7 @@ import {
   qty,
   type Purchase,
   type PurchaseStatus,
+  type UpdatePurchaseInput,
 } from './api';
 
 type StatusFilter = '' | 'completed' | 'draft';
@@ -31,6 +32,7 @@ export function PurchasesTab() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('');
   const [detailsId, setDetailsId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
 
   const overview = usePurchasesOverview();
   const purchasesQ = usePurchases({ status, search });
@@ -113,7 +115,11 @@ export function PurchasesTab() {
                   {purchasesQ.data?.map((p) => {
                     const st = STATUS_LABEL[p.status];
                     return (
-                      <tr key={p.id} className="border-b border-border last:border-0 hover:bg-background/60">
+                      <tr
+                        key={p.id}
+                        className="cursor-pointer border-b border-border last:border-0 hover:bg-background/60"
+                        onClick={() => setDetailsId(p.id)}
+                      >
                         <td className="px-3 py-2.5 font-medium text-text-primary">{purchaseNumber(p.number)}</td>
                         <td className="px-3 py-2.5 text-text-secondary">{formatDate(p.date)}</td>
                         <td className="px-3 py-2.5 text-text-secondary">{p.supplier}</td>
@@ -122,14 +128,14 @@ export function PurchasesTab() {
                         <td className="px-3 py-2.5">
                           <Badge tone={st.tone}>{st.label}</Badge>
                         </td>
-                        <td className="px-3 py-2.5 text-right">
+                        <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1">
                             <button
-                              onClick={() => setDetailsId(p.id)}
+                              onClick={() => setEditId(p.id)}
                               className="p-1.5 text-text-light transition-colors hover:text-primary"
-                              title="Просмотр"
+                              title="Редактировать"
                             >
-                              <IconEye className="h-4 w-4" />
+                              <IconEdit className="h-4 w-4" />
                             </button>
                             {p.status === 'draft' && (
                               <>
@@ -184,7 +190,175 @@ export function PurchasesTab() {
       </div>
 
       {detailsId && <PurchaseDetailsModal id={detailsId} onClose={() => setDetailsId(null)} />}
+      {editId && <PurchaseEditModal id={editId} onClose={() => setEditId(null)} />}
     </div>
+  );
+}
+
+function PurchaseEditModal({ id, onClose }: { id: string; onClose: () => void }) {
+  const purchaseQ = usePurchase(id);
+  const ingredientsQ = useIngredients('');
+  const { update } = usePurchaseMutations();
+  const push = useNotifications((s) => s.push);
+  const p = purchaseQ.data;
+  const ingredients = ingredientsQ.data ?? [];
+  const isDraft = p?.status === 'draft';
+
+  const [date, setDate] = useState('');
+  const [supplier, setSupplier] = useState('');
+  const [rows, setRows] = useState<Row[]>([]);
+  const [error, setError] = useState('');
+
+  // Заполняем форму, когда закупка загрузилась.
+  useEffect(() => {
+    if (!p) return;
+    setDate(new Date(p.date).toISOString().slice(0, 10));
+    setSupplier(p.supplier);
+    setRows(
+      (p.items ?? []).map((it) => ({
+        uid: it.id,
+        ingredientId: it.ingredientId,
+        quantity: String(it.quantity),
+        purchasePrice: String(it.purchasePrice),
+        total: String(it.total),
+      })),
+    );
+  }, [p]);
+
+  function unitOf(ingredientId: string) {
+    return ingredients.find((i) => i.id === ingredientId)?.unit ?? '';
+  }
+  function updateRow(uid: string, patch: Partial<Row>) {
+    setRows((cur) => cur.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
+  }
+  function lineStr(quantity: string, unitPrice: string) {
+    const lt = (Number(quantity) || 0) * (Number(unitPrice) || 0);
+    return lt ? String(Math.round(lt * 100) / 100) : '';
+  }
+
+  async function onSave() {
+    setError('');
+    if (!supplier.trim()) {
+      setError('Укажите поставщика');
+      return;
+    }
+    const body: UpdatePurchaseInput = { id, date, supplier: supplier.trim() };
+    if (isDraft) {
+      const items = rows
+        .filter((r) => r.ingredientId && Number(r.quantity) > 0)
+        .map((r) => {
+          const hasTotal = r.total !== '' && Number.isFinite(Number(r.total));
+          return {
+            ingredientId: r.ingredientId,
+            quantity: Number(r.quantity),
+            purchasePrice: Number(r.purchasePrice) || 0,
+            total: hasTotal ? Number(r.total) : undefined,
+          };
+        });
+      if (items.length === 0) {
+        setError('Добавьте хотя бы одну позицию');
+        return;
+      }
+      body.items = items;
+    }
+    try {
+      await update.mutateAsync(body);
+      push({ message: 'Закупка обновлена', at: new Date().toISOString() });
+      onClose();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={p ? `Редактировать ${purchaseNumber(p.number)}` : 'Редактировать закупку'}
+      panelClassName="max-w-lg"
+      footer={
+        <button className="btn-primary btn-lg w-full font-semibold" disabled={update.isPending || !p} onClick={onSave}>
+          {update.isPending ? <Spinner /> : 'Сохранить изменения'}
+        </button>
+      }
+    >
+      {purchaseQ.isLoading || !p ? (
+        <div className="flex justify-center py-10 text-primary">
+          <Spinner className="h-6 w-6" />
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Дата">
+              <input className="input h-10" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            </Field>
+            <Field label="Поставщик">
+              <input className="input h-10" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
+            </Field>
+          </div>
+
+          {isDraft ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-text-secondary">Позиции</p>
+              {rows.map((r) => {
+                const unit = unitOf(r.ingredientId);
+                return (
+                  <div key={r.uid} className="rounded-xl border border-border bg-background/40 p-2.5">
+                    <Select
+                      className="h-9 w-full text-sm"
+                      value={r.ingredientId}
+                      onChange={(v) => updateRow(r.uid, { ingredientId: v })}
+                      placeholder="Выберите сырьё…"
+                      options={ingredients.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
+                    />
+                    <div className="mt-2 grid grid-cols-3 gap-2">
+                      <Field label={`Кол-во${unit ? ` (${unit})` : ''}`}>
+                        <input
+                          className="input h-9 text-sm"
+                          type="number"
+                          step="0.001"
+                          value={r.quantity}
+                          onChange={(e) => updateRow(r.uid, { quantity: e.target.value, total: lineStr(e.target.value, r.purchasePrice) })}
+                        />
+                      </Field>
+                      <Field label="Цена за ед. (с)">
+                        <input
+                          className="input h-9 text-sm"
+                          type="number"
+                          step="0.01"
+                          value={r.purchasePrice}
+                          onChange={(e) => updateRow(r.uid, { purchasePrice: e.target.value, total: lineStr(r.quantity, e.target.value) })}
+                        />
+                      </Field>
+                      <Field label="Сумма (с)">
+                        <input
+                          className="input h-9 text-sm"
+                          type="number"
+                          step="0.01"
+                          value={r.total}
+                          onChange={(e) => {
+                            const q = Number(r.quantity) || 0;
+                            const unitPrice = q > 0 && e.target.value !== '' ? String(Math.round((Number(e.target.value) / q) * 10000) / 10000) : r.purchasePrice;
+                            updateRow(r.uid, { total: e.target.value, purchasePrice: unitPrice });
+                          }}
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="rounded-xl border border-border bg-background/40 p-3 text-xs text-text-muted">
+              Закупка проведена — состав изменить нельзя (это затронуло бы остатки и себестоимость). Можно изменить
+              только поставщика и дату.
+            </p>
+          )}
+
+          {error && <p className="text-sm text-danger">{error}</p>}
+        </div>
+      )}
+    </Modal>
   );
 }
 

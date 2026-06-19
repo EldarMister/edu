@@ -218,12 +218,24 @@ export interface CreatePurchaseInput {
   complete?: boolean;
 }
 
+export interface UpdatePurchaseInput {
+  id: string;
+  date?: string;
+  supplier?: string;
+  items?: { ingredientId: string; quantity: number; purchasePrice?: number; total?: number }[];
+}
+
 export function usePurchaseMutations() {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: KEY });
   const create = useMutation({
     mutationFn: (body: CreatePurchaseInput) =>
       api.post<Purchase>('/admin/warehouse/purchases', body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: UpdatePurchaseInput) =>
+      api.patch<Purchase>(`/admin/warehouse/purchases/${id}`, body).then((r) => r.data),
     onSuccess: invalidate,
   });
   const complete = useMutation({
@@ -236,7 +248,7 @@ export function usePurchaseMutations() {
       api.post<Purchase>(`/admin/warehouse/purchases/${id}/cancel`).then((r) => r.data),
     onSuccess: invalidate,
   });
-  return { create, complete, cancel };
+  return { create, update, complete, cancel };
 }
 
 // ---------- Движения ----------
