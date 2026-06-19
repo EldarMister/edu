@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Toggle } from '@/components/Toggle';
+import { kitchenVoice } from '@/services/kitchenVoice';
 import {
   KITCHEN_SPEAKERS,
   KITCHEN_SPEECH_RATES,
@@ -9,9 +10,22 @@ import {
   type KitchenVoiceSettings as KitchenVoiceSettingsType,
 } from '@/services/kitchenVoiceSettings';
 
+const KITCHEN_VOICE_TEST_SCENARIOS = [
+  'Тест озвучки кухни. Новый заказ номер четыре. Стол шесть, терраса. Один вок с курицей и удоном.',
+  'Новый заказ номер двенадцать. Стол три. Два лагмана. Один салат греческий. Комментарий: без лука.',
+  'Новый заказ номер двадцать восемь. Стол девять, зал. Один шашлык, пол килограмма. Один картофель фри. Два соуса.',
+  'Добавление к заказу номер семь. Стол два. Добавили: один чай зелёный, один чизкейк, один литр морса.',
+  'Новый заказ номер сорок один. Стол пять, терраса. Три бургера. Первый без помидора. Второй острый. Третий с собой.',
+  'Заказ номер пятнадцать. Замена: куриный суп заменили на грибной крем-суп. Приготовить без сливок.',
+  'Новый заказ номер шестьдесят два. Стол одиннадцать. Один плов, пол порции. Один салат свежий. Один компот, пятьсот миллилитров.',
+  'Сложный тест. Заказ номер девяносто девять. Стол восемь. Два рамена с говядиной. Один вок, пол килограмма. Три лепёшки. Комментарий: сначала подать супы, остальное через десять минут.',
+];
+
 export function KitchenVoiceSettings() {
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState<KitchenVoiceSettingsType>(() => getKitchenVoiceSettings());
+  const [testing, setTesting] = useState(false);
+  const [testMessage, setTestMessage] = useState('');
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => subscribeKitchenVoiceSettings(setSettings), []);
@@ -34,6 +48,24 @@ export function KitchenVoiceSettings() {
 
   function patch(next: Partial<KitchenVoiceSettingsType>) {
     setSettings(saveKitchenVoiceSettings(next));
+    setTestMessage('');
+  }
+
+  async function testVoice() {
+    setTesting(true);
+    setTestMessage('');
+    const scenario = KITCHEN_VOICE_TEST_SCENARIOS[
+      Math.floor(Math.random() * KITCHEN_VOICE_TEST_SCENARIOS.length)
+    ];
+    try {
+      await kitchenVoice.test(scenario, settings);
+      setTestMessage('Тест озвучки завершён');
+    } catch (err) {
+      console.error('[kitchen-tts] тест озвучки не удался:', err);
+      setTestMessage('Не удалось воспроизвести тест');
+    } finally {
+      setTesting(false);
+    }
   }
 
   return (
@@ -114,6 +146,25 @@ export function KitchenVoiceSettings() {
                 </button>
               ))}
             </div>
+          </Section>
+
+          <Section>
+            <button
+              type="button"
+              onClick={testVoice}
+              disabled={testing}
+              className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {testing ? 'Тестируем...' : 'Тестировать'}
+            </button>
+            <p className="mt-2 text-xs leading-relaxed text-text-muted">
+              Запускает случайный кухонный сценарий с выбранным голосом и скоростью.
+            </p>
+            {testMessage && (
+              <p className={`mt-2 text-xs ${testMessage.includes('Не удалось') ? 'text-danger' : 'text-success'}`}>
+                {testMessage}
+              </p>
+            )}
           </Section>
         </div>
       )}
