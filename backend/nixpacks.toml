@@ -5,4 +5,9 @@ cmds = ["npm ci"]
 cmds = ["npm run build"]
 
 [start]
-cmd = "npm run start:prod"
+# NODE_ENV=production — прод-режим библиотек (Nest/Express и пр.).
+# NODE_OPTIONS=--max-old-space-size=512 — кэп heap V8: контейнер видит RAM всего
+#   хоста, и без кэпа V8 лениво раздувает heap. Бэкенд живёт в ~120–200 МБ, 512 — с запасом.
+# MALLOC_ARENA_MAX=2 — меньше арен glibc → ниже RSS Node на многоядерном хосте.
+# Эти переменные можно переопределить в Railway → Variables (дашборд имеет приоритет).
+cmd = "NODE_ENV=production NODE_OPTIONS=--max-old-space-size=512 MALLOC_ARENA_MAX=2 npm run start:prod"

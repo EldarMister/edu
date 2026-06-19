@@ -75,6 +75,24 @@ export class HealthService {
     }
   }
 
+  /**
+   * Снимок памяти процесса для мониторинга RAM (Этап 1 оптимизации).
+   * Все значения в МБ. rss — резидентная память процесса (то, что биллит хостинг).
+   */
+  memory() {
+    const m = process.memoryUsage();
+    const mb = (bytes: number) => Math.round((bytes / 1024 / 1024) * 10) / 10;
+    return {
+      time: new Date().toISOString(),
+      uptimeSec: Math.round(process.uptime()),
+      rssMb: mb(m.rss),
+      heapUsedMb: mb(m.heapUsed),
+      heapTotalMb: mb(m.heapTotal),
+      externalMb: mb(m.external),
+      arrayBuffersMb: mb(m.arrayBuffers),
+    };
+  }
+
   async currentMigrations(): Promise<MigrationStatus> {
     const local = await this.localMigrationNames();
     const applied = await this.appliedMigrationNames(this.prisma);

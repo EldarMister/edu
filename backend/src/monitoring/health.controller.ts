@@ -17,6 +17,11 @@ export class HealthController {
     return this.health.currentMigrations();
   }
 
+  @Get('memory')
+  memory() {
+    return this.health.memory();
+  }
+
   @Get('project')
   project() {
     return this.health.project();
