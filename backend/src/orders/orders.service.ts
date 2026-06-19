@@ -417,7 +417,7 @@ export class OrdersService {
   async cancelOrder(orderId: string, actor: AuditActor, reason?: string) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
@@ -572,7 +572,7 @@ export class OrdersService {
   ) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
 
@@ -718,7 +718,7 @@ export class OrdersService {
     const waiterId = actor.id;
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (order.waiterId !== waiterId) {
+    if (!this.canWaiterAccessOrder(order, waiterId)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
@@ -1552,7 +1552,7 @@ export class OrdersService {
     }
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (order.waiterId !== waiterId) {
+    if (!this.canWaiterAccessOrder(order, waiterId)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     if (!([OrderStatus.ready, OrderStatus.picked_up, OrderStatus.served] as OrderStatus[]).includes(order.status)) {
@@ -1697,7 +1697,7 @@ export class OrdersService {
     const cashierId = actor.id;
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     if (order.status === OrderStatus.paid) {
@@ -2496,7 +2496,7 @@ export class OrdersService {
 
     const order = await this.activeOrderForTable(sourceTableId);
     if (!order) throw new BadRequestException('У стола нет активного заказа для переноса');
-    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
 
@@ -2540,7 +2540,7 @@ export class OrdersService {
     const byUserId = actor.id;
     const order = await this.activeOrderForTable(sourceTableId);
     if (!order) throw new BadRequestException('У стола нет активного заказа для передачи');
-    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
 

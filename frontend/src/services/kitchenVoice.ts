@@ -8,6 +8,7 @@
  * Очередь: озвучки проигрываются строго по очереди и не перебивают друг друга.
  */
 import { api } from '@/lib/api';
+import { getKitchenVoiceSettings } from './kitchenVoiceSettings';
 
 class KitchenVoice {
   private queue: string[] = [];
@@ -18,6 +19,7 @@ class KitchenVoice {
   enqueue(text: string | null | undefined) {
     const t = (text ?? '').trim();
     if (!t) return;
+    if (!getKitchenVoiceSettings().voiceEnabled) return;
     this.queue.push(t);
     void this.pump();
   }
@@ -41,18 +43,30 @@ class KitchenVoice {
   }
 
   private async playText(text: string): Promise<void> {
-    const res = await api.post('/tts/synthesize', { text }, { responseType: 'blob' });
+    const settings = getKitchenVoiceSettings();
+    if (!settings.voiceEnabled) return;
+    const res = await api.post(
+      '/tts/synthesize',
+      {
+        text,
+        speaker: settings.speaker,
+        preferredModel: settings.preferredModel,
+        fallbackModel: settings.fallbackModel,
+      },
+      { responseType: 'blob' },
+    );
     const url = URL.createObjectURL(res.data as Blob);
     try {
-      await this.playUrl(url);
+      await this.playUrl(url, settings.speechRate);
     } finally {
       URL.revokeObjectURL(url);
     }
   }
 
-  private playUrl(url: string): Promise<void> {
+  private playUrl(url: string, playbackRate: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const audio = new Audio(url);
+      audio.playbackRate = playbackRate;
       this.current = audio;
       const done = () => {
         if (this.current === audio) this.current = null;

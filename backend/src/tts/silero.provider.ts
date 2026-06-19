@@ -1,9 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { TtsProvider } from './tts-provider.interface';
+import type { TtsProvider, TtsSynthesizeOptions } from './tts-provider.interface';
 
 /**
  * Провайдер Silero: обращается к self-hosted Python-сервису (tts-service).
- * Логика выбора модели (v4_ru → fallback v3_1_ru) живёт внутри Python-сервиса,
+ * Логика выбора модели (v5_2_ru → fallback v4_ru) живёт внутри Python-сервиса,
  * здесь — только HTTP-вызов. Заменить модель = заменить этот провайдер.
  */
 @Injectable()
@@ -18,17 +18,23 @@ export class SileroTtsProvider implements TtsProvider {
     return !!this.baseUrl;
   }
 
-  async synthesize(text: string): Promise<Buffer> {
+  async synthesize(text: string, options: TtsSynthesizeOptions = {}): Promise<Buffer> {
     if (!this.baseUrl) {
       throw new Error('TTS_SERVICE_URL не задан — озвучка отключена');
     }
+    const speaker = options.speaker === 'ksenia' ? 'kseniya' : options.speaker;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
       const res = await fetch(`${this.baseUrl}/synthesize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
+        body: JSON.stringify({
+          text,
+          speaker,
+          model: options.preferredModel,
+          fallback_model: options.fallbackModel,
+        }),
         signal: controller.signal,
       });
       if (!res.ok) {
