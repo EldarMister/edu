@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import { Role } from '@prisma/client';
 import { IngredientsService } from './ingredients.service';
 import { Roles } from '../common/decorators/roles.decorator';
-import { CreateIngredientDto, UpdateIngredientDto } from './dto';
+import { AdjustIngredientDto, CreateIngredientDto, UpdateIngredientDto } from './dto';
 
 @Controller('admin/warehouse/ingredients')
 @Roles(Role.ADMIN, Role.OWNER)
@@ -33,6 +33,12 @@ export class IngredientsController {
   @Patch(':id')
   update(@Param('id') id: string, @Body() dto: UpdateIngredientDto) {
     return this.ingredients.update(id, dto);
+  }
+
+  // Ручная корректировка остатка: добавить / списать / установить (ТЗ §8).
+  @Post(':id/adjust')
+  adjust(@Param('id') id: string, @Body() dto: AdjustIngredientDto) {
+    return this.ingredients.adjust(id, dto);
   }
 
   @Delete(':id')

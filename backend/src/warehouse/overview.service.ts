@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { fromBase, unitLabel, type UnitCode } from './units';
 
 @Injectable()
 export class WarehouseOverviewService {
@@ -13,7 +14,7 @@ export class WarehouseOverviewService {
     const [ingredients, purchases, saleMovements, recentMovements] = await Promise.all([
       this.prisma.ingredient.findMany({
         where: { isActive: true },
-        select: { id: true, name: true, unit: true, stock: true, avgCost: true, lowStockThreshold: true },
+        select: { id: true, name: true, displayUnit: true, stock: true, avgCost: true, lowStockThreshold: true },
         orderBy: { name: 'asc' },
       }),
       this.prisma.purchase.findMany({
@@ -22,27 +23,31 @@ export class WarehouseOverviewService {
       }),
       this.prisma.stockMovement.findMany({
         where: { type: StockMovementType.sale, createdAt: { gte: range.from, lte: range.to } },
-        include: { ingredient: { select: { name: true, unit: true } } },
+        include: { ingredient: { select: { name: true, displayUnit: true } } },
       }),
       this.prisma.stockMovement.findMany({
         orderBy: { createdAt: 'desc' },
         take: 7,
-        include: { ingredient: { select: { name: true, unit: true } } },
+        include: { ingredient: { select: { name: true, displayUnit: true } } },
       }),
     ]);
 
+    // stockBase × avgCostBase = корректная стоимость в валюте (единицы согласованы).
     const stockValue = round2(
       ingredients.reduce((sum, item) => sum + Number(item.stock) * Number(item.avgCost), 0),
     );
     const lowStockItems = ingredients
       .filter((item) => Number(item.stock) <= Number(item.lowStockThreshold))
-      .map((item) => ({
-        id: item.id,
-        name: item.name,
-        unit: item.unit,
-        stock: Number(item.stock),
-        lowStockThreshold: Number(item.lowStockThreshold),
-      }));
+      .map((item) => {
+        const display = item.displayUnit as UnitCode;
+        return {
+          id: item.id,
+          name: item.name,
+          unit: unitLabel(display),
+          stock: round3(fromBase(Number(item.stock), display)),
+          lowStockThreshold: round3(fromBase(Number(item.lowStockThreshold), display)),
+        };
+      });
 
     const purchasesTotal = round2(purchases.reduce((sum, p) => sum + Number(p.totalAmount), 0));
     const ingredientWriteOffTotal = round2(
@@ -63,15 +68,18 @@ export class WarehouseOverviewService {
       stockValueTrend,
       lowStockItems: lowStockItems.slice(0, 10),
       topConsumedIngredients,
-      recentMovements: recentMovements.map((m) => ({
-        id: m.id,
-        createdAt: m.createdAt,
-        type: m.type,
-        ingredientName: m.ingredient.name,
-        unit: m.ingredient.unit,
-        change: Number(m.change),
-        after: Number(m.afterStock),
-      })),
+      recentMovements: recentMovements.map((m) => {
+        const display = m.ingredient.displayUnit as UnitCode;
+        return {
+          id: m.id,
+          createdAt: m.createdAt,
+          type: m.type,
+          ingredientName: m.ingredient.name,
+          unit: unitLabel(display),
+          change: round3(fromBase(Number(m.change), display)),
+          after: round3(fromBase(Number(m.afterStock), display)),
+        };
+      }),
       suppliersTop,
     };
   }
@@ -81,32 +89,35 @@ export class WarehouseOverviewService {
       ingredientId: string;
       change: Prisma.Decimal;
       costAtMoment: Prisma.Decimal;
-      ingredient: { name: string; unit: string };
+      ingredient: { name: string; displayUnit: string };
     }>,
   ) {
+    // quantity накапливаем в базе, cost = база × себестоимость-за-базу (валюта).
     const byIngredient = new Map<
       string,
-      { ingredientId: string; name: string; unit: string; quantity: number; cost: number }
+      { ingredientId: string; name: string; displayUnit: UnitCode; quantityBase: number; cost: number }
     >();
     for (const movement of movements) {
       const current = byIngredient.get(movement.ingredientId) ?? {
         ingredientId: movement.ingredientId,
         name: movement.ingredient.name,
-        unit: movement.ingredient.unit,
-        quantity: 0,
+        displayUnit: movement.ingredient.displayUnit as UnitCode,
+        quantityBase: 0,
         cost: 0,
       };
-      const quantity = Math.abs(Number(movement.change));
-      current.quantity += quantity;
-      current.cost += quantity * Number(movement.costAtMoment);
+      const quantityBase = Math.abs(Number(movement.change));
+      current.quantityBase += quantityBase;
+      current.cost += quantityBase * Number(movement.costAtMoment);
       byIngredient.set(movement.ingredientId, current);
     }
     return [...byIngredient.values()]
       .sort((a, b) => b.cost - a.cost)
       .slice(0, 5)
       .map((item) => ({
-        ...item,
-        quantity: round3(item.quantity),
+        ingredientId: item.ingredientId,
+        name: item.name,
+        unit: unitLabel(item.displayUnit),
+        quantity: round3(fromBase(item.quantityBase, item.displayUnit)),
         cost: round2(item.cost),
       }));
   }

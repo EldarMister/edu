@@ -7,6 +7,18 @@ import {
 import { Prisma, PurchaseStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePurchaseDto, PurchaseItemInputDto, UpdatePurchaseDto } from './dto';
+import { assertUnitMatchesType, costToBase, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
+
+// Нормализованная позиция закупки: введённые (display) + базовые значения.
+type NormalizedItem = {
+  ingredientId: string;
+  unit: UnitCode;
+  quantity: number; // display
+  purchasePrice: number; // за display-единицу
+  total: number;
+  quantityBase: number;
+  unitPriceBase: number;
+};
 
 @Injectable()
 export class PurchasesService {
@@ -15,16 +27,18 @@ export class PurchasesService {
   private serializeItem(item: {
     id: string;
     ingredientId: string;
+    unit: string;
     quantity: Prisma.Decimal;
     purchasePrice: Prisma.Decimal;
     total: Prisma.Decimal;
-    ingredient?: { name: string; unit: string } | null;
+    ingredient?: { name: string } | null;
   }) {
     return {
       id: item.id,
       ingredientId: item.ingredientId,
       ingredientName: item.ingredient?.name ?? '',
-      unit: item.ingredient?.unit ?? '',
+      unit: unitLabel(item.unit as UnitCode), // кириллица для UI
+      unitCode: item.unit as UnitCode, // код единицы — для форм редактирования
       quantity: Number(item.quantity),
       purchasePrice: Number(item.purchasePrice),
       total: Number(item.total),
@@ -78,14 +92,14 @@ export class PurchasesService {
   async findOne(id: string) {
     const purchase = await this.prisma.purchase.findUnique({
       where: { id },
-      include: { items: { include: { ingredient: { select: { name: true, unit: true } } } } },
+      include: { items: { include: { ingredient: { select: { name: true } } } } },
     });
     if (!purchase) throw new NotFoundException('Закупка не найдена');
     return this.serialize(purchase);
   }
 
   async create(dto: CreatePurchaseDto) {
-    const items = this.normalizeItems(dto.items);
+    const items = await this.normalizeItems(dto.items);
     const total = items.reduce((acc, i) => acc + i.total, 0);
 
     const purchase = await this.prisma.purchase.create({
@@ -93,14 +107,7 @@ export class PurchasesService {
         date: dto.date ? new Date(dto.date) : new Date(),
         supplier: dto.supplier.trim(),
         totalAmount: new Prisma.Decimal(total),
-        items: {
-          create: items.map((i) => ({
-            ingredientId: i.ingredientId,
-            quantity: new Prisma.Decimal(i.quantity),
-            purchasePrice: new Prisma.Decimal(i.purchasePrice),
-            total: new Prisma.Decimal(i.total),
-          })),
-        },
+        items: { create: items.map((i) => this.itemCreateData(i)) },
       },
     });
 
@@ -124,22 +131,14 @@ export class PurchasesService {
       );
     }
 
-    const items = dto.items ? this.normalizeItems(dto.items) : undefined;
+    const items = dto.items ? await this.normalizeItems(dto.items) : undefined;
     const total = items ? items.reduce((acc, i) => acc + i.total, 0) : undefined;
 
     await this.prisma.$transaction(async (tx) => {
       if (items) {
         await tx.purchaseItem.deleteMany({ where: { purchaseId: id } });
         for (const i of items) {
-          await tx.purchaseItem.create({
-            data: {
-              purchaseId: id,
-              ingredientId: i.ingredientId,
-              quantity: new Prisma.Decimal(i.quantity),
-              purchasePrice: new Prisma.Decimal(i.purchasePrice),
-              total: new Prisma.Decimal(i.total),
-            },
-          });
+          await tx.purchaseItem.create({ data: { purchaseId: id, ...this.itemCreateData(i) } });
         }
       }
       await tx.purchase.update({
@@ -188,12 +187,13 @@ export class PurchasesService {
           throw new NotFoundException('Сырьё закупки не найдено');
         }
 
+        // Всё в базовых единицах: остаток, количество и себестоимость за базу.
         const before = Number(ingredient.stock);
-        const qty = Number(item.quantity);
+        const qtyBase = Number(item.quantityBase);
         // Авторитетная сумма позиции (фактически уплаченная) — основа себестоимости.
         const lineTotal = Number(item.total);
-        const after = before + qty;
-        const newAvg =
+        const after = before + qtyBase;
+        const newAvgBase =
           after > 0 ? (before * Number(ingredient.avgCost) + lineTotal) / after : Number(ingredient.avgCost);
         total += lineTotal;
 
@@ -201,7 +201,7 @@ export class PurchasesService {
           where: { id: item.ingredientId },
           data: {
             stock: new Prisma.Decimal(after),
-            avgCost: new Prisma.Decimal(newAvg),
+            avgCost: new Prisma.Decimal(newAvgBase),
           },
         });
 
@@ -212,9 +212,9 @@ export class PurchasesService {
             sourceType: 'purchase',
             sourceId: purchase.id,
             beforeStock: new Prisma.Decimal(before),
-            change: new Prisma.Decimal(qty),
+            change: new Prisma.Decimal(qtyBase),
             afterStock: new Prisma.Decimal(after),
-            costAtMoment: new Prisma.Decimal(newAvg),
+            costAtMoment: new Prisma.Decimal(newAvgBase),
             comment: `Закупка от ${purchase.supplier}`,
           },
         });
@@ -241,16 +241,46 @@ export class PurchasesService {
     return this.findOne(id);
   }
 
-  private normalizeItems(items: PurchaseItemInputDto[]) {
+  private itemCreateData(i: NormalizedItem) {
+    return {
+      ingredientId: i.ingredientId,
+      unit: i.unit,
+      quantity: new Prisma.Decimal(i.quantity),
+      purchasePrice: new Prisma.Decimal(i.purchasePrice),
+      total: new Prisma.Decimal(i.total),
+      quantityBase: new Prisma.Decimal(i.quantityBase),
+      unitPriceBase: new Prisma.Decimal(i.unitPriceBase),
+    };
+  }
+
+  /**
+   * Нормализует позиции: проверяет единицу (совместимость с типом ингредиента) и
+   * считает базовые значения. quantity/purchasePrice остаются в выбранной единице
+   * (для документа), а в расчёт остатка/себестоимости идут quantityBase/total.
+   */
+  private async normalizeItems(items: PurchaseItemInputDto[]): Promise<NormalizedItem[]> {
     if (!items || items.length === 0) {
       throw new BadRequestException('Добавьте хотя бы одну позицию');
     }
+    const ids = [...new Set(items.map((i) => i.ingredientId).filter(Boolean))];
+    const ingredients = await this.prisma.ingredient.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, unitType: true, displayUnit: true },
+    });
+    const byId = new Map(ingredients.map((i) => [i.id, i]));
+
     return items.map((i) => {
-      const quantity = Number(i.quantity);
       if (!i.ingredientId) throw new BadRequestException('Выберите сырьё в каждой позиции');
+      const ingredient = byId.get(i.ingredientId);
+      if (!ingredient) throw new BadRequestException('Сырьё позиции не найдено');
+
+      const quantity = Number(i.quantity);
       if (!Number.isFinite(quantity) || quantity <= 0) {
         throw new BadRequestException('Количество должно быть больше 0');
       }
+
+      const unit = i.unit ? normalizeUnit(i.unit) : (ingredient.displayUnit as UnitCode);
+      assertUnitMatchesType(unit, ingredient.unitType as 'mass' | 'volume' | 'count');
 
       // Если задана сумма — она авторитетна, цену за единицу выводим из неё.
       const hasTotal = i.total != null && Number.isFinite(Number(i.total)) && Number(i.total) >= 0;
@@ -266,13 +296,15 @@ export class PurchasesService {
         }
         total = Math.round(quantity * purchasePrice * 100) / 100;
       }
-      // purchasePrice хранится с округлением до копеек (для отображения);
-      // в расчёте себестоимости используется авторитетный total.
+
       return {
         ingredientId: i.ingredientId,
+        unit,
         quantity,
-        purchasePrice: Math.round(purchasePrice * 100) / 100,
+        purchasePrice: Math.round(purchasePrice * 10000) / 10000,
         total,
+        quantityBase: toBase(quantity, unit),
+        unitPriceBase: costToBase(purchasePrice, unit),
       };
     });
   }

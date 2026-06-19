@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, StockMovementSource, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MovementsQueryDto } from './dto';
+import { costFromBase, fromBase, unitLabel, type UnitCode } from './units';
 
 @Injectable()
 export class MovementsService {
@@ -28,7 +29,7 @@ export class MovementsService {
       where: this.buildWhere(query),
       orderBy: { createdAt: 'desc' },
       take: 500,
-      include: { ingredient: { select: { name: true, unit: true } } },
+      include: { ingredient: { select: { name: true, displayUnit: true } } },
     });
 
     // Подтягиваем номера документов: закупки (по sourceId) и заказы (по sourceId).
@@ -58,20 +59,22 @@ export class MovementsService {
         const num = orderMap.get(m.sourceId);
         documentLabel = num != null ? `Заказ №${num}` : 'Заказ';
       }
+      const display = m.ingredient.displayUnit as UnitCode;
       return {
         id: m.id,
         ingredientId: m.ingredientId,
         orderItemId: m.orderItemId,
         ingredientName: m.ingredient.name,
-        unit: m.ingredient.unit,
+        unit: unitLabel(display),
         type: m.type,
         sourceType: m.sourceType,
         sourceId: m.sourceId,
         documentLabel,
-        beforeStock: Number(m.beforeStock),
-        change: Number(m.change),
-        afterStock: Number(m.afterStock),
-        costAtMoment: Number(m.costAtMoment),
+        // Конвертация база → display-единица ингредиента.
+        beforeStock: round3(fromBase(Number(m.beforeStock), display)),
+        change: round3(fromBase(Number(m.change), display)),
+        afterStock: round3(fromBase(Number(m.afterStock), display)),
+        costAtMoment: round2(costFromBase(Number(m.costAtMoment), display)),
         comment: m.comment,
         createdAt: m.createdAt,
       };
@@ -103,4 +106,11 @@ export class MovementsService {
   private isSource(v: string): v is StockMovementSource {
     return ['purchase', 'order', 'manual'].includes(v);
   }
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+function round3(n: number): number {
+  return Math.round(n * 1000) / 1000;
 }

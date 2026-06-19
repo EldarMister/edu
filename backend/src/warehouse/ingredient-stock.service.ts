@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, StockMovementType } from '@prisma/client';
+import { fromBase, unitLabel, type UnitCode } from './units';
 
 type OrderLine = { id?: string | null; dishId?: string | null; quantity?: number | null };
 
@@ -58,7 +59,7 @@ export class IngredientStockService {
       where: { dishId: { in: dishIds } },
       include: {
         dish: { select: { name: true } },
-        ingredient: { select: { id: true, name: true, unit: true, stock: true, avgCost: true } },
+        ingredient: { select: { id: true, name: true, displayUnit: true, stock: true, avgCost: true } },
       },
     });
     if (recipeItems.length === 0) return [];
@@ -135,19 +136,20 @@ export class IngredientStockService {
     planned: Array<{
       recipeItem: {
         ingredientId: string;
-        ingredient: { name: string; unit: string; stock: Prisma.Decimal };
+        ingredient: { name: string; displayUnit: string; stock: Prisma.Decimal };
       };
       qty: number;
     }>,
   ): Promise<IngredientStockWarning[]> {
+    // needed/available — в базовых единицах (qty и stock уже в базе).
     const neededByIngredient = new Map<
       string,
-      { ingredient: string; unit: string; needed: number; available: number }
+      { ingredient: string; displayUnit: UnitCode; needed: number; available: number }
     >();
     for (const row of planned) {
       const current = neededByIngredient.get(row.recipeItem.ingredientId) ?? {
         ingredient: row.recipeItem.ingredient.name,
-        unit: row.recipeItem.ingredient.unit,
+        displayUnit: row.recipeItem.ingredient.displayUnit as UnitCode,
         needed: 0,
         available: Number(row.recipeItem.ingredient.stock),
       };
@@ -158,13 +160,14 @@ export class IngredientStockService {
     const warnings: IngredientStockWarning[] = [];
     for (const [ingredientId, row] of neededByIngredient.entries()) {
       if (row.needed <= row.available) continue;
+      // В предупреждение отдаём display-единицу (понятнее официанту/админу).
       warnings.push({
         ingredientId,
         ingredient: row.ingredient,
-        unit: row.unit,
-        needed: round3(row.needed),
-        available: round3(row.available),
-        missing: round3(row.needed - row.available),
+        unit: unitLabel(row.displayUnit),
+        needed: round3(fromBase(row.needed, row.displayUnit)),
+        available: round3(fromBase(row.available, row.displayUnit)),
+        missing: round3(fromBase(row.needed - row.available, row.displayUnit)),
       });
     }
     return warnings;

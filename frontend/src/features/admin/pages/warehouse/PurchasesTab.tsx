@@ -18,7 +18,9 @@ import {
   type Purchase,
   type PurchaseStatus,
   type UpdatePurchaseInput,
+  type Ingredient,
 } from './api';
+import { unitsForType, unitLabel, type UnitCode } from './units';
 
 type StatusFilter = '' | 'completed' | 'draft';
 
@@ -218,6 +220,7 @@ function PurchaseEditModal({ id, onClose }: { id: string; onClose: () => void })
       (p.items ?? []).map((it) => ({
         uid: it.id,
         ingredientId: it.ingredientId,
+        unit: it.unitCode,
         quantity: String(it.quantity),
         purchasePrice: String(it.purchasePrice),
         total: String(it.total),
@@ -225,11 +228,11 @@ function PurchaseEditModal({ id, onClose }: { id: string; onClose: () => void })
     );
   }, [p]);
 
-  function unitOf(ingredientId: string) {
-    return ingredients.find((i) => i.id === ingredientId)?.unit ?? '';
-  }
   function updateRow(uid: string, patch: Partial<Row>) {
     setRows((cur) => cur.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
+  }
+  function selectIngredient(uid: string, ingredientId: string) {
+    updateRow(uid, { ingredientId, unit: defaultUnitFor(ingredients, ingredientId) });
   }
   function lineStr(quantity: string, unitPrice: string) {
     const lt = (Number(quantity) || 0) * (Number(unitPrice) || 0);
@@ -250,6 +253,7 @@ function PurchaseEditModal({ id, onClose }: { id: string; onClose: () => void })
           const hasTotal = r.total !== '' && Number.isFinite(Number(r.total));
           return {
             ingredientId: r.ingredientId,
+            unit: r.unit || defaultUnitFor(ingredients, r.ingredientId) || undefined,
             quantity: Number(r.quantity),
             purchasePrice: Number(r.purchasePrice) || 0,
             total: hasTotal ? Number(r.total) : undefined,
@@ -301,18 +305,19 @@ function PurchaseEditModal({ id, onClose }: { id: string; onClose: () => void })
             <div className="space-y-2">
               <p className="text-xs font-medium text-text-secondary">Позиции</p>
               {rows.map((r) => {
-                const unit = unitOf(r.ingredientId);
+                const unitCode = (r.unit || defaultUnitFor(ingredients, r.ingredientId)) as UnitCode | '';
+                const unitLbl = unitCode ? unitLabel(unitCode) : '';
                 return (
                   <div key={r.uid} className="rounded-xl border border-border bg-background/40 p-2.5">
                     <Select
                       className="h-9 w-full text-sm"
                       value={r.ingredientId}
-                      onChange={(v) => updateRow(r.uid, { ingredientId: v })}
+                      onChange={(v) => selectIngredient(r.uid, v)}
                       placeholder="Выберите сырьё…"
                       options={ingredients.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
                     />
-                    <div className="mt-2 grid grid-cols-3 gap-2">
-                      <Field label={`Кол-во${unit ? ` (${unit})` : ''}`}>
+                    <div className="mt-2 grid grid-cols-4 gap-2">
+                      <Field label="Кол-во">
                         <input
                           className="input h-9 text-sm"
                           type="number"
@@ -321,7 +326,16 @@ function PurchaseEditModal({ id, onClose }: { id: string; onClose: () => void })
                           onChange={(e) => updateRow(r.uid, { quantity: e.target.value, total: lineStr(e.target.value, r.purchasePrice) })}
                         />
                       </Field>
-                      <Field label="Цена за ед. (с)">
+                      <Field label="Ед.">
+                        <Select
+                          className="h-9 w-full text-sm"
+                          value={unitCode}
+                          onChange={(v) => updateRow(r.uid, { unit: v })}
+                          placeholder="—"
+                          options={rowUnitOptions(ingredients, r.ingredientId)}
+                        />
+                      </Field>
+                      <Field label={`Цена${unitLbl ? ` (с/${unitLbl})` : ' (с)'}`}>
                         <input
                           className="input h-9 text-sm"
                           type="number"
@@ -444,12 +458,11 @@ function NewPurchaseForm() {
     [rows],
   );
 
-  function unitOf(ingredientId: string) {
-    return ingredients.find((i) => i.id === ingredientId)?.unit ?? '';
-  }
-
   function updateRow(uid: string, patch: Partial<Row>) {
     setRows((cur) => cur.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
+  }
+  function selectIngredient(uid: string, ingredientId: string) {
+    updateRow(uid, { ingredientId, unit: defaultUnitFor(ingredients, ingredientId) });
   }
   // Сумма позиции = кол-во × цена за ед. (для редактируемого поля «Сумма»).
   function lineTotalStr(quantity: string, unitPrice: string) {
@@ -502,6 +515,7 @@ function NewPurchaseForm() {
         const hasTotal = r.total !== '' && Number.isFinite(Number(r.total));
         return {
           ingredientId: r.ingredientId,
+          unit: r.unit || defaultUnitFor(ingredients, r.ingredientId) || undefined,
           quantity: Number(r.quantity),
           purchasePrice: Number(r.purchasePrice) || 0,
           total: hasTotal ? Number(r.total) : undefined,
@@ -539,7 +553,8 @@ function NewPurchaseForm() {
 
       <div className="mt-4 space-y-2">
         {rows.map((r) => {
-          const unit = unitOf(r.ingredientId);
+          const unitCode = (r.unit || defaultUnitFor(ingredients, r.ingredientId)) as UnitCode | '';
+          const unitLbl = unitCode ? unitLabel(unitCode) : '';
           const lineTotal = (Number(r.quantity) || 0) * (Number(r.purchasePrice) || 0);
           return (
             <div key={r.uid} className="rounded-xl border border-border bg-background/40 p-2.5">
@@ -547,7 +562,7 @@ function NewPurchaseForm() {
                 <Select
                   className="h-9 flex-1 text-sm"
                   value={r.ingredientId}
-                  onChange={(v) => updateRow(r.uid, { ingredientId: v })}
+                  onChange={(v) => selectIngredient(r.uid, v)}
                   placeholder="Выберите сырьё…"
                   options={ingredients.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
                 />
@@ -560,8 +575,8 @@ function NewPurchaseForm() {
                   <IconTrash className="h-4 w-4" />
                 </button>
               </div>
-              <div className="mt-2 grid grid-cols-3 items-end gap-2">
-                <Field label={`Кол-во${unit ? ` (${unit})` : ''}`}>
+              <div className="mt-2 grid grid-cols-4 items-end gap-2">
+                <Field label="Кол-во">
                   <input
                     className="input h-9 text-sm"
                     type="number"
@@ -570,7 +585,16 @@ function NewPurchaseForm() {
                     onChange={(e) => setQuantity(r.uid, e.target.value)}
                   />
                 </Field>
-                <Field label={`Цена за ед.${unit ? ` (с/${unit})` : ' (с)'}`}>
+                <Field label="Ед.">
+                  <Select
+                    className="h-9 w-full text-sm"
+                    value={unitCode}
+                    onChange={(v) => updateRow(r.uid, { unit: v })}
+                    placeholder="—"
+                    options={rowUnitOptions(ingredients, r.ingredientId)}
+                  />
+                </Field>
+                <Field label={`Цена${unitLbl ? ` (с/${unitLbl})` : ' (с)'}`}>
                   <input
                     className="input h-9 text-sm"
                     type="number"
@@ -624,12 +648,22 @@ function NewPurchaseForm() {
 interface Row {
   uid: string;
   ingredientId: string;
+  unit: string; // код единицы закупки (g/kg/...)
   quantity: string;
   purchasePrice: string;
   total: string;
 }
 function emptyRow(): Row {
-  return { uid: `r-${Date.now()}-${Math.random()}`, ingredientId: '', quantity: '', purchasePrice: '', total: '' };
+  return { uid: `r-${Date.now()}-${Math.random()}`, ingredientId: '', unit: '', quantity: '', purchasePrice: '', total: '' };
+}
+
+/** Опции единиц для строки: совместимые с типом выбранного ингредиента. */
+function rowUnitOptions(ingredients: Ingredient[], ingredientId: string) {
+  const ing = ingredients.find((i) => i.id === ingredientId);
+  return ing ? unitsForType(ing.unitType) : [];
+}
+function defaultUnitFor(ingredients: Ingredient[], ingredientId: string): string {
+  return ingredients.find((i) => i.id === ingredientId)?.displayUnit ?? '';
 }
 
 function formatDate(value: string): string {
