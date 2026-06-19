@@ -27,6 +27,7 @@ import {
   useServed,
   useToPayment,
   useResolvePartialRejection,
+  useClaimQrOrder,
   useRemoveRejectedItem,
   useCancelReadyItem,
   useReplaceRejectedItem,
@@ -94,6 +95,7 @@ export function WaiterApp() {
   const served = useServed();
   const toPayment = useToPayment();
   const resolvePartialRejection = useResolvePartialRejection();
+  const claimQrOrder = useClaimQrOrder();
   const removeRejectedItem = useRemoveRejectedItem();
   const cancelReadyItem = useCancelReadyItem();
   const replaceRejectedItem = useReplaceRejectedItem();
@@ -199,6 +201,7 @@ export function WaiterApp() {
     served.isPending ||
     toPayment.isPending ||
     resolvePartialRejection.isPending ||
+    claimQrOrder.isPending ||
     removeRejectedItem.isPending ||
     cancelReadyItem.isPending ||
     replaceRejectedItem.isPending ||
@@ -392,6 +395,26 @@ export function WaiterApp() {
     setTab(order.requiresWaiterDecision ? 'orders' : 'cart');
     if (order.status === 'waiting_payment') {
       setPaymentOrder(order);
+    }
+  }
+
+  async function claimQr(order: Order) {
+    if (!activeShift) {
+      push({ message: t('Сначала начните смену в профиле.'), type: 'error', at: new Date().toISOString() });
+      return;
+    }
+    try {
+      const updated = await claimQrOrder.mutateAsync(order.id);
+      cart.selectTable(updated.table.id);
+      setViewingOrderId(updated.id);
+      setTab('orders');
+      push({
+        message: `${t('QR-заказ взят')} · ${t('Стол')} ${updated.table.number}`,
+        type: 'success',
+        at: new Date().toISOString(),
+      });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -691,6 +714,8 @@ export function WaiterApp() {
           order={displayedOrder}
           submitting={actionPending}
           preliminaryPending={createPrintRequest.isPending}
+          claimPending={claimQrOrder.isPending}
+          onClaimQr={() => claimQr(displayedOrder)}
           onPickedUp={() => runAction(() => pickedUp.mutateAsync(displayedOrder.id))}
           onServed={() => runAction(() => served.mutateAsync(displayedOrder.id))}
           onToPayment={() => goToPayment(displayedOrder)}
@@ -794,6 +819,8 @@ export function WaiterApp() {
                   <OrdersList
                     orders={orders}
                     onOpen={openExistingOrder}
+                    onClaimQr={claimQr}
+                    claimPending={claimQrOrder.isPending}
                     onEdit={startEditOrder}
                     onCancel={(o) => setCancelTarget(o)}
                   />
@@ -822,6 +849,8 @@ export function WaiterApp() {
                 <OrdersList
                   orders={orders}
                   onOpen={openExistingOrder}
+                  onClaimQr={claimQr}
+                  claimPending={claimQrOrder.isPending}
                   onEdit={startEditOrder}
                   onCancel={(o) => setCancelTarget(o)}
                 />

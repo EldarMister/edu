@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   Logger,
@@ -91,7 +92,7 @@ export class OrdersService {
 
   async findByIdForActor(id: string, actor: AuditActor) {
     const order = await this.findById(id);
-    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
+    if (actor.role === Role.WAITER && !this.canWaiterViewOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     return order;
@@ -411,6 +412,77 @@ export class OrdersService {
     });
 
     return order;
+  }
+
+  /** Официант берёт свободный QR-заказ. Все официанты видят его до первого успешного claim. */
+  async claimQrOrder(orderId: string, actor: AuditActor) {
+    const before = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      include: { table: true, waiter: { select: { name: true } } },
+    });
+    if (!before) throw new NotFoundException('Заказ не найден');
+    if (before.source !== 'qr') {
+      throw new BadRequestException('Можно взять только заказ из QR-меню');
+    }
+    if (([OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] as OrderStatus[]).includes(before.status)) {
+      throw new BadRequestException('Заказ уже закрыт');
+    }
+    if (before.waiterId === actor.id) {
+      return this.findById(orderId);
+    }
+    if (before.waiterId) {
+      throw new ConflictException(`QR-заказ уже взял официант ${before.waiter?.name ?? ''}`.trim());
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const activeShift = await this.shifts.getRequiredActiveShift(actor.id, tx);
+      const result = await tx.order.updateMany({
+        where: {
+          id: orderId,
+          source: 'qr',
+          waiterId: null,
+          status: { notIn: [OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] },
+        },
+        data: {
+          waiterId: actor.id,
+          waiterShiftId: activeShift.id,
+        },
+      });
+      if (result.count !== 1) return null;
+      return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
+    });
+
+    if (!updated) {
+      const latest = await this.findById(orderId);
+      if (latest.waiter?.id === actor.id) return latest;
+      if (latest.waiter) {
+        throw new ConflictException(`QR-заказ уже взял официант ${latest.waiter.name}`);
+      }
+      throw new BadRequestException('QR-заказ уже недоступен');
+    }
+
+    this.events.emitToWaiters(SERVER_EVENTS.ORDER_STATUS_CHANGED, updated);
+    this.events.emitToAdmin(SERVER_EVENTS.ORDER_STATUS_CHANGED, updated);
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, {
+      tableId: updated.table.id,
+      action: 'claim-qr-order',
+    });
+    this.notifyWaiter(actor.id, `Вы взяли QR-заказ ${updated.orderNumber} · Стол ${updated.table.number}`, updated, 'success');
+
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.ORDER_UPDATED,
+      entityType: AuditEntity.ORDER,
+      entityId: updated.id,
+      orderId: updated.id,
+      tableId: updated.tableId,
+      description: `${actor.name ?? 'Официант'} взял QR-заказ ${updated.orderNumber} на столе ${updated.table.number}`,
+      oldValue: { waiterId: null },
+      newValue: { waiterId: actor.id, waiterName: actor.name },
+      metadata: { source: 'qr', tableNumber: updated.table.number },
+    });
+
+    return updated;
   }
 
   /** Отмена заказа официантом/админом/владельцем с причиной (audit обязателен). */
@@ -2438,8 +2510,12 @@ export class OrdersService {
     return order;
   }
 
-  private canWaiterAccessOrder(order: { waiterId: string | null; source: string }, waiterId: string) {
+  private canWaiterViewOrder(order: { waiterId: string | null; source: string }, waiterId: string) {
     return order.waiterId === waiterId || (order.source === 'qr' && order.waiterId === null);
+  }
+
+  private canWaiterAccessOrder(order: { waiterId: string | null; source: string }, waiterId: string) {
+    return order.waiterId === waiterId;
   }
 
   // ---------- Действия со столом (закрыть / перенести / передать) ----------

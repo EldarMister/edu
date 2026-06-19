@@ -38,6 +38,12 @@ export class OrdersController {
     return this.orders.findByIdForActor(id, user);
   }
 
+  @Post(':id/claim-qr')
+  @Roles(Role.WAITER)
+  claimQr(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.orders.claimQrOrder(id, user);
+  }
+
   @Post(':id/items')
   @Roles(Role.WAITER)
   addItems(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: AddItemsDto) {

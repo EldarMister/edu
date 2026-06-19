@@ -132,6 +132,7 @@ export function QrMenuApp() {
 
   const menu = menuQ.data;
   const session = sessionQ.data;
+  const hasSubmittedOrder = !!submitted?.orderId && submitted.itemCount > 0;
 
   const onSubmitted = (r: QrSubmitResult) => {
     const order = captureSubmitted(r);
@@ -181,10 +182,10 @@ export function QrMenuApp() {
         <MenuScreen
           menu={menu}
           session={session}
-          hasSubmittedOrder={!!submitted}
+          hasSubmittedOrder={hasSubmittedOrder}
           onOpenDish={setDish}
           onOpenOrder={() => setScreen('order')}
-          onOpenSubmittedOrder={() => submitted && setScreen('submitted')}
+          onOpenSubmittedOrder={() => hasSubmittedOrder && setScreen('submitted')}
         />
       )}
 

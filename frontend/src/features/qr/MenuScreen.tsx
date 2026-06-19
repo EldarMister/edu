@@ -162,7 +162,7 @@ export function MenuScreen({
               <button
                 type="button"
                 onClick={onOpenSubmittedOrder}
-                className="pointer-events-auto flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-full bg-white text-[#1E40AF] shadow-[0_2px_10px_rgba(15,23,42,0.18)] transition-transform active:scale-95"
+                className="pointer-events-auto flex h-16 w-16 flex-col items-center justify-center gap-0.5 text-[#1E40AF] transition-transform active:scale-95"
               >
                 <svg
                   width="17"
