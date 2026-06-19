@@ -61,6 +61,7 @@ export class MovementsService {
       return {
         id: m.id,
         ingredientId: m.ingredientId,
+        orderItemId: m.orderItemId,
         ingredientName: m.ingredient.name,
         unit: m.ingredient.unit,
         type: m.type,

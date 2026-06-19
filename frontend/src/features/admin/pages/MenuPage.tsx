@@ -9,6 +9,7 @@ import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { IconEdit, IconTrash, IconPlus } from '../components/icons';
 import { RecipeEditor } from './warehouse/RecipeEditor';
+import { useRecipe } from './warehouse/api';
 import {
   useMenuOverview,
   useAdminCategories,
@@ -270,6 +271,11 @@ function DishModal({
   const [error, setError] = useState('');
   const [tab, setTab] = useState<'main' | 'recipe'>('main');
   const pending = create.isPending || update.isPending;
+  const recipeQ = useRecipe(isEdit ? dish.id : null);
+  const hasRecipe = (recipeQ.data?.items.length ?? 0) > 0;
+  const hasDishStock = variants.length > 0
+    ? variants.some((variant) => variant.stock.trim() !== '')
+    : stock.trim() !== '';
 
   // Фото блюда: preview — что показываем; payload — что отправляем (data URL | ссылка для загрузки | '' удалить | undefined без изменений).
   const initialImageUrl = dish?.imageUrl ?? null;
@@ -543,6 +549,16 @@ function DishModal({
             </Field>
           </div>
           )}
+        <div className="rounded-lg border border-border bg-background/60 p-3 text-xs leading-relaxed text-text-secondary">
+          Для напитков и готовых товаров используйте остаток блюда. Для блюд кухни используйте техкарту.
+          Не включайте оба варианта без необходимости.
+        </div>
+        {isEdit && hasRecipe && hasDishStock && (
+          <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs leading-relaxed text-warning">
+            У этого блюда есть техкарта и заполнен остаток блюда. Проверьте, нужен ли двойной учёт: готовые товары
+            учитываются остатком блюда, блюда кухни — сырьём по техкарте.
+          </div>
+        )}
         <Field label="Описание">
           <input
             className="input"

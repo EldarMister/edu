@@ -610,6 +610,7 @@ model Settings {
   payCard             Boolean @default(true) @map("pay_card")
   qrImageUrl          String? @map("qr_image_url") // data URL загруженного QR-кода (один на заведение)
   printerConnected    Boolean @default(false) @map("printer_connected")
+  allowNegativeIngredientStock Boolean @default(true) @map("allow_negative_ingredient_stock")
 
   // ККМ / фискализация (Кыргызстан). Владелец выбирает провайдера и вводит ключи.
   // null/пусто в fiscalProvider = ККМ выключена, печать фискального чека недоступна.
@@ -808,6 +809,7 @@ model PurchaseItem {
 model StockMovement {
   id           String              @id @default(uuid())
   ingredientId String              @map("ingredient_id")
+  orderItemId  String?             @map("order_item_id")
   type         StockMovementType
   sourceType   StockMovementSource @map("source_type")
   sourceId     String?             @map("source_id") // id закупки или заказа
@@ -821,8 +823,10 @@ model StockMovement {
   ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
 
   @@index([ingredientId])
+  @@index([orderItemId])
   @@index([createdAt])
   @@index([type])
   @@index([sourceType])
+  @@unique([type, sourceType, sourceId, orderItemId, ingredientId], map: "stock_movements_order_item_once_key")
   @@map("stock_movements")
 }

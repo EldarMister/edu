@@ -8,6 +8,8 @@ import { PurchasesService } from './purchases.service';
 import { MovementsController } from './movements.controller';
 import { MovementsService } from './movements.service';
 import { IngredientStockService } from './ingredient-stock.service';
+import { WarehouseOverviewController } from './overview.controller';
+import { WarehouseOverviewService } from './overview.service';
 
 /** Склад: сырьё, техкарты, закупки, движения. */
 @Module({
@@ -16,12 +18,14 @@ import { IngredientStockService } from './ingredient-stock.service';
     RecipesController,
     PurchasesController,
     MovementsController,
+    WarehouseOverviewController,
   ],
   providers: [
     IngredientsService,
     RecipesService,
     PurchasesService,
     MovementsService,
+    WarehouseOverviewService,
     IngredientStockService,
   ],
   // IngredientStockService используется заказами для списания/возврата сырья.

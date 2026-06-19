@@ -80,6 +80,7 @@ export type StockMovementSource = 'purchase' | 'order' | 'manual';
 export interface StockMovement {
   id: string;
   ingredientId: string;
+  orderItemId?: string | null;
   ingredientName: string;
   unit: string;
   type: StockMovementType;
@@ -100,7 +101,50 @@ export interface MovementsSummary {
   returns: number;
 }
 
+export interface WarehouseOverview {
+  stockValue: number;
+  lowStockCount: number;
+  purchasesTotal: number;
+  ingredientWriteOffTotal: number;
+  stockValueTrend: Array<{ date: string; value: number }>;
+  lowStockItems: Array<{
+    id: string;
+    name: string;
+    unit: string;
+    stock: number;
+    lowStockThreshold: number;
+  }>;
+  topConsumedIngredients: Array<{
+    ingredientId: string;
+    name: string;
+    unit: string;
+    quantity: number;
+    cost: number;
+  }>;
+  recentMovements: Array<{
+    id: string;
+    createdAt: string;
+    type: StockMovementType;
+    ingredientName: string;
+    unit: string;
+    change: number;
+    after: number;
+  }>;
+  suppliersTop: Array<{ supplier: string; total: number }>;
+}
+
 const KEY = ['admin', 'warehouse'] as const;
+
+export function useWarehouseOverview(params: { dateFrom: string; dateTo: string }) {
+  const q = new URLSearchParams();
+  q.set('dateFrom', params.dateFrom);
+  q.set('dateTo', params.dateTo);
+  const qs = q.toString();
+  return useQuery({
+    queryKey: [...KEY, 'overview', qs],
+    queryFn: () => get<WarehouseOverview>(`/admin/warehouse/overview?${qs}`),
+  });
+}
 
 // ---------- Сырьё ----------
 
