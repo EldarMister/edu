@@ -37,6 +37,9 @@ export class UpdateSettingsDto {
   @IsOptional() @IsBoolean()
   payCard?: boolean;
 
+  @IsOptional() @IsBoolean()
+  allowNegativeIngredientStock?: boolean;
+
   // QR-код как data URL (image/png|jpeg|webp). Пустая строка = удалить QR.
   @IsOptional() @IsString() @MaxLength(5_000_000)
   qrImageUrl?: string;

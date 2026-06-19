@@ -237,8 +237,8 @@ export class OrdersService {
           include: orderInclude,
         });
         // Списываем сырьё по техкартам блюд заказа (блюда без техкарты пропускаются).
-        await this.ingredientStock.applyDishSale(tx, createdOrder.id, itemsData);
-        return createdOrder;
+        const ingredientStockWarnings = await this.ingredientStock.applyDishSale(tx, createdOrder.id, createdOrder.items);
+        return Object.assign(createdOrder, { ingredientStockWarnings });
       });
     } catch (err) {
       if (this.isUniqueConstraintError(err)) {
@@ -348,8 +348,8 @@ export class OrdersService {
             include: orderInclude,
           });
           // Списываем сырьё по техкартам блюд заказа (блюда без техкарты пропускаются).
-          await this.ingredientStock.applyDishSale(tx, createdOrder.id, itemsData);
-          return createdOrder;
+          const ingredientStockWarnings = await this.ingredientStock.applyDishSale(tx, createdOrder.id, createdOrder.items);
+          return Object.assign(createdOrder, { ingredientStockWarnings });
         });
         break;
       } catch (err) {
@@ -633,10 +633,11 @@ export class OrdersService {
         await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
       }
       await tx.orderItem.deleteMany({ where: { orderId } });
-      await this.createOrderItems(tx, orderId, itemsData);
+      const createdItems = await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
-      await this.ingredientStock.applyDishSale(tx, orderId, itemsData);
-      return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
+      const ingredientStockWarnings = await this.ingredientStock.applyDishSale(tx, orderId, createdItems);
+      const updatedOrder = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
+      return Object.assign(updatedOrder, { ingredientStockWarnings });
     });
 
     // Уведомляем кухню — звук + обновление списка, только если есть что готовить.
@@ -761,9 +762,9 @@ export class OrdersService {
           return false;
         }
       }
-      await this.createOrderItems(tx, orderId, itemsData);
+      const createdItems = await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
-      await this.ingredientStock.applyDishSale(tx, orderId, itemsData);
+      const ingredientStockWarnings = await this.ingredientStock.applyDishSale(tx, orderId, createdItems);
       await this.recalcOrder(tx, orderId);
       // Новые блюда снова уходят на кухню; если добавили только «Без отправки» —
       // статус заказа пересчитываем по составу, кухню не трогаем.
@@ -778,10 +779,13 @@ export class OrdersService {
           waiterShiftId: activeShift.id,
         },
       });
-      return true;
+      return { applied: true, ingredientStockWarnings };
     });
 
     const updated = await this.findById(orderId);
+    if (applied && typeof applied === 'object' && applied.ingredientStockWarnings.length > 0) {
+      Object.assign(updated, { ingredientStockWarnings: applied.ingredientStockWarnings });
+    }
     if (applied) {
       if (hasPrepAdded) {
         this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
@@ -1507,9 +1511,9 @@ export class OrdersService {
         where: { id: itemId },
         data: { rejectionDecision: RejectionDecision.replaced },
       });
-      await this.createOrderItems(tx, orderId, itemsData);
+      const createdItems = await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
-      await this.ingredientStock.applyDishSale(tx, orderId, itemsData);
+      const ingredientStockWarnings = await this.ingredientStock.applyDishSale(tx, orderId, createdItems);
       await this.recalcOrder(tx, orderId);
       const pending = await this.pendingRejectedDecisions(tx, orderId);
       const nextStatus = pending > 0 ? OrderStatus.partially_rejected : await this.statusFromActiveItems(tx, orderId);
@@ -1517,11 +1521,12 @@ export class OrdersService {
       if (nextTableStatus) {
         await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
       }
-      return tx.order.update({
+      const updatedOrder = await tx.order.update({
         where: { id: orderId },
         data: { status: nextStatus, requiresWaiterDecision: pending > 0, waiterShiftId: activeShift.id },
         include: orderInclude,
       });
+      return Object.assign(updatedOrder, { ingredientStockWarnings });
     });
 
     if (hasPrepAdded) {
@@ -2089,9 +2094,11 @@ export class OrdersService {
     orderId: string,
     itemsData: Prisma.OrderItemUncheckedCreateWithoutOrderInput[],
   ) {
+    const created = [];
     for (const item of itemsData) {
-      await tx.orderItem.create({ data: { ...item, orderId } });
+      created.push(await tx.orderItem.create({ data: { ...item, orderId } }));
     }
+    return created;
   }
 
   private async deductInventory(

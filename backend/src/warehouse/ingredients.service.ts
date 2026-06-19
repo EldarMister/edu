@@ -78,7 +78,7 @@ export class IngredientsService {
   }
 
   async update(id: string, dto: UpdateIngredientDto) {
-    await this.ensure(id);
+    const current = await this.ensure(id);
     const data: Prisma.IngredientUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name.trim();
     if (dto.unit !== undefined) data.unit = dto.unit.trim();
@@ -87,7 +87,36 @@ export class IngredientsService {
     if (dto.lowStockThreshold !== undefined)
       data.lowStockThreshold = new Prisma.Decimal(dto.lowStockThreshold);
     if (dto.isActive !== undefined) data.isActive = dto.isActive;
-    const ingredient = await this.prisma.ingredient.update({ where: { id }, data });
+
+    const beforeStock = Number(current.stock);
+    const afterStock = dto.stock !== undefined ? Number(dto.stock) : beforeStock;
+    const beforeCost = Number(current.avgCost);
+    const afterCost = dto.avgCost !== undefined ? Number(dto.avgCost) : beforeCost;
+    const stockChanged = dto.stock !== undefined && beforeStock !== afterStock;
+    const costChanged = dto.avgCost !== undefined && beforeCost !== afterCost;
+
+    const ingredient = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.ingredient.update({ where: { id }, data });
+      if (stockChanged || costChanged) {
+        const comments: string[] = [];
+        if (stockChanged) comments.push(`остаток: ${beforeStock} -> ${afterStock}`);
+        if (costChanged) comments.push(`себестоимость: ${beforeCost} -> ${afterCost}`);
+        await tx.stockMovement.create({
+          data: {
+            ingredientId: id,
+            type: 'correction',
+            sourceType: 'manual',
+            sourceId: null,
+            beforeStock: new Prisma.Decimal(beforeStock),
+            change: new Prisma.Decimal(afterStock - beforeStock),
+            afterStock: new Prisma.Decimal(afterStock),
+            costAtMoment: new Prisma.Decimal(afterCost),
+            comment: `Ручная корректировка (${comments.join(', ')})`,
+          },
+        });
+      }
+      return updated;
+    });
     return this.serialize(ingredient);
   }
 

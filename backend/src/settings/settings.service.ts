@@ -23,6 +23,7 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   payQr: 'оплата QR',
   payCash: 'оплата наличными',
   payCard: 'оплата картой',
+  allowNegativeIngredientStock: 'минусовой остаток сырья',
   qrImageUrl: 'QR-код',
   printerConnected: 'принтер',
   fiscalProvider: 'провайдер ККМ',
