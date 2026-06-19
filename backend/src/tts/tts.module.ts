@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TtsController } from './tts.controller';
 import { TtsService } from './tts.service';
+import { TtsKeepaliveService } from './tts-keepalive.service';
 import { SileroTtsProvider } from './silero.provider';
 import { TTS_PROVIDER } from './tts-provider.interface';
 
@@ -10,7 +11,11 @@ import { TTS_PROVIDER } from './tts-provider.interface';
  */
 @Module({
   controllers: [TtsController],
-  providers: [TtsService, { provide: TTS_PROVIDER, useClass: SileroTtsProvider }],
+  providers: [
+    TtsService,
+    TtsKeepaliveService,
+    { provide: TTS_PROVIDER, useClass: SileroTtsProvider },
+  ],
   exports: [TtsService],
 })
 export class TtsModule {}
