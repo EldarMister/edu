@@ -1,11 +1,13 @@
 import { useState, Fragment } from 'react';
 import { Modal } from '@/components/Modal';
+import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
 import { StatCard, StatCardsRow } from '../components/StatCard';
 import { IconCategory, IconEdit, IconPlus, IconMenu, IconTrash } from '../components/icons';
 import { useWarehouseOverview, useWarehouseItems } from '../warehouse-api';
+import { normalizeUnitLabel, unitLabelOptions } from './warehouse/units';
 import {
   useAdminCategories,
   useDishMutations,
@@ -72,19 +74,16 @@ export function WarehousePage() {
                 {itemsQ.data?.map((item) => {
                   const hasVariants = item.variants.length > 0;
                   const isExp = expanded[item.id];
+                  const aggregate = aggregateInventory(item);
                   
                   let statusTone: 'success' | 'warning' | 'danger' | 'muted' = 'success';
                   let statusLabel = 'В наличии';
-                  if (!hasVariants) {
-                    const stock = item.stock ?? 0;
-                    const initial = item.initialStock ?? stock;
-                    if (stock === 0) {
-                      statusTone = 'danger';
-                      statusLabel = 'Нет в наличии';
-                    } else if (stock <= 0.2 * initial) {
-                      statusTone = 'warning';
-                      statusLabel = 'Мало осталось';
-                    }
+                  if (aggregate.stock === 0) {
+                    statusTone = 'danger';
+                    statusLabel = 'Нет в наличии';
+                  } else if (aggregate.low) {
+                    statusTone = 'warning';
+                    statusLabel = 'Мало осталось';
                   }
 
                   return (
@@ -107,13 +106,13 @@ export function WarehousePage() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-center text-text-primary font-medium">
-                          {hasVariants ? '—' : item.stock ?? 0}
+                          {aggregate.stock}
                         </td>
                         <td className="px-4 py-3 text-center text-text-secondary">
-                          {hasVariants ? '—' : item.unit || 'шт'}
+                          {aggregate.unit}
                         </td>
                         <td className="px-4 py-3">
-                          {!hasVariants && <Badge tone={statusTone}>{statusLabel}</Badge>}
+                          <Badge tone={statusTone}>{statusLabel}</Badge>
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
@@ -147,7 +146,7 @@ export function WarehousePage() {
                           <tr key={v.id} className="border-b border-border bg-slate-50/50 hover:bg-slate-50">
                             <td className="px-4 py-3 pl-12 text-text-secondary">↳ {v.name}</td>
                             <td className="px-4 py-3 text-center text-text-primary font-medium">{vStock}</td>
-                            <td className="px-4 py-3 text-center text-text-secondary">{v.unit || 'шт'}</td>
+                            <td className="px-4 py-3 text-center text-text-secondary">{normalizeUnitLabel(v.unit)}</td>
                             <td className="px-4 py-3"><Badge tone={vStatusTone}>{vStatusLabel}</Badge></td>
                             <td className="px-4 py-3"></td>
                           </tr>
@@ -197,7 +196,7 @@ function variantDraft(v?: AdminDishVariant): VariantDraft {
     name: v?.name ?? '',
     price: v ? String(Number(v.price)) : '0',
     stock: String(v?.stock ?? 0),
-    unit: v?.unit ?? 'шт',
+    unit: normalizeUnitLabel(v?.unit),
   };
 }
 
@@ -227,7 +226,7 @@ function WarehouseItemModal({
   // Поля для товара без вариантов
   const [price, setPrice] = useState(item && item.variants.length === 0 ? String(Number(item.price)) : '0');
   const [stock, setStock] = useState(String(item?.stock ?? 0));
-  const [unit, setUnit] = useState(item?.unit ?? 'шт');
+  const [unit, setUnit] = useState(normalizeUnitLabel(item?.unit));
 
   const [variants, setVariants] = useState<VariantDraft[]>(() => item?.variants.map(variantDraft) ?? []);
   const [error, setError] = useState('');
@@ -281,7 +280,7 @@ function WarehouseItemModal({
           price: Number(v.price),
           stock: Number(v.stock),
           initialStock: isEdit && v.id ? undefined : Number(v.stock),
-          unit: v.unit.trim(),
+          unit: v.unit,
         })),
       };
 
@@ -340,7 +339,7 @@ function WarehouseItemModal({
               <input className="input" type="number" value={stock} onChange={(e) => setStock(e.target.value)} />
             </Field>
             <Field label="Ед. изм.">
-              <input className="input" value={unit} onChange={(e) => setUnit(e.target.value)} />
+              <Select value={unit} onChange={setUnit} options={unitLabelOptions(unit)} className="h-10 w-full" />
             </Field>
           </div>
         )}
@@ -368,7 +367,12 @@ function WarehouseItemModal({
                       <input className="input h-9 text-sm" type="number" value={v.stock} onChange={(e) => updateVariant(v.uid, { stock: e.target.value })} />
                     </Field>
                     <Field label="Ед. изм.">
-                      <input className="input h-9 text-sm" value={v.unit} onChange={(e) => updateVariant(v.uid, { unit: e.target.value })} />
+                      <Select
+                        value={v.unit}
+                        onChange={(value) => updateVariant(v.uid, { unit: value })}
+                        options={unitLabelOptions(v.unit)}
+                        className="h-9 w-full text-sm"
+                      />
                     </Field>
                   </div>
                   <button
@@ -391,7 +395,31 @@ function WarehouseItemModal({
   );
 }
 
+function aggregateInventory(item: AdminDish): { stock: number; unit: string; low: boolean } {
+  if (item.variants.length === 0) {
+    const stock = item.stock ?? 0;
+    const initial = item.initialStock ?? stock;
+    return {
+      stock,
+      unit: normalizeUnitLabel(item.unit),
+      low: initial > 0 && stock <= 0.2 * initial,
+    };
+  }
 
+  const units = new Set(item.variants.map((variant) => normalizeUnitLabel(variant.unit)));
+  const stock = item.variants.reduce((sum, variant) => sum + (variant.stock ?? 0), 0);
+  const low = item.variants.some((variant) => {
+    const stockValue = variant.stock ?? 0;
+    const initial = variant.initialStock ?? stockValue;
+    return initial > 0 && stockValue <= 0.2 * initial;
+  });
+
+  return {
+    stock,
+    unit: units.size === 1 ? [...units][0] : 'по вариантам',
+    low,
+  };
+}
 
 function Chevron({ open }: { open: boolean }) {
   return (

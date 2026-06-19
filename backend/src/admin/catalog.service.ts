@@ -6,6 +6,7 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { normalizeDishImage, withDishImageRef } from '../dishes/dish-image';
+import { normalizeUnit, unitLabel } from '../warehouse/units';
 import {
   CreateCategoryDto,
   CreateDishDto,
@@ -324,9 +325,14 @@ export class CatalogService {
         sortOrder: index,
         stock: variant.stock,
         initialStock: variant.initialStock,
-        unit: variant.unit,
+        unit: this.normalizeInventoryUnit(variant.unit),
       };
     });
+  }
+
+  private normalizeInventoryUnit(unit: string | undefined): string | undefined {
+    if (unit === undefined) return undefined;
+    return unitLabel(normalizeUnit(unit));
   }
 
   private resolveDishPrice(
@@ -382,7 +388,7 @@ export class CatalogService {
         trackInventory: dto.trackInventory ?? false,
         stock: dto.stock,
         initialStock: dto.initialStock,
-        unit: dto.unit,
+        unit: this.normalizeInventoryUnit(dto.unit),
         prepStation: dto.prepStation ?? null,
         voiceName: dto.voiceName?.trim() || null,
         variants: variants.length
@@ -432,6 +438,7 @@ export class CatalogService {
     if (dto.discountValue !== undefined) data.discountValue = new Prisma.Decimal(dto.discountValue);
     if (dto.voiceName !== undefined) data.voiceName = dto.voiceName?.trim() || null;
     if (dto.imageUrl !== undefined) data.imageUrl = await normalizeDishImage(dto.imageUrl);
+    if (dto.unit !== undefined) data.unit = this.normalizeInventoryUnit(dto.unit);
     if (dto.categoryId) await this.ensureCategory(dto.categoryId);
     const updated = await this.prisma.$transaction(async (tx) => {
       if (variants !== undefined) {

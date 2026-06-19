@@ -10,6 +10,7 @@ import { useNotifications } from '@/store/notifications';
 import { IconEdit, IconTrash, IconPlus } from '../components/icons';
 import { RecipeEditor } from './warehouse/RecipeEditor';
 import { useRecipe } from './warehouse/api';
+import { normalizeUnitLabel, unitLabelOptions } from './warehouse/units';
 import {
   useMenuOverview,
   useAdminCategories,
@@ -149,7 +150,10 @@ export function MenuPage() {
                         if (!d.trackInventory) return '—';
                         const hasVar = d.variants.length > 0;
                         const stock = hasVar ? d.variants.reduce((a, v) => a + (v.stock ?? 0), 0) : (d.stock ?? 0);
-                        return `${stock} ${d.unit || 'шт'}`;
+                        const units = hasVar
+                          ? new Set(d.variants.map((variant) => normalizeUnitLabel(variant.unit)))
+                          : new Set([normalizeUnitLabel(d.unit)]);
+                        return `${stock} ${units.size === 1 ? [...units][0] : 'по вариантам'}`;
                       })()}
                     </td>
                     <td className="px-4 py-3">
@@ -236,7 +240,7 @@ function variantDraft(variant?: AdminDishVariant): DishVariantDraft {
     name: variant?.name ?? '',
     price: variant ? String(Number(variant.price)) : '',
     stock: variant?.stock != null ? String(variant.stock) : '',
-    unit: variant?.unit ?? 'шт',
+    unit: normalizeUnitLabel(variant?.unit),
   };
 }
 
@@ -260,7 +264,7 @@ function DishModal({
   );
   const [price, setPrice] = useState(dish ? (dish.variants.length > 0 ? '' : String(Number(dish.price))) : '');
   const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : '');
-  const [unit] = useState(dish?.unit ?? 'шт');
+  const [unit, setUnit] = useState(normalizeUnitLabel(dish?.unit));
   const [description, setDescription] = useState(dish?.description ?? '');
   const [voiceName, setVoiceName] = useState(dish?.voiceName ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
@@ -366,7 +370,7 @@ function DishModal({
         name: variant.name.trim(),
         price: variant.price.trim(),
         stock: variant.stock.trim(),
-        unit: variant.unit.trim(),
+        unit: variant.unit,
       }))
       .filter((variant) => variant.name || variant.price);
     for (const variant of filledVariants) {
@@ -527,7 +531,7 @@ function DishModal({
           </Field>
         </div>
           {variants.length === 0 && (
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <Field label="Цена (с)">
               <input
                 className="input"
@@ -546,6 +550,9 @@ function DishModal({
                 placeholder="Без учета"
                 onChange={(e) => setStock(e.target.value)}
               />
+            </Field>
+            <Field label="Ед. изм.">
+              <Select value={unit} onChange={setUnit} options={unitLabelOptions(unit)} className="h-11 w-full" />
             </Field>
           </div>
           )}
@@ -587,17 +594,18 @@ function DishModal({
             </button>
           </div>
           <div className="overflow-hidden rounded-xl border border-border overflow-x-auto">
-            <div className="grid min-w-[420px] grid-cols-[28px_minmax(120px,1fr)_100px_100px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
+            <div className="grid min-w-[560px] grid-cols-[28px_minmax(120px,1fr)_100px_100px_100px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
               <span />
               <span>Название варианта</span>
               <span>Цена (с)</span>
               <span>Остаток</span>
+              <span>Ед. изм.</span>
               <span />
             </div>
             {variants.length === 0 ? (
               <div className="px-3 py-4 text-sm text-text-muted">Варианты не добавлены</div>
             ) : (
-              <div className="min-w-[500px]">
+              <div className="min-w-[560px]">
                 {variants.map((variant, index) => (
                   <div
                     key={variant.uid}
@@ -609,7 +617,7 @@ function DishModal({
                       setDragIndex(null);
                     }}
                     onDragEnd={() => setDragIndex(null)}
-                    className={`grid grid-cols-[28px_minmax(120px,1fr)_100px_100px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
+                    className={`grid grid-cols-[28px_minmax(120px,1fr)_100px_100px_100px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
                       dragIndex === index ? 'bg-primary/5' : 'bg-white'
                     }`}
                   >
@@ -639,6 +647,12 @@ function DishModal({
                       value={variant.stock}
                       placeholder="Без учета"
                       onChange={(e) => updateVariant(variant.uid, { stock: e.target.value })}
+                    />
+                    <Select
+                      value={variant.unit}
+                      onChange={(value) => updateVariant(variant.uid, { unit: value })}
+                      options={unitLabelOptions(variant.unit)}
+                      className="h-10 w-full"
                     />
                     <button
                       type="button"

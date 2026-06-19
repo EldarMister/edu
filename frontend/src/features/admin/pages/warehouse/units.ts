@@ -41,6 +41,26 @@ export const UNIT_OPTIONS: Array<{ value: UnitCode; label: string }> = ALL_UNITS
   label: u.label,
 }));
 
+export const UNIT_LABEL_OPTIONS: Array<{ value: string; label: string }> = UNIT_OPTIONS.map((u) => ({
+  value: u.label,
+  label: u.label,
+}));
+
+const UNIT_LABELS = new Set(UNIT_LABEL_OPTIONS.map((u) => u.value));
+
+export function normalizeUnitLabel(value?: string | null): string {
+  const unit = (value ?? '').trim();
+  if (!unit) return 'шт';
+  const byCode = UNIT_OPTIONS.find((option) => option.value === unit);
+  if (byCode) return byCode.label;
+  return unit;
+}
+
+export function unitLabelOptions(currentUnit: string): Array<{ value: string; label: string }> {
+  if (UNIT_LABELS.has(currentUnit)) return UNIT_LABEL_OPTIONS;
+  return [{ value: currentUnit, label: currentUnit }, ...UNIT_LABEL_OPTIONS];
+}
+
 /** «с/кг», «с/шт» … */
 export function costUnitLabel(code: UnitCode): string {
   return `с/${unitLabel(code)}`;
