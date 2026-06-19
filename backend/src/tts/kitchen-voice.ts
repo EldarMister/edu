@@ -14,6 +14,7 @@ type VoiceItem = {
   prepStation?: 'kitchen' | 'bar' | 'none' | string | null;
   quantity?: number | null;
   dishNameSnapshot: string;
+  dishVariantNameSnapshot?: string | null;
   dishVoiceSnapshot?: string | null;
   setComponents?: {
     action: string;
@@ -85,7 +86,87 @@ export function orderNumberWords(orderNumber: string): string {
 /** Озвучиваемое имя блюда: voiceName, если задано, иначе обычное название. */
 function dishVoice(item: VoiceItem): string {
   const v = item.dishVoiceSnapshot?.trim();
-  return v && v.length > 0 ? v : item.dishNameSnapshot;
+  const name = v && v.length > 0 ? v : item.dishNameSnapshot;
+  return withVariantVoice(name, item.dishVariantNameSnapshot);
+}
+
+function decimalNumberVoice(raw: string): string {
+  const normalized = raw.replace(',', '.');
+  const value = Number(normalized);
+  if (!Number.isFinite(value)) return raw;
+  if (Number.isInteger(value)) return numberToWordsRu(value);
+
+  const [wholeRaw, fractionRaw = ''] = normalized.split('.');
+  const whole = Number(wholeRaw);
+  const fraction = fractionRaw.replace(/0+$/, '') || '0';
+  const fractionNumber = Number(fraction);
+  const denominator =
+    fraction.length === 1 ? 'десятых' :
+      fraction.length === 2 ? 'сотых' :
+        'тысячных';
+  return `${numberToWordsRu(whole)} целых ${numberToWordsRu(fractionNumber)} ${denominator}`;
+}
+
+function unitKey(rawUnit: string): 'kg' | 'g' | 'l' | 'ml' | 'pcs' | null {
+  const unit = rawUnit.trim().toLowerCase().replace(/\./g, '');
+  if (unit === 'кг' || unit === 'kg' || unit === 'килограмм' || unit === 'килограмма' || unit === 'килограммов') {
+    return 'kg';
+  }
+  if (unit === 'г' || unit === 'гр' || unit === 'g' || unit === 'грамм' || unit === 'грамма' || unit === 'граммов') {
+    return 'g';
+  }
+  if (unit === 'л' || unit === 'l' || unit === 'литр' || unit === 'литра' || unit === 'литров') {
+    return 'l';
+  }
+  if (unit === 'мл' || unit === 'ml' || unit === 'миллилитр' || unit === 'миллилитра' || unit === 'миллилитров') {
+    return 'ml';
+  }
+  if (unit === 'шт' || unit === 'штук' || unit === 'штука' || unit === 'штуки') return 'pcs';
+  return null;
+}
+
+function pluralUnit(n: number, one: string, few: string, many: string): string {
+  const abs = Math.abs(n);
+  const mod100 = abs % 100;
+  const mod10 = abs % 10;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+function unitVoice(rawUnit: string, amount?: number): string {
+  const key = unitKey(rawUnit);
+  if (!key) return rawUnit.trim();
+  const n = amount ?? 1;
+  if (key === 'kg') return pluralUnit(n, 'килограмм', 'килограмма', 'килограммов');
+  if (key === 'g') return pluralUnit(n, 'грамм', 'грамма', 'грамм');
+  if (key === 'l') return pluralUnit(n, 'литр', 'литра', 'литров');
+  if (key === 'ml') return pluralUnit(n, 'миллилитр', 'миллилитра', 'миллилитров');
+  if (key === 'pcs') return pluralUnit(n, 'штука', 'штуки', 'штук');
+  return rawUnit.trim();
+}
+
+function variantVoice(variant?: string | null): string {
+  const raw = variant?.trim();
+  if (!raw) return '';
+
+  // "1кг", "1 кг", "0.5 л", "500мл" → понятная фраза для TTS.
+  const amountUnit = raw.match(/^(\d+(?:[.,]\d+)?)\s*([^\d\s].*)$/u);
+  if (amountUnit) {
+    const amount = Number(amountUnit[1].replace(',', '.'));
+    const key = unitKey(amountUnit[2]);
+    if (amount === 0.5 && key === 'kg') return 'пол килограмма';
+    if (amount === 0.5 && key === 'l') return 'пол литра';
+    return `${decimalNumberVoice(amountUnit[1])} ${unitVoice(amountUnit[2], amount)}`;
+  }
+
+  return raw;
+}
+
+function withVariantVoice(name: string, variant?: string | null): string {
+  const v = variantVoice(variant);
+  return v ? `${name}. ${v}` : name;
 }
 
 /**
@@ -110,10 +191,11 @@ function isSetItem(item: VoiceItem): boolean {
  */
 function setHeadVoice(item: VoiceItem): string {
   const explicit = item.dishVoiceSnapshot?.trim();
-  if (explicit) return explicit;
+  if (explicit) return withVariantVoice(explicit, item.dishVariantNameSnapshot);
   const name = item.dishNameSnapshot.trim();
   const m = name.match(/^(.*\S)[\s-]+(\d{1,4})$/);
-  return m ? `${m[1]} номер ${numberToWordsRu(Number(m[2]))}` : name;
+  const setName = m ? `${m[1]} номер ${numberToWordsRu(Number(m[2]))}` : name;
+  return withVariantVoice(setName, item.dishVariantNameSnapshot);
 }
 
 /**
