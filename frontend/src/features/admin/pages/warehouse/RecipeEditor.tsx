@@ -6,6 +6,7 @@ import { money } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { IconPlus, IconTrash, IconCheck, IconEdit } from '../../components/icons';
 import { useRecipe, useRecipeMutations, useIngredients, qty, type RecipeItem } from './api';
+import { unitsForType, unitTypeOf, type UnitCode } from './units';
 
 /** Вкладка «Техкарта» внутри модалки блюда: ингредиенты на 1 порцию, себестоимость, маржа. */
 export function RecipeEditor({ dishId, price }: { dishId: string; price: number }) {
@@ -16,12 +17,17 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
 
   const [newIngredientId, setNewIngredientId] = useState('');
   const [newAmount, setNewAmount] = useState('');
+  const [newUnit, setNewUnit] = useState<UnitCode | ''>('');
   const [error, setError] = useState('');
 
   const recipe = recipeQ.data;
   const ingredients = ingredientsQ.data ?? [];
   const usedIds = new Set(recipe?.items.map((i) => i.ingredientId) ?? []);
   const available = ingredients.filter((i) => !usedIds.has(i.id));
+  const selectedIngredient = ingredients.find((i) => i.id === newIngredientId);
+  // Единицы того же типа, что у выбранного ингредиента; по умолчанию — его единица.
+  const newUnitOptions = selectedIngredient ? unitsForType(selectedIngredient.unitType) : [];
+  const effectiveNewUnit = (newUnit || selectedIngredient?.displayUnit || '') as UnitCode | '';
 
   const foodCost = recipe?.foodCost ?? 0;
   const margin = recipe?.marginPercent ?? (price > 0 ? ((price - foodCost) / price) * 100 : 0);
@@ -38,9 +44,14 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
       return;
     }
     try {
-      await addItem.mutateAsync({ ingredientId: newIngredientId, amount });
+      await addItem.mutateAsync({
+        ingredientId: newIngredientId,
+        amount,
+        unit: effectiveNewUnit || undefined,
+      });
       setNewIngredientId('');
       setNewAmount('');
+      setNewUnit('');
     } catch (err) {
       setError(apiError(err));
     }
@@ -98,7 +109,7 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
                 <RecipeRow
                   key={item.id}
                   item={item}
-                  onSave={(amount) => updateItem.mutateAsync({ id: item.id, amount })}
+                  onSave={(amount, unit) => updateItem.mutateAsync({ id: item.id, amount, unit })}
                   onRemove={() => onRemove(item)}
                 />
               ))}
@@ -130,19 +141,32 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
           <Select
             className="h-9 w-full text-sm"
             value={newIngredientId}
-            onChange={setNewIngredientId}
+            onChange={(v) => {
+              setNewIngredientId(v);
+              setNewUnit(''); // сбрасываем — подставится единица нового ингредиента
+            }}
             placeholder="Выберите…"
             options={available.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
           />
         </div>
-        <div className="w-28">
-          <label className="mb-1 block text-xs font-medium text-text-secondary">Кол-во на порцию</label>
+        <div className="w-24">
+          <label className="mb-1 block text-xs font-medium text-text-secondary">Кол-во</label>
           <input
             className="input h-9 text-sm"
             type="number"
             step="0.001"
             value={newAmount}
             onChange={(e) => setNewAmount(e.target.value)}
+          />
+        </div>
+        <div className="w-20">
+          <label className="mb-1 block text-xs font-medium text-text-secondary">Ед.</label>
+          <Select
+            className="h-9 w-full text-sm"
+            value={effectiveNewUnit}
+            onChange={(v) => setNewUnit(v as UnitCode)}
+            placeholder="—"
+            options={newUnitOptions}
           />
         </div>
         <button type="button" className="btn-primary btn-md" onClick={onAdd} disabled={addItem.isPending}>
@@ -169,19 +193,21 @@ function RecipeRow({
   onRemove,
 }: {
   item: RecipeItem;
-  onSave: (amount: number) => Promise<unknown>;
+  onSave: (amount: number, unit: string) => Promise<unknown>;
   onRemove: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState(String(item.amount));
+  const [unit, setUnit] = useState<UnitCode>(item.amountUnit);
   const [busy, setBusy] = useState(false);
+  const unitOptions = unitsForType(unitTypeOf(item.amountUnit));
 
   async function save() {
     const value = Number(amount);
     if (!value || value <= 0) return;
     setBusy(true);
     try {
-      await onSave(value);
+      await onSave(value, unit);
       setEditing(false);
     } finally {
       setBusy(false);
@@ -191,7 +217,18 @@ function RecipeRow({
   return (
     <tr className="border-b border-border last:border-0">
       <td className="px-3 py-2 font-medium text-text-primary">{item.name}</td>
-      <td className="px-3 py-2 text-center text-text-secondary">{item.unit}</td>
+      <td className="px-3 py-2 text-center text-text-secondary">
+        {editing ? (
+          <Select
+            className="h-8 w-20 text-sm"
+            value={unit}
+            onChange={(v) => setUnit(v as UnitCode)}
+            options={unitOptions}
+          />
+        ) : (
+          item.unit
+        )}
+      </td>
       <td className="px-3 py-2 text-center">
         {editing ? (
           <input

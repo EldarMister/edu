@@ -15,8 +15,7 @@ import {
   type Ingredient,
   type IngredientInput,
 } from './api';
-
-const UNITS = ['г', 'кг', 'мл', 'л', 'шт'];
+import { UNIT_OPTIONS, costUnitLabel, unitsForType, unitTypeOf, type UnitCode } from './units';
 
 export function IngredientsTab() {
   const [search, setSearch] = useState('');
@@ -93,7 +92,9 @@ export function IngredientsTab() {
                     <td className="px-4 py-3 text-center font-medium text-text-primary">
                       {qty(item.stock, item.unit)}
                     </td>
-                    <td className="px-4 py-3 text-center text-text-secondary">{money(item.avgCost)}</td>
+                    <td className="px-4 py-3 text-center text-text-secondary">
+                      {money(item.avgCost)}/{item.unit}
+                    </td>
                     <td className="px-4 py-3 text-center text-text-secondary">
                       {qty(item.lowStockThreshold, item.unit)}
                     </td>
@@ -156,7 +157,7 @@ function IngredientModal({ item, onClose }: { item: Ingredient | null; onClose: 
   const push = useNotifications((s) => s.push);
 
   const [name, setName] = useState(item?.name ?? '');
-  const [unit, setUnit] = useState(item?.unit ?? 'г');
+  const [unit, setUnit] = useState<UnitCode>(item?.displayUnit ?? 'g');
   const [stock, setStock] = useState(String(item?.stock ?? 0));
   const [avgCost, setAvgCost] = useState(String(item?.avgCost ?? 0));
   const [threshold, setThreshold] = useState(String(item?.lowStockThreshold ?? 0));
@@ -211,14 +212,14 @@ function IngredientModal({ item, onClose }: { item: Ingredient | null; onClose: 
             <Select
               className="h-11 w-full"
               value={unit}
-              onChange={setUnit}
-              options={UNITS.map((u) => ({ value: u, label: u }))}
+              onChange={(v) => setUnit(v as UnitCode)}
+              options={UNIT_OPTIONS}
             />
           </Field>
           <Field label="Текущий остаток">
             <input className="input" type="number" step="0.001" value={stock} onChange={(e) => setStock(e.target.value)} />
           </Field>
-          <Field label="Ср. себестоимость (с)">
+          <Field label={`Ср. себестоимость (${costUnitLabel(unit)})`}>
             <input className="input" type="number" step="0.01" value={avgCost} onChange={(e) => setAvgCost(e.target.value)} />
           </Field>
           <Field label="Порог низкого остатка">
@@ -232,8 +233,79 @@ function IngredientModal({ item, onClose }: { item: Ingredient | null; onClose: 
           </Field>
         </div>
         {error && <p className="text-sm text-danger">{error}</p>}
+        {isEdit && item && <AdjustBlock ingredient={item} />}
       </div>
     </Modal>
+  );
+}
+
+/** Блок ручной корректировки остатка: добавить / списать / установить (ТЗ §8). */
+function AdjustBlock({ ingredient }: { ingredient: Ingredient }) {
+  const { adjust } = useIngredientMutations();
+  const push = useNotifications((s) => s.push);
+  const [mode, setMode] = useState<'add' | 'writeoff' | 'set'>('add');
+  const [quantity, setQuantity] = useState('');
+  const [unit, setUnit] = useState<UnitCode>(ingredient.displayUnit);
+  const [error, setError] = useState('');
+
+  const unitOptions = unitsForType(unitTypeOf(ingredient.displayUnit));
+  const MODE_LABEL = { add: 'Добавить', writeoff: 'Списать', set: 'Установить остаток' } as const;
+
+  async function onApply() {
+    setError('');
+    const q = Number(quantity);
+    if (!Number.isFinite(q) || q < 0) {
+      setError('Укажите количество');
+      return;
+    }
+    try {
+      await adjust.mutateAsync({ id: ingredient.id, mode, quantity: q, unit });
+      setQuantity('');
+      push({ message: `${MODE_LABEL[mode]}: ${q} ${unitOptions.find((u) => u.value === unit)?.label ?? ''}`, at: new Date().toISOString() });
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-background/40 p-3">
+      <p className="mb-2 text-xs font-medium text-text-secondary">Корректировка остатка</p>
+      <div className="grid grid-cols-[1.1fr_0.9fr_0.7fr_auto] items-end gap-2">
+        <Field label="Операция">
+          <Select
+            className="h-9 w-full text-sm"
+            value={mode}
+            onChange={(v) => setMode(v as 'add' | 'writeoff' | 'set')}
+            options={[
+              { value: 'add', label: 'Добавить' },
+              { value: 'writeoff', label: 'Списать' },
+              { value: 'set', label: 'Установить' },
+            ]}
+          />
+        </Field>
+        <Field label="Кол-во">
+          <input
+            className="input h-9 text-sm"
+            type="number"
+            step="0.001"
+            value={quantity}
+            onChange={(e) => setQuantity(e.target.value)}
+          />
+        </Field>
+        <Field label="Ед.">
+          <Select
+            className="h-9 w-full text-sm"
+            value={unit}
+            onChange={(v) => setUnit(v as UnitCode)}
+            options={unitOptions}
+          />
+        </Field>
+        <button type="button" className="btn-secondary btn-md h-9" onClick={onApply} disabled={adjust.isPending}>
+          {adjust.isPending ? <Spinner className="h-4 w-4" /> : 'Применить'}
+        </button>
+      </div>
+      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
+    </div>
   );
 }
 

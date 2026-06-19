@@ -1,0 +1,47 @@
+// Единицы измерения склада (зеркало backend/src/warehouse/units.ts).
+// Бэкенд отдаёт значения уже в display-единице + кириллическую метку `unit`,
+// поэтому здесь нужны только: список единиц по типу и конвертация для форм.
+
+export type UnitType = 'mass' | 'volume' | 'count';
+export type UnitCode = 'g' | 'kg' | 'ml' | 'l' | 'pcs';
+
+interface UnitDef {
+  code: UnitCode;
+  type: UnitType;
+  factor: number;
+  label: string;
+}
+
+const UNITS: Record<UnitCode, UnitDef> = {
+  g: { code: 'g', type: 'mass', factor: 1, label: 'г' },
+  kg: { code: 'kg', type: 'mass', factor: 1000, label: 'кг' },
+  ml: { code: 'ml', type: 'volume', factor: 1, label: 'мл' },
+  l: { code: 'l', type: 'volume', factor: 1000, label: 'л' },
+  pcs: { code: 'pcs', type: 'count', factor: 1, label: 'шт' },
+};
+
+export const ALL_UNITS: UnitDef[] = Object.values(UNITS);
+
+export function unitLabel(code: UnitCode): string {
+  return UNITS[code]?.label ?? code;
+}
+
+export function unitTypeOf(code: UnitCode): UnitType {
+  return UNITS[code]?.type ?? 'count';
+}
+
+/** Единицы того же типа — для селекта в строке техкарты/закупки. */
+export function unitsForType(type: UnitType): Array<{ value: UnitCode; label: string }> {
+  return ALL_UNITS.filter((u) => u.type === type).map((u) => ({ value: u.code, label: u.label }));
+}
+
+/** Опции селекта единицы ингредиента (все 5). */
+export const UNIT_OPTIONS: Array<{ value: UnitCode; label: string }> = ALL_UNITS.map((u) => ({
+  value: u.code,
+  label: u.label,
+}));
+
+/** «с/кг», «с/шт» … */
+export function costUnitLabel(code: UnitCode): string {
+  return `с/${unitLabel(code)}`;
+}

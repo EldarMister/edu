@@ -5,13 +5,21 @@ const get = async <T>(url: string) => (await api.get<T>(url)).data;
 
 // ---------- Типы ----------
 
+import type { UnitCode, UnitType } from './units';
+
 export interface Ingredient {
   id: string;
   name: string;
-  unit: string;
-  stock: number;
-  avgCost: number;
+  unitType: UnitType;
+  baseUnit: UnitCode;
+  displayUnit: UnitCode;
+  unit: string; // кириллица display-единицы
+  stock: number; // в display-единице
+  avgCost: number; // за display-единицу
   lowStockThreshold: number;
+  costUnitLabel: string; // «с/кг»
+  stockBase: number;
+  avgCostBase: number;
   isActive: boolean;
   isLow: boolean;
 }
@@ -26,11 +34,15 @@ export interface RecipeItem {
   id: string;
   ingredientId: string;
   name: string;
-  unit: string;
-  amount: number;
-  avgCost: number;
+  unit: string; // кириллица amountUnit
+  amountUnit: UnitCode;
+  unitType: UnitType;
+  ingredientDisplayUnit: UnitCode;
+  amount: number; // в amountUnit
+  avgCost: number; // за amountUnit
+  costUnitLabel: string;
   lineCost: number;
-  stock: number;
+  stock: number; // в amountUnit
   isLow: boolean;
   isActive: boolean;
 }
@@ -50,7 +62,8 @@ export interface PurchaseItem {
   id: string;
   ingredientId: string;
   ingredientName: string;
-  unit: string;
+  unit: string; // кириллица
+  unitCode: UnitCode;
   quantity: number;
   purchasePrice: number;
   total: number;
@@ -191,7 +204,12 @@ export function useIngredientMutations() {
       api.delete(`/admin/warehouse/ingredients/${id}`).then((r) => r.data),
     onSuccess: invalidate,
   });
-  return { create, update, remove };
+  const adjust = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; mode: 'add' | 'writeoff' | 'set'; quantity: number; unit: string }) =>
+      api.post<Ingredient>(`/admin/warehouse/ingredients/${id}/adjust`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove, adjust };
 }
 
 // ---------- Техкарта ----------
@@ -211,13 +229,13 @@ export function useRecipeMutations(dishId: string | null) {
     qc.invalidateQueries({ queryKey: KEY });
   };
   const addItem = useMutation({
-    mutationFn: (body: { ingredientId: string; amount: number }) =>
+    mutationFn: (body: { ingredientId: string; amount: number; unit?: string }) =>
       api.post<Recipe>(`/admin/warehouse/dishes/${dishId}/recipe`, body).then((r) => r.data),
     onSuccess: invalidate,
   });
   const updateItem = useMutation({
-    mutationFn: ({ id, amount }: { id: string; amount: number }) =>
-      api.patch<Recipe>(`/admin/warehouse/recipe/${id}`, { amount }).then((r) => r.data),
+    mutationFn: ({ id, amount, unit }: { id: string; amount: number; unit?: string }) =>
+      api.patch<Recipe>(`/admin/warehouse/recipe/${id}`, { amount, unit }).then((r) => r.data),
     onSuccess: invalidate,
   });
   const removeItem = useMutation({
@@ -258,7 +276,7 @@ export function usePurchasesOverview() {
 export interface CreatePurchaseInput {
   date?: string;
   supplier: string;
-  items: { ingredientId: string; quantity: number; purchasePrice?: number; total?: number }[];
+  items: { ingredientId: string; quantity: number; unit?: string; purchasePrice?: number; total?: number }[];
   complete?: boolean;
 }
 
@@ -266,7 +284,7 @@ export interface UpdatePurchaseInput {
   id: string;
   date?: string;
   supplier?: string;
-  items?: { ingredientId: string; quantity: number; purchasePrice?: number; total?: number }[];
+  items?: { ingredientId: string; quantity: number; unit?: string; purchasePrice?: number; total?: number }[];
 }
 
 export function usePurchaseMutations() {
