@@ -8,7 +8,7 @@
  * Очередь: озвучки проигрываются строго по очереди и не перебивают друг друга.
  */
 import { api } from '@/lib/api';
-import { getKitchenVoiceSettings } from './kitchenVoiceSettings';
+import { getKitchenVoiceSettings, type KitchenVoiceSettings } from './kitchenVoiceSettings';
 
 class KitchenVoice {
   private queue: string[] = [];
@@ -22,6 +22,16 @@ class KitchenVoice {
     if (!getKitchenVoiceSettings().voiceEnabled) return;
     this.queue.push(t);
     void this.pump();
+  }
+
+  /** Проиграть тестовую фразу сразу, с текущей конфигурацией, без проверки voiceEnabled. */
+  async test(text: string, settings: KitchenVoiceSettings = getKitchenVoiceSettings()) {
+    const t = text.trim();
+    if (!t) return;
+    this.queue = [];
+    this.current?.pause();
+    this.current = null;
+    await this.playText(t, settings, true);
   }
 
   private async pump() {
@@ -42,9 +52,12 @@ class KitchenVoice {
     }
   }
 
-  private async playText(text: string): Promise<void> {
-    const settings = getKitchenVoiceSettings();
-    if (!settings.voiceEnabled) return;
+  private async playText(
+    text: string,
+    settings: KitchenVoiceSettings = getKitchenVoiceSettings(),
+    force = false,
+  ): Promise<void> {
+    if (!force && !settings.voiceEnabled) return;
     const res = await api.post(
       '/tts/synthesize',
       {
