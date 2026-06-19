@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { money } from '@/lib/format';
 import { useWarehouseOverview, qty, type StockMovementType } from './api';
+import { StockTrendChart } from './StockTrendChart';
 
 type PeriodPreset = 'today' | 'week' | 'month' | 'custom';
 
@@ -68,7 +69,7 @@ export function WarehouseOverviewTab() {
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
             <Panel title="Динамика остатков">
-              <StockLineChart data={data?.stockValueTrend ?? []} />
+              <StockTrendChart data={data?.stockValueTrend ?? []} />
             </Panel>
             <Panel title="Критично / низкий остаток">
               <CompactTable
@@ -220,45 +221,6 @@ function CompactTable({ headers, rows, empty }: { headers: string[]; rows: strin
   );
 }
 
-function StockLineChart({ data }: { data: Array<{ date: string; value: number }> }) {
-  if (data.length === 0) {
-    return <div className="rounded-lg border border-dashed border-border py-20 text-center text-sm text-text-muted">Нет данных для графика</div>;
-  }
-
-  const width = 720;
-  const height = 230;
-  const padX = 38;
-  const padY = 22;
-  const max = Math.max(...data.map((item) => item.value), 1);
-  const min = Math.min(...data.map((item) => item.value), 0);
-  const spread = Math.max(max - min, 1);
-  const points = data.map((item, index) => {
-    const x = padX + (index * (width - padX * 2)) / Math.max(data.length - 1, 1);
-    const y = height - padY - ((item.value - min) * (height - padY * 2)) / spread;
-    return { ...item, x, y };
-  });
-  const path = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ');
-  const grid = [0, 1, 2, 3].map((i) => padY + (i * (height - padY * 2)) / 3);
-
-  return (
-    <div className="overflow-hidden">
-      <svg viewBox={`0 0 ${width} ${height}`} className="h-[230px] w-full">
-        {grid.map((y) => (
-          <line key={y} x1={padX} x2={width - padX} y1={y} y2={y} stroke="#e5e7eb" strokeDasharray="4 4" />
-        ))}
-        <path d={path} fill="none" stroke="#0b63f6" strokeWidth="2.5" />
-        {points.map((point) => (
-          <circle key={point.date} cx={point.x} cy={point.y} r="3.5" fill="white" stroke="#0b63f6" strokeWidth="2" />
-        ))}
-      </svg>
-      <div className="flex justify-between gap-2 text-xs text-text-muted">
-        <span>{formatDate(data[0]?.date)}</span>
-        <span>{formatDate(data[data.length - 1]?.date)}</span>
-      </div>
-    </div>
-  );
-}
-
 function localDate(date: Date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -270,11 +232,6 @@ function addDays(date: Date, days: number) {
   const next = new Date(date);
   next.setDate(next.getDate() + days);
   return next;
-}
-
-function formatDate(value?: string) {
-  if (!value) return '';
-  return new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: 'short' }).format(new Date(value));
 }
 
 function formatTime(value: string) {
