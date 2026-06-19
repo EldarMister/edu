@@ -210,21 +210,25 @@ export function KitchenApp({
                   : 'Отказанных заказов нет'}
           </p>
         ) : (
-          <div className="grid items-start grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          // Masonry через CSS-колонки: карточки разной высоты упаковываются
+          // плотно по вертикали, без пустот «по высоте самой длинной в ряду»,
+          // как было у grid (Сет с раскрытым составом тянул весь ряд).
+          <div className="columns-1 gap-4 sm:columns-2 lg:columns-3 xl:columns-4">
             {orders.map((o) => (
-              <KitchenOrderCard
-                key={o.id}
-                order={o}
-                tab={tab}
-                now={now}
-                submitting={actingId === o.id}
-                pendingItemIds={
-                  pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []
-                }
-                pendingType={pending?.orderId === o.id ? pending.type : null}
-                onAccept={() => act(o.id, () => accept.mutateAsync(o.id))}
-                onBatch={(type, ids) => onBatch(o.id, type, ids)}
-              />
+              <div key={o.id} className="mb-4 break-inside-avoid">
+                <KitchenOrderCard
+                  order={o}
+                  tab={tab}
+                  now={now}
+                  submitting={actingId === o.id}
+                  pendingItemIds={
+                    pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []
+                  }
+                  pendingType={pending?.orderId === o.id ? pending.type : null}
+                  onAccept={() => act(o.id, () => accept.mutateAsync(o.id))}
+                  onBatch={(type, ids) => onBatch(o.id, type, ids)}
+                />
+              </div>
             ))}
           </div>
         )}
