@@ -1,8 +1,8 @@
 """
 Silero TTS микросервис для озвучки кухни (self-hosted, бесплатный).
 
-Основная модель: v4_ru + speaker baya.
-Fallback:        v3_1_ru + speaker baya (только если v4_ru не загрузилась/упала).
+Основная модель: v5_2_ru + speaker baya.
+Fallback:        v4_ru + speaker baya (только если v5_2_ru не загрузилась/упала).
 
 Сервис ТОЛЬКО синтезирует переданный текст в WAV. Формирование текста
 (номер прописью, точки между блюдами, voiceName блюд) — на стороне backend.
@@ -34,8 +34,8 @@ log = logging.getLogger("silero-tts")
 
 # ---- Конфигурация ----
 MODELS_DIR = os.environ.get("TTS_MODELS_DIR", os.path.join(os.path.dirname(__file__), "models"))
-DEFAULT_MODEL = os.environ.get("TTS_MODEL", "v4_ru")          # основная модель
-FALLBACK_MODEL = os.environ.get("TTS_FALLBACK_MODEL", "v3_1_ru")
+DEFAULT_MODEL = os.environ.get("TTS_MODEL", "v5_2_ru")          # основная модель
+FALLBACK_MODEL = os.environ.get("TTS_FALLBACK_MODEL", "v4_ru")
 DEFAULT_SPEAKER = os.environ.get("TTS_SPEAKER", "baya")
 # 24000 Гц — критично для скорости: на 48000 синтез в ~10x медленнее (дорогой
 # вокодер-апсемплинг), а для кухонных колонок качества 24 кГц достаточно.
@@ -54,10 +54,10 @@ MAX_CHUNK_CHARS = int(os.environ.get("TTS_MAX_CHUNK_CHARS", "800"))
 # Пауза между склеенными кусками (сек), чтобы речь не «слипалась».
 CHUNK_GAP_SEC = float(os.environ.get("TTS_CHUNK_GAP_SEC", "0.25"))
 
-# Разрешённые русские модели. v5* намеренно НЕ поддерживаются (см. ТЗ).
+# Разрешённые русские модели: v5_2_ru как основная, v4_ru как fallback.
 MODEL_URLS = {
+    "v5_2_ru": "https://models.silero.ai/models/tts/ru/v5_2_ru.pt",
     "v4_ru": "https://models.silero.ai/models/tts/ru/v4_ru.pt",
-    "v3_1_ru": "https://models.silero.ai/models/tts/ru/v3_1_ru.pt",
 }
 
 torch.set_num_threads(THREADS)
@@ -156,20 +156,21 @@ def _synthesize(text: str, model_name: str, speaker: str, sample_rate: int) -> b
     return buf.getvalue()
 
 
-def _synthesize_with_fallback(text: str, primary: str, speaker: str, sample_rate: int) -> tuple[bytes, str, float]:
-    """Основная модель → при ошибке fallback (v3_1_ru). Возвращает (wav, модель, секунды)."""
+def _synthesize_with_fallback(text: str, primary: str, fallback: str, speaker: str, sample_rate: int) -> tuple[bytes, str, float]:
+    """Основная модель → при ошибке fallback. Возвращает (wav, модель, секунды)."""
     t0 = time.time()
     try:
         return _synthesize(text, primary, speaker, sample_rate), primary, time.time() - t0
     except Exception as exc:  # noqa: BLE001
-        log.error("Модель %s упала: %s. Fallback → %s.", primary, exc, FALLBACK_MODEL)
-        wav = _synthesize(text, FALLBACK_MODEL, speaker, sample_rate)
-        return wav, FALLBACK_MODEL, time.time() - t0
+        log.error("Модель %s упала: %s. Fallback → %s.", primary, exc, fallback)
+        wav = _synthesize(text, fallback, speaker, sample_rate)
+        return wav, fallback, time.time() - t0
 
 
 class SynthRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     model: Optional[str] = None
+    fallback_model: Optional[str] = None
     speaker: Optional[str] = None
     sample_rate: Optional[int] = None
 
@@ -189,7 +190,7 @@ async def lifespan(_app: "FastAPI"):
         t0 = time.time()
         for w in warmups:
             await loop.run_in_executor(
-                _executor, _synthesize_with_fallback, w, DEFAULT_MODEL, DEFAULT_SPEAKER, DEFAULT_SAMPLE_RATE
+                _executor, _synthesize_with_fallback, w, DEFAULT_MODEL, FALLBACK_MODEL, DEFAULT_SPEAKER, DEFAULT_SAMPLE_RATE
             )
         log.info("Прогрев модели %s (%d фраз) завершён за %.2f c.", DEFAULT_MODEL, len(warmups), time.time() - t0)
     except Exception as exc:  # noqa: BLE001
@@ -219,13 +220,16 @@ async def synthesize(req: SynthRequest) -> Response:
     if not text:
         raise HTTPException(status_code=400, detail="Пустой текст")
     speaker = req.speaker or DEFAULT_SPEAKER
+    if speaker == "ksenia":
+        speaker = "kseniya"
     sample_rate = req.sample_rate or DEFAULT_SAMPLE_RATE
     primary = req.model or DEFAULT_MODEL
+    fallback = req.fallback_model or FALLBACK_MODEL
 
     loop = asyncio.get_event_loop()
     try:
         wav, used, took = await loop.run_in_executor(
-            _executor, _synthesize_with_fallback, text, primary, speaker, sample_rate
+            _executor, _synthesize_with_fallback, text, primary, fallback, speaker, sample_rate
         )
     except Exception as exc:  # noqa: BLE001
         log.error("Синтез не удался (включая fallback): %s", exc)

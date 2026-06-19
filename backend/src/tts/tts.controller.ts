@@ -19,7 +19,11 @@ export class TtsController {
   @Post('synthesize')
   async synthesize(@Body() dto: SynthesizeDto, @Res() res: Response) {
     try {
-      const wav = await this.tts.synthesize(dto.text);
+      const wav = await this.tts.synthesize(dto.text, {
+        speaker: dto.speaker,
+        preferredModel: dto.preferredModel,
+        fallbackModel: dto.fallbackModel,
+      });
       res.setHeader('Content-Type', 'audio/wav');
       res.setHeader('Cache-Control', 'public, max-age=86400');
       res.send(wav);

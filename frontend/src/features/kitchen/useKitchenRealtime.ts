@@ -5,6 +5,7 @@ import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/lib/format';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import { kitchenVoice } from '@/services/kitchenVoice';
+import { getKitchenVoiceSettings } from '@/services/kitchenVoiceSettings';
 import type { Order, PrepStation } from '@/types';
 
 /** Заказ из сокета может нести готовый текст озвучки (формирует backend). */
@@ -32,20 +33,22 @@ export function useKitchenRealtime(station: PrepStation = 'kitchen') {
     invalidate();
     const text = stationVoice(order, station);
     if (!text) return;
+    const settings = getKitchenVoiceSettings();
 
-    // 1. Звук уведомления.
-    beep('newOrder');
+    // 1. Обычные уведомления: звук + визуальный toast.
+    if (settings.notificationsEnabled) {
+      beep('newOrder');
 
-    // 2. Тост.
-    const orderNumber = displayOrderNumber(order.orderNumber);
-    push({
-      message: `Новый заказ ${orderNumber} · Стол ${order.table?.number}`,
-      orderId: order.id,
-      orderNumber,
-      at: new Date().toISOString(),
-    });
+      const orderNumber = displayOrderNumber(order.orderNumber);
+      push({
+        message: `Новый заказ ${orderNumber} · Стол ${order.table?.number}`,
+        orderId: order.id,
+        orderNumber,
+        at: new Date().toISOString(),
+      });
+    }
 
-    // 3. Озвучка — текст уже сформирован backend для конкретной станции.
+    // 2. Озвучка — текст уже сформирован backend для конкретной станции.
     kitchenVoice.enqueue(text);
   });
 
@@ -56,7 +59,7 @@ export function useKitchenRealtime(station: PrepStation = 'kitchen') {
     // Backend добавляет voice.text только для полной отмены/отказа — озвучиваем.
     const text = stationVoice(order, station);
     if (text) {
-      beep('notify');
+      if (getKitchenVoiceSettings().notificationsEnabled) beep('notify');
       kitchenVoice.enqueue(text);
     }
   });

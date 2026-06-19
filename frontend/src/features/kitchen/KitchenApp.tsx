@@ -11,6 +11,7 @@ import type { PrepStation } from '@/types';
 import { useKitchenOrders, useAccept, useReadyItems, useRejectItems, type KitchenTab } from './api';
 import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
+import { KitchenVoiceSettings } from './KitchenVoiceSettings';
 
 const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'new', label: 'Новые' },
@@ -181,12 +182,15 @@ export function KitchenApp({
             </button>
           ))}
         </div>
-        <button
-          onClick={() => setStopListOpen(true)}
-          className="shrink-0 rounded-lg border border-primary bg-white px-3.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
-        >
-          Стоп-лист
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <KitchenVoiceSettings />
+          <button
+            onClick={() => setStopListOpen(true)}
+            className="shrink-0 rounded-lg border border-primary bg-white px-3.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
+          >
+            Стоп-лист
+          </button>
+        </div>
       </div>
 
       {/* Лента заказов */}

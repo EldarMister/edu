@@ -2,10 +2,10 @@
 
 Self-hosted, бесплатная озвучка кухни (русский) на [Silero TTS](https://github.com/snakers4/silero-models).
 
-- **Основная модель:** `v4_ru` + speaker `baya`
-- **Fallback:** `v3_1_ru` + speaker `baya` (только если v4_ru упала)
+- **Основная модель:** `v5_2_ru` + speaker `baya`
+- **Fallback:** `v4_ru` + speaker `baya` (только если v5_2_ru упала)
 - **Sample rate:** `24000` Гц — критично для скорости (на 48000 синтез в ~10x медленнее).
-- v5-модели не используются.
+- Голоса для `v5_2_ru`: `aidar`, `baya`, `kseniya`, `xenia`, `eugene`.
 
 Сервис только **синтезирует** переданный текст в WAV. Формирование текста
 (номер прописью, точки между блюдами, `voiceName` блюд) — на стороне backend (NestJS).
@@ -40,7 +40,7 @@ venv/Scripts/uvicorn app:app --host 0.0.0.0 --port 8001
 ## API
 
 - `GET /health` → статус, загруженные модели.
-- `POST /synthesize` `{ "text": "...", "model"?: "v4_ru", "speaker"?: "baya", "sample_rate"?: 24000 }`
+- `POST /synthesize` `{ "text": "...", "model"?: "v5_2_ru", "fallback_model"?: "v4_ru", "speaker"?: "baya", "sample_rate"?: 24000 }`
   → `audio/wav`. Заголовки ответа: `X-TTS-Model`, `X-TTS-Seconds`.
 
 ## Переменные окружения
@@ -48,8 +48,8 @@ venv/Scripts/uvicorn app:app --host 0.0.0.0 --port 8001
 | Переменная | По умолчанию | Описание |
 |---|---|---|
 | `PORT` | `8001` | Порт сервиса |
-| `TTS_MODEL` | `v4_ru` | Основная модель |
-| `TTS_FALLBACK_MODEL` | `v3_1_ru` | Fallback |
+| `TTS_MODEL` | `v5_2_ru` | Основная модель |
+| `TTS_FALLBACK_MODEL` | `v4_ru` | Fallback |
 | `TTS_SPEAKER` | `baya` | Голос |
 | `TTS_SAMPLE_RATE` | `24000` | Частота |
 | `TTS_THREADS` | число CPU | Потоки torch |
