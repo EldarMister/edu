@@ -9,6 +9,7 @@ import { Spinner } from '@/components/Spinner';
 const SLOW_AFTER = 20 * 60;
 
 const FINAL_ITEM_STATUSES: OrderItemStatus[] = ['rejected', 'cancelled', 'ready', 'served'];
+const QR_ORDER_COMMENT = 'Заказ из QR-меню';
 
 function kitchenCardBadgeStatus(order: Order, tab: KitchenTab): OrderStatus {
   if (tab !== 'ready' || order.status === 'paid') return order.status;
@@ -18,6 +19,26 @@ function kitchenCardBadgeStatus(order: Order, tab: KitchenTab): OrderStatus {
   if (activeItems.every((item) => item.status === 'served')) return 'served';
   if (activeItems.every((item) => item.status === 'ready' || item.status === 'served')) return 'ready';
   return order.status;
+}
+
+function isQrOrder(order: Order) {
+  return order.source === 'qr' || order.comment?.trim() === QR_ORDER_COMMENT;
+}
+
+function kitchenItemComment(comment: string | null, qrOrder: boolean) {
+  if (!comment) return null;
+  const value = comment.trim();
+  if (!qrOrder) return value;
+  const withoutGuestPrefix = value.replace(/^Гость\s+\d+\s*·\s*/, '').trim();
+  if (/^Гость\s+\d+$/.test(withoutGuestPrefix)) return null;
+  return withoutGuestPrefix || null;
+}
+
+function kitchenOrderComment(comment: string | null, qrOrder: boolean) {
+  if (!comment) return null;
+  const value = comment.trim();
+  if (qrOrder && value === QR_ORDER_COMMENT) return null;
+  return value;
 }
 
 export function KitchenOrderCard({
@@ -46,6 +67,8 @@ export function KitchenOrderCard({
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
   const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
   const badgeStatus = kitchenCardBadgeStatus(order, tab);
+  const qrOrder = isQrOrder(order);
+  const visibleOrderComment = kitchenOrderComment(order.comment, qrOrder);
   // Частичный отказ/ожидание решения — только если отказ есть среди позиций ЭТОЙ станции.
   // Станции независимы: отказ на баре не блокирует кухню и наоборот.
   const stationRejected = order.items.some((it) => it.status === 'rejected');
@@ -273,6 +296,11 @@ export function KitchenOrderCard({
         <div className="min-w-0">
           <p className="text-lg font-bold leading-tight text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
           <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}{hallSuffix(order.table)}</p>
+          {qrOrder && (
+            <p className="mt-2 inline-flex rounded-lg bg-warning/10 px-2.5 py-1 text-[12px] font-medium text-warning">
+              {QR_ORDER_COMMENT}
+            </p>
+          )}
         </div>
         <div className="text-right">
           <p className="text-[13px] text-text-muted">
@@ -291,7 +319,7 @@ export function KitchenOrderCard({
         </div>
       </div>
 
-      <p className="mt-0.5 text-[13px] text-text-muted">Официант: {order.waiter.name}</p>
+      {order.waiter && <p className="mt-0.5 text-[13px] text-text-muted">Официант: {order.waiter.name}</p>}
 
       {allTakeaway && (
         <div className="mt-2">
@@ -318,12 +346,13 @@ export function KitchenOrderCard({
       <ul className="mt-4 space-y-3 border-t border-border pt-4">
         {order.items.map((it) => {
           const itemName = orderItemDisplayName(it);
+          const itemComment = kitchenItemComment(it.comment, qrOrder);
           const setParts = it.setComponents ?? [];
           const isSet = setParts.length > 0;
           const header = (
             <>
               <span className="font-semibold">{it.quantity}×</span> {itemName}
-              {it.comment && <span className="text-warning font-medium"> · {it.comment}</span>}
+              {itemComment && <span className="text-warning font-medium"> · {itemComment}</span>}
               {/* Точечная метка «с собой» — только если весь заказ не навынос. */}
               {it.takeaway && !allTakeaway && (
                 <span className="ml-1.5 inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 align-middle text-[11px] font-semibold text-primary">
@@ -442,8 +471,8 @@ export function KitchenOrderCard({
         })}
       </ul>
 
-      {order.comment && (
-        <p className="mt-2.5 rounded-lg bg-warning/10 px-2.5 py-1.5 text-[13px] text-warning">{order.comment}</p>
+      {visibleOrderComment && (
+        <p className="mt-2.5 rounded-lg bg-warning/10 px-2.5 py-1.5 text-[13px] text-warning">{visibleOrderComment}</p>
       )}
 
       {waitingDecision && (

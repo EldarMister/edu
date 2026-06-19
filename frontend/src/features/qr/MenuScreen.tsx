@@ -8,13 +8,17 @@ import { pluralItems } from './plural';
 export function MenuScreen({
   menu,
   session,
+  hasSubmittedOrder,
   onOpenDish,
   onOpenOrder,
+  onOpenSubmittedOrder,
 }: {
   menu: QrMenu;
   session: QrSession | undefined;
+  hasSubmittedOrder: boolean;
   onOpenDish: (dish: QrDish) => void;
   onOpenOrder: () => void;
+  onOpenSubmittedOrder: () => void;
 }) {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
@@ -39,7 +43,7 @@ export function MenuScreen({
   const sharedOrder = activeGuestCount > 1;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       <QrHeader tableNumber={menu.table.number} />
 
       <div className="min-h-0 flex-1 overflow-y-auto app-scrollbar-subtle">
@@ -96,26 +100,88 @@ export function MenuScreen({
         <div className="h-24" />
       </div>
 
-      {/* Sticky: общий заказ (только если есть позиции) */}
-      {itemCount > 0 && (
-        <div className="shrink-0 px-2 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          <button
-            type="button"
-            onClick={onOpenOrder}
-            className="flex w-full items-center gap-3 rounded-lg bg-primary px-4 py-3 text-left text-white transition-colors hover:bg-primary-hover"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l-1 11H6L5 9z" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[15px] font-semibold leading-tight">{sharedOrder ? 'Общий заказ' : 'Корзина'}</span>
-              <span className="flex items-center gap-1 text-[13px] text-white/85">
-                <span>{pluralItems(itemCount)} ·</span>
-                <NumberTicker value={Number(session?.totalAmount ?? 0)} />
-              </span>
-            </span>
-            <span className="rounded-lg bg-white/15 px-3 py-1.5 text-[14px] font-bold">{sharedOrder ? 'Заказ' : 'Открыть'}</span>
-          </button>
+      {/* Низ экрана: панель общего заказа + круглая кнопка «Мои заказы» в вырезе панели */}
+      {(itemCount > 0 || hasSubmittedOrder) && (
+        <div className="relative shrink-0">
+          {/* Панель общего заказа (только если есть позиции). При наличии «Мои заказы»
+              в верхнем крае делаем полукруглый вырез радиальным градиентом. */}
+          {itemCount > 0 && (
+            <div
+              className="px-4 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-3"
+              style={{
+                background: hasSubmittedOrder
+                  ? 'radial-gradient(circle 36px at 50% 12px, transparent 0 35px, #005BFF 36px)'
+                  : '#005BFF',
+              }}
+            >
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  onClick={onOpenOrder}
+                  className="flex min-w-0 flex-1 items-center gap-2.5 text-left text-white"
+                >
+                  <svg className="shrink-0" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M16 11V7a4 4 0 0 0-8 0v4M5 9h14l-1 11H6L5 9z" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[15px] font-bold leading-tight">{sharedOrder ? 'Общий заказ' : 'Корзина'}</span>
+                    <span className="flex items-center gap-1 text-[12px] text-white/85">
+                      <span>{pluralItems(itemCount)} ·</span>
+                      <NumberTicker value={Number(session?.totalAmount ?? 0)} />
+                    </span>
+                  </span>
+                </button>
+
+                {/* Резерв под центральную кнопку, чтобы корзина и «Открыть» не конфликтовали */}
+                {hasSubmittedOrder && <div aria-hidden className="w-[76px] shrink-0" />}
+
+                <div className="flex flex-1 justify-end">
+                  <button
+                    type="button"
+                    onClick={onOpenOrder}
+                    className="text-[15px] font-bold text-white transition-opacity hover:opacity-90"
+                  >
+                    Открыть
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Кнопка «Мои заказы»: при наличии корзины — круглая, в вырезе панели;
+              без корзины — по центру внизу. */}
+          {hasSubmittedOrder && (
+            <div
+              className={
+                itemCount > 0
+                  ? 'pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center'
+                  : 'flex justify-center pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2'
+              }
+              style={itemCount > 0 ? { transform: 'translateY(-20px)' } : undefined}
+            >
+              <button
+                type="button"
+                onClick={onOpenSubmittedOrder}
+                className="pointer-events-auto flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-full bg-white text-[#1E40AF] shadow-[0_2px_10px_rgba(15,23,42,0.18)] transition-transform active:scale-95"
+              >
+                <svg
+                  width="17"
+                  height="17"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M16 10V7a4 4 0 0 0-8 0v3" />
+                  <path d="M5.5 9.5h13l-.8 10.5H6.3L5.5 9.5Z" />
+                </svg>
+                <span className="whitespace-nowrap text-[10px] font-semibold leading-none text-text-primary">Мои заказы</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

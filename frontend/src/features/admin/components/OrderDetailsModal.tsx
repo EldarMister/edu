@@ -39,7 +39,7 @@ export function OrderDetailsModal({
           <Info label="Статус" value={<OrderBadge status={order.status} />} />
           <Info label="Дата" value={`${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`} />
           <Info label="Стол" value={`Стол ${order.table.number}${hallSuffix(order.table)}`} />
-          <Info label="Официант" value={order.waiter.name} />
+          <Info label="Официант" value={order.waiter?.name ?? 'QR menu'} />
           <Info label="Сумма" value={money(order.finalAmount)} strong />
           {Number(order.discountAmount) > 0 && <Info label="Скидка" value={money(order.discountAmount)} />}
           {order.paymentMethod && <Info label="Оплата" value={paymentDisplayLabel(order)} />}

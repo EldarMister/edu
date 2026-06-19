@@ -28,6 +28,7 @@ import { SettingsService } from '../settings/settings.service';
 import { DishPopularityService } from '../dishes/dish-popularity.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
+import { IngredientStockService } from '../warehouse/ingredient-stock.service';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
 import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu } from '../tts/kitchen-voice';
@@ -74,6 +75,7 @@ export class OrdersService {
     private settings: SettingsService,
     private dishPopularity: DishPopularityService,
     private audit: AuditService,
+    private ingredientStock: IngredientStockService,
   ) {}
 
   /** Денежный формат для человекочитаемых описаний аудита. */
@@ -89,17 +91,20 @@ export class OrdersService {
 
   async findByIdForActor(id: string, actor: AuditActor) {
     const order = await this.findById(id);
-    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     return order;
   }
 
-  /** Активные заказы официанта (не закрытые). */
+  /** Активные заказы официанта и QR-заказы без назначенного официанта. */
   findActiveForWaiter(waiterId: string) {
     return this.prisma.order.findMany({
       where: {
-        waiterId,
+        OR: [
+          { waiterId },
+          { source: 'qr', waiterId: null },
+        ],
         // rejected/cancelled заказы завершены и не должны числиться активными за столом.
         status: { notIn: [OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] },
       },
@@ -213,7 +218,7 @@ export class OrdersService {
           data: { status: initialTableStatus },
         });
         await this.deductInventory(tx, dishDeductions, variantDeductions);
-        return tx.order.create({
+        const createdOrder = await tx.order.create({
           data: {
             orderNumber,
             businessDate,
@@ -231,6 +236,9 @@ export class OrdersService {
           },
           include: orderInclude,
         });
+        // Списываем сырьё по техкартам блюд заказа (блюда без техкарты пропускаются).
+        await this.ingredientStock.applyDishSale(tx, createdOrder.id, itemsData);
+        return createdOrder;
       });
     } catch (err) {
       if (this.isUniqueConstraintError(err)) {
@@ -290,8 +298,16 @@ export class OrdersService {
    * смены. Переиспользует ту же сборку позиций/итогов/склада, что и обычное создание.
    * Не накладывает ограничение «один активный заказ на стол» — QR-заказы аддитивны.
    */
-  async createFromQr(params: { tableId: string; items: CreateOrderItemDto[]; comment?: string }) {
+  async createFromQr(params: { tableId: string; items: CreateOrderItemDto[]; comment?: string; idempotencyKey?: string }) {
     const { tableId } = params;
+    if (params.idempotencyKey) {
+      const existing = await this.prisma.order.findUnique({
+        where: { idempotencyKey: params.idempotencyKey },
+        include: orderInclude,
+      });
+      if (existing) return existing;
+    }
+
     const table = await this.prisma.table.findUnique({ where: { id: tableId } });
     if (!table || !table.isActive) {
       throw new NotFoundException('Стол не найден');
@@ -302,32 +318,55 @@ export class OrdersService {
     const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
     const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
 
-    const order = await this.prisma.$transaction(async (tx) => {
-      const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
-      const totals = this.calcTotals(itemsData, serviceChargeAmount);
-      const businessDate = this.businessDateOf();
-      const orderNumber = await this.nextOrderNumber(tx, businessDate);
-      await tx.table.update({ where: { id: tableId }, data: { status: initialTableStatus } });
-      await this.deductInventory(tx, dishDeductions, variantDeductions);
-      return tx.order.create({
-        data: {
-          orderNumber,
-          businessDate,
-          tableId,
-          waiterId: null,
-          waiterShiftId: null,
-          source: 'qr',
-          status: initialStatus,
-          comment: params.comment,
-          totalAmount: totals.total,
-          discountAmount: totals.discount,
-          serviceChargeAmount: totals.serviceCharge,
-          finalAmount: totals.final,
-          items: { create: itemsData },
-        },
-        include: orderInclude,
-      });
-    });
+    let order: Awaited<ReturnType<typeof this.findById>> | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        order = await this.prisma.$transaction(async (tx) => {
+          const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
+          const totals = this.calcTotals(itemsData, serviceChargeAmount);
+          const businessDate = this.businessDateOf();
+          const orderNumber = await this.nextOrderNumber(tx, businessDate);
+          await tx.table.update({ where: { id: tableId }, data: { status: initialTableStatus } });
+          await this.deductInventory(tx, dishDeductions, variantDeductions);
+          const createdOrder = await tx.order.create({
+            data: {
+              orderNumber,
+              businessDate,
+              tableId,
+              waiterId: null,
+              waiterShiftId: null,
+              source: 'qr',
+              status: initialStatus,
+              comment: params.comment,
+              idempotencyKey: params.idempotencyKey,
+              totalAmount: totals.total,
+              discountAmount: totals.discount,
+              serviceChargeAmount: totals.serviceCharge,
+              finalAmount: totals.final,
+              items: { create: itemsData },
+            },
+            include: orderInclude,
+          });
+          // Списываем сырьё по техкартам блюд заказа (блюда без техкарты пропускаются).
+          await this.ingredientStock.applyDishSale(tx, createdOrder.id, itemsData);
+          return createdOrder;
+        });
+        break;
+      } catch (err) {
+        if (!this.isUniqueConstraintError(err)) throw err;
+        if (params.idempotencyKey) {
+          const existing = await this.prisma.order.findUnique({
+            where: { idempotencyKey: params.idempotencyKey },
+            include: orderInclude,
+          });
+          if (existing) return existing;
+        }
+        if (attempt === 2) throw err;
+      }
+    }
+    if (!order) {
+      throw new BadRequestException('Не удалось создать QR-заказ');
+    }
 
     if (hasPrep) {
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
@@ -347,6 +386,14 @@ export class OrdersService {
       number: table.number,
       status: initialTableStatus,
       hallId: table.hallId,
+    });
+    this.events.emitToWaiters(SERVER_EVENTS.ORDER_STATUS_CHANGED, order);
+    this.events.emitToWaiters(SERVER_EVENTS.NOTIFICATION_NEW, {
+      message: `QR-заказ ${order.orderNumber} · Стол ${table.number}`,
+      type: 'info',
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      at: new Date().toISOString(),
     });
     // Админы видят все заказы — сообщим о новом QR-заказе.
     this.events.emitToAdmin(SERVER_EVENTS.ORDER_NEW, order);
@@ -392,6 +439,7 @@ export class OrdersService {
         ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.served].includes(item.status as any)
       );
       await this.restoreInventory(tx, itemsToCancel);
+      await this.ingredientStock.restoreDishSale(tx, orderId, itemsToCancel);
       await tx.orderItem.updateMany({
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.served] } },
         data: { status: OrderItemStatus.cancelled },
@@ -566,6 +614,7 @@ export class OrdersService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, order.items);
+      await this.ingredientStock.restoreDishSale(tx, orderId, order.items);
       const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
       const totals = this.calcTotals(itemsData, serviceChargeAmount);
       await tx.order.update({
@@ -586,6 +635,7 @@ export class OrdersService {
       await tx.orderItem.deleteMany({ where: { orderId } });
       await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
+      await this.ingredientStock.applyDishSale(tx, orderId, itemsData);
       return tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
     });
 
@@ -713,6 +763,7 @@ export class OrdersService {
       }
       await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
+      await this.ingredientStock.applyDishSale(tx, orderId, itemsData);
       await this.recalcOrder(tx, orderId);
       // Новые блюда снова уходят на кухню; если добавили только «Без отправки» —
       // статус заказа пересчитываем по составу, кухню не трогаем.
@@ -874,6 +925,7 @@ export class OrdersService {
         ![OrderItemStatus.rejected, OrderItemStatus.cancelled].includes(item.status as any)
       );
       await this.restoreInventory(tx, itemsToReject);
+      await this.ingredientStock.restoreDishSale(tx, orderId, itemsToReject);
       await tx.orderItem.updateMany({
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
         data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
@@ -918,6 +970,7 @@ export class OrdersService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, [item]);
+      await this.ingredientStock.restoreDishSale(tx, orderId, [item]);
       await tx.orderItem.update({
         where: { id: itemId },
         data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
@@ -1232,6 +1285,7 @@ export class OrdersService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.restoreInventory(tx, inventoryToRestore);
+      await this.ingredientStock.restoreDishSale(tx, orderId, inventoryToRestore);
       if (fullIds.length > 0) {
         await tx.orderItem.updateMany({
           where: { id: { in: fullIds }, orderId },
@@ -1305,6 +1359,7 @@ export class OrdersService {
         });
       }
       await this.restoreInventory(tx, setsRejected);
+      await this.ingredientStock.restoreDishSale(tx, orderId, setsRejected);
 
       // Если отказаны все блюда — заказ rejected, иначе partially_rejected.
       const remaining = await tx.orderItem.count({
@@ -1454,6 +1509,7 @@ export class OrdersService {
       });
       await this.createOrderItems(tx, orderId, itemsData);
       await this.deductInventory(tx, dishDeductions, variantDeductions);
+      await this.ingredientStock.applyDishSale(tx, orderId, itemsData);
       await this.recalcOrder(tx, orderId);
       const pending = await this.pendingRejectedDecisions(tx, orderId);
       const nextStatus = pending > 0 ? OrderStatus.partially_rejected : await this.statusFromActiveItems(tx, orderId);
@@ -1768,20 +1824,20 @@ export class OrdersService {
     const updated = await this.prisma.$transaction(async (tx) => {
       if (fromClosedCancelled && targetIsActive) {
         await this.deductExistingInventory(tx, order.items);
+        await this.ingredientStock.applyDishSale(tx, order.id, order.items);
       }
 
       if (!fromClosedCancelled && toClosedCancelled) {
-        await this.restoreInventory(
-          tx,
-          order.items.filter((item) => {
-            const closedItemStatuses: OrderItemStatus[] = [
-              OrderItemStatus.rejected,
-              OrderItemStatus.cancelled,
-              OrderItemStatus.served,
-            ];
-            return !closedItemStatuses.includes(item.status);
-          }),
+        const closedItemStatuses: OrderItemStatus[] = [
+          OrderItemStatus.rejected,
+          OrderItemStatus.cancelled,
+          OrderItemStatus.served,
+        ];
+        const itemsToRestore = order.items.filter(
+          (item) => !closedItemStatuses.includes(item.status),
         );
+        await this.restoreInventory(tx, itemsToRestore);
+        await this.ingredientStock.restoreDishSale(tx, order.id, itemsToRestore);
       }
 
       if (targetItemStatus) {
@@ -2369,10 +2425,14 @@ export class OrdersService {
   private async assertOwnedOrder(orderId: string, waiterId: string) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (order.waiterId !== waiterId) {
+    if (!this.canWaiterAccessOrder(order, waiterId)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     return order;
+  }
+
+  private canWaiterAccessOrder(order: { waiterId: string | null; source: string }, waiterId: string) {
+    return order.waiterId === waiterId || (order.source === 'qr' && order.waiterId === null);
   }
 
   // ---------- Действия со столом (закрыть / перенести / передать) ----------

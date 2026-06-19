@@ -77,7 +77,7 @@ export default defineConfig({
     } as Plugin,
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.png', 'sounds/*.mp3', 'sounds/*.wav', 'sounds/*.ogg'],
+      includeAssets: ['edupos.png', 'sounds/*.mp3', 'sounds/*.wav', 'sounds/*.ogg'],
       workbox: {
         importScripts: ['push-sw.js'],
         // Новый SW активируется сразу — не ждёт закрытия всех вкладок
@@ -96,7 +96,7 @@ export default defineConfig({
         display: 'standalone',
         start_url: '/',
         icons: [
-          { src: 'icon.png', sizes: '1254x1254', type: 'image/png', purpose: 'any maskable' },
+          { src: 'edupos.png', sizes: '1254x1254', type: 'image/png', purpose: 'any maskable' },
         ],
       },
       devOptions: { enabled: false },

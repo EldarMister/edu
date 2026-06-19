@@ -19,7 +19,10 @@ export class DishesService {
 
     const dishes = await this.prisma.dish.findMany({
       where,
-      orderBy: [{ categoryId: 'asc' }, { popularityScore: 'desc' }, { sortOrder: 'asc' }, { name: 'asc' }],
+      // Популярность — главный ключ: в «Все» самые заказываемые блюда поднимаются
+      // наверх по всему меню. Раньше первичной была сортировка по categoryId, из-за
+      // чего «Все» показывал просто первую по uuid категорию, игнорируя популярность.
+      orderBy: [{ popularityScore: 'desc' }, { sortOrder: 'asc' }, { name: 'asc' }],
       select: {
         id: true,
         categoryId: true,

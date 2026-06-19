@@ -8,7 +8,7 @@ export function BrandLogo({ className = '', size = 'header' }: BrandLogoProps) {
 
   return (
     <img
-      src="/icon1.png"
+      src="/icon1.png?v=edu-pos"
       alt="EDU POS"
       className={`${sizeClass} w-auto object-contain ${className}`}
     />

@@ -86,6 +86,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         // Бар получает ту же ленту, что и кухня; экран фильтрует позиции по станции.
         client.join(ROOMS.KITCHEN);
       } else if (user.role === 'WAITER') {
+        client.join(ROOMS.WAITERS);
         client.join(ROOMS.waiter(user.id));
       } else if (user.role === 'ADMIN' || user.role === 'OWNER') {
         client.join(ROOMS.ADMIN);
@@ -150,6 +151,10 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     // QR-заказ может быть без официанта — тогда персональной комнаты нет.
     if (!waiterId) return;
     this.server.to(ROOMS.waiter(waiterId)).emit(event, payload);
+  }
+
+  emitToWaiters(event: string, payload: unknown) {
+    this.server.to(ROOMS.WAITERS).emit(event, payload);
   }
 
   emitToAdmin(event: string, payload: unknown) {

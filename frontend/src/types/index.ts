@@ -193,7 +193,8 @@ export interface Order {
   requiresWaiterDecision: boolean;
   createdAt: string;
   table: { id: string; number: number; seats: number; hallId: string; status: TableStatus; hall?: { name: string } };
-  waiter: { id: string; name: string };
+  waiter: { id: string; name: string } | null;
+  source?: 'waiter' | 'qr';
   items: OrderItem[];
   /** Разбивка оплат (для смешанной — наличные + QR). Приходит в списке заказов админки. */
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];

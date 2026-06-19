@@ -165,3 +165,18 @@ export const IconCard = (p: P) => (
     <path d="M2 10h20" />
   </S>
 );
+export const IconCart = (p: P) => (
+  <S {...p}>
+    <circle cx="9" cy="20" r="1.4" />
+    <circle cx="18" cy="20" r="1.4" />
+    <path d="M2 3h2.5l2.2 12.2a1.5 1.5 0 0 0 1.5 1.3h8.4a1.5 1.5 0 0 0 1.5-1.2L21 7H5.2" />
+  </S>
+);
+export const IconWarehouse = (p: P) => (
+  <S {...p}>
+    <path d="M3 21V8l9-5 9 5v13" />
+    <path d="M3 21h18" />
+    <rect x="8" y="13" width="8" height="8" rx="1" />
+    <path d="M8 17h8" />
+  </S>
+);

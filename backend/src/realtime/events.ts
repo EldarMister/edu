@@ -4,6 +4,7 @@
  */
 export const ROOMS = {
   KITCHEN: 'role:kitchen',
+  WAITERS: 'role:waiters',
   ADMIN: 'role:admin',
   ADMIN_ONLY: 'role:admin-only',
   waiter: (waiterId: string) => `waiter:${waiterId}`,
