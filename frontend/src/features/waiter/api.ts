@@ -246,6 +246,7 @@ export const usePickedUp = () => useOrderAction((id) => `/orders/${id}/picked-up
 export const useServed = () => useOrderAction((id) => `/orders/${id}/served`);
 export const useToPayment = () => useOrderAction((id) => `/orders/${id}/to-payment`);
 export const useResolvePartialRejection = () => useOrderAction((id) => `/orders/${id}/resolve-partial-rejection`);
+export const useClaimQrOrder = () => useOrderAction((id) => `/orders/${id}/claim-qr`);
 
 export function useRemoveRejectedItem() {
   const qc = useQueryClient();

@@ -147,6 +147,11 @@ export function useWaiterRealtime() {
   });
 
   useSocketEvent<VoicedOrder>('order:status_changed', (order) => {
+    if (order.source === 'qr' && order.waiter?.id && order.waiter.id !== userId) {
+      qc.setQueryData<Order[]>(['orders', 'active'], (current) => current?.filter((item) => item.id !== order.id));
+      invalidate();
+      return;
+    }
     applyOrderStatusToCache(qc, order);
     invalidate();
 

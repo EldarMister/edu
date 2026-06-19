@@ -8,11 +8,15 @@ import { useT } from '@/lib/i18n';
 export function OrdersList({
   orders,
   onOpen,
+  onClaimQr,
+  claimPending,
   onEdit,
   onCancel,
 }: {
   orders: Order[];
   onOpen: (order: Order) => void;
+  onClaimQr: (order: Order) => void;
+  claimPending?: boolean;
   onEdit: (order: Order) => void;
   onCancel: (order: Order) => void;
 }) {
@@ -33,6 +37,7 @@ export function OrdersList({
     <div className="space-y-3 px-1.5">
       {sortedOrders.map((o) => {
         const attention = isAttentionOrder(o);
+        const unclaimedQr = isUnclaimedQrOrder(o);
         return (
           <div
             key={o.id}
@@ -46,7 +51,7 @@ export function OrdersList({
               }
             }}
             className={`card flex w-full cursor-pointer items-stretch gap-3 px-4 py-3.5 text-left transition-colors hover:border-primary/40 ${
-              attention ? 'border-primary/40 bg-primary/5 shadow-soft' : ''
+              attention || unclaimedQr ? 'border-primary/40 bg-primary/5 shadow-soft' : ''
             }`}
           >
             {/* Левая часть: номер, стол, время, позиции */}
@@ -55,6 +60,11 @@ export function OrdersList({
                 <span className="text-base font-semibold text-text-primary">
                   {displayOrderNumber(o.orderNumber)}
                 </span>
+                {unclaimedQr && (
+                  <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary">
+                    QR
+                  </span>
+                )}
                 <span className="text-sm text-text-muted">{t('Стол')} {o.table.number}{hallSuffix(o.table)}</span>
               </div>
               <p className="flex items-center gap-1.5 text-xs text-text-light">
@@ -66,26 +76,41 @@ export function OrdersList({
             {/* Правая часть: статус сверху, сумма снизу — зеркально левой */}
             <div className="flex shrink-0 flex-col items-end justify-between gap-2">
               <OrderBadge status={o.status} />
+              {unclaimedQr && (
+                <button
+                  type="button"
+                  disabled={claimPending}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onClaimQr(o);
+                  }}
+                  className="rounded-lg bg-primary px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-primary-dark disabled:opacity-60"
+                >
+                  {claimPending ? t('Берём...') : t('Взять')}
+                </button>
+              )}
               <span className="text-base font-semibold text-text-primary">
                 {money(o.finalAmount)}
               </span>
             </div>
 
             {/* Три точки — меню действий над заказом */}
-            <OrderActionsMenu
-              order={o}
-              open={menuFor === o.id}
-              onToggle={() => setMenuFor((id) => (id === o.id ? null : o.id))}
-              onClose={() => setMenuFor(null)}
-              onEdit={() => {
-                setMenuFor(null);
-                onEdit(o);
-              }}
-              onCancel={() => {
-                setMenuFor(null);
-                onCancel(o);
-              }}
-            />
+            {!unclaimedQr && (
+              <OrderActionsMenu
+                order={o}
+                open={menuFor === o.id}
+                onToggle={() => setMenuFor((id) => (id === o.id ? null : o.id))}
+                onClose={() => setMenuFor(null)}
+                onEdit={() => {
+                  setMenuFor(null);
+                  onEdit(o);
+                }}
+                onCancel={() => {
+                  setMenuFor(null);
+                  onCancel(o);
+                }}
+              />
+            )}
           </div>
         );
       })}
@@ -242,4 +267,8 @@ function ClockIcon() {
 
 function isAttentionOrder(order: Order) {
   return order.requiresWaiterDecision || ['ready', 'rejected'].includes(order.status);
+}
+
+function isUnclaimedQrOrder(order: Order) {
+  return order.source === 'qr' && !order.waiter;
 }

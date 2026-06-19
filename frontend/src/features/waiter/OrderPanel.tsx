@@ -59,6 +59,8 @@ export function OrderPanel({
   order,
   submitting,
   preliminaryPending,
+  claimPending,
+  onClaimQr,
   onPickedUp,
   onServed,
   onToPayment,
@@ -73,6 +75,8 @@ export function OrderPanel({
   order: Order;
   submitting: boolean;
   preliminaryPending: boolean;
+  claimPending?: boolean;
+  onClaimQr?: () => void;
   onPickedUp: () => void;
   onServed: () => void;
   onToPayment: () => void;
@@ -89,6 +93,7 @@ export function OrderPanel({
   const [billItem, setBillItem] = useState<Order['items'][number] | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
+  const unclaimedQr = order.source === 'qr' && !order.waiter;
   // Редактирование доступно, пока кухня не завершила заказ (как в списке заказов).
   const editable = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'].includes(order.status);
   const billCorrection = ['ready', 'picked_up', 'served'].includes(order.status);
@@ -123,7 +128,12 @@ export function OrderPanel({
             </span>
           )}
           <OrderBadge status={order.status} size="sm" />
-          {onEdit && editable && (
+          {unclaimedQr && (
+            <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+              QR
+            </span>
+          )}
+          {onEdit && editable && !unclaimedQr && (
             <button
               onClick={onEdit}
               className="flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border px-2 text-[12px] font-medium text-text-secondary transition-colors hover:border-primary/50 hover:text-primary"
@@ -227,10 +237,17 @@ export function OrderPanel({
         </div>
 
         <div className="mt-3">
+          {unclaimedQr && (
+            <div className="mb-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">
+              {t('Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.')}
+            </div>
+          )}
           <ActionButton
             order={order}
             submitting={submitting}
             preliminaryPending={preliminaryPending}
+            claimPending={claimPending}
+            onClaimQr={onClaimQr}
             onPickedUp={onPickedUp}
             onServed={onServed}
             onToPayment={onToPayment}
@@ -418,6 +435,8 @@ function ActionButton({
   order,
   submitting,
   preliminaryPending,
+  claimPending,
+  onClaimQr,
   onPickedUp,
   onServed,
   onToPayment,
@@ -428,6 +447,8 @@ function ActionButton({
   order: Order;
   submitting: boolean;
   preliminaryPending: boolean;
+  claimPending?: boolean;
+  onClaimQr?: () => void;
   onPickedUp: () => void;
   onServed: () => void;
   onToPayment: () => void;
@@ -439,6 +460,7 @@ function ActionButton({
   const [actionCooldown, setActionCooldown] = useState(0);
   const s = order.status;
   const spin = submitting ? <Spinner /> : null;
+  const unclaimedQr = order.source === 'qr' && !order.waiter;
   const waitingDecision = s === 'partially_rejected' && order.requiresWaiterDecision;
   // Кухонная/барная логика — только по позициям, реально отправленным на станцию.
   // Позиции «Без отправки» (prepStation === 'none') не участвуют в кухне/баре.
@@ -459,6 +481,14 @@ function ActionButton({
   function runProtectedAction(action: () => void) {
     setActionCooldown(5);
     action();
+  }
+
+  if (unclaimedQr) {
+    return (
+      <button className="btn-primary btn-lg w-full font-semibold" disabled={claimPending || submitting} onClick={onClaimQr}>
+        {claimPending ? <Spinner /> : t('Взять заказ')}
+      </button>
+    );
   }
 
   if (waitingDecision) {
