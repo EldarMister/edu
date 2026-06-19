@@ -14,7 +14,7 @@ const get = async <T>(url: string) => (await api.get<T>(url)).data;
 export function useWarehouseOverview() {
   return useQuery({
     queryKey: ['admin', 'warehouse', 'overview'],
-    queryFn: () => get<WarehouseOverview>('/admin/warehouse/overview'),
+    queryFn: () => get<WarehouseOverview>('/admin/warehouse/items/overview'),
   });
 }
 

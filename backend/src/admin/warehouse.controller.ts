@@ -8,7 +8,7 @@ import { Role } from '@prisma/client';
 export class AdminWarehouseController {
   constructor(private readonly warehouse: AdminWarehouseService) {}
 
-  @Get('overview')
+  @Get('items/overview')
   overview() {
     return this.warehouse.overview();
   }

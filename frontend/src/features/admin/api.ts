@@ -511,7 +511,7 @@ export interface DishInput {
   imageUrl?: string;
 }
 export function useDishMutations() {
-  const invalidate = useInvalidate([['admin', 'dishes'], ['admin', 'menu', 'overview']]);
+  const invalidate = useInvalidate([['admin', 'dishes'], ['admin', 'menu', 'overview'], ['admin', 'warehouse']]);
   const create = useMutation({
     mutationFn: (b: DishInput) => api.post('/admin/dishes', b).then((r) => r.data),
     onSuccess: invalidate,
