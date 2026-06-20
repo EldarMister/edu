@@ -7,6 +7,7 @@ import {
   getKitchenVoiceSettings,
   saveKitchenVoiceSettings,
   subscribeKitchenVoiceSettings,
+  type KitchenSpeechRate,
   type KitchenVoiceSettings as KitchenVoiceSettingsType,
 } from '@/services/kitchenVoiceSettings';
 import { KITCHEN_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
@@ -120,22 +121,11 @@ export function KitchenVoiceSettings() {
 
           <Section>
             <p className="mb-3 font-semibold text-text-primary">Скорость озвучки</p>
-            <div className="grid grid-cols-4 gap-1.5">
-              {KITCHEN_SPEECH_RATES.map((rate) => (
-                <button
-                  key={rate}
-                  type="button"
-                  onClick={() => patch({ speechRate: rate })}
-                  className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors ${
-                    settings.speechRate === rate
-                      ? 'border-primary bg-primary text-white'
-                      : 'border-border bg-white text-text-secondary hover:border-primary/40 hover:text-primary'
-                  }`}
-                >
-                  {rate.toFixed(1)}x
-                </button>
-              ))}
-            </div>
+            <SpeedSlider
+              rates={KITCHEN_SPEECH_RATES}
+              value={settings.speechRate}
+              onChange={(rate) => patch({ speechRate: rate })}
+            />
           </Section>
 
           <Section>
@@ -161,6 +151,88 @@ export function KitchenVoiceSettings() {
 
 function Section({ children }: { children: React.ReactNode }) {
   return <div className="mt-4 border-t border-border pt-4">{children}</div>;
+}
+
+/** Дискретный ползунок скорости озвучки: остановки распределены равномерно по индексу,
+ *  поддерживает тап/перетаскивание/стрелки. Значение выбирается из переданных rates. */
+function SpeedSlider({
+  rates,
+  value,
+  onChange,
+}: {
+  rates: KitchenSpeechRate[];
+  value: KitchenSpeechRate;
+  onChange: (rate: KitchenSpeechRate) => void;
+}) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const n = rates.length;
+  const index = Math.max(0, rates.indexOf(value));
+  const posOf = (i: number) => (n > 1 ? (i / (n - 1)) * 100 : 0);
+  const pct = posOf(index);
+
+  const setFromClientX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    const next = rates[Math.round(ratio * (n - 1))];
+    if (next !== value) onChange(next);
+  };
+
+  return (
+    <div className="select-none px-2.5">
+      <div
+        ref={trackRef}
+        role="slider"
+        tabIndex={0}
+        aria-valuemin={rates[0]}
+        aria-valuemax={rates[n - 1]}
+        aria-valuenow={value}
+        aria-label="Скорость озвучки"
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId);
+          setFromClientX(e.clientX);
+        }}
+        onPointerMove={(e) => {
+          if (e.buttons !== 0) setFromClientX(e.clientX);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowLeft' && index > 0) onChange(rates[index - 1]);
+          if (e.key === 'ArrowRight' && index < n - 1) onChange(rates[index + 1]);
+        }}
+        className="relative flex h-7 cursor-pointer touch-none items-center outline-none"
+      >
+        <div className="absolute inset-x-0 h-1.5 rounded-full bg-background" />
+        <div className="absolute h-1.5 rounded-full bg-primary" style={{ width: `${pct}%` }} />
+        {rates.map((r, i) => (
+          <span
+            key={r}
+            className={`absolute h-2 w-2 -translate-x-1/2 rounded-full ${i <= index ? 'bg-primary' : 'bg-slate-300'}`}
+            style={{ left: `${posOf(i)}%` }}
+          />
+        ))}
+        <span
+          className="absolute h-5 w-5 -translate-x-1/2 rounded-full border-2 border-primary bg-white shadow-sm"
+          style={{ left: `${pct}%` }}
+        />
+      </div>
+      <div className="relative mt-2 h-4">
+        {rates.map((r, i) => (
+          <button
+            key={r}
+            type="button"
+            onClick={() => onChange(r)}
+            className={`absolute -translate-x-1/2 text-xs font-semibold transition-colors ${
+              r === value ? 'text-primary' : 'text-text-muted hover:text-text-secondary'
+            }`}
+            style={{ left: `${posOf(i)}%` }}
+          >
+            {r.toFixed(1)}x
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function SettingRow({

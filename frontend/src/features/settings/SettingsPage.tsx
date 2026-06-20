@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
 import { apiError } from '@/lib/api';
@@ -52,11 +52,9 @@ export function SettingsPage() {
   const setLocale = useLocale((s) => s.setLocale);
   const t = useT();
   const [fiscalCheck, setFiscalCheck] = useState<'ok' | 'fail' | null>(null);
+  const [dirty, setDirty] = useState(false);
 
   const [form, setForm] = useState<Form | null>(null);
-  const saveTimer = useRef<number | null>(null);
-  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
-  const hydrateRef = useRef(true);
 
   useEffect(() => {
     if (data) {
@@ -84,13 +82,9 @@ export function SettingsPage() {
         fiscalYakassaApiKey: data.fiscalYakassaApiKey ?? '',
         fiscalYakassaUrl: data.fiscalYakassaUrl ?? '',
       });
-      hydrateRef.current = false;
+      setDirty(false);
     }
   }, [data?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => () => {
-    if (saveTimer.current) window.clearTimeout(saveTimer.current);
-  }, []);
 
   if (isLoading) {
     return (
@@ -108,30 +102,47 @@ export function SettingsPage() {
     );
   }
 
-  const enqueuePersist = (patch: SettingsInput) => {
-    saveQueue.current = saveQueue.current
-      .catch(() => undefined)
-      .then(async () => {
-        try {
-          await update.mutateAsync(patch);
-          if (patch.language) setLocale(patch.language as Locale);
-        } catch (err) {
-          const msg = apiError(err);
-          push({ message: msg, type: 'error', at: new Date().toISOString() });
-        }
-      });
-    return saveQueue.current;
+  const toSettingsInput = (source: Form): SettingsInput => ({
+    cafeName: source.cafeName,
+    address: source.address,
+    phone: source.phone,
+    phone2: source.phone2,
+    instagram: source.instagram,
+    website: source.website,
+    receiptText: source.receiptText,
+    language: source.language,
+    payQr: source.payQr,
+    payCash: source.payCash,
+    payCard: source.payCard,
+    qrGeoEnabled: source.qrGeoEnabled,
+    qrGeoLat: source.qrGeoLat,
+    qrGeoLng: source.qrGeoLng,
+    qrGeoRadius: source.qrGeoRadius,
+    fiscalProvider: source.fiscalProvider,
+    fiscalEkassaApiKey: source.fiscalEkassaApiKey,
+    fiscalEkassaUrl: source.fiscalEkassaUrl,
+    fiscalEkassaInn: source.fiscalEkassaInn,
+    fiscalYakassaApiKey: source.fiscalYakassaApiKey,
+    fiscalYakassaUrl: source.fiscalYakassaUrl,
+  });
+
+  const saveSettings = async ({ silent = false }: { silent?: boolean } = {}) => {
+    if (!form) return false;
+    try {
+      const saved = await update.mutateAsync(toSettingsInput(form));
+      setLocale(saved.language as Locale);
+      setDirty(false);
+      if (!silent) {
+        push({ message: t('Настройки сохранены'), type: 'success', at: new Date().toISOString() });
+      }
+      return true;
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+      return false;
+    }
   };
 
-  const schedulePersist = (patch: SettingsInput) => {
-    if (saveTimer.current) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => {
-      saveTimer.current = null;
-      void enqueuePersist(patch);
-    }, 700);
-  };
-
-  const set = <K extends keyof Form>(k: K, v: Form[K], mode: 'debounce' | 'instant' = 'debounce') => {
+  const set = <K extends keyof Form>(k: K, v: Form[K], _mode: 'debounce' | 'instant' = 'debounce') => {
     let nextForm: Form | null = null;
     let blockedNoMethod = false;
     setForm((f) => {
@@ -145,18 +156,15 @@ export function SettingsPage() {
       return nextForm;
     });
     if (blockedNoMethod) {
+      push({
+        message: t('Должен быть включён хотя бы один способ оплаты'),
+        type: 'error',
+        at: new Date().toISOString(),
+      });
       return;
     }
     if (!nextForm || nextForm[k] !== v) return;
-    const patch = { [k]: v } as SettingsInput;
-    if (nextForm && !hydrateRef.current) {
-      if (mode === 'instant') {
-        if (saveTimer.current) window.clearTimeout(saveTimer.current);
-        void enqueuePersist(patch);
-      } else {
-        schedulePersist(patch);
-      }
-    }
+    setDirty(true);
   };
 
   const selectLanguage = (language: Locale) => {
@@ -177,8 +185,8 @@ export function SettingsPage() {
         const lat = Number(pos.coords.latitude.toFixed(6));
         const lng = Number(pos.coords.longitude.toFixed(6));
         setForm((f) => (f ? { ...f, qrGeoLat: lat, qrGeoLng: lng } : f));
-        void enqueuePersist({ qrGeoLat: lat, qrGeoLng: lng });
-        push({ message: t('Координаты кафе сохранены'), type: 'success', at: new Date().toISOString() });
+        setDirty(true);
+        push({ message: t('Координаты получены. Нажмите «Сохранить изменения»'), type: 'success', at: new Date().toISOString() });
       },
       () => push({ message: t('Не удалось получить геолокацию. Разрешите доступ.'), type: 'error', at: new Date().toISOString() }),
       { enableHighAccuracy: true, timeout: 10_000 },
@@ -188,6 +196,8 @@ export function SettingsPage() {
   const runFiscalCheck = async () => {
     setFiscalCheck(null);
     try {
+      const saved = await saveSettings({ silent: true });
+      if (!saved) return;
       const res = await testFiscal.mutateAsync();
       setFiscalCheck(res.ok ? 'ok' : 'fail');
       if (!res.ok) {
@@ -205,6 +215,23 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-4">
+      <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/95 px-4 py-3 shadow-sm backdrop-blur">
+        <div>
+          <p className="text-sm font-semibold text-text-primary">{t('Настройки')}</p>
+          <p className={`text-xs ${dirty ? 'text-warning' : 'text-text-muted'}`}>
+            {dirty ? t('Есть несохранённые изменения') : t('Все изменения сохранены')}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void saveSettings()}
+          disabled={!dirty || update.isPending}
+          className="btn-primary h-10 rounded-lg px-4 text-sm font-semibold disabled:opacity-50"
+        >
+          {update.isPending ? t('Сохраняем…') : t('Сохранить изменения')}
+        </button>
+      </div>
+
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Левая большая карточка — информация о кафе */}
         <div className="card p-5 lg:col-span-2">
