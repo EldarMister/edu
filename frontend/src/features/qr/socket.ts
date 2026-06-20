@@ -35,6 +35,7 @@ export function useQrRealtime(tableId: string | undefined, handlers: QrRealtimeH
     const join = () => sock.emit('qr:join', { tableId, guestKey: getGuestKey() });
     if (sock.connected) join();
     sock.on('connect', join);
+    const heartbeat = window.setInterval(join, 30_000);
 
     const onCart = (p: unknown) => handlers.onCartUpdated?.(p);
     const onJoined = () => handlers.onGuestChanged?.();
@@ -51,6 +52,7 @@ export function useQrRealtime(tableId: string | undefined, handlers: QrRealtimeH
 
     return () => {
       sock.emit('qr:leave', { tableId });
+      window.clearInterval(heartbeat);
       sock.off('connect', join);
       sock.off('qr:cart_updated', onCart);
       sock.off('qr:guest_joined', onJoined);

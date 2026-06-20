@@ -21,6 +21,7 @@ const sessionInclude = {
 } satisfies Prisma.QrTableSessionInclude;
 
 type SessionWithRelations = Prisma.QrTableSessionGetPayload<{ include: typeof sessionInclude }>;
+const QR_ACTIVE_GUEST_TTL_MS = 2 * 60 * 1000;
 
 /**
  * Публичное QR-меню стола: общий заказ, который гости наполняют со своих телефонов.
@@ -80,6 +81,12 @@ export class QrService {
     });
     if (session && (await this.closeDraftIfAlreadySubmitted(session))) {
       session = null;
+    } else if (session) {
+      await this.pruneStaleGuests(session.id);
+      session = await this.prisma.qrTableSession.findUnique({
+        where: { id: session.id },
+        include: sessionInclude,
+      });
     }
     return this.serializeSession(table, session);
   }
@@ -227,8 +234,9 @@ export class QrService {
       where: { id: session.id },
       include: sessionInclude,
     });
-    const onlineGuestIds = new Set(full.guests.filter((g) => g.isOnline).map((g) => g.id));
-    const orderable = full.items.filter((i) => !!i.dishId && onlineGuestIds.has(i.guestId));
+    await this.pruneStaleGuests(full.id);
+    const activeGuestIds = new Set(full.guests.filter((g) => this.isActiveGuest(g)).map((g) => g.id));
+    const orderable = full.items.filter((i) => !!i.dishId && activeGuestIds.has(i.guestId));
     if (orderable.length === 0) {
       throw new BadRequestException('Общий заказ пуст');
     }
@@ -289,6 +297,25 @@ export class QrService {
       select: { id: true },
     });
     return order?.id ?? null;
+  }
+
+  private activeGuestCutoff() {
+    return new Date(Date.now() - QR_ACTIVE_GUEST_TTL_MS);
+  }
+
+  private isActiveGuest(guest: { isOnline: boolean; lastSeenAt: Date }) {
+    return guest.isOnline && guest.lastSeenAt >= this.activeGuestCutoff();
+  }
+
+  private async pruneStaleGuests(sessionId: string) {
+    await this.prisma.qrGuest.updateMany({
+      where: {
+        sessionId,
+        isOnline: true,
+        lastSeenAt: { lt: this.activeGuestCutoff() },
+      },
+      data: { isOnline: false },
+    });
   }
 
   private async closeDraftIfAlreadySubmitted(session: { id: string; submittedOrderId: string | null }) {
@@ -363,6 +390,7 @@ export class QrService {
     if (await this.closeDraftIfAlreadySubmitted(session)) {
       throw new BadRequestException('Предыдущий заказ уже отправлен. Откройте меню заново.');
     }
+    await this.pruneStaleGuests(session.id);
     const guest = await this.prisma.qrGuest.findUnique({
       where: { sessionId_guestKey: { sessionId: session.id, guestKey } },
     });
@@ -414,12 +442,12 @@ export class QrService {
       };
     }
 
-    const onlineGuestIds = new Set(session.guests.filter((g) => g.isOnline).map((g) => g.id));
-    const visibleGuests = session.guests.filter((g) => onlineGuestIds.has(g.id));
+    const activeGuestIds = new Set(session.guests.filter((g) => this.isActiveGuest(g)).map((g) => g.id));
+    const visibleGuests = session.guests.filter((g) => activeGuestIds.has(g.id));
     const labelById = new Map(visibleGuests.map((g) => [g.id, g.guestLabel]));
     let total = 0;
     let count = 0;
-    const items = session.items.filter((i) => onlineGuestIds.has(i.guestId)).map((i) => {
+    const items = session.items.filter((i) => activeGuestIds.has(i.guestId)).map((i) => {
       const line = Number(i.snapshotPrice) * i.quantity;
       total += line;
       count += i.quantity;

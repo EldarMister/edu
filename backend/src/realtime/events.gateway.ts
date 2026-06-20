@@ -184,7 +184,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     const key = this.presenceKey(tableId, guestKey);
     this.qrPresence.set(key, (this.qrPresence.get(key) ?? 0) + 1);
     const session = await this.prisma.qrTableSession.findFirst({
-      where: { tableId, status: 'draft' },
+      where: { tableId, status: 'draft', submittedOrderId: null },
       orderBy: { createdAt: 'desc' },
       select: { id: true },
     });
@@ -209,7 +209,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       } else {
         this.qrPresence.delete(key);
         const session = await this.prisma.qrTableSession.findFirst({
-          where: { tableId: qr.tableId, status: 'draft' },
+          where: { tableId: qr.tableId, status: 'draft', submittedOrderId: null },
           orderBy: { createdAt: 'desc' },
           select: { id: true },
         });
@@ -235,7 +235,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     await this.cleanupExpiredOfflineGuestItems(tableId);
 
     const session = await this.prisma.qrTableSession.findFirst({
-      where: { tableId, status: 'draft' },
+      where: { tableId, status: 'draft', submittedOrderId: null },
       orderBy: { createdAt: 'desc' },
       include: {
         table: { select: { number: true, hall: { select: { name: true } } } },

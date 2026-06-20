@@ -102,7 +102,13 @@ export function MenuScreen({
 
       {/* Низ экрана: панель общего заказа + круглая кнопка «Мои заказы» в вырезе панели */}
       {(itemCount > 0 || hasSubmittedOrder) && (
-        <div className="relative shrink-0">
+        <div
+          className={
+            itemCount > 0
+              ? 'relative shrink-0'
+              : 'pointer-events-none absolute inset-x-0 bottom-0 z-20'
+          }
+        >
           {/* Панель общего заказа (только если есть позиции). При наличии «Мои заказы»
               в верхнем крае делаем полукруглый вырез радиальным градиентом. */}
           {itemCount > 0 && (
@@ -110,7 +116,7 @@ export function MenuScreen({
               className="mx-3 rounded-t-2xl px-4 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-3 shadow-soft"
               style={{
                 background: hasSubmittedOrder
-                  ? 'radial-gradient(circle 36px at 50% 12px, transparent 0 35px, #005BFF 36px)'
+                  ? 'radial-gradient(circle 32px at 50% 12px, transparent 0 31px, #005BFF 32px)'
                   : '#005BFF',
               }}
             >
@@ -155,14 +161,14 @@ export function MenuScreen({
               className={
                 itemCount > 0
                   ? 'pointer-events-none absolute inset-x-0 top-0 z-20 flex justify-center'
-                  : 'flex justify-center pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2'
+                  : 'flex justify-center pb-[max(0.5rem,env(safe-area-inset-bottom))]'
               }
               style={itemCount > 0 ? { transform: 'translateY(-20px)' } : undefined}
             >
               <button
                 type="button"
                 onClick={onOpenSubmittedOrder}
-                className="pointer-events-auto flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-full bg-background text-[#1E40AF] transition-transform active:scale-95"
+                className="pointer-events-auto flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-full text-[#1E40AF] transition-transform active:scale-95"
               >
                 <svg
                   width="17"
