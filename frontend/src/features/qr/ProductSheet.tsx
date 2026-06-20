@@ -98,23 +98,6 @@ function ProductSheetBody({ token, dish, onClose }: { token: string; dish: QrDis
           </div>
         )}
 
-        <div className="mt-4 rounded-lg border border-border bg-white px-3 py-3">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between gap-3 text-left"
-            disabled
-            aria-disabled="true"
-          >
-            <span className="min-w-0">
-              <span className="block text-[13px] font-bold text-text-primary">Добавки</span>
-              <span className="mt-0.5 block text-[12px] font-medium text-text-muted">Не выбрано</span>
-            </span>
-            <svg className="shrink-0 text-text-primary" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m6 9 6 6 6-6" />
-            </svg>
-          </button>
-        </div>
-
         {/* Количество */}
         <div className="mt-5 flex items-center justify-between">
           <span className="text-[13px] font-bold text-text-primary">Количество</span>

@@ -107,7 +107,7 @@ export function MenuScreen({
               в верхнем крае делаем полукруглый вырез радиальным градиентом. */}
           {itemCount > 0 && (
             <div
-              className="px-4 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-3"
+              className="mx-3 rounded-t-2xl px-4 pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-3 shadow-soft"
               style={{
                 background: hasSubmittedOrder
                   ? 'radial-gradient(circle 36px at 50% 12px, transparent 0 35px, #005BFF 36px)'
