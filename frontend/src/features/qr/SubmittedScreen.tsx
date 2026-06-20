@@ -1,6 +1,12 @@
 import { useMemo } from 'react';
 import { displayOrderNumber, money } from '@/lib/format';
-import type { QrMenu, QrSessionItem } from './api';
+import {
+  useQrSubmittedOrder,
+  type QrMenu,
+  type QrOrderItemStatus,
+  type QrSessionItem,
+  type QrSubmittedOrderItem,
+} from './api';
 import { EduMenuLogo, DishPhoto } from './ui';
 import { pluralItems } from './plural';
 
@@ -25,7 +31,31 @@ function stepIndex(status: string): number {
   }
 }
 
+type DisplayItem = (QrSessionItem | QrSubmittedOrderItem) & { status?: QrOrderItemStatus };
+
+function itemStatusBadge(status?: QrOrderItemStatus) {
+  switch (status) {
+    case 'new':
+      return { label: 'Отправлен на кухню', cls: 'bg-primary/10 text-primary' };
+    case 'accepted':
+    case 'cooking':
+      return { label: 'Готовится', cls: 'bg-warning/10 text-warning' };
+    case 'ready':
+      return { label: 'Готов', cls: 'bg-success/10 text-success' };
+    case 'served':
+      return { label: 'Подан', cls: 'bg-background text-text-muted' };
+    case 'rejected':
+      return { label: 'Отказано', cls: 'bg-danger/10 text-danger' };
+    case 'cancelled':
+      return { label: 'Отменено', cls: 'bg-danger/10 text-danger' };
+    default:
+      return null;
+  }
+}
+
 export function SubmittedScreen({
+  token,
+  orderId,
   orderNumber,
   tableNumber,
   status,
@@ -35,6 +65,8 @@ export function SubmittedScreen({
   menu,
   onBackToMenu,
 }: {
+  token: string;
+  orderId: string;
   orderNumber: string;
   tableNumber: number;
   status: string;
@@ -44,7 +76,14 @@ export function SubmittedScreen({
   menu: QrMenu;
   onBackToMenu: () => void;
 }) {
-  const current = stepIndex(status);
+  const submittedQ = useQrSubmittedOrder(token, orderId);
+  const live = submittedQ.data;
+  const currentStatus = live?.status ?? status;
+  const currentOrderNumber = live?.orderNumber ?? orderNumber;
+  const currentItems: DisplayItem[] = live?.items ?? items;
+  const currentTotalAmount = live?.totalAmount ?? totalAmount;
+  const currentItemCount = live?.itemCount ?? itemCount;
+  const current = stepIndex(currentStatus);
 
   const imageByDish = useMemo(() => {
     const m = new Map<string, string | null>();
@@ -74,7 +113,7 @@ export function SubmittedScreen({
           <h2 className="mt-3 text-[18px] font-bold text-text-primary">Заказ отправлен</h2>
           <p className="text-[14px] text-text-secondary">Ваш общий заказ принят</p>
           <p className="mt-3 text-[13px] text-text-muted">Номер заказа</p>
-          <p className="text-[26px] font-bold text-primary">{displayOrderNumber(orderNumber)}</p>
+          <p className="text-[26px] font-bold text-primary">{displayOrderNumber(currentOrderNumber)}</p>
         </div>
 
         {/* Статус заказа */}
@@ -118,27 +157,37 @@ export function SubmittedScreen({
         </div>
 
         {/* Состав заказа */}
-        {items.length > 0 && (
+        {currentItems.length > 0 && (
           <div className="mt-4 overflow-hidden rounded-2xl border border-border bg-card">
             <p className="px-4 pt-4 text-[13px] font-semibold text-text-muted">Состав заказа</p>
             <div className="mt-2">
-              {items.map((it) => (
-                <div key={it.id} className="flex items-center gap-3 border-t border-border px-4 py-3 first:border-t-0">
-                  <DishPhoto
-                    src={it.dishId ? imageByDish.get(it.dishId) ?? null : null}
-                    name={it.name}
-                    className="h-12 w-12 shrink-0 rounded-lg"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[14px] font-bold leading-tight text-text-primary">{it.name}</p>
-                    {it.variantName && <p className="mt-0.5 text-[12px] text-text-muted">Размер: {it.variantName}</p>}
-                    <p className="mt-0.5 text-[13px] text-text-secondary">
-                      {it.quantity} × {money(it.price)}
-                    </p>
+              {currentItems.map((it) => {
+                const badge = itemStatusBadge(it.status);
+                return (
+                  <div key={it.id} className="flex items-center gap-3 border-t border-border px-4 py-3 first:border-t-0">
+                    <DishPhoto
+                      src={it.dishId ? imageByDish.get(it.dishId) ?? null : null}
+                      name={it.name}
+                      className="h-12 w-12 shrink-0 rounded-lg"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="text-[14px] font-bold leading-tight text-text-primary">{it.name}</p>
+                        {badge && (
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.cls}`}>
+                            {badge.label}
+                          </span>
+                        )}
+                      </div>
+                      {it.variantName && <p className="mt-0.5 text-[12px] text-text-muted">Размер: {it.variantName}</p>}
+                      <p className="mt-0.5 text-[13px] text-text-secondary">
+                        {it.quantity} × {money(it.price)}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-[15px] font-bold text-text-primary">{money(it.lineTotal)}</span>
                   </div>
-                  <span className="shrink-0 text-[15px] font-bold text-text-primary">{money(it.lineTotal)}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -146,13 +195,13 @@ export function SubmittedScreen({
 
       {/* Низ: итог + возврат в меню */}
       <div className="shrink-0 border-t border-border bg-card px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        {items.length > 0 && (
+        {currentItems.length > 0 && (
           <div className="mb-2.5 flex items-end justify-between">
             <div>
               <p className="text-[12px] text-text-muted">Итого к оплате</p>
-              <p className="text-[22px] font-bold text-text-primary">{money(totalAmount)}</p>
+              <p className="text-[22px] font-bold text-text-primary">{money(currentTotalAmount)}</p>
             </div>
-            <span className="pb-1 text-[13px] text-text-muted">{pluralItems(itemCount)}</span>
+            <span className="pb-1 text-[13px] text-text-muted">{pluralItems(currentItemCount)}</span>
           </div>
         )}
         <button type="button" onClick={onBackToMenu} className="btn-primary btn-lg w-full rounded-lg font-bold">

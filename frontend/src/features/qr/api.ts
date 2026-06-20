@@ -57,6 +57,21 @@ export interface QrSessionItem {
   comment: string | null;
 }
 
+export type QrOrderItemStatus = 'new' | 'accepted' | 'cooking' | 'ready' | 'served' | 'rejected' | 'cancelled';
+
+export interface QrSubmittedOrderItem extends Omit<QrSessionItem, 'guestId' | 'guestLabel' | 'comment'> {
+  status: QrOrderItemStatus;
+}
+
+export interface QrSubmittedOrder {
+  orderId: string;
+  orderNumber: string;
+  status: string;
+  totalAmount: string;
+  itemCount: number;
+  items: QrSubmittedOrderItem[];
+}
+
 export interface QrGuest {
   id: string;
   guestLabel: string;
@@ -94,6 +109,7 @@ export interface QrSubmitResult {
 
 export const qrMenuKey = (token: string) => ['qr', 'menu', token] as const;
 export const qrSessionKey = (token: string) => ['qr', 'session', token] as const;
+export const qrSubmittedOrderKey = (token: string, orderId: string | null) => ['qr', 'submitted-order', token, orderId] as const;
 
 export function useQrMenu(token: string) {
   return useQuery({
@@ -109,6 +125,14 @@ export function useQrSession(token: string, enabled: boolean) {
     queryKey: qrSessionKey(token),
     queryFn: async () => (await publicApi.get<QrSession>(`/qr-session/${token}`)).data,
     enabled,
+  });
+}
+
+export function useQrSubmittedOrder(token: string, orderId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: qrSubmittedOrderKey(token, orderId),
+    queryFn: async () => (await publicApi.get<QrSubmittedOrder>(`/qr-session/${token}/orders/${orderId}`)).data,
+    enabled: enabled && !!orderId,
   });
 }
 
