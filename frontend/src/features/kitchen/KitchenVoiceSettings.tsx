@@ -9,17 +9,7 @@ import {
   subscribeKitchenVoiceSettings,
   type KitchenVoiceSettings as KitchenVoiceSettingsType,
 } from '@/services/kitchenVoiceSettings';
-
-const KITCHEN_VOICE_TEST_SCENARIOS = [
-  'Тест озвучки кухни. Новый заказ номер четыре. Стол шесть, терраса. Один вок с курицей и удоном.',
-  'Новый заказ номер двенадцать. Стол три. Два лагмана. Один салат греческий. Комментарий: без лука.',
-  'Новый заказ номер двадцать восемь. Стол девять, зал. Один шашлык, пол килограмма. Один картофель фри. Два соуса.',
-  'Добавление к заказу номер семь. Стол два. Добавили: один чай зелёный, один чизкейк, один литр морса.',
-  'Новый заказ номер сорок один. Стол пять, терраса. Три бургера. Первый без помидора. Второй острый. Третий с собой.',
-  'Заказ номер пятнадцать. Замена: куриный суп заменили на грибной крем-суп. Приготовить без сливок.',
-  'Новый заказ номер шестьдесят два. Стол одиннадцать. Один плов, пол порции. Один салат свежий. Один компот, пятьсот миллилитров.',
-  'Сложный тест. Заказ номер девяносто девять. Стол восемь. Два рамена с говядиной. Один вок, пол килограмма. Три лепёшки. Комментарий: сначала подать супы, остальное через десять минут.',
-];
+import { KITCHEN_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
 
 export function KitchenVoiceSettings() {
   const [open, setOpen] = useState(false);
@@ -58,7 +48,7 @@ export function KitchenVoiceSettings() {
       Math.floor(Math.random() * KITCHEN_VOICE_TEST_SCENARIOS.length)
     ];
     try {
-      await kitchenVoice.test(scenario, settings);
+      await kitchenVoice.testScenario(scenario, settings);
       setTestMessage('Тест озвучки завершён');
     } catch (err) {
       console.error('[kitchen-tts] тест озвучки не удался:', err);
