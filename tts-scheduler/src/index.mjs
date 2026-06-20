@@ -130,9 +130,7 @@ async function getCurrentMode(token, serviceId, environmentId, instanceFields, s
 async function updateServiceInstance(token, serviceId, environmentId, input) {
   const data = await gql(`
     mutation UpdateTtsServiceInstance($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) {
-      serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) {
-        id
-      }
+      serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input)
     }
   `, { serviceId, environmentId, input }, token);
   return data.serviceInstanceUpdate;
