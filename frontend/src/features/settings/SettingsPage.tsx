@@ -305,6 +305,53 @@ export function SettingsPage() {
               </div>
             </div>
 
+            {/* Гео-проверка QR-заказа — рядом со статусом принтера */}
+            <div className="pt-2">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <IconPin className="h-5 w-5 shrink-0 text-text-secondary" />
+                  <h3 className="truncate text-[15px] font-semibold text-text-primary">{t('Гео-проверка QR-заказа')}</h3>
+                </div>
+                <Toggle checked={form.qrGeoEnabled} onChange={(v) => set('qrGeoEnabled', v, 'instant')} />
+              </div>
+
+              {form.qrGeoEnabled && (
+                <div className="space-y-2.5 rounded-xl border border-border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-text-muted">{t('Координаты кафе')}</p>
+                      {form.qrGeoLat != null && form.qrGeoLng != null ? (
+                        <p className="truncate text-sm font-medium text-text-primary">
+                          {form.qrGeoLat}, {form.qrGeoLng}
+                        </p>
+                      ) : (
+                        <p className="text-sm font-medium text-warning">{t('не заданы')}</p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={captureLocation}
+                      className="shrink-0 rounded-lg border border-primary/40 px-3 py-1.5 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+                    >
+                      {form.qrGeoLat != null && form.qrGeoLng != null ? t('Обновить') : t('Задать')}
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2 border-t border-border pt-2.5">
+                    <span className="text-sm text-text-secondary">{t('Радиус')}</span>
+                    <input
+                      type="number"
+                      className="input h-9 w-20 px-2.5 text-center"
+                      min={20}
+                      max={5000}
+                      value={form.qrGeoRadius}
+                      onChange={(e) => set('qrGeoRadius', Number(e.target.value))}
+                    />
+                    <span className="text-sm text-text-muted">{t('м')}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
           </div>
         </div>
 
@@ -381,61 +428,6 @@ export function SettingsPage() {
 
           {/* QR-оплата */}
           <QrPaymentCard qrImageUrl={data.qrImageUrl} />
-
-          {/* Гео-проверка QR-заказа */}
-          <div className="card p-5">
-            <div className="mb-1 flex items-center justify-between gap-3">
-              <h3 className="text-[15px] font-semibold text-text-primary">{t('Гео-проверка QR-заказа')}</h3>
-              <Toggle checked={form.qrGeoEnabled} onChange={(v) => set('qrGeoEnabled', v, 'instant')} />
-            </div>
-            <p className="mb-3 text-xs text-text-muted">
-              {t('Гость сможет заказать через QR, только находясь рядом с кафе. Дополнительный барьер: при отказе в геолокации заказ не блокируется.')}
-            </p>
-
-            {form.qrGeoEnabled && (
-              <div className="space-y-3">
-                <div className="rounded-xl border border-border p-3">
-                  <p className="text-sm font-medium text-text-secondary">{t('Координаты кафе')}</p>
-                  <p className="mt-0.5 text-sm text-text-primary">
-                    {form.qrGeoLat != null && form.qrGeoLng != null
-                      ? `${form.qrGeoLat}, ${form.qrGeoLng}`
-                      : t('не заданы')}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={captureLocation}
-                    className="mt-2 rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-                  >
-                    {t('Использовать моё местоположение')}
-                  </button>
-                  <p className="mt-1.5 text-xs text-text-muted">
-                    {t('Откройте эту страницу на устройстве в кафе и нажмите кнопку.')}
-                  </p>
-                </div>
-
-                <Field label={t('Радиус, метры')}>
-                  <input
-                    type="number"
-                    className="input"
-                    min={20}
-                    max={5000}
-                    value={form.qrGeoRadius}
-                    onChange={(e) => set('qrGeoRadius', Number(e.target.value))}
-                    placeholder="150"
-                  />
-                  <p className="mt-1 text-xs text-text-muted">
-                    {t('К радиусу добавляется буфер ~50 м на погрешность GPS.')}
-                  </p>
-                </Field>
-
-                {(form.qrGeoLat == null || form.qrGeoLng == null) && (
-                  <p className="text-xs text-warning">
-                    {t('Гео-проверка включена, но координаты не заданы — проверка не работает.')}
-                  </p>
-                )}
-              </div>
-            )}
-          </div>
 
           {/* ККМ / Фискализация */}
           <div className="card p-5">
@@ -552,6 +544,15 @@ export function SettingsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function IconPin({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" />
+      <circle cx="12" cy="10" r="3" />
+    </svg>
   );
 }
 

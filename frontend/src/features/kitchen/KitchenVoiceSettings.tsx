@@ -147,9 +147,6 @@ export function KitchenVoiceSettings() {
             >
               {testing ? 'Тестируем...' : 'Тестировать'}
             </button>
-            <p className="mt-2 text-xs leading-relaxed text-text-muted">
-              Запускает случайный кухонный сценарий с выбранным голосом и скоростью.
-            </p>
             {testMessage && (
               <p className={`mt-2 text-xs ${testMessage.includes('Не удалось') ? 'text-danger' : 'text-success'}`}>
                 {testMessage}
