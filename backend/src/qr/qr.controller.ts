@@ -24,6 +24,15 @@ export class QrController {
     return this.qr.getSession(tableToken);
   }
 
+  /** Уже отправленный QR-заказ с живыми статусами позиций. */
+  @Get('qr-session/:tableToken/orders/:orderId')
+  submittedOrder(
+    @Param('tableToken') tableToken: string,
+    @Param('orderId') orderId: string,
+  ) {
+    return this.qr.getSubmittedOrder(tableToken, orderId);
+  }
+
   /** Вход гостя — создаёт/возвращает guestId и guestLabel. */
   @Post('qr-session/:tableToken/join')
   join(@Param('tableToken') tableToken: string, @Body() dto: JoinDto) {

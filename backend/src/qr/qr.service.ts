@@ -73,12 +73,59 @@ export class QrService {
   /** Активная (draft) сессия стола с гостями и позициями — или null, если её нет. */
   async getSession(tableToken: string) {
     const table = await this.resolveTable(tableToken);
-    const session = await this.prisma.qrTableSession.findFirst({
-      where: { tableId: table.id, status: 'draft' },
+    let session = await this.prisma.qrTableSession.findFirst({
+      where: { tableId: table.id, status: 'draft', submittedOrderId: null },
       orderBy: { createdAt: 'desc' },
       include: sessionInclude,
     });
+    if (session && (await this.closeDraftIfAlreadySubmitted(session))) {
+      session = null;
+    }
     return this.serializeSession(table, session);
+  }
+
+  /** Уже отправленный QR-заказ: нужен гостю для live-статусов отдельных блюд. */
+  async getSubmittedOrder(tableToken: string, orderId: string) {
+    const table = await this.resolveTable(tableToken);
+    const order = await this.prisma.order.findFirst({
+      where: { id: orderId, tableId: table.id, source: 'qr' },
+      include: {
+        items: {
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            dishId: true,
+            dishVariantId: true,
+            dishNameSnapshot: true,
+            dishVariantNameSnapshot: true,
+            priceSnapshot: true,
+            quantity: true,
+            finalPrice: true,
+            status: true,
+          },
+        },
+      },
+    });
+    if (!order) throw new NotFoundException('QR-заказ не найден');
+
+    return {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      status: order.status,
+      totalAmount: String(order.finalAmount),
+      itemCount: order.items.reduce((sum, item) => sum + item.quantity, 0),
+      items: order.items.map((item) => ({
+        id: item.id,
+        dishId: item.dishId,
+        variantId: item.dishVariantId,
+        name: item.dishNameSnapshot,
+        variantName: item.dishVariantNameSnapshot,
+        quantity: item.quantity,
+        price: String(item.priceSnapshot),
+        lineTotal: String(item.finalPrice),
+        status: item.status,
+      })),
+    };
   }
 
   /** Вход гостя: создаёт/возвращает сессию и гостя (Гость N). */
@@ -195,16 +242,14 @@ export class QrService {
       };
     });
 
+    const idempotencyKey = `qr:${session.id}`;
     const order = await this.orders.createFromQr({
       tableId: table.id,
       items,
-      idempotencyKey: `qr:${session.id}`,
+      idempotencyKey,
     });
 
-    await this.prisma.qrTableSession.update({
-      where: { id: session.id },
-      data: { status: 'submitted', submittedOrderId: order.id },
-    });
+    await this.markSubmittedSession(session.id, order.id);
 
     this.events.emitToQrTable(table.id, SERVER_EVENTS.QR_ORDER_SUBMITTED, {
       tableId: table.id,
@@ -229,8 +274,53 @@ export class QrService {
       where: { tableId, status: 'draft' },
       orderBy: { createdAt: 'desc' },
     });
-    if (existing) return existing;
+    if (existing) {
+      if (await this.closeDraftIfAlreadySubmitted(existing)) {
+        return this.prisma.qrTableSession.create({ data: { tableId, status: 'draft' } });
+      }
+      return existing;
+    }
     return this.prisma.qrTableSession.create({ data: { tableId, status: 'draft' } });
+  }
+
+  private async submittedOrderIdForSession(sessionId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { idempotencyKey: `qr:${sessionId}` },
+      select: { id: true },
+    });
+    return order?.id ?? null;
+  }
+
+  private async closeDraftIfAlreadySubmitted(session: { id: string; submittedOrderId: string | null }) {
+    const submittedOrderId = session.submittedOrderId ?? (await this.submittedOrderIdForSession(session.id));
+    if (!submittedOrderId) return false;
+    await this.markSubmittedSession(session.id, submittedOrderId);
+    return true;
+  }
+
+  private async markSubmittedSession(sessionId: string, orderId: string) {
+    try {
+      await this.prisma.qrTableSession.update({
+        where: { id: sessionId },
+        data: { status: 'submitted', submittedOrderId: orderId },
+      });
+    } catch (err) {
+      if (!this.isUniqueConstraintError(err)) throw err;
+      // Идемпотентный повтор: заказ уже может быть привязан к этой же сессии.
+      const linked = await this.prisma.qrTableSession.findFirst({
+        where: { id: sessionId, submittedOrderId: orderId },
+      });
+      if (linked) {
+        if (linked.status !== 'submitted') {
+          await this.prisma.qrTableSession.update({
+            where: { id: sessionId },
+            data: { status: 'submitted' },
+          });
+        }
+        return;
+      }
+      throw err;
+    }
   }
 
   /**
@@ -270,6 +360,9 @@ export class QrService {
       orderBy: { createdAt: 'desc' },
     });
     if (!session) throw new BadRequestException('Сессия заказа не найдена. Откройте меню заново.');
+    if (await this.closeDraftIfAlreadySubmitted(session)) {
+      throw new BadRequestException('Предыдущий заказ уже отправлен. Откройте меню заново.');
+    }
     const guest = await this.prisma.qrGuest.findUnique({
       where: { sessionId_guestKey: { sessionId: session.id, guestKey } },
     });
@@ -293,7 +386,7 @@ export class QrService {
     event: string,
   ) {
     const session = await this.prisma.qrTableSession.findFirst({
-      where: { tableId: table.id, status: 'draft' },
+      where: { tableId: table.id, status: 'draft', submittedOrderId: null },
       orderBy: { createdAt: 'desc' },
       include: sessionInclude,
     });
@@ -360,6 +453,10 @@ export class QrService {
       totalAmount: String(round2(total)),
       submittedOrderId: session.submittedOrderId,
     };
+  }
+
+  private isUniqueConstraintError(err: unknown) {
+    return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
   }
 }
 

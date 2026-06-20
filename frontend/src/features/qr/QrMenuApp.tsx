@@ -5,6 +5,7 @@ import { Spinner } from '@/components/Spinner';
 import {
   joinSession,
   qrSessionKey,
+  qrSubmittedOrderKey,
   useQrMenu,
   useQrSession,
   type QrDish,
@@ -92,6 +93,7 @@ export function QrMenuApp() {
     onCartUpdated: (payload) => qc.setQueryData(qrSessionKey(tableToken), payload as QrSession),
     onGuestChanged: () => qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) }),
     onOrderSubmitted: (p) => {
+      qc.invalidateQueries({ queryKey: qrSubmittedOrderKey(tableToken, p.orderId) });
       setSubmitted((prev) => {
         // Свой только что отправленный заказ с уже снятым составом — не затираем пустым.
         if (prev?.orderId === p.orderId && prev.items.length > 0) return prev;
@@ -103,6 +105,7 @@ export function QrMenuApp() {
       qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) });
     },
     onOrderStatusChanged: (p) => {
+      qc.invalidateQueries({ queryKey: qrSubmittedOrderKey(tableToken, p.orderId) });
       setSubmitted((prev) => {
         if (!prev || prev.orderId !== p.orderId) return prev;
         const next = { ...prev, status: p.status };
@@ -140,6 +143,7 @@ export function QrMenuApp() {
     saveSubmittedOrder(tableToken, order);
     setScreen('submitted');
     qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) });
+    qc.invalidateQueries({ queryKey: qrSubmittedOrderKey(tableToken, r.orderId) });
   };
 
   const backToMenu = () => {
@@ -160,6 +164,8 @@ export function QrMenuApp() {
     <div className="mx-auto flex h-full max-w-md flex-col bg-background">
       {screen === 'submitted' && submitted ? (
         <SubmittedScreen
+          token={tableToken}
+          orderId={submitted.orderId}
           orderNumber={submitted.orderNumber}
           tableNumber={menu.table.number}
           status={submitted.status}
