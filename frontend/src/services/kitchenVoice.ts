@@ -9,11 +9,18 @@
  */
 import { api } from '@/lib/api';
 import { getKitchenVoiceSettings, type KitchenVoiceSettings } from './kitchenVoiceSettings';
+import {
+  KITCHEN_SAMPLES_BASE,
+  type KitchenSamplesManifest,
+  type KitchenVoiceScenario,
+} from './kitchenVoiceScenarios';
 
 class KitchenVoice {
   private queue: string[] = [];
   private pumping = false;
   private current: HTMLAudioElement | null = null;
+  // Манифест предзаписанных озвучек (какие голоса доступны без запроса на TTS).
+  private manifestPromise: Promise<KitchenSamplesManifest | null> | null = null;
 
   /** Добавить текст в очередь озвучки. Текст формирует backend. */
   enqueue(text: string | null | undefined) {
@@ -32,6 +39,42 @@ class KitchenVoice {
     this.current?.pause();
     this.current = null;
     await this.playText(t, settings, true);
+  }
+
+  /**
+   * Проиграть тестовый сценарий из ПРЕДЗАПИСАННОГО аудио (без запроса на TTS).
+   * Если для выбранного голоса предзаписи нет — мягкий fallback на синтез через TTS.
+   */
+  async testScenario(
+    scenario: KitchenVoiceScenario,
+    settings: KitchenVoiceSettings = getKitchenVoiceSettings(),
+  ) {
+    this.queue = [];
+    this.current?.pause();
+    this.current = null;
+
+    const manifest = await this.loadSamplesManifest();
+    if (manifest && manifest.speakers.includes(settings.speaker) && manifest.scenarioIds.includes(scenario.id)) {
+      const url = `${KITCHEN_SAMPLES_BASE}/${settings.speaker}/${scenario.id}.${manifest.format}`;
+      try {
+        await this.playUrl(url, settings.speechRate);
+        return;
+      } catch (err) {
+        // Файл повреждён/недоступен — падаем на TTS, чтобы тест всё равно сработал.
+        console.warn('[kitchen-tts] предзапись не проигралась, fallback на TTS:', err);
+      }
+    }
+    await this.playText(scenario.text, settings, true);
+  }
+
+  /** Манифест предзаписей — грузится один раз; при отсутствии файла → null (всегда TTS). */
+  private loadSamplesManifest(): Promise<KitchenSamplesManifest | null> {
+    if (!this.manifestPromise) {
+      this.manifestPromise = fetch(`${KITCHEN_SAMPLES_BASE}/manifest.json`, { cache: 'force-cache' })
+        .then((res) => (res.ok ? (res.json() as Promise<KitchenSamplesManifest>) : null))
+        .catch(() => null);
+    }
+    return this.manifestPromise;
   }
 
   private async pump() {
