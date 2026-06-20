@@ -3,6 +3,7 @@ import { money } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { NumberTicker } from '@/components/NumberTicker';
 import {
+  getGuestPosition,
   useRemoveItem,
   useSubmitOrder,
   useUpdateItem,
@@ -56,7 +57,9 @@ export function OrderScreen({
   const doSubmit = async () => {
     setErr(null);
     try {
-      const res = await submit.mutateAsync();
+      // Если владелец включил гео-проверку — берём координаты гостя (отказ → null, мягкий пропуск).
+      const coords = menu.geo.required ? await getGuestPosition() : null;
+      const res = await submit.mutateAsync(coords);
       setConfirm(false);
       onSubmitted(res);
     } catch (e) {

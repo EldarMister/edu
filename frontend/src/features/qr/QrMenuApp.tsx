@@ -19,7 +19,7 @@ import { MenuScreen } from './MenuScreen';
 import { OrderScreen } from './OrderScreen';
 import { ProductSheet } from './ProductSheet';
 import { SubmittedScreen } from './SubmittedScreen';
-import { EduMenuLogo } from './ui';
+import { ClosedScreen, EduMenuLogo } from './ui';
 
 type Screen = 'menu' | 'order' | 'submitted';
 
@@ -51,6 +51,14 @@ function saveSubmittedOrder(token: string, order: SubmittedOrder) {
   }
 }
 
+function clearSubmittedOrder(token: string) {
+  try {
+    window.localStorage.removeItem(submittedOrderStorageKey(token));
+  } catch {
+    // localStorage can be unavailable in private mode.
+  }
+}
+
 export function QrMenuApp() {
   const { tableToken = '' } = useParams();
   const qc = useQueryClient();
@@ -63,6 +71,9 @@ export function QrMenuApp() {
   const [screen, setScreen] = useState<Screen>('menu');
   const [dish, setDish] = useState<QrDish | null>(null);
   const [submitted, setSubmitted] = useState<SubmittedOrder | null>(() => readSubmittedOrder(tableToken));
+  // Визит закрыт официантом: гость больше не может заказывать до явного «нового заказа».
+  const [closed, setClosed] = useState(false);
+  const [reopening, setReopening] = useState(false);
 
   // Снимок состава заказа из текущей сессии — чтобы показать его на экране «Мои заказы».
   const captureSubmitted = (p: { orderId: string; orderNumber: string; status: string }): SubmittedOrder => {
@@ -82,7 +93,10 @@ export function QrMenuApp() {
     if (!menuQ.data || joinedRef.current) return;
     joinedRef.current = true;
     joinSession(tableToken)
-      .then(setJoin)
+      .then((j) => {
+        setJoin(j);
+        if (j.status === 'closed') setClosed(true);
+      })
       .catch(() => {
         joinedRef.current = false;
       });
@@ -113,6 +127,12 @@ export function QrMenuApp() {
         return next;
       });
     },
+    onSessionClosed: () => {
+      // Официант закрыл стол → визит завершён, показываем «Заказ завершён».
+      setClosed(true);
+      clearSubmittedOrder(tableToken);
+      qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) });
+    },
   });
 
   if (menuQ.isLoading) {
@@ -136,6 +156,22 @@ export function QrMenuApp() {
   const menu = menuQ.data;
   const session = sessionQ.data;
   const hasSubmittedOrder = !!submitted?.orderId && submitted.itemCount > 0;
+  const isClosed = closed || join?.status === 'closed' || session?.status === 'closed';
+
+  // «Сделать новый заказ» — явно открываем новый визит после закрытия стола.
+  const startNewOrder = () => {
+    setReopening(true);
+    joinSession(tableToken, true)
+      .then((j) => {
+        setJoin(j);
+        setClosed(false);
+        setSubmitted(null);
+        clearSubmittedOrder(tableToken);
+        setScreen('menu');
+        qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) });
+      })
+      .finally(() => setReopening(false));
+  };
 
   const onSubmitted = (r: QrSubmitResult) => {
     const order = captureSubmitted(r);
@@ -162,7 +198,9 @@ export function QrMenuApp() {
 
   return (
     <div className="mx-auto flex h-full max-w-md flex-col bg-background">
-      {screen === 'submitted' && submitted ? (
+      {isClosed ? (
+        <ClosedScreen tableNumber={menu.table.number} busy={reopening} onNewOrder={startNewOrder} />
+      ) : screen === 'submitted' && submitted ? (
         <SubmittedScreen
           token={tableToken}
           orderId={submitted.orderId}
@@ -195,7 +233,7 @@ export function QrMenuApp() {
         />
       )}
 
-      <ProductSheet token={tableToken} dish={dish} onClose={() => setDish(null)} />
+      <ProductSheet token={tableToken} dish={dish} geoRequired={menu.geo.required} onClose={() => setDish(null)} />
     </div>
   );
 }

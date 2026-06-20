@@ -2547,6 +2547,16 @@ export class OrdersService {
     });
     this.emitTableStatus(updated.id, updated.number, TableStatus.free, updated.hallId);
 
+    // Визит завершён: закрываем QR-сессии стола, чтобы гости (в т.ч. ушедшие домой
+    // с открытой вкладкой) больше не могли заказывать до нового визита.
+    const closedSessions = await this.prisma.qrTableSession.updateMany({
+      where: { tableId, status: { in: ['draft', 'submitted'] } },
+      data: { status: 'closed' },
+    });
+    if (closedSessions.count > 0) {
+      this.events.emitToQrTable(tableId, SERVER_EVENTS.QR_SESSION_CLOSED, { tableId });
+    }
+
     await this.audit.log({
       actor,
       actionType: AuditAction.TABLE_CLOSED,

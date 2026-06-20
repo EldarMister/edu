@@ -22,6 +22,42 @@ export function QrHeader({ tableNumber }: { tableNumber: number }) {
   );
 }
 
+/** Экран завершённого визита: стол закрыт официантом, заказывать нельзя. */
+export function ClosedScreen({
+  tableNumber,
+  busy = false,
+  onNewOrder,
+}: {
+  tableNumber: number;
+  busy?: boolean;
+  onNewOrder: () => void;
+}) {
+  return (
+    <div className="flex h-full flex-col">
+      <QrHeader tableNumber={tableNumber} />
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-success/10 text-success">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M20 6 9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+        <div>
+          <h2 className="text-[19px] font-semibold text-text-primary">Заказ завершён</h2>
+          <p className="mt-1.5 text-[14px] leading-5 text-text-secondary">
+            Спасибо, что были у нас! Этот заказ закрыт.
+          </p>
+          <p className="mt-1 text-[13px] text-text-muted">
+            Чтобы заказать снова, начните новый заказ.
+          </p>
+        </div>
+        <button type="button" onClick={onNewOrder} disabled={busy} className="btn-primary btn-md w-full max-w-xs">
+          Сделать новый заказ
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Маленькая зелёная точка online. */
 export function OnlineDot({ on = true }: { on?: boolean }) {
   return (

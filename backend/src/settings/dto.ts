@@ -40,6 +40,19 @@ export class UpdateSettingsDto {
   @IsOptional() @IsBoolean()
   allowNegativeIngredientStock?: boolean;
 
+  // ---- QR-меню: гео-проверка присутствия ----
+  @IsOptional() @IsBoolean()
+  qrGeoEnabled?: boolean;
+
+  @IsOptional() @IsNumber() @Min(-90) @Max(90)
+  qrGeoLat?: number;
+
+  @IsOptional() @IsNumber() @Min(-180) @Max(180)
+  qrGeoLng?: number;
+
+  @IsOptional() @IsNumber() @Min(20) @Max(5000)
+  qrGeoRadius?: number;
+
   // QR-код как data URL (image/png|jpeg|webp). Пустая строка = удалить QR.
   @IsOptional() @IsString() @MaxLength(5_000_000)
   qrImageUrl?: string;
