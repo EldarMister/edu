@@ -1,0 +1,15 @@
+{
+  "name": "tts-scheduler",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "wake": "node src/index.mjs wake",
+    "night": "node src/index.mjs night",
+    "check": "node --check src/index.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
