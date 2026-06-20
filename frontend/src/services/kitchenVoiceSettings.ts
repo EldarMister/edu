@@ -1,5 +1,5 @@
 export type KitchenSpeaker = 'baya' | 'kseniya' | 'xenia' | 'eugene' | 'aidar';
-export type KitchenSpeechRate = 0.8 | 1 | 1.2 | 1.5;
+export type KitchenSpeechRate = 0.8 | 0.9 | 1 | 1.1 | 1.2 | 1.5;
 
 export interface KitchenVoiceSettings {
   speaker: KitchenSpeaker;
@@ -18,7 +18,7 @@ export const KITCHEN_SPEAKERS: { value: KitchenSpeaker; label: string }[] = [
   { value: 'aidar', label: 'Aidar' },
 ];
 
-export const KITCHEN_SPEECH_RATES: KitchenSpeechRate[] = [0.8, 1, 1.2, 1.5];
+export const KITCHEN_SPEECH_RATES: KitchenSpeechRate[] = [0.8, 0.9, 1, 1.1, 1.2, 1.5];
 
 const STORAGE_KEY = 'edu-pos-kitchen-voice-settings-v1';
 
