@@ -39,8 +39,29 @@ export interface QrCategory {
 export interface QrMenu {
   cafe: { name: string; address: string; phone: string };
   table: { id: string; number: number; hall: string | null };
+  /** Нужна ли отправка координат гостя (включена владельцем гео-проверка). */
+  geo: { required: boolean; radius: number };
   categories: QrCategory[];
   dishes: QrDish[];
+}
+
+export interface GuestCoords {
+  lat: number;
+  lng: number;
+}
+
+/** Координаты гостя для гео-проверки. Отказ/недоступность → null (мягкий пропуск). */
+export function getGuestPosition(): Promise<GuestCoords | null> {
+  if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+    return Promise.resolve(null);
+  }
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 },
+    );
+  });
 }
 
 export interface QrSessionItem {
@@ -91,10 +112,11 @@ export interface QrSession {
 }
 
 export interface QrJoinResult {
-  sessionId: string;
-  guestId: string;
-  guestKey: string;
-  guestLabel: string;
+  status: 'draft' | 'closed';
+  sessionId?: string;
+  guestId?: string;
+  guestKey?: string;
+  guestLabel?: string;
   tableId: string;
 }
 
@@ -136,10 +158,11 @@ export function useQrSubmittedOrder(token: string, orderId: string | null, enabl
   });
 }
 
-/** Вход гостя (создаёт/возвращает guestId, guestLabel). */
-export async function joinSession(token: string): Promise<QrJoinResult> {
+/** Вход гостя (создаёт/возвращает guestId, guestLabel).
+ *  reopen=true — явно начать новый визит после того, как стол был закрыт официантом. */
+export async function joinSession(token: string, reopen = false): Promise<QrJoinResult> {
   const guestKey = getGuestKey();
-  const { data } = await publicApi.post<QrJoinResult>(`/qr-session/${token}/join`, { guestKey });
+  const { data } = await publicApi.post<QrJoinResult>(`/qr-session/${token}/join`, { guestKey, reopen });
   return data;
 }
 
@@ -148,6 +171,8 @@ export interface AddItemBody {
   variantId?: string;
   quantity: number;
   comment?: string;
+  lat?: number;
+  lng?: number;
 }
 
 export function useAddItem(token: string) {
@@ -192,8 +217,11 @@ export function useRemoveItem(token: string) {
 
 export function useSubmitOrder(token: string) {
   return useMutation({
-    mutationFn: async () =>
-      (await publicApi.post<QrSubmitResult>(`/qr-session/${token}/submit`, { guestKey: getGuestKey() })).data,
+    mutationFn: async (coords?: GuestCoords | null) =>
+      (await publicApi.post<QrSubmitResult>(`/qr-session/${token}/submit`, {
+        guestKey: getGuestKey(),
+        ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+      })).data,
   });
 }
 

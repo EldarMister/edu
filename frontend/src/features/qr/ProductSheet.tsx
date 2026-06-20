@@ -2,26 +2,38 @@ import { useMemo, useState } from 'react';
 import { money } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { NumberTicker } from '@/components/NumberTicker';
-import { useAddItem, type QrDish } from './api';
+import { getGuestPosition, useAddItem, type QrDish } from './api';
 import { BottomSheet, DishPhoto, QtyStepper } from './ui';
 
 export function ProductSheet({
   token,
   dish,
+  geoRequired = false,
   onClose,
 }: {
   token: string;
   dish: QrDish | null;
+  geoRequired?: boolean;
   onClose: () => void;
 }) {
   return (
     <BottomSheet open={!!dish} onClose={onClose}>
-      {dish && <ProductSheetBody token={token} dish={dish} onClose={onClose} />}
+      {dish && <ProductSheetBody token={token} dish={dish} geoRequired={geoRequired} onClose={onClose} />}
     </BottomSheet>
   );
 }
 
-function ProductSheetBody({ token, dish, onClose }: { token: string; dish: QrDish; onClose: () => void }) {
+function ProductSheetBody({
+  token,
+  dish,
+  geoRequired,
+  onClose,
+}: {
+  token: string;
+  dish: QrDish;
+  geoRequired: boolean;
+  onClose: () => void;
+}) {
   const hasVariants = dish.variants.length > 0;
   const [variantId, setVariantId] = useState<string | null>(hasVariants ? dish.variants[0].id : null);
   const [qty, setQty] = useState(1);
@@ -43,7 +55,13 @@ function ProductSheetBody({ token, dish, onClose }: { token: string; dish: QrDis
   const submit = async () => {
     setErr(null);
     try {
-      await add.mutateAsync({ dishId: dish.id, variantId: variantId ?? undefined, quantity: qty });
+      const coords = geoRequired ? await getGuestPosition() : null;
+      await add.mutateAsync({
+        dishId: dish.id,
+        variantId: variantId ?? undefined,
+        quantity: qty,
+        ...(coords ? { lat: coords.lat, lng: coords.lng } : {}),
+      });
       onClose();
     } catch (e) {
       setErr(apiError(e));

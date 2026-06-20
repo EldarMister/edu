@@ -30,6 +30,10 @@ interface Form {
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
+  qrGeoEnabled: boolean;
+  qrGeoLat: number | null;
+  qrGeoLng: number | null;
+  qrGeoRadius: number;
   fiscalProvider: FiscalProvider;
   fiscalEkassaApiKey: string;
   fiscalEkassaUrl: string;
@@ -69,6 +73,10 @@ export function SettingsPage() {
         payQr: data.payQr,
         payCash: data.payCash,
         payCard: data.payCard,
+        qrGeoEnabled: data.qrGeoEnabled,
+        qrGeoLat: data.qrGeoLat,
+        qrGeoLng: data.qrGeoLng,
+        qrGeoRadius: data.qrGeoRadius,
         fiscalProvider: (data.fiscalProvider ?? '') as FiscalProvider,
         fiscalEkassaApiKey: data.fiscalEkassaApiKey ?? '',
         fiscalEkassaUrl: data.fiscalEkassaUrl ?? '',
@@ -157,6 +165,25 @@ export function SettingsPage() {
   };
 
   const noMethod = !form.payQr && !form.payCash && !form.payCard;
+
+  // Зафиксировать координаты кафе из геолокации устройства владельца (нужен HTTPS).
+  const captureLocation = () => {
+    if (!('geolocation' in navigator)) {
+      push({ message: t('Геолокация недоступна на этом устройстве'), type: 'error', at: new Date().toISOString() });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = Number(pos.coords.latitude.toFixed(6));
+        const lng = Number(pos.coords.longitude.toFixed(6));
+        setForm((f) => (f ? { ...f, qrGeoLat: lat, qrGeoLng: lng } : f));
+        void enqueuePersist({ qrGeoLat: lat, qrGeoLng: lng });
+        push({ message: t('Координаты кафе сохранены'), type: 'success', at: new Date().toISOString() });
+      },
+      () => push({ message: t('Не удалось получить геолокацию. Разрешите доступ.'), type: 'error', at: new Date().toISOString() }),
+      { enableHighAccuracy: true, timeout: 10_000 },
+    );
+  };
 
   const runFiscalCheck = async () => {
     setFiscalCheck(null);
@@ -354,6 +381,61 @@ export function SettingsPage() {
 
           {/* QR-оплата */}
           <QrPaymentCard qrImageUrl={data.qrImageUrl} />
+
+          {/* Гео-проверка QR-заказа */}
+          <div className="card p-5">
+            <div className="mb-1 flex items-center justify-between gap-3">
+              <h3 className="text-[15px] font-semibold text-text-primary">{t('Гео-проверка QR-заказа')}</h3>
+              <Toggle checked={form.qrGeoEnabled} onChange={(v) => set('qrGeoEnabled', v, 'instant')} />
+            </div>
+            <p className="mb-3 text-xs text-text-muted">
+              {t('Гость сможет заказать через QR, только находясь рядом с кафе. Дополнительный барьер: при отказе в геолокации заказ не блокируется.')}
+            </p>
+
+            {form.qrGeoEnabled && (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-border p-3">
+                  <p className="text-sm font-medium text-text-secondary">{t('Координаты кафе')}</p>
+                  <p className="mt-0.5 text-sm text-text-primary">
+                    {form.qrGeoLat != null && form.qrGeoLng != null
+                      ? `${form.qrGeoLat}, ${form.qrGeoLng}`
+                      : t('не заданы')}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={captureLocation}
+                    className="mt-2 rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+                  >
+                    {t('Использовать моё местоположение')}
+                  </button>
+                  <p className="mt-1.5 text-xs text-text-muted">
+                    {t('Откройте эту страницу на устройстве в кафе и нажмите кнопку.')}
+                  </p>
+                </div>
+
+                <Field label={t('Радиус, метры')}>
+                  <input
+                    type="number"
+                    className="input"
+                    min={20}
+                    max={5000}
+                    value={form.qrGeoRadius}
+                    onChange={(e) => set('qrGeoRadius', Number(e.target.value))}
+                    placeholder="150"
+                  />
+                  <p className="mt-1 text-xs text-text-muted">
+                    {t('К радиусу добавляется буфер ~50 м на погрешность GPS.')}
+                  </p>
+                </Field>
+
+                {(form.qrGeoLat == null || form.qrGeoLng == null) && (
+                  <p className="text-xs text-warning">
+                    {t('Гео-проверка включена, но координаты не заданы — проверка не работает.')}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* ККМ / Фискализация */}
           <div className="card p-5">

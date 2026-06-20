@@ -24,6 +24,10 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   payCash: 'оплата наличными',
   payCard: 'оплата картой',
   allowNegativeIngredientStock: 'минусовой остаток сырья',
+  qrGeoEnabled: 'гео-проверка QR',
+  qrGeoLat: 'широта кафе',
+  qrGeoLng: 'долгота кафе',
+  qrGeoRadius: 'радиус гео-проверки',
   qrImageUrl: 'QR-код',
   printerConnected: 'принтер',
   fiscalProvider: 'провайдер ККМ',
@@ -79,6 +83,18 @@ export class SettingsService {
       printerConnected: s.printerConnected,
       // Включена ли ККМ — без раскрытия ключей (нужно фронтенду для подсказок/гейтинга).
       fiscalEnabled: !!s.fiscalProvider,
+    };
+  }
+
+  /** Конфиг гео-проверки QR-меню. enabled=true только если включена И заданы координаты. */
+  async getQrGeoConfig() {
+    const s = await this.ensure();
+    const hasCoords = s.qrGeoLat != null && s.qrGeoLng != null;
+    return {
+      enabled: s.qrGeoEnabled && hasCoords,
+      lat: s.qrGeoLat,
+      lng: s.qrGeoLng,
+      radius: s.qrGeoRadius,
     };
   }
 

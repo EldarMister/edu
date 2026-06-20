@@ -41,6 +41,8 @@ export const SERVER_EVENTS = {
   QR_ITEM_REMOVED: 'qr:item_removed',
   QR_ORDER_SUBMITTED: 'qr:order_submitted',
   QR_ORDER_STATUS_CHANGED: 'qr:order_status_changed',
+  // Официант закрыл стол → визит завершён, гости больше не могут заказывать.
+  QR_SESSION_CLOSED: 'qr:session_closed',
 } as const;
 
 /** Клиентские события, которые шлёт гость QR-меню (вход/выход в комнату стола). */

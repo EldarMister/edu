@@ -26,6 +26,11 @@ export interface Settings {
   payCard: boolean;
   qrImageUrl: string | null;
   printerConnected: boolean;
+  // QR-меню: гео-проверка присутствия
+  qrGeoEnabled: boolean;
+  qrGeoLat: number | null;
+  qrGeoLng: number | null;
+  qrGeoRadius: number;
   // ККМ / фискализация
   fiscalProvider: string | null; // 'ekassa' | 'yakassa' | null
   fiscalEkassaApiKey: string | null;

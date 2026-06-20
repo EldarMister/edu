@@ -24,6 +24,7 @@ export interface QrRealtimeHandlers {
   onGuestChanged?: () => void;
   onOrderSubmitted?: (payload: { orderId: string; orderNumber: string; status: string }) => void;
   onOrderStatusChanged?: (payload: { orderId: string; status: string }) => void;
+  onSessionClosed?: (payload: { tableId: string }) => void;
 }
 
 /** Подключает гостя к комнате стола и подписывает на realtime-события QR-меню. */
@@ -43,12 +44,14 @@ export function useQrRealtime(tableId: string | undefined, handlers: QrRealtimeH
     const onSubmitted = (p: { orderId: string; orderNumber: string; status: string }) =>
       handlers.onOrderSubmitted?.(p);
     const onStatus = (p: { orderId: string; status: string }) => handlers.onOrderStatusChanged?.(p);
+    const onClosed = (p: { tableId: string }) => handlers.onSessionClosed?.(p);
 
     sock.on('qr:cart_updated', onCart);
     sock.on('qr:guest_joined', onJoined);
     sock.on('qr:guest_left', onLeft);
     sock.on('qr:order_submitted', onSubmitted);
     sock.on('qr:order_status_changed', onStatus);
+    sock.on('qr:session_closed', onClosed);
 
     return () => {
       sock.emit('qr:leave', { tableId });
@@ -59,6 +62,7 @@ export function useQrRealtime(tableId: string | undefined, handlers: QrRealtimeH
       sock.off('qr:guest_left', onLeft);
       sock.off('qr:order_submitted', onSubmitted);
       sock.off('qr:order_status_changed', onStatus);
+      sock.off('qr:session_closed', onClosed);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tableId]);

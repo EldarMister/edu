@@ -619,6 +619,14 @@ model Settings {
   printerConnected             Boolean @default(false) @map("printer_connected")
   allowNegativeIngredientStock Boolean @default(true) @map("allow_negative_ingredient_stock")
 
+  // QR-меню: опциональная гео-проверка присутствия гостя у кафе.
+  // Владелец включает по желанию, делится координатами кафе и задаёт радиус.
+  // Заказ блокируется, если гость дальше радиуса + буфер на погрешность GPS.
+  qrGeoEnabled Boolean @default(false) @map("qr_geo_enabled")
+  qrGeoLat     Float?  @map("qr_geo_lat")
+  qrGeoLng     Float?  @map("qr_geo_lng")
+  qrGeoRadius  Int     @default(150) @map("qr_geo_radius") // метры
+
   // ККМ / фискализация (Кыргызстан). Владелец выбирает провайдера и вводит ключи.
   // null/пусто в fiscalProvider = ККМ выключена, печать фискального чека недоступна.
   fiscalProvider      String? @map("fiscal_provider") // ekassa | yakassa | null

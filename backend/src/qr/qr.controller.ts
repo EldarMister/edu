@@ -36,7 +36,7 @@ export class QrController {
   /** Вход гостя — создаёт/возвращает guestId и guestLabel. */
   @Post('qr-session/:tableToken/join')
   join(@Param('tableToken') tableToken: string, @Body() dto: JoinDto) {
-    return this.qr.join(tableToken, dto.guestKey);
+    return this.qr.join(tableToken, dto.guestKey, dto.reopen ?? false);
   }
 
   /** Добавить позицию в общий заказ. */
@@ -68,6 +68,6 @@ export class QrController {
   /** Отправить общий заказ в POS. */
   @Post('qr-session/:tableToken/submit')
   submit(@Param('tableToken') tableToken: string, @Body() dto: SubmitDto) {
-    return this.qr.submit(tableToken, dto.guestKey);
+    return this.qr.submit(tableToken, dto.guestKey, { lat: dto.lat, lng: dto.lng });
   }
 }

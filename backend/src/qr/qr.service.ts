@@ -22,6 +22,8 @@ const sessionInclude = {
 
 type SessionWithRelations = Prisma.QrTableSessionGetPayload<{ include: typeof sessionInclude }>;
 const QR_ACTIVE_GUEST_TTL_MS = 2 * 60 * 1000;
+/** Допуск к радиусу на погрешность GPS (особенно в помещении). */
+const QR_GEO_BUFFER_M = 50;
 
 /**
  * Публичное QR-меню стола: общий заказ, который гости наполняют со своих телефонов.
@@ -54,8 +56,9 @@ export class QrService {
   /** Меню для гостя: реквизиты заведения, стол, категории и блюда. */
   async getMenu(tableToken: string) {
     const table = await this.resolveTable(tableToken);
-    const [settings, categories, dishes] = await Promise.all([
+    const [settings, geo, categories, dishes] = await Promise.all([
       this.settings.getPublic(),
+      this.settings.getQrGeoConfig(),
       this.categories.findAll(),
       this.dishes.findAll({}),
     ]);
@@ -66,6 +69,8 @@ export class QrService {
         phone: settings.phone,
       },
       table: { id: table.id, number: table.number, hall: table.hall?.name ?? null },
+      // Нужна ли гостю отправка координат и в каком радиусе (без раскрытия координат кафе).
+      geo: { required: geo.enabled, radius: geo.radius },
       categories,
       dishes,
     };
@@ -87,6 +92,11 @@ export class QrService {
         where: { id: session.id },
         include: sessionInclude,
       });
+    }
+    // Нет активного draft, но последний визит закрыт официантом → показываем гостю
+    // экран «Заказ завершён» вместо пустого меню (заказывать нельзя до нового визита).
+    if (!session && (await this.isVisitClosed(table.id))) {
+      return { ...this.serializeSession(table, null), status: 'closed' as const };
     }
     return this.serializeSession(table, session);
   }
@@ -135,10 +145,16 @@ export class QrService {
     };
   }
 
-  /** Вход гостя: создаёт/возвращает сессию и гостя (Гость N). */
-  async join(tableToken: string, guestKey?: string) {
+  /** Вход гостя: создаёт/возвращает сессию и гостя (Гость N).
+   *  Если визит закрыт официантом — вход не открывает новый заказ сам по себе:
+   *  возвращаем status='closed'. Новый круг начинается только явной кнопкой (reopen). */
+  async join(tableToken: string, guestKey?: string, reopen = false) {
     const table = await this.resolveTable(tableToken);
-    const { session, guest, key } = await this.ensureSessionGuest(table.id, guestKey);
+    const ensured = await this.ensureSessionGuest(table.id, guestKey, { reopen });
+    if (!ensured) {
+      return { status: 'closed' as const, tableId: table.id };
+    }
+    const { session, guest, key } = ensured;
 
     this.events.emitToQrTable(table.id, SERVER_EVENTS.QR_GUEST_JOINED, {
       tableId: table.id,
@@ -147,6 +163,7 @@ export class QrService {
     });
 
     return {
+      status: 'draft' as const,
       sessionId: session.id,
       guestId: guest.id,
       guestKey: key,
@@ -160,7 +177,12 @@ export class QrService {
    *  создаём свежую draft-сессию и заново привязываем гостя по его guestKey. */
   async addItem(tableToken: string, dto: AddItemDto) {
     const table = await this.resolveTable(tableToken);
-    const { session, guest } = await this.ensureSessionGuest(table.id, dto.guestKey);
+    await this.assertWithinGeofence(dto.lat, dto.lng);
+    const ensured = await this.ensureSessionGuest(table.id, dto.guestKey);
+    if (!ensured) {
+      throw new BadRequestException('Заказ по этому столу завершён. Начните новый заказ.');
+    }
+    const { session, guest } = ensured;
 
     const dish = await this.prisma.dish.findFirst({
       where: { id: dto.dishId, isActive: true },
@@ -226,8 +248,9 @@ export class QrService {
   }
 
   /** Отправка общего заказа стола в POS (создаёт реальный заказ source=qr). */
-  async submit(tableToken: string, guestKey: string) {
+  async submit(tableToken: string, guestKey: string, coords?: { lat?: number; lng?: number }) {
     const table = await this.resolveTable(tableToken);
+    await this.assertWithinGeofence(coords?.lat, coords?.lng);
     const { session } = await this.requireGuest(table.id, guestKey);
 
     const full = await this.prisma.qrTableSession.findUniqueOrThrow({
@@ -277,7 +300,12 @@ export class QrService {
 
   // ---- helpers ----
 
-  private async getOrCreateDraftSession(tableId: string) {
+  /**
+   * Активный draft стола или null, если визит закрыт официантом (и reopen не задан).
+   * После submit (статус submitted) автоматически открывается новый круг — стол ещё занят.
+   * После close (официант закрыл стол) новый круг создаётся ТОЛЬКО по явному reopen.
+   */
+  private async getOrCreateDraftSession(tableId: string, opts?: { reopen?: boolean }) {
     const existing = await this.prisma.qrTableSession.findFirst({
       where: { tableId, status: 'draft' },
       orderBy: { createdAt: 'desc' },
@@ -288,7 +316,40 @@ export class QrService {
       }
       return existing;
     }
+    // Активного draft нет: либо стол ещё «живой» (предыдущий круг отправлен) → новый круг,
+    // либо визит закрыт официантом → без явного reopen новый заказ не открываем.
+    if (!opts?.reopen && (await this.isVisitClosed(tableId))) {
+      return null;
+    }
     return this.prisma.qrTableSession.create({ data: { tableId, status: 'draft' } });
+  }
+
+  /**
+   * Опциональная гео-проверка: если владелец включил её и задал координаты кафе,
+   * заказ блокируется, когда гость дальше радиуса + буфер на погрешность GPS.
+   * Если координаты гостя отсутствуют (отказал в доступе / нет геолокации) —
+   * не блокируем: это «мягкий» дополнительный барьер поверх привязки к столу.
+   */
+  private async assertWithinGeofence(lat?: number, lng?: number) {
+    const geo = await this.settings.getQrGeoConfig();
+    if (!geo.enabled || geo.lat == null || geo.lng == null) return;
+    if (lat == null || lng == null) return; // нет координат гостя — мягкий пропуск
+    const distance = haversineMeters(lat, lng, geo.lat, geo.lng);
+    if (distance > geo.radius + QR_GEO_BUFFER_M) {
+      throw new BadRequestException(
+        'Заказ доступен только рядом с кафе. Похоже, вы слишком далеко.',
+      );
+    }
+  }
+
+  /** Последний визит стола закрыт официантом (нет более свежей активной сессии). */
+  private async isVisitClosed(tableId: string) {
+    const latest = await this.prisma.qrTableSession.findFirst({
+      where: { tableId },
+      orderBy: { createdAt: 'desc' },
+      select: { status: true },
+    });
+    return latest?.status === 'closed';
   }
 
   private async submittedOrderIdForSession(sessionId: string) {
@@ -355,8 +416,9 @@ export class QrService {
    * Общая логика входа и добавления позиции: позволяет начать новый круг заказа
    * после того, как предыдущий общий заказ уже отправлен.
    */
-  private async ensureSessionGuest(tableId: string, guestKey?: string) {
-    const session = await this.getOrCreateDraftSession(tableId);
+  private async ensureSessionGuest(tableId: string, guestKey?: string, opts?: { reopen?: boolean }) {
+    const session = await this.getOrCreateDraftSession(tableId, opts);
+    if (!session) return null; // визит закрыт официантом
     const key = guestKey?.trim() || randomUUID();
     let guest = await this.prisma.qrGuest.findUnique({
       where: { sessionId_guestKey: { sessionId: session.id, guestKey: key } },
@@ -490,4 +552,16 @@ export class QrService {
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+
+/** Расстояние между двумя точками на земле в метрах (формула гаверсинуса). */
+function haversineMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6_371_000; // радиус Земли, м
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
 }
