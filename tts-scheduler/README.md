@@ -4,7 +4,7 @@ Small Railway cron service for switching only `tts-service` between day and nigh
 
 Goal:
 
-- day: Serverless off, then `GET /health` to warm TTS
+- day: Serverless off, apply staged changes, then warm TTS via `/health` until it responds
 - night: Serverless on, no health ping, so Railway can sleep after inactivity
 - backend, frontend and Postgres are not touched
 
@@ -31,6 +31,10 @@ RAILWAY_SERVERLESS_FIELD=
 # Last-resort fallback. Warning: replicas=0 will not wake on night TTS requests.
 RAILWAY_ALLOW_REPLICA_FALLBACK=false
 RAILWAY_REPLICA_FIELD=
+
+# Wake-mode health retry loop.
+TTS_HEALTH_RETRIES=12
+TTS_HEALTH_RETRY_DELAY_MS=10000
 ```
 
 ## Railway setup
@@ -55,6 +59,10 @@ cron services from this same folder:
 - `tts-scheduler-night` with `SCHEDULER_ACTION=night`
 
 Both still modify only `RAILWAY_TTS_SERVICE_ID`.
+
+Important: `serviceInstanceUpdate` creates staged changes in Railway. The
+scheduler must also trigger a deploy/redeploy mutation so the updated
+Serverless value is actually applied to `tts-service`.
 
 ## GraphQL field verification
 

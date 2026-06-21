@@ -1,6 +1,8 @@
 const RAILWAY_GRAPHQL_URL = process.env.RAILWAY_GRAPHQL_URL || 'https://backboard.railway.com/graphql/v2';
 const TZ = 'Asia/Bishkek';
 const HEALTH_TIMEOUT_MS = Number(process.env.TTS_HEALTH_TIMEOUT_MS || 30_000);
+const HEALTH_RETRIES = Number(process.env.TTS_HEALTH_RETRIES || 12);
+const HEALTH_RETRY_DELAY_MS = Number(process.env.TTS_HEALTH_RETRY_DELAY_MS || 10_000);
 
 const SERVERLESS_FIELDS = [
   'sleepApplication',
@@ -12,6 +14,7 @@ const SERVERLESS_FIELDS = [
 ];
 
 const REPLICA_FIELDS = ['numReplicas', 'replicas', 'replicaCount'];
+const DEPLOY_MUTATIONS = ['serviceInstanceDeployV2', 'serviceInstanceRedeploy'];
 
 function bishkekTimestamp(date = new Date()) {
   return new Intl.DateTimeFormat('sv-SE', {
@@ -90,6 +93,13 @@ function fieldNames(type) {
   return new Set((type?.inputFields || type?.fields || []).map((field) => field.name));
 }
 
+function mutationMap(schema) {
+  return new Map((schema?.mutation?.mutationType?.fields || []).map((field) => [
+    field.name,
+    new Set((field.args || []).map((arg) => arg.name)),
+  ]));
+}
+
 async function introspect(token) {
   return gql(`
     query SchedulerIntrospection {
@@ -110,6 +120,14 @@ async function introspect(token) {
 
 function pickFirst(names, candidates) {
   return candidates.find((name) => names.has(name)) || null;
+}
+
+function pickMutation(mutations, candidates) {
+  for (const name of candidates) {
+    const args = mutations.get(name);
+    if (args) return { name, args };
+  }
+  return null;
 }
 
 async function getCurrentMode(token, serviceId, environmentId, instanceFields, serverlessField, replicaField) {
@@ -136,6 +154,34 @@ async function updateServiceInstance(token, serviceId, environmentId, input) {
   return data.serviceInstanceUpdate;
 }
 
+async function applyStagedChanges(token, deployMutation, serviceId, environmentId) {
+  const variableDefs = [];
+  const args = [];
+  const variables = {};
+
+  if (deployMutation.args.has('serviceId')) {
+    variableDefs.push('$serviceId: String!');
+    args.push('serviceId: $serviceId');
+    variables.serviceId = serviceId;
+  }
+  if (deployMutation.args.has('environmentId')) {
+    variableDefs.push('$environmentId: String!');
+    args.push('environmentId: $environmentId');
+    variables.environmentId = environmentId;
+  }
+
+  const mutationSignature = variableDefs.length > 0 ? `(${variableDefs.join(', ')})` : '';
+  const mutationArgs = args.length > 0 ? `(${args.join(', ')})` : '';
+
+  const data = await gql(`
+    mutation ApplyTtsServiceChanges${mutationSignature} {
+      ${deployMutation.name}${mutationArgs}
+    }
+  `, variables, token);
+
+  return data[deployMutation.name];
+}
+
 async function pingHealth(url) {
   if (!url) return { skipped: true };
   const controller = new AbortController();
@@ -146,6 +192,33 @@ async function pingHealth(url) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function pingHealthUntilReady(url) {
+  if (!url) return { skipped: true };
+
+  let last = { skipped: false, ok: false, status: null, attempt: 0 };
+  for (let attempt = 1; attempt <= HEALTH_RETRIES; attempt += 1) {
+    try {
+      const result = await pingHealth(url);
+      last = { ...result, attempt };
+      if (result.ok) return last;
+    } catch (error) {
+      last = {
+        skipped: false,
+        ok: false,
+        status: null,
+        attempt,
+        error: error?.name === 'AbortError' ? 'timeout' : (error?.message || String(error)),
+      };
+    }
+
+    if (attempt < HEALTH_RETRIES) {
+      await new Promise((resolve) => setTimeout(resolve, HEALTH_RETRY_DELAY_MS));
+    }
+  }
+
+  return last;
 }
 
 async function main() {
@@ -163,8 +236,10 @@ async function main() {
   const schema = await introspect(token);
   const instanceFields = fieldNames(schema.serviceInstance);
   const inputFields = fieldNames(schema.updateInput);
+  const mutations = mutationMap(schema);
   const serverlessField = pickFirst(inputFields, SERVERLESS_FIELDS);
   const replicaField = pickFirst(inputFields, REPLICA_FIELDS);
+  const deployMutation = pickMutation(mutations, DEPLOY_MUTATIONS);
 
   if (!serverlessField) {
     const allowReplicaFallback = (process.env.RAILWAY_ALLOW_REPLICA_FALLBACK || 'false') === 'true';
@@ -175,6 +250,12 @@ async function main() {
         `Fallback is replicas 1/0 with RAILWAY_ALLOW_REPLICA_FALLBACK=true, but replicas=0 will not wake on night TTS requests.`,
       );
     }
+  }
+
+  if (!deployMutation) {
+    throw new Error(
+      `No deploy mutation found after serviceInstanceUpdate. Expected one of: ${DEPLOY_MUTATIONS.join(', ')}`,
+    );
   }
 
   const effectiveServerlessField = process.env.RAILWAY_SERVERLESS_FIELD?.trim() || serverlessField;
@@ -204,10 +285,19 @@ async function main() {
   });
 
   await updateServiceInstance(token, serviceId, environmentId, input);
+  log('info', 'applying staged changes', {
+    currentMode: mode,
+    action,
+    mutation: deployMutation.name,
+  });
+  await applyStagedChanges(token, deployMutation, serviceId, environmentId);
 
   let health = { skipped: true };
   if (mode === 'wake') {
-    health = await pingHealth(healthUrl);
+    health = await pingHealthUntilReady(healthUrl);
+    if (!health.ok) {
+      throw new Error(`Healthcheck did not become ready after ${health.attempt || 0} attempts`);
+    }
   }
 
   log('info', 'tts-scheduler success', {
