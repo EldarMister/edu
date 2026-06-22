@@ -9,6 +9,7 @@ import { KitchenApp } from '@/features/kitchen/KitchenApp';
 import { BarApp } from '@/features/bar/BarApp';
 import { AdminApp } from '@/features/admin/AdminApp';
 import { QrMenuApp } from '@/features/qr/QrMenuApp';
+import { PlatformApp } from '@/features/platform/PlatformApp';
 
 export function App() {
   const user = useAuth((s) => s.user);
@@ -18,6 +19,9 @@ export function App() {
       <Routes>
         {/* Публичное QR-меню стола (EDU MENU) — без авторизации. */}
         <Route path="/menu/:tableToken" element={<QrMenuApp />} />
+
+        {/* Платформенная панель супер-админа — своя авторизация (вне ролей персонала). */}
+        <Route path="/platform/*" element={<PlatformApp />} />
 
         <Route
           path="/login"
