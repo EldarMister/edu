@@ -160,16 +160,41 @@ enum IngredientUnitType {
 
 // ---------- Models ----------
 
+// Статус кафе на платформе: active — работает; suspended — приостановлено (вход персонала
+// и QR-меню заблокированы). Приостановку ставит супер-админ вручную или cron по «оплачено до».
+enum CafeStatus {
+  active
+  suspended
+}
+
 // Заведение (арендатор). Все бизнес-данные привязаны к кафе через cafe_id.
 // Мультитенантность, фаза 1: cafe_id добавлен nullable во все таблицы и бэкфиллен «Кафе #1».
 model Cafe {
-  id        String   @id @default(uuid())
-  name      String
-  isActive  Boolean  @default(true) @map("is_active")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id              String     @id @default(uuid())
+  name            String
+  isActive        Boolean    @default(true) @map("is_active")
+  // Подписка / платформенный контроль.
+  status          CafeStatus @default(active)
+  paidUntil       DateTime?  @map("paid_until") // оплачено до; cron приостанавливает после
+  suspendedAt     DateTime?  @map("suspended_at")
+  suspendedReason String?    @map("suspended_reason") // напр. «не оплачено» или текст супер-админа
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
 
   @@map("cafes")
+}
+
+// Платформенный супер-админ (управляет кафе). Вне мультитенантности — НЕ привязан к кафе.
+model PlatformAdmin {
+  id           String   @id @default(uuid())
+  login        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_admins")
 }
 
 model User {

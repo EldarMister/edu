@@ -14,6 +14,7 @@ import { OrdersService } from '../orders/orders.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { setCafeId } from '../tenant/tenant-context';
+import { assertCafeActive } from '../platform/cafe-status';
 import type { AddItemDto, UpdateItemDto } from './dto';
 
 const sessionInclude = {
@@ -51,6 +52,8 @@ export class QrService {
     if (!table || !table.isActive) {
       throw new NotFoundException('Стол не найден или недоступен');
     }
+    // Кафе приостановлено — QR-меню недоступно гостям.
+    await assertCafeActive(this.prisma, table.cafeId);
     // QR-меню без логина: кафе берём из стола → дальнейшие запросы скоупятся по нему.
     setCafeId(table.cafeId);
     return table;

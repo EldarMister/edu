@@ -25,6 +25,7 @@ import { AuditModule } from './audit/audit.module';
 import { TtsModule } from './tts/tts.module';
 import { MonitoringModule } from './monitoring/monitoring.module';
 import { BackupBotModule } from './backup-bot/backup-bot.module';
+import { PlatformModule } from './platform/platform.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { TenantContextMiddleware } from './tenant/tenant-context.middleware';
@@ -56,6 +57,7 @@ import { TenantContextMiddleware } from './tenant/tenant-context.middleware';
     TtsModule,
     MonitoringModule,
     BackupBotModule,
+    PlatformModule,
   ],
   providers: [
     // Глобально: сначала проверка JWT, затем проверка роли.
