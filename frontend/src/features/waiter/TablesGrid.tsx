@@ -78,7 +78,7 @@ export function TablesGrid({
               onClick={() => onSelect(t.id)}
               className={`relative flex w-full flex-col items-center justify-center rounded-[22px] border font-medium transition-all ${cardSizeClass} ${cardPaddingClass} ${
                 selected
-                  ? 'border-primary bg-primary text-white shadow-soft'
+                  ? 'border-primary/90 bg-primary/90 text-white shadow-soft'
                   : 'border-border bg-white text-text-primary hover:border-primary/40'
               }`}
             >

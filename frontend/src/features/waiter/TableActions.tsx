@@ -306,7 +306,7 @@ function TablePick({ table, selected, onClick }: { table: TableItem; selected: b
       onClick={onClick}
       className={`flex h-[60px] flex-col items-center justify-center rounded-xl border text-[15px] font-medium transition-colors ${
         selected
-          ? 'border-primary bg-primary text-white'
+          ? 'border-primary/90 bg-primary/90 text-white'
           : 'border-border bg-white text-text-primary hover:border-primary/40'
       }`}
     >

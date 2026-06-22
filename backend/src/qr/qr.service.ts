@@ -13,6 +13,7 @@ import { CategoriesService } from '../categories/categories.service';
 import { OrdersService } from '../orders/orders.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
+import { setCafeId } from '../tenant/tenant-context';
 import type { AddItemDto, UpdateItemDto } from './dto';
 
 const sessionInclude = {
@@ -45,11 +46,13 @@ export class QrService {
   private async resolveTable(tableToken: string) {
     const table = await this.prisma.table.findUnique({
       where: { qrToken: tableToken },
-      select: { id: true, number: true, isActive: true, hall: { select: { name: true } } },
+      select: { id: true, number: true, isActive: true, cafeId: true, hall: { select: { name: true } } },
     });
     if (!table || !table.isActive) {
       throw new NotFoundException('Стол не найден или недоступен');
     }
+    // QR-меню без логина: кафе берём из стола → дальнейшие запросы скоупятся по нему.
+    setCafeId(table.cafeId);
     return table;
   }
 

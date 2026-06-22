@@ -143,19 +143,9 @@ export function SettingsPage() {
   };
 
   const set = <K extends keyof Form>(k: K, v: Form[K], _mode: 'debounce' | 'instant' = 'debounce') => {
-    let nextForm: Form | null = null;
-    let blockedNoMethod = false;
-    setForm((f) => {
-      if (!f) return f;
-      nextForm = { ...f, [k]: v };
-      if (!nextForm.payQr && !nextForm.payCash && !nextForm.payCard) {
-        nextForm = f;
-        blockedNoMethod = true;
-        return f;
-      }
-      return nextForm;
-    });
-    if (blockedNoMethod) {
+    if (!form) return;
+    const next = { ...form, [k]: v };
+    if (!next.payQr && !next.payCash && !next.payCard) {
       push({
         message: t('Должен быть включён хотя бы один способ оплаты'),
         type: 'error',
@@ -163,7 +153,8 @@ export function SettingsPage() {
       });
       return;
     }
-    if (!nextForm || nextForm[k] !== v) return;
+    if (next[k] === form[k]) return;
+    setForm(next);
     setDirty(true);
   };
 
@@ -569,6 +560,21 @@ export function SettingsPage() {
           </div>
 
         </div>
+      </div>
+
+      {/* Сохранение — статичная панель внизу страницы */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+        <p className={`text-sm ${dirty ? 'text-warning' : 'text-text-muted'}`}>
+          {dirty ? t('Есть несохранённые изменения') : t('Все изменения сохранены')}
+        </p>
+        <button
+          type="button"
+          onClick={() => void saveSettings()}
+          disabled={!dirty || update.isPending}
+          className="btn-primary h-10 rounded-lg px-5 text-sm font-semibold disabled:opacity-50"
+        >
+          {update.isPending ? t('Сохраняем…') : t('Сохранить изменения')}
+        </button>
       </div>
     </div>
   );

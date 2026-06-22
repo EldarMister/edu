@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react';
 
-/** Карточка-метрика в верхней части каждого раздела (как в референсах). */
 export function StatCard({
   label,
   value,
@@ -12,26 +11,29 @@ export function StatCard({
   icon: ReactNode;
   tone?: 'primary' | 'success' | 'warning' | 'danger' | 'muted';
 }) {
-  const tones: Record<string, string> = {
-    primary: 'bg-primary/10 text-primary',
-    success: 'bg-success/10 text-success',
-    warning: 'bg-warning/10 text-warning',
-    danger: 'bg-danger/10 text-danger',
-    muted: 'bg-slate-100 text-text-muted',
+  const iconColor: Record<string, string> = {
+    primary: 'text-primary',
+    success: 'text-success',
+    warning: 'text-warning',
+    danger: 'text-danger',
+    muted: 'text-text-muted',
   };
+
   return (
-    <div className="card flex items-center gap-3 p-3.5 sm:gap-3.5 sm:p-4">
-      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl sm:h-11 sm:w-11 ${tones[tone]}`}>
-        {icon}
+    <div className="group rounded-lg border border-border bg-white p-3 transition-shadow duration-200 hover:shadow-[0_2px_8px_rgba(0,0,0,0.04)]">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-medium uppercase tracking-widest text-text-muted">{label}</p>
+        <span className={`[&>svg]:h-3.5 [&>svg]:w-3.5 shrink-0 ${iconColor[tone]} opacity-60`}>
+          {icon}
+        </span>
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="break-words text-[13px] leading-snug text-text-muted sm:text-sm">{label}</p>
-        <p className="mt-0.5 text-xl font-semibold leading-tight text-text-primary">{value}</p>
-      </div>
+      <p className="mt-2 text-[22px] font-semibold leading-none tracking-tight text-text-primary">
+        {value}
+      </p>
     </div>
   );
 }
 
 export function StatCardsRow({ children }: { children: ReactNode }) {
-  return <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{children}</div>;
+  return <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">{children}</div>;
 }

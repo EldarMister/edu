@@ -5,11 +5,12 @@ export interface AuthUser {
   role: string;
   name: string;
   phone: string;
+  cafeId: string | null;
 }
 
 /** Достаёт пользователя, положенного в request JwtStrategy. */
 export const CurrentUser = createParamDecorator(
-  (data: keyof AuthUser | undefined, ctx: ExecutionContext): AuthUser | string => {
+  (data: keyof AuthUser | undefined, ctx: ExecutionContext): AuthUser | string | null => {
     const request = ctx.switchToHttp().getRequest();
     const user = request.user as AuthUser;
     return data ? user?.[data] : user;

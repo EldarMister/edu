@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { queryClient } from '@/lib/queryClient';
 import type { AuthUser } from '@/types';
 
 interface AuthState {
@@ -20,7 +21,12 @@ export const useAuth = create<AuthState>()(
       setSession: (data) =>
         set({ user: data.user, accessToken: data.accessToken, refreshToken: data.refreshToken }),
       setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
-      logout: () => set({ user: null, accessToken: null, refreshToken: null }),
+      logout: () => {
+        // Чистим React Query кэш, чтобы при логине другого пользователя на этом же
+        // устройстве не «мигали» чужие данные (мультитенантная гигиена).
+        queryClient.clear();
+        set({ user: null, accessToken: null, refreshToken: null });
+      },
     }),
     { name: 'edu-pos-auth' },
   ),
