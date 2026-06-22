@@ -153,7 +153,6 @@ export function SettingsPage() {
       });
       return;
     }
-    if (next[k] === form[k]) return;
     setForm(next);
     setDirty(true);
   };
@@ -206,23 +205,6 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-4">
-      <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card/95 px-4 py-3 shadow-sm backdrop-blur">
-        <div>
-          <p className="text-sm font-semibold text-text-primary">{t('Настройки')}</p>
-          <p className={`text-xs ${dirty ? 'text-warning' : 'text-text-muted'}`}>
-            {dirty ? t('Есть несохранённые изменения') : t('Все изменения сохранены')}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => void saveSettings()}
-          disabled={!dirty || update.isPending}
-          className="btn-primary h-10 rounded-lg px-4 text-sm font-semibold disabled:opacity-50"
-        >
-          {update.isPending ? t('Сохраняем…') : t('Сохранить изменения')}
-        </button>
-      </div>
-
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Левая большая карточка — информация о кафе */}
         <div className="card p-5 lg:col-span-2">
