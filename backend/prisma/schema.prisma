@@ -160,7 +160,20 @@ enum IngredientUnitType {
 
 // ---------- Models ----------
 
+// Заведение (арендатор). Все бизнес-данные привязаны к кафе через cafe_id.
+// Мультитенантность, фаза 1: cafe_id добавлен nullable во все таблицы и бэкфиллен «Кафе #1».
+model Cafe {
+  id        String   @id @default(uuid())
+  name      String
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("cafes")
+}
+
 model User {
+  cafeId       String?  @map("cafe_id")
   id           String   @id @default(uuid())
   name         String
   phone        String   @unique
@@ -189,6 +202,7 @@ model User {
 }
 
 model Hall {
+  cafeId    String?  @map("cafe_id")
   id        String   @id @default(uuid())
   name      String
   isActive  Boolean  @default(true) @map("is_active")
@@ -202,6 +216,7 @@ model Hall {
 }
 
 model Table {
+  cafeId    String?     @map("cafe_id")
   id        String      @id @default(uuid())
   hallId    String      @map("hall_id")
   number    Int
@@ -225,6 +240,7 @@ model Table {
 }
 
 model Category {
+  cafeId      String?     @map("cafe_id")
   id          String      @id @default(uuid())
   name        String
   sortOrder   Int         @default(0) @map("sort_order")
@@ -239,6 +255,7 @@ model Category {
 }
 
 model Dish {
+  cafeId          String?      @map("cafe_id")
   id              String       @id @default(uuid())
   categoryId      String       @map("category_id")
   name            String
@@ -283,6 +300,7 @@ model Dish {
 }
 
 model SetComponent {
+  cafeId        String?  @map("cafe_id")
   id            String   @id @default(uuid())
   setId         String   @map("set_id")
   dishId        String   @map("dish_id")
@@ -305,6 +323,7 @@ model SetComponent {
 }
 
 model DishVariant {
+  cafeId       String?  @map("cafe_id")
   id           String   @id @default(uuid())
   dishId       String   @map("dish_id")
   name         String
@@ -325,6 +344,7 @@ model DishVariant {
 }
 
 model Order {
+  cafeId                 String?        @map("cafe_id")
   id                     String         @id @default(uuid())
   // Номер заказа сбрасывается каждый день (нумерация в пределах businessDate).
   orderNumber            String         @map("order_number")
@@ -371,7 +391,7 @@ model Order {
   // Заполняется, если заказ создан из QR-сессии стола.
   qrSession            QrTableSession?
 
-  @@unique([businessDate, orderNumber])
+  @@unique([cafeId, businessDate, orderNumber])
   @@index([status])
   @@index([tableId])
   @@index([waiterId])
@@ -380,6 +400,7 @@ model Order {
 }
 
 model OrderAction {
+  cafeId         String?  @map("cafe_id")
   id             String   @id @default(uuid())
   orderId        String   @map("order_id")
   type           String
@@ -395,6 +416,7 @@ model OrderAction {
 }
 
 model WaiterShift {
+  cafeId    String?           @map("cafe_id")
   id        String            @id @default(uuid())
   waiterId  String            @map("waiter_id")
   startedAt DateTime          @default(now()) @map("started_at")
@@ -413,6 +435,7 @@ model WaiterShift {
 // Факт сдачи наличных сотрудником за смену (на конкретную дату).
 // «Касса (сдал)» в отчёте по сменам — вводится администратором, не расчётное.
 model ShiftCashReport {
+  cafeId      String?  @map("cafe_id")
   id          String   @id @default(uuid())
   waiterId    String   @map("waiter_id")
   date        DateTime @db.Date
@@ -428,6 +451,7 @@ model ShiftCashReport {
 }
 
 model OrderItem {
+  cafeId                  String?            @map("cafe_id")
   id                      String             @id @default(uuid())
   orderId                 String             @map("order_id")
   // nullable: блюдо может быть полностью удалено из меню — позиция остаётся в истории по снимкам.
@@ -476,6 +500,7 @@ enum RejectionDecision {
 }
 
 model OrderItemSetComponent {
+  cafeId                      String?            @map("cafe_id")
   id                          String             @id @default(uuid())
   orderItemId                 String             @map("order_item_id")
   // nullable: блюдо состава может быть удалено из меню — имя сохраняется в снимке.
@@ -504,6 +529,7 @@ model OrderItemSetComponent {
 }
 
 model Payment {
+  cafeId    String?       @map("cafe_id")
   id        String        @id @default(uuid())
   orderId   String        @map("order_id")
   amount    Decimal       @db.Decimal(10, 2)
@@ -520,6 +546,7 @@ model Payment {
 }
 
 model KitchenEvent {
+  cafeId      String?          @map("cafe_id")
   id          String           @id @default(uuid())
   orderId     String           @map("order_id")
   orderItemId String?          @map("order_item_id")
@@ -537,6 +564,7 @@ model KitchenEvent {
 }
 
 model PenaltyReward {
+  cafeId      String?     @map("cafe_id")
   id          String      @id @default(uuid())
   userId      String      @map("user_id")
   type        PenaltyType
@@ -552,6 +580,7 @@ model PenaltyReward {
 }
 
 model Incident {
+  cafeId       String?        @map("cafe_id")
   id           String         @id @default(uuid())
   type         String
   description  String?
@@ -574,6 +603,7 @@ model Incident {
 }
 
 model AuditLog {
+  cafeId      String?  @map("cafe_id")
   id          String   @id @default(uuid())
   userId      String?  @map("user_id")
   userName    String?  @map("user_name") // имя на момент действия (не зависит от переименования)
@@ -602,7 +632,8 @@ model AuditLog {
 
 // Настройки заведения (singleton, id = "default"). Этап 8.
 model Settings {
-  id                           String  @id @default("default")
+  cafeId                       String? @unique @map("cafe_id")
+  id                           String  @id @default(uuid())
   cafeName                     String  @default("EDU CAFE") @map("cafe_name")
   address                      String  @default("г. Бишкек, ул. Киевская 120")
   phone                        String  @default("+996 500 123 456")
@@ -642,6 +673,7 @@ model Settings {
 }
 
 model PushSubscription {
+  cafeId    String?  @map("cafe_id")
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
   endpoint  String   @unique
@@ -659,6 +691,7 @@ model PushSubscription {
 
 // Запрос официанта на печать чека — подтверждается администратором (раздел «Печать чека»).
 model ReceiptPrintRequest {
+  cafeId      String?            @map("cafe_id")
   id          String             @id @default(uuid())
   orderId     String             @map("order_id")
   waiterId    String             @map("waiter_id")
@@ -684,6 +717,7 @@ model ReceiptPrintRequest {
 // Черновик (draft) живёт до submit; после submit привязывается к реальному Order.
 
 model QrTableSession {
+  cafeId           String?  @map("cafe_id")
   id               String   @id @default(uuid())
   tableId          String   @map("table_id")
   status           String   @default("draft") // draft | submitted | closed
@@ -701,6 +735,7 @@ model QrTableSession {
 }
 
 model QrGuest {
+  cafeId     String?  @map("cafe_id")
   id         String   @id @default(uuid())
   sessionId  String   @map("session_id")
   // Секрет гостя из localStorage — идентифицирует устройство без авторизации.
@@ -719,6 +754,7 @@ model QrGuest {
 }
 
 model QrSessionItem {
+  cafeId         String?  @map("cafe_id")
   id             String   @id @default(uuid())
   sessionId      String   @map("session_id")
   guestId        String   @map("guest_id")
@@ -749,6 +785,7 @@ model QrSessionItem {
 // Сырьё (ингредиент). Деньги — Decimal(12,2), количества — Decimal(12,3),
 // чтобы хранить дробные граммы/килограммы (например, 0.120 кг).
 model Ingredient {
+  cafeId            String?            @map("cafe_id")
   id                String             @id @default(uuid())
   name              String
   // Тип единицы и display-единица, выбранная админом (g|kg|ml|l|pcs).
@@ -771,6 +808,7 @@ model Ingredient {
 
 // Строка техкарты: сколько ингредиента уходит на 1 порцию блюда.
 model RecipeItem {
+  cafeId       String?  @map("cafe_id")
   id           String   @id @default(uuid())
   dishId       String   @map("dish_id")
   ingredientId String   @map("ingredient_id")
@@ -790,6 +828,7 @@ model RecipeItem {
 
 // Закупка. number — автоинкремент, на фронте показываем как «ЗКП-000142».
 model Purchase {
+  cafeId      String?        @map("cafe_id")
   id          String         @id @default(uuid())
   number      Int            @default(autoincrement())
   date        DateTime       @default(now())
@@ -807,6 +846,7 @@ model Purchase {
 }
 
 model PurchaseItem {
+  cafeId        String?  @map("cafe_id")
   id            String   @id @default(uuid())
   purchaseId    String   @map("purchase_id")
   ingredientId  String   @map("ingredient_id")
@@ -831,6 +871,7 @@ model PurchaseItem {
 
 // Движение склада — неизменяемая запись в журнале остатков.
 model StockMovement {
+  cafeId       String?             @map("cafe_id")
   id           String              @id @default(uuid())
   ingredientId String              @map("ingredient_id")
   orderItemId  String?             @map("order_item_id")

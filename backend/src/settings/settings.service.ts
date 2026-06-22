@@ -7,8 +7,6 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { UpdateSettingsDto } from './dto';
 
-const SINGLETON_ID = 'default';
-
 /** Человекочитаемые названия полей настроек для описаний аудита. */
 const SETTINGS_FIELD_LABELS: Record<string, string> = {
   cafeName: 'название кафе',
@@ -49,13 +47,13 @@ export class SettingsService {
     private events: EventsGateway,
   ) {}
 
-  /** Возвращает singleton-настройки, создавая их при первом обращении. */
+  /** Настройки текущего кафе, создавая их при первом обращении.
+   *  findFirst/create скоупятся по cafeId middleware'ом (контекст тенанта).
+   *  Без контекста (фоновые/публичные) — вернётся единственная строка. */
   async ensure(): Promise<Settings> {
-    return this.prisma.settings.upsert({
-      where: { id: SINGLETON_ID },
-      update: {},
-      create: { id: SINGLETON_ID },
-    });
+    const existing = await this.prisma.settings.findFirst();
+    if (existing) return existing;
+    return this.prisma.settings.create({ data: {} });
   }
 
   /** Полные настройки (для страницы владельца). */
@@ -141,7 +139,7 @@ export class SettingsService {
     }
 
     const updated = await this.prisma.settings.update({
-      where: { id: SINGLETON_ID },
+      where: { id: current.id },
       data,
     });
 
@@ -173,7 +171,7 @@ export class SettingsService {
         actor,
         actionType: AuditAction.SETTINGS_UPDATED,
         entityType: AuditEntity.SETTINGS,
-        entityId: SINGLETON_ID,
+        entityId: current.id,
         description: `${actor.name ?? 'Владелец'} изменил настройки: ${changed.join(', ')}`,
         oldValue,
         newValue,

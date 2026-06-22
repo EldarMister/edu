@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
@@ -27,6 +27,7 @@ import { MonitoringModule } from './monitoring/monitoring.module';
 import { BackupBotModule } from './backup-bot/backup-bot.module';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
+import { TenantContextMiddleware } from './tenant/tenant-context.middleware';
 
 @Module({
   imports: [
@@ -62,4 +63,9 @@ import { RolesGuard } from './common/guards/roles.guard';
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    // Открывает контекст тенанта на каждый запрос (cafeId заполняется после авторизации).
+    consumer.apply(TenantContextMiddleware).forRoutes('*');
+  }
+}

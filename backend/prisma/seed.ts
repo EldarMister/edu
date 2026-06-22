@@ -6,6 +6,18 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('🌱 Seeding database...');
 
+  // --- Кафе (арендатор) — всё демо-данные привязываем к нему (мультитенантность) ---
+  const cafe = await prisma.cafe.upsert({
+    where: { id: 'seed-cafe-1' },
+    update: { name: 'Демо-кафе' },
+    create: { id: 'seed-cafe-1', name: 'Демо-кафе' },
+  });
+  await prisma.settings.upsert({
+    where: { cafeId: cafe.id },
+    update: {},
+    create: { cafeId: cafe.id, cafeName: 'Демо-кафе' },
+  });
+
   // --- Пользователи (вход по телефону + пароль) ---
   const users = [
     { name: 'Иванов И.', phone: '+70000000001', role: Role.WAITER, password: 'waiter123' },
@@ -19,7 +31,7 @@ async function main() {
     await prisma.user.upsert({
       where: { phone: u.phone },
       update: { name: u.name, role: u.role, passwordHash, isActive: true },
-      create: { name: u.name, phone: u.phone, role: u.role, passwordHash },
+      create: { cafeId: cafe.id, name: u.name, phone: u.phone, role: u.role, passwordHash },
     });
   }
   console.log(`✓ ${users.length} пользователей`);
@@ -28,12 +40,12 @@ async function main() {
   const hall = await prisma.hall.upsert({
     where: { id: 'seed-hall-main' },
     update: { name: 'Зал' },
-    create: { id: 'seed-hall-main', name: 'Зал', sortOrder: 0 },
+    create: { id: 'seed-hall-main', cafeId: cafe.id, name: 'Зал', sortOrder: 0 },
   });
   const terrace = await prisma.hall.upsert({
     where: { id: 'seed-hall-terrace' },
     update: { name: 'Терраса' },
-    create: { id: 'seed-hall-terrace', name: 'Терраса', sortOrder: 1 },
+    create: { id: 'seed-hall-terrace', cafeId: cafe.id, name: 'Терраса', sortOrder: 1 },
   });
 
   // Столы как на макете: сетка номеров
@@ -42,14 +54,14 @@ async function main() {
     await prisma.table.upsert({
       where: { hallId_number: { hallId: hall.id, number } },
       update: {},
-      create: { hallId: hall.id, number, seats: number % 3 === 0 ? 4 : 2, sortOrder: number },
+      create: { cafeId: cafe.id, hallId: hall.id, number, seats: number % 3 === 0 ? 4 : 2, sortOrder: number },
     });
   }
   for (const number of [1, 2, 3, 4]) {
     await prisma.table.upsert({
       where: { hallId_number: { hallId: terrace.id, number } },
       update: {},
-      create: { hallId: terrace.id, number, seats: 4, sortOrder: number },
+      create: { cafeId: cafe.id, hallId: terrace.id, number, seats: 4, sortOrder: number },
     });
   }
   console.log(`✓ 2 зала, ${mainTables.length + 4} столов`);
@@ -105,7 +117,7 @@ async function main() {
     const category = await prisma.category.upsert({
       where: { id: categoryId },
       update: { name: cat.name, sortOrder: catIndex },
-      create: { id: categoryId, name: cat.name, sortOrder: catIndex },
+      create: { id: categoryId, cafeId: cafe.id, name: cat.name, sortOrder: catIndex },
     });
 
     let dishSort = 0;
@@ -116,6 +128,7 @@ async function main() {
         update: { name: d.name, price: d.price, description: d.desc, categoryId: category.id },
         create: {
           id: dishId,
+          cafeId: cafe.id,
           categoryId: category.id,
           name: d.name,
           description: d.desc,
