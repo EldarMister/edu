@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { OrderStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { setCafeId } from '../tenant/tenant-context';
+import { TtsService } from '../tts/tts.service';
 
 /** Статусы заказа, в которых он ещё готовится (левая колонка табло). */
 const PREPARING_STATUSES: OrderStatus[] = [
@@ -31,7 +32,50 @@ export interface QueueBoardDto {
 
 @Injectable()
 export class QueueService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private tts: TtsService,
+  ) {}
+
+  /** Кафе из короткого кода или из cafeId; кладёт в контекст тенанта. */
+  private async resolveCafe(opts: { cafeId?: string; code?: string }): Promise<void> {
+    let cafeId = opts.cafeId;
+    if (opts.code) {
+      const row = await this.prisma.settings.findFirst({
+        where: { queueDisplayCode: opts.code },
+        select: { cafeId: true },
+      });
+      if (!row) throw new NotFoundException('Табло не найдено');
+      cafeId = row.cafeId ?? undefined;
+    }
+    if (cafeId) setCafeId(cafeId);
+  }
+
+  /**
+   * Озвучка готового заказа для табло: «Стол N, заказ готов» либо
+   * «Заказ номер N готов» (по режиму). Текст строит сервер из номера —
+   * произвольный текст на публичный TTS не пропускаем.
+   */
+  async announce(opts: { cafeId?: string; code?: string; orderId: string }): Promise<Buffer> {
+    await this.resolveCafe(opts);
+
+    const settings = await this.prisma.settings.findFirst({
+      select: { queueDisplayMode: true },
+    });
+    const order = await this.prisma.order.findFirst({
+      where: { id: opts.orderId },
+      select: { orderNumber: true, table: { select: { number: true } } },
+    });
+    if (!order) throw new NotFoundException('Заказ не найден');
+
+    const mode = settings?.queueDisplayMode === 'number' ? 'number' : 'table';
+    const text =
+      mode === 'number'
+        ? `Заказ номер ${parseInt(order.orderNumber, 10) || order.orderNumber} готов`
+        : `Стол ${order.table.number}, заказ готов`;
+
+    return this.tts.synthesize(text);
+  }
 
   /**
    * Состояние табло очереди заказов. Считает по заказу целиком (кухня + бар):
@@ -43,18 +87,12 @@ export class QueueService {
     // код (/q/CODE — для ввода на ТВ), либо cafeId (?cafe=…). Найденный cafeId
     // кладём в контекст тенанта — дальше settings/orders скоупятся сами.
     // Без идентификатора (одно кафе на стенде) — по единственной строке.
-    let cafeId = opts.cafeId;
-    if (opts.code) {
-      const row = await this.prisma.settings.findFirst({
-        where: { queueDisplayCode: opts.code },
-        select: { cafeId: true },
-      });
-      if (!row) {
-        return { enabled: false, mode: 'table', cafeName: '', preparing: [], ready: [] };
-      }
-      cafeId = row.cafeId ?? undefined;
+    try {
+      await this.resolveCafe(opts);
+    } catch {
+      // Неизвестный код — показываем «выключено», а не ошибку.
+      return { enabled: false, mode: 'table', cafeName: '', preparing: [], ready: [] };
     }
-    if (cafeId) setCafeId(cafeId);
 
     const settings = await this.prisma.settings.findFirst({
       select: { cafeName: true, queueDisplayEnabled: true, queueDisplayMode: true },

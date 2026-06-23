@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Spinner } from '@/components/Spinner';
 import { useQueueBoard, type QueueBoard, type QueueOrder, type QueueStatus } from './api';
+import { queueVoice } from './voice';
 
 /** Подпись статуса позиции в колонке «Готовятся». */
 const STATUS_LABEL: Record<QueueStatus, string> = {
@@ -28,16 +29,49 @@ function padNumber(value: string | number): string {
 export function QueueApp() {
   const { code: codeParam } = useParams();
   const [searchParams] = useSearchParams();
-  const { data, isLoading, isError } = useQueueBoard({
-    code: codeParam ?? searchParams.get('code'),
-    cafe: searchParams.get('cafe'),
-  });
+  const code = codeParam ?? searchParams.get('code');
+  const cafe = searchParams.get('cafe');
+  const { data, isLoading, isError } = useQueueBoard({ code, cafe });
   const [now, setNow] = useState(() => Date.now());
+  const [soundOn, setSoundOn] = useState(false);
+  // id заказов, уже попавших в «Готовы», — чтобы озвучивать только новые.
+  const announcedReady = useRef<Set<string> | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
+
+  // Озвучка только что приготовленных заказов. При первой загрузке ничего не
+  // объявляем (запоминаем текущие готовые), дальше — только появившиеся.
+  useEffect(() => {
+    if (!data?.enabled) return;
+    const readyIds = data.ready.map((o) => o.id);
+    if (announcedReady.current === null) {
+      announcedReady.current = new Set(readyIds);
+      return;
+    }
+    for (const o of data.ready) {
+      if (!announcedReady.current.has(o.id)) {
+        announcedReady.current.add(o.id);
+        queueVoice.enqueue({ code, cafe }, o.id);
+      }
+    }
+    // Чистим ушедшие, чтобы повторное появление номера снова озвучилось.
+    announcedReady.current = new Set(
+      [...announcedReady.current].filter((id) => readyIds.includes(id)),
+    );
+  }, [data, code, cafe]);
+
+  function toggleSound() {
+    if (soundOn) {
+      queueVoice.disable();
+      setSoundOn(false);
+    } else {
+      queueVoice.unlock();
+      setSoundOn(true);
+    }
+  }
 
   const clock = new Date(now).toLocaleTimeString('ru-RU', {
     hour: '2-digit',
@@ -82,9 +116,23 @@ export function QueueApp() {
         <span className="text-center text-xl font-semibold tabular-nums tracking-tight text-text-secondary sm:text-3xl">
           {clock}
         </span>
-        <h1 className="text-right text-2xl font-extrabold tracking-tight text-text-primary sm:text-4xl">
-          Готовы
-        </h1>
+        <div className="flex items-center justify-end gap-4">
+          <button
+            type="button"
+            onClick={toggleSound}
+            title={soundOn ? 'Звук включён' : 'Включить звук'}
+            className={`shrink-0 rounded-full border p-2 transition-colors ${
+              soundOn
+                ? 'border-success/40 bg-success/10 text-success'
+                : 'border-border text-text-muted hover:bg-background'
+            }`}
+          >
+            {soundOn ? <IconSpeaker className="h-5 w-5" /> : <IconSpeakerOff className="h-5 w-5" />}
+          </button>
+          <h1 className="text-2xl font-extrabold tracking-tight text-text-primary sm:text-4xl">
+            Готовы
+          </h1>
+        </div>
       </header>
 
       {/* Две колонки */}
@@ -181,5 +229,23 @@ function QueueRow({
         {padNumber(number)}
       </span>
     </div>
+  );
+}
+
+function IconSpeaker({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+      <path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a9 9 0 0 1 0 14" />
+    </svg>
+  );
+}
+
+function IconSpeakerOff({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M11 5 6 9H2v6h4l5 4V5Z" />
+      <path d="m22 9-6 6M16 9l6 6" />
+    </svg>
   );
 }
