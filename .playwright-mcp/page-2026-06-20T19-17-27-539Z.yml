@@ -1,0 +1,278 @@
+- generic [ref=e103]:
+  - banner [ref=e105]:
+    - generic [ref=e106]:
+      - link "Railway Logo" [ref=e5564] [cursor=pointer]:
+        - /url: /dashboard
+        - img "Railway Logo" [ref=e5565]
+      - generic [ref=e112]:
+        - button "edu pos asman" [ref=e5566] [cursor=pointer]:
+          - generic "eldarmister's Projects" [ref=e5567]
+          - generic [ref=e118]: edu pos asman
+          - img [ref=e120]
+        - button "production" [ref=e5568] [cursor=pointer]:
+          - generic [ref=e125]: production
+          - img [ref=e127]
+    - navigation [ref=e129]:
+      - generic [ref=e131]:
+        - button "Toggle activity" [ref=e5569] [cursor=pointer]
+        - button [ref=e137] [cursor=pointer]:
+          - img [ref=e140]
+        - button "Agent" [ref=e5570] [cursor=pointer]:
+          - img [ref=e145]
+          - text: Agent
+  - generic [ref=e147]:
+    - navigation "Project navigation" [ref=e5571]:
+      - generic [ref=e149]:
+        - link "Architecture" [ref=e5572] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e154]
+        - link "Observability" [ref=e5573] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/observability?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e162]
+        - link "Logs" [ref=e5574] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/logs?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e167]
+        - link "Settings" [ref=e5575] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e173]
+      - button [ref=e176] [cursor=pointer]
+    - region [ref=e184]:
+      - generic [ref=e185]:
+        - generic [ref=e6620]:
+          - paragraph [ref=e6623]: Applying 11 changes
+          - button "Inspect" [ref=e6624] [cursor=pointer]:
+            - generic [ref=e6625]: Inspect
+        - generic [ref=e257]:
+          - img [ref=e258]
+          - generic [ref=e259]:
+            - generic [ref=e261]:
+              - generic:
+                - img
+                - generic:
+                  - button "Postgres Online postgres-volume" [ref=e6561]:
+                    - generic [ref=e263]:
+                      - link "Postgres Online" [ref=e6562] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/dfd0af25-d766-4d99-95f5-f8b1f21c4baa/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - paragraph [ref=e269]: Postgres
+                        - generic [ref=e271]:
+                          - img [ref=e272]
+                          - paragraph [ref=e275]: Online
+                      - link "postgres-volume" [ref=e6563] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/volume/29ad3adb-9e35-4532-be09-ee2af22e8a11/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e279]:
+                          - img [ref=e281]
+                          - paragraph [ref=e283]: postgres-volume
+                  - button "frontend edu-pos.up.railway.app Online" [ref=e6564]:
+                    - link "frontend edu-pos.up.railway.app Online" [ref=e6565] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/ce115acf-6071-453c-9555-e53fed469c88/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e288]:
+                        - img [ref=e290]
+                        - generic [ref=e292]:
+                          - paragraph [ref=e293]: frontend
+                          - paragraph [ref=e294]: edu-pos.up.railway.app
+                      - generic [ref=e296]:
+                        - img [ref=e297]
+                        - paragraph [ref=e300]: Online
+                  - button "tts-scheduler-wake Ready Next in 5 hours" [ref=e6566]:
+                    - generic [ref=e857]:
+                      - link "tts-scheduler-wake Ready" [ref=e6567] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e860]:
+                          - img [ref=e862]
+                          - paragraph [ref=e865]: tts-scheduler-wake
+                        - generic [ref=e3941]:
+                          - img [ref=e3942]
+                          - paragraph [ref=e3945]: Ready
+                      - link "Next in 5 hours" [ref=e6568] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e3763]:
+                          - img [ref=e3765]
+                          - paragraph [ref=e3768]:
+                            - text: Next
+                            - time [ref=e3770]: in 5 hours
+                  - button "tts-scheduler-night New 6 Variables and 4 Settings Next in 5 hours" [ref=e6569]:
+                    - generic [ref=e4379]:
+                      - link "tts-scheduler-night New 6 Variables and 4 Settings" [ref=e6570] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e4382]:
+                          - img [ref=e4384]
+                          - paragraph [ref=e4387]: tts-scheduler-night
+                        - generic [ref=e4388]: New
+                        - generic [ref=e4389]:
+                          - img [ref=e4391]
+                          - paragraph [ref=e4394]: 6 Variables and 4 Settings
+                      - link "Next in 5 hours" [ref=e6571] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e6464]:
+                          - img [ref=e6466]
+                          - paragraph [ref=e6469]:
+                            - text: Next
+                            - time [ref=e6471]: in 5 hours
+                  - button "tts tts-production-9005d.up.railway.app Online" [ref=e6572]:
+                    - link "tts tts-production-9005d.up.railway.app Online" [ref=e6573] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/6f1349f7-a026-4546-941b-1ac4c664c8ae/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e305]:
+                        - img [ref=e307]
+                        - generic [ref=e309]:
+                          - paragraph [ref=e310]: tts
+                          - paragraph [ref=e311]: tts-production-9005d.up.railway.app
+                      - generic [ref=e313]:
+                        - img [ref=e314]
+                        - paragraph [ref=e317]: Online
+                  - button "dev edu-production-056d.up.railway.app Online" [ref=e6574]:
+                    - link "dev edu-production-056d.up.railway.app Online" [ref=e6575] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/53f9e84f-da21-4c2b-aacf-0ca319a99b1e/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e322]:
+                        - img [ref=e324]
+                        - generic [ref=e326]:
+                          - paragraph [ref=e327]: dev
+                          - paragraph [ref=e328]: edu-production-056d.up.railway.app
+                      - generic [ref=e330]:
+                        - img [ref=e331]
+                        - paragraph [ref=e334]: Online
+                  - button "backend edu-production-2395.up.railway.app Online" [ref=e6576]:
+                    - link "backend edu-production-2395.up.railway.app Online" [ref=e6577] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/4194ac35-7c1e-4da9-9b22-00e217ea5cc0/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e339]:
+                        - img [ref=e341]
+                        - generic [ref=e343]:
+                          - paragraph [ref=e344]: backend
+                          - paragraph [ref=e345]: edu-production-2395.up.railway.app
+                      - generic [ref=e347]:
+                        - img [ref=e348]
+                        - paragraph [ref=e351]: Online
+            - toolbar "Canvas options" [ref=e6578]:
+              - button "Canvas settings" [ref=e6579] [cursor=pointer]:
+                - img [ref=e359]
+              - group "canvas action" [ref=e6580]:
+                - button "Zoom in" [ref=e6581] [cursor=pointer]:
+                  - img [ref=e372]
+                - button "Zoom out" [ref=e6582] [cursor=pointer]:
+                  - img [ref=e376]
+                - button "Center canvas" [ref=e6583] [cursor=pointer]:
+                  - img [ref=e379]
+              - group "canvas action" [ref=e6584]:
+                - button "Undo" [ref=e6585] [cursor=pointer]:
+                  - img [ref=e387]
+                - button "Redo" [ref=e6586] [cursor=pointer]:
+                  - img [ref=e392]
+              - button "Visibility layers" [ref=e6587] [cursor=pointer]:
+                - img [ref=e397]
+            - img [ref=e407]
+        - generic [ref=e4412]:
+          - generic [ref=e4413]:
+            - generic [ref=e4414]:
+              - generic [ref=e4416]:
+                - button [ref=e4417] [cursor=pointer]:
+                  - img [ref=e4419]
+                - heading "tts-scheduler-night" [level=1] [ref=e6588]:
+                  - button "tts-scheduler-night" [ref=e6589] [cursor=pointer]
+              - link [ref=e4424] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - img [ref=e4426]
+            - generic [ref=e4428]:
+              - link "Cron Runs" [ref=e6594] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/schedule?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e6473]: Cron Runs
+              - link "Deployments" [ref=e6595] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4430]: Deployments
+              - link "Variables" [ref=e6596] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4432]: Variables
+              - link "Metrics" [ref=e6597] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/metrics?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4434]: Metrics
+              - link "Console" [ref=e6598] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/console?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4436]: Console
+              - link "Settings" [ref=e6599] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4438]: Settings
+          - generic [ref=e6072]:
+            - generic [ref=e6074]:
+              - generic [ref=e6075]:
+                - generic [ref=e6076]: Filter settings
+                - textbox "Filter settings" [ref=e6600]:
+                  - /placeholder: Filter Settings...
+                  - text: Cron
+              - button [ref=e6457] [cursor=pointer]:
+                - img [ref=e6459]
+            - generic [ref=e6081]:
+              - generic [ref=e6082]:
+                - generic [ref=e6308]:
+                  - img [ref=e6310]
+                  - heading "Deploy" [level=1] [ref=e6601]
+                  - generic [ref=e6313]:
+                    - generic [ref=e6331]:
+                      - generic [ref=e6332]:
+                        - link "Teardown" [ref=e6602] [cursor=pointer]:
+                          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings/#deploy-teardown
+                        - heading "Configure old deployment termination when a new one is started. Docs" [level=2] [ref=e6603]:
+                          - text: Configure old deployment termination when a new one is started.
+                          - link "Docs" [ref=e6604] [cursor=pointer]:
+                            - /url: https://docs.railway.com/guides/deployment-teardown
+                            - text: Docs↗
+                      - generic [ref=e6338]:
+                        - switch "Enable Teardown" [ref=e6605] [cursor=pointer]
+                        - generic [ref=e6341] [cursor=pointer]: Enable Teardown
+                    - generic [ref=e6342]:
+                      - generic [ref=e6343]:
+                        - link "Cron Schedule" [ref=e6606] [cursor=pointer]:
+                          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings/#deploy-cron-schedule
+                        - heading "Run the service according to the specified cron schedule." [level=2] [ref=e6607]
+                      - generic [ref=e6474]:
+                        - generic [ref=e6475]:
+                          - generic [ref=e6476]: Cron schedule
+                          - generic [ref=e6477]:
+                            - combobox "Cron schedule" [ref=e6608] [cursor=pointer]:
+                              - option "No schedule"
+                              - option "Hourly"
+                              - option "Daily"
+                              - option "Weekly"
+                              - option "Monthly"
+                              - option "Every 15 minutes"
+                              - option "Every 30 minutes"
+                              - option "Every Monday"
+                              - option "Every Friday"
+                              - option "Every Sunday"
+                              - option "Hourly M-F"
+                              - option "Custom" [selected]
+                            - generic:
+                              - generic:
+                                - img
+                        - generic [ref=e6482]:
+                          - generic [ref=e6483]:
+                            - generic [ref=e6484]: Custom cron schedule
+                            - textbox "Custom cron schedule" [ref=e6609]:
+                              - /placeholder: 0 1 * * *
+                              - text: 10 18 * * *
+                          - generic [ref=e6488]:
+                            - button "Cancel" [ref=e6610] [cursor=pointer]:
+                              - img [ref=e6491]
+                            - button "Save" [ref=e6611] [cursor=pointer]:
+                              - img [ref=e6495]
+                        - paragraph [ref=e6487]: At 18:10 (UTC)
+                - generic [ref=e6393]:
+                  - img [ref=e6395]
+                  - heading "Config-as-code" [level=1] [ref=e6612]
+                  - generic [ref=e6400]:
+                    - generic [ref=e6401]:
+                      - link "Railway Config File" [ref=e6613] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings/#config-as-code-file
+                      - heading "Manage your build and deployment settings through a config file. Docs" [level=2] [ref=e6614]:
+                        - text: Manage your build and deployment settings through a config file.
+                        - link "Docs" [ref=e6615] [cursor=pointer]:
+                          - /url: https://docs.railway.com/guides/config-as-code
+                          - text: Docs↗
+                    - button "Add File Path" [ref=e6616] [cursor=pointer]:
+                      - img [ref=e6407]
+                      - generic [ref=e6409]: Add File Path
+              - complementary [ref=e6439]:
+                - list [ref=e6440]:
+                  - listitem [ref=e6449]:
+                    - link "Deploy" [ref=e6617] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings/#deploy
+                  - listitem [ref=e6451]:
+                    - link "Config-as-code" [ref=e6618] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings/#config-as-code

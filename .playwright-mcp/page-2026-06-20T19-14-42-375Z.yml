@@ -1,0 +1,366 @@
+- generic [ref=e103]:
+  - banner [ref=e105]:
+    - generic [ref=e106]:
+      - link "Railway Logo" [ref=e4340] [cursor=pointer]:
+        - /url: /dashboard
+        - img "Railway Logo" [ref=e4341]
+      - generic [ref=e112]:
+        - button "edu pos asman" [ref=e4342] [cursor=pointer]:
+          - generic "eldarmister's Projects" [ref=e4343]
+          - generic [ref=e118]: edu pos asman
+          - img [ref=e120]
+        - button "production" [ref=e4344] [cursor=pointer]:
+          - generic [ref=e125]: production
+          - img [ref=e127]
+    - navigation [ref=e129]:
+      - generic [ref=e131]:
+        - button "Toggle activity" [ref=e4345] [cursor=pointer]:
+          - img [ref=e3929]
+        - button [ref=e137] [cursor=pointer]:
+          - img [ref=e140]
+        - button "Agent" [ref=e4346] [cursor=pointer]:
+          - img [ref=e145]
+          - text: Agent
+  - generic [ref=e147]:
+    - navigation "Project navigation" [ref=e4347]:
+      - generic [ref=e149]:
+        - link "Architecture" [ref=e4348] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e154]
+        - link "Observability" [ref=e4349] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/observability?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e162]
+        - link "Logs" [ref=e4350] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/logs?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e167]
+        - link "Settings" [ref=e4351] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e173]
+      - button [ref=e176] [cursor=pointer]
+    - region [ref=e184]:
+      - generic [ref=e185]:
+        - generic [ref=e4356]:
+          - paragraph [ref=e4358]: Apply 4 changes
+          - generic [ref=e4359]:
+            - button "Details" [ref=e4360] [cursor=pointer]:
+              - generic [ref=e4361]: Details
+            - button "Deploy ⇧+Enter" [ref=e4362] [cursor=pointer]:
+              - generic [ref=e4363]: Deploy ⇧+Enter
+            - button "Staged changes actions" [ref=e4364] [cursor=pointer]:
+              - img [ref=e4366]
+        - generic [ref=e257]:
+          - img [ref=e258]
+          - generic [ref=e259]:
+            - generic [ref=e261]:
+              - generic:
+                - img
+                - generic:
+                  - button "Postgres Online postgres-volume" [ref=e4370]:
+                    - generic [ref=e263]:
+                      - link "Postgres Online" [ref=e4371] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/dfd0af25-d766-4d99-95f5-f8b1f21c4baa/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - paragraph [ref=e269]: Postgres
+                        - generic [ref=e271]:
+                          - img [ref=e272]
+                          - paragraph [ref=e275]: Online
+                      - link "postgres-volume" [ref=e4372] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/volume/29ad3adb-9e35-4532-be09-ee2af22e8a11/metrics?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e279]:
+                          - img [ref=e281]
+                          - paragraph [ref=e283]: postgres-volume
+                  - button "frontend edu-pos.up.railway.app Online" [ref=e4373]:
+                    - link "frontend edu-pos.up.railway.app Online" [ref=e4374] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/ce115acf-6071-453c-9555-e53fed469c88/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e288]:
+                        - img [ref=e290]
+                        - generic [ref=e292]:
+                          - paragraph [ref=e293]: frontend
+                          - paragraph [ref=e294]: edu-pos.up.railway.app
+                      - generic [ref=e296]:
+                        - img [ref=e297]
+                        - paragraph [ref=e300]: Online
+                  - button "tts-scheduler-wake Ready Next in 5 hours" [ref=e4375]:
+                    - generic [ref=e857]:
+                      - link "tts-scheduler-wake Ready" [ref=e4376] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e860]:
+                          - img [ref=e862]
+                          - paragraph [ref=e865]: tts-scheduler-wake
+                        - generic [ref=e3941]:
+                          - img [ref=e3942]
+                          - paragraph [ref=e3945]: Ready
+                      - link "Next in 5 hours" [ref=e4377] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e3763]:
+                          - img [ref=e3765]
+                          - paragraph [ref=e3768]:
+                            - text: Next
+                            - time [ref=e3770]: in 5 hours
+                  - button "edu New 3 Settings" [ref=e5212]:
+                    - link "edu New 3 Settings" [ref=e5213] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e4382]:
+                        - img [ref=e4384]
+                        - paragraph [ref=e4387]: edu
+                      - generic [ref=e4388]: New
+                      - generic [ref=e4389]:
+                        - img [ref=e4391]
+                        - paragraph [ref=e4394]: 3 Settings
+                  - button "tts tts-production-9005d.up.railway.app Online" [ref=e4395]:
+                    - link "tts tts-production-9005d.up.railway.app Online" [ref=e4396] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/6f1349f7-a026-4546-941b-1ac4c664c8ae/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e305]:
+                        - img [ref=e307]
+                        - generic [ref=e309]:
+                          - paragraph [ref=e310]: tts
+                          - paragraph [ref=e311]: tts-production-9005d.up.railway.app
+                      - generic [ref=e313]:
+                        - img [ref=e314]
+                        - paragraph [ref=e317]: Online
+                  - button "dev edu-production-056d.up.railway.app Online" [ref=e4397]:
+                    - link "dev edu-production-056d.up.railway.app Online" [ref=e4398] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/53f9e84f-da21-4c2b-aacf-0ca319a99b1e/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e322]:
+                        - img [ref=e324]
+                        - generic [ref=e326]:
+                          - paragraph [ref=e327]: dev
+                          - paragraph [ref=e328]: edu-production-056d.up.railway.app
+                      - generic [ref=e330]:
+                        - img [ref=e331]
+                        - paragraph [ref=e334]: Online
+                  - button "backend edu-production-2395.up.railway.app Online" [ref=e4399]:
+                    - link "backend edu-production-2395.up.railway.app Online" [ref=e4400] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/4194ac35-7c1e-4da9-9b22-00e217ea5cc0/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e339]:
+                        - img [ref=e341]
+                        - generic [ref=e343]:
+                          - paragraph [ref=e344]: backend
+                          - paragraph [ref=e345]: edu-production-2395.up.railway.app
+                      - generic [ref=e347]:
+                        - img [ref=e348]
+                        - paragraph [ref=e351]: Online
+            - toolbar "Canvas options" [ref=e4401]:
+              - button "Canvas settings" [ref=e4402] [cursor=pointer]:
+                - img [ref=e359]
+              - group "canvas action" [ref=e4403]:
+                - button "Zoom in" [ref=e4404] [cursor=pointer]:
+                  - img [ref=e372]
+                - button "Zoom out" [ref=e4405] [cursor=pointer]:
+                  - img [ref=e376]
+                - button "Center canvas" [ref=e4406] [cursor=pointer]:
+                  - img [ref=e379]
+              - group "canvas action" [ref=e4407]:
+                - button "Undo" [ref=e4408] [cursor=pointer]:
+                  - img [ref=e387]
+                - button "Redo" [ref=e4409] [cursor=pointer]:
+                  - img [ref=e392]
+              - button "Visibility layers" [ref=e4410] [cursor=pointer]:
+                - img [ref=e397]
+            - img [ref=e407]
+        - generic [ref=e4412]:
+          - generic [ref=e4413]:
+            - generic [ref=e4414]:
+              - generic [ref=e4416]:
+                - button [ref=e4417] [cursor=pointer]:
+                  - img [ref=e4419]
+                - heading "edu" [level=1] [ref=e4421]:
+                  - button "edu" [ref=e4422] [cursor=pointer]
+              - link [ref=e4424] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - img [ref=e4426]
+            - generic [ref=e4428]:
+              - link "Deployments" [ref=e4429] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4430]: Deployments
+              - link "Variables" [active] [ref=e4431] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4432]: Variables
+              - link "Metrics" [ref=e4433] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/metrics?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4434]: Metrics
+              - link "Console" [ref=e4435] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/console?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4436]: Console
+              - link "Settings" [ref=e4437] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                - generic [ref=e4438]: Settings
+          - generic [ref=e5233]:
+            - generic [ref=e5234]:
+              - generic [ref=e5235]:
+                - generic [ref=e5237]: Service Variables
+                - generic [ref=e5238]:
+                  - button "Shared Variable" [ref=e5239] [cursor=pointer]:
+                    - img [ref=e5241]
+                    - generic [ref=e5244]: Shared Variable
+                  - button "Raw Editor" [ref=e5245] [cursor=pointer]:
+                    - img [ref=e5247]
+                    - generic [ref=e5249]: Raw Editor
+                  - button "New Variable" [ref=e5250] [cursor=pointer]:
+                    - img [ref=e5252]
+                    - generic [ref=e5254]: New Variable
+              - generic:
+                - generic:
+                  - generic:
+                    - button "Close":
+                      - generic:
+                        - img
+                    - generic:
+                      - generic:
+                        - img "graph of shared variable pointed to multiple services"
+                      - generic:
+                        - paragraph: Keep variables in sync across services
+                        - paragraph:
+                          - text: Create a shared variable in
+                          - link "Project Settings":
+                            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/settings/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                          - text: or promote an existing service variable to a shared variable via the
+                          - generic: "`⋮`"
+                          - text: icon.
+                        - generic:
+                          - link "Configure Shared Variables":
+                            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/settings/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                            - generic: Configure Shared Variables
+                          - link "View Docs":
+                            - /url: https://docs.railway.com/develop/variables#shared-variables
+                            - generic: View Docs
+            - generic [ref=e5255]:
+              - generic [ref=e5257]:
+                - img [ref=e5259]
+                - paragraph [ref=e5261]:
+                  - text: Trying to connect a database?
+                  - button "Add Variable" [ref=e5262] [cursor=pointer]
+                - button "Dismiss" [ref=e5263] [cursor=pointer]:
+                  - img [ref=e5265]
+              - generic [ref=e5267]:
+                - button "Suggested Variables" [expanded] [ref=e5268] [cursor=pointer]:
+                  - img [ref=e5270]
+                  - paragraph [ref=e5272]: Suggested Variables
+                - generic [ref=e5273]:
+                  - paragraph [ref=e5274]: We found these variables in your source code
+                  - generic [ref=e5276]:
+                    - generic [ref=e5277]:
+                      - generic [ref=e5278]: Name
+                      - textbox "Name" [ref=e5280]:
+                        - /placeholder: VARIABLE_NAME
+                        - text: TTS_SCHEDULER_ACTION
+                    - group [ref=e5282]:
+                      - generic [ref=e5283]:
+                        - generic [ref=e5284]: Variable Value
+                        - generic [ref=e5285]:
+                          - textbox "Variable Value" [ref=e5286]:
+                            - /placeholder: "VALUE or ${{REF}}"
+                          - button [ref=e5287] [cursor=pointer]:
+                            - img [ref=e5291]
+                    - button "Remove" [ref=e5293] [cursor=pointer]:
+                      - img [ref=e5295]
+                    - generic [ref=e5297]:
+                      - generic [ref=e5298]: Name
+                      - textbox "Name" [ref=e5300]:
+                        - /placeholder: VARIABLE_NAME
+                        - text: TTS_PUBLIC_OR_PRIVATE_HEALTH_URL
+                    - group [ref=e5302]:
+                      - generic [ref=e5303]:
+                        - generic [ref=e5304]: Variable Value
+                        - generic [ref=e5305]:
+                          - textbox "Variable Value" [ref=e5306]:
+                            - /placeholder: "VALUE or ${{REF}}"
+                          - button [ref=e5307] [cursor=pointer]:
+                            - img [ref=e5311]
+                    - button "Remove" [ref=e5313] [cursor=pointer]:
+                      - img [ref=e5315]
+                    - generic [ref=e5317]:
+                      - generic [ref=e5318]: Name
+                      - textbox "Name" [ref=e5320]:
+                        - /placeholder: VARIABLE_NAME
+                        - text: RAILWAY_ALLOW_REPLICA_FALLBACK
+                    - group [ref=e5322]:
+                      - generic [ref=e5323]:
+                        - generic [ref=e5324]: Variable Value
+                        - generic [ref=e5325]:
+                          - textbox "Variable Value" [ref=e5326]:
+                            - /placeholder: "VALUE or ${{REF}}"
+                          - button [ref=e5327] [cursor=pointer]:
+                            - img [ref=e5331]
+                    - button "Remove" [ref=e5333] [cursor=pointer]:
+                      - img [ref=e5335]
+                    - generic [ref=e5337]:
+                      - generic [ref=e5338]: Name
+                      - textbox "Name" [ref=e5340]:
+                        - /placeholder: VARIABLE_NAME
+                        - text: RAILWAY_SERVERLESS_FIELD
+                    - group [ref=e5342]:
+                      - generic [ref=e5343]:
+                        - generic [ref=e5344]: Variable Value
+                        - generic [ref=e5345]:
+                          - textbox "Variable Value" [ref=e5346]:
+                            - /placeholder: "VALUE or ${{REF}}"
+                          - button [ref=e5347] [cursor=pointer]:
+                            - img [ref=e5351]
+                    - button "Remove" [ref=e5353] [cursor=pointer]:
+                      - img [ref=e5355]
+                    - generic [ref=e5357]:
+                      - generic [ref=e5358]: Name
+                      - textbox "Name" [ref=e5360]:
+                        - /placeholder: VARIABLE_NAME
+                        - text: RAILWAY_REPLICA_FIELD
+                    - group [ref=e5362]:
+                      - generic [ref=e5363]:
+                        - generic [ref=e5364]: Variable Value
+                        - generic [ref=e5365]:
+                          - textbox "Variable Value" [ref=e5366]:
+                            - /placeholder: "VALUE or ${{REF}}"
+                          - button [ref=e5367] [cursor=pointer]:
+                            - img [ref=e5371]
+                    - button "Remove" [ref=e5373] [cursor=pointer]:
+                      - img [ref=e5375]
+                    - generic [ref=e5377]:
+                      - generic [ref=e5378]: Name
+                      - textbox "Name" [ref=e5380]:
+                        - /placeholder: VARIABLE_NAME
+                        - text: RAILWAY_GRAPHQL_URL
+                    - group [ref=e5382]:
+                      - generic [ref=e5383]:
+                        - generic [ref=e5384]: Variable Value
+                        - generic [ref=e5385]:
+                          - textbox "Variable Value" [ref=e5386]:
+                            - /placeholder: "VALUE or ${{REF}}"
+                          - button [ref=e5387] [cursor=pointer]:
+                            - img [ref=e5391]
+                    - button "Remove" [ref=e5393] [cursor=pointer]:
+                      - img [ref=e5395]
+                    - generic [ref=e5397]:
+                      - generic [ref=e5398]: Name
+                      - textbox "Name" [ref=e5400]:
+                        - /placeholder: VARIABLE_NAME
+                        - text: TTS_HEALTH_TIMEOUT_MS
+                    - group [ref=e5402]:
+                      - generic [ref=e5403]:
+                        - generic [ref=e5404]: Variable Value
+                        - generic [ref=e5405]:
+                          - textbox "Variable Value" [ref=e5406]:
+                            - /placeholder: "VALUE or ${{REF}}"
+                          - button [ref=e5407] [cursor=pointer]:
+                            - img [ref=e5411]
+                    - button "Remove" [ref=e5413] [cursor=pointer]:
+                      - img [ref=e5415]
+                    - generic [ref=e5417]:
+                      - generic [ref=e5418]: Name
+                      - textbox "Name" [ref=e5420]:
+                        - /placeholder: VARIABLE_NAME
+                        - text: SCHEDULER_ACTION
+                    - group [ref=e5422]:
+                      - generic [ref=e5423]:
+                        - generic [ref=e5424]: Variable Value
+                        - generic [ref=e5425]:
+                          - textbox "Variable Value" [ref=e5426]:
+                            - /placeholder: "VALUE or ${{REF}}"
+                          - button [ref=e5427] [cursor=pointer]:
+                            - img [ref=e5431]
+                    - button "Remove" [ref=e5433] [cursor=pointer]:
+                      - img [ref=e5435]
+                    - button "Add" [disabled] [ref=e5438]:
+                      - img [ref=e5440]
+                      - generic [ref=e5442]: Add
+              - button "6 variables added by Railway" [ref=e5446] [cursor=pointer]:
+                - img [ref=e5448]
+                - paragraph [ref=e5450]: 6 variables added by Railway

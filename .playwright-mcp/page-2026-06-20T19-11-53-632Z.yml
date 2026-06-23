@@ -1,0 +1,282 @@
+- generic:
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - banner:
+            - generic:
+              - link:
+                - /url: /dashboard
+                - generic:
+                  - img
+              - generic:
+                - generic:
+                  - button:
+                    - generic: edu pos asman
+                    - generic:
+                      - img
+                - generic:
+                  - button:
+                    - generic: production
+                    - generic:
+                      - img
+            - navigation:
+              - generic:
+                - generic:
+                  - generic:
+                    - button:
+                      - generic:
+                        - img
+                  - button:
+                    - generic:
+                      - generic:
+                        - img
+                  - button:
+                    - generic:
+                      - img
+                    - text: Agent
+        - generic:
+          - navigation:
+            - generic:
+              - generic:
+                - link:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic:
+                    - img
+              - generic:
+                - link:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/observability?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic:
+                    - img
+              - generic:
+                - link:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/logs?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic:
+                    - img
+              - generic:
+                - link:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic:
+                    - img
+            - generic:
+              - button
+          - generic:
+            - generic:
+              - generic:
+                - generic:
+                  - region:
+                    - generic:
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - generic:
+                                - generic:
+                                  - paragraph: Apply 11 changes
+                                - generic:
+                                  - button:
+                                    - generic: Details
+                                  - button:
+                                    - generic: Deploy ⇧+Enter
+                                  - button:
+                                    - generic:
+                                      - img
+                      - generic:
+                        - generic:
+                          - generic:
+                            - generic:
+                              - img
+                              - generic:
+                                - generic:
+                                  - generic:
+                                    - generic:
+                                      - img
+                                      - generic:
+                                        - button [ref=e3826]:
+                                          - generic [ref=e263]:
+                                            - link [ref=e3827] [cursor=pointer]:
+                                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/dfd0af25-d766-4d99-95f5-f8b1f21c4baa/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                                              - paragraph [ref=e269]: Postgres
+                                              - generic [ref=e271]:
+                                                - img [ref=e272]
+                                                - paragraph [ref=e275]: Online
+                                            - link [ref=e3828] [cursor=pointer]:
+                                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/volume/29ad3adb-9e35-4532-be09-ee2af22e8a11/settings?
+                                              - generic [ref=e279]:
+                                                - img [ref=e281]
+                                                - paragraph [ref=e283]: postgres-volume
+                                        - button [ref=e3829]:
+                                          - link [ref=e3830] [cursor=pointer]:
+                                            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/ce115acf-6071-453c-9555-e53fed469c88/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                                            - generic [ref=e288]:
+                                              - img [ref=e290]
+                                              - generic [ref=e292]:
+                                                - paragraph [ref=e293]: frontend
+                                                - paragraph [ref=e294]: edu-pos.up.railway.app
+                                            - generic [ref=e296]:
+                                              - img [ref=e297]
+                                              - paragraph [ref=e300]: Online
+                                        - button [ref=e3831]:
+                                          - generic [ref=e857]:
+                                            - link [ref=e3832] [cursor=pointer]:
+                                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                                              - generic [ref=e860]:
+                                                - img [ref=e862]
+                                                - paragraph [ref=e865]: edu
+                                              - generic [ref=e866]: New
+                                              - generic [ref=e867]:
+                                                - img [ref=e869]
+                                                - paragraph [ref=e872]: 6 Variables and 4 Settings
+                                            - link [ref=e3833] [cursor=pointer]:
+                                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings?
+                                              - generic [ref=e3763]:
+                                                - img [ref=e3765]
+                                                - paragraph [ref=e3768]:
+                                                  - text: Next
+                                                  - time [ref=e3770]: in 5 hours
+                                        - button [ref=e3834]:
+                                          - link [ref=e3835] [cursor=pointer]:
+                                            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/6f1349f7-a026-4546-941b-1ac4c664c8ae/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                                            - generic [ref=e305]:
+                                              - img [ref=e307]
+                                              - generic [ref=e309]:
+                                                - paragraph [ref=e310]: tts
+                                                - paragraph [ref=e311]: tts-production-9005d.up.railway.app
+                                            - generic [ref=e313]:
+                                              - img [ref=e314]
+                                              - paragraph [ref=e317]: Online
+                                        - button [ref=e3836]:
+                                          - link [ref=e3837] [cursor=pointer]:
+                                            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/53f9e84f-da21-4c2b-aacf-0ca319a99b1e/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                                            - generic [ref=e322]:
+                                              - img [ref=e324]
+                                              - generic [ref=e326]:
+                                                - paragraph [ref=e327]: dev
+                                                - paragraph [ref=e328]: edu-production-056d.up.railway.app
+                                            - generic [ref=e330]:
+                                              - img [ref=e331]
+                                              - paragraph [ref=e334]: Online
+                                        - button [ref=e3838]:
+                                          - link [ref=e3839] [cursor=pointer]:
+                                            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/4194ac35-7c1e-4da9-9b22-00e217ea5cc0/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                                            - generic [ref=e339]:
+                                              - img [ref=e341]
+                                              - generic [ref=e343]:
+                                                - paragraph [ref=e344]: backend
+                                                - paragraph [ref=e345]: edu-production-2395.up.railway.app
+                                            - generic [ref=e347]:
+                                              - img [ref=e348]
+                                              - paragraph [ref=e351]: Online
+                                - toolbar [ref=e3840]:
+                                  - button [ref=e3841] [cursor=pointer]:
+                                    - img [ref=e359]
+                                  - group [ref=e3842]:
+                                    - button [ref=e3843] [cursor=pointer]:
+                                      - img [ref=e372]
+                                    - button [ref=e3844] [cursor=pointer]:
+                                      - img [ref=e376]
+                                    - button [ref=e3845] [cursor=pointer]:
+                                      - img [ref=e379]
+                                  - group [ref=e3846]:
+                                    - button [ref=e3847] [cursor=pointer]:
+                                      - img [ref=e387]
+                                    - button [ref=e3848] [cursor=pointer]:
+                                      - img [ref=e392]
+                                  - button [ref=e3849] [cursor=pointer]:
+                                    - img [ref=e397]
+                                - img
+                      - generic [ref=e890]:
+                        - generic [ref=e891]:
+                          - generic [ref=e892]:
+                            - generic [ref=e894]:
+                              - button [ref=e895] [cursor=pointer]:
+                                - img [ref=e897]
+                              - heading [level=1] [ref=e3850]:
+                                - button [ref=e3851] [cursor=pointer]: edu
+                            - link [ref=e902] [cursor=pointer]:
+                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?
+                              - img [ref=e904]
+                          - generic [ref=e906]:
+                            - link [ref=e3852] [cursor=pointer]:
+                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/schedule?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                              - generic [ref=e3772]: Cron Runs
+                            - link [ref=e3853] [cursor=pointer]:
+                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                              - generic [ref=e908]: Deployments
+                            - link [ref=e3854] [cursor=pointer]:
+                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                              - generic [ref=e910]: Variables
+                            - link [ref=e3855] [cursor=pointer]:
+                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/metrics?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                              - generic [ref=e912]: Metrics
+                            - link [ref=e3856] [cursor=pointer]:
+                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/console?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                              - generic [ref=e914]: Console
+                            - link [ref=e3857] [cursor=pointer]:
+                              - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                              - generic [ref=e916]: Settings
+                        - generic [ref=e3360]:
+                          - generic [ref=e3362]:
+                            - generic [ref=e3363]:
+                              - generic [ref=e3364]: Filter settings
+                              - textbox [ref=e3858]:
+                                - /placeholder: Filter Settings...
+                                - text: Restart
+                            - button [ref=e3756] [cursor=pointer]:
+                              - img [ref=e3758]
+                          - generic [ref=e3369]:
+                            - generic [ref=e3596]:
+                              - img [ref=e3598]
+                              - heading [level=1] [ref=e3859]: Deploy
+                              - generic [ref=e3601]:
+                                - generic [ref=e3797]:
+                                  - generic [ref=e3798]:
+                                    - link [ref=e3860] [cursor=pointer]:
+                                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings/#deploy-start-command
+                                      - text: Custom Start Command
+                                    - heading [level=2] [ref=e3861]:
+                                      - text: Command that will be run to start new deployments.
+                                      - link [ref=e3862] [cursor=pointer]:
+                                        - /url: https://docs.railway.com/guides/start-command
+                                        - text: Docs↗
+                                  - button [ref=e3863] [cursor=pointer]:
+                                    - img [ref=e3804]
+                                    - generic [ref=e3806]: Start Command
+                                - generic [ref=e3807]:
+                                  - generic [ref=e3808]:
+                                    - link [ref=e3864] [cursor=pointer]:
+                                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings/#deploy-restart-policy
+                                      - text: Restart Policy
+                                    - heading [level=2] [ref=e3865]:
+                                      - text: Configure what to do when the process exits.
+                                      - link [ref=e3866] [cursor=pointer]:
+                                        - /url: https://docs.railway.com/deploy/deployments#restart-policy
+                                        - text: Docs↗
+                                  - generic [ref=e3812]:
+                                    - generic [ref=e3813]:
+                                      - paragraph [ref=e3815]: Never
+                                      - paragraph [ref=e3816]: Never restart the container if it stops.
+                                    - button [disabled] [ref=e3867]:
+                                      - img [ref=e3819]
+                                  - generic [ref=e3821]:
+                                    - img [ref=e3823]
+                                    - text: Services with a cron schedule do not have a restart policy.
+                                  - generic:
+                                    - heading [level=2]: Number of times to try and restart the service if it stopped due to an error.
+                                  - generic:
+                                    - generic:
+                                      - generic: Max restart retries
+                                      - generic:
+                                        - spinbutton: "10"
+                            - complementary [ref=e3727]:
+                              - list [ref=e3728]:
+                                - listitem [ref=e3737]:
+                                  - link [ref=e3868] [cursor=pointer]:
+                                    - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings/#deploy
+                                    - text: Deploy
+  - dialog [active] [ref=e3870]:
+    - generic [ref=e3871]:
+      - generic [ref=e3873]: Edit service name
+      - generic [ref=e3875]:
+        - combobox [expanded] [ref=e3878]: tts-scheduler-wake
+        - listbox "Suggestions"

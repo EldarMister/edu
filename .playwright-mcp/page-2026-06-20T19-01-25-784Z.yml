@@ -1,0 +1,176 @@
+- generic [ref=e1]:
+  - generic [ref=e103]:
+    - banner [ref=e105]:
+      - generic [ref=e106]:
+        - link [ref=e410] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e411]
+        - generic [ref=e112]:
+          - button [ref=e412] [cursor=pointer]:
+            - generic [ref=e118]: edu pos asman
+            - img [ref=e120]
+          - button [ref=e414] [cursor=pointer]:
+            - generic [ref=e125]: production
+            - img [ref=e127]
+      - navigation [ref=e129]:
+        - generic [ref=e131]:
+          - button [ref=e415] [cursor=pointer]:
+            - img [ref=e135]
+          - button [ref=e137] [cursor=pointer]:
+            - img [ref=e140]
+          - button [ref=e416] [cursor=pointer]:
+            - img [ref=e145]
+            - text: Agent
+    - generic [ref=e147]:
+      - navigation [ref=e417]:
+        - generic [ref=e149]:
+          - link [ref=e418] [cursor=pointer]:
+            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+            - img [ref=e154]
+          - link [ref=e419] [cursor=pointer]:
+            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/observability?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+            - img [ref=e162]
+          - link [ref=e420] [cursor=pointer]:
+            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/logs?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+            - img [ref=e167]
+          - link [ref=e421] [cursor=pointer]:
+            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+            - img [ref=e173]
+        - button [ref=e176] [cursor=pointer]
+      - region [ref=e184]:
+        - generic [ref=e257]:
+          - img [ref=e258]
+          - generic [ref=e259]:
+            - generic [ref=e261]:
+              - generic:
+                - img
+                - generic:
+                  - button [ref=e422]:
+                    - generic [ref=e263]:
+                      - link [ref=e423] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/dfd0af25-d766-4d99-95f5-f8b1f21c4baa/database?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - paragraph [ref=e269]: Postgres
+                        - generic [ref=e271]:
+                          - img [ref=e272]
+                          - paragraph [ref=e275]: Online
+                      - link [ref=e424] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/volume/29ad3adb-9e35-4532-be09-ee2af22e8a11/metrics?
+                        - generic [ref=e279]:
+                          - img [ref=e281]
+                          - paragraph [ref=e283]: postgres-volume
+                  - button [ref=e425]:
+                    - link [ref=e426] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/ce115acf-6071-453c-9555-e53fed469c88?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e288]:
+                        - img [ref=e290]
+                        - generic [ref=e292]:
+                          - paragraph [ref=e293]: frontend
+                          - paragraph [ref=e294]: edu-pos.up.railway.app
+                      - generic [ref=e296]:
+                        - img [ref=e297]
+                        - paragraph [ref=e300]: Online
+                  - button [ref=e427]:
+                    - link [ref=e428] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/6f1349f7-a026-4546-941b-1ac4c664c8ae?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e305]:
+                        - img [ref=e307]
+                        - generic [ref=e309]:
+                          - paragraph [ref=e310]: tts
+                          - paragraph [ref=e311]: tts-production-9005d.up.railway.app
+                      - generic [ref=e313]:
+                        - img [ref=e314]
+                        - paragraph [ref=e317]: Online
+                  - button [ref=e429]:
+                    - link [ref=e430] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/53f9e84f-da21-4c2b-aacf-0ca319a99b1e?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e322]:
+                        - img [ref=e324]
+                        - generic [ref=e326]:
+                          - paragraph [ref=e327]: dev
+                          - paragraph [ref=e328]: edu-production-056d.up.railway.app
+                      - generic [ref=e330]:
+                        - img [ref=e331]
+                        - paragraph [ref=e334]: Online
+                  - button [ref=e431]:
+                    - link [ref=e432] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/4194ac35-7c1e-4da9-9b22-00e217ea5cc0?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e339]:
+                        - img [ref=e341]
+                        - generic [ref=e343]:
+                          - paragraph [ref=e344]: backend
+                          - paragraph [ref=e345]: edu-production-2395.up.railway.app
+                      - generic [ref=e347]:
+                        - img [ref=e348]
+                        - paragraph [ref=e351]:
+                          - text: Online
+                          - generic [ref=e352]:
+                            - text: ·
+                            - generic [ref=e353]:
+                              - text: Building (
+                              - time [ref=e354]: 01:05
+                              - text: )
+            - toolbar [ref=e433]:
+              - button [ref=e434] [cursor=pointer]:
+                - img [ref=e359]
+              - group [ref=e435]:
+                - button [ref=e436] [cursor=pointer]:
+                  - img [ref=e372]
+                - button [ref=e437] [cursor=pointer]:
+                  - img [ref=e376]
+                - button [ref=e438] [cursor=pointer]:
+                  - img [ref=e379]
+              - group [ref=e439]:
+                - button [ref=e440] [cursor=pointer]:
+                  - img [ref=e387]
+                - button [ref=e441] [cursor=pointer]:
+                  - img [ref=e392]
+              - button [ref=e442] [cursor=pointer]:
+                - img [ref=e397]
+            - button [ref=e443] [cursor=pointer]:
+              - img [ref=e404]
+              - generic [ref=e406]: Add
+            - img [ref=e407]
+  - dialog "Create" [ref=e445]:
+    - heading "Create" [level=3] [ref=e447]
+    - generic [ref=e448]:
+      - button "Пропустить"
+    - generic [ref=e453]:
+      - combobox [expanded] [active] [ref=e456]
+      - listbox "Suggestions" [ref=e457]:
+        - generic [ref=e458]:
+          - option "GitHub Repository" [selected] [ref=e459] [cursor=pointer]:
+            - generic [ref=e460]:
+              - img [ref=e462]
+              - text: GitHub Repository
+              - img [ref=e465]
+          - option "Database" [ref=e467] [cursor=pointer]:
+            - generic [ref=e468]:
+              - img [ref=e470]
+              - text: Database
+              - img [ref=e475]
+          - option "Template" [ref=e477] [cursor=pointer]:
+            - generic [ref=e478]:
+              - img [ref=e480]
+              - text: Template
+              - img [ref=e483]
+          - option "Docker Image" [ref=e485] [cursor=pointer]:
+            - generic [ref=e486]:
+              - img [ref=e488]
+              - text: Docker Image
+              - img [ref=e491]
+          - option "Function" [ref=e493] [cursor=pointer]:
+            - generic [ref=e494]:
+              - img [ref=e496]
+              - text: Function
+          - option "Bucket" [ref=e499] [cursor=pointer]:
+            - generic [ref=e500]:
+              - img [ref=e502]
+              - text: Bucket
+          - option "Volume" [ref=e505] [cursor=pointer]:
+            - generic [ref=e506]:
+              - img [ref=e508]
+              - text: Volume
+          - option "Empty Service" [ref=e510] [cursor=pointer]:
+            - generic [ref=e511]:
+              - img [ref=e513]
+              - text: Empty Service

@@ -1,0 +1,533 @@
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - paragraph [ref=e6]: Railway mobile app now available on iOS
+      - link "Download now ↗" [ref=e7] [cursor=pointer]:
+        - /url: https://apps.apple.com/us/app/railway-com/id6755712493
+        - paragraph [ref=e8]: Download now ↗
+    - button "Dismiss" [ref=e10] [cursor=pointer]:
+      - img [ref=e12]
+  - generic [ref=e14]:
+    - generic [ref=e17]:
+      - link "Railway" [ref=e18] [cursor=pointer]:
+        - /url: /
+        - img [ref=e20]
+        - generic [ref=e40]: Railway
+      - navigation "Main" [ref=e42]:
+        - list [ref=e44]:
+          - listitem [ref=e45]:
+            - button "Product" [ref=e46] [cursor=pointer]:
+              - generic [ref=e47]: Product
+              - img [ref=e49]
+          - listitem [ref=e51]:
+            - button "Developers" [ref=e52] [cursor=pointer]:
+              - generic [ref=e53]: Developers
+              - img [ref=e55]
+          - listitem [ref=e57]:
+            - button "Enterprise" [ref=e58] [cursor=pointer]:
+              - generic [ref=e59]: Enterprise
+              - img [ref=e61]
+          - listitem [ref=e63]:
+            - button "Company" [ref=e64] [cursor=pointer]:
+              - generic [ref=e65]: Company
+              - img [ref=e67]
+          - listitem [ref=e69]:
+            - link "Pricing" [ref=e70] [cursor=pointer]:
+              - /url: /pricing
+      - img [ref=e72]
+    - generic [ref=e76]:
+      - generic [ref=e78]:
+        - heading "Ship software peacefully" [level=1] [ref=e79]
+        - paragraph [ref=e80]:
+          - text: With the all-in-one
+          - link "intelligent" [ref=e81] [cursor=pointer]:
+            - /url: /agents
+          - text: cloud provider
+        - generic [ref=e82]:
+          - link "Deploy →" [ref=e83] [cursor=pointer]:
+            - /url: /new
+          - link "Agents" [ref=e84] [cursor=pointer]:
+            - /url: /agents
+      - generic [ref=e88]:
+        - img [ref=e90]:
+          - generic [ref=e95]:
+            - generic [ref=e96]: Deploy your app to production effortlessly
+            - generic [ref=e97]: New Project
+          - generic [ref=e102]:
+            - generic [ref=e104]: Dashboard
+            - generic [ref=e110]: New Project
+        - generic [ref=e111]:
+          - generic [ref=e113]:
+            - img [ref=e115]
+            - paragraph [ref=e117]: Deploy
+          - generic [ref=e120]:
+            - img [ref=e122]
+            - paragraph [ref=e127]: Network
+          - generic [ref=e130]:
+            - img [ref=e132]
+            - paragraph [ref=e133]: Scale
+          - generic [ref=e136]:
+            - img [ref=e138]
+            - paragraph [ref=e141]: Monitor
+          - generic [ref=e144]:
+            - img [ref=e146]
+            - paragraph [ref=e151]: Evolve
+      - generic [ref=e155]:
+        - img "TripAdvisor" [ref=e157]
+        - img "Cognizant" [ref=e159]
+        - img "Mercado Libre" [ref=e161]
+        - img "G2X" [ref=e163]
+        - img "Reducto" [ref=e165]
+        - img "Automattic" [ref=e167]
+        - img "hud" [ref=e169]
+        - img "Bilt" [ref=e171]
+        - img "MGM Resorts" [ref=e173]
+        - img "Chatbase" [ref=e175]
+        - img "Switzerland Tourism" [ref=e177]
+        - img "Numeral" [ref=e179]
+    - generic [ref=e180]:
+      - generic [ref=e183]:
+        - generic [ref=e184]:
+          - generic [ref=e186]:
+            - generic [ref=e187]: Build and deploy
+            - generic [ref=e188]:
+              - heading "Deploy anything without the complexity" [level=3] [ref=e189]:
+                - text: Deploy anything
+                - text: without the complexity
+              - paragraph [ref=e191]:
+                - text: Connect your repo, Railway handles the rest. Auto-config, instant previews, no new tools to learn.
+                - link "Learn more →" [ref=e192] [cursor=pointer]:
+                  - /url: /features#build-and-deploy
+          - img [ref=e195]
+        - generic [ref=e197]:
+          - generic [ref=e198]:
+            - generic [ref=e199]:
+              - img [ref=e201]
+              - generic [ref=e204]:
+                - generic [ref=e205]: See your infrastructure
+                - generic [ref=e206]: Craft on a visual canvas that makes your entire stack visible at a glance.
+            - generic [ref=e207]:
+              - img [ref=e209]
+              - generic [ref=e211]:
+                - generic [ref=e212]: Correct config. All the time
+                - generic [ref=e213]: Railway reads your code and sets the right settings, automatically.
+            - generic [ref=e214]:
+              - img [ref=e216]
+              - generic [ref=e218]:
+                - generic [ref=e219]: Edit anything in context
+                - generic [ref=e220]: Modify settings directly from the canvas. YAML optional.
+          - generic [ref=e223]:
+            - generic [ref=e224]:
+              - img [ref=e225]
+              - generic [ref=e227]: Alternative to
+            - generic [ref=e228]:
+              - img "Docker logo"
+              - img "Helm logo"
+              - img "Heroku logo"
+              - img "Digitalocean logo"
+              - img "Cloudrun logo"
+      - generic [ref=e232]:
+        - generic [ref=e233]:
+          - generic [ref=e234]: Network and connect
+          - generic [ref=e235]:
+            - heading "Instant networking. Zero setup." [level=3] [ref=e236]:
+              - text: Instant networking.
+              - text: Zero setup.
+            - generic [ref=e237]:
+              - paragraph [ref=e238]: Private connections, public endpoints, SSL, and load balancing live from the moment you deploy.
+              - paragraph [ref=e239]:
+                - link "Learn more →" [ref=e240] [cursor=pointer]:
+                  - /url: /features#network-and-connect
+          - generic [ref=e241]:
+            - generic [ref=e244]:
+              - generic [ref=e246]:
+                - img [ref=e248]
+                - generic [ref=e250]:
+                  - generic [ref=e251]: Private, fast connections by default
+                  - generic [ref=e252]: 100 Gbps internal networking without VPC configuration.
+              - generic [ref=e255]:
+                - img [ref=e257]
+                - generic [ref=e263]:
+                  - generic [ref=e264]: Protocol detection built-in
+                  - generic [ref=e265]: HTTP, TCP, gRPC, WebSockets handled automatically.
+            - generic [ref=e268]:
+              - generic [ref=e269]:
+                - img [ref=e270]
+                - generic [ref=e272]: Alternative to
+              - generic [ref=e273]:
+                - img "Envoy logo"
+                - img "Cilium logo"
+                - img "Nginx logo"
+                - img "Istio logo"
+                - img "Haproxy logo"
+        - img [ref=e277]
+      - generic [ref=e281]:
+        - generic [ref=e282]:
+          - generic [ref=e283]: Scale and grow
+          - generic [ref=e284]:
+            - heading "Grow big without the growing pains" [level=3] [ref=e285]:
+              - text: Grow big
+              - text: without the growing pains
+            - generic [ref=e286]:
+              - paragraph [ref=e287]: Take a single instance to a global deployment. Railway handles the scaling, so you stay focused on the product.
+              - paragraph [ref=e288]:
+                - link "Learn more →" [ref=e289] [cursor=pointer]:
+                  - /url: /features#scale-and-grow
+          - generic [ref=e290]:
+            - generic [ref=e293]:
+              - generic [ref=e295]:
+                - img [ref=e297]
+                - generic [ref=e303]:
+                  - generic [ref=e304]: Handle more load and traffic
+                  - generic [ref=e305]: Scale CPU and RAM or add replicas with load balancing.
+              - generic [ref=e308]:
+                - img [ref=e310]
+                - generic [ref=e312]:
+                  - generic [ref=e313]: Reach users faster globally
+                  - generic [ref=e314]: Run your application closer to where your users are.
+            - generic [ref=e317]:
+              - generic [ref=e318]:
+                - img [ref=e319]
+                - generic [ref=e321]: Alternative to
+              - generic [ref=e322]:
+                - img "Kubernetes logo"
+                - img "Amazon-ecs logo"
+                - img "Nomad logo"
+                - img "Betterstack logo"
+        - img [ref=e325]
+      - generic [ref=e328]:
+        - generic [ref=e329]:
+          - generic [ref=e331]:
+            - generic [ref=e332]: Monitor and observe
+            - generic [ref=e333]:
+              - heading "Logs, metrics, and alerts in one place. Clarity without the chaos." [level=3] [ref=e334]
+              - paragraph [ref=e336]:
+                - text: Monitor resource usage, set custom alerts, and track logs. Full visibility from the moment you deploy with everything you need to stay ahead of issues.
+                - link "Learn more →" [ref=e337] [cursor=pointer]:
+                  - /url: /features#monitor-and-observe
+          - img [ref=e340]
+        - generic [ref=e342]:
+          - generic [ref=e343]:
+            - generic [ref=e344]:
+              - img [ref=e346]
+              - generic [ref=e348]:
+                - generic [ref=e349]: All your metrics in one dashboard
+                - generic [ref=e350]: Create custom dashboards with metrics from any service.
+            - generic [ref=e351]:
+              - img [ref=e353]
+              - generic [ref=e355]:
+                - generic [ref=e356]: Alerts that reach you
+                - generic [ref=e357]: Slack, Discord, or emails the moment conditions you specify are met.
+            - generic [ref=e358]:
+              - img [ref=e360]
+              - generic [ref=e363]:
+                - generic [ref=e364]: Contextual debugging
+                - generic [ref=e365]: All logs in one place. Spot issues without switching tools.
+          - generic [ref=e368]:
+            - generic [ref=e369]:
+              - img [ref=e370]
+              - generic [ref=e372]: Alternative to
+            - generic [ref=e373]:
+              - img "Datadog logo"
+              - img "Sentry logo"
+              - img "Opentelemetry logo"
+      - generic [ref=e377]:
+        - generic [ref=e379]:
+          - generic [ref=e380]: Evolve and collaborate
+          - generic [ref=e381]:
+            - heading "Finally, a development workflow that actually flows." [level=3] [ref=e382]
+            - generic [ref=e383]:
+              - paragraph [ref=e384]: Spin-up unlimited environments. Preview every PR automatically. One-click rollbacks are there just in case.
+              - paragraph [ref=e385]:
+                - link "Learn more →" [ref=e386] [cursor=pointer]:
+                  - /url: /features#improve-and-automate
+        - img [ref=e388]
+        - generic [ref=e389]:
+          - generic [ref=e390]:
+            - generic [ref=e391]:
+              - img [ref=e393]
+              - generic [ref=e399]:
+                - generic [ref=e400]: Everyone ships at full speed
+                - generic [ref=e401]: Unlimited environments mean everyone can ship simultaneously.
+            - generic [ref=e402]:
+              - img [ref=e404]
+              - generic [ref=e407]:
+                - generic [ref=e408]: Preview every PR
+                - generic [ref=e409]: Every pull request gets its own preview. No surprises after merge.
+            - generic [ref=e410]:
+              - img [ref=e412]
+              - generic [ref=e414]:
+                - generic [ref=e415]: Undo mistakes in seconds
+                - generic [ref=e416]: Rollback to any previous version instantly when something breaks.
+          - generic [ref=e418]:
+            - generic [ref=e419]:
+              - img [ref=e420]
+              - generic [ref=e422]: Alternative to
+            - generic [ref=e423]:
+              - img "Terraform logo"
+              - img "Spacelift logo"
+    - generic [ref=e425]:
+      - generic [ref=e426]:
+        - generic [ref=e427]:
+          - heading "Trusted by the best in business" [level=2] [ref=e428]
+          - paragraph [ref=e430]: Railway supports great software teams wherever they are. Hear from some of the teams building their products on Railway.
+          - link "Read customer stories →" [ref=e431] [cursor=pointer]:
+            - /url: /customers
+        - generic [ref=e432]:
+          - generic [ref=e433]:
+            - img
+            - paragraph [ref=e435]: "\"On our previous rent day, we saw traffic of 1,500+ requests per second that were all being fulfilled in under 50 milliseconds, which is really great. Our technical team is really impressed with scale like that.\""
+            - generic [ref=e437]:
+              - generic [ref=e438]: Kartik Aggarwal
+              - generic [ref=e439]: Tech Lead at Bilt
+          - generic [ref=e440]:
+            - img
+            - paragraph [ref=e442]: "\"Services that took 1 week to configure elsewhere take 1 day to spin up in Railway. Messy networking like on other cloud platforms doesn't exist on Railway. If you understand basic TCP, you're all set.\""
+            - generic [ref=e444]:
+              - generic [ref=e445]: Daniel Lobaton
+              - generic [ref=e446]: CTO at G2X
+          - generic [ref=e447]:
+            - img
+            - paragraph [ref=e449]: "\"Railway streamlines and accelerates our entire operation. It gives us instant observability into our services and makes spinning up self-hosted third-party tools almost effortless. This reduces friction in experimentation and shortens our deployment cycles significantly.\""
+            - generic [ref=e451]:
+              - generic [ref=e452]: Daniel Moretti
+              - generic [ref=e453]: Co-Founder & CTO at Mappa
+        - generic [ref=e454]:
+          - generic [ref=e455]: ...and loved by developers
+          - link "Join 2M+ developers building with Railway →" [ref=e456] [cursor=pointer]:
+            - /url: /
+      - generic [ref=e459]:
+        - generic [ref=e460]:
+          - generic [ref=e462]:
+            - generic [ref=e463]: Thales Gelinger
+            - generic [ref=e464]: "@thalesgelinger_"
+          - generic [ref=e465]: Real talk, i’m love with @Railway, it took me about 2 minutes to setup my server with a postgres using postgis, a volume, and all env and databases and everything else keeps in the same project, pretty neat way to organize things
+        - generic [ref=e466]:
+          - generic [ref=e468]:
+            - generic [ref=e469]: Praveen Thirumurugan
+            - generic [ref=e470]: "@PraveenTcom"
+          - generic [ref=e471]: Initial impressions on using @Railway is amazing. Zero config deployment if a Dockerfile is ready to use. Will check for a month on how it comes to the pricing and usage billing part.
+        - generic [ref=e472]:
+          - generic [ref=e474]:
+            - generic [ref=e475]: Brib
+            - generic [ref=e476]: "@spanish_vanish"
+          - generic [ref=e477]: I'm super bullish for the @Railway. They just started with their self-owned servers. and their new start-up program is super exciting, let's see how it develops in the future.
+        - generic [ref=e478]:
+          - generic [ref=e480]:
+            - generic [ref=e481]: Kevin Jin
+            - generic [ref=e482]: "@itskevinjin"
+          - generic [ref=e483]: really gotta commend @Railway for allowing hard spending limits, I have never, ever seen this with any cloud provider. It's so refreshing to use a platform that isn't trying to extract maximal dollars from my wallet
+        - generic [ref=e484]:
+          - generic [ref=e486]:
+            - generic [ref=e487]: Celia Rozalén
+            - generic [ref=e488]: "@celiarozalenm"
+          - generic [ref=e489]: I self-hosted @PlausibleHQ in one minute thanks to @juliaalvarez23 recommendation of Railway and I feel I need to tell everyone. I want to try it for a month and If everything works I will record a video.
+        - generic [ref=e490]:
+          - generic [ref=e492]:
+            - generic [ref=e493]: recursed - oss/acc
+            - generic [ref=e494]: "@0x0elliot"
+          - generic [ref=e495]: i love how railway makes it super easy to just pull up your set up in front of someone and the architecture is communicated without saying a word.
+        - generic [ref=e496]:
+          - generic [ref=e498]:
+            - generic [ref=e499]: Thales Gelinger
+            - generic [ref=e500]: "@thalesgelinger_"
+          - generic [ref=e501]: Real talk, i’m love with @Railway, it took me about 2 minutes to setup my server with a postgres using postgis, a volume, and all env and databases and everything else keeps in the same project, pretty neat way to organize things
+        - generic [ref=e502]:
+          - generic [ref=e504]:
+            - generic [ref=e505]: Praveen Thirumurugan
+            - generic [ref=e506]: "@PraveenTcom"
+          - generic [ref=e507]: Initial impressions on using @Railway is amazing. Zero config deployment if a Dockerfile is ready to use. Will check for a month on how it comes to the pricing and usage billing part.
+        - generic [ref=e508]:
+          - generic [ref=e510]:
+            - generic [ref=e511]: Brib
+            - generic [ref=e512]: "@spanish_vanish"
+          - generic [ref=e513]: I'm super bullish for the @Railway. They just started with their self-owned servers. and their new start-up program is super exciting, let's see how it develops in the future.
+        - generic [ref=e514]:
+          - generic [ref=e516]:
+            - generic [ref=e517]: Kevin Jin
+            - generic [ref=e518]: "@itskevinjin"
+          - generic [ref=e519]: really gotta commend @Railway for allowing hard spending limits, I have never, ever seen this with any cloud provider. It's so refreshing to use a platform that isn't trying to extract maximal dollars from my wallet
+        - generic [ref=e520]:
+          - generic [ref=e522]:
+            - generic [ref=e523]: Celia Rozalén
+            - generic [ref=e524]: "@celiarozalenm"
+          - generic [ref=e525]: I self-hosted @PlausibleHQ in one minute thanks to @juliaalvarez23 recommendation of Railway and I feel I need to tell everyone. I want to try it for a month and If everything works I will record a video.
+        - generic [ref=e526]:
+          - generic [ref=e528]:
+            - generic [ref=e529]: recursed - oss/acc
+            - generic [ref=e530]: "@0x0elliot"
+          - generic [ref=e531]: i love how railway makes it super easy to just pull up your set up in front of someone and the architecture is communicated without saying a word.
+    - generic [ref=e532]:
+      - generic [ref=e533]:
+        - heading "0+ deploys per month (and counting)" [level=2] [ref=e534]
+        - paragraph [ref=e535]: Real-time usage showing totals for users and services, along with 30-day deploys, requests, and logs.
+      - generic [ref=e536]: Users 0000000, Services 000000000, Deployments 000000000, Requests 00000000000000, Logs 00000000000000
+      - generic [ref=e539]:
+        - generic:
+          - generic:
+            - img
+          - generic:
+            - img
+        - generic [ref=e540]:
+          - generic [ref=e542]:
+            - generic [ref=e543]:
+              - generic [ref=e544]:
+                - paragraph [ref=e545]: A better future is
+                - paragraph [ref=e546]: now boarding
+              - paragraph [ref=e547]: Deploy your first project today
+            - link "All Aboard" [ref=e548] [cursor=pointer]:
+              - /url: /new
+          - generic:
+            - img
+    - contentinfo [ref=e551]:
+      - generic [ref=e552]:
+        - generic [ref=e553]:
+          - generic [ref=e554]:
+            - paragraph [ref=e555]: Featured
+            - link "Mobile app now available for iOS. Download now." [ref=e556] [cursor=pointer]:
+              - /url: https://apps.apple.com/us/app/railway-com/id6755712493
+              - paragraph [ref=e557]:
+                - text: Mobile app
+                - generic [ref=e558]: now available for
+                - generic [ref=e559]: iOS
+              - paragraph [ref=e560]: Deploy, monitor, and manage your services from anywhere. Your full Railway workspace, now in your pocket. Download now ↗
+          - link "Railway Compliance" [ref=e562] [cursor=pointer]:
+            - /url: https://trust.railway.com
+            - img [ref=e563]
+            - img [ref=e565]
+        - generic [ref=e577]:
+          - generic [ref=e578]:
+            - paragraph [ref=e579]: Product
+            - generic [ref=e580]:
+              - link "Features" [ref=e581] [cursor=pointer]:
+                - /url: /features
+                - paragraph [ref=e582]: Features
+              - link "Mobile app" [ref=e583] [cursor=pointer]:
+                - /url: /mobile
+                - paragraph [ref=e584]: Mobile app
+              - link "Pricing" [ref=e585] [cursor=pointer]:
+                - /url: /pricing
+                - paragraph [ref=e586]: Pricing
+              - link "Agents" [ref=e587] [cursor=pointer]:
+                - /url: /agents
+                - paragraph [ref=e588]: Agents
+              - link "Changelog" [ref=e589] [cursor=pointer]:
+                - /url: /changelog
+                - paragraph [ref=e590]: Changelog
+              - link "Templates" [ref=e591] [cursor=pointer]:
+                - /url: /deploy
+                - paragraph [ref=e592]: Templates
+              - link "Template kickback" [ref=e593] [cursor=pointer]:
+                - /url: /open-source-kickback
+                - paragraph [ref=e594]: Template kickback
+          - generic [ref=e595]:
+            - paragraph [ref=e596]: Compare
+            - generic [ref=e597]:
+              - link "Heroku" [ref=e598] [cursor=pointer]:
+                - /url: /heroku
+                - paragraph [ref=e599]: Heroku
+              - link "Render" [ref=e600] [cursor=pointer]:
+                - /url: https://docs.railway.com/maturity/compare-to-render
+                - paragraph [ref=e601]: Render
+              - link "Fly.io" [ref=e602] [cursor=pointer]:
+                - /url: https://docs.railway.com/maturity/compare-to-fly
+                - paragraph [ref=e603]: Fly.io
+              - link "Vercel" [ref=e604] [cursor=pointer]:
+                - /url: https://docs.railway.com/maturity/compare-to-vercel
+                - paragraph [ref=e605]: Vercel
+          - generic [ref=e606]:
+            - paragraph [ref=e607]: Contact
+            - generic [ref=e608]:
+              - link "Discord" [ref=e609] [cursor=pointer]:
+                - /url: https://discord.gg/railway
+                - paragraph [ref=e610]: Discord
+              - link "Twitter" [ref=e611] [cursor=pointer]:
+                - /url: https://twitter.com/Railway
+                - paragraph [ref=e612]: Twitter
+              - link "GitHub" [ref=e613] [cursor=pointer]:
+                - /url: https://github.com/railwayapp
+                - paragraph [ref=e614]: GitHub
+              - link "Email" [ref=e615] [cursor=pointer]:
+                - /url: mailto:team@railway.com
+                - paragraph [ref=e616]: Email
+          - generic [ref=e617]:
+            - paragraph [ref=e618]: Resources
+            - generic [ref=e619]:
+              - link "Customers" [ref=e620] [cursor=pointer]:
+                - /url: /customers
+                - paragraph [ref=e621]: Customers
+              - link "Enterprise" [ref=e622] [cursor=pointer]:
+                - /url: /enterprise
+                - paragraph [ref=e623]: Enterprise
+              - link "Docs" [ref=e624] [cursor=pointer]:
+                - /url: https://docs.railway.com
+                - paragraph [ref=e625]: Docs
+              - link "Central Station" [ref=e626] [cursor=pointer]:
+                - /url: https://station.railway.com
+                - paragraph [ref=e627]: Central Station
+              - link "Blog" [ref=e628] [cursor=pointer]:
+                - /url: https://blog.railway.com
+                - paragraph [ref=e629]: Blog
+              - link "Partnerships" [ref=e630] [cursor=pointer]:
+                - /url: /partners
+                - paragraph [ref=e631]: Partnerships
+              - link "Affiliate program" [ref=e632] [cursor=pointer]:
+                - /url: /affiliate-program
+                - paragraph [ref=e633]: Affiliate program
+          - generic [ref=e634]:
+            - paragraph [ref=e635]: Company
+            - generic [ref=e636]:
+              - link "About" [ref=e637] [cursor=pointer]:
+                - /url: /about
+                - paragraph [ref=e638]: About
+              - link "Philosophy" [ref=e639] [cursor=pointer]:
+                - /url: https://docs.railway.com/maturity/philosophy
+                - paragraph [ref=e640]: Philosophy
+              - link "Careers" [ref=e641] [cursor=pointer]:
+                - /url: /careers
+                - paragraph [ref=e642]: Careers
+              - link "Shop" [ref=e643] [cursor=pointer]:
+                - /url: https://shop.railway.com
+                - paragraph [ref=e644]: Shop
+              - link "Trust" [ref=e645] [cursor=pointer]:
+                - /url: https://trust.railway.com
+                - paragraph [ref=e646]: Trust
+              - link "Logo" [ref=e647] [cursor=pointer]:
+                - /url: /design
+                - paragraph [ref=e648]: Logo
+              - link "Status" [ref=e649] [cursor=pointer]:
+                - /url: https://status.railway.com
+                - paragraph [ref=e650]: Status
+          - generic [ref=e651]:
+            - paragraph [ref=e652]: Legal
+            - generic [ref=e653]:
+              - link "DPA" [ref=e654] [cursor=pointer]:
+                - /url: /legal/dpa
+                - paragraph [ref=e655]: DPA
+              - link "Acceptable Use" [ref=e656] [cursor=pointer]:
+                - /url: /legal/acceptable-use
+                - paragraph [ref=e657]: Acceptable Use
+              - link "Privacy Policy" [ref=e658] [cursor=pointer]:
+                - /url: /legal/privacy
+                - paragraph [ref=e659]: Privacy Policy
+              - link "Terms of Service" [ref=e660] [cursor=pointer]:
+                - /url: /legal/terms
+                - paragraph [ref=e661]: Terms of Service
+              - link "Enterprise Agreement" [ref=e662] [cursor=pointer]:
+                - /url: /legal/enterprise-agreement
+                - paragraph [ref=e663]: Enterprise Agreement
+              - link "Bug Bounty Program" [ref=e664] [cursor=pointer]:
+                - /url: /bug-bounty
+                - paragraph [ref=e665]: Bug Bounty Program
+              - button "Cookie preferences" [ref=e666] [cursor=pointer]
+      - separator [ref=e667]
+      - generic [ref=e668]:
+        - generic [ref=e669]:
+          - link "Railway Logo" [ref=e670] [cursor=pointer]:
+            - /url: /
+            - img "Railway Logo" [ref=e671]
+          - link "All systems operational" [ref=e674] [cursor=pointer]:
+            - /url: https://status.railway.com
+            - generic [ref=e675]: All systems operational
+            - generic [ref=e676]: ↗
+        - generic [ref=e677]: © 2026 Railway Corp. All rights reserved.

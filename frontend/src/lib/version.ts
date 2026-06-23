@@ -19,7 +19,7 @@ function displayVersion(version: string): string {
   return version.startsWith('0.') ? version.slice(2) : version;
 }
 
-/** Строка для отображения: «v1.38 · a1b2c3d · 08.06.2026 15:30» (пустые части опускаются). */
-export const APP_VERSION_LABEL = [`v${displayVersion(APP_VERSION)}`, APP_COMMIT, builtAtShort()]
+/** Строка для отображения: «v1.38 · 08.06.2026 15:30» (пустые части опускаются). */
+export const APP_VERSION_LABEL = [`v${displayVersion(APP_VERSION)}`, builtAtShort()]
   .filter(Boolean)
   .join(' · ');

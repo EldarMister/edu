@@ -35,7 +35,7 @@ export function OrderDetailsModal({
       panelClassName="max-w-2xl"
     >
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-wrap gap-2">
           <Info label="Статус" value={<OrderBadge status={order.status} />} />
           <Info label="Дата" value={`${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`} />
           <Info label="Стол" value={`Стол ${order.table.number}${hallSuffix(order.table)}`} />
@@ -57,6 +57,24 @@ export function OrderDetailsModal({
                   <span className="font-medium text-text-primary">{money(payment.amount)}</span>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length && (
+          <div className="rounded-lg border border-border bg-background px-3 py-2">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">
+              Разбивка оплаты
+            </p>
+            <div className="mt-1.5 space-y-1">
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-text-secondary">Наличными</span>
+                <span className="font-medium text-text-primary">{money(mixedSumBy(order, 'cash'))}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-sm">
+                <span className="text-text-secondary">QR</span>
+                <span className="font-medium text-text-primary">{money(mixedSumBy(order, 'qr'))}</span>
+              </div>
             </div>
           </div>
         )}
@@ -190,6 +208,16 @@ function FiscalBlock({ order }: { order: Order }) {
   );
 }
 
+/** Сумма платежей заказа по способу (наличные / QR) для смешанной оплаты. */
+function mixedSumBy(
+  order: { payments?: { method: string; amount: string }[] },
+  method: string,
+): number {
+  return (order.payments ?? [])
+    .filter((p) => p.method === method)
+    .reduce((acc, p) => acc + Number(p.amount), 0);
+}
+
 function Info({
   label,
   value,
@@ -200,7 +228,7 @@ function Info({
   strong?: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border px-3 py-2">
+    <div className="min-w-[7rem] rounded-lg border border-border px-3 py-2">
       <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">{label}</p>
       <div className={`mt-0.5 text-sm ${strong ? 'font-semibold text-text-primary' : 'text-text-secondary'}`}>
         {value}

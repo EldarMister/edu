@@ -1,0 +1,309 @@
+- generic [ref=e1]:
+  - generic [ref=e103]:
+    - banner [ref=e105]:
+      - generic [ref=e106]:
+        - link [ref=e3951] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e3952]
+        - generic [ref=e112]:
+          - button [ref=e3953] [cursor=pointer]:
+            - generic [ref=e118]: edu pos asman
+            - img [ref=e120]
+          - button [ref=e3955] [cursor=pointer]:
+            - generic [ref=e125]: production
+            - img [ref=e127]
+      - navigation [ref=e129]:
+        - generic [ref=e131]:
+          - button [ref=e3956] [cursor=pointer]:
+            - img [ref=e3929]
+          - button [ref=e137] [cursor=pointer]:
+            - img [ref=e140]
+          - button [ref=e3957] [cursor=pointer]:
+            - img [ref=e145]
+            - text: Agent
+    - generic [ref=e147]:
+      - navigation [ref=e3958]:
+        - generic [ref=e149]:
+          - link [ref=e3959] [cursor=pointer]:
+            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+            - img [ref=e154]
+          - link [ref=e3960] [cursor=pointer]:
+            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/observability?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+            - img [ref=e162]
+          - link [ref=e3961] [cursor=pointer]:
+            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/logs?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+            - img [ref=e167]
+          - link [ref=e3962] [cursor=pointer]:
+            - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+            - img [ref=e173]
+        - button [ref=e176] [cursor=pointer]
+      - region [ref=e184]:
+        - generic [ref=e257]:
+          - img [ref=e258]
+          - generic [ref=e259]:
+            - generic [ref=e261]:
+              - generic:
+                - img
+                - generic:
+                  - button [ref=e3963]:
+                    - generic [ref=e263]:
+                      - link [ref=e3964] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/dfd0af25-d766-4d99-95f5-f8b1f21c4baa/database?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - paragraph [ref=e269]: Postgres
+                        - generic [ref=e271]:
+                          - img [ref=e272]
+                          - paragraph [ref=e275]: Online
+                      - link [ref=e3965] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/volume/29ad3adb-9e35-4532-be09-ee2af22e8a11/metrics?
+                        - generic [ref=e279]:
+                          - img [ref=e281]
+                          - paragraph [ref=e283]: postgres-volume
+                  - button [ref=e3966]:
+                    - link [ref=e3967] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/ce115acf-6071-453c-9555-e53fed469c88?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e288]:
+                        - img [ref=e290]
+                        - generic [ref=e292]:
+                          - paragraph [ref=e293]: frontend
+                          - paragraph [ref=e294]: edu-pos.up.railway.app
+                      - generic [ref=e296]:
+                        - img [ref=e297]
+                        - paragraph [ref=e300]: Online
+                  - button [ref=e3968]:
+                    - generic [ref=e857]:
+                      - link [ref=e3969] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/schedule?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e860]:
+                          - img [ref=e862]
+                          - paragraph [ref=e865]: tts-scheduler-wake
+                        - generic [ref=e3941]:
+                          - img [ref=e3942]
+                          - paragraph [ref=e3945]: Ready
+                      - link [ref=e3970] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e3763]:
+                          - img [ref=e3765]
+                          - paragraph [ref=e3768]:
+                            - text: Next
+                            - time [ref=e3770]: in 5 hours
+                  - button [ref=e3971]:
+                    - link [ref=e3972] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/6f1349f7-a026-4546-941b-1ac4c664c8ae?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e305]:
+                        - img [ref=e307]
+                        - generic [ref=e309]:
+                          - paragraph [ref=e310]: tts
+                          - paragraph [ref=e311]: tts-production-9005d.up.railway.app
+                      - generic [ref=e313]:
+                        - img [ref=e314]
+                        - paragraph [ref=e317]: Online
+                  - button [ref=e3973]:
+                    - link [ref=e3974] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/53f9e84f-da21-4c2b-aacf-0ca319a99b1e?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e322]:
+                        - img [ref=e324]
+                        - generic [ref=e326]:
+                          - paragraph [ref=e327]: dev
+                          - paragraph [ref=e328]: edu-production-056d.up.railway.app
+                      - generic [ref=e330]:
+                        - img [ref=e331]
+                        - paragraph [ref=e334]: Online
+                  - button [ref=e3975]:
+                    - link [ref=e3976] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/4194ac35-7c1e-4da9-9b22-00e217ea5cc0?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e339]:
+                        - img [ref=e341]
+                        - generic [ref=e343]:
+                          - paragraph [ref=e344]: backend
+                          - paragraph [ref=e345]: edu-production-2395.up.railway.app
+                      - generic [ref=e347]:
+                        - img [ref=e348]
+                        - paragraph [ref=e351]: Online
+            - toolbar [ref=e3977]:
+              - button [ref=e3978] [cursor=pointer]:
+                - img [ref=e359]
+              - group [ref=e3979]:
+                - button [ref=e3980] [cursor=pointer]:
+                  - img [ref=e372]
+                - button [ref=e3981] [cursor=pointer]:
+                  - img [ref=e376]
+                - button [ref=e3982] [cursor=pointer]:
+                  - img [ref=e379]
+              - group [ref=e3983]:
+                - button [ref=e3984] [cursor=pointer]:
+                  - img [ref=e387]
+                - button [ref=e3985] [cursor=pointer]:
+                  - img [ref=e392]
+              - button [ref=e3986] [cursor=pointer]:
+                - img [ref=e397]
+            - button [ref=e3987] [cursor=pointer]:
+              - img [ref=e3948]
+              - generic [ref=e3950]: Add
+            - img [ref=e407]
+  - dialog "Create" [ref=e3989]:
+    - heading "Create" [level=3] [ref=e3991]
+    - generic [ref=e3992]:
+      - button "Пропустить"
+    - generic [ref=e3994]:
+      - generic [ref=e4059]: GitHub Repository
+      - generic [ref=e3997]:
+        - generic [ref=e3999]:
+          - button "Back" [ref=e4060] [cursor=pointer]:
+            - img [ref=e4062]
+          - combobox [expanded] [active] [ref=e4000]
+        - listbox "Suggestions" [ref=e4001]:
+          - generic [ref=e4002]:
+            - option "Configure GitHub App Refresh" [ref=e4064] [cursor=pointer]:
+              - generic [ref=e4065]:
+                - button "Configure GitHub App" [ref=e4066]:
+                  - img [ref=e4068]
+                  - generic [ref=e4070]: Configure GitHub App
+                - button "Refresh" [ref=e4071]:
+                  - img [ref=e4073]
+                  - generic [ref=e4076]: Refresh
+            - generic [ref=e4078]:
+              - option "EldarMister/edu" [ref=e4080] [cursor=pointer]:
+                - generic [ref=e4081]:
+                  - img [ref=e4083]
+                  - text: EldarMister/edu
+                  - img [ref=e4086]
+              - option "EldarMister/edukassa" [ref=e4089] [cursor=pointer]:
+                - generic [ref=e4090]:
+                  - img [ref=e4092]
+                  - text: EldarMister/edukassa
+                  - img [ref=e4095]
+              - option "EldarMister/namz" [ref=e4098] [cursor=pointer]:
+                - generic [ref=e4099]:
+                  - img [ref=e4101]
+                  - text: EldarMister/namz
+                  - img [ref=e4104]
+              - option "EldarMister/jardamchy-stable" [ref=e4107] [cursor=pointer]:
+                - generic [ref=e4108]:
+                  - img [ref=e4110]
+                  - text: EldarMister/jardamchy-stable
+                  - img [ref=e4113]
+              - option "EldarMister/tamga-ehnanced" [ref=e4116] [cursor=pointer]:
+                - generic [ref=e4117]:
+                  - img [ref=e4119]
+                  - text: EldarMister/tamga-ehnanced
+                  - img [ref=e4122]
+              - option "EldarMister/portfolio" [ref=e4125] [cursor=pointer]:
+                - generic [ref=e4126]:
+                  - img [ref=e4128]
+                  - text: EldarMister/portfolio
+                  - img [ref=e4131]
+              - option "EldarMister/vibrafy" [ref=e4134] [cursor=pointer]:
+                - generic [ref=e4135]:
+                  - img [ref=e4137]
+                  - text: EldarMister/vibrafy
+                  - img [ref=e4140]
+              - option "EldarMister/bot" [ref=e4143] [cursor=pointer]:
+                - generic [ref=e4144]:
+                  - img [ref=e4146]
+                  - text: EldarMister/bot
+                  - img [ref=e4149]
+              - option "EldarMister/armbot" [ref=e4152] [cursor=pointer]:
+                - generic [ref=e4153]:
+                  - img [ref=e4155]
+                  - text: EldarMister/armbot
+                  - img [ref=e4158]
+              - option "EldarMister/pixelmedia1" [ref=e4161] [cursor=pointer]:
+                - generic [ref=e4162]:
+                  - img [ref=e4164]
+                  - text: EldarMister/pixelmedia1
+                  - img [ref=e4167]
+              - option "EldarMister/arm-tg" [ref=e4170] [cursor=pointer]:
+                - generic [ref=e4171]:
+                  - img [ref=e4173]
+                  - text: EldarMister/arm-tg
+                  - img [ref=e4176]
+              - option "EldarMister/tamga" [ref=e4179] [cursor=pointer]:
+                - generic [ref=e4180]:
+                  - img [ref=e4182]
+                  - text: EldarMister/tamga
+                  - img [ref=e4185]
+              - option "EldarMister/shoring" [ref=e4188] [cursor=pointer]:
+                - generic [ref=e4189]:
+                  - img [ref=e4191]
+                  - text: EldarMister/shoring
+                  - img [ref=e4194]
+              - option "EldarMister/jardamchy" [ref=e4197] [cursor=pointer]:
+                - generic [ref=e4198]:
+                  - img [ref=e4200]
+                  - text: EldarMister/jardamchy
+                  - img [ref=e4203]
+              - option "EldarMister/arm" [ref=e4206] [cursor=pointer]:
+                - generic [ref=e4207]:
+                  - img [ref=e4209]
+                  - text: EldarMister/arm
+                  - img [ref=e4212]
+              - option "EldarMister/more" [ref=e4215] [cursor=pointer]:
+                - generic [ref=e4216]:
+                  - img [ref=e4218]
+                  - text: EldarMister/more
+                  - img [ref=e4221]
+              - option "EldarMister/pdd" [ref=e4224] [cursor=pointer]:
+                - generic [ref=e4225]:
+                  - img [ref=e4227]
+                  - text: EldarMister/pdd
+                  - img [ref=e4230]
+              - option "EldarMister/pixelmedia" [ref=e4233] [cursor=pointer]:
+                - generic [ref=e4234]:
+                  - img [ref=e4236]
+                  - text: EldarMister/pixelmedia
+                  - img [ref=e4239]
+              - option "EldarMister/tamgapage" [ref=e4242] [cursor=pointer]:
+                - generic [ref=e4243]:
+                  - img [ref=e4245]
+                  - text: EldarMister/tamgapage
+                  - img [ref=e4248]
+              - option "EldarMister/secret" [ref=e4251] [cursor=pointer]:
+                - generic [ref=e4252]:
+                  - img [ref=e4254]
+                  - text: EldarMister/secret
+                  - img [ref=e4257]
+              - option "EldarMister/aaaa" [ref=e4260] [cursor=pointer]:
+                - generic [ref=e4261]:
+                  - img [ref=e4263]
+                  - text: EldarMister/aaaa
+                  - img [ref=e4266]
+              - option "EldarMister/toprider" [ref=e4269] [cursor=pointer]:
+                - generic [ref=e4270]:
+                  - img [ref=e4272]
+                  - text: EldarMister/toprider
+                  - img [ref=e4275]
+              - option "EldarMister/finance" [ref=e4278] [cursor=pointer]:
+                - generic [ref=e4279]:
+                  - img [ref=e4281]
+                  - text: EldarMister/finance
+                  - img [ref=e4284]
+              - option "EldarMister/game" [ref=e4287] [cursor=pointer]:
+                - generic [ref=e4288]:
+                  - img [ref=e4290]
+                  - text: EldarMister/game
+                  - img [ref=e4293]
+              - option "EldarMister/bla-bla" [ref=e4296] [cursor=pointer]:
+                - generic [ref=e4297]:
+                  - img [ref=e4299]
+                  - text: EldarMister/bla-bla
+                  - img [ref=e4302]
+              - option "EldarMister/shopp" [ref=e4305] [cursor=pointer]:
+                - generic [ref=e4306]:
+                  - img [ref=e4308]
+                  - text: EldarMister/shopp
+                  - img [ref=e4311]
+              - option "EldarMister/zakaz" [ref=e4314] [cursor=pointer]:
+                - generic [ref=e4315]:
+                  - img [ref=e4317]
+                  - text: EldarMister/zakaz
+                  - img [ref=e4320]
+              - option "EldarMister/tapshyrma" [ref=e4323] [cursor=pointer]:
+                - generic [ref=e4324]:
+                  - img [ref=e4326]
+                  - text: EldarMister/tapshyrma
+                  - img [ref=e4329]
+              - option "EldarMister/router" [ref=e4332] [cursor=pointer]:
+                - generic [ref=e4333]:
+                  - img [ref=e4335]
+                  - text: EldarMister/router
+                  - img [ref=e4338]

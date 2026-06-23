@@ -165,7 +165,7 @@ export function AdminApp() {
   const current = sections.find((s) => s.key === section) ?? sections[0];
 
   const sidebar = (
-    <aside className="flex h-full w-60 shrink-0 flex-col border-r border-border bg-white">
+    <aside className="flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
       <div className="flex h-16 items-center px-5">
         <BrandLogo />
       </div>

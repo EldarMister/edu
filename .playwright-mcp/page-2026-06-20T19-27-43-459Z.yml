@@ -1,0 +1,293 @@
+- generic [ref=e16]:
+  - banner [ref=e18]:
+    - generic [ref=e19]:
+      - link "Railway Logo" [ref=e20] [cursor=pointer]:
+        - /url: /dashboard
+        - img "Railway Logo" [ref=e22]
+      - generic [ref=e25]:
+        - button "edu pos asman" [ref=e28] [cursor=pointer]:
+          - generic "eldarmister's Projects" [ref=e29]
+          - generic [ref=e31]: edu pos asman
+          - img [ref=e33]
+        - button "production" [ref=e37] [cursor=pointer]:
+          - generic [ref=e38]: production
+          - img [ref=e40]
+    - navigation [ref=e42]:
+      - generic [ref=e44]:
+        - button "Toggle activity" [ref=e46] [cursor=pointer]:
+          - img [ref=e48]
+        - button [ref=e50] [cursor=pointer]:
+          - img [ref=e53]
+        - button "Agent" [ref=e56] [cursor=pointer]:
+          - img [ref=e58]
+          - text: Agent
+  - generic [ref=e60]:
+    - navigation "Project navigation" [ref=e61]:
+      - generic [ref=e62]:
+        - link "Architecture" [ref=e65] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e67]
+        - link "Observability" [ref=e73] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/observability?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e75]
+        - link "Logs" [ref=e78] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/logs?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e80]
+        - link "Settings" [ref=e84] [cursor=pointer]:
+          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+          - img [ref=e86]
+      - button [ref=e89] [cursor=pointer]
+    - region [ref=e97]:
+      - generic [ref=e98]:
+        - generic [ref=e102]:
+          - img [ref=e103]
+          - generic [ref=e104]:
+            - generic [ref=e106]:
+              - generic:
+                - img
+                - generic:
+                  - button "Postgres Online postgres-volume" [ref=e107]:
+                    - generic [ref=e108]:
+                      - link "Postgres Online" [ref=e110] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/dfd0af25-d766-4d99-95f5-f8b1f21c4baa/database?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - paragraph [ref=e114]: Postgres
+                        - generic [ref=e116]:
+                          - img [ref=e117]
+                          - paragraph [ref=e120]: Online
+                      - link "postgres-volume" [ref=e122] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/volume/29ad3adb-9e35-4532-be09-ee2af22e8a11/metrics?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e124]:
+                          - img [ref=e126]
+                          - paragraph [ref=e128]: postgres-volume
+                  - button "frontend edu-pos.up.railway.app Online" [ref=e129]:
+                    - link "frontend edu-pos.up.railway.app Online" [ref=e132] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/ce115acf-6071-453c-9555-e53fed469c88?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e133]:
+                        - img [ref=e135]
+                        - generic [ref=e137]:
+                          - paragraph [ref=e138]: frontend
+                          - paragraph [ref=e139]: edu-pos.up.railway.app
+                      - generic [ref=e141]:
+                        - img [ref=e142]
+                        - paragraph [ref=e145]: Online
+                  - button "tts-scheduler-wake Ready Next in 9 hours" [ref=e146]:
+                    - generic [ref=e147]:
+                      - link "tts-scheduler-wake Ready" [ref=e149] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/schedule?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e150]:
+                          - img [ref=e152]
+                          - paragraph [ref=e155]: tts-scheduler-wake
+                        - generic [ref=e156]:
+                          - img [ref=e157]
+                          - paragraph [ref=e160]: Ready
+                      - link "Next in 9 hours" [ref=e161] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/a2d6a674-2d47-40bd-afda-4350a347a47e/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e162]:
+                          - img [ref=e164]
+                          - paragraph [ref=e167]:
+                            - text: Next
+                            - time [ref=e169]: in 9 hours
+                  - button "tts-scheduler-night Last run failed in 22 seconds Next in 23 hours" [ref=e423]:
+                    - generic [ref=e171]:
+                      - link "tts-scheduler-night Last run failed in 22 seconds" [ref=e424] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/schedule?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e174]:
+                          - img [ref=e176]
+                          - paragraph [ref=e179]: tts-scheduler-night
+                        - generic [ref=e180]:
+                          - img [ref=e426]
+                          - paragraph [ref=e184]:
+                            - text: Last run failed
+                            - time [ref=e428]: in 22 seconds
+                      - link "Next in 23 hours" [ref=e185] [cursor=pointer]:
+                        - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                        - generic [ref=e186]:
+                          - img [ref=e188]
+                          - paragraph [ref=e191]:
+                            - text: Next
+                            - time [ref=e193]: in 23 hours
+                  - button "tts tts-production-9005d.up.railway.app Online" [ref=e194]:
+                    - link "tts tts-production-9005d.up.railway.app Online" [ref=e197] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/6f1349f7-a026-4546-941b-1ac4c664c8ae?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e198]:
+                        - img [ref=e200]
+                        - generic [ref=e202]:
+                          - paragraph [ref=e203]: tts
+                          - paragraph [ref=e204]: tts-production-9005d.up.railway.app
+                      - generic [ref=e206]:
+                        - img [ref=e207]
+                        - paragraph [ref=e210]: Online
+                  - button "dev edu-production-056d.up.railway.app Online" [ref=e211]:
+                    - link "dev edu-production-056d.up.railway.app Online" [ref=e214] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/53f9e84f-da21-4c2b-aacf-0ca319a99b1e?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e215]:
+                        - img [ref=e217]
+                        - generic [ref=e219]:
+                          - paragraph [ref=e220]: dev
+                          - paragraph [ref=e221]: edu-production-056d.up.railway.app
+                      - generic [ref=e223]:
+                        - img [ref=e224]
+                        - paragraph [ref=e227]: Online
+                  - button "backend edu-production-2395.up.railway.app Online" [ref=e228]:
+                    - link "backend edu-production-2395.up.railway.app Online" [ref=e231] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/4194ac35-7c1e-4da9-9b22-00e217ea5cc0?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                      - generic [ref=e232]:
+                        - img [ref=e234]
+                        - generic [ref=e236]:
+                          - paragraph [ref=e237]: backend
+                          - paragraph [ref=e238]: edu-production-2395.up.railway.app
+                      - generic [ref=e240]:
+                        - img [ref=e241]
+                        - paragraph [ref=e244]: Online
+            - toolbar "Canvas options" [ref=e246]:
+              - button "Canvas settings" [ref=e247] [cursor=pointer]:
+                - img [ref=e249]
+              - group "canvas action" [ref=e259]:
+                - button "Zoom in" [ref=e260] [cursor=pointer]:
+                  - img [ref=e262]
+                - button "Zoom out" [ref=e264] [cursor=pointer]:
+                  - img [ref=e266]
+                - button "Center canvas" [ref=e267] [cursor=pointer]:
+                  - img [ref=e269]
+              - group "canvas action" [ref=e274]:
+                - button "Undo" [ref=e275] [cursor=pointer]:
+                  - img [ref=e277]
+                - button "Redo" [ref=e280] [cursor=pointer]:
+                  - img [ref=e282]
+              - button "Visibility layers" [ref=e285] [cursor=pointer]:
+                - img [ref=e287]
+            - img [ref=e289]
+        - generic [ref=e292]:
+          - generic [ref=e294]:
+            - generic [ref=e295]:
+              - generic [ref=e296]:
+                - generic [ref=e298]:
+                  - button [ref=e299] [cursor=pointer]:
+                    - img [ref=e301]
+                  - heading "tts-scheduler-night" [level=1] [ref=e303]:
+                    - button "tts-scheduler-night" [ref=e304] [cursor=pointer]
+                - link [ref=e306] [cursor=pointer]:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - img [ref=e308]
+              - generic [ref=e310]:
+                - link "Cron Runs" [ref=e311] [cursor=pointer]:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/schedule?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic [ref=e312]: Cron Runs
+                - link "Deployments" [ref=e314] [cursor=pointer]:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic [ref=e315]: Deployments
+                - link "Variables" [ref=e316] [cursor=pointer]:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/variables?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic [ref=e317]: Variables
+                - link "Metrics" [ref=e318] [cursor=pointer]:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/metrics?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic [ref=e319]: Metrics
+                - link "Console" [ref=e320] [cursor=pointer]:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/console?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic [ref=e321]: Console
+                - link "Settings" [ref=e322] [cursor=pointer]:
+                  - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic [ref=e323]: Settings
+            - generic [ref=e432]:
+              - generic [ref=e433]:
+                - generic [ref=e434]:
+                  - img [ref=e436]
+                  - link "Unexposed service" [ref=e438] [cursor=pointer]:
+                    - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8#networking-public
+                - generic [ref=e439]:
+                  - generic [ref=e440]:
+                    - img [ref=e442]
+                    - link "EU West" [ref=e445] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8#deploy-region-config
+                  - generic [ref=e446]:
+                    - img [ref=e448]
+                    - link "1 Replica" [ref=e450] [cursor=pointer]:
+                      - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/settings?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8#deploy-region-config
+              - link "Crashed Add Railway TTS scheduler and remove backend keepalive 5 minutes ago via GitHub Restart" [ref=e453] [cursor=pointer]:
+                - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8&id=0ea55c38-a7d9-41ea-b4ac-272bee905a70#deploy
+                - generic [ref=e455]:
+                  - generic [ref=e457]: Crashed
+                  - generic [ref=e459]:
+                    - generic "EldarMister" [ref=e460]
+                    - img [ref=e463]
+                  - generic [ref=e466]:
+                    - paragraph [ref=e467]: Add Railway TTS scheduler and remove backend keepalive
+                    - paragraph [ref=e468]:
+                      - time [ref=e469]: 5 minutes ago
+                      - text: via GitHub
+                  - generic [ref=e470]:
+                    - button "Deployment actions" [ref=e471]:
+                      - img [ref=e473]
+                    - button "Restart" [ref=e477]:
+                      - generic [ref=e478]: Restart
+              - generic [ref=e481]:
+                - generic [ref=e482]:
+                  - button "History" [expanded] [ref=e483] [cursor=pointer]:
+                    - img [ref=e485]
+                    - paragraph [ref=e487]: History
+                  - button "Hide Skipped" [ref=e488] [cursor=pointer]
+                - region "History" [ref=e489]:
+                  - link "Removed Add Railway TTS scheduler and remove backend keepalive 10 minutes ago via GitHub View logs" [ref=e490] [cursor=pointer]:
+                    - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8&id=10e7bfa4-dc36-4973-ae38-b26ade73f972
+                    - generic [ref=e493]:
+                      - generic [ref=e495]: Removed
+                      - generic [ref=e497]:
+                        - generic "EldarMister" [ref=e498]
+                        - img [ref=e501]
+                      - generic [ref=e504]:
+                        - paragraph [ref=e505]: Add Railway TTS scheduler and remove backend keepalive
+                        - paragraph [ref=e506]:
+                          - time [ref=e507]: 10 minutes ago
+                          - text: via GitHub
+                      - generic [ref=e508]:
+                        - button "Deployment actions" [ref=e509]:
+                          - img [ref=e511]
+                        - link "View logs" [ref=e516]:
+                          - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8&id=10e7bfa4-dc36-4973-ae38-b26ade73f972#deploy
+                          - generic [ref=e517]: View logs
+          - generic [ref=e520]:
+            - generic [ref=e521]:
+              - generic [ref=e522]:
+                - img [ref=e524]
+                - generic [ref=e526]:
+                  - link "tts-scheduler-night" [ref=e527] [cursor=pointer]:
+                    - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                  - generic [ref=e528]: /
+                  - button "0ea55c38" [ref=e529] [cursor=pointer]
+                  - generic [ref=e530]: Crashed
+                - generic [ref=e531]:
+                  - button "Deployment actions" [ref=e532] [cursor=pointer]:
+                    - img [ref=e534]
+                  - time [ref=e538]: Jun 21, 2026, 1:23 AM GMT+6
+                  - link [ref=e539] [cursor=pointer]:
+                    - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/service/8bc0b1c2-ce31-4933-8531-af4601e6d5b9/schedule?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8
+                    - img [ref=e541]
+              - link "Get Help" [ref=e545] [cursor=pointer]:
+                - /url: https://backboard.railway.com/csc/auth/login?redirect_uri=https://station-server.railway.com/auth/callback
+                - img [ref=e547]
+                - generic [ref=e550]: Get Help
+            - tablist [ref=e551]:
+              - tab "Details" [ref=e552] [cursor=pointer]
+              - tab "Build Logs" [ref=e553] [cursor=pointer]
+              - tab "Deploy Logs" [selected] [ref=e554] [cursor=pointer]: Deploy Logs
+              - tab "Network Flow Logs" [ref=e556] [cursor=pointer]
+            - tabpanel "Deploy Logs" [ref=e557]:
+              - generic [ref=e559]:
+                - generic [ref=e562]:
+                  - generic [ref=e563]:
+                    - generic:
+                      - img
+                    - generic [ref=e564]:
+                      - generic: Filter and search logs
+                      - textbox [ref=e565]
+                    - generic [ref=e567]: /
+                  - button "Options" [ref=e568] [cursor=pointer]:
+                    - img [ref=e570]
+                  - link "Open in Log Explorer" [ref=e573] [cursor=pointer]:
+                    - /url: /project/7187f559-6771-40f5-8e77-78b38e9a8c9a/logs?environmentId=57ed97dc-2f16-4ca9-83c9-2abd1deaa4a8&filter=(%40deployment%3A0ea55c38-a7d9-41ea-b4ac-272bee905a70)+&start=1781983389920&end=1781983682717
+                    - img [ref=e575]
+                - generic [ref=e578]:
+                  - img [ref=e579]
+                  - generic [ref=e648]:
+                    - heading "Your logs are loading..." [level=2] [ref=e649]
+                    - paragraph [ref=e650]: Give us a moment to fetch your logs.
