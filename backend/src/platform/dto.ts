@@ -1,4 +1,4 @@
-import { IsBoolean, IsISO8601, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsBoolean, IsIn, IsISO8601, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class PlatformLoginDto {
   @IsString() @MaxLength(100)
@@ -35,4 +35,21 @@ export class UpdateSubscriptionDto {
   // Возобновить кафе, если стоит будущая дата (по умолчанию true).
   @IsOptional() @IsBoolean()
   resumeIfPaid?: boolean;
+}
+
+export class CleanupCafeDto {
+  @IsArray() @ArrayNotEmpty()
+  @IsIn(['orders', 'menu', 'warehouse'], { each: true })
+  scopes!: ('orders' | 'menu' | 'warehouse')[];
+}
+
+export class DeleteCafeDto {
+  // Точное название кафе — финальное подтверждение удаления.
+  @IsString() @MaxLength(120)
+  confirmName!: string;
+}
+
+export class SetStaffActiveDto {
+  @IsBoolean()
+  isActive!: boolean;
 }

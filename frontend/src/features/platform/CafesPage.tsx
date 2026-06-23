@@ -10,6 +10,7 @@ import {
   useUpdateSubscription,
   type PlatformCafe,
 } from './api';
+import { ManageCafeModal } from './ManageCafeModal';
 
 const fmtDate = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString('ru-RU') : '—');
 const isExpired = (iso: string | null) => !!iso && new Date(iso).getTime() < Date.now();
@@ -52,6 +53,7 @@ function CafeCard({ cafe }: { cafe: PlatformCafe }) {
   const push = useNotifications((s) => s.push);
   const [date, setDate] = useState(cafe.paidUntil ? cafe.paidUntil.slice(0, 10) : '');
   const [showSuspend, setShowSuspend] = useState(false);
+  const [showManage, setShowManage] = useState(false);
 
   const suspended = cafe.status === 'suspended';
 
@@ -137,6 +139,18 @@ function CafeCard({ cafe }: { cafe: PlatformCafe }) {
           </button>
         )}
       </div>
+
+      <button
+        type="button"
+        onClick={() => setShowManage(true)}
+        className="mt-2 w-full rounded-lg py-2 text-sm font-medium text-text-secondary transition-colors hover:bg-background"
+      >
+        Управление · очистка · удаление
+      </button>
+
+      {showManage && (
+        <ManageCafeModal cafe={cafe} onClose={() => setShowManage(false)} onDeleted={() => setShowManage(false)} />
+      )}
 
       {showSuspend && (
         <SuspendModal

@@ -106,6 +106,63 @@ export function useUpdateSubscription() {
   });
 }
 
+export type CleanupScope = 'orders' | 'menu' | 'warehouse';
+
+export interface CafeStaff {
+  id: string;
+  name: string;
+  phone: string;
+  role: string;
+  isActive: boolean;
+}
+
+export function useCleanupCafe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, scopes }: { id: string; scopes: CleanupScope[] }) =>
+      (await platformApi.post(`/platform/cafes/${id}/cleanup`, { scopes })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: cafesKey }),
+  });
+}
+
+export function useDeleteCafe() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, confirmName }: { id: string; confirmName: string }) =>
+      (await platformApi.delete(`/platform/cafes/${id}`, { data: { confirmName } })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: cafesKey }),
+  });
+}
+
+export function useCafeStaff(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['platform', 'staff', id],
+    queryFn: async () => (await platformApi.get<CafeStaff[]>(`/platform/cafes/${id}/staff`)).data,
+    enabled,
+  });
+}
+
+export function useSetStaffActive(cafeId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ userId, isActive }: { userId: string; isActive: boolean }) =>
+      (await platformApi.patch(`/platform/cafes/${cafeId}/staff/${userId}`, { isActive })).data,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['platform', 'staff', cafeId] }),
+  });
+}
+
+export function useDeleteStaff(cafeId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (userId: string) =>
+      (await platformApi.delete(`/platform/cafes/${cafeId}/staff/${userId}`)).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['platform', 'staff', cafeId] });
+      qc.invalidateQueries({ queryKey: cafesKey });
+    },
+  });
+}
+
 export function useHealth() {
   return useQuery({
     queryKey: ['platform', 'health'],

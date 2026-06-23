@@ -1,8 +1,15 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
 import { PlatformAuthGuard } from './platform-auth.guard';
 import { PlatformService } from './platform.service';
-import { CreateCafeDto, SuspendCafeDto, UpdateSubscriptionDto } from './dto';
+import {
+  CleanupCafeDto,
+  CreateCafeDto,
+  DeleteCafeDto,
+  SetStaffActiveDto,
+  SuspendCafeDto,
+  UpdateSubscriptionDto,
+} from './dto';
 
 @Public() // пропускаем глобальные guard'ы персонала
 @UseGuards(PlatformAuthGuard)
@@ -33,5 +40,31 @@ export class PlatformController {
   @Patch(':id/subscription')
   subscription(@Param('id') id: string, @Body() dto: UpdateSubscriptionDto) {
     return this.svc.updateSubscription(id, dto.paidUntil, dto.resumeIfPaid ?? true);
+  }
+
+  @Post(':id/cleanup')
+  cleanup(@Param('id') id: string, @Body() dto: CleanupCafeDto) {
+    return this.svc.cleanupCafe(id, dto.scopes);
+  }
+
+  @Delete(':id')
+  remove(@Param('id') id: string, @Body() dto: DeleteCafeDto) {
+    return this.svc.deleteCafe(id, dto.confirmName);
+  }
+
+  // Персонал кафе
+  @Get(':id/staff')
+  staff(@Param('id') id: string) {
+    return this.svc.getCafeStaff(id);
+  }
+
+  @Patch(':id/staff/:userId')
+  setStaffActive(@Param('id') id: string, @Param('userId') userId: string, @Body() dto: SetStaffActiveDto) {
+    return this.svc.setStaffActive(id, userId, dto.isActive);
+  }
+
+  @Delete(':id/staff/:userId')
+  deleteStaff(@Param('id') id: string, @Param('userId') userId: string) {
+    return this.svc.deleteStaff(id, userId);
   }
 }
