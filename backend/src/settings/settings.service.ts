@@ -22,6 +22,8 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   payCash: 'оплата наличными',
   payCard: 'оплата картой',
   allowNegativeIngredientStock: 'минусовой остаток сырья',
+  queueDisplayEnabled: 'экран очереди заказов',
+  queueDisplayMode: 'режим экрана очереди',
   qrGeoEnabled: 'гео-проверка QR',
   qrGeoLat: 'широта кафе',
   qrGeoLng: 'долгота кафе',

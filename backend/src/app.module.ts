@@ -15,6 +15,7 @@ import { PaymentsModule } from './payments/payments.module';
 import { ReceiptPrintsModule } from './receipt-prints/receipt-prints.module';
 import { FiscalModule } from './fiscal/fiscal.module';
 import { QrModule } from './qr/qr.module';
+import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { WaiterShiftsModule } from './waiter-shifts/waiter-shifts.module';
 import { AdminModule } from './admin/admin.module';
@@ -49,6 +50,7 @@ import { TenantContextMiddleware } from './tenant/tenant-context.middleware';
     ReceiptPrintsModule,
     FiscalModule,
     QrModule,
+    QueueModule,
     AdminModule,
     WarehouseModule,
     SettingsModule,

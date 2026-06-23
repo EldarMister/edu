@@ -675,6 +675,11 @@ model Settings {
   printerConnected             Boolean @default(false) @map("printer_connected")
   allowNegativeIngredientStock Boolean @default(true) @map("allow_negative_ingredient_stock")
 
+  // Экран очереди заказов (табло в зале): включается по желанию владельца.
+  // Режим: table — показываем номера столов, number — номера заказов.
+  queueDisplayEnabled Boolean @default(false) @map("queue_display_enabled")
+  queueDisplayMode    String  @default("table") @map("queue_display_mode") // table | number
+
   // QR-меню: опциональная гео-проверка присутствия гостя у кафе.
   // Владелец включает по желанию, делится координатами кафе и задаёт радиус.
   // Заказ блокируется, если гость дальше радиуса + буфер на погрешность GPS.

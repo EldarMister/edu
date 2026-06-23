@@ -34,6 +34,8 @@ interface Form {
   qrGeoLat: number | null;
   qrGeoLng: number | null;
   qrGeoRadius: number;
+  queueDisplayEnabled: boolean;
+  queueDisplayMode: 'table' | 'number';
   fiscalProvider: FiscalProvider;
   fiscalEkassaApiKey: string;
   fiscalEkassaUrl: string;
@@ -75,6 +77,8 @@ export function SettingsPage() {
         qrGeoLat: data.qrGeoLat,
         qrGeoLng: data.qrGeoLng,
         qrGeoRadius: data.qrGeoRadius,
+        queueDisplayEnabled: data.queueDisplayEnabled,
+        queueDisplayMode: data.queueDisplayMode,
         fiscalProvider: (data.fiscalProvider ?? '') as FiscalProvider,
         fiscalEkassaApiKey: data.fiscalEkassaApiKey ?? '',
         fiscalEkassaUrl: data.fiscalEkassaUrl ?? '',
@@ -118,6 +122,8 @@ export function SettingsPage() {
     qrGeoLat: source.qrGeoLat,
     qrGeoLng: source.qrGeoLng,
     qrGeoRadius: source.qrGeoRadius,
+    queueDisplayEnabled: source.queueDisplayEnabled,
+    queueDisplayMode: source.queueDisplayMode,
     fiscalProvider: source.fiscalProvider,
     fiscalEkassaApiKey: source.fiscalEkassaApiKey,
     fiscalEkassaUrl: source.fiscalEkassaUrl,
@@ -429,6 +435,62 @@ export function SettingsPage() {
           {/* QR-оплата */}
           <QrPaymentCard qrImageUrl={data.qrImageUrl} />
 
+          {/* Экран очереди заказов (табло в зале) */}
+          <div className="card p-5">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <IconMonitor className="h-5 w-5 shrink-0 text-text-secondary" />
+                <h3 className="truncate text-[15px] font-semibold text-text-primary">
+                  {t('Экран очереди заказов')}
+                </h3>
+              </div>
+              <Toggle
+                checked={form.queueDisplayEnabled}
+                onChange={(v) => set('queueDisplayEnabled', v, 'instant')}
+              />
+            </div>
+            <p className="mb-3 text-xs text-text-muted">
+              {t('Табло «Готовятся / Готовы» для монитора в зале. Откройте /queue на отдельном экране.')}
+            </p>
+
+            {form.queueDisplayEnabled && (
+              <div className="space-y-3">
+                <div>
+                  <p className="mb-1.5 text-sm font-medium text-text-secondary">{t('Что показывать')}</p>
+                  <div className="flex rounded-xl bg-background p-1">
+                    {(
+                      [
+                        { value: 'table', label: t('Номера столов') },
+                        { value: 'number', label: t('Номера заказов') },
+                      ] as { value: 'table' | 'number'; label: string }[]
+                    ).map((m) => (
+                      <button
+                        key={m.value}
+                        onClick={() => set('queueDisplayMode', m.value, 'instant')}
+                        className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
+                          form.queueDisplayMode === m.value
+                            ? 'bg-white text-primary shadow-sm'
+                            : 'text-text-muted hover:text-text-secondary'
+                        }`}
+                      >
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <a
+                  href="/queue"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+                >
+                  <IconMonitor className="h-4 w-4" />
+                  {t('Открыть экран очереди')}
+                </a>
+              </div>
+            )}
+          </div>
+
           {/* ККМ / Фискализация */}
           <div className="card p-5">
             <h3 className="mb-1 text-[15px] font-semibold text-text-primary">{t('ККМ / Фискализация')}</h3>
@@ -559,6 +621,15 @@ export function SettingsPage() {
         </button>
       </div>
     </div>
+  );
+}
+
+function IconMonitor({ className = '' }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2" y="3" width="20" height="14" rx="2" />
+      <path d="M8 21h8M12 17v4" />
+    </svg>
   );
 }
 

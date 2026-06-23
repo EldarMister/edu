@@ -40,6 +40,13 @@ export class UpdateSettingsDto {
   @IsOptional() @IsBoolean()
   allowNegativeIngredientStock?: boolean;
 
+  // ---- Экран очереди заказов (табло в зале) ----
+  @IsOptional() @IsBoolean()
+  queueDisplayEnabled?: boolean;
+
+  @IsOptional() @IsIn(['table', 'number'])
+  queueDisplayMode?: string;
+
   // ---- QR-меню: гео-проверка присутствия ----
   @IsOptional() @IsBoolean()
   qrGeoEnabled?: boolean;

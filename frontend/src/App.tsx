@@ -9,6 +9,7 @@ import { KitchenApp } from '@/features/kitchen/KitchenApp';
 import { BarApp } from '@/features/bar/BarApp';
 import { AdminApp } from '@/features/admin/AdminApp';
 import { QrMenuApp } from '@/features/qr/QrMenuApp';
+import { QueueApp } from '@/features/queue/QueueApp';
 import { PlatformApp } from '@/features/platform/PlatformApp';
 
 export function App() {
@@ -19,6 +20,9 @@ export function App() {
       <Routes>
         {/* Публичное QR-меню стола (EDU MENU) — без авторизации. */}
         <Route path="/menu/:tableToken" element={<QrMenuApp />} />
+
+        {/* Публичное табло очереди заказов (монитор в зале) — без авторизации. */}
+        <Route path="/queue" element={<QueueApp />} />
 
         {/* Платформенная панель супер-админа — своя авторизация (вне ролей персонала). */}
         <Route path="/platform/*" element={<PlatformApp />} />

@@ -26,6 +26,9 @@ export interface Settings {
   payCard: boolean;
   qrImageUrl: string | null;
   printerConnected: boolean;
+  // Экран очереди заказов (табло в зале)
+  queueDisplayEnabled: boolean;
+  queueDisplayMode: 'table' | 'number';
   // QR-меню: гео-проверка присутствия
   qrGeoEnabled: boolean;
   qrGeoLat: number | null;
