@@ -41,6 +41,17 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
 /** Разрешённые форматы загружаемого QR-кода. */
 const QR_DATA_URL_RE = /^data:image\/(png|jpe?g|webp);base64,[A-Za-z0-9+/=]+$/;
 
+/** Алфавит кода табло без похожих символов (без 0/O, 1/I/L). */
+const QUEUE_CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+function genQueueCode(): string {
+  let code = '';
+  for (let i = 0; i < 5; i++) {
+    code += QUEUE_CODE_ALPHABET[Math.floor(Math.random() * QUEUE_CODE_ALPHABET.length)];
+  }
+  return code;
+}
+
 @Injectable()
 export class SettingsService {
   constructor(
@@ -59,8 +70,24 @@ export class SettingsService {
   }
 
   /** Полные настройки (для страницы владельца). */
-  get() {
-    return this.ensure();
+  async get() {
+    return this.ensureQueueCode(await this.ensure());
+  }
+
+  /** Генерирует короткий код табло, если оно включено, а кода ещё нет. */
+  private async ensureQueueCode(s: Settings): Promise<Settings> {
+    if (!s.queueDisplayEnabled || s.queueDisplayCode) return s;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        return await this.prisma.settings.update({
+          where: { id: s.id },
+          data: { queueDisplayCode: genQueueCode() },
+        });
+      } catch {
+        // Коллизия уникального кода — пробуем ещё раз.
+      }
+    }
+    return s;
   }
 
   /** Публичная часть: реквизиты кафе, включённые способы оплаты, язык, статус принтера.
@@ -184,7 +211,7 @@ export class SettingsService {
       });
     }
 
-    return updated;
+    return this.ensureQueueCode(updated);
   }
 
   /** Список включённых способов оплаты. */

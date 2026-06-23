@@ -30,6 +30,7 @@ export interface Settings {
   // Экран очереди заказов (табло в зале)
   queueDisplayEnabled: boolean;
   queueDisplayMode: 'table' | 'number';
+  queueDisplayCode: string | null;
   // QR-меню: гео-проверка присутствия
   qrGeoEnabled: boolean;
   qrGeoLat: number | null;
@@ -80,7 +81,7 @@ export function useAdminSettings() {
   });
 }
 
-export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount'>> & {
+export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'queueDisplayCode' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount'>> & {
   serviceChargeAmount?: number;
 };
 

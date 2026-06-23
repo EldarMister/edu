@@ -679,6 +679,9 @@ model Settings {
   // Режим: table — показываем номера столов, number — номера заказов.
   queueDisplayEnabled Boolean @default(false) @map("queue_display_enabled")
   queueDisplayMode    String  @default("table") @map("queue_display_mode") // table | number
+  // Короткий код для публичной ссылки табло (/q/CODE) — чтобы вводить на ТВ
+  // вручную, без длинного UUID кафе. Генерируется при включении табло.
+  queueDisplayCode    String? @unique @map("queue_display_code")
 
   // QR-меню: опциональная гео-проверка присутствия гостя у кафе.
   // Владелец включает по желанию, делится координатами кафе и задаёт радиус.

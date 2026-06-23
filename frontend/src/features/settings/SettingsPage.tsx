@@ -169,6 +169,7 @@ export function SettingsPage() {
   };
 
   const noMethod = !form.payQr && !form.payCash && !form.payCard;
+  const queueUrl = data.queueDisplayCode ? `${window.location.origin}/q/${data.queueDisplayCode}` : '';
 
   // Зафиксировать координаты кафе из геолокации устройства владельца (нужен HTTPS).
   const captureLocation = () => {
@@ -478,15 +479,41 @@ export function SettingsPage() {
                     ))}
                   </div>
                 </div>
-                <a
-                  href={data.cafeId ? `/queue?cafe=${data.cafeId}` : '/queue'}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
-                >
-                  <IconMonitor className="h-4 w-4" />
-                  {t('Открыть экран очереди')}
-                </a>
+                {data.queueDisplayCode ? (
+                  <div className="space-y-2 rounded-xl border border-border p-3">
+                    <p className="text-xs text-text-muted">
+                      {t('Откройте эту ссылку на мониторе/ТВ:')}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 truncate rounded-lg bg-background px-3 py-2 text-sm font-medium text-text-primary">
+                        {queueUrl}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard?.writeText(queueUrl);
+                          push({ message: t('Ссылка скопирована'), type: 'success', at: new Date().toISOString() });
+                        }}
+                        className="shrink-0 rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+                      >
+                        {t('Копировать')}
+                      </button>
+                    </div>
+                    <a
+                      href={`/q/${data.queueDisplayCode}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center justify-center gap-2 rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
+                    >
+                      <IconMonitor className="h-4 w-4" />
+                      {t('Открыть экран очереди')}
+                    </a>
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-text-muted">
+                    {t('Сохраните изменения — появится ссылка для монитора.')}
+                  </p>
+                )}
               </div>
             )}
           </div>

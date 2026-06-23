@@ -21,8 +21,10 @@ export function App() {
         {/* Публичное QR-меню стола (EDU MENU) — без авторизации. */}
         <Route path="/menu/:tableToken" element={<QrMenuApp />} />
 
-        {/* Публичное табло очереди заказов (монитор в зале) — без авторизации. */}
+        {/* Публичное табло очереди заказов (монитор в зале) — без авторизации.
+            /q/:code — короткая ссылка для ввода на ТВ. */}
         <Route path="/queue" element={<QueueApp />} />
+        <Route path="/q/:code" element={<QueueApp />} />
 
         {/* Платформенная панель супер-админа — своя авторизация (вне ролей персонала). */}
         <Route path="/platform/*" element={<PlatformApp />} />

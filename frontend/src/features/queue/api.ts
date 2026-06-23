@@ -26,12 +26,16 @@ export interface QueueBoard {
 }
 
 /** Публичное табло очереди — без авторизации, опрос раз в 5 секунд.
- *  cafe — идентификатор кафе из ссылки (мультитенантность). */
-export function useQueueBoard(cafe?: string | null) {
+ *  code — короткий код табло (/q/CODE), cafe — id кафе (совместимость). */
+export function useQueueBoard({ code, cafe }: { code?: string | null; cafe?: string | null }) {
   return useQuery({
-    queryKey: ['queue', 'board', cafe ?? null],
-    queryFn: async () =>
-      (await api.get<QueueBoard>('/queue', { params: cafe ? { cafe } : undefined })).data,
+    queryKey: ['queue', 'board', code ?? null, cafe ?? null],
+    queryFn: async () => {
+      const params: Record<string, string> = {};
+      if (code) params.code = code;
+      else if (cafe) params.cafe = cafe;
+      return (await api.get<QueueBoard>('/queue', { params })).data;
+    },
     refetchInterval: 5_000,
     refetchIntervalInBackground: true,
   });

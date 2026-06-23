@@ -38,10 +38,22 @@ export class QueueService {
    * «Готовятся» — заказ в работе, «Готовы» — все позиции готовы, но ещё не
    * забраны/поданы/оплачены. Публичный метод (табло висит в зале без входа).
    */
-  async getBoard(cafeId?: string): Promise<QueueBoardDto> {
-    // Табло висит без входа, поэтому кафе берём из ссылки (?cafe=…). Проставляем
-    // его в контекст тенанта — дальше settings/orders скоупятся автоматически.
-    // Без cafeId (одно кафе на стенде) работаем как раньше — по единственной строке.
+  async getBoard(opts: { cafeId?: string; code?: string } = {}): Promise<QueueBoardDto> {
+    // Табло висит без входа, поэтому кафе определяем из ссылки: либо короткий
+    // код (/q/CODE — для ввода на ТВ), либо cafeId (?cafe=…). Найденный cafeId
+    // кладём в контекст тенанта — дальше settings/orders скоупятся сами.
+    // Без идентификатора (одно кафе на стенде) — по единственной строке.
+    let cafeId = opts.cafeId;
+    if (opts.code) {
+      const row = await this.prisma.settings.findFirst({
+        where: { queueDisplayCode: opts.code },
+        select: { cafeId: true },
+      });
+      if (!row) {
+        return { enabled: false, mode: 'table', cafeName: '', preparing: [], ready: [] };
+      }
+      cafeId = row.cafeId ?? undefined;
+    }
     if (cafeId) setCafeId(cafeId);
 
     const settings = await this.prisma.settings.findFirst({
