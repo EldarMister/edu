@@ -39,11 +39,7 @@ export function WarehouseOverviewTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-xl font-semibold text-text-primary">Склад</h2>
-          <p className="text-sm text-text-secondary">Обзор остатков, закупок и движений</p>
-        </div>
+      <div className="flex flex-wrap items-center gap-3 sm:justify-end">
         <PeriodFilter
           preset={preset}
           setPreset={setPreset}
@@ -71,14 +67,15 @@ export function WarehouseOverviewTab() {
             <Panel title="Динамика остатков">
               <StockTrendChart data={data?.stockValueTrend ?? []} />
             </Panel>
-            <Panel title="Критично / низкий остаток">
+            <Panel title="Низкий остаток">
               <CompactTable
-                headers={['Ингредиент', 'Текущий остаток', 'Порог']}
+                headers={['Товар', 'Остаток', 'Ед.']}
+                align={['left', 'right', 'right']}
                 empty="Низких остатков нет"
                 rows={(data?.lowStockItems ?? []).map((item) => [
                   item.name,
-                  qty(item.stock, item.unit),
-                  qty(item.lowStockThreshold, item.unit),
+                  num(item.stock),
+                  item.unit,
                 ])}
               />
             </Panel>
@@ -88,6 +85,7 @@ export function WarehouseOverviewTab() {
             <Panel title="Топ расходуемых ингредиентов">
               <CompactTable
                 headers={['Ингредиент', 'Расход', 'Сумма']}
+                align={['left', 'right', 'right']}
                 empty="Нет списаний за период"
                 rows={(data?.topConsumedIngredients ?? []).map((item) => [
                   item.name,
@@ -99,12 +97,13 @@ export function WarehouseOverviewTab() {
             <Panel title="Последние движения">
               <CompactTable
                 headers={['Время', 'Тип', 'Ингредиент', 'Изменение', 'После']}
+                align={['left', 'left', 'left', 'right', 'right']}
                 empty="Движений пока нет"
                 rows={(data?.recentMovements ?? []).map((item) => [
                   formatTime(item.createdAt),
-                  TYPE_LABEL[item.type] ?? item.type,
+                  <TypeBadge key="t" type={item.type} />,
                   item.ingredientName,
-                  signedQty(item.change, item.unit),
+                  <ChangeCell key="c" value={item.change} unit={item.unit} />,
                   qty(item.after, item.unit),
                 ])}
               />
@@ -112,6 +111,7 @@ export function WarehouseOverviewTab() {
             <Panel title="Закупки по поставщикам">
               <CompactTable
                 headers={['Поставщик', 'Сумма']}
+                align={['left', 'right']}
                 empty="Нет закупок за период"
                 rows={(data?.suppliersTop ?? []).map((item) => [item.supplier, money(item.total)])}
               />
@@ -174,8 +174,8 @@ function PeriodFilter({
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-border bg-white p-4">
-      <p className="text-sm text-text-secondary">{label}</p>
-      <p className="mt-3 text-2xl font-semibold text-text-primary">{value}</p>
+      <p className="text-[13px] text-text-muted">{label}</p>
+      <p className="mt-1.5 text-2xl font-semibold text-text-primary">{value}</p>
     </div>
   );
 }
@@ -189,17 +189,28 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
-function CompactTable({ headers, rows, empty }: { headers: string[]; rows: string[][]; empty: string }) {
+function CompactTable({
+  headers,
+  rows,
+  empty,
+  align = [],
+}: {
+  headers: string[];
+  rows: React.ReactNode[][];
+  empty: string;
+  align?: ('left' | 'right')[];
+}) {
   if (rows.length === 0) {
-    return <div className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-text-muted">{empty}</div>;
+    return <p className="py-8 text-center text-sm text-text-muted">{empty}</p>;
   }
+  const cls = (i: number) => (align[i] === 'right' ? 'text-right' : 'text-left');
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[360px] text-sm">
+      <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-border text-left text-xs text-text-muted">
-            {headers.map((header) => (
-              <th key={header} className="px-2 py-2 font-medium">
+          <tr className="border-b border-border text-xs text-text-muted">
+            {headers.map((header, i) => (
+              <th key={header} className={`px-2 py-2 font-medium ${cls(i)}`}>
                 {header}
               </th>
             ))}
@@ -207,9 +218,12 @@ function CompactTable({ headers, rows, empty }: { headers: string[]; rows: strin
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr key={`${row[0]}-${index}`} className="border-b border-border last:border-0">
+            <tr key={index} className="border-b border-border last:border-0">
               {row.map((cell, cellIndex) => (
-                <td key={`${cell}-${cellIndex}`} className="px-2 py-2.5 text-text-secondary first:font-medium first:text-text-primary">
+                <td
+                  key={cellIndex}
+                  className={`px-2 py-2.5 ${cls(cellIndex)} ${cellIndex === 0 ? 'font-medium text-text-primary' : 'text-text-secondary'}`}
+                >
                   {cell}
                 </td>
               ))}
@@ -219,6 +233,35 @@ function CompactTable({ headers, rows, empty }: { headers: string[]; rows: strin
       </table>
     </div>
   );
+}
+
+const TYPE_TONE: Record<StockMovementType, string> = {
+  purchase: 'bg-success/10 text-success',
+  return: 'bg-success/10 text-success',
+  sale: 'bg-danger/10 text-danger',
+  correction: 'bg-warning/10 text-warning',
+  cancel: 'bg-background text-text-muted',
+};
+
+/** Спокойный бейдж типа движения. */
+function TypeBadge({ type }: { type: StockMovementType }) {
+  return (
+    <span className={`inline-flex rounded-md px-2 py-0.5 text-xs font-medium ${TYPE_TONE[type]}`}>
+      {TYPE_LABEL[type] ?? type}
+    </span>
+  );
+}
+
+/** Изменение остатка со знаком и цветом. */
+function ChangeCell({ value, unit }: { value: number; unit: string }) {
+  const tone = value > 0 ? 'text-success' : value < 0 ? 'text-danger' : 'text-text-secondary';
+  return <span className={`font-medium ${tone}`}>{signedQty(value, unit)}</span>;
+}
+
+/** Число без единицы измерения: 0.12 → «0,12», 5 → «5». */
+function num(value: number): string {
+  const rounded = Math.round(value * 1000) / 1000;
+  return Number.isInteger(rounded) ? String(rounded) : String(rounded).replace('.', ',');
 }
 
 function localDate(date: Date) {

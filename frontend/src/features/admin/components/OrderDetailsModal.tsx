@@ -34,15 +34,42 @@ export function OrderDetailsModal({
       title={`Заказ ${displayOrderNumber(order.orderNumber)}`}
       panelClassName="max-w-2xl"
     >
-      <div className="space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <Info label="Статус" value={<OrderBadge status={order.status} />} />
-          <Info label="Дата" value={`${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`} />
-          <Info label="Стол" value={`Стол ${order.table.number}${hallSuffix(order.table)}`} />
-          <Info label="Официант" value={order.waiter?.name ?? 'QR menu'} />
-          <Info label="Сумма" value={money(order.finalAmount)} strong />
-          {Number(order.discountAmount) > 0 && <Info label="Скидка" value={money(order.discountAmount)} />}
-          {order.paymentMethod && <Info label="Оплата" value={paymentDisplayLabel(order)} />}
+      <div className="space-y-4">
+        <div>
+          <h4 className="mb-2 text-sm font-semibold text-text-primary">Информация</h4>
+          <div className="overflow-hidden rounded-xl border border-border text-sm">
+            {[
+              [
+                { label: 'Статус', value: <OrderBadge status={order.status} /> },
+                { label: 'Официант', value: order.waiter?.name ?? 'QR menu' },
+              ],
+              [
+                { label: 'Дата', value: `${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}` },
+                { label: 'Сумма', value: money(order.finalAmount) },
+              ],
+              [
+                { label: 'Стол', value: `Стол ${order.table.number}${hallSuffix(order.table)}` },
+                { label: 'Оплата', value: order.paymentMethod ? paymentDisplayLabel(order) : '—' },
+              ],
+            ].map((pair, ri, rows) => (
+              <div
+                key={ri}
+                className={`grid grid-cols-1 sm:grid-cols-2 ${ri < rows.length - 1 ? 'border-b border-border' : ''}`}
+              >
+                {pair.map((cell, ci) => (
+                  <div
+                    key={ci}
+                    className={`flex items-center justify-between gap-3 px-4 py-3 ${
+                      ci === 1 ? 'border-t border-border sm:border-l sm:border-t-0' : ''
+                    }`}
+                  >
+                    <span className="text-text-muted">{cell.label}</span>
+                    <span className="text-right font-medium text-text-primary">{cell.value}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
 
         {isSplitPayment(order) && !!order.payments?.length && (
@@ -87,13 +114,13 @@ export function OrderDetailsModal({
         )}
 
         <div>
-          <div className="mb-1.5 flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between">
             <h4 className="text-sm font-semibold text-text-primary">Блюда</h4>
             <span className="text-xs text-text-muted">{order.items.length} поз.</span>
           </div>
           <div className="overflow-hidden rounded-xl border border-border">
             {order.items.map((item) => (
-              <div key={item.id} className="border-b border-border px-3 py-2 last:border-0">
+              <div key={item.id} className="border-b border-border px-4 py-3 last:border-0">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-text-primary">
@@ -216,25 +243,6 @@ function mixedSumBy(
   return (order.payments ?? [])
     .filter((p) => p.method === method)
     .reduce((acc, p) => acc + Number(p.amount), 0);
-}
-
-function Info({
-  label,
-  value,
-  strong = false,
-}: {
-  label: string;
-  value: React.ReactNode;
-  strong?: boolean;
-}) {
-  return (
-    <div className="min-w-[7rem] rounded-lg border border-border px-3 py-2">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-text-muted">{label}</p>
-      <div className={`mt-0.5 text-sm ${strong ? 'font-semibold text-text-primary' : 'text-text-secondary'}`}>
-        {value}
-      </div>
-    </div>
-  );
 }
 
 function Total({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {

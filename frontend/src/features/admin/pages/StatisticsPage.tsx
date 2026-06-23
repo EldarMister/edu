@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { money } from '@/lib/format';
 import type { PaymentMethod } from '@/types';
-import { IconCard, IconCash, IconCheck, IconOrders, IconQr } from '../components/icons';
 import { useStatistics, type StatsPeriod } from '../api';
 import { usePublicSettings } from '@/features/settings/api';
 
@@ -14,12 +13,12 @@ const PERIODS: { value: StatsPeriod; label: string }[] = [
   { value: 'custom', label: 'Период' },
 ];
 
-const METHOD_META: Record<PaymentMethod, { label: string; bar: string; tone: string; icon: JSX.Element }> = {
-  qr: { label: 'QR-код', bar: 'bg-primary', tone: 'bg-primary/10 text-primary', icon: <IconQr /> },
-  cash: { label: 'Наличные', bar: 'bg-success', tone: 'bg-success/10 text-success', icon: <IconCash /> },
-  card: { label: 'Карта', bar: 'bg-warning', tone: 'bg-warning/10 text-warning', icon: <IconCard /> },
+const METHOD_LABEL: Record<PaymentMethod, string> = {
+  qr: 'QR-код',
+  cash: 'Наличные',
+  card: 'Карта',
   // Смешанная в статистике раскладывается на наличные/QR на бэке, отдельной строкой не выводится.
-  mixed: { label: 'Смешанная', bar: 'bg-primary', tone: 'bg-primary/10 text-primary', icon: <IconQr /> },
+  mixed: 'Смешанная',
 };
 
 export function StatisticsPage() {
@@ -49,32 +48,31 @@ export function StatisticsPage() {
   })();
 
   return (
-    <div className="space-y-5 overflow-x-hidden">
+    <div className="space-y-4 overflow-x-hidden">
       {/* Переключатель периода */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="grid w-full grid-cols-3 gap-1 rounded-xl bg-background p-1 sm:inline-flex sm:w-auto sm:flex-wrap">
-          {PERIODS.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setPeriod(p.value)}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                period === p.value
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-text-muted hover:text-text-secondary'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-
-        {period === 'custom' && (
-          <div className="flex flex-wrap items-center gap-2">
-            <input className="input h-10 w-[150px]" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-            <span className="text-sm text-text-muted">—</span>
-            <input className="input h-10 w-[150px]" type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
+      <div className="flex flex-wrap items-center gap-3 sm:justify-end">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex flex-wrap gap-1">
+            {PERIODS.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setPeriod(p.value)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  period === p.value ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
           </div>
-        )}
+          {period === 'custom' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <input className="input h-9 w-[145px] text-sm" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+              <span className="text-sm text-text-muted">—</span>
+              <input className="input h-9 w-[145px] text-sm" type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
+            </div>
+          )}
+        </div>
       </div>
 
       {statsQ.isLoading || !d ? (
@@ -83,55 +81,81 @@ export function StatisticsPage() {
         </div>
       ) : (
         <>
-          {/* Метрики: десктоп — две карточки */}
-          <div className="hidden gap-4 lg:grid lg:grid-cols-2">
-            <MetricCard icon={<IconOrders />} label="Заказов сегодня" value={d.cards.ordersToday} delta={d.trends.orders} />
-            <MetricCard icon={<IconCheck />} label="Средний чек" value={money(d.cards.avgCheck)} delta={d.trends.avgCheck} />
-          </div>
-
-          {/* Метрики: мобильный — единый сплит-блок (2 показателя) */}
-          <div className="card flex divide-x divide-border lg:hidden">
-            <SplitMetric icon={<IconOrders />} label="Заказов сегодня" value={d.cards.ordersToday} delta={d.trends.orders} />
-            <SplitMetric icon={<IconCheck />} label="Средний чек" value={money(d.cards.avgCheck)} delta={d.trends.avgCheck} />
-          </div>
-
-          {/* График — главный элемент */}
-          <section className="rounded-[24px] border border-[#E8EEF6] bg-white p-5 shadow-[0_18px_45px_rgba(15,23,42,0.055),0_2px_8px_rgba(15,23,42,0.035)] sm:p-7">
-            <div className="mb-6 flex items-start justify-between gap-4 sm:mb-7">
-              <div className="min-w-0">
-                <h3 className="text-[13px] font-medium leading-none text-text-muted">Выручка за период</h3>
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <span className="text-[34px] font-bold leading-[0.95] tracking-[-0.01em] text-text-primary sm:text-[38px]">
-                    {money(d.cards.revenuePeriod)}
-                  </span>
-                  <TrendPill value={d.trends.revenue} />
+          {/* KPI */}
+          {(() => {
+            const kpis = [
+              { label: 'Заказов сегодня', value: String(d.cards.ordersToday), delta: d.trends.orders },
+              { label: 'Средний чек', value: money(d.cards.avgCheck), delta: d.trends.avgCheck },
+              { label: 'Заказов за период', value: String(d.cards.ordersPeriod), delta: d.trends.orders },
+              { label: 'Выручка за период', value: money(d.cards.revenuePeriod), delta: d.trends.revenue },
+            ];
+            return (
+              <>
+                {/* Десктоп — 4 отдельные карточки */}
+                <div className="hidden gap-3 xl:grid xl:grid-cols-4">
+                  {kpis.map((k) => (
+                    <Kpi key={k.label} label={k.label} value={k.value} delta={k.delta} />
+                  ))}
                 </div>
-              </div>
-              <div className="hidden pt-1 text-right text-[13px] font-medium leading-none text-text-muted sm:block">
-                {d.cards.ordersPeriod} заказов
-              </div>
+                {/* Мобильный/планшет — единый сплит-блок 2×2 */}
+                <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-border bg-white xl:hidden">
+                  {kpis.map((k, i) => (
+                    <div
+                      key={k.label}
+                      className={`p-4 ${i % 2 === 1 ? 'border-l border-border' : ''} ${i >= 2 ? 'border-t border-border' : ''}`}
+                    >
+                      <p className="text-[13px] text-text-muted">{k.label}</p>
+                      <div className="mt-1.5 flex flex-wrap items-baseline gap-2">
+                        <span className="text-xl font-semibold leading-none text-text-primary">{k.value}</span>
+                        <TrendPill value={k.delta} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
+
+          {/* График выручки */}
+          <section className="rounded-xl border border-border bg-white p-4 sm:p-5">
+            <div className="mb-4 flex items-center justify-between gap-4">
+              <h3 className="text-base font-semibold text-text-primary">Выручка за период</h3>
+              <span className="text-sm font-medium text-text-muted">{d.cards.ordersPeriod} заказов</span>
             </div>
             <RevenueChart data={d.revenueSeries} />
           </section>
 
           {/* Аналитические блоки */}
-          <div className="grid gap-4 xl:grid-cols-4">
-            <PaymentMethodsCard methods={visiblePaymentMethods} />
-            <Leaderboard
-              title="Топ блюд"
-              items={d.topDishes.map((x) => ({ name: x.name, sub: `${x.count} заказов`, amount: x.amount }))}
-              empty="Нет продаж за период"
-            />
-            <Leaderboard
-              title="Лучшие официанты"
-              items={d.topWaiters.map((x) => ({
-                name: x.name,
-                sub: `${x.orders} закрыто · ср. чек ${money(x.avgCheck)}`,
-                amount: x.amount,
-              }))}
-              empty="Нет данных за период"
-            />
-            <PeakHoursCard items={d.peakHours} />
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Panel title="Способы оплаты">
+              <MiniTable
+                columns={[{ label: 'Способ' }, { label: 'Сумма', align: 'right' }]}
+                rows={visiblePaymentMethods.map((m) => [METHOD_LABEL[m.method], money(m.amount)])}
+                footer={['Итого', money(visiblePaymentMethods.reduce((s, m) => s + m.amount, 0))]}
+                empty="Нет оплат за период"
+              />
+            </Panel>
+            <Panel title="Топ блюд">
+              <MiniTable
+                columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }, { label: 'Выручка', align: 'right' }]}
+                rows={d.topDishes.map((x) => [x.name, `${x.count} шт`, money(x.amount)])}
+                empty="Нет продаж за период"
+              />
+            </Panel>
+            <Panel title="Лучшие официанты">
+              <MiniTable
+                columns={[{ label: 'Официант' }, { label: 'Заказы', align: 'right' }, { label: 'Выручка', align: 'right' }]}
+                rows={d.topWaiters.map((x) => [x.name, String(x.orders), money(x.amount)])}
+                empty="Нет данных за период"
+              />
+            </Panel>
+            <Panel title="Часы пик">
+              <MiniTable
+                columns={[{ label: 'Время' }, { label: 'Выручка', align: 'right' }]}
+                rows={d.peakHours.map((x) => [`${x.hour} – ${nextHourLabel(x.hour)}`, money(x.amount)])}
+                empty="Нет оплаченных заказов за период"
+              />
+            </Panel>
           </div>
         </>
       )}
@@ -139,58 +163,88 @@ export function StatisticsPage() {
   );
 }
 
-/* ---------- Карточки-метрики ---------- */
+/* ---------- KPI ---------- */
 
-function MetricCard({
-  icon,
-  label,
-  value,
-  delta,
-}: {
-  icon: JSX.Element;
-  label: string;
-  value: React.ReactNode;
-  delta: number;
-}) {
+function Kpi({ label, value, delta }: { label: string; value: string; delta: number }) {
   return (
-    <div className="card flex items-center gap-4 p-5">
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-        {icon}
+    <div className="rounded-xl border border-border bg-white p-4">
+      <p className="text-[13px] text-text-muted">{label}</p>
+      <div className="mt-2 flex flex-wrap items-baseline gap-2">
+        <span className="text-2xl font-semibold leading-none text-text-primary">{value}</span>
+        <TrendPill value={delta} />
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-[13px] text-text-muted">{label}</p>
-        <p className="mt-1 text-[26px] font-semibold leading-none text-text-primary">{value}</p>
-      </div>
-      <TrendPill value={delta} />
     </div>
   );
 }
 
-/** Половина мобильного сплит-блока KPI. */
-function SplitMetric({
-  icon,
-  label,
-  value,
-  delta,
-}: {
-  icon: JSX.Element;
-  label: string;
-  value: React.ReactNode;
-  delta: number;
-}) {
+/* ---------- Панель и компактная таблица ---------- */
+
+function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="flex-1 p-4">
-      <div className="flex items-center gap-2">
-        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          {icon}
-        </span>
-        <p className="text-[12px] leading-tight text-text-muted">{label}</p>
-      </div>
-      <p className="mt-2 text-[22px] font-semibold leading-none text-text-primary">{value}</p>
-      <div className="mt-2">
-        <TrendPill value={delta} />
-      </div>
-    </div>
+    <section className="rounded-xl border border-border bg-white p-4">
+      <h3 className="mb-3 text-base font-semibold text-text-primary">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+type Col = { label: string; align?: 'left' | 'right' };
+
+function MiniTable({
+  columns,
+  rows,
+  footer,
+  empty,
+}: {
+  columns: Col[];
+  rows: string[][];
+  footer?: string[];
+  empty: string;
+}) {
+  if (rows.length === 0) {
+    return <p className="py-8 text-center text-sm text-text-muted">{empty}</p>;
+  }
+  const cellAlign = (i: number) => (columns[i]?.align === 'right' ? 'text-right' : 'text-left');
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="border-b border-border text-xs text-text-muted">
+          {columns.map((c, i) => (
+            <th key={c.label} className={`pb-2 font-medium ${cellAlign(i)}`}>
+              {c.label}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, ri) => (
+          <tr key={ri} className="border-b border-border last:border-0">
+            {row.map((cell, ci) => (
+              <td
+                key={ci}
+                className={`py-2 ${cellAlign(ci)} ${ci === 0 ? 'font-medium text-text-primary' : 'text-text-secondary'}`}
+              >
+                {cell}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+      {footer && (
+        <tfoot>
+          <tr className="border-t border-border">
+            {footer.map((cell, ci) => (
+              <td
+                key={ci}
+                className={`pt-2 font-semibold text-text-primary ${cellAlign(ci)}`}
+              >
+                {cell}
+              </td>
+            ))}
+          </tr>
+        </tfoot>
+      )}
+    </table>
   );
 }
 
@@ -364,113 +418,6 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
         </div>
       )}
     </div>
-  );
-}
-
-/* ---------- Способы оплаты ---------- */
-
-function PaymentMethodsCard({ methods }: { methods: { method: PaymentMethod; amount: number; percent: number }[] }) {
-  const total = methods.reduce((s, m) => s + m.amount, 0);
-  return (
-    <section className="card p-5 sm:p-6">
-      <h3 className="mb-5 text-[15px] font-semibold text-text-primary">Способы оплаты</h3>
-      {total === 0 ? (
-        <p className="py-10 text-center text-sm text-text-muted">Нет оплат за период</p>
-      ) : (
-        <div className="space-y-4">
-          {methods.map((m) => {
-            const meta = METHOD_META[m.method];
-            return (
-              <div key={m.method}>
-                <div className="mb-1.5 flex items-center gap-2.5">
-                  <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${meta.tone}`}>
-                    {meta.icon}
-                  </span>
-                  <span className="text-sm font-medium text-text-primary">{meta.label}</span>
-                  <span className="ml-auto text-sm font-semibold text-text-primary">{m.percent}%</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-background">
-                  <div className={`h-full rounded-full ${meta.bar}`} style={{ width: `${m.percent}%` }} />
-                </div>
-                <p className="mt-1 text-right text-xs text-text-muted">{money(m.amount)}</p>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-/* ---------- Рейтинги ---------- */
-
-const RANK_TONE = ['bg-amber-100 text-amber-600', 'bg-slate-200 text-slate-600', 'bg-orange-100 text-orange-500'];
-
-function Leaderboard({
-  title,
-  items,
-  empty,
-}: {
-  title: string;
-  items: { name: string; sub: string; amount: number }[];
-  empty: string;
-}) {
-  return (
-    <section className="card p-5 sm:p-6">
-      <h3 className="mb-4 text-[15px] font-semibold text-text-primary">{title}</h3>
-      {items.length === 0 ? (
-        <p className="py-10 text-center text-sm text-text-muted">{empty}</p>
-      ) : (
-        <ul className="space-y-1">
-          {items.map((it, i) => (
-            <li
-              key={`${it.name}-${i}`}
-              className={`flex items-center gap-3 rounded-xl px-2 py-2 ${i === 0 ? 'bg-primary/5' : ''}`}
-            >
-              <span
-                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
-                  RANK_TONE[i] ?? 'bg-background text-text-muted'
-                }`}
-              >
-                {i + 1}
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className={`truncate text-sm ${i === 0 ? 'font-semibold' : 'font-medium'} text-text-primary`}>
-                  {it.name}
-                </p>
-                <p className="text-xs text-text-muted">{it.sub}</p>
-              </div>
-              <span className="shrink-0 text-sm font-semibold tabular-nums text-text-primary">{money(it.amount)}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  );
-}
-
-function PeakHoursCard({ items }: { items: { hour: string; amount: number; orders: number }[] }) {
-  return (
-    <section className="card p-5 sm:p-6">
-      <h3 className="mb-4 text-[15px] font-semibold text-text-primary">Часы пик</h3>
-      {items.length === 0 ? (
-        <p className="py-10 text-center text-sm text-text-muted">Нет оплаченных заказов за период</p>
-      ) : (
-        <ul className="space-y-2">
-          {items.map((item, index) => (
-            <li key={item.hour} className={`rounded-xl border border-border px-3 py-3 ${index === 0 ? 'bg-primary/5' : ''}`}>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-text-primary">{item.hour} - {nextHourLabel(item.hour)}</p>
-                  <p className="mt-0.5 text-xs text-text-muted">{item.orders} закрытых заказов</p>
-                </div>
-                <span className="shrink-0 text-sm font-semibold text-text-primary">{money(item.amount)}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }
 
