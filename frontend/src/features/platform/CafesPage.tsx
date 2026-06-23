@@ -51,6 +51,7 @@ function CafeCard({ cafe }: { cafe: PlatformCafe }) {
   const updateSub = useUpdateSubscription();
   const push = useNotifications((s) => s.push);
   const [date, setDate] = useState(cafe.paidUntil ? cafe.paidUntil.slice(0, 10) : '');
+  const [showSuspend, setShowSuspend] = useState(false);
 
   const suspended = cafe.status === 'suspended';
 
@@ -129,15 +130,62 @@ function CafeCard({ cafe }: { cafe: PlatformCafe }) {
           <button
             type="button"
             disabled={suspend.isPending}
-            onClick={() => {
-              const reason = window.prompt('Причина приостановки (необязательно):', 'Не оплачено') ?? undefined;
-              void act(() => suspend.mutateAsync({ id: cafe.id, reason }), 'Кафе приостановлено');
-            }}
+            onClick={() => setShowSuspend(true)}
             className="btn-md w-full rounded-lg border border-danger/40 font-semibold text-danger transition-colors hover:bg-danger/10"
           >
             Приостановить
           </button>
         )}
+      </div>
+
+      {showSuspend && (
+        <SuspendModal
+          cafeName={cafe.name}
+          busy={suspend.isPending}
+          onClose={() => setShowSuspend(false)}
+          onConfirm={async (reason) => {
+            await act(() => suspend.mutateAsync({ id: cafe.id, reason }), 'Кафе приостановлено');
+            setShowSuspend(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SuspendModal({
+  cafeName,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  cafeName: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState('Не оплачено');
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+      <div className="modal-backdrop animate-fade-in" onClick={onClose} />
+      <div className="animate-card-pop relative z-10 w-full max-w-sm rounded-2xl bg-card p-5 shadow-soft">
+        <h3 className="text-[17px] font-semibold text-text-primary">Приостановить кафе?</h3>
+        <p className="mt-1 text-sm text-text-secondary">
+          «{cafeName}»: персонал не сможет войти, QR-меню отключится.
+        </p>
+        <label className="mb-1.5 mt-4 block text-sm font-medium text-text-secondary">Причина (необязательно)</label>
+        <input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Не оплачено" />
+        <div className="mt-5 flex gap-3">
+          <button type="button" onClick={onClose} className="btn-secondary btn-md flex-1">Отмена</button>
+          <button
+            type="button"
+            onClick={() => onConfirm(reason.trim())}
+            disabled={busy}
+            className="btn-md flex-1 rounded-lg bg-danger font-semibold text-white transition-colors hover:bg-danger/90 disabled:opacity-50"
+          >
+            {busy ? 'Приостанавливаем…' : 'Приостановить'}
+          </button>
+        </div>
       </div>
     </div>
   );
