@@ -25,11 +25,13 @@ export interface QueueBoard {
   ready: QueueOrder[];
 }
 
-/** Публичное табло очереди — без авторизации, опрос раз в 5 секунд. */
-export function useQueueBoard() {
+/** Публичное табло очереди — без авторизации, опрос раз в 5 секунд.
+ *  cafe — идентификатор кафе из ссылки (мультитенантность). */
+export function useQueueBoard(cafe?: string | null) {
   return useQuery({
-    queryKey: ['queue', 'board'],
-    queryFn: async () => (await api.get<QueueBoard>('/queue')).data,
+    queryKey: ['queue', 'board', cafe ?? null],
+    queryFn: async () =>
+      (await api.get<QueueBoard>('/queue', { params: cafe ? { cafe } : undefined })).data,
     refetchInterval: 5_000,
     refetchIntervalInBackground: true,
   });

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Spinner } from '@/components/Spinner';
 import { useQueueBoard, type QueueBoard, type QueueOrder, type QueueStatus } from './api';
 
@@ -25,7 +26,8 @@ function padNumber(value: string | number): string {
 }
 
 export function QueueApp() {
-  const { data, isLoading, isError } = useQueueBoard();
+  const [searchParams] = useSearchParams();
+  const { data, isLoading, isError } = useQueueBoard(searchParams.get('cafe'));
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {

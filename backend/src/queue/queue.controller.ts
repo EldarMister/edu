@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { QueueService } from './queue.service';
 import { Public } from '../common/decorators/public.decorator';
 
@@ -6,10 +6,11 @@ import { Public } from '../common/decorators/public.decorator';
 export class QueueController {
   constructor(private readonly queue: QueueService) {}
 
-  /** Публичное табло очереди заказов (висит на мониторе в зале, без входа). */
+  /** Публичное табло очереди заказов (висит на мониторе в зале, без входа).
+   *  cafe — идентификатор кафе из ссылки (для мультитенантности). */
   @Public()
   @Get()
-  board() {
-    return this.queue.getBoard();
+  board(@Query('cafe') cafe?: string) {
+    return this.queue.getBoard(cafe);
   }
 }

@@ -12,6 +12,7 @@ export function resolveQrSrc(value: string | null | undefined): string | null {
 
 export interface Settings {
   id: string;
+  cafeId: string | null;
   cafeName: string;
   address: string;
   phone: string;
@@ -79,7 +80,7 @@ export function useAdminSettings() {
   });
 }
 
-export type SettingsInput = Partial<Omit<Settings, 'id' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount'>> & {
+export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount'>> & {
   serviceChargeAmount?: number;
 };
 

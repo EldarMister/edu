@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OrderStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { setCafeId } from '../tenant/tenant-context';
 
 /** Статусы заказа, в которых он ещё готовится (левая колонка табло). */
 const PREPARING_STATUSES: OrderStatus[] = [
@@ -37,7 +38,12 @@ export class QueueService {
    * «Готовятся» — заказ в работе, «Готовы» — все позиции готовы, но ещё не
    * забраны/поданы/оплачены. Публичный метод (табло висит в зале без входа).
    */
-  async getBoard(): Promise<QueueBoardDto> {
+  async getBoard(cafeId?: string): Promise<QueueBoardDto> {
+    // Табло висит без входа, поэтому кафе берём из ссылки (?cafe=…). Проставляем
+    // его в контекст тенанта — дальше settings/orders скоупятся автоматически.
+    // Без cafeId (одно кафе на стенде) работаем как раньше — по единственной строке.
+    if (cafeId) setCafeId(cafeId);
+
     const settings = await this.prisma.settings.findFirst({
       select: { cafeName: true, queueDisplayEnabled: true, queueDisplayMode: true },
     });

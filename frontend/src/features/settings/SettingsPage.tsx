@@ -479,7 +479,7 @@ export function SettingsPage() {
                   </div>
                 </div>
                 <a
-                  href="/queue"
+                  href={data.cafeId ? `/queue?cafe=${data.cafeId}` : '/queue'}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center justify-center gap-2 rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10"
