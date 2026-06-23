@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertCafeActive } from '../platform/cafe-status';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 import { getJwtAccessSecret, getJwtRefreshSecret } from './jwt.config';
@@ -32,6 +33,9 @@ export class AuthService {
     if (!ok) {
       throw new UnauthorizedException('Неверный телефон или пароль');
     }
+
+    // Кафе приостановлено — не пускаем персонал (сообщение видит пользователь на входе).
+    await assertCafeActive(this.prisma, user.cafeId);
 
     const tokens = await this.issueTokens(user.id, user.role);
     return {

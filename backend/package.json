@@ -15,6 +15,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "ts-node prisma/seed.ts",
     "cafe:create": "ts-node --transpile-only scripts/create-cafe.ts",
+    "platform:create-admin": "ts-node --transpile-only scripts/create-platform-admin.ts",
     "prisma:studio": "prisma studio",
     "backup:prod": "ts-node --transpile-only scripts/backup-postgres-to-drive.ts",
     "popularity:recalculate": "ts-node --transpile-only scripts/recalculate-dish-popularity.ts",
