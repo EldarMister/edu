@@ -95,7 +95,7 @@ export function StatisticsPage() {
           {(() => {
             const kpis = [
               { label: ORDERS_LABEL[period], value: String(d.cards.ordersPeriod), delta: d.trends.orders },
-              { label: 'Выручка за период', value: money(d.cards.revenuePeriod), delta: d.trends.revenue },
+              { label: 'Средний чек', value: money(d.cards.avgCheck), delta: d.trends.avgCheck },
             ];
             return (
               <>

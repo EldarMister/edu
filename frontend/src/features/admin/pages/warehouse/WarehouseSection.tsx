@@ -40,8 +40,8 @@ export function WarehouseSection() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-px">
-        <div className="flex gap-1 overflow-x-auto">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border pb-px">
+        <div className="flex flex-wrap gap-1">
           {TABS.map((t) => (
             <Tab key={t.key} active={tab === t.key} onClick={() => setTab(t.key)}>
               {t.label}
