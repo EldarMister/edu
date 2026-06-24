@@ -13,6 +13,15 @@ const PERIODS: { value: StatsPeriod; label: string }[] = [
   { value: 'custom', label: 'Период' },
 ];
 
+// Подпись KPI заказов зависит от выбранного периода вверху.
+const ORDERS_LABEL: Record<StatsPeriod, string> = {
+  today: 'Заказов сегодня',
+  week: 'Заказов за неделю',
+  month: 'Заказов за месяц',
+  all: 'Заказов за всё время',
+  custom: 'Заказов за период',
+};
+
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   qr: 'QR-код',
   cash: 'Наличные',
@@ -85,26 +94,21 @@ export function StatisticsPage() {
           {/* KPI */}
           {(() => {
             const kpis = [
-              { label: 'Заказов сегодня', value: String(d.cards.ordersToday), delta: d.trends.orders },
-              { label: 'Средний чек', value: money(d.cards.avgCheck), delta: d.trends.avgCheck },
-              { label: 'Заказов за период', value: String(d.cards.ordersPeriod), delta: d.trends.orders },
+              { label: ORDERS_LABEL[period], value: String(d.cards.ordersPeriod), delta: d.trends.orders },
               { label: 'Выручка за период', value: money(d.cards.revenuePeriod), delta: d.trends.revenue },
             ];
             return (
               <>
-                {/* Десктоп — 4 отдельные карточки */}
-                <div className="hidden gap-3 xl:grid xl:grid-cols-4">
+                {/* Десктоп — отдельные карточки */}
+                <div className="hidden gap-3 xl:grid xl:grid-cols-2">
                   {kpis.map((k) => (
                     <Kpi key={k.label} label={k.label} value={k.value} delta={k.delta} />
                   ))}
                 </div>
-                {/* Мобильный/планшет — единый сплит-блок 2×2 */}
+                {/* Мобильный/планшет — единый сплит-блок */}
                 <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-border bg-white xl:hidden">
                   {kpis.map((k, i) => (
-                    <div
-                      key={k.label}
-                      className={`p-4 ${i % 2 === 1 ? 'border-l border-border' : ''} ${i >= 2 ? 'border-t border-border' : ''}`}
-                    >
+                    <div key={k.label} className={`p-4 ${i % 2 === 1 ? 'border-l border-border' : ''}`}>
                       <p className="text-[13px] text-text-muted">{k.label}</p>
                       <div className="mt-1.5 flex flex-wrap items-baseline gap-2">
                         <span className="text-xl font-semibold leading-none text-text-primary">{k.value}</span>
