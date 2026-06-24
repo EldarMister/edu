@@ -50,29 +50,30 @@ export function StatisticsPage() {
   return (
     <div className="space-y-4 overflow-x-hidden">
       {/* Переключатель периода */}
-      <div className="flex flex-wrap items-center gap-3 sm:justify-end">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex flex-wrap gap-1">
-            {PERIODS.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => setPeriod(p.value)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                  period === p.value ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-          {period === 'custom' && (
-            <div className="flex flex-wrap items-center gap-2">
-              <input className="input h-9 w-[145px] text-sm" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
-              <span className="text-sm text-text-muted">—</span>
-              <input className="input h-9 w-[145px] text-sm" type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
-            </div>
-          )}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid w-full grid-cols-3 gap-1 rounded-xl bg-background p-1 sm:inline-flex sm:w-auto sm:flex-wrap">
+          {PERIODS.map((p) => (
+            <button
+              key={p.value}
+              onClick={() => setPeriod(p.value)}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                period === p.value
+                  ? 'bg-white text-primary shadow-sm'
+                  : 'text-text-muted hover:text-text-secondary'
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
         </div>
+
+        {period === 'custom' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input className="input h-10 w-[150px]" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+            <span className="text-sm text-text-muted">—</span>
+            <input className="input h-10 w-[150px]" type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
+          </div>
+        )}
       </div>
 
       {statsQ.isLoading || !d ? (

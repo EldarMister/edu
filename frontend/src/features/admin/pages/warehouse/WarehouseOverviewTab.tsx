@@ -1,10 +1,7 @@
-import { useMemo, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { money } from '@/lib/format';
 import { useWarehouseOverview, qty, type StockMovementType } from './api';
 import { StockTrendChart } from './StockTrendChart';
-
-type PeriodPreset = 'today' | 'week' | 'month' | 'custom';
 
 const TYPE_LABEL: Record<StockMovementType, string> = {
   purchase: 'Приход',
@@ -14,42 +11,12 @@ const TYPE_LABEL: Record<StockMovementType, string> = {
   cancel: 'Отмена',
 };
 
-export function WarehouseOverviewTab() {
-  const [preset, setPreset] = useState<PeriodPreset>('week');
-  const [customFrom, setCustomFrom] = useState(localDate(addDays(new Date(), -6)));
-  const [customTo, setCustomTo] = useState(localDate(new Date()));
-
-  const range = useMemo(() => {
-    const today = new Date();
-    if (preset === 'today') {
-      const value = localDate(today);
-      return { dateFrom: value, dateTo: value };
-    }
-    if (preset === 'month') {
-      return { dateFrom: localDate(addDays(today, -29)), dateTo: localDate(today) };
-    }
-    if (preset === 'custom') {
-      return { dateFrom: customFrom, dateTo: customTo };
-    }
-    return { dateFrom: localDate(addDays(today, -6)), dateTo: localDate(today) };
-  }, [customFrom, customTo, preset]);
-
+export function WarehouseOverviewTab({ range }: { range: { dateFrom: string; dateTo: string } }) {
   const overview = useWarehouseOverview(range);
   const data = overview.data;
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 sm:justify-end">
-        <PeriodFilter
-          preset={preset}
-          setPreset={setPreset}
-          customFrom={customFrom}
-          customTo={customTo}
-          setCustomFrom={setCustomFrom}
-          setCustomTo={setCustomTo}
-        />
-      </div>
-
       {overview.isLoading ? (
         <div className="flex justify-center py-16 text-primary">
           <Spinner className="h-6 w-6" />
@@ -118,54 +85,6 @@ export function WarehouseOverviewTab() {
             </Panel>
           </div>
         </>
-      )}
-    </div>
-  );
-}
-
-function PeriodFilter({
-  preset,
-  setPreset,
-  customFrom,
-  customTo,
-  setCustomFrom,
-  setCustomTo,
-}: {
-  preset: PeriodPreset;
-  setPreset: (v: PeriodPreset) => void;
-  customFrom: string;
-  customTo: string;
-  setCustomFrom: (v: string) => void;
-  setCustomTo: (v: string) => void;
-}) {
-  const items: { key: PeriodPreset; label: string }[] = [
-    { key: 'today', label: 'Сегодня' },
-    { key: 'week', label: 'Неделя' },
-    { key: 'month', label: 'Месяц' },
-    { key: 'custom', label: 'Период' },
-  ];
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      <div className="inline-flex rounded-lg border border-border bg-white p-1">
-        {items.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              preset === item.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-            }`}
-            onClick={() => setPreset(item.key)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-      {preset === 'custom' && (
-        <div className="flex items-center gap-2">
-          <input className="input h-10 w-[145px] text-sm" type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
-          <span className="text-text-muted">-</span>
-          <input className="input h-10 w-[145px] text-sm" type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
-        </div>
       )}
     </div>
   );
@@ -262,19 +181,6 @@ function ChangeCell({ value, unit }: { value: number; unit: string }) {
 function num(value: number): string {
   const rounded = Math.round(value * 1000) / 1000;
   return Number.isInteger(rounded) ? String(rounded) : String(rounded).replace('.', ',');
-}
-
-function localDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
 }
 
 function formatTime(value: string) {
