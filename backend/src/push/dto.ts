@@ -25,3 +25,28 @@ export class PushSubscriptionDto {
   @IsOptional()
   userAgent?: string;
 }
+
+/** Регистрация мобильного устройства (React Native) для native push. */
+export class RegisterDeviceDto {
+  @IsString()
+  @IsNotEmpty()
+  pushToken: string;
+
+  @IsString()
+  @IsNotEmpty()
+  platform: string; // 'android' | 'ios'
+
+  @IsString()
+  @IsOptional()
+  deviceId?: string;
+
+  @IsString()
+  @IsOptional()
+  appVersion?: string;
+}
+
+export class UnregisterDeviceDto {
+  @IsString()
+  @IsNotEmpty()
+  pushToken: string;
+}

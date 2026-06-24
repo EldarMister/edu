@@ -1,0 +1,89 @@
+import React from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { BottomSheet } from '@/components/BottomSheet';
+import { colors, fontSize, radius, spacing } from '@/theme';
+import { TABLE_STATUS } from '@/theme/status';
+import { useHalls } from '@/services/api/waiter';
+import { useAuth } from '@/store/auth';
+import { useCart } from '@/store/cart';
+import type { TableItem } from '@/types';
+
+/** Смена стола на экране меню — список столов по залам (как в PWA TableSelectModal). */
+export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
+  const halls = useHalls();
+  const user = useAuth((s) => s.user);
+  const selectTable = useCart((s) => s.selectTable);
+  const currentTableId = useCart((s) => s.tableId);
+  const lines = useCart((s) => s.lines);
+
+  const pick = (tbl: TableItem, hallName: string) => {
+    if (tbl.id === currentTableId) {
+      onClose();
+      return;
+    }
+    if (tbl.occupiedBy && tbl.occupiedBy.id !== user?.id) {
+      Alert.alert('Стол занят', `Этот стол занят другим официантом: ${tbl.occupiedBy?.name}`);
+      return;
+    }
+    const apply = () => {
+      selectTable({ id: tbl.id, number: tbl.number, hallName });
+      onClose();
+    };
+    if (lines.length > 0) {
+      Alert.alert('Сменить стол?', 'В корзине уже есть блюда. Они будут очищены.', [
+        { text: 'Отмена', style: 'cancel' },
+        { text: 'Сменить', style: 'destructive', onPress: apply },
+      ]);
+    } else {
+      apply();
+    }
+  };
+
+  return (
+    <BottomSheet visible={visible} onClose={onClose} title="Выбор стола">
+      <ScrollView style={{ maxHeight: 520 }} showsVerticalScrollIndicator={false}>
+        {(halls.data ?? []).map((hall) => (
+          <View key={hall.id} style={{ marginBottom: spacing.lg }}>
+            <Text style={styles.hallName}>{hall.name}</Text>
+            <View style={styles.grid}>
+              {hall.tables.map((tbl) => {
+                const selected = tbl.id === currentTableId;
+                const meta = TABLE_STATUS[tbl.status];
+                return (
+                  <Pressable
+                    key={tbl.id}
+                    onPress={() => pick(tbl, hall.name)}
+                    style={[styles.table, selected && styles.tableSelected]}
+                  >
+                    {!selected ? <View style={[styles.dot, { backgroundColor: meta.dot }]} /> : null}
+                    <Text style={[styles.tableNumber, selected && { color: colors.white }]}>
+                      {tbl.number}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </BottomSheet>
+  );
+}
+
+const styles = StyleSheet.create({
+  hallName: { fontSize: fontSize.sm, color: colors.textMuted, marginBottom: spacing.sm },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  table: {
+    width: '22.6%',
+    aspectRatio: 1,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tableSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  dot: { position: 'absolute', right: 6, top: 6, width: 10, height: 10, borderRadius: 5 },
+  tableNumber: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
+});

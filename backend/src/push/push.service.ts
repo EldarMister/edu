@@ -2,7 +2,9 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import webpush, { PushSubscription as WebPushSubscription } from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '@prisma/client';
-import { PushSubscriptionDto } from './dto';
+import { PushSubscriptionDto, RegisterDeviceDto } from './dto';
+
+const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
 
 export interface PushPayload {
   title: string;
@@ -66,8 +68,10 @@ export class PushService {
   }
 
   async notifyUser(userId: string, payload: PushPayload) {
-    if (!this.configured) return;
+    // Native push (мобильное приложение) работает независимо от Web Push (VAPID).
+    await this.sendNativeToUsers([userId], payload);
 
+    if (!this.configured) return;
     const subscriptions = await this.prisma.pushSubscription.findMany({
       where: { userId },
     });
@@ -79,12 +83,104 @@ export class PushService {
   }
 
   async notifyRole(role: Role, payload: PushPayload) {
-    if (!this.configured) return;
+    // Native push для роли (мобильные устройства).
+    const devices = await this.prisma.userDevice.findMany({
+      where: { isActive: true, pushToken: { not: null }, user: { role, isActive: true } },
+      select: { pushToken: true },
+    });
+    await this.sendNativeToTokens(
+      devices.map((d) => d.pushToken).filter((t): t is string => !!t),
+      payload,
+    );
 
+    if (!this.configured) return;
     const subscriptions = await this.prisma.pushSubscription.findMany({
       where: { user: { role, isActive: true } },
     });
     await this.sendToSubscriptions(subscriptions, payload);
+  }
+
+  // ---------- Native push (React Native через Expo Push) ----------
+
+  /** Регистрирует/обновляет мобильное устройство для native push. */
+  async registerDevice(userId: string, dto: RegisterDeviceDto) {
+    await this.prisma.userDevice.upsert({
+      where: { pushToken: dto.pushToken },
+      update: {
+        userId,
+        platform: dto.platform,
+        deviceId: dto.deviceId,
+        appVersion: dto.appVersion,
+        isActive: true,
+      },
+      create: {
+        userId,
+        pushToken: dto.pushToken,
+        platform: dto.platform,
+        deviceId: dto.deviceId,
+        appVersion: dto.appVersion,
+      },
+    });
+    return { ok: true };
+  }
+
+  /** Отключает устройство (при logout). */
+  async unregisterDevice(userId: string, pushToken: string) {
+    await this.prisma.userDevice.deleteMany({ where: { userId, pushToken } });
+    return { ok: true };
+  }
+
+  private async sendNativeToUsers(userIds: string[], payload: PushPayload) {
+    const devices = await this.prisma.userDevice.findMany({
+      where: { userId: { in: userIds }, isActive: true, pushToken: { not: null } },
+      select: { pushToken: true },
+    });
+    await this.sendNativeToTokens(
+      devices.map((d) => d.pushToken).filter((t): t is string => !!t),
+      payload,
+    );
+  }
+
+  /** Отправка через Expo Push API. Токены вида ExponentPushToken[...]. */
+  private async sendNativeToTokens(tokens: string[], payload: PushPayload) {
+    if (tokens.length === 0) return;
+
+    const messages = tokens.map((to) => ({
+      to,
+      title: payload.title,
+      body: payload.body,
+      sound: 'default',
+      priority: 'high',
+      data: {
+        type: payload.type,
+        orderId: payload.orderId,
+        orderNumber: payload.orderNumber,
+        url: payload.url,
+      },
+    }));
+
+    try {
+      const res = await fetch(EXPO_PUSH_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(messages),
+      });
+      if (!res.ok) {
+        this.logger.warn(`Expo push failed: HTTP ${res.status}`);
+        return;
+      }
+      // Деактивируем устройства с невалидными токенами (DeviceNotRegistered).
+      const json = (await res.json()) as { data?: { status: string; details?: { error?: string } }[] };
+      const tickets = json.data ?? [];
+      const deadTokens = tokens.filter((_, i) => tickets[i]?.details?.error === 'DeviceNotRegistered');
+      if (deadTokens.length > 0) {
+        await this.prisma.userDevice
+          .deleteMany({ where: { pushToken: { in: deadTokens } } })
+          .catch(() => undefined);
+      }
+    } catch (err) {
+      this.logger.warn(`Expo push error: ${(err as Error).message}`);
+    }
   }
 
   private async sendToSubscriptions(

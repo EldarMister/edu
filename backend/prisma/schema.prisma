@@ -220,6 +220,7 @@ model User {
   incidentsMade        Incident[]            @relation("IncidentAuthor")
   auditLogs            AuditLog[]
   pushSubscriptions    PushSubscription[]
+  devices              UserDevice[]
   receiptPrintRequests ReceiptPrintRequest[] @relation("WaiterReceiptPrints")
   cashReports          ShiftCashReport[]     @relation("WaiterCashReports")
 
@@ -720,6 +721,26 @@ model PushSubscription {
 
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+// Мобильное устройство пользователя для native push (React Native клиент).
+// Отдельно от PushSubscription (Web Push для PWA) — каналы не пересекаются.
+model UserDevice {
+  cafeId     String?  @map("cafe_id")
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  platform   String // 'android' | 'ios' | 'web-pwa'
+  deviceId   String?  @map("device_id")
+  pushToken  String?  @unique @map("push_token")
+  appVersion String?  @map("app_version")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("user_devices")
 }
 
 // Запрос официанта на печать чека — подтверждается администратором (раздел «Печать чека»).

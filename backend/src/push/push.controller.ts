@@ -3,7 +3,7 @@ import { Role } from '@prisma/client';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { PushSubscriptionDto } from './dto';
+import { PushSubscriptionDto, RegisterDeviceDto, UnregisterDeviceDto } from './dto';
 import { PushService } from './push.service';
 
 @Controller()
@@ -33,5 +33,19 @@ export class PushController {
   @Delete('push/subscribe')
   unsubscribe(@CurrentUser() user: AuthUser, @Body() dto: { endpoint: string }) {
     return this.push.unsubscribe(user.id, dto.endpoint);
+  }
+
+  // ---------- Native push (мобильное приложение React Native) ----------
+
+  @Roles(Role.WAITER, Role.KITCHEN, Role.BAR, Role.ADMIN, Role.OWNER)
+  @Post('push/devices')
+  registerDevice(@CurrentUser() user: AuthUser, @Body() dto: RegisterDeviceDto) {
+    return this.push.registerDevice(user.id, dto);
+  }
+
+  @Roles(Role.WAITER, Role.KITCHEN, Role.BAR, Role.ADMIN, Role.OWNER)
+  @Delete('push/devices')
+  unregisterDevice(@CurrentUser() user: AuthUser, @Body() dto: UnregisterDeviceDto) {
+    return this.push.unregisterDevice(user.id, dto.pushToken);
   }
 }

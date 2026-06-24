@@ -21,8 +21,15 @@ const ACTIVE_TAB_STATUSES: OrderStatus[] = [
   OrderStatus.served,
 ];
 
-/** История кухни: завершённые и отказанные заказы видны только последние 24 часа. */
+/** Отказанные заказы видны в ленте кухни только последние 24 часа. */
 const KITCHEN_HISTORY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/** Начало сегодняшнего дня (локальное время сервера) — как в статистике «сегодня». */
+function startOfToday() {
+  const s = new Date();
+  s.setHours(0, 0, 0, 0);
+  return s;
+}
 
 type StationItem = { status: OrderItemStatus };
 
@@ -53,12 +60,13 @@ function stationTabOf(items: StationItem[]): Exclude<KitchenTab, 'rejected'> | n
   return 'in_work';
 }
 
+/** Момент завершения для ленты кухни: для оплаченных — закрытие, иначе — обновление. */
+function kitchenHistoryAt(order: HistoryOrder): Date {
+  return order.status === OrderStatus.paid ? (order.closedAt ?? order.updatedAt) : order.updatedAt;
+}
+
 function isRecentKitchenHistory(order: HistoryOrder, cutoff: Date) {
-  const historyAt =
-    order.status === OrderStatus.paid
-      ? (order.closedAt ?? order.updatedAt)
-      : order.updatedAt;
-  return historyAt >= cutoff;
+  return kitchenHistoryAt(order) >= cutoff;
 }
 
 @Injectable()
@@ -109,11 +117,17 @@ export class KitchenService {
 
     // Оставляем только позиции станции и раскладываем по вкладке станции.
     // Оплаченные заказы (все позиции готовы/поданы) попадают в «Завершённые».
-    // Завершённые храним в ленте кухни только 24 часа.
-    return orders
+    // Завершённые показываем только за сегодня и сортируем: недавние сверху, старые снизу.
+    const todayStart = startOfToday();
+    const list = orders
       .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }))
       .filter((o) => o.status === OrderStatus.paid ? tab === 'ready' : stationTabOf(o.items) === tab)
-      .filter((o) => tab === 'ready' ? isRecentKitchenHistory(o, historyCutoff) : true);
+      .filter((o) => tab === 'ready' ? isRecentKitchenHistory(o, todayStart) : true);
+
+    if (tab === 'ready') {
+      list.sort((a, b) => kitchenHistoryAt(b).getTime() - kitchenHistoryAt(a).getTime());
+    }
+    return list;
   }
 
   /**
