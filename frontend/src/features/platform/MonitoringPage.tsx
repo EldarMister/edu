@@ -38,7 +38,7 @@ export function MonitoringPage() {
           <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2.5 text-sm sm:grid-cols-3">
             <Stat label="База данных" value={h.database === 'ok' ? 'OK' : 'Ошибка'} bad={h.database !== 'ok'} />
             <Stat label="Окружение" value={h.env} />
-            <Stat label="Версия (commit)" value={h.commit ?? '—'} />
+            <Stat label="Версия (commit)" value={h.commit ? h.commit.slice(0, 8) : '—'} />
             <Stat label="Миграции применено" value={`${h.migrations.appliedCount} / ${h.migrations.localCount}`} bad={h.migrations.behind} />
             <Stat label="Отставание" value={h.migrations.behind ? 'есть' : 'нет'} bad={h.migrations.behind} />
             <Stat label="Упавшие миграции" value={h.migrations.failed.length ? String(h.migrations.failed.length) : 'нет'} bad={h.migrations.failed.length > 0} />
