@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { money } from '@/lib/format';
 import type { PaymentMethod } from '@/types';
+import { IconCheck, IconOrders } from '../components/icons';
 import { useStatistics, type StatsPeriod } from '../api';
 import { usePublicSettings } from '@/features/settings/api';
 
@@ -91,35 +92,17 @@ export function StatisticsPage() {
         </div>
       ) : (
         <>
-          {/* KPI */}
-          {(() => {
-            const kpis = [
-              { label: ORDERS_LABEL[period], value: String(d.cards.ordersPeriod), delta: d.trends.orders },
-              { label: 'Средний чек', value: money(d.cards.avgCheck), delta: d.trends.avgCheck },
-            ];
-            return (
-              <>
-                {/* Десктоп — отдельные карточки */}
-                <div className="hidden gap-3 xl:grid xl:grid-cols-2">
-                  {kpis.map((k) => (
-                    <Kpi key={k.label} label={k.label} value={k.value} delta={k.delta} />
-                  ))}
-                </div>
-                {/* Мобильный/планшет — единый сплит-блок */}
-                <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-border bg-white xl:hidden">
-                  {kpis.map((k, i) => (
-                    <div key={k.label} className={`p-4 ${i % 2 === 1 ? 'border-l border-border' : ''}`}>
-                      <p className="text-[13px] text-text-muted">{k.label}</p>
-                      <div className="mt-1.5 flex flex-wrap items-baseline gap-2">
-                        <span className="text-xl font-semibold leading-none text-text-primary">{k.value}</span>
-                        <TrendPill value={k.delta} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            );
-          })()}
+          {/* Метрики: десктоп — две карточки */}
+          <div className="hidden gap-4 lg:grid lg:grid-cols-2">
+            <MetricCard icon={<IconOrders />} label={ORDERS_LABEL[period]} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
+            <MetricCard icon={<IconCheck />} label="Средний чек" value={money(d.cards.avgCheck)} delta={d.trends.avgCheck} />
+          </div>
+
+          {/* Метрики: мобильный — единый сплит-блок (2 показателя) */}
+          <div className="card flex divide-x divide-border lg:hidden">
+            <SplitMetric icon={<IconOrders />} label={ORDERS_LABEL[period]} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
+            <SplitMetric icon={<IconCheck />} label="Средний чек" value={money(d.cards.avgCheck)} delta={d.trends.avgCheck} />
+          </div>
 
           {/* График выручки */}
           <section className="rounded-xl border border-border bg-white p-4 sm:p-5">
@@ -168,14 +151,55 @@ export function StatisticsPage() {
   );
 }
 
-/* ---------- KPI ---------- */
+/* ---------- Карточки-метрики ---------- */
 
-function Kpi({ label, value, delta }: { label: string; value: string; delta: number }) {
+function MetricCard({
+  icon,
+  label,
+  value,
+  delta,
+}: {
+  icon: JSX.Element;
+  label: string;
+  value: React.ReactNode;
+  delta: number;
+}) {
   return (
-    <div className="rounded-xl border border-border bg-white p-4">
-      <p className="text-[13px] text-text-muted">{label}</p>
-      <div className="mt-2 flex flex-wrap items-baseline gap-2">
-        <span className="text-2xl font-semibold leading-none text-text-primary">{value}</span>
+    <div className="card flex items-center gap-4 p-5">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-[13px] text-text-muted">{label}</p>
+        <p className="mt-1 text-[26px] font-semibold leading-none text-text-primary">{value}</p>
+      </div>
+      <TrendPill value={delta} />
+    </div>
+  );
+}
+
+/** Половина мобильного сплит-блока KPI. */
+function SplitMetric({
+  icon,
+  label,
+  value,
+  delta,
+}: {
+  icon: JSX.Element;
+  label: string;
+  value: React.ReactNode;
+  delta: number;
+}) {
+  return (
+    <div className="flex-1 p-4">
+      <div className="flex items-center gap-2">
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          {icon}
+        </span>
+        <p className="text-[12px] leading-tight text-text-muted">{label}</p>
+      </div>
+      <p className="mt-2 text-[22px] font-semibold leading-none text-text-primary">{value}</p>
+      <div className="mt-2">
         <TrendPill value={delta} />
       </div>
     </div>

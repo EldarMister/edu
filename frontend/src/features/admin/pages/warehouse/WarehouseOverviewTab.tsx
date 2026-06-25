@@ -23,7 +23,7 @@ export function WarehouseOverviewTab({ range }: { range: { dateFrom: string; dat
         </div>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
             <MetricCard label="Стоимость остатков" value={money(data?.stockValue ?? 0)} />
             <MetricCard label="Низкий остаток" value={String(data?.lowStockCount ?? 0)} />
             <MetricCard label="Закупки за период" value={money(data?.purchasesTotal ?? 0)} />

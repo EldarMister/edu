@@ -26,6 +26,29 @@ export function OrderDetailsModal({
   if (!order) return null;
 
   const date = new Date(order.createdAt);
+  const showMixedBreakdown =
+    order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
+
+  const infoRows: { label: string; value: React.ReactNode }[][] = [
+    [
+      { label: 'Статус', value: <OrderBadge status={order.status} /> },
+      { label: 'Официант', value: order.waiter?.name ?? 'QR menu' },
+    ],
+    [
+      { label: 'Дата', value: `${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}` },
+      { label: 'Сумма', value: money(order.finalAmount) },
+    ],
+    [
+      { label: 'Стол', value: `Стол ${order.table.number}${hallSuffix(order.table)}` },
+      { label: 'Оплата', value: order.paymentMethod ? paymentDisplayLabel(order) : '—' },
+    ],
+  ];
+  if (showMixedBreakdown) {
+    infoRows.push([
+      { label: 'Наличными', value: money(mixedSumBy(order, 'cash')) },
+      { label: 'QR', value: money(mixedSumBy(order, 'qr')) },
+    ]);
+  }
 
   return (
     <Modal
@@ -38,20 +61,7 @@ export function OrderDetailsModal({
         <div>
           <h4 className="mb-2 text-sm font-semibold text-text-primary">Информация</h4>
           <div className="overflow-hidden rounded-xl border border-border text-sm">
-            {[
-              [
-                { label: 'Статус', value: <OrderBadge status={order.status} /> },
-                { label: 'Официант', value: order.waiter?.name ?? 'QR menu' },
-              ],
-              [
-                { label: 'Дата', value: `${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}` },
-                { label: 'Сумма', value: money(order.finalAmount) },
-              ],
-              [
-                { label: 'Стол', value: `Стол ${order.table.number}${hallSuffix(order.table)}` },
-                { label: 'Оплата', value: order.paymentMethod ? paymentDisplayLabel(order) : '—' },
-              ],
-            ].map((pair, ri, rows) => (
+            {infoRows.map((pair, ri, rows) => (
               <div
                 key={ri}
                 className={`grid grid-cols-1 sm:grid-cols-2 ${ri < rows.length - 1 ? 'border-b border-border' : ''}`}
@@ -84,24 +94,6 @@ export function OrderDetailsModal({
                   <span className="font-medium text-text-primary">{money(payment.amount)}</span>
                 </div>
               ))}
-            </div>
-          </div>
-        )}
-
-        {order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length && (
-          <div className="rounded-lg border border-border bg-background px-3 py-2">
-            <p className="text-[11px] font-medium uppercase tracking-wide text-text-muted">
-              Разбивка оплаты
-            </p>
-            <div className="mt-1.5 space-y-1">
-              <div className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-text-secondary">Наличными</span>
-                <span className="font-medium text-text-primary">{money(mixedSumBy(order, 'cash'))}</span>
-              </div>
-              <div className="flex items-center justify-between gap-2 text-sm">
-                <span className="text-text-secondary">QR</span>
-                <span className="font-medium text-text-primary">{money(mixedSumBy(order, 'qr'))}</span>
-              </div>
             </div>
           </div>
         )}
