@@ -23,6 +23,15 @@ const ORDERS_LABEL: Record<StatsPeriod, string> = {
   custom: 'Заказов за период',
 };
 
+// Заголовок карточки приготовленных блюд зависит от выбранного периода.
+const PREPARED_LABEL: Record<StatsPeriod, string> = {
+  today: 'Приготовлено сегодня',
+  week: 'Приготовлено за неделю',
+  month: 'Приготовлено за месяц',
+  all: 'Приготовлено за всё время',
+  custom: 'Приготовлено за период',
+};
+
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   qr: 'QR-код',
   cash: 'Наличные',
@@ -142,6 +151,42 @@ export function StatisticsPage() {
                 columns={[{ label: 'Время' }, { label: 'Выручка', align: 'right' }]}
                 rows={d.peakHours.map((x) => [`${x.hour} – ${nextHourLabel(x.hour)}`, money(x.amount)])}
                 empty="Нет оплаченных заказов за период"
+              />
+            </Panel>
+          </div>
+
+          {/* Приготовленные блюда и проданные напитки */}
+          <div className="grid gap-3 lg:grid-cols-3">
+            <Panel title="Приготовлено блюд">
+              <table className="w-full text-sm">
+                <tbody>
+                  {[
+                    ['Всего приготовлено', `${d.prepared.total} шт`],
+                    ['В среднем в день', `${d.prepared.avgPerDay} шт`],
+                    ['Уникальных блюд', String(d.prepared.uniqueDishes)],
+                    ['Максимум за день', `${d.prepared.maxPerDay} шт`],
+                  ].map(([label, value]) => (
+                    <tr key={label} className="border-b border-border last:border-0">
+                      <td className="py-2 font-medium text-text-primary">{label}</td>
+                      <td className="py-2 text-right text-text-secondary">{value}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Panel>
+            <Panel title={PREPARED_LABEL[period]}>
+              <MiniTable
+                columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }]}
+                rows={d.prepared.dishes.map((x) => [x.name, `${x.count} шт`])}
+                empty="Нет приготовленных блюд за период"
+              />
+            </Panel>
+            <Panel title="Продано напитков">
+              <MiniTable
+                columns={[{ label: 'Напиток' }, { label: 'Кол-во', align: 'right' }]}
+                rows={d.drinks.dishes.map((x) => [x.name, `${x.count} шт`])}
+                footer={['Итого', `${d.drinks.total} шт`]}
+                empty="Нет продаж напитков за период"
               />
             </Panel>
           </div>

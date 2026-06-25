@@ -107,6 +107,17 @@ export interface StatsDashboard {
   paymentMethods: { method: PaymentMethod; amount: number; percent: number }[];
   topDishes: { name: string; amount: number; count: number }[];
   topWaiters: { name: string; amount: number; orders: number; avgCheck: number }[];
+  prepared: {
+    total: number;
+    avgPerDay: number;
+    uniqueDishes: number;
+    maxPerDay: number;
+    dishes: { name: string; count: number }[];
+  };
+  drinks: {
+    total: number;
+    dishes: { name: string; count: number }[];
+  };
   period: StatsPeriod;
   range: { from: string | null; to: string | null };
 }
