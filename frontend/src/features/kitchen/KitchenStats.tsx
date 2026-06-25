@@ -139,16 +139,17 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
         </div>
       ) : (
         <>
-          {/* Карточки-метрики */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <StatCard tone="green" icon={<IconPrepared />} label="Приготовлено блюд" value={String(d.cards.prepared)} />
-            <StatCard tone="red" icon={<IconReject />} label="Отказов" value={String(d.cards.rejections)} />
-            <StatCard
-              tone="blue"
-              icon={<IconClock />}
-              label="Среднее время приготовления"
-              value={d.cards.avgPrepMin > 0 ? minutes(d.cards.avgPrepMin) : '—'}
-            />
+          {/* Inline-сводка (как у заказов) */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
+            <Sum label="Приготовлено блюд" value={d.cards.prepared} />
+            <Sep />
+            <Sum label="В среднем в день" value={`${d.prepared.avgPerDay} шт`} />
+            <Sep />
+            <Sum label="Максимум за день" value={`${d.prepared.maxPerDay} шт`} />
+            <Sep />
+            <Sum label="Отказов" value={d.cards.rejections} />
+            <Sep />
+            <Sum label="Среднее время" value={d.cards.avgPrepMin > 0 ? minutes(d.cards.avgPrepMin) : '—'} />
           </div>
 
           {/* Блоки-списки */}
@@ -179,32 +180,13 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
             </Panel>
           </div>
 
-          <div className="grid gap-3 lg:grid-cols-2">
-            <Panel title="Приготовлено блюд">
-              <table className="w-full text-sm">
-                <tbody>
-                  {[
-                    ['Всего приготовлено', `${d.prepared.total} шт`],
-                    ['В среднем в день', `${d.prepared.avgPerDay} шт`],
-                    ['Уникальных блюд', String(d.prepared.uniqueDishes)],
-                    ['Максимум за день', `${d.prepared.maxPerDay} шт`],
-                  ].map(([label, value]) => (
-                    <tr key={label} className="border-b border-border last:border-0">
-                      <td className="py-2 font-medium text-text-primary">{label}</td>
-                      <td className="py-2 text-right text-text-secondary">{value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </Panel>
-            <Panel title="Отказы по блюдам">
-              <MiniTable
-                columns={[{ label: 'Блюдо' }, { label: 'Отказов', align: 'right' }]}
-                rows={d.rejections.slice(0, 6).map((x) => [x.name, String(x.count)])}
-                empty="Нет отказов за период"
-              />
-            </Panel>
-          </div>
+          <Panel title="Отказы по блюдам">
+            <MiniTable
+              columns={[{ label: 'Блюдо' }, { label: 'Отказов', align: 'right' }]}
+              rows={d.rejections.slice(0, 6).map((x) => [x.name, String(x.count)])}
+              empty="Нет отказов за период"
+            />
+          </Panel>
 
           <section className="rounded-xl border border-border bg-white p-4">
             <div className="mb-3 flex items-center justify-between gap-3">
@@ -252,34 +234,17 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
   );
 }
 
-/* ---------- Карточка-метрика ---------- */
+/* ---------- Inline-сводка (как у заказов) ---------- */
 
-const TONE: Record<'blue' | 'green' | 'red', string> = {
-  blue: 'bg-primary/10 text-primary',
-  green: 'bg-success/10 text-success',
-  red: 'bg-danger/10 text-danger',
-};
-
-function StatCard({
-  tone,
-  icon,
-  label,
-  value,
-}: {
-  tone: 'blue' | 'green' | 'red';
-  icon: JSX.Element;
-  label: string;
-  value: string;
-}) {
+function Sum({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="card flex items-center gap-3 p-4">
-      <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${TONE[tone]}`}>{icon}</div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[12px] leading-tight text-text-muted">{label}</p>
-        <p className="mt-1 text-[22px] font-semibold leading-none text-text-primary">{value}</p>
-      </div>
-    </div>
+    <span>
+      {label}: <span className="font-medium text-text-primary">{value}</span>
+    </span>
   );
+}
+function Sep() {
+  return <span className="text-text-light">|</span>;
 }
 
 /* ---------- Панель и компактная таблица ---------- */
@@ -677,14 +642,17 @@ function HourlyChart({
   if (!data.some((h) => h.count > 0)) {
     return <p className="py-12 text-center text-sm text-text-muted">Нет данных за период</p>;
   }
-  // Подписи по оси X прореживаем (каждый 3-й час), чтобы не наезжали.
+  // Сверху над столбцом — количество, снизу — час (ось времени).
   return (
     <div className="w-full">
       <div className="flex items-stretch gap-[3px]" style={{ height }}>
         {data.map((h) => {
           const hPct = (h.count / max) * 100;
           return (
-            <div key={h.hour} className="group flex flex-1 flex-col justify-end">
+            <div key={h.hour} className="group flex flex-1 flex-col items-center justify-end">
+              {h.count > 0 && (
+                <span className="mb-1 text-[10px] font-medium leading-none text-text-secondary">{h.count}</span>
+              )}
               <div
                 className="w-full rounded-t-[3px] bg-primary/85 transition-colors group-hover:bg-primary"
                 style={{ height: `${h.count > 0 ? Math.max(4, hPct) : 0}%` }}
@@ -697,40 +665,11 @@ function HourlyChart({
       <div className="mt-1.5 flex gap-[3px]">
         {data.map((h) => (
           <div key={h.hour} className="flex-1 text-center text-[10px] leading-none text-text-light">
-            {h.hour % 3 === 0 ? String(h.hour).padStart(2, '0') : ''}
+            {String(h.hour).padStart(2, '0')}
           </div>
         ))}
       </div>
       <span className="sr-only">{barCount} часов</span>
     </div>
-  );
-}
-
-/* ---------- Иконки ---------- */
-
-function IconPrepared() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 11h18" />
-      <path d="M12 2a9 9 0 0 1 9 9H3a9 9 0 0 1 9-9Z" />
-      <path d="M5 18h14" />
-      <path d="M7 21h10" />
-    </svg>
-  );
-}
-function IconReject() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M15 9l-6 6M9 9l6 6" />
-    </svg>
-  );
-}
-function IconClock() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
-    </svg>
   );
 }
