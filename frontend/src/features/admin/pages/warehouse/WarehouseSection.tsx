@@ -41,7 +41,7 @@ export function WarehouseSection() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border pb-px">
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-nowrap gap-0.5">
           {TABS.map((t) => (
             <Tab key={t.key} active={tab === t.key} onClick={() => setTab(t.key)}>
               {t.label}
@@ -75,7 +75,7 @@ function Tab({ active, onClick, children }: { active: boolean; onClick: () => vo
   return (
     <button
       onClick={onClick}
-      className={`shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+      className={`shrink-0 whitespace-nowrap border-b-2 px-3 py-2.5 text-sm font-medium transition-colors sm:px-4 ${
         active
           ? 'border-primary text-primary'
           : 'border-transparent text-text-secondary hover:text-text-primary'
