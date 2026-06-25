@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { OrderItemStatus, OrderStatus, PrepStation } from '@prisma/client';
+import { KitchenEventType, OrderItemStatus, OrderStatus, PrepStation } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { orderInclude } from '../orders/order.helpers';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -26,6 +26,33 @@ function startOfToday() {
   const s = new Date();
   s.setHours(0, 0, 0, 0);
   return s;
+}
+
+function startOfDay(d: Date) {
+  const s = new Date(d);
+  s.setHours(0, 0, 0, 0);
+  return s;
+}
+
+function addDays(d: Date, days: number) {
+  const next = new Date(d);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function parseDate(value: string | undefined, fallback: Date) {
+  if (!value) return fallback;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? fallback : parsed;
+}
+
+export type KitchenStatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
+
+/** Имя позиции с вариантом: «Капучино · 0.4 л». */
+function itemName(it: { dishNameSnapshot: string; dishVariantNameSnapshot: string | null }) {
+  return it.dishVariantNameSnapshot
+    ? `${it.dishNameSnapshot} · ${it.dishVariantNameSnapshot}`
+    : it.dishNameSnapshot;
 }
 
 type StationItem = { status: OrderItemStatus };
@@ -202,5 +229,205 @@ export class KitchenService {
     }
 
     return this.getStopList();
+  }
+
+  /** Диапазон периода статистики кухни. Для «всё время» нижней границы нет. */
+  private resolveStatsRange(
+    period: KitchenStatsPeriod,
+    from?: string,
+    to?: string,
+  ): { from: Date | null; to: Date | null } {
+    const today = startOfToday();
+    const endOfToday = addDays(today, 1);
+    if (period === 'today') return { from: today, to: endOfToday };
+    if (period === 'week') return { from: addDays(today, -6), to: endOfToday };
+    if (period === 'month') return { from: addDays(today, -29), to: endOfToday };
+    if (period === 'custom') {
+      return {
+        from: startOfDay(parseDate(from, addDays(today, -6))),
+        to: addDays(startOfDay(parseDate(to, today)), 1),
+      };
+    }
+    return { from: null, to: null };
+  }
+
+  /**
+   * Статистика станции (кухня/бар): приготовленные блюда, время приготовления,
+   * отказы и распределение по часам — за выбранный период.
+   *
+   * Время приготовления позиции = момент готовности (событие ready_item) минус
+   * момент принятия заказа станцией (первое событие accept по заказу).
+   */
+  async statistics(
+    period: KitchenStatsPeriod = 'today',
+    from: string | undefined,
+    to: string | undefined,
+    station: PrepStation = PrepStation.kitchen,
+  ) {
+    const range = this.resolveStatsRange(period, from, to);
+    const createdAtWhere =
+      range.from || range.to ? { gte: range.from ?? undefined, lt: range.to ?? undefined } : undefined;
+
+    // Готовые позиции за период (по событиям). Дедупликация по позиции — берём
+    // последний момент готовности (актуально для сетов, где состав отмечают по частям).
+    const readyEvents = await this.prisma.kitchenEvent.findMany({
+      where: { type: KitchenEventType.ready_item, orderItemId: { not: null }, createdAt: createdAtWhere },
+      select: { orderItemId: true, orderId: true, createdAt: true },
+    });
+    const readyByItem = new Map<string, Date>();
+    const orderIds = new Set<string>();
+    for (const e of readyEvents) {
+      const id = e.orderItemId!;
+      const cur = readyByItem.get(id);
+      if (!cur || e.createdAt > cur) readyByItem.set(id, e.createdAt);
+      orderIds.add(e.orderId);
+    }
+
+    // Момент принятия заказа станцией — первое событие accept по заказу.
+    const acceptEvents = orderIds.size
+      ? await this.prisma.kitchenEvent.findMany({
+          where: { type: KitchenEventType.accept, orderId: { in: [...orderIds] } },
+          select: { orderId: true, createdAt: true },
+        })
+      : [];
+    const acceptByOrder = new Map<string, Date>();
+    for (const e of acceptEvents) {
+      const cur = acceptByOrder.get(e.orderId);
+      if (!cur || e.createdAt < cur) acceptByOrder.set(e.orderId, e.createdAt);
+    }
+
+    // Позиции станции (исключаем отказанные/отменённые).
+    const items = readyByItem.size
+      ? await this.prisma.orderItem.findMany({
+          where: {
+            id: { in: [...readyByItem.keys()] },
+            prepStation: station,
+            status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] },
+          },
+          select: {
+            id: true,
+            orderId: true,
+            dishNameSnapshot: true,
+            dishVariantNameSnapshot: true,
+            finalPrice: true,
+            quantity: true,
+          },
+        })
+      : [];
+
+    type DishAgg = {
+      name: string;
+      count: number;
+      revenue: number;
+      timedSum: number;
+      timedCount: number;
+      minMs: number;
+      maxMs: number;
+    };
+    const dishMap = new Map<string, DishAgg>();
+    const hourly = Array.from({ length: 24 }, (_, hour) => ({ hour, count: 0, revenue: 0 }));
+    // Количество приготовленных по дням — для «в среднем в день» и «максимум за день».
+    const preparedPerDay = new Map<string, number>();
+    let preparedTotal = 0;
+    let revenueTotal = 0;
+    let prepSum = 0;
+    let prepCount = 0;
+
+    for (const it of items) {
+      const name = itemName(it);
+      const revenue = Number(it.finalPrice);
+      const readyAt = readyByItem.get(it.id)!;
+      const acceptAt = acceptByOrder.get(it.orderId);
+      const ms = acceptAt ? readyAt.getTime() - acceptAt.getTime() : -1;
+      const timed = ms >= 0;
+
+      const cur =
+        dishMap.get(name) ??
+        { name, count: 0, revenue: 0, timedSum: 0, timedCount: 0, minMs: Infinity, maxMs: 0 };
+      cur.count += it.quantity;
+      cur.revenue += revenue;
+      if (timed) {
+        cur.timedSum += ms;
+        cur.timedCount += 1;
+        cur.minMs = Math.min(cur.minMs, ms);
+        cur.maxMs = Math.max(cur.maxMs, ms);
+      }
+      dishMap.set(name, cur);
+
+      preparedTotal += it.quantity;
+      revenueTotal += revenue;
+      const day = `${readyAt.getFullYear()}-${readyAt.getMonth()}-${readyAt.getDate()}`;
+      preparedPerDay.set(day, (preparedPerDay.get(day) ?? 0) + it.quantity);
+      if (timed) {
+        prepSum += ms;
+        prepCount += 1;
+      }
+
+      const h = readyAt.getHours();
+      hourly[h].count += it.quantity;
+      hourly[h].revenue += revenue;
+    }
+
+    const toMin = (ms: number) => Math.round(ms / 60000);
+    const dishes = [...dishMap.values()].map((d) => ({
+      name: d.name,
+      count: d.count,
+      revenue: d.revenue,
+      avgMin: d.timedCount > 0 ? toMin(d.timedSum / d.timedCount) : 0,
+      minMin: d.timedCount > 0 ? toMin(d.minMs) : 0,
+      maxMin: d.timedCount > 0 ? toMin(d.maxMs) : 0,
+      timed: d.timedCount > 0,
+    }));
+
+    // Отказы по блюдам станции — события reject_item за период.
+    const rejectEvents = await this.prisma.kitchenEvent.findMany({
+      where: { type: KitchenEventType.reject_item, orderItemId: { not: null }, createdAt: createdAtWhere },
+      select: { orderItemId: true },
+    });
+    const rejectIds = [...new Set(rejectEvents.map((e) => e.orderItemId!))];
+    const rejectItemsList = rejectIds.length
+      ? await this.prisma.orderItem.findMany({
+          where: { id: { in: rejectIds }, prepStation: station },
+          select: { id: true, dishNameSnapshot: true, dishVariantNameSnapshot: true },
+        })
+      : [];
+    const rejectNameById = new Map(rejectItemsList.map((it) => [it.id, itemName(it)]));
+    const rejectMap = new Map<string, number>();
+    let rejectionsTotal = 0;
+    for (const e of rejectEvents) {
+      const name = rejectNameById.get(e.orderItemId!);
+      if (!name) continue; // позиция не этой станции
+      rejectMap.set(name, (rejectMap.get(name) ?? 0) + 1);
+      rejectionsTotal += 1;
+    }
+    const rejections = [...rejectMap.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+
+    const activeDays = preparedPerDay.size;
+    const prepared = {
+      total: preparedTotal,
+      avgPerDay: activeDays > 0 ? Math.round(preparedTotal / activeDays) : 0,
+      uniqueDishes: dishMap.size,
+      maxPerDay: activeDays > 0 ? Math.max(...preparedPerDay.values()) : 0,
+    };
+
+    return {
+      cards: {
+        revenue: revenueTotal,
+        prepared: preparedTotal,
+        rejections: rejectionsTotal,
+        avgPrepMin: prepCount > 0 ? toMin(prepSum / prepCount) : 0,
+      },
+      prepared,
+      dishes,
+      rejections,
+      hourly,
+      period,
+      range: {
+        from: range.from?.toISOString() ?? null,
+        to: range.to?.toISOString() ?? null,
+      },
+    };
   }
 }

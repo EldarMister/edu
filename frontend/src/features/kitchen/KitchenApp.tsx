@@ -12,6 +12,7 @@ import { useKitchenOrders, useAccept, useReadyItems, useRejectItems, type Kitche
 import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
 import { KitchenVoiceSettings } from './KitchenVoiceSettings';
+import { KitchenStats } from './KitchenStats';
 
 const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'new', label: 'Новые' },
@@ -54,6 +55,7 @@ export function KitchenApp({
   const pushNotifications = usePushNotifications(user?.role === 'KITCHEN' || user?.role === 'BAR');
 
   const [tab, setTab] = useState<KitchenTab>('new');
+  const [showStats, setShowStats] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [actingId, setActingId] = useState<string | null>(null);
   const [stopListOpen, setStopListOpen] = useState(false);
@@ -170,19 +172,32 @@ export function KitchenApp({
           {TABS.map((t) => (
             <button
               key={t.key}
-              onClick={() => setTab(t.key)}
+              onClick={() => {
+                setTab(t.key);
+                setShowStats(false);
+              }}
               className={`shrink-0 rounded-lg px-4 py-2 text-[15px] font-medium transition-colors ${
-                tab === t.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
+                !showStats && tab === t.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
               }`}
             >
               {t.label}
-              {tab === t.key && counts > 0 && (
+              {!showStats && tab === t.key && counts > 0 && (
                 <span className="ml-2 rounded-full bg-white/25 px-1.5 text-xs">{counts}</span>
               )}
             </button>
           ))}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={() => setShowStats((v) => !v)}
+            className={`shrink-0 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
+              showStats
+                ? 'border-primary bg-primary text-white'
+                : 'border-primary bg-white text-primary hover:bg-primary/5'
+            }`}
+          >
+            Статистика
+          </button>
           <KitchenVoiceSettings />
           <button
             onClick={() => setStopListOpen(true)}
@@ -193,7 +208,13 @@ export function KitchenApp({
         </div>
       </div>
 
-      {/* Лента заказов */}
+      {/* Статистика кухни */}
+      {showStats ? (
+        <main className="flex-1 overflow-y-auto">
+          <KitchenStats station={station} />
+        </main>
+      ) : (
+      /* Лента заказов */
       <main className="flex-1 overflow-y-auto p-4 sm:p-5">
         {ordersQ.isLoading ? (
           <div className="flex justify-center py-16 text-primary">
@@ -233,6 +254,7 @@ export function KitchenApp({
           </div>
         )}
       </main>
+      )}
 
       {/* Нижний блок отмены действия с таймером */}
       {pending && (

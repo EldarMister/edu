@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { PrepStation, Role } from '@prisma/client';
-import { KitchenService, KitchenTab } from './kitchen.service';
+import { KitchenService, KitchenStatsPeriod, KitchenTab } from './kitchen.service';
 import { OrdersService } from '../orders/orders.service';
 import { RejectDto } from './dto/reject.dto';
 import { ReadyItemsDto, RejectItemsDto } from './dto/batch.dto';
@@ -24,6 +24,16 @@ export class KitchenController {
   @Get('orders')
   list(@Query('tab') tab: KitchenTab = 'new', @Query('station') station?: string) {
     return this.kitchen.findByTab(tab, this.parseStation(station));
+  }
+
+  @Get('statistics')
+  statistics(
+    @Query('period') period: KitchenStatsPeriod = 'today',
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('station') station?: string,
+  ) {
+    return this.kitchen.statistics(period, from, to, this.parseStation(station));
   }
 
   @Get('stop-list')
