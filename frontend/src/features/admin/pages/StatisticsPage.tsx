@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { money } from '@/lib/format';
 import type { PaymentMethod } from '@/types';
@@ -50,6 +51,7 @@ export function StatisticsPage() {
   const [period, setPeriod] = useState<StatsPeriod>('week');
   const [from, setFrom] = useState(weekAgo);
   const [to, setTo] = useState(today);
+  const [viewAll, setViewAll] = useState<{ title: string; columns: Col[]; rows: string[][] } | null>(null);
   const statsQ = useStatistics({
     period,
     from: period === 'custom' ? from : undefined,
@@ -174,25 +176,61 @@ export function StatisticsPage() {
                 </tbody>
               </table>
             </Panel>
-            <Panel title={PREPARED_LABEL[period]}>
-              <MiniTable
-                columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }]}
-                rows={d.prepared.dishes.map((x) => [x.name, `${x.count} шт`])}
-                empty="Нет приготовленных блюд за период"
-              />
-            </Panel>
-            <Panel title="Продано напитков">
-              <MiniTable
-                columns={[{ label: 'Напиток' }, { label: 'Кол-во', align: 'right' }]}
-                rows={d.drinks.dishes.map((x) => [x.name, `${x.count} шт`])}
-                footer={['Итого', `${d.drinks.total} шт`]}
-                empty="Нет продаж напитков за период"
-              />
-            </Panel>
+            <ListCard
+              title={PREPARED_LABEL[period]}
+              columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }]}
+              rows={d.prepared.dishes.map((x) => [x.name, `${x.count} шт`])}
+              empty="Нет приготовленных блюд за период"
+              onViewAll={setViewAll}
+            />
+            <ListCard
+              title="Продано напитков"
+              columns={[{ label: 'Напиток' }, { label: 'Кол-во', align: 'right' }]}
+              rows={d.drinks.dishes.map((x) => [x.name, `${x.count} шт`])}
+              empty="Нет продаж напитков за период"
+              onViewAll={setViewAll}
+            />
           </div>
         </>
       )}
+
+      <Modal open={!!viewAll} onClose={() => setViewAll(null)} title={viewAll?.title} panelClassName="max-w-md">
+        {viewAll && <MiniTable columns={viewAll.columns} rows={viewAll.rows} empty="—" />}
+      </Modal>
     </div>
+  );
+}
+
+/* ---------- Карточка-список с «Смотреть все» ---------- */
+
+const LIST_LIMIT = 6;
+
+function ListCard({
+  title,
+  columns,
+  rows,
+  empty,
+  onViewAll,
+}: {
+  title: string;
+  columns: Col[];
+  rows: string[][];
+  empty: string;
+  onViewAll: (v: { title: string; columns: Col[]; rows: string[][] }) => void;
+}) {
+  return (
+    <Panel title={title}>
+      <MiniTable columns={columns} rows={rows.slice(0, LIST_LIMIT)} empty={empty} />
+      {rows.length > LIST_LIMIT && (
+        <button
+          type="button"
+          onClick={() => onViewAll({ title, columns, rows })}
+          className="mt-3 text-sm font-medium text-primary hover:underline"
+        >
+          Смотреть все
+        </button>
+      )}
+    </Panel>
   );
 }
 
