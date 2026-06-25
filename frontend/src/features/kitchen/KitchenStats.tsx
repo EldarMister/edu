@@ -25,6 +25,15 @@ const PERIOD_LABEL: Record<KitchenStatsPeriod, string> = {
   custom: 'Период',
 };
 
+// Заголовок списка приготовленных блюд зависит от выбранного периода (как у владельца).
+const PREPARED_LABEL: Record<KitchenStatsPeriod, string> = {
+  today: 'Приготовлено сегодня',
+  week: 'Приготовлено за неделю',
+  month: 'Приготовлено за месяц',
+  all: 'Приготовлено за всё время',
+  custom: 'Приготовлено за период',
+};
+
 function minutes(n: number) {
   return `${n} мин`;
 }
@@ -92,7 +101,7 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
   const [to, setTo] = useState(today);
 
   const [longOpen, setLongOpen] = useState(false);
-  const [topOpen, setTopOpen] = useState(false);
+  const [preparedOpen, setPreparedOpen] = useState(false);
   const [hourlyOpen, setHourlyOpen] = useState(false);
 
   const statsQ = useKitchenStats(
@@ -109,8 +118,8 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
     () => (d ? [...d.dishes].filter((x) => x.timed).sort((a, b) => a.avgMin - b.avgMin) : []),
     [d],
   );
-  const topRevenue = useMemo(
-    () => (d ? [...d.dishes].sort((a, b) => b.revenue - a.revenue) : []),
+  const preparedDishes = useMemo(
+    () => (d ? [...d.dishes].sort((a, b) => b.count - a.count) : []),
     [d],
   );
 
@@ -131,13 +140,7 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
       ) : (
         <>
           {/* Карточки-метрики */}
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard
-              tone="blue"
-              icon={<IconRevenue />}
-              label="Выручка приготовленных блюд"
-              value={money(d.cards.revenue)}
-            />
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <StatCard tone="green" icon={<IconPrepared />} label="Приготовлено блюд" value={String(d.cards.prepared)} />
             <StatCard tone="red" icon={<IconReject />} label="Отказов" value={String(d.cards.rejections)} />
             <StatCard
@@ -164,11 +167,14 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
                 empty="Нет данных за период"
               />
             </Panel>
-            <Panel title="Топ блюд по выручке" onViewAll={topRevenue.length ? () => setTopOpen(true) : undefined}>
+            <Panel
+              title={PREPARED_LABEL[period]}
+              onViewAll={preparedDishes.length ? () => setPreparedOpen(true) : undefined}
+            >
               <MiniTable
-                columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }, { label: 'Выручка', align: 'right' }]}
-                rows={topRevenue.slice(0, 6).map((x) => [x.name, `${x.count} шт`, money(x.revenue)])}
-                empty="Нет продаж за период"
+                columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }]}
+                rows={preparedDishes.slice(0, 6).map((x) => [x.name, `${x.count} шт`])}
+                empty="Нет приготовленных блюд за период"
               />
             </Panel>
           </div>
@@ -224,11 +230,12 @@ export function KitchenStats({ station = 'kitchen' }: { station?: PrepStation })
           onClose={() => setLongOpen(false)}
         />
       )}
-      {topOpen && d && (
-        <TopRevenuePanel
-          dishes={topRevenue}
-          totalRevenue={d.cards.revenue}
-          onClose={() => setTopOpen(false)}
+      {preparedOpen && d && (
+        <PreparedDishesModal
+          dishes={preparedDishes}
+          title={PREPARED_LABEL[period]}
+          periodLabel={PERIOD_LABEL[period]}
+          onClose={() => setPreparedOpen(false)}
         />
       )}
       {hourlyOpen && (
@@ -474,100 +481,77 @@ function Pagination({ page, pages, onChange }: { page: number; pages: number; on
   );
 }
 
-/* ---------- Правая панель «Топ блюд по выручке» ---------- */
+/* ---------- Модалка «Приготовлено за период» (как у владельца) ---------- */
 
-type SortKey = 'revenue' | 'count' | 'name';
-
-function TopRevenuePanel({
+function PreparedDishesModal({
   dishes,
-  totalRevenue,
+  title,
+  periodLabel,
   onClose,
 }: {
   dishes: KitchenStatsDish[];
-  totalRevenue: number;
+  title: string;
+  periodLabel: string;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<SortKey>('revenue');
+  const [page, setPage] = useState(1);
 
-  const rows = useMemo(() => {
+  const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = q ? dishes.filter((x) => x.name.toLowerCase().includes(q)) : dishes;
-    const sorted = [...list];
-    if (sort === 'revenue') sorted.sort((a, b) => b.revenue - a.revenue);
-    else if (sort === 'count') sorted.sort((a, b) => b.count - a.count);
-    else sorted.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
-    return sorted;
-  }, [dishes, search, sort]);
+    return q ? dishes.filter((x) => x.name.toLowerCase().includes(q)) : dishes;
+  }, [dishes, search]);
 
-  const totalCount = rows.reduce((s, x) => s + x.count, 0);
-  const total = totalRevenue || 1;
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const current = Math.min(page, pages);
+  const rows = filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
+  const totalCount = filtered.reduce((s, x) => s + x.count, 0);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
-      <aside className="relative z-10 flex h-full w-full max-w-[560px] flex-col bg-white shadow-soft">
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-5 py-4">
-          <h2 className="text-lg font-semibold text-text-primary">Топ блюд по выручке</h2>
-          <button
-            onClick={onClose}
-            aria-label="Закрыть"
-            className="-mr-1 text-text-light transition-colors hover:text-text-secondary"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <div className="modal-backdrop z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+      <div className="absolute inset-0" onClick={onClose} aria-hidden />
+      <div
+        className="card relative z-10 flex w-full flex-col rounded-b-none sm:max-w-xl sm:rounded-2xl"
+        style={{ maxHeight: 'calc(92dvh - env(safe-area-inset-bottom, 0px))' }}
+      >
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-5 py-3">
+          <div>
+            <h3 className="text-base font-semibold text-text-primary">{title}</h3>
+            <p className="mt-0.5 text-xs text-text-muted">{periodLabel}</p>
+          </div>
+          <button onClick={onClose} className="text-text-light hover:text-text-secondary" aria-label="Закрыть">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2 px-5 py-3">
+        <div className="shrink-0 px-4 py-3">
           <input
-            className="input min-w-0 flex-1"
-            placeholder="Поиск блюда"
+            className="input"
+            placeholder="Поиск по блюду"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPage(1);
+            }}
           />
-          <select
-            className="input h-10 w-[160px]"
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
-          >
-            <option value="revenue">По выручке</option>
-            <option value="count">По количеству</option>
-            <option value="name">По названию</option>
-          </select>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-4">
           <MiniTable
-            columns={[
-              { label: 'Блюдо' },
-              { label: 'Кол-во', align: 'right' },
-              { label: 'Выручка', align: 'right' },
-              { label: 'Средняя цена', align: 'right' },
-              { label: '% от выручки', align: 'right' },
-            ]}
-            rows={rows.map((x) => [
-              x.name,
-              `${x.count} шт`,
-              money(x.revenue),
-              money(x.count > 0 ? x.revenue / x.count : 0),
-              `${Math.round((x.revenue / total) * 100)}%`,
-            ])}
+            columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }]}
+            rows={rows.map((x) => [x.name, `${x.count} шт`])}
+            footer={['Итого', `${totalCount} шт`]}
             empty="Ничего не найдено"
           />
         </div>
 
-        <div className="shrink-0 border-t border-border px-5 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
-          <div className="flex items-center justify-between text-sm font-semibold text-text-primary">
-            <span>Итого</span>
-            <span className="flex gap-6">
-              <span>{totalCount} шт</span>
-              <span>{money(rows.reduce((s, x) => s + x.revenue, 0))}</span>
-            </span>
-          </div>
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+          <span className="text-xs text-text-muted">Всего блюд: {filtered.length}</span>
+          <Pagination page={current} pages={pages} onChange={setPage} />
         </div>
-      </aside>
+      </div>
     </div>
   );
 }
@@ -696,14 +680,14 @@ function HourlyChart({
   // Подписи по оси X прореживаем (каждый 3-й час), чтобы не наезжали.
   return (
     <div className="w-full">
-      <div className="flex items-end gap-[3px]" style={{ height }}>
+      <div className="flex items-stretch gap-[3px]" style={{ height }}>
         {data.map((h) => {
           const hPct = (h.count / max) * 100;
           return (
-            <div key={h.hour} className="group relative flex flex-1 flex-col items-center justify-end">
+            <div key={h.hour} className="group flex flex-1 flex-col justify-end">
               <div
                 className="w-full rounded-t-[3px] bg-primary/85 transition-colors group-hover:bg-primary"
-                style={{ height: `${Math.max(h.count > 0 ? 4 : 0, hPct)}%` }}
+                style={{ height: `${h.count > 0 ? Math.max(4, hPct) : 0}%` }}
                 title={`${String(h.hour).padStart(2, '0')}:00 — ${h.count} шт${showRevenueAxis ? `, ${money(h.revenue)}` : ''}`}
               />
             </div>
@@ -724,14 +708,6 @@ function HourlyChart({
 
 /* ---------- Иконки ---------- */
 
-function IconRevenue() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <line x1="12" y1="1" x2="12" y2="23" />
-      <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-    </svg>
-  );
-}
 function IconPrepared() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
