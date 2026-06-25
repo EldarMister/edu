@@ -21,9 +21,6 @@ const ACTIVE_TAB_STATUSES: OrderStatus[] = [
   OrderStatus.served,
 ];
 
-/** Отказанные заказы видны в ленте кухни только последние 24 часа. */
-const KITCHEN_HISTORY_WINDOW_MS = 24 * 60 * 60 * 1000;
-
 /** Начало сегодняшнего дня (локальное время сервера) — как в статистике «сегодня». */
 function startOfToday() {
   const s = new Date();
@@ -78,17 +75,18 @@ export class KitchenService {
   ) {}
 
   async findByTab(tab: KitchenTab, station: PrepStation = PrepStation.kitchen) {
-    const historyCutoff = new Date(Date.now() - KITCHEN_HISTORY_WINDOW_MS);
+    const todayStart = startOfToday();
 
     if (tab === 'rejected') {
+      // Отказанные — как и завершённые: только за сегодня, недавние сверху.
       const orders = await this.prisma.order.findMany({
         where: { status: OrderStatus.rejected, items: { some: { prepStation: station } } },
-        orderBy: { createdAt: 'asc' },
         include: orderInclude,
       });
       return orders
-        .filter((o) => isRecentKitchenHistory(o, historyCutoff))
-        .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }));
+        .filter((o) => isRecentKitchenHistory(o, todayStart))
+        .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }))
+        .sort((a, b) => kitchenHistoryAt(b).getTime() - kitchenHistoryAt(a).getTime());
     }
 
     const statusWhere =
@@ -118,7 +116,6 @@ export class KitchenService {
     // Оставляем только позиции станции и раскладываем по вкладке станции.
     // Оплаченные заказы (все позиции готовы/поданы) попадают в «Завершённые».
     // Завершённые показываем только за сегодня и сортируем: недавние сверху, старые снизу.
-    const todayStart = startOfToday();
     const list = orders
       .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }))
       .filter((o) => o.status === OrderStatus.paid ? tab === 'ready' : stationTabOf(o.items) === tab)
