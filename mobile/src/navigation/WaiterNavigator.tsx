@@ -1,4 +1,5 @@
 import React from 'react';
+import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,9 +29,11 @@ export function WaiterNavigator() {
   ).length;
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.white }} edges={['top']}>
-      <OfflineBanner />
-      <WaiterHeader />
+    // Верхний инсет (область строки состояния) синий — как в PWA; шапка ниже белая.
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.primary }} edges={['top']}>
+      <View style={{ flex: 1, backgroundColor: colors.white }}>
+        <OfflineBanner />
+        <WaiterHeader />
       <Tab.Navigator
         screenOptions={({ route }) => ({
           headerShown: false,
@@ -56,6 +59,7 @@ export function WaiterNavigator() {
         />
         <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Профиль' }} />
       </Tab.Navigator>
+      </View>
     </SafeAreaView>
   );
 }

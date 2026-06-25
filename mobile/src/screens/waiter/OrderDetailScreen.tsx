@@ -205,11 +205,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.lg,
   },
-  itemName: { flex: 1, fontSize: fontSize.md, color: colors.textPrimary },
+  // PWA OrderPanel: имя text-[15px], ×qty text-sm secondary, цена text-[15px] medium.
+  itemName: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary },
   itemRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
-  itemQty: { fontSize: fontSize.base, color: colors.textMuted },
-  itemRight: { alignItems: 'flex-end', gap: 2, minWidth: 72 },
-  itemPrice: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+  itemQty: { fontSize: 14, color: colors.textSecondary },
+  itemRight: { alignItems: 'flex-end', gap: 2, minWidth: 80 },
+  itemPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   itemDone: { fontSize: fontSize.sm, color: colors.success, fontWeight: '600' },
   itemRejected: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '600' },
   footer: {

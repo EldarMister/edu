@@ -75,14 +75,15 @@ const styles = StyleSheet.create({
   },
   handleWrap: { paddingTop: 10, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300 },
-  sheetTitle: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  sheetTitle: { fontSize: fontSize.xl, fontWeight: '600', color: colors.textPrimary },
+  // PWA Modal header: px-5 py-3, заголовок text-base font-semibold (16/600).
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: 20,
     paddingVertical: spacing.md,
   },
   title: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },

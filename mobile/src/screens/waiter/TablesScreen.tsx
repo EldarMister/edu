@@ -149,7 +149,8 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
   panel: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
-  panelTitle: { fontSize: 24, fontWeight: '700', color: colors.textPrimary },
+  // PWA Panel title: text-lg font-semibold (18/600).
+  panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   editBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -178,8 +179,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tableSelected: { backgroundColor: 'rgba(0,91,255,0.9)', borderColor: 'rgba(0,91,255,0.9)', ...softShadow },
-  dot: { position: 'absolute', right: 12, top: 12, width: 13, height: 13, borderRadius: 7 },
-  tableNumber: { fontSize: 38, fontWeight: '600', color: colors.textPrimary },
+  // PWA: точка right-2 top-2 h-2.5 w-2.5 (10px). Цифра — text-2xl (24/500) как в PWA TablesGrid.
+  dot: { position: 'absolute', right: 8, top: 8, width: 10, height: 10, borderRadius: 5 },
+  tableNumber: { fontSize: 24, fontWeight: '500', color: colors.textPrimary },
 
   legend: {
     flexDirection: 'row',

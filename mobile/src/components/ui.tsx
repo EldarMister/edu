@@ -225,7 +225,7 @@ export function SegmentTabs<T extends string>({
   );
 }
 
-/** Круглая кнопка ±, как в корзине PWA (dec красная, inc синяя). */
+/** Круглая кнопка ± — PWA CartItems RoundBtn: h-7 w-7 (28), dec красная, inc синяя. */
 export function RoundBtn({ kind, onPress }: { kind: 'inc' | 'dec'; onPress: () => void }) {
   const isDec = kind === 'dec';
   return (
@@ -239,6 +239,18 @@ export function RoundBtn({ kind, onPress }: { kind: 'inc' | 'dec'; onPress: () =
       <Text style={[styles.roundBtnText, { color: isDec ? colors.red500 : colors.primary }]}>
         {isDec ? '−' : '+'}
       </Text>
+    </Pressable>
+  );
+}
+
+/** Тумблер — PWA TakeawaySwitch: трек h-5 w-9 (20×36), бегунок h-4 w-4 (16). */
+export function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <Pressable
+      onPress={() => onChange(!value)}
+      style={[styles.toggleTrack, { backgroundColor: value ? colors.primary : colors.slate300 }]}
+    >
+      <View style={[styles.toggleKnob, { transform: [{ translateX: value ? 18 : 2 }] }]} />
     </Pressable>
   );
 }
@@ -279,20 +291,23 @@ const styles = StyleSheet.create({
   muted: { color: colors.textMuted, fontSize: fontSize.base, textAlign: 'center' },
 
   pillRow: { gap: spacing.sm, paddingVertical: 2 },
+  // Пилюля = PWA CatTab/hall tab: rounded-lg px-3.5 py-2 text-sm font-medium, shrink-0.
   pill: {
-    paddingHorizontal: 18,
-    paddingVertical: 11,
-    borderRadius: radius.md,
+    flexShrink: 0,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: radius.sm,
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.border,
   },
   pillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  pillText: { fontSize: fontSize.base, color: colors.textSecondary, fontWeight: '600' },
+  pillText: { fontSize: 14, color: colors.textSecondary, fontWeight: '500' },
   pillTextActive: { color: colors.white },
 
   segmentRow: { gap: spacing.sm, paddingVertical: 2 },
   segment: {
+    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -307,13 +322,26 @@ const styles = StyleSheet.create({
   segmentCountText: { color: colors.white, fontSize: fontSize.xs },
 
   roundBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    borderWidth: 1.5,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  roundBtnText: { fontSize: 22, fontWeight: '600', lineHeight: 24 },
+  roundBtnText: { fontSize: 17, fontWeight: '600', lineHeight: 19 },
+
+  toggleTrack: { width: 36, height: 20, borderRadius: 10, justifyContent: 'center' },
+  toggleKnob: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.white,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 1.5,
+    elevation: 2,
+  },
 });

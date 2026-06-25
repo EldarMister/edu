@@ -1,6 +1,6 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
-import { Button, RoundBtn } from '@/components/ui';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Button, RoundBtn, Toggle } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { colors, fontSize, spacing } from '@/theme';
 import { useCart, linePrice } from '@/store/cart';
@@ -46,11 +46,9 @@ export function CartSheet({
         {hasLines ? (
           <View style={styles.takeawayRow}>
             <Text style={styles.takeawayLabel}>С собой</Text>
-            <Switch
+            <Toggle
               value={allTakeaway}
-              onValueChange={(v) => lines.forEach((_, i) => setTakeaway(i, v))}
-              trackColor={{ true: colors.primary, false: colors.slate300 }}
-              thumbColor={colors.white}
+              onChange={(v) => lines.forEach((_, i) => setTakeaway(i, v))}
             />
           </View>
         ) : null}

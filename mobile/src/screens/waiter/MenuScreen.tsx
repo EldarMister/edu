@@ -8,8 +8,9 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { colors, fontSize, radius, spacing, cardShadow } from '@/theme';
 import { useCategories, useCreateOrder, useAddItems, useDishes } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
+import { notify } from '@/store/notifications';
 import { buildSetLine } from '@/utils/set';
-import { makeIdempotencyKey, money } from '@/utils/format';
+import { makeIdempotencyKey, money, pluralPositions } from '@/utils/format';
 import { apiError } from '@/lib/api';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
@@ -74,6 +75,7 @@ export function MenuScreen() {
   const onAddDish = (dish: Dish) => {
     if (dish.isSet) {
       cart.addLine(buildSetLine(dish));
+      notify(`${dish.name} добавлен`);
       return;
     }
     if (dish.variants && dish.variants.length > 0) {
@@ -81,6 +83,8 @@ export function MenuScreen() {
       return;
     }
     cart.add(dish);
+    const line = useCart.getState().lines.find((l) => l.dish.id === dish.id && !l.variant && !l.set);
+    notify(`${dish.name} ×${line?.quantity ?? 1} добавлено`);
   };
 
   const onSubmit = () => {
@@ -213,7 +217,7 @@ export function MenuScreen() {
         >
           <Ionicons name="cart-outline" size={20} color={colors.textSecondary} />
           <View>
-            <Text style={styles.cartCount}>{count} поз.</Text>
+            <Text style={styles.cartCount}>{count} {pluralPositions(count)}</Text>
             <Text style={styles.cartTotal}>{money(cart.total())}</Text>
           </View>
         </Pressable>
@@ -238,7 +242,13 @@ export function MenuScreen() {
         dish={variantDish}
         onClose={() => setVariantDish(null)}
         onAdd={(variant) => {
-          if (variantDish) cart.add(variantDish, variant);
+          if (variantDish) {
+            cart.add(variantDish, variant);
+            const line = useCart
+              .getState()
+              .lines.find((l) => l.dish.id === variantDish.id && l.variant?.id === variant.id && !l.set);
+            notify(`${variantDish.name} · ${variant.name} ×${line?.quantity ?? 1} добавлено`);
+          }
           setVariantDish(null);
         }}
       />
@@ -329,35 +339,36 @@ const styles = StyleSheet.create({
   tableChipText: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: spacing.md, paddingBottom: spacing.md },
+  // Карточка блюда — точные размеры из PWA DishMenu: h-[100px], rounded-xl, px-3 py-2.
   dish: {
-    width: '48.5%',
-    height: 140,
-    borderRadius: radius.lg,
+    width: '48%',
+    height: 100,
+    borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     ...cardShadow,
   },
   dishActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
   dishDisabled: { opacity: 0.5 },
-  dishName: { fontSize: fontSize.md, fontWeight: '500', color: colors.textPrimary, lineHeight: 21 },
-  dishSub: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 4 },
-  dishBottom: { marginTop: 'auto', flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
-  dishPrice: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  dishName: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary, lineHeight: 20 },
+  dishSub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
+  dishBottom: { marginTop: 'auto', paddingTop: 8, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  dishPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   qtyBadge: {
-    minWidth: 32,
-    height: 32,
-    borderRadius: 16,
-    borderWidth: 1.5,
+    minWidth: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
     borderColor: colors.red400,
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
+    paddingHorizontal: 10,
   },
-  qtyBadgeText: { color: colors.red500, fontWeight: '600', fontSize: fontSize.base },
+  qtyBadgeText: { color: colors.red500, fontWeight: '600', fontSize: 14 },
   unavailable: {
     position: 'absolute',
     right: 8,
