@@ -16,13 +16,13 @@ Goal:
 RAILWAY_API_TOKEN=
 RAILWAY_PROJECT_ID=
 RAILWAY_ENVIRONMENT_ID=
-RAILWAY_TTS_SERVICE_ID=
-TTS_PUBLIC_OR_PRIVATE_HEALTH_URL=https://.../health
 ```
 
 Optional:
 
 ```env
+RAILWAY_TTS_SERVICE_ID=
+TTS_PUBLIC_OR_PRIVATE_HEALTH_URL=https://.../health
 RAILWAY_BACKEND_SERVICE_ID=
 RAILWAY_FRONTEND_SERVICE_ID=
 BACKEND_PUBLIC_OR_PRIVATE_HEALTH_URL=https://.../api/health
@@ -56,7 +56,7 @@ Use the same source directory (`tts-scheduler`) for cron jobs:
 
 | Job | Targets | Action | Cron schedule |
 | --- | --- | --- | --- |
-| tts wake | `SCHEDULER_TARGETS=tts` | `SCHEDULER_ACTION=wake` | `0 3 * * *` |
+| tts wake | `SCHEDULER_TARGETS=tts` | `SCHEDULER_ACTION=wake` | `0 5 * * *` |
 | tts night | `SCHEDULER_TARGETS=tts` | `SCHEDULER_ACTION=night` | `10 18 * * *` |
 | app wake | `SCHEDULER_TARGETS=backend,frontend` | `SCHEDULER_ACTION=wake` | `0 3 * * *` |
 | app night | `SCHEDULER_TARGETS=backend,frontend` | `SCHEDULER_ACTION=night` | `0 19 * * *` |
@@ -64,6 +64,7 @@ Use the same source directory (`tts-scheduler`) for cron jobs:
 Railway cron schedules are UTC. In Asia/Bishkek:
 
 - `0 3 * * *` is 09:00.
+- `0 5 * * *` is 11:00.
 - `10 18 * * *` is 00:10.
 - `0 19 * * *` is 01:00 on the next local day.
 
