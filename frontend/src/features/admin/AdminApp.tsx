@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/store/auth';
+import { usePermissions } from '@/hooks/usePermissions';
+import type { SectionKey } from '@/types';
 import { useT } from '@/lib/i18n';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
@@ -86,17 +88,19 @@ type Section =
   | 'reconcile'
   | 'settings';
 
-const SECTIONS: { key: Section; label: string; icon: typeof IconStats; ownerOnly?: boolean; adminOnly?: boolean }[] = [
-  { key: 'stats', label: 'Статистика', icon: IconStats, ownerOnly: true },
-  { key: 'orders', label: 'Заказы', icon: IconOrders },
-  { key: 'receipts', label: 'Печать чека', icon: IconPrinter, adminOnly: true },
-  { key: 'tables', label: 'Столы', icon: IconTables },
-  { key: 'menu', label: 'Меню', icon: IconMenu },
-  { key: 'warehouse', label: 'Склад', icon: IconWarehouse },
-  { key: 'staff', label: 'Персонал', icon: IconStaff },
-  { key: 'audit', label: 'Журнал', icon: IconJournal, ownerOnly: true },
-  { key: 'reconcile', label: 'Сверка оплат', icon: IconReconcile, ownerOnly: true },
-  { key: 'settings', label: 'Настройки', icon: IconSettings, ownerOnly: true },
+// perm — ключ права раздела (управляется через «Права доступа» сотрудника).
+// adminOnly — раздел структурно только для админа (владельцу не показываем).
+const SECTIONS: { key: Section; label: string; icon: typeof IconStats; perm: SectionKey; adminOnly?: boolean }[] = [
+  { key: 'stats', label: 'Статистика', icon: IconStats, perm: 'statistics' },
+  { key: 'orders', label: 'Заказы', icon: IconOrders, perm: 'orders' },
+  { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks', adminOnly: true },
+  { key: 'tables', label: 'Столы', icon: IconTables, perm: 'tables' },
+  { key: 'menu', label: 'Меню', icon: IconMenu, perm: 'menu' },
+  { key: 'warehouse', label: 'Склад', icon: IconWarehouse, perm: 'warehouse' },
+  { key: 'staff', label: 'Персонал', icon: IconStaff, perm: 'staff' },
+  { key: 'audit', label: 'Журнал', icon: IconJournal, perm: 'journal' },
+  { key: 'reconcile', label: 'Сверка оплат', icon: IconReconcile, perm: 'paymentReconciliation' },
+  { key: 'settings', label: 'Настройки', icon: IconSettings, perm: 'settings' },
 ];
 
 
@@ -104,12 +108,24 @@ export function AdminApp() {
   const { user, logout } = useAuth();
   const qc = useQueryClient();
   const t = useT();
+  const { canSection } = usePermissions();
   const isOwner = user?.role === 'OWNER';
   const isAdmin = user?.role === 'ADMIN';
 
-  const sections = SECTIONS.filter((s) => (!s.ownerOnly || isOwner) && (!s.adminOnly || isAdmin));
+  // Раздел в меню: структурное ограничение (adminOnly) + право доступа к разделу.
+  const sections = SECTIONS.filter((s) => {
+    if (s.adminOnly && !isAdmin) return false;
+    return canSection(s.perm);
+  });
   const [section, setSection] = useState<Section>(isOwner ? 'stats' : 'orders');
   const [mobileNav, setMobileNav] = useState(false);
+
+  // Если текущий раздел стал недоступен (право отозвали) — уходим на первый доступный.
+  useEffect(() => {
+    if (sections.length > 0 && !sections.some((s) => s.key === section)) {
+      setSection(sections[0].key);
+    }
+  }, [sections, section]);
   const invalidateReceipts = () =>
     qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
 
@@ -227,7 +243,7 @@ export function AdminApp() {
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <h1 className="text-xl font-semibold text-text-primary lg:text-2xl">{t(current.label)}</h1>
+            <h1 className="text-xl font-semibold text-text-primary lg:text-2xl">{current ? t(current.label) : ''}</h1>
           </div>
           <div className="flex items-center gap-3">
             <ConnectionStatus />
@@ -236,18 +252,40 @@ export function AdminApp() {
 
         <main className={`app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}>
 
-          {section === 'stats' && isOwner && <StatisticsPage />}
-          {section === 'orders' && <OrdersPage />}
-          {section === 'receipts' && isAdmin && <ReceiptPrintsPage />}
-          {section === 'tables' && <TablesPage />}
-          { section === 'menu' && <MenuPage /> }
-          { section === 'warehouse' && <WarehouseSection /> }
-          { section === 'staff' && <StaffPage /> }
-          { section === 'audit' && isOwner && <AuditPage /> }
-          { section === 'reconcile' && isOwner && <ReconciliationPage /> }
-          {section === 'settings' && isOwner && <SettingsPage />}
+          {!current ? (
+            <NoAccessScreen />
+          ) : (
+            <>
+              {section === 'stats' && canSection('statistics') && <StatisticsPage />}
+              {section === 'orders' && canSection('orders') && <OrdersPage />}
+              {section === 'receipts' && isAdmin && canSection('checks') && <ReceiptPrintsPage />}
+              {section === 'tables' && canSection('tables') && <TablesPage />}
+              {section === 'menu' && canSection('menu') && <MenuPage />}
+              {section === 'warehouse' && canSection('warehouse') && <WarehouseSection />}
+              {section === 'staff' && canSection('staff') && <StaffPage />}
+              {section === 'audit' && canSection('journal') && <AuditPage />}
+              {section === 'reconcile' && canSection('paymentReconciliation') && <ReconciliationPage />}
+              {section === 'settings' && canSection('settings') && <SettingsPage />}
+            </>
+          )}
         </main>
       </div>
+    </div>
+  );
+}
+
+/** Пустое состояние при отсутствии доступа к разделу. */
+function NoAccessScreen() {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
+      <div className="flex h-14 w-14 items-center justify-center rounded-full bg-background text-text-light">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="5" y="11" width="14" height="10" rx="2" />
+          <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+        </svg>
+      </div>
+      <p className="text-base font-medium text-text-primary">У вас нет доступа к этому разделу</p>
+      <p className="max-w-xs text-sm text-text-muted">Обратитесь к владельцу или администратору, чтобы открыть доступ.</p>
     </div>
   );
 }

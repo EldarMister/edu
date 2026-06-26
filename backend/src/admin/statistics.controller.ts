@@ -2,11 +2,13 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { StatisticsService } from './statistics.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { StatsQueryDto } from './dto';
 
-// Статистика — только владелец (ТЗ §7, §12: официант/админ её не видят).
+// Статистика — владелец всегда; админ — только если выдано право sections.statistics.
 @Controller('admin/statistics')
-@Roles(Role.OWNER)
+@Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.statistics')
 export class StatisticsController {
   constructor(private readonly statistics: StatisticsService) {}
 

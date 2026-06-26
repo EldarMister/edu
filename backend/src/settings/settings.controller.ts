@@ -3,6 +3,7 @@ import type { Response } from 'express';
 import { Role } from '@prisma/client';
 import { SettingsService } from './settings.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { UpdateSettingsDto } from './dto';
@@ -31,15 +32,17 @@ export class SettingsController {
     res.end(img.buffer);
   }
 
-  /** Полные настройки — только владелец. */
+  /** Полные настройки — владелец всегда; админ — по праву sections.settings. */
   @Get('admin/settings')
-  @Roles(Role.OWNER)
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('sections.settings')
   get() {
     return this.settings.get();
   }
 
   @Patch('admin/settings')
-  @Roles(Role.OWNER)
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('sections.settings')
   update(@Body() dto: UpdateSettingsDto, @CurrentUser() user: AuthUser) {
     return this.settings.update(dto, user);
   }

@@ -207,6 +207,8 @@ model User {
   pinHash      String?  @map("pin_hash")
   role         Role
   isActive     Boolean  @default(true) @map("is_active")
+  // Права доступа сотрудника (разделы/действия). null = дефолты по роли.
+  permissions  Json?    @map("permissions")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 

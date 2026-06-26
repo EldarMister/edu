@@ -312,4 +312,48 @@
   .revenue-tooltip {
     animation: revenue-tooltip-in 160ms ease-out both;
   }
+
+  /* Экран «Смена не начата»: появление логотипа, пульсация фона, успех. */
+  @keyframes shift-logo-in {
+    from {
+      transform: scale(0.85);
+      opacity: 0.5;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  @keyframes shift-halo-pulse {
+    0% {
+      transform: scale(0.82);
+      opacity: 0;
+    }
+    18% {
+      opacity: 0.45;
+    }
+    100% {
+      transform: scale(1.18);
+      opacity: 0;
+    }
+  }
+  @keyframes shift-check-pop {
+    from {
+      transform: scale(0.4);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  .animate-shift-logo-in {
+    animation: shift-logo-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .animate-shift-halo-pulse {
+    animation: shift-halo-pulse 1.8s ease-in-out infinite;
+  }
+  .animate-shift-check-pop {
+    animation: shift-check-pop 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
 }

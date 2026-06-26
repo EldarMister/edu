@@ -2,10 +2,12 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuditService } from './audit.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 
-/** Журнал действий — доступен только владельцу. Только чтение (append-only). */
+/** Журнал действий — владелец всегда; админ — по праву sections.journal. Только чтение. */
 @Controller('audit-logs')
-@Roles(Role.OWNER)
+@Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.journal')
 export class AuditController {
   constructor(private readonly audit: AuditService) {}
 

@@ -4,7 +4,13 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
-import { CreateStaffDto, ShiftHistoryQueryDto, UpdateShiftHistoryDto, UpdateStaffDto } from './dto';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { CreateStaffDto, ShiftHistoryQueryDto, UpdatePermissionsDto, UpdateShiftHistoryDto, UpdateStaffDto } from './dto';
+import {
+  EmployeePermissions,
+  resolvePermissions,
+  sanitizePermissionsInput,
+} from '../common/permissions';
 
 const STAFF_SELECT = {
   id: true,
@@ -12,6 +18,7 @@ const STAFF_SELECT = {
   phone: true,
   role: true,
   isActive: true,
+  permissions: true,
   createdAt: true,
 } satisfies Prisma.UserSelect;
 
@@ -24,6 +31,18 @@ export class StaffService {
 
   private isOwner(actor: AuditActor) {
     return actor.role === Role.OWNER;
+  }
+
+  /** Подставить итоговые (resolved) права вместо «сырого» json из БД. */
+  private withPermissions<T extends { role: Role; permissions: Prisma.JsonValue }>(user: T) {
+    return { ...user, permissions: resolvePermissions(user.role, user.permissions) };
+  }
+
+  /** Кто может редактировать права: владелец, либо право editPermissions/manageStaff. */
+  private canEditPermissions(actor: AuthUser): boolean {
+    if (actor.role === Role.OWNER) return true;
+    const perms = actor.permissions ?? resolvePermissions(actor.role as Role, null);
+    return perms.actions.editPermissions === true || perms.actions.manageStaff === true;
   }
 
   private assertCanManageRole(actor: AuditActor, role: Role) {
@@ -82,7 +101,55 @@ export class StaffService {
     });
     const onShift = new Set(activeShifts.map((s) => s.waiterId));
 
-    return users.map((u) => ({ ...u, onShift: onShift.has(u.id) }));
+    return users.map((u) => ({ ...this.withPermissions(u), onShift: onShift.has(u.id) }));
+  }
+
+  /** Один сотрудник с итоговыми правами доступа. */
+  async getOne(id: string, actor: AuditActor) {
+    const user = await this.prisma.user.findUnique({ where: { id }, select: STAFF_SELECT });
+    if (!user) throw new NotFoundException('Сотрудник не найден');
+    if (user.role === Role.OWNER && !this.isOwner(actor)) {
+      throw new ForbiddenException('Только владелец может просматривать владельцев');
+    }
+    return this.withPermissions(user);
+  }
+
+  /** Обновить права доступа сотрудника. */
+  async updatePermissions(id: string, dto: UpdatePermissionsDto, actor: AuthUser) {
+    if (!this.canEditPermissions(actor)) {
+      throw new ForbiddenException('Недостаточно прав для изменения прав доступа');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id }, select: STAFF_SELECT });
+    if (!user) throw new NotFoundException('Сотрудник не найден');
+    // Права владельца всегда полные — менять нельзя.
+    if (user.role === Role.OWNER) {
+      throw new ForbiddenException('Права владельца изменить нельзя');
+    }
+    // Нельзя редактировать собственные права (защита от само-эскалации).
+    if (id === actor.id) {
+      throw new ForbiddenException('Нельзя менять собственные права доступа');
+    }
+
+    const permissions: EmployeePermissions = sanitizePermissionsInput(user.role, {
+      sections: dto.sections,
+      actions: dto.actions,
+    });
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: { permissions: permissions as unknown as Prisma.InputJsonValue },
+      select: STAFF_SELECT,
+    });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.STAFF_UPDATED,
+      entityType: AuditEntity.STAFF,
+      entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} изменил права доступа сотрудника ${user.name}`,
+      oldValue: { permissions: user.permissions } as unknown as Prisma.InputJsonValue,
+      newValue: { permissions } as unknown as Prisma.InputJsonValue,
+    });
+    return this.withPermissions(updated);
   }
 
   private normalizePhone(phone: string) {
@@ -109,7 +176,7 @@ export class StaffService {
       description: `${actor.name ?? 'Сотрудник'} добавил сотрудника ${created.name} (${created.role})`,
       newValue: { name: created.name, phone: created.phone, role: created.role },
     });
-    return created;
+    return this.withPermissions(created);
   }
 
   async update(id: string, dto: UpdateStaffDto, actor: AuditActor) {
@@ -159,7 +226,7 @@ export class StaffService {
       newValue: { name: updated.name, role: updated.role, phone: updated.phone, isActive: updated.isActive },
       metadata: { passwordChanged: !!dto.password },
     });
-    return updated;
+    return this.withPermissions(updated);
   }
 
   async remove(id: string, actor: AuditActor) {

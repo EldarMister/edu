@@ -3,11 +3,38 @@ export type Role = 'WAITER' | 'KITCHEN' | 'BAR' | 'ADMIN' | 'OWNER';
 /** Направление приготовления/выдачи позиции. `none` — без отправки (официант забирает сам). */
 export type PrepStation = 'kitchen' | 'bar' | 'none';
 
+export type SectionKey =
+  | 'statistics'
+  | 'orders'
+  | 'tables'
+  | 'menu'
+  | 'warehouse'
+  | 'staff'
+  | 'journal'
+  | 'paymentReconciliation'
+  | 'checks'
+  | 'settings';
+
+export type ActionKey =
+  | 'editMenu'
+  | 'refundChecks'
+  | 'exportReports'
+  | 'closeShift'
+  | 'manageStaff'
+  | 'editPermissions';
+
+export interface EmployeePermissions {
+  sections: Record<SectionKey, boolean>;
+  actions: Record<ActionKey, boolean>;
+}
+
 export interface AuthUser {
   id: string;
   name: string;
   phone: string;
   role: Role;
+  /** Итоговые права доступа (приходят с бэкенда). Может отсутствовать у старых сессий. */
+  permissions?: EmployeePermissions;
 }
 
 export interface LoginResponse {

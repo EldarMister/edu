@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertCafeActive } from '../platform/cafe-status';
+import { resolvePermissions } from '../common/permissions';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 import { getJwtAccessSecret, getJwtRefreshSecret } from './jwt.config';
@@ -40,7 +41,13 @@ export class AuthService {
     const tokens = await this.issueTokens(user.id, user.role);
     return {
       ...tokens,
-      user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+      user: {
+        id: user.id,
+        name: user.name,
+        phone: user.phone,
+        role: user.role,
+        permissions: resolvePermissions(user.role, user.permissions),
+      },
     };
   }
 
@@ -65,12 +72,18 @@ export class AuthService {
   async me(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, name: true, phone: true, role: true },
+      select: { id: true, name: true, phone: true, role: true, permissions: true },
     });
     if (!user) {
       throw new UnauthorizedException();
     }
-    return user;
+    return {
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      role: user.role,
+      permissions: resolvePermissions(user.role, user.permissions),
+    };
   }
 
   private async issueTokens(userId: string, role: string) {
