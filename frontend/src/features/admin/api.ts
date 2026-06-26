@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
-import type { Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
+import type { EmployeePermissions, Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
 
 // ---------- Типы ответов ----------
 export interface AdminTableItem {
@@ -78,6 +78,8 @@ export interface StaffMember {
   isActive: boolean;
   createdAt: string;
   onShift: boolean;
+  /** Итоговые права доступа сотрудника. */
+  permissions: EmployeePermissions;
 }
 export interface WaiterReportItem {
   id: string;
@@ -745,6 +747,16 @@ export interface StaffInput {
   password?: string;
   isActive?: boolean;
 }
+/** Сохранить права доступа сотрудника. Возвращает актуальные permissions. */
+export function useUpdatePermissions() {
+  const invalidate = useInvalidate([['admin', 'staff']]);
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string } & EmployeePermissions) =>
+      api.patch<StaffMember>(`/admin/staff/${id}/permissions`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+}
+
 export function useStaffMutations() {
   const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'staff', 'overview']]);
   const create = useMutation({

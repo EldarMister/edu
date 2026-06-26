@@ -2,11 +2,20 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import { Role } from '@prisma/client';
 import { StaffService } from './staff.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateStaffDto, SetCashHandedDto, ShiftHistoryQueryDto, UpdateShiftHistoryDto, UpdateStaffDto } from './dto';
+import {
+  CreateStaffDto,
+  SetCashHandedDto,
+  ShiftHistoryQueryDto,
+  UpdatePermissionsDto,
+  UpdateShiftHistoryDto,
+  UpdateStaffDto,
+} from './dto';
 
 @Controller('admin/staff')
 @Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.staff')
 export class StaffController {
   constructor(private readonly staff: StaffService) {}
 
@@ -53,9 +62,19 @@ export class StaffController {
     return this.staff.list(actor, { role, search });
   }
 
+  @Get(':id')
+  getOne(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
+    return this.staff.getOne(id, actor);
+  }
+
   @Post()
   create(@Body() dto: CreateStaffDto, @CurrentUser() actor: AuthUser) {
     return this.staff.create(dto, actor);
+  }
+
+  @Patch(':id/permissions')
+  updatePermissions(@Param('id') id: string, @Body() dto: UpdatePermissionsDto, @CurrentUser() actor: AuthUser) {
+    return this.staff.updatePermissions(id, dto, actor);
   }
 
   @Patch(':id')

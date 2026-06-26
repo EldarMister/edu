@@ -9,6 +9,8 @@ interface AuthState {
   refreshToken: string | null;
   setSession: (data: { user: AuthUser; accessToken: string; refreshToken: string }) => void;
   setTokens: (accessToken: string, refreshToken: string) => void;
+  /** Обновить поля текущего пользователя (например, актуальные права из /auth/me). */
+  updateUser: (patch: Partial<AuthUser>) => void;
   logout: () => void;
 }
 
@@ -21,6 +23,8 @@ export const useAuth = create<AuthState>()(
       setSession: (data) =>
         set({ user: data.user, accessToken: data.accessToken, refreshToken: data.refreshToken }),
       setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
+      updateUser: (patch) =>
+        set((s) => (s.user ? { user: { ...s.user, ...patch } } : {})),
       logout: () => {
         // Чистим React Query кэш, чтобы при логине другого пользователя на этом же
         // устройстве не «мигали» чужие данные (мультитенантная гигиена).

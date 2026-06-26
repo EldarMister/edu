@@ -55,6 +55,7 @@ import { WaiterCabinet } from './WaiterCabinet';
 import { PaymentModal } from './PaymentModal';
 import { ReceiptPrintSheet } from './ReceiptPrintSheet';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
+import { ShiftRequiredScreen } from './ShiftRequiredScreen';
 import { CancelOrderModal } from './CancelOrderModal';
 import {
   TableActionsMenu,
@@ -124,12 +125,17 @@ export function WaiterApp() {
   const [replacementTarget, setReplacementTarget] = useState<ReplacementTarget | null>(null);
   const [idemKey, setIdemKey] = useState(() => clientId());
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
+  // Пока идёт запуск смены, оверлей «Смена не начата» удерживается до конца анимации.
+  const [shiftBusy, setShiftBusy] = useState(false);
 
   const availableWaitersQ = useAvailableWaiters(tableModal === 'transfer');
 
   const halls = hallsQ.data ?? [];
   const orders = ordersQ.data ?? [];
   const activeShift = currentShiftQ.data ?? null;
+  // Смена не начата → показываем экран-оверлей «Смена не начата» поверх контента вкладок.
+  const shiftActive = !!activeShift && activeShift.status === 'active';
+  const showShiftGate = !shiftActive || shiftBusy;
 
   // Самый свежий активный заказ по каждому столу (бэкенд отдаёт по убыванию даты).
   const ordersByTable = useMemo(() => {
@@ -800,6 +806,7 @@ export function WaiterApp() {
         <BackgroundPushBanner onEnable={pushNotifications.enable} />
       )}
 
+      <div className="relative flex min-h-0 flex-1 flex-col">
       {/* DESKTOP: 3 колонки */}
       <main className="hidden flex-1 gap-4 overflow-hidden p-4 lg:flex">
         {desktopView === 'tables' ? (
@@ -868,8 +875,16 @@ export function WaiterApp() {
           ))}
       </main>
 
+      {/* Оверлей «Смена не начата» поверх контента вкладок (нижняя навигация остаётся видна) */}
+      {showShiftGate && (
+        <div className="absolute inset-0 z-30">
+          <ShiftRequiredScreen onBusyChange={setShiftBusy} />
+        </div>
+      )}
+      </div>
+
       {/* Корзина над нижней навигацией (только на экране меню) */}
-      {tab === 'menu' && !replacementTarget && (
+      {tab === 'menu' && !replacementTarget && !showShiftGate && (
         <MenuCartBar
           count={cart.lines.length}
           total={cartTotals(cart.lines).final}

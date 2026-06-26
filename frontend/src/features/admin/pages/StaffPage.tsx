@@ -6,8 +6,11 @@ import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
+import { useAuth } from '@/store/auth';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { IconPlus, IconEdit, IconTrash } from '../components/icons';
+import { EmployeePermissionsModal } from '../components/EmployeePermissionsModal';
 import {
   useShiftReport,
   useSetCashHanded,
@@ -36,6 +39,14 @@ function IconRefresh(p: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
       <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  );
+}
+function IconKey(p: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
+      <circle cx="7.5" cy="15.5" r="3.5" />
+      <path d="M10 13l8-8m-2 0h3v3" />
     </svg>
   );
 }
@@ -97,6 +108,7 @@ export function StaffPage() {
   const [closingShift, setClosingShift] = useState<ShiftHistoryRow | null>(null);
   const [editing, setEditing] = useState<StaffMember | null | 'new'>(null);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null);
 
   const reportQ = useShiftReport(date);
   const historyQ = useShiftHistory(historyFilters);
@@ -105,6 +117,10 @@ export function StaffPage() {
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const tr = useT();
+  const currentUser = useAuth((s) => s.user);
+  const { isOwner, canAction } = usePermissions();
+  // Кнопку «Права доступа» видит владелец, либо админ с правом editPermissions/manageStaff.
+  const canManagePermissions = isOwner || canAction('editPermissions') || canAction('manageStaff');
 
   const rows = reportQ.data ?? [];
   const memberById = new Map((staffQ.data ?? []).map((m) => [m.id, m]));
@@ -314,7 +330,7 @@ export function StaffPage() {
                           </td>
                         )}
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex justify-end gap-1">
+                          <div className="flex items-center justify-end gap-1">
                             <IconBtn title={tr('Изменить')} onClick={openEdit}>
                               <IconEdit className="h-4 w-4" />
                             </IconBtn>
@@ -351,7 +367,21 @@ export function StaffPage() {
       )}
 
       {editing !== null && (
-        <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+        <StaffModal
+          member={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+          onManagePermissions={
+            editing !== 'new' && editing && canManagePermissions && editing.role !== 'OWNER' && editing.id !== currentUser?.id
+              ? () => {
+                  setPermissionsFor(editing);
+                  setEditing(null);
+                }
+              : undefined
+          }
+        />
+      )}
+      {permissionsFor && (
+        <EmployeePermissionsModal member={permissionsFor} onClose={() => setPermissionsFor(null)} />
       )}
       {editingShift && (
         <ShiftEditModal row={editingShift} onClose={() => setEditingShift(null)} />
@@ -867,7 +897,15 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
   );
 }
 
-function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: () => void }) {
+function StaffModal({
+  member,
+  onClose,
+  onManagePermissions,
+}: {
+  member: StaffMember | null;
+  onClose: () => void;
+  onManagePermissions?: () => void;
+}) {
   const isEdit = !!member;
   const { create, update } = useStaffMutations();
   const push = useNotifications((s) => s.push);
@@ -953,6 +991,21 @@ function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: 
             <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
             Активен (может входить в систему)
           </label>
+        )}
+        {onManagePermissions && (
+          <button
+            type="button"
+            onClick={onManagePermissions}
+            className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-white px-3 py-2.5 text-left text-sm font-medium text-text-primary transition-colors hover:border-primary/40 hover:bg-background"
+          >
+            <span className="flex items-center gap-2.5">
+              <IconKey className="h-[18px] w-[18px] text-text-muted" />
+              Права доступа
+            </span>
+            <svg className="h-4 w-4 text-text-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m9 6 6 6-6 6" />
+            </svg>
+          </button>
         )}
         {error && <p className="text-sm text-danger">{error}</p>}
       </div>

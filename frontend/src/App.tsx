@@ -1,5 +1,8 @@
+import { useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from '@/store/auth';
+import { api } from '@/lib/api';
+import type { AuthUser } from '@/types';
 import { ProtectedRoute, homeForRole } from '@/routes/ProtectedRoute';
 import { Toaster } from '@/components/Toaster';
 import { UpdateModal } from '@/components/UpdateModal';
@@ -14,6 +17,25 @@ import { PlatformApp } from '@/features/platform/PlatformApp';
 
 export function App() {
   const user = useAuth((s) => s.user);
+  const accessToken = useAuth((s) => s.accessToken);
+  const updateUser = useAuth((s) => s.updateUser);
+
+  // Подтягиваем актуальные права доступа при загрузке (старые сессии могли войти
+  // до появления permissions; владелец мог изменить права сотрудника).
+  useEffect(() => {
+    if (!accessToken) return;
+    let cancelled = false;
+    api
+      .get<AuthUser>('/auth/me')
+      .then(({ data }) => {
+        if (!cancelled && data?.permissions) updateUser({ permissions: data.permissions, role: data.role });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken]);
 
   return (
     <>
