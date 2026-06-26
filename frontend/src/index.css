@@ -324,17 +324,30 @@
       opacity: 1;
     }
   }
-  @keyframes shift-halo-pulse {
+  /* Мягкая расходящаяся «рябь» вокруг логотипа (пульсация фона по референсу). */
+  @keyframes shift-ripple {
     0% {
-      transform: scale(0.82);
+      transform: scale(0.55);
       opacity: 0;
     }
-    18% {
-      opacity: 0.45;
+    25% {
+      opacity: 0.5;
     }
     100% {
-      transform: scale(1.18);
+      transform: scale(1.25);
       opacity: 0;
+    }
+  }
+  /* Дышащее радиальное свечение под логотипом. */
+  @keyframes shift-glow {
+    0%,
+    100% {
+      transform: scale(0.94);
+      opacity: 0.55;
+    }
+    50% {
+      transform: scale(1.06);
+      opacity: 0.9;
     }
   }
   @keyframes shift-check-pop {
@@ -350,8 +363,11 @@
   .animate-shift-logo-in {
     animation: shift-logo-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
-  .animate-shift-halo-pulse {
-    animation: shift-halo-pulse 1.8s ease-in-out infinite;
+  .animate-shift-ripple {
+    animation: shift-ripple 2.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  }
+  .animate-shift-glow {
+    animation: shift-glow 2.6s ease-in-out infinite;
   }
   .animate-shift-check-pop {
     animation: shift-check-pop 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
