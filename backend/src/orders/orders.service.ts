@@ -839,11 +839,12 @@ export class OrdersService {
       await this.deductInventory(tx, dishDeductions, variantDeductions);
       const ingredientStockWarnings = await this.ingredientStock.applyDishSale(tx, orderId, createdItems);
       await this.recalcOrder(tx, orderId);
-      // Новые блюда снова уходят на кухню; если добавили только «Без отправки» —
-      // статус заказа пересчитываем по составу, кухню не трогаем.
-      const nextStatus = hasPrepAdded
-        ? OrderStatus.sent_to_kitchen
-        : await this.statusFromActiveItems(tx, orderId);
+      // Статус заказа всегда считаем по составу активных позиций, а не
+      // принудительно откатываем в «отправлен на кухню». Иначе заказ, где часть
+      // блюд уже «готовится»/«готов», после добавления новых позиций терял свой
+      // прогресс. Новые блюда всё равно уезжают на станцию — отдельно по
+      // hasPrepAdded (эмит/озвучка кухни ниже).
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
       await tx.order.update({
         where: { id: orderId },
         data: {

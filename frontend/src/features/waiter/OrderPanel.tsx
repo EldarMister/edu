@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Order } from '@/types';
-import { OrderBadge } from '@/components/StatusBadge';
+import { OrderStatusBadges } from '@/components/StatusBadge';
 import { ORDER_STATUS } from '@/lib/status';
 import { displayOrderNumber, hallSuffix, money, orderItemDisplayName } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -127,7 +127,7 @@ export function OrderPanel({
               {t('Нужен ответ')}
             </span>
           )}
-          <OrderBadge status={order.status} size="sm" />
+          <OrderStatusBadges order={order} size="sm" />
           {unclaimedQr && (
             <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
               QR
