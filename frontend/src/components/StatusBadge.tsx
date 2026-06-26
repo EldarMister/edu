@@ -18,13 +18,22 @@ export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?
  * бар) в разных состояниях — показываем пару станционных чипов «Кухня: …» /
  * «Бар: …», иначе один глобальный бейдж.
  */
-export function OrderStatusBadges({ order, size = 'md' }: { order: Order; size?: 'sm' | 'md' }) {
+export function OrderStatusBadges({
+  order,
+  size = 'md',
+  className = 'flex flex-wrap items-center justify-end gap-1',
+}: {
+  order: Order;
+  size?: 'sm' | 'md';
+  /** Раскладка контейнера чипов. На узких карточках передают вертикальный стек. */
+  className?: string;
+}) {
   const t = useT();
   const chips = orderStationStatuses(order);
   const sizeCls = size === 'sm' ? 'rounded-md px-2 py-0.5 text-[11px]' : 'rounded-lg px-2.5 py-1 text-xs';
   if (chips.length === 0) return <OrderBadge status={order.status} size={size} />;
   return (
-    <div className="flex flex-wrap items-center justify-end gap-1">
+    <div className={className}>
       {chips.map((c) => (
         <span
           key={c.station}

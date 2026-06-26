@@ -4,7 +4,11 @@ import { useAuth } from '@/store/auth';
 import { API_URL } from './api';
 
 let socket: Socket | null = null;
-const VISIBLE_DISCONNECT_GRACE_MS = 8_000;
+// Сколько ждём восстановления связи, прежде чем показать баннер «Нет соединения».
+// На реальной инфраструктуре (прокси/Render, мобильная сеть) websocket иногда
+// кратко отваливается и переподнимается с бэкоффом за несколько секунд — это не
+// «нет интернета». Держим запас, чтобы баннер не мигал на каждой задержке.
+const VISIBLE_DISCONNECT_GRACE_MS = 20_000;
 
 /** Возвращает singleton-сокет, подключённый с текущим JWT. */
 export function getSocket(): Socket {
@@ -18,6 +22,10 @@ export function getSocket(): Socket {
       autoConnect: true,
       reconnection: true,
       reconnectionDelay: 1000,
+      // Не сдаёмся: бесконечные попытки с разумным верхним интервалом, чтобы
+      // после короткого провала связь восстанавливалась сама, без баннера.
+      reconnectionDelayMax: 5000,
+      reconnectionAttempts: Infinity,
     });
   } else {
     // Обновляем токен на случай повторного входа.
