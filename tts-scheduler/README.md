@@ -1,12 +1,14 @@
 # tts-scheduler
 
-Small Railway cron service for switching only `tts-service` between day and night modes.
+Small Railway cron service for switching selected Railway services between day
+and night modes.
 
 Goal:
 
-- day: Serverless off, apply staged changes, then warm TTS via `/health` until it responds
+- day: Serverless off, apply staged changes, then warm configured health URLs until they respond
 - night: Serverless on, no health ping, so Railway can sleep after inactivity
-- backend, frontend and Postgres are not touched
+- targets are controlled by `SCHEDULER_TARGETS`
+- Postgres is not touched
 
 ## Required variables
 
@@ -21,6 +23,14 @@ TTS_PUBLIC_OR_PRIVATE_HEALTH_URL=https://.../health
 Optional:
 
 ```env
+RAILWAY_BACKEND_SERVICE_ID=
+RAILWAY_FRONTEND_SERVICE_ID=
+BACKEND_PUBLIC_OR_PRIVATE_HEALTH_URL=https://.../api/health
+FRONTEND_PUBLIC_OR_PRIVATE_HEALTH_URL=https://.../
+
+# tts | backend,frontend | all
+SCHEDULER_TARGETS=tts
+
 # auto | wake | night
 SCHEDULER_ACTION=auto
 
@@ -32,7 +42,8 @@ RAILWAY_SERVERLESS_FIELD=
 RAILWAY_ALLOW_REPLICA_FALLBACK=false
 RAILWAY_REPLICA_FIELD=
 
-# Wake-mode health retry loop.
+# Wake-mode health retry loop. These values are shared by all configured
+# health URLs.
 TTS_HEALTH_RETRIES=12
 TTS_HEALTH_RETRY_DELAY_MS=10000
 ```
@@ -41,28 +52,44 @@ TTS_HEALTH_RETRY_DELAY_MS=10000
 
 Railway cron schedules are UTC.
 
-Use the same source directory (`tts-scheduler`) for both cron jobs:
+Use the same source directory (`tts-scheduler`) for cron jobs:
 
-| Job | Action | Cron schedule |
-| --- | --- | --- |
-| wake | `SCHEDULER_ACTION=wake` | `0 3 * * *` |
-| night mode | `SCHEDULER_ACTION=night` | `10 18 * * *` |
+| Job | Targets | Action | Cron schedule |
+| --- | --- | --- | --- |
+| tts wake | `SCHEDULER_TARGETS=tts` | `SCHEDULER_ACTION=wake` | `0 3 * * *` |
+| tts night | `SCHEDULER_TARGETS=tts` | `SCHEDULER_ACTION=night` | `10 18 * * *` |
+| app wake | `SCHEDULER_TARGETS=backend,frontend` | `SCHEDULER_ACTION=wake` | `0 3 * * *` |
+| app night | `SCHEDULER_TARGETS=backend,frontend` | `SCHEDULER_ACTION=night` | `0 19 * * *` |
 
-`0 3 * * *` is 09:00 in Asia/Bishkek. If the intended day switch is exactly
-10:00 Asia/Bishkek, use `0 4 * * *` instead.
+Railway cron schedules are UTC. In Asia/Bishkek:
 
-Native Railway cron currently stores one cron expression per service. If the
-dashboard does not allow two schedules on one service, create two tiny Railway
-cron services from this same folder:
+- `0 3 * * *` is 09:00.
+- `10 18 * * *` is 00:10.
+- `0 19 * * *` is 01:00 on the next local day.
+
+Native Railway cron currently stores one cron expression per service. Create
+separate tiny Railway cron services from this same folder when schedules differ:
 
 - `tts-scheduler-wake` with `SCHEDULER_ACTION=wake`
 - `tts-scheduler-night` with `SCHEDULER_ACTION=night`
+- `app-scheduler-wake` with `SCHEDULER_ACTION=wake`
+- `app-scheduler-night` with `SCHEDULER_ACTION=night`
 
-Both still modify only `RAILWAY_TTS_SERVICE_ID`.
+`tts-scheduler-*` should use `SCHEDULER_TARGETS=tts`.
+`app-scheduler-*` should use `SCHEDULER_TARGETS=backend,frontend`.
+
+For the setup shown in Railway, add these variables to both app scheduler services:
+
+```env
+RAILWAY_BACKEND_SERVICE_ID=<backend service id>
+RAILWAY_FRONTEND_SERVICE_ID=<frontend service id>
+BACKEND_PUBLIC_OR_PRIVATE_HEALTH_URL=https://edu-production-2395.up.railway.app/api/health
+FRONTEND_PUBLIC_OR_PRIVATE_HEALTH_URL=https://edu-pos.up.railway.app/
+```
 
 Important: `serviceInstanceUpdate` creates staged changes in Railway. The
 scheduler must also trigger a deploy/redeploy mutation so the updated
-Serverless value is actually applied to `tts-service`.
+Serverless value is actually applied to each configured service.
 
 ## GraphQL field verification
 
