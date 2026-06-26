@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ShiftStartAnimation, type ShiftAnimState } from './ShiftStartAnimation';
 import { useStartShift } from './api';
 import { useNotifications } from '@/store/notifications';
@@ -8,6 +8,12 @@ const TEXT: Record<ShiftAnimState, { title: string; subtitle: string }> = {
   loading: { title: 'Проверяем данные…', subtitle: 'Это займёт несколько секунд' },
   success: { title: 'Смена начата', subtitle: '' },
 };
+
+// Минимальная длительность загрузки — чтобы кольцо успело красиво заполниться,
+// даже если сервер ответил мгновенно.
+const MIN_LOADING_MS = 1900;
+const SUCCESS_HOLD_MS = 820;
+const FADE_MS = 320;
 
 /**
  * Экран «Смена не начата» (строго по референсу /designe, как в mobile).
@@ -19,14 +25,19 @@ const TEXT: Record<ShiftAnimState, { title: string; subtitle: string }> = {
 export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boolean) => void }) {
   const [phase, setPhase] = useState<ShiftAnimState>('idle');
   const [visible, setVisible] = useState(true);
+  const successTimerRef = useRef<number | null>(null);
   const startShift = useStartShift();
   const push = useNotifications((s) => s.push);
+
+  useEffect(() => () => {
+    if (successTimerRef.current) window.clearTimeout(successTimerRef.current);
+  }, []);
 
   // Успех: показать галочку, выдержать паузу и плавно убрать экран.
   useEffect(() => {
     if (phase !== 'success') return;
-    const fadeAt = setTimeout(() => setVisible(false), 420);
-    const done = setTimeout(() => onBusyChange(false), 420 + 300);
+    const fadeAt = setTimeout(() => setVisible(false), SUCCESS_HOLD_MS);
+    const done = setTimeout(() => onBusyChange(false), SUCCESS_HOLD_MS + FADE_MS);
     return () => {
       clearTimeout(fadeAt);
       clearTimeout(done);
@@ -37,9 +48,20 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
     if (phase !== 'idle') return;
     onBusyChange(true);
     setPhase('loading');
+    const startedAt = Date.now();
     startShift.mutate(undefined, {
-      onSuccess: () => setPhase('success'),
+      onSuccess: () => {
+        const remaining = Math.max(MIN_LOADING_MS - (Date.now() - startedAt), 0);
+        successTimerRef.current = window.setTimeout(() => {
+          successTimerRef.current = null;
+          setPhase('success');
+        }, remaining);
+      },
       onError: () => {
+        if (successTimerRef.current) {
+          window.clearTimeout(successTimerRef.current);
+          successTimerRef.current = null;
+        }
         setPhase('idle');
         onBusyChange(false);
         push({
@@ -54,7 +76,7 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
   const { title, subtitle } = TEXT[phase];
 
   return (
-    <div className={`flex h-full flex-col bg-white transition-opacity duration-300 ${visible ? 'opacity-100' : 'opacity-0'}`}>
+    <div className={`flex h-full flex-col bg-white transition-opacity ${visible ? 'opacity-100' : 'opacity-0'}`} style={{ transitionDuration: `${FADE_MS}ms` }}>
       <div className="flex flex-1 flex-col items-center justify-center px-6">
         <ShiftStartAnimation state={phase} />
         <h2 className="mt-8 text-center text-[22px] font-bold text-text-primary">{title}</h2>
