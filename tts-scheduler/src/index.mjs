@@ -65,7 +65,7 @@ function serviceTargets() {
     {
       key: 'tts',
       name: 'tts-service',
-      serviceId: requiredEnv('RAILWAY_TTS_SERVICE_ID'),
+      serviceId: optionalEnv('RAILWAY_TTS_SERVICE_ID'),
       healthUrl: optionalEnv('TTS_PUBLIC_OR_PRIVATE_HEALTH_URL'),
     },
     {
