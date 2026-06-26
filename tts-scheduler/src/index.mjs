@@ -44,6 +44,56 @@ function requiredEnv(name) {
   return value;
 }
 
+function optionalEnv(name) {
+  const value = process.env[name]?.trim();
+  return value || null;
+}
+
+function serviceTargets() {
+  const configuredTargets = (process.env.SCHEDULER_TARGETS || process.env.TTS_SCHEDULER_TARGETS || 'tts')
+    .split(',')
+    .map((target) => target.trim().toLowerCase())
+    .filter(Boolean);
+  const enabled = new Set(configuredTargets);
+  if (enabled.has('all')) {
+    enabled.add('tts');
+    enabled.add('backend');
+    enabled.add('frontend');
+  }
+
+  const targets = [
+    {
+      key: 'tts',
+      name: 'tts-service',
+      serviceId: requiredEnv('RAILWAY_TTS_SERVICE_ID'),
+      healthUrl: optionalEnv('TTS_PUBLIC_OR_PRIVATE_HEALTH_URL'),
+    },
+    {
+      key: 'backend',
+      name: 'backend',
+      serviceId: optionalEnv('RAILWAY_BACKEND_SERVICE_ID'),
+      healthUrl: optionalEnv('BACKEND_PUBLIC_OR_PRIVATE_HEALTH_URL'),
+    },
+    {
+      key: 'frontend',
+      name: 'frontend',
+      serviceId: optionalEnv('RAILWAY_FRONTEND_SERVICE_ID'),
+      healthUrl: optionalEnv('FRONTEND_PUBLIC_OR_PRIVATE_HEALTH_URL'),
+    },
+  ].filter((target) => enabled.has(target.key));
+
+  if (targets.length === 0) {
+    throw new Error(`No scheduler targets enabled. Set SCHEDULER_TARGETS to tts, backend, frontend, or all.`);
+  }
+
+  const missing = targets.filter((target) => !target.serviceId).map((target) => target.name);
+  if (missing.length > 0) {
+    throw new Error(`Missing Railway service ids for enabled targets: ${missing.join(', ')}`);
+  }
+
+  return targets;
+}
+
 function localParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: TZ,
@@ -136,7 +186,7 @@ async function getCurrentMode(token, serviceId, environmentId, instanceFields, s
   if (replicaField && instanceFields.has(replicaField)) fields.push(replicaField);
 
   const data = await gql(`
-    query CurrentTtsServiceInstance($serviceId: String!, $environmentId: String!) {
+    query CurrentServiceInstance($serviceId: String!, $environmentId: String!) {
       serviceInstance(serviceId: $serviceId, environmentId: $environmentId) {
         ${fields.join('\n        ')}
       }
@@ -147,7 +197,7 @@ async function getCurrentMode(token, serviceId, environmentId, instanceFields, s
 
 async function updateServiceInstance(token, serviceId, environmentId, input) {
   const data = await gql(`
-    mutation UpdateTtsServiceInstance($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) {
+    mutation UpdateServiceInstance($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) {
       serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input)
     }
   `, { serviceId, environmentId, input }, token);
@@ -174,7 +224,7 @@ async function applyStagedChanges(token, deployMutation, serviceId, environmentI
   const mutationArgs = args.length > 0 ? `(${args.join(', ')})` : '';
 
   const data = await gql(`
-    mutation ApplyTtsServiceChanges${mutationSignature} {
+    mutation ApplyServiceChanges${mutationSignature} {
       ${deployMutation.name}${mutationArgs}
     }
   `, variables, token);
@@ -225,13 +275,16 @@ async function main() {
   const token = requiredEnv('RAILWAY_API_TOKEN');
   requiredEnv('RAILWAY_PROJECT_ID');
   const environmentId = requiredEnv('RAILWAY_ENVIRONMENT_ID');
-  const serviceId = requiredEnv('RAILWAY_TTS_SERVICE_ID');
-  const healthUrl = process.env.TTS_PUBLIC_OR_PRIVATE_HEALTH_URL?.trim();
+  const targets = serviceTargets();
   const mode = resolveMode();
   const action = mode === 'wake' ? 'serverless_off' : 'serverless_on';
   const targetServerless = mode === 'night';
 
-  log('info', 'tts-scheduler started', { currentMode: mode, action });
+  log('info', 'tts-scheduler started', {
+    currentMode: mode,
+    action,
+    targets: targets.map((target) => target.name),
+  });
 
   const schema = await introspect(token);
   const instanceFields = fieldNames(schema.serviceInstance);
@@ -260,15 +313,6 @@ async function main() {
 
   const effectiveServerlessField = process.env.RAILWAY_SERVERLESS_FIELD?.trim() || serverlessField;
   const effectiveReplicaField = process.env.RAILWAY_REPLICA_FIELD?.trim() || replicaField;
-  const current = await getCurrentMode(
-    token,
-    serviceId,
-    environmentId,
-    instanceFields,
-    effectiveServerlessField,
-    effectiveReplicaField,
-  );
-
   const input = {};
   if (effectiveServerlessField) {
     input[effectiveServerlessField] = targetServerless;
@@ -276,35 +320,51 @@ async function main() {
     input[effectiveReplicaField] = mode === 'wake' ? 1 : 0;
   }
 
-  log('info', 'updating tts-service instance', {
-    currentMode: mode,
-    action,
-    field: Object.keys(input)[0],
-    currentValue: current?.[Object.keys(input)[0]] ?? null,
-    targetValue: Object.values(input)[0],
-  });
+  const results = [];
+  for (const target of targets) {
+    const current = await getCurrentMode(
+      token,
+      target.serviceId,
+      environmentId,
+      instanceFields,
+      effectiveServerlessField,
+      effectiveReplicaField,
+    );
 
-  await updateServiceInstance(token, serviceId, environmentId, input);
-  log('info', 'applying staged changes', {
-    currentMode: mode,
-    action,
-    mutation: deployMutation.name,
-  });
-  await applyStagedChanges(token, deployMutation, serviceId, environmentId);
+    log('info', 'updating service instance', {
+      service: target.name,
+      currentMode: mode,
+      action,
+      field: Object.keys(input)[0],
+      currentValue: current?.[Object.keys(input)[0]] ?? null,
+      targetValue: Object.values(input)[0],
+    });
 
-  let health = { skipped: true };
-  if (mode === 'wake') {
-    health = await pingHealthUntilReady(healthUrl);
-    if (!health.ok) {
-      throw new Error(`Healthcheck did not become ready after ${health.attempt || 0} attempts`);
+    await updateServiceInstance(token, target.serviceId, environmentId, input);
+    log('info', 'applying staged changes', {
+      service: target.name,
+      currentMode: mode,
+      action,
+      mutation: deployMutation.name,
+    });
+    await applyStagedChanges(token, deployMutation, target.serviceId, environmentId);
+
+    let health = { skipped: true };
+    if (mode === 'wake') {
+      health = await pingHealthUntilReady(target.healthUrl);
+      if (target.healthUrl && !health.ok) {
+        throw new Error(`${target.name} healthcheck did not become ready after ${health.attempt || 0} attempts`);
+      }
     }
+
+    results.push({ service: target.name, health });
   }
 
   log('info', 'tts-scheduler success', {
     currentMode: mode,
     action,
     success: true,
-    health,
+    results,
   });
 }
 
