@@ -1,46 +1,89 @@
 import React from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet } from '@/components/BottomSheet';
+import { Button } from '@/components/ui';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { TABLE_STATUS } from '@/theme/status';
-import { useHalls } from '@/services/api/waiter';
+import { useActiveOrders, useHalls } from '@/services/api/waiter';
 import { useAuth } from '@/store/auth';
 import { useCart } from '@/store/cart';
+import { useNotifications } from '@/store/notifications';
 import type { TableItem } from '@/types';
 
 /** Смена стола на экране меню — список столов по залам (как в PWA TableSelectModal). */
 export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const halls = useHalls();
+  const orders = useActiveOrders();
   const user = useAuth((s) => s.user);
+  const push = useNotifications((s) => s.push);
   const selectTable = useCart((s) => s.selectTable);
+  const moveDraftTo = useCart((s) => s.moveDraftTo);
   const currentTableId = useCart((s) => s.tableId);
   const lines = useCart((s) => s.lines);
+  const [pending, setPending] = React.useState<{ table: TableItem; hallName: string } | null>(null);
+
+  const ordersByTable = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const order of orders.data ?? []) {
+      if (!m.has(order.table.id)) m.set(order.table.id, order.id);
+    }
+    return m;
+  }, [orders.data]);
+
+  const close = () => {
+    setPending(null);
+    onClose();
+  };
+
+  const apply = (tbl: TableItem, hallName: string, preserveDraft = false) => {
+    const table = { id: tbl.id, number: tbl.number, hallName };
+    const activeOrderId = ordersByTable.get(tbl.id) ?? null;
+    if (preserveDraft) moveDraftTo(table, activeOrderId);
+    else selectTable(table, activeOrderId);
+    close();
+  };
 
   const pick = (tbl: TableItem, hallName: string) => {
     if (tbl.id === currentTableId) {
-      onClose();
+      close();
       return;
     }
     if (tbl.occupiedBy && tbl.occupiedBy.id !== user?.id) {
-      Alert.alert('Стол занят', `Этот стол занят другим официантом: ${tbl.occupiedBy?.name}`);
+      push({
+        message: `Этот стол занят другим официантом: ${tbl.occupiedBy?.name}`,
+        type: 'error',
+        at: new Date().toISOString(),
+      });
       return;
     }
-    const apply = () => {
-      selectTable({ id: tbl.id, number: tbl.number, hallName });
-      onClose();
-    };
     if (lines.length > 0) {
-      Alert.alert('Сменить стол?', 'В корзине уже есть блюда. Они будут очищены.', [
-        { text: 'Отмена', style: 'cancel' },
-        { text: 'Сменить', style: 'destructive', onPress: apply },
-      ]);
+      setPending({ table: tbl, hallName });
     } else {
-      apply();
+      apply(tbl, hallName);
     }
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Выбор стола" maxHeight="92%">
+    <BottomSheet
+      visible={visible}
+      onClose={close}
+      title="Выбор стола"
+      maxHeight="92%"
+      footer={
+        pending ? (
+          <View style={styles.confirmFooter}>
+            <Text style={styles.confirmTitle}>Сменить стол?</Text>
+            <Text style={styles.confirmText}>
+              В корзине уже есть блюда. Они будут перенесены на стол {pending.table.number}.
+            </Text>
+            <View style={styles.confirmActions}>
+              <Button title="Отмена" variant="secondary" onPress={() => setPending(null)} style={{ flex: 1 }} />
+              <Button title="Сменить" onPress={() => apply(pending.table, pending.hallName, true)} style={{ flex: 1 }} />
+            </View>
+          </View>
+        ) : undefined
+      }
+    >
       <ScrollView showsVerticalScrollIndicator={false}>
         {(halls.data ?? []).map((hall) => (
           <View key={hall.id} style={styles.section}>
@@ -72,6 +115,10 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
 
 const styles = StyleSheet.create({
   section: { marginBottom: spacing.md },
+  confirmFooter: { gap: spacing.sm, paddingBottom: spacing.sm },
+  confirmTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+  confirmText: { fontSize: fontSize.sm, color: colors.textMuted, lineHeight: 18 },
+  confirmActions: { flexDirection: 'row', gap: spacing.sm, paddingTop: 2 },
   hallName: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted, marginBottom: 6 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   table: {

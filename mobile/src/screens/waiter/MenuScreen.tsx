@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import React, { memo, useCallback, useMemo, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
@@ -17,6 +17,18 @@ import { CartSheet } from './CartSheet';
 import { TablePickerSheet } from './TablePickerSheet';
 import type { Dish, DishVariant } from '@/types';
 
+function linePriceLocal(line: { dish: Dish; variant?: DishVariant; quantity: number }): number {
+  return Number(line.variant?.price ?? line.dish.price) * line.quantity;
+}
+
+function currentDishQuantity(dishId: string): number {
+  return useCart.getState().lines.reduce((sum, line) => sum + (line.dish.id === dishId ? line.quantity : 0), 0);
+}
+
+function currentVariantQuantity(variantId: string): number {
+  return useCart.getState().lines.reduce((sum, line) => sum + (line.variant?.id === variantId ? line.quantity : 0), 0);
+}
+
 export function MenuScreen() {
   const navigation = useNavigation<any>();
   const connected = useConnectionStatus();
@@ -26,7 +38,13 @@ export function MenuScreen() {
   const hallName = useCart((s) => s.hallName);
   const activeOrderId = useCart((s) => s.activeOrderId);
   const orderComment = useCart((s) => s.comment);
-  const cart = useCart();
+  const cartLines = useCart((s) => s.lines);
+  const addToCart = useCart((s) => s.add);
+  const addLineToCart = useCart((s) => s.addLine);
+  const setCartQuantity = useCart((s) => s.setQuantity);
+  const clearCartTable = useCart((s) => s.clearTable);
+  const cartCount = useCart((s) => s.lines.reduce((sum, line) => sum + line.quantity, 0));
+  const cartTotal = useCart((s) => s.lines.reduce((sum, line) => sum + linePriceLocal(line), 0));
   const push = useNotifications((s) => s.push);
 
   const categories = useCategories();
@@ -47,12 +65,12 @@ export function MenuScreen() {
 
   const cartQuantities = useMemo(() => {
     const map: Record<string, number> = {};
-    for (const l of cart.lines) {
+    for (const l of cartLines) {
       map[l.dish.id] = (map[l.dish.id] ?? 0) + l.quantity;
       if (l.variant) map[l.variant.id] = (map[l.variant.id] ?? 0) + l.quantity;
     }
     return map;
-  }, [cart.lines]);
+  }, [cartLines]);
 
   const filteredDishes = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -65,6 +83,39 @@ export function MenuScreen() {
     return [...list.filter((d) => d.isAvailable), ...list.filter((d) => !d.isAvailable)];
   }, [dishes.data, categoryId, search]);
 
+  const onAddDish = useCallback((dish: Dish) => {
+    if (dish.isSet) {
+      addLineToCart(buildSetLine(dish));
+      push({ message: `${dish.name} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
+      return;
+    }
+    if (dish.variants && dish.variants.length > 0) {
+      setVariantDish(dish);
+      return;
+    }
+    const nextQty = currentDishQuantity(dish.id) + 1;
+    addToCart(dish);
+    push({ message: `${dish.name} ×${nextQty} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
+  }, [addLineToCart, addToCart, push]);
+
+  const onDecDish = useCallback((dish: Dish) => {
+    const lines = useCart.getState().lines;
+    const idx = lines.findIndex((l) => l.dish.id === dish.id && !l.set);
+    if (idx >= 0) setCartQuantity(idx, lines[idx].quantity - 1);
+  }, [setCartQuantity]);
+
+  const renderDish = useCallback(({ item }: { item: Dish }) => (
+    <DishCard
+      dish={item}
+      qty={cartQuantities[item.id] ?? 0}
+      disabled={!item.isAvailable}
+      onAdd={onAddDish}
+      onDec={onDecDish}
+    />
+  ), [cartQuantities, onAddDish, onDecDish]);
+
+  const dishKey = useCallback((dish: Dish) => dish.id, []);
+
   if (!tableId) {
     return (
       <SafeAreaView style={styles.safe} edges={[]}>
@@ -73,44 +124,31 @@ export function MenuScreen() {
     );
   }
 
-  const onAddDish = (dish: Dish) => {
-    if (dish.isSet) {
-      cart.addLine(buildSetLine(dish));
-      return;
-    }
-    if (dish.variants && dish.variants.length > 0) {
-      setVariantDish(dish);
-      return;
-    }
-    cart.add(dish);
-    push({ message: `${dish.name} ×${(cartQuantities[dish.id] ?? 0) + 1} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
-  };
-
   const onSubmit = () => {
     if (!connected) {
       push({ message: 'Создание заказа недоступно без интернета.', type: 'error', at: new Date().toISOString() });
       return;
     }
-    if (cart.lines.length === 0) return;
+    if (cartLines.length === 0) return;
     const idempotencyKey = makeIdempotencyKey();
     const done = () => {
-      cart.clearTable();
+      clearCartTable();
       setCartOpen(false);
       navigation.navigate('Orders');
     };
     const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
 
     if (activeOrderId) {
-      addItems.mutate({ orderId: activeOrderId, idempotencyKey, lines: cart.lines }, { onSuccess: done, onError });
+      addItems.mutate({ orderId: activeOrderId, idempotencyKey, lines: cartLines }, { onSuccess: done, onError });
     } else {
       createOrder.mutate(
-        { tableId, idempotencyKey, comment: orderComment, lines: cart.lines },
+        { tableId, idempotencyKey, comment: orderComment, lines: cartLines },
         { onSuccess: done, onError },
       );
     }
   };
 
-  const count = cart.count();
+  const count = cartCount;
   const submitting = createOrder.isPending || addItems.isPending;
   const submitLabel = activeOrderId ? 'Добавить к заказу' : 'Отправить на кухню';
 
@@ -149,62 +187,22 @@ export function MenuScreen() {
       {dishes.isLoading ? (
         <Loading />
       ) : (
-        <ScrollView contentContainerStyle={styles.grid} showsVerticalScrollIndicator={false}>
-          {filteredDishes.map((d) => {
-            const hasVariants = d.variants.length > 0;
-            const qty = cartQuantities[d.id] ?? 0;
-            const active = qty > 0;
-            const unit = hasVariants
-              ? Math.min(...d.variants.map((v) => Number(v.price)))
-              : Number(d.price);
-            const disabled = !d.isAvailable;
-            return (
-              <Pressable
-                key={d.id}
-                disabled={disabled}
-                onPress={() => onAddDish(d)}
-                style={[styles.dish, active && styles.dishActive, disabled && styles.dishDisabled]}
-              >
-                {!d.isAvailable ? (
-                  <View style={styles.unavailable}>
-                    <Text style={styles.unavailableText}>Недоступно</Text>
-                  </View>
-                ) : null}
-                <Text style={styles.dishName} numberOfLines={2}>
-                  {d.name}
-                </Text>
-                {hasVariants ? (
-                  <Text style={styles.dishSub} numberOfLines={1}>
-                    {d.variants.map((v) => v.name).join(' / ')}
-                  </Text>
-                ) : d.description ? (
-                  <Text style={styles.dishSub} numberOfLines={1}>
-                    {d.description}
-                  </Text>
-                ) : null}
-                <View style={styles.dishBottom}>
-                  <Text style={styles.dishPrice}>
-                    {hasVariants ? `от ${money(unit)}` : money(unit)}
-                  </Text>
-                  {active ? (
-                    <Pressable
-                      style={styles.qtyBadge}
-                      onPress={() => {
-                        const idx = cart.lines.findIndex((l) => l.dish.id === d.id && !l.set);
-                        if (idx >= 0) cart.setQuantity(idx, cart.lines[idx].quantity - 1);
-                      }}
-                    >
-                      <Text style={styles.qtyBadgeText}>{qty}</Text>
-                    </Pressable>
-                  ) : null}
-                </View>
-              </Pressable>
-            );
-          })}
-          {filteredDishes.length === 0 ? (
-            <Text style={styles.notFound}>Ничего не найдено</Text>
-          ) : null}
-        </ScrollView>
+        <FlatList
+          data={filteredDishes}
+          renderItem={renderDish}
+          keyExtractor={dishKey}
+          numColumns={2}
+          style={styles.menuList}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.grid}
+          columnWrapperStyle={styles.gridRow}
+          removeClippedSubviews
+          initialNumToRender={12}
+          maxToRenderPerBatch={8}
+          windowSize={5}
+          updateCellsBatchingPeriod={32}
+          ListEmptyComponent={<Text style={styles.notFound}>Ничего не найдено</Text>}
+        />
       )}
 
       {/* Бар корзины над нижней навигацией */}
@@ -217,7 +215,7 @@ export function MenuScreen() {
           <PwaIcon name="cart" size={22} color={colors.textSecondary} />
           <View>
             <Text style={styles.cartCount}>{count} {pozLabel(count)}</Text>
-            <Text style={styles.cartTotal}>{money(cart.total())}</Text>
+            <Text style={styles.cartTotal}>{money(cartTotal)}</Text>
           </View>
         </Pressable>
         <Button
@@ -242,9 +240,10 @@ export function MenuScreen() {
         onClose={() => setVariantDish(null)}
         onAdd={(variant) => {
           if (variantDish) {
-            cart.add(variantDish, variant);
+            const nextQty = currentVariantQuantity(variant.id) + 1;
+            addToCart(variantDish, variant);
             push({
-              message: `${variantDish.name} · ${variant.name} ×${(cartQuantities[variant.id] ?? 0) + 1} добавлено`,
+              message: `${variantDish.name} · ${variant.name} ×${nextQty} добавлено`,
               at: new Date().toISOString(),
               durationMs: 1800,
             });
@@ -266,6 +265,74 @@ function pozLabel(n: number): string {
   if (b >= 2 && b <= 4) return 'позиции';
   return 'позиций';
 }
+
+const DishCard = memo(function DishCard({
+  dish,
+  qty,
+  disabled,
+  onAdd,
+  onDec,
+}: {
+  dish: Dish;
+  qty: number;
+  disabled: boolean;
+  onAdd: (dish: Dish) => void;
+  onDec: (dish: Dish) => void;
+}) {
+  const hasVariants = dish.variants.length > 0;
+  const active = qty > 0;
+  const unit = hasVariants
+    ? Math.min(...dish.variants.map((v) => Number(v.price)))
+    : Number(dish.price);
+
+  return (
+    <Pressable
+      disabled={disabled}
+      onPress={() => onAdd(dish)}
+      style={[styles.dish, active && styles.dishActive, disabled && styles.dishDisabled]}
+    >
+      {!dish.isAvailable ? (
+        <View style={styles.unavailable}>
+          <Text style={styles.unavailableText}>Недоступно</Text>
+        </View>
+      ) : null}
+      <Text style={styles.dishName} numberOfLines={2}>
+        {dish.name}
+      </Text>
+      {hasVariants ? (
+        <Text style={styles.dishSub} numberOfLines={1}>
+          {dish.variants.map((v) => v.name).join(' / ')}
+        </Text>
+      ) : dish.description ? (
+        <Text style={styles.dishSub} numberOfLines={1}>
+          {dish.description}
+        </Text>
+      ) : null}
+      <View style={styles.dishBottom}>
+        <Text style={styles.dishPrice}>
+          {hasVariants ? `от ${money(unit)}` : money(unit)}
+        </Text>
+        {active ? (
+          <Pressable
+            style={styles.qtyBadge}
+            onPress={(event) => {
+              event.stopPropagation();
+              onDec(dish);
+            }}
+          >
+            <Text style={styles.qtyBadgeText}>{qty}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+}, (prev, next) =>
+  prev.dish === next.dish &&
+  prev.qty === next.qty &&
+  prev.disabled === next.disabled &&
+  prev.onAdd === next.onAdd &&
+  prev.onDec === next.onDec
+);
 
 /** Лист выбора варианта/размера — радио-список как в PWA. */
 function VariantSheet({
@@ -348,7 +415,9 @@ const styles = StyleSheet.create({
   tableChipActive: { borderColor: colors.primary },
   tableChipText: { fontSize: fontSize.tab, fontWeight: '500', color: colors.textPrimary },
 
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: spacing.md, paddingBottom: spacing.md },
+  menuList: { flex: 1 },
+  grid: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
+  gridRow: { justifyContent: 'space-between', marginBottom: 10 },
   dish: {
     width: '48.5%',
     height: waiterLayout.dishCardHeight,

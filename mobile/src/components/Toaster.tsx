@@ -1,7 +1,7 @@
 import React from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, fontSize, radius, spacing, softShadow } from '@/theme';
+import { colors, fontSize, radius, spacing } from '@/theme';
 import { type AppNotification, useNotifications } from '@/store/notifications';
 
 const TOAST_EXIT_MS = 260;
@@ -72,7 +72,8 @@ function Toast({ toast }: { toast: RenderedToast }) {
     return () => clearTimeout(timer);
   }, [dismiss, toast.durationMs, toast.exiting, toast.id, toast.type]);
 
-  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [-18, 0] });
+  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [toast.exiting ? 0 : 18, 0] });
+  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [toast.exiting ? -18 : 8, 0] });
   const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] });
 
   return (
@@ -81,7 +82,7 @@ function Toast({ toast }: { toast: RenderedToast }) {
         styles.toastShell,
         {
           opacity: progress,
-          transform: [{ translateY }, { scale }],
+          transform: [{ translateX }, { translateY }, { scale }],
         },
       ]}
     >
@@ -113,7 +114,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     paddingHorizontal: spacing.lg,
     paddingVertical: 10,
-    ...softShadow,
   },
   toastText: {
     fontSize: fontSize.sm,

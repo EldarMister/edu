@@ -1,5 +1,5 @@
 import React from 'react';
-import { View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -28,9 +28,7 @@ export function WaiterNavigator() {
   const insets = useSafeAreaInsets();
   const orders = useActiveOrders();
   const shiftQ = useCurrentShift();
-  const attention = (orders.data ?? []).filter(
-    (o) => o.requiresWaiterDecision || ['ready', 'rejected'].includes(o.status),
-  ).length;
+  const ordersCount = orders.data?.length ?? 0;
 
   const shiftActive = shiftQ.data?.status === 'active';
   // Пока идёт запуск смены, оверлей удерживается, даже когда смена уже активна.
@@ -57,7 +55,16 @@ export function WaiterNavigator() {
               paddingBottom: Math.max(insets.bottom, 4),
             },
             tabBarLabelStyle: { fontSize: fontSize.xs, marginTop: 2 },
-            tabBarIcon: ({ color }) => <PwaIcon name={ICONS[route.name]} size={22} color={color} />,
+            tabBarIcon: ({ color }) => (
+              <View style={styles.iconWrap}>
+                <PwaIcon name={ICONS[route.name]} size={22} color={color} />
+                {route.name === 'Orders' && ordersCount > 0 ? (
+                  <View style={styles.ordersBadge}>
+                    <Text style={styles.ordersBadgeText}>{ordersCount > 99 ? '99+' : ordersCount}</Text>
+                  </View>
+                ) : null}
+              </View>
+            ),
           })}
         >
           <Tab.Screen name="Tables" component={TablesScreen} options={{ title: 'Столы' }} />
@@ -65,11 +72,7 @@ export function WaiterNavigator() {
           <Tab.Screen
             name="Orders"
             component={OrdersNavigator}
-            options={{
-              title: 'Заказы',
-              tabBarBadge: attention > 0 ? attention : undefined,
-              tabBarBadgeStyle: { backgroundColor: colors.primary },
-            }}
+            options={{ title: 'Заказы' }}
           />
           <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Профиль' }} />
         </Tab.Navigator>
@@ -84,3 +87,30 @@ export function WaiterNavigator() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  iconWrap: {
+    width: 28,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ordersBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -7,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primary,
+  },
+  ordersBadgeText: {
+    color: colors.white,
+    fontSize: 10,
+    fontWeight: '500',
+    lineHeight: 12,
+  },
+});

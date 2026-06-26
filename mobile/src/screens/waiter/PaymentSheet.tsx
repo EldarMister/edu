@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Button } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { colors, fontSize, radius, spacing } from '@/theme';
@@ -44,7 +44,7 @@ export function PaymentSheet({
   if (!order) return null;
   const total = Number(order.finalAmount);
   const qrSrc = resolveQrSrc(settings.data?.qrImageUrl);
-  const onError = (e: unknown) => Alert.alert('Ошибка', apiError(e));
+  const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
 
   const submit = () => {
     const onSuccess = () => {
@@ -57,7 +57,11 @@ export function PaymentSheet({
       const cash = Number(cashInput) || 0;
       const qr = Number(qrInput) || 0;
       if (Math.round(cash + qr) !== Math.round(total)) {
-        Alert.alert('Проверьте суммы', `Сумма наличных и QR должна быть равна ${money(total)}`);
+        push({
+          message: `Сумма наличных и QR должна быть равна ${money(total)}`,
+          type: 'error',
+          at: new Date().toISOString(),
+        });
         return;
       }
       pay.mutate(
@@ -70,7 +74,27 @@ export function PaymentSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Оплата заказа">
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title="Оплата заказа"
+      footer={
+        <View style={styles.payActions}>
+          <Button
+            title="Разделить счёт"
+            variant="secondary"
+            onPress={() => push({ message: 'Разделение счёта будет доступно после настройки кассы.', at: new Date().toISOString() })}
+            style={styles.splitButton}
+          />
+          <Button
+            title={`Оплачено · ${money(total)}`}
+            onPress={submit}
+            loading={pay.isPending}
+            style={{ flex: 1 }}
+          />
+        </View>
+      }
+    >
       <Text style={styles.subtitle}>
         Стол {order.table.number}
         {hallSuffix(order.table)} · {displayOrderNumber(order.orderNumber)}
@@ -139,13 +163,6 @@ export function PaymentSheet({
         )}
       </View>
 
-      <View style={{ paddingTop: spacing.md, paddingBottom: spacing.sm }}>
-        <Button
-          title={`Оплачено · ${money(total)}`}
-          onPress={submit}
-          loading={pay.isPending}
-        />
-      </View>
     </BottomSheet>
   );
 }
@@ -197,4 +214,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     textAlign: 'right',
   },
+  payActions: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
+  splitButton: { width: 148 },
 });

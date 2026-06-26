@@ -82,16 +82,46 @@ export function useEndShift() {
 
 // ---------- Действия со столом ----------
 
-export function useCloseTable() {
+export interface AvailableWaiter {
+  id: string;
+  name: string;
+}
+
+export function useAvailableWaiters(enabled: boolean) {
+  return useQuery({
+    queryKey: ['tables', 'available-waiters'],
+    queryFn: async () => (await api.get<AvailableWaiter[]>('/tables/available-waiters')).data,
+    enabled,
+  });
+}
+
+function useTableMutation<TVars, TData>(fn: (vars: TVars) => Promise<TData>) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (tableId: string) => api.post(`/tables/${tableId}/close`).then((r) => r.data),
+    mutationFn: fn,
     retry: networkRetry,
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
   });
+}
+
+export function useCloseTable() {
+  return useTableMutation((tableId: string) => api.post(`/tables/${tableId}/close`).then((r) => r.data));
+}
+
+export function useMoveTable() {
+  return useTableMutation((vars: { tableId: string; targetTableId: string }) =>
+    api.post<Order>(`/tables/${vars.tableId}/move`, { targetTableId: vars.targetTableId }).then((r) => r.data),
+  );
+}
+
+export function useTransferTable() {
+  return useTableMutation((vars: { tableId: string; waiterId: string }) =>
+    api.post<Order>(`/tables/${vars.tableId}/transfer`, { waiterId: vars.waiterId }).then((r) => r.data),
+  );
 }
 
 /** Линии корзины → позиции заказа (учитывает состав сета). */
@@ -176,6 +206,7 @@ export const useServed = () => useOrderAction((id) => `/orders/${id}/served`);
 export const useToPayment = () => useOrderAction((id) => `/orders/${id}/to-payment`);
 export const useResolvePartialRejection = () =>
   useOrderAction((id) => `/orders/${id}/resolve-partial-rejection`);
+export const useClaimQrOrder = () => useOrderAction((id) => `/orders/${id}/claim-qr`);
 
 export function useRemoveRejectedItem() {
   const qc = useQueryClient();
@@ -186,6 +217,36 @@ export function useRemoveRejectedItem() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
+    },
+  });
+}
+
+export function useCancelReadyItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { orderId: string; itemId: string; reason: string }) =>
+      (await api.post<Order>(`/orders/${p.orderId}/items/${p.itemId}/cancel`, { reason: p.reason })).data,
+    retry: networkRetry,
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
+
+export function useReplaceRejectedItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (p: { orderId: string; itemId: string; line: CartLine }) => {
+      const [item] = linesToItems([p.line]);
+      return (await api.post<Order>(`/orders/${p.orderId}/rejected-items/${p.itemId}/replace`, { item })).data;
+    },
+    retry: networkRetry,
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
   });
 }

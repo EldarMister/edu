@@ -14,7 +14,9 @@ export type PwaIconName =
   | 'plus'
   | 'minus'
   | 'close'
-  | 'bag';
+  | 'bag'
+  | 'clock'
+  | 'dotsVertical';
 
 export function PwaIcon({
   name,
@@ -75,6 +77,19 @@ export function PwaIcon({
         <>
           <Path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6l-2-4Z" {...common} strokeWidth={2} />
           <Path d="M4 6h16M16 10a4 4 0 0 1-8 0" {...common} strokeWidth={2} />
+        </>
+      )}
+      {name === 'clock' && (
+        <>
+          <Circle cx="12" cy="12" r="9" {...common} strokeWidth={2} />
+          <Path d="M12 7v5l3 2" {...common} strokeWidth={2} />
+        </>
+      )}
+      {name === 'dotsVertical' && (
+        <>
+          <Circle cx="12" cy="5" r="1.6" fill={color} />
+          <Circle cx="12" cy="12" r="1.6" fill={color} />
+          <Circle cx="12" cy="19" r="1.6" fill={color} />
         </>
       )}
     </Svg>

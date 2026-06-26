@@ -76,13 +76,13 @@ export const fontSize = {
   xxl: 26,
 } as const;
 
-/** Мягкая тень карточек — PWA shadow-card (очень лёгкая). */
+/** Базовые карточки в мобильном эталоне читаются как чистый border без подъёма. */
 export const cardShadow = {
   shadowColor: '#0F172A',
-  shadowOffset: { width: 0, height: 1 },
-  shadowOpacity: 0.06,
-  shadowRadius: 3,
-  elevation: 1,
+  shadowOffset: { width: 0, height: 0 },
+  shadowOpacity: 0,
+  shadowRadius: 0,
+  elevation: 0,
 } as const;
 
 /** Тень для всплывающих элементов — PWA shadow-soft. */
