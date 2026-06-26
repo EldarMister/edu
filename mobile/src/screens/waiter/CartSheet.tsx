@@ -1,8 +1,10 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Button, RoundBtn, Toggle } from '@/components/ui';
+import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Button, RoundBtn } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
-import { colors, fontSize, spacing } from '@/theme';
+import { PwaIcon } from '@/components/PwaIcon';
+import { colors, fontSize, spacing, waiterLayout } from '@/theme';
 import { useCart, linePrice } from '@/store/cart';
 import { money } from '@/utils/format';
 
@@ -20,6 +22,7 @@ export function CartSheet({
   submitting: boolean;
   submitLabel: string;
 }) {
+  const insets = useSafeAreaInsets();
   const { lines, setQuantity, setTakeaway, clear, total } = useCart();
   const hasLines = lines.length > 0;
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
@@ -40,14 +43,22 @@ export function CartSheet({
   );
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} sheet footer={footer} bodyStyle={{ paddingVertical: 0 }}>
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      sheet
+      footer={footer}
+      bodyStyle={{ paddingVertical: 0 }}
+      maxHeight="78%"
+      bottomInset={waiterLayout.navBarHeight + insets.bottom}
+    >
       <View style={styles.headRow}>
         <Text style={styles.title}>Корзина</Text>
         {hasLines ? (
           <View style={styles.takeawayRow}>
             <Text style={styles.takeawayLabel}>С собой</Text>
-            <Toggle
-              value={allTakeaway}
+            <TakeawaySwitch
+              on={allTakeaway}
               onChange={(v) => lines.forEach((_, i) => setTakeaway(i, v))}
             />
           </View>
@@ -74,7 +85,8 @@ export function CartSheet({
                   </Text>
                 ) : null}
                 {l.takeaway ? (
-                  <Pressable onPress={() => setTakeaway(i, false)} style={styles.takeawayChip}>
+                  <Pressable onPress={() => setTakeaway(i, false)} style={styles.takeawayChip} hitSlop={6}>
+                    <PwaIcon name="bag" size={12} color={colors.textSecondary} strokeWidth={2} />
                     <Text style={styles.takeawayChipText}>С собой</Text>
                   </Pressable>
                 ) : null}
@@ -93,6 +105,39 @@ export function CartSheet({
   );
 }
 
+function TakeawaySwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+  const progress = React.useRef(new Animated.Value(on ? 1 : 0)).current;
+
+  React.useEffect(() => {
+    Animated.timing(progress, {
+      toValue: on ? 1 : 0,
+      duration: 180,
+      easing: Easing.bezier(0.4, 0, 0.2, 1),
+      useNativeDriver: false,
+    }).start();
+  }, [on, progress]);
+
+  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [2, 18] });
+  const backgroundColor = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [colors.slate300, colors.primary],
+  });
+
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked: on }}
+      onPress={() => onChange(!on)}
+      style={styles.switchPress}
+      hitSlop={8}
+    >
+      <Animated.View style={[styles.switchTrack, { backgroundColor }]}>
+        <Animated.View style={[styles.switchThumb, { transform: [{ translateX }] }]} />
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   headRow: {
     flexDirection: 'row',
@@ -103,7 +148,7 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   takeawayRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  takeawayLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
+  takeawayLabel: { fontSize: fontSize.base, color: colors.textSecondary },
   empty: { textAlign: 'center', color: colors.textMuted, fontSize: fontSize.sm, paddingVertical: spacing.xxl },
   line: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
   lineBorder: { borderTopWidth: 1, borderTopColor: colors.border },
@@ -111,14 +156,18 @@ const styles = StyleSheet.create({
   lineSub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
   takeawayChip: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     marginTop: 4,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 6,
+    backgroundColor: colors.white,
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  takeawayChipText: { fontSize: fontSize.xs, color: colors.textSecondary },
+  takeawayChipText: { fontSize: fontSize.xs, color: colors.textSecondary, lineHeight: 14 },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   qty: { width: 20, textAlign: 'center', fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
   linePrice: { width: 70, textAlign: 'right', fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
@@ -134,4 +183,20 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   clearBtn: { height: 36, alignItems: 'center', justifyContent: 'center' },
   clearText: { color: colors.primary, fontSize: fontSize.sm, fontWeight: '500' },
+  switchPress: {
+    width: 36,
+    height: 20,
+  },
+  switchTrack: {
+    width: 36,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+  },
+  switchThumb: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: colors.white,
+  },
 });

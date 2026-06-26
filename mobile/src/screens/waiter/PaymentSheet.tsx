@@ -6,6 +6,8 @@ import { colors, fontSize, radius, spacing } from '@/theme';
 import { usePay } from '@/services/api/waiter';
 import { usePublicSettings, resolveQrSrc } from '@/services/api/settings';
 import { apiError } from '@/lib/api';
+import { beep } from '@/lib/sound';
+import { useNotifications } from '@/store/notifications';
 import { displayOrderNumber, hallSuffix, money } from '@/utils/format';
 import type { Order, PaymentMethod } from '@/types';
 
@@ -24,6 +26,7 @@ export function PaymentSheet({
 }) {
   const settings = usePublicSettings();
   const pay = usePay();
+  const push = useNotifications((s) => s.push);
   const [tab, setTab] = useState<Tab>('qr');
   const [cashInput, setCashInput] = useState('');
   const [qrInput, setQrInput] = useState('');
@@ -44,6 +47,12 @@ export function PaymentSheet({
   const onError = (e: unknown) => Alert.alert('Ошибка', apiError(e));
 
   const submit = () => {
+    const onSuccess = () => {
+      void beep('payment');
+      push({ message: 'Оплата принята', type: 'success', at: new Date().toISOString() });
+      onPaid();
+    };
+
     if (tab === 'mixed') {
       const cash = Number(cashInput) || 0;
       const qr = Number(qrInput) || 0;
@@ -53,10 +62,10 @@ export function PaymentSheet({
       }
       pay.mutate(
         { orderId: order.id, method: 'mixed', cashAmount: cash, qrAmount: qr },
-        { onSuccess: onPaid, onError },
+        { onSuccess, onError },
       );
     } else {
-      pay.mutate({ orderId: order.id, method: tab }, { onSuccess: onPaid, onError });
+      pay.mutate({ orderId: order.id, method: tab }, { onSuccess, onError });
     }
   };
 

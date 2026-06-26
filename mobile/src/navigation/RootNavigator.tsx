@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Loading } from '@/components/ui';
+import { Toaster } from '@/components/Toaster';
 import { colors } from '@/theme';
 import { useAuth } from '@/store/auth';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
@@ -21,7 +22,12 @@ function AuthedArea({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     void registerForPushNotifications();
   }, []);
-  return <View style={{ flex: 1 }}>{children}</View>;
+  return (
+    <View style={{ flex: 1 }}>
+      {children}
+      <Toaster />
+    </View>
+  );
 }
 
 export function RootNavigator() {

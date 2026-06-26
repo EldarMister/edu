@@ -37,6 +37,11 @@
         "POST_NOTIFICATIONS"
       ]
     },
+    "androidStatusBar": {
+      "backgroundColor": "#005BFF",
+      "barStyle": "light-content",
+      "translucent": false
+    },
     "plugins": [
       "expo-secure-store",
       [

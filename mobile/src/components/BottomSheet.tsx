@@ -1,5 +1,7 @@
 import React from 'react';
 import {
+  Animated,
+  Easing,
   Modal as RNModal,
   Pressable,
   StyleSheet,
@@ -8,8 +10,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { colors, fontSize, radius, spacing, softShadow } from '@/theme';
+import { colors, fontSize, spacing, waiterLayout } from '@/theme';
+import { PwaIcon } from './PwaIcon';
 
 /**
  * Нижний лист / модалка — повторяет PWA Modal на мобильном (items-end):
@@ -25,6 +27,8 @@ export function BottomSheet({
   footer,
   sheet = false,
   bodyStyle,
+  maxHeight,
+  bottomInset,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -34,12 +38,72 @@ export function BottomSheet({
   /** true — стиль «нижний лист» с хваталкой вместо шапки-крестика. */
   sheet?: boolean;
   bodyStyle?: ViewStyle;
+  maxHeight?: ViewStyle['maxHeight'];
+  bottomInset?: number;
 }) {
+  const [render, setRender] = React.useState(visible);
+  const progress = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    if (visible) {
+      setRender(true);
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 440,
+        easing: Easing.bezier(0.4, 0, 0.2, 1),
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: 260,
+      easing: Easing.bezier(0.4, 0, 0.2, 1),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setRender(false);
+    });
+  }, [progress, visible]);
+
+  if (!render) return null;
+
+  const translateY = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [520, 0],
+  });
+  const opacity = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 1],
+  });
+
   return (
-    <RNModal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <RNModal
+      visible={render}
+      animationType="none"
+      transparent
+      statusBarTranslucent={false}
+      hardwareAccelerated
+      onRequestClose={onClose}
+    >
       <View style={styles.backdrop}>
-        <Pressable style={styles.backdropFill} onPress={onClose} />
-        <SafeAreaView style={styles.sheet} edges={['bottom']}>
+        <Animated.View
+          style={[styles.backdropFill, bottomInset != null && { bottom: bottomInset }, { opacity }]}
+          pointerEvents="box-none"
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        </Animated.View>
+        <Animated.View
+          style={[
+            styles.sheet,
+            maxHeight != null && { maxHeight },
+            bottomInset != null && { marginBottom: bottomInset },
+            { transform: [{ translateY }] },
+          ]}
+        >
+        <SafeAreaView
+          style={styles.sheetSafe}
+          edges={['bottom']}
+        >
           {sheet ? (
             <View style={styles.handleWrap}>
               <View style={styles.handle} />
@@ -49,7 +113,7 @@ export function BottomSheet({
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>
               <Pressable onPress={onClose} hitSlop={12}>
-                <Ionicons name="close" size={22} color={colors.textLight} />
+                <PwaIcon name="close" size={22} color={colors.textLight} />
               </Pressable>
             </View>
           ) : null}
@@ -58,25 +122,26 @@ export function BottomSheet({
 
           {footer ? <View style={styles.footer}>{footer}</View> : null}
         </SafeAreaView>
+        </Animated.View>
       </View>
     </RNModal>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  backdropFill: { ...StyleSheet.absoluteFillObject },
+  backdrop: { flex: 1, justifyContent: 'flex-end' },
+  backdropFill: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.34)' },
   sheet: {
     backgroundColor: colors.card,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
+    borderTopLeftRadius: waiterLayout.sheetRadius,
+    borderTopRightRadius: waiterLayout.sheetRadius,
     maxHeight: '92%',
-    ...softShadow,
+    overflow: 'hidden',
   },
+  sheetSafe: { backgroundColor: colors.card },
   handleWrap: { paddingTop: 10, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300 },
-  sheetTitle: { fontSize: fontSize.xl, fontWeight: '600', color: colors.textPrimary },
-  // PWA Modal header: px-5 py-3, заголовок text-base font-semibold (16/600).
+  sheetTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

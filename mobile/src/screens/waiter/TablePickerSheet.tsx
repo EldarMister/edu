@@ -1,7 +1,7 @@
 import React from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet } from '@/components/BottomSheet';
-import { colors, fontSize, radius, spacing } from '@/theme';
+import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { TABLE_STATUS } from '@/theme/status';
 import { useHalls } from '@/services/api/waiter';
 import { useAuth } from '@/store/auth';
@@ -40,10 +40,10 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Выбор стола">
-      <ScrollView style={{ maxHeight: 560 }} showsVerticalScrollIndicator={false}>
+    <BottomSheet visible={visible} onClose={onClose} title="Выбор стола" maxHeight="92%">
+      <ScrollView showsVerticalScrollIndicator={false}>
         {(halls.data ?? []).map((hall) => (
-          <View key={hall.id} style={{ marginBottom: spacing.md }}>
+          <View key={hall.id} style={styles.section}>
             <Text style={styles.hallName}>{hall.name}</Text>
             <View style={styles.grid}>
               {hall.tables.map((tbl) => {
@@ -71,13 +71,12 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
 }
 
 const styles = StyleSheet.create({
-  // PWA TableSelectModal: ярлык зала mb-1.5 text-xs text-text-muted.
-  hallName: { fontSize: fontSize.xs, color: colors.textMuted, marginBottom: 6, fontWeight: '500' },
+  section: { marginBottom: spacing.md },
+  hallName: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted, marginBottom: 6 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  // PWA: сетка grid-cols-4 gap-2, карточка h-[60px] (фиксированная высота, не квадрат).
   table: {
     width: '22.6%',
-    height: 60,
+    height: waiterLayout.tablePickerCardHeight,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -86,8 +85,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tableSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  // PWA: точка right-2 top-2 h-2.5 w-2.5 (8/8/10).
-  dot: { position: 'absolute', right: 8, top: 8, width: 10, height: 10, borderRadius: 5 },
-  // PWA: цифра text-[15px] font-medium.
-  tableNumber: { fontSize: 15, fontWeight: '500', color: colors.textPrimary },
+  dot: { position: 'absolute', right: 6, top: 6, width: 10, height: 10, borderRadius: 5 },
+  tableNumber: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
 });

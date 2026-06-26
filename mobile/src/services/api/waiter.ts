@@ -61,7 +61,11 @@ export function useStartShift() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async () => (await api.post<WaiterShift>('/waiter/shifts/start')).data,
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['waiter', 'shift'] }),
+    onSuccess: (data) => {
+      // Сразу отражаем активную смену, чтобы оверлей старта закрылся детерминированно.
+      qc.setQueryData(['waiter', 'shift', 'current'], data);
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
   });
 }
 

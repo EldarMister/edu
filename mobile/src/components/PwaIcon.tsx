@@ -1,0 +1,82 @@
+import React from 'react';
+import Svg, { Circle, Path, Rect } from 'react-native-svg';
+
+export type PwaIconName =
+  | 'grid'
+  | 'menu'
+  | 'list'
+  | 'user'
+  | 'cart'
+  | 'search'
+  | 'chevronDown'
+  | 'chevronRight'
+  | 'pencil'
+  | 'plus'
+  | 'minus'
+  | 'close'
+  | 'bag';
+
+export function PwaIcon({
+  name,
+  size = 22,
+  color,
+  strokeWidth = 1.8,
+}: {
+  name: PwaIconName;
+  size?: number;
+  color: string;
+  strokeWidth?: number;
+}) {
+  const common = {
+    stroke: color,
+    strokeWidth,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+  };
+
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      {name === 'grid' && (
+        <>
+          <Rect x="3" y="3" width="7" height="7" rx="1.5" {...common} />
+          <Rect x="14" y="3" width="7" height="7" rx="1.5" {...common} />
+          <Rect x="3" y="14" width="7" height="7" rx="1.5" {...common} />
+          <Rect x="14" y="14" width="7" height="7" rx="1.5" {...common} />
+        </>
+      )}
+      {name === 'menu' && <Path d="M4 6h16M4 12h16M4 18h10" {...common} />}
+      {name === 'list' && <Path d="M8 6h12M8 12h12M8 18h12M3.5 6h.01M3.5 12h.01M3.5 18h.01" {...common} />}
+      {name === 'user' && (
+        <>
+          <Circle cx="12" cy="8" r="4" {...common} />
+          <Path d="M4 21c0-4 4-6 8-6s8 2 8 6" {...common} />
+        </>
+      )}
+      {name === 'cart' && (
+        <>
+          <Path d="M3 4h2l2.4 12.3a1 1 0 0 0 1 .7h8.7a1 1 0 0 0 1-.8L21 8H6" {...common} />
+          <Circle cx="9" cy="20" r="1.4" {...common} />
+          <Circle cx="18" cy="20" r="1.4" {...common} />
+        </>
+      )}
+      {name === 'search' && (
+        <>
+          <Circle cx="11" cy="11" r="7" {...common} />
+          <Path d="m20 20-3-3" {...common} />
+        </>
+      )}
+      {name === 'chevronDown' && <Path d="m6 9 6 6 6-6" {...common} strokeWidth={2} />}
+      {name === 'chevronRight' && <Path d="m9 18 6-6-6-6" {...common} strokeWidth={2} />}
+      {name === 'pencil' && <Path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" {...common} />}
+      {name === 'plus' && <Path d="M5 12h14M12 5v14" {...common} strokeWidth={2.4} />}
+      {name === 'minus' && <Path d="M5 12h14" {...common} strokeWidth={2.4} />}
+      {name === 'close' && <Path d="M18 6 6 18M6 6l12 12" {...common} strokeWidth={2} />}
+      {name === 'bag' && (
+        <>
+          <Path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6l-2-4Z" {...common} strokeWidth={2} />
+          <Path d="M4 6h16M16 10a4 4 0 0 1-8 0" {...common} strokeWidth={2} />
+        </>
+      )}
+    </Svg>
+  );
+}

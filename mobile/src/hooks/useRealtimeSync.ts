@@ -2,6 +2,8 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSocket } from '@/services/socket';
 import { SERVER_EVENTS } from '@/services/socket/events';
+import { beep } from '@/lib/sound';
+import { useNotifications } from '@/store/notifications';
 
 /**
  * Глобальная синхронизация React Query кэша по realtime-событиям (ТЗ §21).
@@ -10,6 +12,7 @@ import { SERVER_EVENTS } from '@/services/socket/events';
  */
 export function useRealtimeSync() {
   const qc = useQueryClient();
+  const push = useNotifications((s) => s.push);
 
   useEffect(() => {
     const sock = getSocket();
@@ -28,15 +31,27 @@ export function useRealtimeSync() {
       qc.invalidateQueries({ queryKey: ['dishes'] });
       qc.invalidateQueries({ queryKey: ['categories'] });
     };
+    const notifyWaiter = () => {
+      invalidateOrders();
+      push({ message: 'Статус заказа обновлён', type: 'info', at: new Date().toISOString() });
+      void beep('notify');
+    };
+    const notifyReceiptAccepted = () => {
+      invalidateOrders();
+      push({ message: 'Печать чека подтверждена', type: 'success', at: new Date().toISOString() });
+      void beep('accept');
+    };
 
     const handlers: Array<[string, () => void]> = [
       [SERVER_EVENTS.ORDER_NEW, invalidateOrders],
       [SERVER_EVENTS.ORDER_STATUS_CHANGED, invalidateOrders],
       [SERVER_EVENTS.KITCHEN_NEW_ORDER, invalidateOrders],
-      [SERVER_EVENTS.WAITER_ORDER_READY, invalidateOrders],
-      [SERVER_EVENTS.WAITER_ORDER_REJECTED, invalidateOrders],
+      [SERVER_EVENTS.WAITER_ORDER_READY, notifyWaiter],
+      [SERVER_EVENTS.WAITER_ORDER_REJECTED, notifyWaiter],
       [SERVER_EVENTS.WAITER_SHIFT_STARTED, invalidateOrders],
       [SERVER_EVENTS.WAITER_SHIFT_ENDED, invalidateOrders],
+      [SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, notifyReceiptAccepted],
+      [SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, notifyReceiptAccepted],
       [SERVER_EVENTS.TABLE_STATUS_CHANGED, invalidateTables],
       [SERVER_EVENTS.TABLES_UPDATED, invalidateTables],
       [SERVER_EVENTS.MENU_UPDATED, invalidateMenu],
@@ -55,5 +70,5 @@ export function useRealtimeSync() {
       handlers.forEach(([event, fn]) => sock.off(event, fn));
       sock.off('connect', onReconnect);
     };
-  }, [qc]);
+  }, [push, qc]);
 }

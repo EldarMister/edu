@@ -67,6 +67,7 @@ export const radius = {
 // Размеры шрифта (PWA base 15px, line-height 1.4).
 export const fontSize = {
   xs: 11,
+  tab: 14,
   sm: 13,
   base: 15,
   md: 16,
@@ -91,4 +92,19 @@ export const softShadow = {
   shadowOpacity: 0.08,
   shadowRadius: 16,
   elevation: 6,
+} as const;
+
+/** Fixed mobile layout tokens copied from the PWA waiter UI. */
+export const waiterLayout = {
+  inputHeight: 44,
+  pillHeight: 36,
+  pillRadius: 8,
+  dishCardHeight: 100,
+  dishCardRadius: 12,
+  tableCardRadius: 22,
+  tablePickerCardHeight: 60,
+  cartBarHeight: 65,
+  navBarHeight: 58,
+  roundButton: 28,
+  sheetRadius: 16,
 } as const;

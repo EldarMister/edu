@@ -10,7 +10,8 @@ import {
   type TextInputProps,
   type ViewStyle,
 } from 'react-native';
-import { colors, radius, spacing, fontSize, cardShadow } from '@/theme';
+import { colors, radius, spacing, fontSize, cardShadow, waiterLayout } from '@/theme';
+import { PwaIcon } from './PwaIcon';
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger';
 type ButtonSize = 'lg' | 'md';
@@ -47,9 +48,9 @@ export function Button({
     <Pressable
       onPress={onPress}
       disabled={isDisabled}
-      style={({ pressed }) => [
+      style={[
         styles.btn,
-        { height, backgroundColor: bg, opacity: isDisabled ? 0.5 : pressed ? 0.9 : 1 },
+        { height, backgroundColor: bg, opacity: isDisabled ? 0.5 : 1 },
         variant === 'secondary' && styles.btnSecondary,
         style,
       ]}
@@ -90,7 +91,7 @@ export function Card({
   ];
   if (onPress) {
     return (
-      <Pressable onPress={onPress} style={({ pressed }) => [...content, pressed && { opacity: 0.95 }]}>
+      <Pressable onPress={onPress} style={content}>
         {children}
       </Pressable>
     );
@@ -165,24 +166,18 @@ export function PillTabs<T extends string>({
   style?: ViewStyle;
 }) {
   return (
-    <ScrollView
-      horizontal
-      showsHorizontalScrollIndicator={false}
-      contentContainerStyle={[styles.pillRow, style]}
-    >
-      {items.map((it) => {
-        const active = it.key === value;
-        return (
-          <Pressable
-            key={it.key}
-            onPress={() => onChange(it.key)}
-            style={[styles.pill, active && styles.pillActive]}
-          >
-            <Text style={[styles.pillText, active && styles.pillTextActive]}>{it.label}</Text>
-          </Pressable>
-        );
-      })}
-    </ScrollView>
+    <View style={[styles.pillOuter, style]}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.pillRow}>
+        {items.map((it) => {
+          const active = it.key === value;
+          return (
+            <Pressable key={it.key} onPress={() => onChange(it.key)} style={[styles.pill, active && styles.pillActive]}>
+              <Text style={[styles.pillText, active && styles.pillTextActive]}>{it.label}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -225,32 +220,18 @@ export function SegmentTabs<T extends string>({
   );
 }
 
-/** Круглая кнопка ± — PWA CartItems RoundBtn: h-7 w-7 (28), dec красная, inc синяя. */
+/** Круглая кнопка ±, как в корзине PWA (dec красная, inc синяя). */
 export function RoundBtn({ kind, onPress }: { kind: 'inc' | 'dec'; onPress: () => void }) {
   const isDec = kind === 'dec';
   return (
     <Pressable
       onPress={onPress}
-      style={({ pressed }) => [
+      style={[
         styles.roundBtn,
-        { borderColor: isDec ? colors.red400 : colors.primary, opacity: pressed ? 0.6 : 1 },
+        { borderColor: isDec ? colors.red400 : colors.primary },
       ]}
     >
-      <Text style={[styles.roundBtnText, { color: isDec ? colors.red500 : colors.primary }]}>
-        {isDec ? '−' : '+'}
-      </Text>
-    </Pressable>
-  );
-}
-
-/** Тумблер — PWA TakeawaySwitch: трек h-5 w-9 (20×36), бегунок h-4 w-4 (16). */
-export function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <Pressable
-      onPress={() => onChange(!value)}
-      style={[styles.toggleTrack, { backgroundColor: value ? colors.primary : colors.slate300 }]}
-    >
-      <View style={[styles.toggleKnob, { transform: [{ translateX: value ? 18 : 2 }] }]} />
+      <PwaIcon name={isDec ? 'minus' : 'plus'} size={14} color={isDec ? colors.red500 : colors.primary} />
     </Pressable>
   );
 }
@@ -290,24 +271,24 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
   muted: { color: colors.textMuted, fontSize: fontSize.base, textAlign: 'center' },
 
-  pillRow: { gap: spacing.sm, paddingVertical: 2 },
-  // Пилюля = PWA CatTab/hall tab: rounded-lg px-3.5 py-2 text-sm font-medium, shrink-0.
+  pillOuter: { height: waiterLayout.pillHeight, flexGrow: 0, flexShrink: 0 },
+  pillRow: { gap: spacing.sm },
   pill: {
-    flexShrink: 0,
+    height: waiterLayout.pillHeight,
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: radius.sm,
+    borderRadius: waiterLayout.pillRadius,
     backgroundColor: colors.white,
     borderWidth: 1,
     borderColor: colors.border,
   },
   pillActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  pillText: { fontSize: 14, color: colors.textSecondary, fontWeight: '500' },
+  pillText: { fontSize: fontSize.tab, color: colors.textSecondary, fontWeight: '500' },
   pillTextActive: { color: colors.white },
 
   segmentRow: { gap: spacing.sm, paddingVertical: 2 },
   segment: {
-    flexShrink: 0,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -322,26 +303,12 @@ const styles = StyleSheet.create({
   segmentCountText: { color: colors.white, fontSize: fontSize.xs },
 
   roundBtn: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: waiterLayout.roundButton,
+    height: waiterLayout.roundButton,
+    borderRadius: waiterLayout.roundButton / 2,
     borderWidth: 1,
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  roundBtnText: { fontSize: 17, fontWeight: '600', lineHeight: 19 },
-
-  toggleTrack: { width: 36, height: 20, borderRadius: 10, justifyContent: 'center' },
-  toggleKnob: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: colors.white,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.5,
-    elevation: 2,
   },
 });

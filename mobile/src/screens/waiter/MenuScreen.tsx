@@ -1,16 +1,16 @@
 import React, { useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
-import { colors, fontSize, radius, spacing, cardShadow } from '@/theme';
+import { PwaIcon } from '@/components/PwaIcon';
+import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { useCategories, useCreateOrder, useAddItems, useDishes } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
-import { notify } from '@/store/notifications';
+import { useNotifications } from '@/store/notifications';
 import { buildSetLine } from '@/utils/set';
-import { makeIdempotencyKey, money, pluralPositions } from '@/utils/format';
+import { makeIdempotencyKey, money } from '@/utils/format';
 import { apiError } from '@/lib/api';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
@@ -27,6 +27,7 @@ export function MenuScreen() {
   const activeOrderId = useCart((s) => s.activeOrderId);
   const orderComment = useCart((s) => s.comment);
   const cart = useCart();
+  const push = useNotifications((s) => s.push);
 
   const categories = useCategories();
   const dishes = useDishes();
@@ -75,7 +76,6 @@ export function MenuScreen() {
   const onAddDish = (dish: Dish) => {
     if (dish.isSet) {
       cart.addLine(buildSetLine(dish));
-      notify(`${dish.name} добавлен`);
       return;
     }
     if (dish.variants && dish.variants.length > 0) {
@@ -83,13 +83,12 @@ export function MenuScreen() {
       return;
     }
     cart.add(dish);
-    const line = useCart.getState().lines.find((l) => l.dish.id === dish.id && !l.variant && !l.set);
-    notify(`${dish.name} ×${line?.quantity ?? 1} добавлено`);
+    push({ message: `${dish.name} ×${(cartQuantities[dish.id] ?? 0) + 1} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
   };
 
   const onSubmit = () => {
     if (!connected) {
-      Alert.alert('Нет соединения', 'Создание заказа недоступно без интернета.');
+      push({ message: 'Создание заказа недоступно без интернета.', type: 'error', at: new Date().toISOString() });
       return;
     }
     if (cart.lines.length === 0) return;
@@ -99,7 +98,7 @@ export function MenuScreen() {
       setCartOpen(false);
       navigation.navigate('Orders');
     };
-    const onError = (e: unknown) => Alert.alert('Ошибка', apiError(e));
+    const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
 
     if (activeOrderId) {
       addItems.mutate({ orderId: activeOrderId, idempotencyKey, lines: cart.lines }, { onSuccess: done, onError });
@@ -120,7 +119,7 @@ export function MenuScreen() {
       {/* Поиск + выбранный стол */}
       <View style={styles.searchRow}>
         <View style={styles.searchWrap}>
-          <Ionicons name="search" size={18} color={colors.textLight} />
+          <PwaIcon name="search" size={18} color={colors.textLight} strokeWidth={2} />
           <TextInput
             placeholder="Поиск блюда"
             placeholderTextColor={colors.textLight}
@@ -129,12 +128,12 @@ export function MenuScreen() {
             style={styles.searchInput}
           />
         </View>
-        <Pressable style={styles.tableChip} onPress={() => setTablePickerOpen(true)}>
+        <Pressable style={[styles.tableChip, tablePickerOpen && styles.tableChipActive]} onPress={() => setTablePickerOpen(true)}>
           <Text style={styles.tableChipText}>
             Стол {tableNumber}
             {hallName ? ` · ${hallName}` : ''}
           </Text>
-          <Ionicons name="chevron-down" size={16} color={colors.textMuted} />
+          <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} />
         </Pressable>
       </View>
 
@@ -143,7 +142,7 @@ export function MenuScreen() {
         items={[{ key: 'all', label: 'Все' }, ...sortedCategories.map((c) => ({ key: c.id, label: c.name }))]}
         value={categoryId}
         onChange={setCategoryId}
-        style={{ paddingHorizontal: spacing.md, marginBottom: spacing.sm }}
+        style={{ paddingHorizontal: spacing.md, marginBottom: spacing.md }}
       />
 
       {/* Блюда */}
@@ -215,9 +214,9 @@ export function MenuScreen() {
           disabled={count === 0}
           onPress={() => setCartOpen(true)}
         >
-          <Ionicons name="cart-outline" size={20} color={colors.textSecondary} />
+          <PwaIcon name="cart" size={22} color={colors.textSecondary} />
           <View>
-            <Text style={styles.cartCount}>{count} {pluralPositions(count)}</Text>
+            <Text style={styles.cartCount}>{count} {pozLabel(count)}</Text>
             <Text style={styles.cartTotal}>{money(cart.total())}</Text>
           </View>
         </Pressable>
@@ -244,10 +243,11 @@ export function MenuScreen() {
         onAdd={(variant) => {
           if (variantDish) {
             cart.add(variantDish, variant);
-            const line = useCart
-              .getState()
-              .lines.find((l) => l.dish.id === variantDish.id && l.variant?.id === variant.id && !l.set);
-            notify(`${variantDish.name} · ${variant.name} ×${line?.quantity ?? 1} добавлено`);
+            push({
+              message: `${variantDish.name} · ${variant.name} ×${(cartQuantities[variant.id] ?? 0) + 1} добавлено`,
+              at: new Date().toISOString(),
+              durationMs: 1800,
+            });
           }
           setVariantDish(null);
         }}
@@ -256,6 +256,15 @@ export function MenuScreen() {
       <TablePickerSheet visible={tablePickerOpen} onClose={() => setTablePickerOpen(false)} />
     </SafeAreaView>
   );
+}
+
+function pozLabel(n: number): string {
+  const a = Math.abs(n) % 100;
+  const b = Math.abs(n) % 10;
+  if (a > 10 && a < 20) return 'позиций';
+  if (b === 1) return 'позиция';
+  if (b >= 2 && b <= 4) return 'позиции';
+  return 'позиций';
 }
 
 /** Лист выбора варианта/размера — радио-список как в PWA. */
@@ -318,57 +327,56 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
-    height: 48,
+    height: waiterLayout.inputHeight,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.background,
+    backgroundColor: colors.white,
   },
   searchInput: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary, padding: 0 },
   tableChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    height: 48,
+    height: waiterLayout.inputHeight,
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.background,
+    backgroundColor: colors.white,
   },
-  tableChipText: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  tableChipActive: { borderColor: colors.primary },
+  tableChipText: { fontSize: fontSize.tab, fontWeight: '500', color: colors.textPrimary },
 
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingHorizontal: spacing.md, paddingBottom: spacing.md },
-  // Карточка блюда — точные размеры из PWA DishMenu: h-[100px], rounded-xl, px-3 py-2.
   dish: {
-    width: '48%',
-    height: 100,
-    borderRadius: radius.md,
+    width: '48.5%',
+    height: waiterLayout.dishCardHeight,
+    borderRadius: waiterLayout.dishCardRadius,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    ...cardShadow,
   },
   dishActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
   dishDisabled: { opacity: 0.5 },
   dishName: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary, lineHeight: 20 },
-  dishSub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
-  dishBottom: { marginTop: 'auto', paddingTop: 8, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
+  dishSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  dishBottom: { marginTop: 'auto', flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   dishPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   qtyBadge: {
-    minWidth: 28,
-    height: 28,
-    borderRadius: 14,
+    minWidth: waiterLayout.roundButton,
+    height: waiterLayout.roundButton,
+    borderRadius: waiterLayout.roundButton / 2,
     borderWidth: 1,
     borderColor: colors.red400,
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 6,
   },
-  qtyBadgeText: { color: colors.red500, fontWeight: '600', fontSize: 14 },
+  qtyBadgeText: { color: colors.red500, fontWeight: '600', fontSize: fontSize.tab },
   unavailable: {
     position: 'absolute',
     right: 8,

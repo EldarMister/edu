@@ -1,33 +1,37 @@
 import { create } from 'zustand';
 
-/** Запись ленты уведомлений официанта (как history в PWA). */
+export type NotificationType = 'info' | 'success' | 'error';
+
 export interface AppNotification {
   id: string;
   message: string;
-  at: string; // ISO
+  type?: NotificationType;
+  at: string;
+  durationMs?: number;
 }
 
 interface NotifyState {
+  toasts: AppNotification[];
   history: AppNotification[];
-  push: (message: string) => void;
-  clear: () => void;
+  push: (n: Omit<AppNotification, 'id'>) => void;
+  dismiss: (id: string) => void;
+  clearHistory: () => void;
 }
 
 let counter = 0;
+const MAX_TOASTS = 4;
 
 export const useNotifications = create<NotifyState>((set) => ({
+  toasts: [],
   history: [],
-  push: (message) =>
-    set((s) => ({
-      history: [
-        { id: `n${++counter}`, message, at: new Date().toISOString() },
-        ...s.history,
-      ].slice(0, 50),
-    })),
-  clear: () => set({ history: [] }),
+  push: (n) =>
+    set((s) => {
+      const item: AppNotification = { ...n, id: `n${++counter}` };
+      return {
+        toasts: [...s.toasts, item].slice(-MAX_TOASTS),
+        history: [item, ...s.history].slice(0, 50),
+      };
+    }),
+  dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
+  clearHistory: () => set({ history: [] }),
 }));
-
-/** Короткий помощник: добавить запись в ленту без подписки на стор. */
-export function notify(message: string) {
-  useNotifications.getState().push(message);
-}

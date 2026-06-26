@@ -130,20 +130,18 @@ function OrderCard({ order }: { order: Order }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   panel: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
-  // PWA Panel title: text-lg font-semibold (18/600).
-  panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.md },
+  panelTitle: { fontSize: 24, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.md },
   list: { gap: spacing.md, paddingBottom: spacing.md },
-  // PWA OrdersList: gap-3, номер/сумма text-base font-semibold (16/600), стол text-sm, время text-xs.
-  row: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.md },
+  row: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
   headLeft: { flex: 1, minWidth: 0, gap: spacing.sm },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-  orderNumber: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap' },
+  orderNumber: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
   qrTag: { backgroundColor: colors.primarySoft, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   qrTagText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primary },
-  tableText: { fontSize: 14, color: colors.textMuted },
+  tableText: { fontSize: fontSize.base, color: colors.textMuted },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  metaText: { fontSize: 12, color: colors.textLight },
+  metaText: { fontSize: fontSize.sm, color: colors.textLight },
   headRight: { alignItems: 'flex-end', gap: spacing.sm },
-  money: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
+  money: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
   dots: { paddingLeft: 4, paddingTop: 2 },
 });
