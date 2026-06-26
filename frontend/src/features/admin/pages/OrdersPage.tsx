@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Order, OrderStatus } from '@/types';
-import { OrderBadge } from '@/components/StatusBadge';
+import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { useNotifications } from '@/store/notifications';
@@ -296,7 +296,7 @@ export function OrdersPage() {
                     <Td className="text-text-secondary">{ord.waiter?.name ?? 'QR menu'}</Td>
                     <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
                     <Td>
-                      <OrderBadge status={ord.status} size="sm" />
+                      <OrderStatusBadges order={ord} size="sm" />
                     </Td>
                     <Td className="whitespace-nowrap text-text-secondary">{paymentCell(ord)}</Td>
                     <Td className="px-1">

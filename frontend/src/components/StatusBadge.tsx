@@ -1,5 +1,5 @@
-import type { OrderStatus, TableStatus } from '@/types';
-import { ORDER_STATUS, TABLE_STATUS } from '@/lib/status';
+import type { Order, OrderStatus, TableStatus } from '@/types';
+import { ORDER_STATUS, TABLE_STATUS, orderStationStatuses } from '@/lib/status';
 import { useT } from '@/lib/i18n';
 
 export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?: 'sm' | 'md' }) {
@@ -10,6 +10,30 @@ export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?
     <span className={`inline-flex items-center whitespace-nowrap font-medium ${sizeCls} ${meta.badge}`}>
       {t(meta.label)}
     </span>
+  );
+}
+
+/**
+ * Бейдж(и) статуса заказа. Если позиции активны сразу на двух станциях (кухня и
+ * бар) в разных состояниях — показываем пару станционных чипов «Кухня: …» /
+ * «Бар: …», иначе один глобальный бейдж.
+ */
+export function OrderStatusBadges({ order, size = 'md' }: { order: Order; size?: 'sm' | 'md' }) {
+  const t = useT();
+  const chips = orderStationStatuses(order);
+  const sizeCls = size === 'sm' ? 'rounded-md px-2 py-0.5 text-[11px]' : 'rounded-lg px-2.5 py-1 text-xs';
+  if (chips.length === 0) return <OrderBadge status={order.status} size={size} />;
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-1">
+      {chips.map((c) => (
+        <span
+          key={c.station}
+          className={`inline-flex items-center whitespace-nowrap font-medium ${sizeCls} ${c.badge}`}
+        >
+          {t(c.stationLabel)}: {t(c.label)}
+        </span>
+      ))}
+    </div>
   );
 }
 

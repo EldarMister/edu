@@ -1,5 +1,5 @@
 import { Modal } from '@/components/Modal';
-import { OrderBadge } from '@/components/StatusBadge';
+import { OrderStatusBadges } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
 import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
@@ -31,7 +31,7 @@ export function OrderDetailsModal({
 
   const infoRows: { label: string; value: React.ReactNode }[][] = [
     [
-      { label: 'Статус', value: <OrderBadge status={order.status} /> },
+      { label: 'Статус', value: <OrderStatusBadges order={order} /> },
       { label: 'Официант', value: order.waiter?.name ?? 'QR menu' },
     ],
     [
