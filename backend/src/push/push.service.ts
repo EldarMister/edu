@@ -149,7 +149,8 @@ export class PushService {
       to,
       title: payload.title,
       body: payload.body,
-      sound: 'default',
+      sound: 'notify.mp3',
+      channelId: 'orders',
       priority: 'high',
       data: {
         type: payload.type,

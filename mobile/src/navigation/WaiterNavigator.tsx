@@ -31,9 +31,10 @@ export function WaiterNavigator() {
   const ordersCount = orders.data?.length ?? 0;
 
   const shiftActive = shiftQ.data?.status === 'active';
+  const shiftResolved = shiftQ.isFetched || shiftQ.data !== undefined;
   // Пока идёт запуск смены, оверлей удерживается, даже когда смена уже активна.
   const [busy, setBusy] = React.useState(false);
-  const showGate = !shiftActive || busy;
+  const showGate = busy || (shiftResolved && !shiftActive);
   // Высота нижней навигации — оверлей не перекрывает её, вкладки остаются доступны.
   const tabBarHeight = waiterLayout.navBarHeight + Math.max(insets.bottom, 4);
 

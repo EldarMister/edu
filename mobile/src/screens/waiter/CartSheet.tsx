@@ -4,7 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, RoundBtn } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
-import { colors, fontSize, spacing, waiterLayout } from '@/theme';
+import { NumberTicker } from '@/components/NumberTicker';
+import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { useCart, linePrice } from '@/store/cart';
 import { money } from '@/utils/format';
 
@@ -31,7 +32,7 @@ export function CartSheet({
     <View style={{ gap: spacing.sm, paddingBottom: spacing.sm }}>
       <View style={styles.totalRow}>
         <Text style={styles.totalLabel}>Итого</Text>
-        <Text style={styles.totalValue}>{money(total())}</Text>
+        <NumberTicker value={total()} style={styles.totalValue} digitHeight={22} />
       </View>
       <Button title={submitLabel} onPress={onSubmit} loading={submitting} disabled={!hasLines} />
       {hasLines ? (
@@ -67,7 +68,9 @@ export function CartSheet({
 
       <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
         {!hasLines ? (
-          <Text style={styles.empty}>Корзина пуста</Text>
+          <View style={styles.emptyBox}>
+            <Text style={styles.empty}>Корзина пуста</Text>
+          </View>
         ) : (
           lines.map((l, i) => (
             <View
@@ -149,7 +152,13 @@ const styles = StyleSheet.create({
   title: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   takeawayRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   takeawayLabel: { fontSize: fontSize.base, color: colors.textSecondary },
-  empty: { textAlign: 'center', color: colors.textMuted, fontSize: fontSize.sm, paddingVertical: spacing.xxl },
+  emptyBox: {
+    marginTop: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.background,
+    paddingVertical: spacing.xxl,
+  },
+  empty: { textAlign: 'center', color: colors.textMuted, fontSize: fontSize.sm },
   line: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
   lineBorder: { borderTopWidth: 1, borderTopColor: colors.border },
   lineName: { fontSize: fontSize.base, color: colors.textPrimary },

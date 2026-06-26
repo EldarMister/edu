@@ -8,6 +8,7 @@ import { colors } from '@/theme';
 import { useAuth } from '@/store/auth';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { registerForPushNotifications } from '@/services/push';
+import { useSocketLifecycle } from '@/services/socket';
 import { LoginScreen } from '@/screens/auth/LoginScreen';
 import { WaiterNavigator } from './WaiterNavigator';
 import { KitchenNavigator, BarNavigator } from './KitchenNavigator';
@@ -18,6 +19,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 /** Подключает глобальную realtime-синхронизацию в авторизованной зоне. */
 function AuthedArea({ children }: { children: React.ReactNode }) {
+  useSocketLifecycle();
   useRealtimeSync();
   React.useEffect(() => {
     void registerForPushNotifications();

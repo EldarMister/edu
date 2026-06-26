@@ -162,21 +162,25 @@ export function TablesScreen() {
           <Text style={styles.panelTitle}>Выбор стола</Text>
           <View style={styles.actionsAnchor}>
             <Pressable
+              disabled={!selectedTable}
               onPress={() => setActionsOpen((v) => !v)}
               style={[styles.editBtn, !selectedTable && styles.editBtnDisabled]}
             >
-              <PwaIcon name="pencil" size={16} color={colors.textLight} />
-              <Text style={styles.editBtnText}>Редактировать</Text>
+              <PwaIcon name="pencil" size={16} color={selectedTable ? colors.textSecondary : colors.textLight} />
+              <Text style={[styles.editBtnText, selectedTable && styles.editBtnTextActive]}>Редактировать</Text>
             </Pressable>
             {actionsOpen ? (
               <View style={styles.tableActionsMenu}>
                 <Pressable onPress={() => openTableAction('close')} style={styles.tableActionItem}>
+                  <PwaIcon name="close" size={16} color={colors.textLight} />
                   <Text style={styles.tableActionText}>Закрыть стол</Text>
                 </Pressable>
                 <Pressable onPress={() => openTableAction('move')} style={styles.tableActionItem}>
+                  <PwaIcon name="move" size={16} color={colors.textLight} />
                   <Text style={styles.tableActionText}>Перенести стол</Text>
                 </Pressable>
                 <Pressable onPress={() => openTableAction('transfer')} style={styles.tableActionItem}>
+                  <PwaIcon name="transfer" size={16} color={colors.textLight} />
                   <Text style={styles.tableActionText}>Передать стол</Text>
                 </Pressable>
               </View>
@@ -444,8 +448,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.white,
   },
-  editBtnDisabled: { opacity: 0.65 },
+  editBtnDisabled: { opacity: 0.4 },
   editBtnText: { fontSize: fontSize.sm, color: colors.textLight, fontWeight: '500' },
+  editBtnTextActive: { color: colors.textSecondary },
   tableActionsMenu: {
     position: 'absolute',
     right: 0,
@@ -458,7 +463,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     zIndex: 50,
   },
-  tableActionItem: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  tableActionItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   tableActionText: { fontSize: fontSize.sm, color: colors.textSecondary },
 
   tableList: { flex: 1 },

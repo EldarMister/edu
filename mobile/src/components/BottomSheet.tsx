@@ -45,20 +45,29 @@ export function BottomSheet({
   const progress = React.useRef(new Animated.Value(0)).current;
 
   React.useEffect(() => {
+    let frame: ReturnType<typeof requestAnimationFrame> | null = null;
+    progress.stopAnimation();
     if (visible) {
       setRender(true);
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: 440,
-        easing: Easing.bezier(0.4, 0, 0.2, 1),
-        useNativeDriver: true,
-      }).start();
-      return;
+      progress.setValue(0);
+      frame = requestAnimationFrame(() => {
+        Animated.timing(progress, {
+          toValue: 1,
+          duration: 300,
+          easing: Easing.out(Easing.cubic),
+          isInteraction: false,
+          useNativeDriver: true,
+        }).start();
+      });
+      return () => {
+        if (frame) cancelAnimationFrame(frame);
+      };
     }
     Animated.timing(progress, {
       toValue: 0,
-      duration: 260,
-      easing: Easing.bezier(0.4, 0, 0.2, 1),
+      duration: 240,
+      easing: Easing.in(Easing.cubic),
+      isInteraction: false,
       useNativeDriver: true,
     }).start(({ finished }) => {
       if (finished) setRender(false);
@@ -69,7 +78,7 @@ export function BottomSheet({
 
   const translateY = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [520, 0],
+    outputRange: [96, 0],
   });
   const opacity = progress.interpolate({
     inputRange: [0, 1],
@@ -97,7 +106,7 @@ export function BottomSheet({
             styles.sheet,
             maxHeight != null && { maxHeight },
             bottomInset != null && { marginBottom: bottomInset },
-            { transform: [{ translateY }] },
+            { opacity, transform: [{ translateY }] },
           ]}
         >
         <SafeAreaView

@@ -31,11 +31,21 @@ export async function registerForPushNotifications(): Promise<void> {
   if (status !== 'granted') return;
 
   if (Platform.OS === 'android') {
+    await Notifications.setNotificationChannelAsync('orders', {
+      name: 'EDU POS',
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: 'notify.mp3',
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#005BFF',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    });
     await Notifications.setNotificationChannelAsync('default', {
       name: 'EDU POS',
       importance: Notifications.AndroidImportance.HIGH,
+      sound: 'notify.mp3',
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#005BFF',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }
 

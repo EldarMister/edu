@@ -47,14 +47,23 @@
       [
         "expo-notifications",
         {
-          "color": "#005BFF"
+          "color": "#005BFF",
+          "sounds": [
+            "./assets/sounds/notify.mp3",
+            "./assets/sounds/new-order.mp3",
+            "./assets/sounds/accept.mp3",
+            "./assets/sounds/payment sound.mp3"
+          ]
         }
       ],
       "expo-asset",
       "expo-font"
     ],
     "extra": {
-      "eas": {}
-    }
+      "eas": {
+        "projectId": "e4170c03-bd0d-430d-b7e4-0fdf300c561f"
+      }
+    },
+    "owner": "eldarchkk"
   }
 }

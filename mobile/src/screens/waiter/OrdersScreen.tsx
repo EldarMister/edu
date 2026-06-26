@@ -5,11 +5,12 @@ import { useNavigation } from '@react-navigation/native';
 import { Card, EmptyState, Loading } from '@/components/ui';
 import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
+import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, spacing } from '@/theme';
 import { useActiveOrders, useCancelOrder, useClaimQrOrder } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
-import { displayOrderNumber, hallSuffix, money, timeHM } from '@/utils/format';
+import { displayOrderNumber, hallSuffix, timeHM } from '@/utils/format';
 import { apiError } from '@/lib/api';
 import type { Order } from '@/types';
 
@@ -97,7 +98,7 @@ export function OrdersScreen() {
         });
       }}
     />
-  ), [cancelOrder, claimOrder, claimQr.isPending, editOrder, menuFor?.order.id, openOrder, screenWidth]);
+  ), [claimOrder, claimQr.isPending, menuFor?.order.id, openOrder, screenWidth]);
 
   const keyOrder = React.useCallback((order: Order) => order.id, []);
 
@@ -208,7 +209,7 @@ const OrderCard = memo(function OrderCard({
               <Text style={styles.claimText}>{claimPending ? 'Берём...' : 'Взять'}</Text>
             </Pressable>
           ) : null}
-          <Text style={styles.money}>{money(order.finalAmount)}</Text>
+          <NumberTicker value={Number(order.finalAmount)} style={styles.money} digitHeight={20} />
         </View>
 
         {!unclaimedQr ? (
@@ -235,20 +236,20 @@ const OrderCard = memo(function OrderCard({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   panel: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: 18 },
-  panelTitle: { fontSize: 24, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.lg },
-  list: { gap: spacing.md, paddingBottom: spacing.lg },
-  orderCard: { minHeight: 98, paddingHorizontal: spacing.lg, paddingVertical: 14 },
+  panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.lg },
+  list: { gap: spacing.sm, paddingBottom: spacing.lg },
+  orderCard: { paddingHorizontal: spacing.lg, paddingVertical: 14 },
   row: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.sm },
-  headLeft: { flex: 1, minWidth: 0, gap: spacing.sm },
+  headLeft: { flex: 1, minWidth: 0, justifyContent: 'space-between', gap: 8 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-  orderNumber: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+  orderNumber: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   qrTag: { backgroundColor: colors.primarySoft, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   qrTagText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primary },
   tableText: { fontSize: fontSize.base, color: colors.textMuted },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: fontSize.sm, color: colors.textLight },
-  headRight: { alignItems: 'flex-end', justifyContent: 'space-between', gap: spacing.sm },
-  money: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  headRight: { alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 },
+  money: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
   dots: { paddingLeft: 4, paddingTop: 2 },
   dotsActive: { borderRadius: 12, backgroundColor: colors.background },
   claimBtn: {

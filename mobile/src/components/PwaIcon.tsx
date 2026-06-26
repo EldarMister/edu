@@ -11,6 +11,8 @@ export type PwaIconName =
   | 'chevronDown'
   | 'chevronRight'
   | 'pencil'
+  | 'move'
+  | 'transfer'
   | 'plus'
   | 'minus'
   | 'close'
@@ -70,6 +72,8 @@ export function PwaIcon({
       {name === 'chevronDown' && <Path d="m6 9 6 6 6-6" {...common} strokeWidth={2} />}
       {name === 'chevronRight' && <Path d="m9 18 6-6-6-6" {...common} strokeWidth={2} />}
       {name === 'pencil' && <Path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" {...common} />}
+      {name === 'move' && <Path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20" {...common} />}
+      {name === 'transfer' && <Path d="M16 3h5v5M21 3l-7 7M8 21H3v-5M3 21l7-7" {...common} />}
       {name === 'plus' && <Path d="M5 12h14M12 5v14" {...common} strokeWidth={2.4} />}
       {name === 'minus' && <Path d="M5 12h14" {...common} strokeWidth={2.4} />}
       {name === 'close' && <Path d="M18 6 6 18M6 6l12 12" {...common} strokeWidth={2} />}

@@ -42,7 +42,7 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
     const loop = Animated.loop(
       Animated.timing(pulse, {
         toValue: 1,
-        duration: 1800,
+        duration: 1600,
         easing: Easing.inOut(Easing.ease),
         useNativeDriver: true,
       }),
@@ -53,6 +53,9 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
 
   React.useEffect(() => {
     if (state === 'loading') {
+      progress.setValue(0);
+      logoOpacity.setValue(1);
+      success.setValue(0);
       Animated.timing(ringOpacity, {
         toValue: 1,
         duration: 240,
@@ -60,8 +63,8 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
       }).start();
       // Прогресс заполняется по часовой стрелке.
       Animated.timing(progress, {
-        toValue: 0.92,
-        duration: 1100,
+        toValue: 1,
+        duration: 980,
         easing: Easing.out(Easing.cubic),
         useNativeDriver: false,
       }).start();
@@ -76,6 +79,11 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
           useNativeDriver: true,
         }),
       ]).start();
+    } else {
+      progress.setValue(0);
+      ringOpacity.setValue(0);
+      logoOpacity.setValue(1);
+      success.setValue(0);
     }
   }, [state, ringOpacity, progress, logoOpacity, success]);
 

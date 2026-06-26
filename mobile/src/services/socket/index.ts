@@ -5,6 +5,21 @@ import { useAuth } from '@/store/auth';
 import { API_URL } from '@/config/env';
 
 let socket: Socket | null = null;
+const OFFLINE_GRACE_MS = 5500;
+
+function socketIsConnecting(sock: Socket) {
+  return Boolean((sock as Socket & { active?: boolean }).active);
+}
+
+function shouldConnectNow() {
+  return AppState.currentState === 'active' && !!useAuth.getState().accessToken;
+}
+
+function connectIfNeeded(sock: Socket) {
+  if (!shouldConnectNow()) return;
+  if (sock.connected || socketIsConnecting(sock)) return;
+  sock.connect();
+}
 
 /** Singleton-сокет, подключённый с текущим JWT (тот же способ, что и PWA). */
 export function getSocket(): Socket {
@@ -13,18 +28,17 @@ export function getSocket(): Socket {
     socket = io(API_URL, {
       auth: { token },
       transports: ['websocket'],
-      autoConnect: true,
+      autoConnect: false,
       reconnection: true,
       reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
+      reconnectionDelayMax: 8000,
+      reconnectionAttempts: Infinity,
     });
   } else {
     // Обновляем токен на случай повторного входа.
     socket.auth = { token };
-    if (token && !socket.connected) {
-      socket.connect();
-    }
   }
+  connectIfNeeded(socket);
   return socket;
 }
 
@@ -40,35 +54,81 @@ export function reconnectSocket() {
     return;
   }
   socket.auth = { token: useAuth.getState().accessToken };
-  socket.disconnect();
-  socket.connect();
+  if (socket.connected || socketIsConnecting(socket)) {
+    socket.disconnect();
+  }
+  connectIfNeeded(socket);
+}
+
+/** Один lifecycle-хук на всё приложение: без дублей из разных индикаторов. */
+export function useSocketLifecycle() {
+  useEffect(() => {
+    const sock = getSocket();
+    connectIfNeeded(sock);
+
+    const onAppState = (next: AppStateStatus) => {
+      if (next !== 'active') return;
+      const id = setTimeout(() => connectIfNeeded(sock), 350);
+      return () => clearTimeout(id);
+    };
+    const sub = AppState.addEventListener('change', onAppState);
+
+    return () => {
+      sub.remove();
+    };
+  }, []);
 }
 
 /** Хук: статус соединения. Используется индикатором «Онлайн / Нет соединения». */
 export function useConnectionStatus(): boolean {
   const s = getSocket();
-  const [connected, setConnected] = useState<boolean>(() => s.connected);
+  const [connected, setConnected] = useState<boolean>(() => s.connected || AppState.currentState !== 'active');
 
   useEffect(() => {
     const sock = getSocket();
+    let offlineTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearOfflineTimer = () => {
+      if (!offlineTimer) return;
+      clearTimeout(offlineTimer);
+      offlineTimer = null;
+    };
     const onConnect = () => setConnected(true);
-    const onDisconnect = () => setConnected(false);
+    const markOfflineSoon = () => {
+      clearOfflineTimer();
+      if (AppState.currentState !== 'active') {
+        setConnected(true);
+        return;
+      }
+      offlineTimer = setTimeout(() => {
+        if (!sock.connected && AppState.currentState === 'active') setConnected(false);
+      }, OFFLINE_GRACE_MS);
+    };
+    const onDisconnect = () => markOfflineSoon();
+    const onConnectError = () => markOfflineSoon();
 
     sock.on('connect', onConnect);
     sock.on('disconnect', onDisconnect);
-    setConnected(sock.connected);
+    sock.on('connect_error', onConnectError);
+    setConnected(sock.connected || AppState.currentState !== 'active');
 
-    // При возврате приложения из фона — поднимаем соединение.
     const onAppState = (next: AppStateStatus) => {
-      if (next === 'active' && !sock.connected) {
-        sock.connect();
+      if (next !== 'active') {
+        clearOfflineTimer();
+        setConnected(true);
+        return;
       }
+      setConnected(sock.connected || true);
+      setTimeout(() => {
+        if (!sock.connected) markOfflineSoon();
+      }, 600);
     };
     const sub = AppState.addEventListener('change', onAppState);
 
     return () => {
+      clearOfflineTimer();
       sock.off('connect', onConnect);
       sock.off('disconnect', onDisconnect);
+      sock.off('connect_error', onConnectError);
       sub.remove();
     };
   }, []);

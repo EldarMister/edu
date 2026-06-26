@@ -4,28 +4,30 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { Button, EmptyState, Loading } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
+import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
+import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { useNotifications } from '@/store/notifications';
 import {
   useActiveOrders,
   useCancelOrder,
-  useDishes,
   usePickedUp,
   useRemoveRejectedItem,
-  useReplaceRejectedItem,
   useServed,
   useToPayment,
   useResolvePartialRejection,
   useCreateReceiptPrintRequest,
 } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
+import { useReplacement } from '@/store/replacement';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, hallSuffix, money } from '@/utils/format';
 import { PaymentSheet } from './PaymentSheet';
 import type { CartLine, Dish, DishVariant, Order, OrderItem } from '@/types';
 
 type R = RouteProp<{ OrderDetail: { orderId: string } }, 'OrderDetail'>;
+const DETAIL_EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready'];
 
 export function OrderDetailScreen() {
   const route = useRoute<R>();
@@ -39,13 +41,11 @@ export function OrderDetailScreen() {
   const toPayment = useToPayment();
   const resolve = useResolvePartialRejection();
   const removeRejected = useRemoveRejectedItem();
-  const replaceRejected = useReplaceRejectedItem();
   const cancelOrder = useCancelOrder();
   const print = useCreateReceiptPrintRequest();
-  const dishes = useDishes();
   const selectTable = useCart((s) => s.selectTable);
+  const setReplacementTarget = useReplacement((s) => s.setTarget);
   const [payOpen, setPayOpen] = useState(false);
-  const [replaceItem, setReplaceItem] = useState<OrderItem | null>(null);
   const push = useNotifications((s) => s.push);
 
   const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
@@ -65,23 +65,20 @@ export function OrderDetailScreen() {
     return (
       <PartialRejectionScreen
         order={order}
-        dishes={dishes.data ?? []}
-        replacingItem={replaceItem}
-        busy={resolve.isPending || removeRejected.isPending || replaceRejected.isPending || cancelOrder.isPending}
-        onReplacePress={setReplaceItem}
-        onCloseReplace={() => setReplaceItem(null)}
-        onReplace={(item, line) =>
-          replaceRejected.mutate(
-            { orderId: order.id, itemId: item.id, line },
-            {
-              onSuccess: () => {
-                setReplaceItem(null);
-                push({ message: `${orderItemName(item)} заменено`, type: 'success', at: new Date().toISOString() });
-              },
-              onError,
-            },
-          )
-        }
+        busy={resolve.isPending || removeRejected.isPending || cancelOrder.isPending}
+        onReplacePress={(item) => {
+          selectTable(
+            { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
+            order.id,
+          );
+          setReplacementTarget({
+            orderId: order.id,
+            table: { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
+            item,
+          });
+          push({ message: `Выберите блюдо на замену: ${orderItemName(item)}`, type: 'info', at: new Date().toISOString() });
+          navigation.navigate('Menu');
+        }}
         onRemove={(item) =>
           removeRejected.mutate(
             { orderId: order.id, itemId: item.id },
@@ -109,10 +106,6 @@ export function OrderDetailScreen() {
             },
           )
         }
-        onSelectTable={() => selectTable(
-          { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
-          order.id,
-        )}
       />
     );
   }
@@ -166,7 +159,24 @@ export function OrderDetailScreen() {
             {hallSuffix(order.table)}
           </Text>
         </Text>
-        <OrderBadge status={order.status} />
+        <View style={styles.titleActions}>
+          <OrderBadge status={order.status} />
+          {DETAIL_EDITABLE.includes(order.status) ? (
+            <Pressable
+              onPress={() => {
+                selectTable(
+                  { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
+                  order.id,
+                );
+                navigation.navigate('Menu');
+              }}
+              style={styles.editOrderBtn}
+            >
+              <PwaIcon name="pencil" size={14} color={colors.textSecondary} />
+              <Text style={styles.editOrderText}>Изменить</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
@@ -178,7 +188,7 @@ export function OrderDetailScreen() {
       <View style={styles.footer}>
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>Итого</Text>
-          <Text style={styles.totalValue}>{money(order.finalAmount)}</Text>
+          <NumberTicker value={Number(order.finalAmount)} style={styles.totalValue} digitHeight={32} />
         </View>
         <View style={styles.actions}>
           <Button
@@ -245,28 +255,18 @@ function ItemCard({ item }: { item: OrderItem }) {
 
 function PartialRejectionScreen({
   order,
-  dishes,
-  replacingItem,
   busy,
   onReplacePress,
-  onCloseReplace,
-  onReplace,
   onRemove,
   onContinue,
   onCancel,
-  onSelectTable,
 }: {
   order: Order;
-  dishes: Dish[];
-  replacingItem: OrderItem | null;
   busy: boolean;
   onReplacePress: (item: OrderItem) => void;
-  onCloseReplace: () => void;
-  onReplace: (item: OrderItem, line: CartLine) => void;
   onRemove: (item: OrderItem) => void;
   onContinue: () => void;
   onCancel: () => void;
-  onSelectTable: () => void;
 }) {
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const rejectedItems = order.items.filter(
@@ -326,7 +326,7 @@ function PartialRejectionScreen({
 
         <View style={styles.partialTotalBlock}>
           <Text style={styles.totalLabel}>Итого</Text>
-          <Text style={styles.totalValue}>{money(activeTotal)}</Text>
+          <NumberTicker value={activeTotal} style={styles.totalValue} digitHeight={32} />
         </View>
 
         <Text style={styles.sectionTitle}>3. Решение</Text>
@@ -339,14 +339,6 @@ function PartialRejectionScreen({
           <Text style={styles.cancelWholeText}>Отменить весь заказ</Text>
         </Pressable>
       </ScrollView>
-
-      <ReplacementSheet
-        item={replacingItem}
-        dishes={dishes}
-        onClose={onCloseReplace}
-        onReplace={(line) => replacingItem && onReplace(replacingItem, line)}
-        onSelectTable={onSelectTable}
-      />
     </SafeAreaView>
   );
 }
@@ -430,8 +422,21 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.lg,
     gap: spacing.sm,
   },
-  title: { flex: 1, fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  title: { flex: 1, fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   titleMuted: { fontSize: fontSize.base, fontWeight: '400', color: colors.textMuted },
+  titleActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.sm },
+  editOrderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 30,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  editOrderText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm, paddingBottom: spacing.md },
   itemCard: {
     flexDirection: 'row',
@@ -443,11 +448,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: 14,
   },
-  itemName: { flex: 1, fontSize: fontSize.md, color: colors.textPrimary },
+  itemName: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary },
   itemRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
   itemQty: { fontSize: fontSize.base, color: colors.textMuted },
   itemRight: { alignItems: 'flex-end', gap: 2, minWidth: 72 },
-  itemPrice: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+  itemPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   itemDone: { fontSize: fontSize.sm, color: colors.success, fontWeight: '600' },
   itemRejected: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '600' },
   footer: {
@@ -460,7 +465,7 @@ const styles = StyleSheet.create({
   },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
-  totalValue: { fontSize: fontSize.xxl, fontWeight: '700', color: colors.textPrimary },
+  totalValue: { fontSize: 22, fontWeight: '600', color: colors.textPrimary },
   actions: { flexDirection: 'row', gap: spacing.sm },
   partialList: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl, gap: spacing.md },
   sectionTitle: { fontSize: fontSize.xl, fontWeight: '700', color: colors.textPrimary, marginTop: spacing.sm },

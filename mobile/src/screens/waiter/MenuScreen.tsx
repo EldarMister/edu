@@ -5,17 +5,19 @@ import { useNavigation } from '@react-navigation/native';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
+import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
-import { useCategories, useCreateOrder, useAddItems, useDishes } from '@/services/api/waiter';
+import { useCategories, useCreateOrder, useAddItems, useDishes, useReplaceRejectedItem } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
+import { useReplacement } from '@/store/replacement';
 import { buildSetLine } from '@/utils/set';
 import { makeIdempotencyKey, money } from '@/utils/format';
 import { apiError } from '@/lib/api';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
 import { TablePickerSheet } from './TablePickerSheet';
-import type { Dish, DishVariant } from '@/types';
+import type { CartLine, Dish, DishVariant } from '@/types';
 
 function linePriceLocal(line: { dish: Dish; variant?: DishVariant; quantity: number }): number {
   return Number(line.variant?.price ?? line.dish.price) * line.quantity;
@@ -51,6 +53,9 @@ export function MenuScreen() {
   const dishes = useDishes();
   const createOrder = useCreateOrder();
   const addItems = useAddItems();
+  const replaceRejected = useReplaceRejectedItem();
+  const replacementTarget = useReplacement((s) => s.target);
+  const clearReplacement = useReplacement((s) => s.clear);
 
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string>('all');
@@ -83,9 +88,37 @@ export function MenuScreen() {
     return [...list.filter((d) => d.isAvailable), ...list.filter((d) => !d.isAvailable)];
   }, [dishes.data, categoryId, search]);
 
+  const replaceWithLine = useCallback((line: CartLine) => {
+    if (!replacementTarget) return;
+    replaceRejected.mutate(
+      {
+        orderId: replacementTarget.orderId,
+        itemId: replacementTarget.item.id,
+        line,
+      },
+      {
+        onSuccess: () => {
+          const itemName = orderItemName(replacementTarget.item);
+          clearReplacement();
+          push({ message: `${itemName} заменено`, type: 'success', at: new Date().toISOString() });
+          navigation.navigate('Orders', {
+            screen: 'OrderDetail',
+            params: { orderId: replacementTarget.orderId },
+          });
+        },
+        onError: (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() }),
+      },
+    );
+  }, [clearReplacement, navigation, push, replaceRejected, replacementTarget]);
+
   const onAddDish = useCallback((dish: Dish) => {
     if (dish.isSet) {
-      addLineToCart(buildSetLine(dish));
+      const line = buildSetLine(dish);
+      if (replacementTarget) {
+        replaceWithLine(line);
+        return;
+      }
+      addLineToCart(line);
       push({ message: `${dish.name} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
       return;
     }
@@ -93,10 +126,14 @@ export function MenuScreen() {
       setVariantDish(dish);
       return;
     }
+    if (replacementTarget) {
+      replaceWithLine({ dish, quantity: 1 });
+      return;
+    }
     const nextQty = currentDishQuantity(dish.id) + 1;
     addToCart(dish);
     push({ message: `${dish.name} ×${nextQty} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
-  }, [addLineToCart, addToCart, push]);
+  }, [addLineToCart, addToCart, push, replaceWithLine, replacementTarget]);
 
   const onDecDish = useCallback((dish: Dish) => {
     const lines = useCart.getState().lines;
@@ -149,8 +186,9 @@ export function MenuScreen() {
   };
 
   const count = cartCount;
-  const submitting = createOrder.isPending || addItems.isPending;
+  const submitting = createOrder.isPending || addItems.isPending || replaceRejected.isPending;
   const submitLabel = activeOrderId ? 'Добавить к заказу' : 'Отправить на кухню';
+  const replacing = !!replacementTarget;
 
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
@@ -206,6 +244,19 @@ export function MenuScreen() {
       )}
 
       {/* Бар корзины над нижней навигацией */}
+      {replacing ? (
+        <View style={styles.replacementBar}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.replacementLabel}>Выберите блюдо на замену</Text>
+            <Text style={styles.replacementName} numberOfLines={1}>
+              {replacementTarget ? orderItemName(replacementTarget.item) : ''}
+            </Text>
+          </View>
+          <Pressable onPress={clearReplacement} style={styles.replacementCancel}>
+            <Text style={styles.replacementCancelText}>Отмена</Text>
+          </Pressable>
+        </View>
+      ) : (
       <View style={styles.cartBar}>
         <Pressable
           style={styles.cartInfo}
@@ -215,7 +266,7 @@ export function MenuScreen() {
           <PwaIcon name="cart" size={22} color={colors.textSecondary} />
           <View>
             <Text style={styles.cartCount}>{count} {pozLabel(count)}</Text>
-            <Text style={styles.cartTotal}>{money(cartTotal)}</Text>
+            <NumberTicker value={cartTotal} style={styles.cartTotal} digitHeight={17} />
           </View>
         </Pressable>
         <Button
@@ -226,9 +277,10 @@ export function MenuScreen() {
           style={{ flex: 1 }}
         />
       </View>
+      )}
 
       <CartSheet
-        visible={cartOpen}
+        visible={cartOpen && !replacing}
         onClose={() => setCartOpen(false)}
         onSubmit={onSubmit}
         submitting={submitting}
@@ -240,6 +292,11 @@ export function MenuScreen() {
         onClose={() => setVariantDish(null)}
         onAdd={(variant) => {
           if (variantDish) {
+            if (replacementTarget) {
+              replaceWithLine({ dish: variantDish, variant, quantity: 1 });
+              setVariantDish(null);
+              return;
+            }
             const nextQty = currentVariantQuantity(variant.id) + 1;
             addToCart(variantDish, variant);
             push({
@@ -264,6 +321,12 @@ function pozLabel(n: number): string {
   if (b === 1) return 'позиция';
   if (b >= 2 && b <= 4) return 'позиции';
   return 'позиций';
+}
+
+function orderItemName(item: { dishNameSnapshot: string; dishVariantNameSnapshot?: string | null }) {
+  return item.dishVariantNameSnapshot
+    ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
+    : item.dishNameSnapshot;
 }
 
 const DishCard = memo(function DishCard({
@@ -482,6 +545,27 @@ const styles = StyleSheet.create({
   },
   cartCount: { fontSize: fontSize.xs, color: colors.textMuted },
   cartTotal: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+  replacementBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  replacementLabel: { fontSize: fontSize.xs, color: colors.primary, fontWeight: '700' },
+  replacementName: { marginTop: 2, fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '600' },
+  replacementCancel: {
+    height: 36,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  replacementCancelText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
 
   variantHint: { fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary, marginBottom: spacing.sm, marginTop: 4 },
   variant: {

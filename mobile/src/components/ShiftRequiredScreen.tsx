@@ -7,9 +7,13 @@ import { useNotifications } from '@/store/notifications';
 
 const TEXT: Record<ShiftAnimState, { title: string; subtitle: string }> = {
   idle: { title: 'Смена не начата', subtitle: 'Начните смену, чтобы принимать заказы.' },
-  loading: { title: 'Запускаем смену…', subtitle: 'Это займёт несколько секунд' },
+  loading: { title: 'Проверяем данные…', subtitle: 'Это займёт несколько секунд' },
   success: { title: 'Смена начата', subtitle: '' },
 };
+
+const MIN_LOADING_MS = 1450;
+const SUCCESS_HOLD_MS = 680;
+const FADE_MS = 260;
 
 /**
  * Экран «Смена не начата» (строго по референсу /designe).
@@ -25,6 +29,11 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
 
   const fade = React.useRef(new Animated.Value(1)).current;
   const btnScale = React.useRef(new Animated.Value(1)).current;
+  const successTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => () => {
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
+  }, []);
 
   // Успех: показать галочку, выдержать паузу и плавно убрать экран.
   React.useEffect(() => {
@@ -32,10 +41,10 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
     const timer = setTimeout(() => {
       Animated.timing(fade, {
         toValue: 0,
-        duration: 280,
+        duration: FADE_MS,
         useNativeDriver: true,
       }).start(() => onBusyChange(false));
-    }, 420);
+    }, SUCCESS_HOLD_MS);
     return () => clearTimeout(timer);
   }, [phase, fade, onBusyChange]);
 
@@ -43,9 +52,20 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
     // Удерживаем оверлей на всё время запуска (loading → success → fade).
     onBusyChange(true);
     setPhase('loading');
+    const startedAt = Date.now();
     startShift.mutate(undefined, {
-      onSuccess: () => setPhase('success'),
+      onSuccess: () => {
+        const remaining = Math.max(MIN_LOADING_MS - (Date.now() - startedAt), 0);
+        successTimerRef.current = setTimeout(() => {
+          successTimerRef.current = null;
+          setPhase('success');
+        }, remaining);
+      },
       onError: () => {
+        if (successTimerRef.current) {
+          clearTimeout(successTimerRef.current);
+          successTimerRef.current = null;
+        }
         setPhase('idle');
         onBusyChange(false);
         pushToast({
