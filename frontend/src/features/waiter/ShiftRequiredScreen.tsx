@@ -11,9 +11,9 @@ const TEXT: Record<ShiftAnimState, { title: string; subtitle: string }> = {
 
 // Минимальная длительность загрузки — чтобы кольцо успело красиво заполниться,
 // даже если сервер ответил мгновенно.
-const MIN_LOADING_MS = 1900;
-const SUCCESS_HOLD_MS = 820;
-const FADE_MS = 320;
+const MIN_LOADING_MS = 1450;
+const SUCCESS_HOLD_MS = 680;
+const FADE_MS = 260;
 
 /**
  * Экран «Смена не начата» (строго по референсу /designe, как в mobile).

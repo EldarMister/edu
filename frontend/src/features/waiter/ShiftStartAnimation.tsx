@@ -14,7 +14,7 @@ const C = 2 * Math.PI * R;
  */
 export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
   const isSuccess = state === 'success';
-  const dashOffset = state === 'loading' ? C * 0.08 : C;
+  const dashOffset = state === 'loading' ? 0 : C;
 
   return (
     <div className="relative flex items-center justify-center" style={{ width: SIZE, height: SIZE }}>
@@ -56,7 +56,7 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
           fill="none"
           strokeDasharray={C}
           strokeDashoffset={dashOffset}
-          style={{ transition: 'stroke-dashoffset 1100ms cubic-bezier(0.16,1,0.3,1)' }}
+          style={{ transition: 'stroke-dashoffset 980ms cubic-bezier(0.16,1,0.3,1)' }}
         />
       </svg>
 

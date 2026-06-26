@@ -364,12 +364,12 @@
     animation: shift-logo-in 0.42s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
   .animate-shift-ripple {
-    animation: shift-ripple 2.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+    animation: shift-ripple 2.3s cubic-bezier(0.16, 1, 0.3, 1) infinite;
   }
   .animate-shift-glow {
-    animation: shift-glow 2.6s ease-in-out infinite;
+    animation: shift-glow 2.3s ease-in-out infinite;
   }
   .animate-shift-check-pop {
-    animation: shift-check-pop 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: shift-check-pop 0.34s cubic-bezier(0.16, 1, 0.3, 1) both;
   }
 }
