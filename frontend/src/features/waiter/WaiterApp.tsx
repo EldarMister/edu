@@ -134,8 +134,9 @@ export function WaiterApp() {
   const orders = ordersQ.data ?? [];
   const activeShift = currentShiftQ.data ?? null;
   // Смена не начата → показываем экран-оверлей «Смена не начата» поверх контента вкладок.
+  // Профиль остаётся доступным (там можно начать смену, посмотреть свои данные, выйти).
   const shiftActive = !!activeShift && activeShift.status === 'active';
-  const showShiftGate = !shiftActive || shiftBusy;
+  const showShiftGate = (!shiftActive || shiftBusy) && tab !== 'profile';
 
   // Самый свежий активный заказ по каждому столу (бэкенд отдаёт по убыванию даты).
   const ordersByTable = useMemo(() => {
