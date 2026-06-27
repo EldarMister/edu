@@ -78,20 +78,25 @@ export interface StationStatusChip {
 }
 
 /**
- * Чипы статусов по станциям. Возвращает их только когда у заказа есть активные
- * позиции сразу на двух станциях (кухня И бар) — именно в этом случае один
- * глобальный статус вводит в заблуждение. Если активна одна станция, глобального
- * бейджа достаточно — возвращаем пустой массив.
+ * Чипы статусов по станциям. Возвращаем пару бейджей только когда обе станции
+ * (кухня и бар) активны И находятся в РАЗНЫХ статусах — только тогда один
+ * глобальный статус вводит в заблуждение (напр. кухня готовит, а бар лишь
+ * отправлен). Если станции в одном статусе (оба готовы, оба отправлены,
+ * ожидание оплаты и т.п.) — дублировать незачем, отдаём пустой массив, и
+ * вызывающий показывает единый глобальный бейдж.
  */
 export function orderStationStatuses(order: Pick<Order, 'items'>): StationStatusChip[] {
+  const kitchen = aggregateStationStatus(order.items.filter((i) => i.prepStation === 'kitchen'));
+  const bar = aggregateStationStatus(order.items.filter((i) => i.prepStation === 'bar'));
+  // Нужны обе станции, и их статусы должны различаться.
+  if (!kitchen || !bar || kitchen === bar) return [];
   const chips: StationStatusChip[] = [];
-  for (const station of ['kitchen', 'bar'] as Station[]) {
-    const agg = aggregateStationStatus(order.items.filter((i) => i.prepStation === station));
-    const meta = agg ? STATION_ITEM_STATUS[agg] : undefined;
-    if (!meta) continue;
+  for (const [station, agg] of [['kitchen', kitchen], ['bar', bar]] as [Station, OrderItemStatus][]) {
+    const meta = STATION_ITEM_STATUS[agg];
+    if (!meta) return [];
     chips.push({ station, stationLabel: STATION_LABEL[station], label: meta.label, badge: meta.badge });
   }
-  return chips.length >= 2 ? chips : [];
+  return chips;
 }
 
 export const REJECT_REASONS = [
