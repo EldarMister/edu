@@ -4,10 +4,12 @@ export type SoundKind = 'notify' | 'newOrder' | 'payment' | 'accept';
 
 const SOURCES: Record<SoundKind, number> = {
   notify: require('../../assets/sounds/notify.mp3'),
-  newOrder: require('../../assets/sounds/new-order.mp3'),
-  payment: require('../../assets/sounds/payment sound.mp3'),
+  newOrder: require('../../assets/sounds/new_order.mp3'),
+  payment: require('../../assets/sounds/payment_sound.mp3'),
   accept: require('../../assets/sounds/accept.mp3'),
 };
+
+const activeSounds = new Set<Audio.Sound>();
 
 export async function configureAudioPlayback() {
   await Audio.setAudioModeAsync({
@@ -19,21 +21,50 @@ export async function configureAudioPlayback() {
   });
 }
 
-export async function beep(kind: SoundKind = 'notify') {
+export async function beep(kind: SoundKind = 'notify'): Promise<boolean> {
+  let sound: Audio.Sound | null = null;
   try {
     await configureAudioPlayback();
-    const { sound } = await Audio.Sound.createAsync(SOURCES[kind], {
-      shouldPlay: false,
+    const created = await Audio.Sound.createAsync(SOURCES[kind], {
+      shouldPlay: true,
       volume: 1,
       rate: 1,
     });
-    sound.setOnPlaybackStatusUpdate((status) => {
-      if ('didJustFinish' in status && status.didJustFinish) {
-        void sound.unloadAsync();
-      }
+
+    sound = created.sound;
+    activeSounds.add(sound);
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      const timeout = setTimeout(finish, 2500);
+
+      sound!.setOnPlaybackStatusUpdate((status) => {
+        if (!status.isLoaded) {
+          clearTimeout(timeout);
+          finish();
+          return;
+        }
+        if (status.didJustFinish) {
+          clearTimeout(timeout);
+          finish();
+        }
+      });
     });
-    await sound.playAsync();
-  } catch {
+
+    return true;
+  } catch (err) {
     // Звук не должен ломать основной сценарий.
+    console.warn('[sound] Не удалось воспроизвести звук:', err);
+    return false;
+  } finally {
+    if (sound) {
+      activeSounds.delete(sound);
+      await sound.unloadAsync().catch(() => undefined);
+    }
   }
 }

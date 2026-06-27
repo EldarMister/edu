@@ -7,6 +7,7 @@ import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { beep } from '@/lib/sound';
 import { useAuth } from '@/store/auth';
+import { useNotifications } from '@/store/notifications';
 import { useCurrentShift, useEndShift } from '@/services/api/waiter';
 import { disconnectSocket } from '@/services/socket';
 import { unregisterPushDevice } from '@/services/push';
@@ -26,6 +27,8 @@ export function ProfileScreen() {
   const isWaiter = user?.role === 'WAITER';
   const shiftQuery = useCurrentShift(isWaiter);
   const endShift = useEndShift();
+  const push = useNotifications((s) => s.push);
+  const [checkingSound, setCheckingSound] = React.useState(false);
   const shift = isWaiter ? shiftQuery.data : null;
   const shiftActive = shift?.status === 'active';
 
@@ -33,6 +36,18 @@ export function ProfileScreen() {
     void unregisterPushDevice();
     disconnectSocket();
     logout();
+  };
+
+  const onCheckSound = async () => {
+    if (checkingSound) return;
+    setCheckingSound(true);
+    const ok = await beep('notify');
+    push({
+      type: ok ? 'success' : 'error',
+      message: ok ? 'Тестовый звук воспроизведён' : 'Не удалось воспроизвести звук уведомления',
+      at: new Date().toISOString(),
+    });
+    setCheckingSound(false);
   };
 
   return (
@@ -101,15 +116,16 @@ export function ProfileScreen() {
               title="Проверить звук"
               variant="secondary"
               size="md"
+              loading={checkingSound}
               style={{ marginTop: spacing.md }}
-              onPress={() => void beep('notify')}
+              onPress={() => void onCheckSound()}
             />
           </View>
         </Card>
 
         <Button title="Выйти" variant="secondary" danger onPress={onLogout} />
 
-        <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.0'}</Text>
+        <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.1'}</Text>
       </ScrollView>
     </SafeAreaView>
   );

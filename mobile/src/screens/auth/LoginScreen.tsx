@@ -92,7 +92,7 @@ export function LoginScreen() {
             <Button title="Войти" onPress={onSubmit} loading={login.isPending} />
           </Card>
 
-          <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.0'}</Text>
+          <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.1'}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

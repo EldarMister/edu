@@ -4,6 +4,9 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { api } from '@/lib/api';
 
+export const ORDER_NOTIFICATION_CHANNEL_ID = 'orders_v2';
+const NOTIFICATION_SOUND = 'notify.mp3';
+
 // Показывать уведомления, когда приложение открыто (баннер + звук).
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -31,18 +34,18 @@ export async function registerForPushNotifications(): Promise<void> {
   if (status !== 'granted') return;
 
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('orders', {
+    await Notifications.setNotificationChannelAsync(ORDER_NOTIFICATION_CHANNEL_ID, {
       name: 'EDU POS',
       importance: Notifications.AndroidImportance.HIGH,
-      sound: 'notify.mp3',
+      sound: NOTIFICATION_SOUND,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#005BFF',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
-    await Notifications.setNotificationChannelAsync('default', {
+    await Notifications.setNotificationChannelAsync('default_v2', {
       name: 'EDU POS',
       importance: Notifications.AndroidImportance.HIGH,
-      sound: 'notify.mp3',
+      sound: NOTIFICATION_SOUND,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#005BFF',
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,

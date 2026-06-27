@@ -2,7 +2,7 @@
   "expo": {
     "name": "EDU POS",
     "slug": "edu-pos-mobile",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "orientation": "portrait",
     "icon": "./assets/app-icon.png",
     "scheme": "edupos",
@@ -27,6 +27,7 @@
     },
     "android": {
       "package": "com.edupos.mobile",
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/app-adaptive-icon.png",
         "backgroundColor": "#FFFFFF"
@@ -48,11 +49,12 @@
         "expo-notifications",
         {
           "color": "#005BFF",
+          "defaultChannel": "orders_v2",
           "sounds": [
             "./assets/sounds/notify.mp3",
-            "./assets/sounds/new-order.mp3",
+            "./assets/sounds/new_order.mp3",
             "./assets/sounds/accept.mp3",
-            "./assets/sounds/payment sound.mp3"
+            "./assets/sounds/payment_sound.mp3"
           ]
         }
       ],

@@ -5,6 +5,8 @@ import { Role } from '@prisma/client';
 import { PushSubscriptionDto, RegisterDeviceDto } from './dto';
 
 const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
+const EXPO_ANDROID_CHANNEL_ID = 'orders_v2';
+const EXPO_NOTIFICATION_SOUND = 'notify.mp3';
 
 export interface PushPayload {
   title: string;
@@ -149,8 +151,8 @@ export class PushService {
       to,
       title: payload.title,
       body: payload.body,
-      sound: 'notify.mp3',
-      channelId: 'orders',
+      sound: EXPO_NOTIFICATION_SOUND,
+      channelId: EXPO_ANDROID_CHANNEL_ID,
       priority: 'high',
       data: {
         type: payload.type,
