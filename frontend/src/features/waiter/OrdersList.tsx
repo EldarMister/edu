@@ -50,13 +50,13 @@ export function OrdersList({
                 onOpen(o);
               }
             }}
-            className={`card flex w-full cursor-pointer flex-col gap-2 px-4 py-3.5 text-left transition-colors hover:border-primary/40 ${
+            className={`card flex w-full cursor-pointer items-stretch gap-3 px-4 py-3.5 text-left transition-colors hover:border-primary/40 ${
               attention || unclaimedQr ? 'border-primary/40 bg-primary/5 shadow-soft' : ''
             }`}
           >
-            {/* Верхняя строка: номер + стол слева, действия справа */}
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            {/* Левая часть: номер, стол, время, позиции */}
+            <div className="flex min-w-0 flex-1 flex-col justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2.5">
                 <span className="shrink-0 text-base font-semibold text-text-primary">
                   {displayOrderNumber(o.orderNumber)}
                 </span>
@@ -67,7 +67,16 @@ export function OrdersList({
                 )}
                 <span className="truncate text-sm text-text-muted">{t('Стол')} {o.table.number}{hallSuffix(o.table)}</span>
               </div>
-              {unclaimedQr ? (
+              <p className="flex items-center gap-1.5 text-xs text-text-light">
+                <ClockIcon />
+                {timeHM(o.createdAt)} · {o.items.length} {t('поз')}.
+              </p>
+            </div>
+
+            {/* Правая часть: статус сверху, сумма снизу — зеркально левой */}
+            <div className="flex shrink-0 flex-col items-end justify-between gap-2">
+              <OrderStatusBadges order={o} className="flex flex-col items-end gap-1" />
+              {unclaimedQr && (
                 <button
                   type="button"
                   disabled={claimPending}
@@ -75,41 +84,33 @@ export function OrdersList({
                     event.stopPropagation();
                     onClaimQr(o);
                   }}
-                  className="shrink-0 rounded-lg bg-primary px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-primary-dark disabled:opacity-60"
+                  className="rounded-lg bg-primary px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-primary-dark disabled:opacity-60"
                 >
                   {claimPending ? t('Берём...') : t('Взять')}
                 </button>
-              ) : (
-                <OrderActionsMenu
-                  order={o}
-                  open={menuFor === o.id}
-                  onToggle={() => setMenuFor((id) => (id === o.id ? null : o.id))}
-                  onClose={() => setMenuFor(null)}
-                  onEdit={() => {
-                    setMenuFor(null);
-                    onEdit(o);
-                  }}
-                  onCancel={() => {
-                    setMenuFor(null);
-                    onCancel(o);
-                  }}
-                />
               )}
-            </div>
-
-            {/* Статусные чипы — своя строка на всю ширину, не ломают карточку */}
-            <OrderStatusBadges order={o} className="flex flex-wrap gap-1" />
-
-            {/* Нижняя строка: время · позиции слева, сумма справа */}
-            <div className="flex items-center justify-between gap-2">
-              <p className="flex items-center gap-1.5 text-xs text-text-light">
-                <ClockIcon />
-                {timeHM(o.createdAt)} · {o.items.length} {t('поз')}.
-              </p>
               <span className="text-base font-semibold text-text-primary">
                 {money(o.finalAmount)}
               </span>
             </div>
+
+            {/* Три точки — меню действий над заказом */}
+            {!unclaimedQr && (
+              <OrderActionsMenu
+                order={o}
+                open={menuFor === o.id}
+                onToggle={() => setMenuFor((id) => (id === o.id ? null : o.id))}
+                onClose={() => setMenuFor(null)}
+                onEdit={() => {
+                  setMenuFor(null);
+                  onEdit(o);
+                }}
+                onCancel={() => {
+                  setMenuFor(null);
+                  onCancel(o);
+                }}
+              />
+            )}
           </div>
         );
       })}
