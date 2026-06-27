@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Order } from '@/types';
-import { OrderStatusBadges } from '@/components/StatusBadge';
+import { OrderBadge } from '@/components/StatusBadge';
 import { displayOrderNumber, hallSuffix, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 
@@ -75,7 +75,7 @@ export function OrdersList({
 
             {/* Правая часть: статус сверху, сумма снизу — зеркально левой */}
             <div className="flex shrink-0 flex-col items-end justify-between gap-2">
-              <OrderStatusBadges order={o} className="flex flex-col items-end gap-1" />
+              <OrderBadge status={o.status} />
               {unclaimedQr && (
                 <button
                   type="button"
