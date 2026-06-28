@@ -4,6 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Loading } from '@/components/ui';
 import { Toaster } from '@/components/Toaster';
+import { ReceiptPrintSheet } from '@/components/ReceiptPrintSheet';
 import { colors } from '@/theme';
 import { useAuth } from '@/store/auth';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
@@ -27,6 +28,7 @@ function AuthedArea({ children }: { children: React.ReactNode }) {
   return (
     <View style={{ flex: 1 }}>
       {children}
+      <ReceiptPrintSheet />
       <Toaster />
     </View>
   );

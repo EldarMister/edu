@@ -1,32 +1,46 @@
 import React, { memo } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { Card, EmptyState, Loading } from '@/components/ui';
+import { BottomSheet } from '@/components/BottomSheet';
+import { Button, Card, EmptyState, Loading } from '@/components/ui';
 import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, spacing } from '@/theme';
-import { useActiveOrders, useCancelOrder, useClaimQrOrder } from '@/services/api/waiter';
+import { useActiveOrders, useCancelOrder, useClaimQrOrder, useDishes } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
 import { displayOrderNumber, hallSuffix, timeHM } from '@/utils/format';
+import { orderToCartLines } from '@/utils/orderCart';
 import { apiError } from '@/lib/api';
 import type { Order } from '@/types';
 
 const EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
 const CANCELLABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready', 'partially_rejected'];
+const CANCEL_UNDO_SECONDS = 6;
+const CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
+const DEFAULT_CANCEL_REASON = CANCEL_REASONS[0];
+
+type PendingCancel = { order: Order; reason: string; deadline: number };
 
 export function OrdersScreen() {
   const navigation = useNavigation<any>();
   const rootRef = React.useRef<View>(null);
   const { width: screenWidth } = useWindowDimensions();
   const orders = useActiveOrders();
+  const dishes = useDishes();
   const selectTable = useCart((s) => s.selectTable);
+  const startEditing = useCart((s) => s.startEditing);
   const push = useNotifications((s) => s.push);
   const cancel = useCancelOrder();
   const claimQr = useClaimQrOrder();
   const [menuFor, setMenuFor] = React.useState<{ order: Order; top: number; left: number } | null>(null);
+  const [cancelTarget, setCancelTarget] = React.useState<Order | null>(null);
+  const [cancelReason, setCancelReason] = React.useState<string>(DEFAULT_CANCEL_REASON);
+  const [cancelOther, setCancelOther] = React.useState('');
+  const [pendingCancel, setPendingCancel] = React.useState<PendingCancel | null>(null);
+  const [now, setNow] = React.useState(Date.now());
 
   const sorted = React.useMemo(() => {
     const attention = (o: Order) =>
@@ -44,23 +58,68 @@ export function OrdersScreen() {
 
   const editOrder = React.useCallback((order: Order) => {
     setMenuFor(null);
-    selectTable(
+    const lines = orderToCartLines(order, dishes.data ?? []);
+    if (lines.length === 0) {
+      push({ message: 'Не удалось восстановить позиции заказа для редактирования', type: 'error', at: new Date().toISOString() });
+      return;
+    }
+    startEditing(
       { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
-      order.id,
+      { id: order.id, orderNumber: order.orderNumber, comment: order.comment },
+      lines,
     );
     navigation.navigate('Menu');
-  }, [navigation, selectTable]);
+  }, [dishes.data, navigation, push, startEditing]);
 
-  const cancelOrder = React.useCallback((order: Order) => {
-    setMenuFor(null);
+  const commitCancel = React.useCallback((pending: PendingCancel) => {
+    setPendingCancel((current) => (
+      current?.order.id === pending.order.id && current.deadline === pending.deadline ? null : current
+    ));
     cancel.mutate(
-      { orderId: order.id },
+      { orderId: pending.order.id, reason: pending.reason || undefined },
       {
         onSuccess: () => push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() }),
         onError: (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() }),
       },
     );
   }, [cancel, push]);
+
+  React.useEffect(() => {
+    if (!pendingCancel) return undefined;
+    setNow(Date.now());
+    const tick = setInterval(() => setNow(Date.now()), 250);
+    const timeout = setTimeout(() => commitCancel(pendingCancel), Math.max(0, pendingCancel.deadline - Date.now()));
+    return () => {
+      clearInterval(tick);
+      clearTimeout(timeout);
+    };
+  }, [commitCancel, pendingCancel]);
+
+  const requestCancelOrder = React.useCallback((order: Order) => {
+    setMenuFor(null);
+    setCancelReason(DEFAULT_CANCEL_REASON);
+    setCancelOther('');
+    setCancelTarget(order);
+  }, []);
+
+  const confirmCancelOrder = React.useCallback(() => {
+    if (!cancelTarget) return;
+    if (pendingCancel) commitCancel(pendingCancel);
+    const finalReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
+    setPendingCancel({
+      order: cancelTarget,
+      reason: finalReason,
+      deadline: Date.now() + CANCEL_UNDO_SECONDS * 1000,
+    });
+    setCancelTarget(null);
+    setCancelReason(DEFAULT_CANCEL_REASON);
+    setCancelOther('');
+  }, [cancelOther, cancelReason, cancelTarget, commitCancel, pendingCancel]);
+
+  const undoCancel = React.useCallback(() => {
+    setPendingCancel(null);
+    push({ message: 'Отмена заказа отменена', type: 'info', at: new Date().toISOString() });
+  }, [push]);
 
   const claimOrder = React.useCallback((order: Order) => {
     claimQr.mutate(order.id, {
@@ -141,7 +200,7 @@ export function OrdersScreen() {
             ) : null}
             <Pressable
               disabled={!CANCELLABLE.includes(menuFor.order.status)}
-              onPress={() => cancelOrder(menuFor.order)}
+              onPress={() => requestCancelOrder(menuFor.order)}
               style={[styles.menuItem, !CANCELLABLE.includes(menuFor.order.status) && { opacity: 0.4 }]}
             >
               <Text style={[styles.menuItemText, styles.menuDanger]}>Отменить заказ</Text>
@@ -149,7 +208,108 @@ export function OrdersScreen() {
           </View>
         </View>
       ) : null}
+      {pendingCancel ? (
+        <View pointerEvents="box-none" style={styles.undoOuter}>
+          <View style={styles.undoCard}>
+            <View style={styles.undoIcon}>
+              <PwaIcon name="rotateCcw" size={20} color={colors.white} strokeWidth={2.2} />
+            </View>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={styles.undoTitle} numberOfLines={1}>
+                {displayOrderNumber(pendingCancel.order.orderNumber)} · Стол {pendingCancel.order.table.number}
+              </Text>
+              <Text style={styles.undoSub}>
+                Отменится через {String(Math.max(0, Math.ceil((pendingCancel.deadline - now) / 1000))).padStart(2, '0')} сек
+              </Text>
+            </View>
+            <Pressable onPress={undoCancel} style={styles.undoBtn}>
+              <Text style={styles.undoBtnText}>Вернуть</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
+      <CancelOrderSheet
+        order={cancelTarget}
+        reason={cancelReason}
+        other={cancelOther}
+        submitting={cancel.isPending}
+        onReasonChange={setCancelReason}
+        onOtherChange={setCancelOther}
+        onClose={() => setCancelTarget(null)}
+        onConfirm={confirmCancelOrder}
+      />
     </SafeAreaView>
+  );
+}
+
+function CancelOrderSheet({
+  order,
+  reason,
+  other,
+  submitting,
+  onReasonChange,
+  onOtherChange,
+  onClose,
+  onConfirm,
+}: {
+  order: Order | null;
+  reason: string;
+  other: string;
+  submitting: boolean;
+  onReasonChange: (value: string) => void;
+  onOtherChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <BottomSheet
+      visible={!!order}
+      onClose={onClose}
+      title="Отменить заказ"
+      footer={
+        <View style={styles.cancelFooter}>
+          <Button title="Назад" variant="secondary" onPress={onClose} style={{ flex: 1 }} />
+          <Button title="Отменить" variant="danger" loading={submitting} onPress={onConfirm} style={{ flex: 1 }} />
+        </View>
+      }
+    >
+      {order ? (
+        <>
+          <Text style={styles.cancelText}>
+            {displayOrderNumber(order.orderNumber)} · Стол {order.table.number}
+            {hallSuffix(order.table)}
+          </Text>
+          <Text style={styles.cancelHint}>Заказ ещё не принят кухней, поэтому он будет отменён сразу.</Text>
+        </>
+      ) : null}
+      <Text style={styles.cancelReasonTitle}>Причина</Text>
+      <View style={styles.cancelReasonList}>
+        {CANCEL_REASONS.map((item) => {
+          const active = reason === item;
+          return (
+            <Pressable
+              key={item}
+              onPress={() => onReasonChange(item)}
+              style={[styles.cancelReasonRow, active && styles.cancelReasonRowActive]}
+            >
+              <View style={[styles.cancelRadio, active && styles.cancelRadioActive]}>
+                {active ? <View style={styles.cancelRadioDot} /> : null}
+              </View>
+              <Text style={[styles.cancelReasonText, active && styles.cancelReasonTextActive]}>{item}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {reason === 'Другое' ? (
+        <TextInput
+          value={other}
+          onChangeText={onOtherChange}
+          placeholder="Укажите причину"
+          placeholderTextColor={colors.textLight}
+          style={styles.cancelInput}
+        />
+      ) : null}
+    </BottomSheet>
   );
 }
 
@@ -275,4 +435,83 @@ const styles = StyleSheet.create({
   },
   menuItemText: { fontSize: fontSize.sm, color: colors.textPrimary },
   menuDanger: { color: colors.danger },
+  undoOuter: {
+    position: 'absolute',
+    left: spacing.md,
+    right: spacing.md,
+    bottom: spacing.lg,
+    alignItems: 'center',
+  },
+  undoCard: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 16,
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  undoIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  undoTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
+  undoSub: { marginTop: 2, fontSize: fontSize.sm, color: colors.textMuted },
+  undoBtn: {
+    height: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+  },
+  undoBtnText: { color: colors.primary, fontSize: fontSize.sm, fontWeight: '700' },
+  cancelFooter: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
+  cancelText: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
+  cancelHint: { marginTop: 4, fontSize: fontSize.sm, color: colors.textMuted },
+  cancelReasonTitle: { marginTop: spacing.md, marginBottom: spacing.sm, fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
+  cancelReasonList: { gap: spacing.sm },
+  cancelReasonRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  cancelReasonRowActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
+  cancelRadio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: colors.slate300,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelRadioActive: { borderColor: colors.primary },
+  cancelRadioDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: colors.primary },
+  cancelReasonText: { fontSize: fontSize.base, color: colors.textSecondary },
+  cancelReasonTextActive: { color: colors.textPrimary },
+  cancelInput: {
+    height: 44,
+    marginTop: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+  },
 });

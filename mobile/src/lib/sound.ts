@@ -1,4 +1,5 @@
 import { Audio } from 'expo-av';
+import { Asset } from 'expo-asset';
 
 export type SoundKind = 'notify' | 'newOrder' | 'payment' | 'accept';
 
@@ -10,6 +11,7 @@ const SOURCES: Record<SoundKind, number> = {
 };
 
 const activeSounds = new Set<Audio.Sound>();
+const loadedAssets: Partial<Record<SoundKind, Asset>> = {};
 
 export async function configureAudioPlayback() {
   await Audio.setAudioModeAsync({
@@ -25,46 +27,64 @@ export async function beep(kind: SoundKind = 'notify'): Promise<boolean> {
   let sound: Audio.Sound | null = null;
   try {
     await configureAudioPlayback();
-    const created = await Audio.Sound.createAsync(SOURCES[kind], {
-      shouldPlay: true,
-      volume: 1,
-      rate: 1,
-    });
 
+    const created = await Audio.Sound.createAsync(
+      SOURCES[kind],
+      {
+        shouldPlay: true,
+        volume: 1,
+        rate: 1,
+        progressUpdateIntervalMillis: 100,
+      },
+      undefined,
+      true,
+    );
     sound = created.sound;
-    activeSounds.add(sound);
+    const playbackSound = sound;
 
-    await new Promise<void>((resolve) => {
-      let settled = false;
-      const finish = () => {
-        if (settled) return;
-        settled = true;
-        resolve();
-      };
-      const timeout = setTimeout(finish, 2500);
-
-      sound!.setOnPlaybackStatusUpdate((status) => {
-        if (!status.isLoaded) {
-          clearTimeout(timeout);
-          finish();
-          return;
-        }
-        if (status.didJustFinish) {
-          clearTimeout(timeout);
-          finish();
-        }
-      });
+    activeSounds.add(playbackSound);
+    playbackSound.setOnPlaybackStatusUpdate((status) => {
+      if (!status.isLoaded || status.didJustFinish) {
+        activeSounds.delete(playbackSound);
+        playbackSound.setOnPlaybackStatusUpdate(null);
+        void playbackSound.unloadAsync().catch(() => undefined);
+      }
     });
 
     return true;
   } catch (err) {
-    // Звук не должен ломать основной сценарий.
-    console.warn('[sound] Не удалось воспроизвести звук:', err);
-    return false;
-  } finally {
     if (sound) {
       activeSounds.delete(sound);
       await sound.unloadAsync().catch(() => undefined);
+    }
+    try {
+      const asset = loadedAssets[kind] ?? Asset.fromModule(SOURCES[kind]);
+      if (!asset.localUri) await asset.downloadAsync();
+      loadedAssets[kind] = asset;
+
+      const created = await Audio.Sound.createAsync(
+        { uri: asset.localUri ?? asset.uri },
+        {
+          shouldPlay: true,
+          volume: 1,
+          rate: 1,
+          progressUpdateIntervalMillis: 100,
+        },
+      );
+      const fallbackSound = created.sound;
+      activeSounds.add(fallbackSound);
+      fallbackSound.setOnPlaybackStatusUpdate((status) => {
+        if (!status.isLoaded || status.didJustFinish) {
+          activeSounds.delete(fallbackSound);
+          fallbackSound.setOnPlaybackStatusUpdate(null);
+          void fallbackSound.unloadAsync().catch(() => undefined);
+        }
+      });
+      return true;
+    } catch (fallbackErr) {
+      // Звук не должен ломать основной сценарий.
+      console.warn('[sound] Не удалось воспроизвести звук:', fallbackErr);
+      return false;
     }
   }
 }

@@ -9,6 +9,7 @@ export type PwaIconName =
   | 'cart'
   | 'search'
   | 'chevronDown'
+  | 'chevronLeft'
   | 'chevronRight'
   | 'pencil'
   | 'move'
@@ -18,6 +19,10 @@ export type PwaIconName =
   | 'close'
   | 'bag'
   | 'clock'
+  | 'info'
+  | 'rotateCcw'
+  | 'check'
+  | 'eye'
   | 'dotsVertical';
 
 export function PwaIcon({
@@ -70,6 +75,7 @@ export function PwaIcon({
         </>
       )}
       {name === 'chevronDown' && <Path d="m6 9 6 6 6-6" {...common} strokeWidth={2} />}
+      {name === 'chevronLeft' && <Path d="m15 18-6-6 6-6" {...common} strokeWidth={2} />}
       {name === 'chevronRight' && <Path d="m9 18 6-6-6-6" {...common} strokeWidth={2} />}
       {name === 'pencil' && <Path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" {...common} />}
       {name === 'move' && <Path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20" {...common} />}
@@ -87,6 +93,25 @@ export function PwaIcon({
         <>
           <Circle cx="12" cy="12" r="9" {...common} strokeWidth={2} />
           <Path d="M12 7v5l3 2" {...common} strokeWidth={2} />
+        </>
+      )}
+      {name === 'info' && (
+        <>
+          <Circle cx="12" cy="12" r="9" {...common} strokeWidth={2} />
+          <Path d="M12 16v-4M12 8h.01" {...common} strokeWidth={2} />
+        </>
+      )}
+      {name === 'rotateCcw' && (
+        <>
+          <Path d="M3 7v6h6" {...common} strokeWidth={2} />
+          <Path d="M3 13a9 9 0 1 0 3-7.7L3 8" {...common} strokeWidth={2} />
+        </>
+      )}
+      {name === 'check' && <Path d="M20 6 9 17l-5-5" {...common} strokeWidth={2.5} />}
+      {name === 'eye' && (
+        <>
+          <Path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" {...common} strokeWidth={2} />
+          <Circle cx="12" cy="12" r="3" {...common} strokeWidth={2} />
         </>
       )}
       {name === 'dotsVertical' && (

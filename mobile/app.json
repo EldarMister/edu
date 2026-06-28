@@ -49,7 +49,7 @@
         "expo-notifications",
         {
           "color": "#005BFF",
-          "defaultChannel": "orders_v2",
+          "defaultChannel": "orders_v3",
           "sounds": [
             "./assets/sounds/notify.mp3",
             "./assets/sounds/new_order.mp3",

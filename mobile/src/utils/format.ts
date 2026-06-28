@@ -1,5 +1,26 @@
 /** Форматирование — зеркало frontend/src/lib/format.ts. */
 
+export function paymentMethodLabel(method: string | null | undefined): string {
+  switch (method) {
+    case 'qr':
+      return 'QR-код';
+    case 'cash':
+      return 'Наличные';
+    case 'card':
+      return 'Карта';
+    case 'mixed':
+      return 'Смешанная';
+    default:
+      return '—';
+  }
+}
+
+export function isSplitPayment(order: {
+  payments?: { source?: string | null }[];
+}): boolean {
+  return (order.payments ?? []).some((payment) => payment.source === 'split');
+}
+
 /** Сумма: «1 250 с» или «1 250,50 с». */
 export function money(value: string | number): string {
   const n = typeof value === 'string' ? Number(value) : value;
@@ -42,6 +63,38 @@ export function elapsed(iso: string, nowMs: number): string {
   const m = Math.floor(diff / 60);
   const s = diff % 60;
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+/** Итоговая цена единицы блюда с учётом скидки. */
+export function dishUnitPrice(price: string, discountType: string, discountValue: string): number {
+  const p = Number(price);
+  const v = Number(discountValue);
+  if (discountType === 'percent') return Math.max(0, p - (p * v) / 100);
+  if (discountType === 'fixed') return Math.max(0, p - v);
+  return p;
+}
+
+export function variantNamesLine(variants: { name: string }[]): string {
+  return variants.map((variant) => variant.name).join(' / ');
+}
+
+export function minDishUnitPrice(dish: {
+  price: string;
+  discountType: string;
+  discountValue: string;
+  variants?: { price: string }[];
+}): number {
+  const prices = dish.variants?.length ? dish.variants.map((variant) => variant.price) : [dish.price];
+  return Math.min(...prices.map((price) => dishUnitPrice(price, dish.discountType, dish.discountValue)));
+}
+
+export function orderItemDisplayName(item: {
+  dishNameSnapshot: string;
+  dishVariantNameSnapshot?: string | null;
+}): string {
+  return item.dishVariantNameSnapshot
+    ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
+    : item.dishNameSnapshot;
 }
 
 /** Уникальный idempotency key для создания заказа (ТЗ §20). */

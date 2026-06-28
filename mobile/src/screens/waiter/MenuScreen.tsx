@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Modal as RNModal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
@@ -7,21 +7,18 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
-import { useCategories, useCreateOrder, useAddItems, useDishes, useReplaceRejectedItem } from '@/services/api/waiter';
-import { useCart } from '@/store/cart';
+import { useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem } from '@/services/api/waiter';
+import { linePrice, useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
 import { useReplacement } from '@/store/replacement';
-import { buildSetLine } from '@/utils/set';
-import { makeIdempotencyKey, money } from '@/utils/format';
+import { buildSetLine, calcSetPrice, defaultSetComponents } from '@/utils/set';
+import { makeIdempotencyKey, minDishUnitPrice, money, variantNamesLine } from '@/utils/format';
+import { cartStations } from '@/utils/prepStation';
 import { apiError } from '@/lib/api';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
 import { TablePickerSheet } from './TablePickerSheet';
-import type { CartLine, Dish, DishVariant } from '@/types';
-
-function linePriceLocal(line: { dish: Dish; variant?: DishVariant; quantity: number }): number {
-  return Number(line.variant?.price ?? line.dish.price) * line.quantity;
-}
+import type { CartLine, CartSetComponent, Category, Dish, DishVariant } from '@/types';
 
 function currentDishQuantity(dishId: string): number {
   return useCart.getState().lines.reduce((sum, line) => sum + (line.dish.id === dishId ? line.quantity : 0), 0);
@@ -39,20 +36,24 @@ export function MenuScreen() {
   const tableNumber = useCart((s) => s.tableNumber);
   const hallName = useCart((s) => s.hallName);
   const activeOrderId = useCart((s) => s.activeOrderId);
+  const editingOrderId = useCart((s) => s.editingOrderId);
+  const editingOrderNumber = useCart((s) => s.editingOrderNumber);
   const orderComment = useCart((s) => s.comment);
   const cartLines = useCart((s) => s.lines);
   const addToCart = useCart((s) => s.add);
   const addLineToCart = useCart((s) => s.addLine);
   const setCartQuantity = useCart((s) => s.setQuantity);
-  const clearCartTable = useCart((s) => s.clearTable);
-  const cartCount = useCart((s) => s.lines.reduce((sum, line) => sum + line.quantity, 0));
-  const cartTotal = useCart((s) => s.lines.reduce((sum, line) => sum + linePriceLocal(line), 0));
+  const clearCart = useCart((s) => s.clear);
+  const cancelEditing = useCart((s) => s.cancelEditing);
+  const cartCount = useCart((s) => s.lines.length);
+  const cartTotal = useCart((s) => s.lines.reduce((sum, line) => sum + linePrice(line), 0));
   const push = useNotifications((s) => s.push);
 
   const categories = useCategories();
   const dishes = useDishes();
   const createOrder = useCreateOrder();
   const addItems = useAddItems();
+  const editOrder = useEditOrder();
   const replaceRejected = useReplaceRejectedItem();
   const replacementTarget = useReplacement((s) => s.target);
   const clearReplacement = useReplacement((s) => s.clear);
@@ -62,11 +63,16 @@ export function MenuScreen() {
   const [cartOpen, setCartOpen] = useState(false);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [variantDish, setVariantDish] = useState<Dish | null>(null);
+  const [setPickerOpen, setSetPickerOpen] = useState(false);
+  const [configSet, setConfigSet] = useState<Dish | null>(null);
 
   const sortedCategories = useMemo(
     () => (categories.data ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder),
     [categories.data],
   );
+  const sets = useMemo(() => (dishes.data ?? []).filter((dish) => dish.isSet), [dishes.data]);
+  const setsCategoryIds = useMemo(() => new Set(sets.map((set) => set.categoryId)), [sets]);
+  const menuDishes = useMemo(() => (dishes.data ?? []).filter((dish) => !dish.isSet), [dishes.data]);
 
   const cartQuantities = useMemo(() => {
     const map: Record<string, number> = {};
@@ -77,16 +83,21 @@ export function MenuScreen() {
     return map;
   }, [cartLines]);
 
+  const cartLineCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const line of cartLines) map[line.dish.id] = (map[line.dish.id] ?? 0) + 1;
+    return map;
+  }, [cartLines]);
+
   const filteredDishes = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = (dishes.data ?? []).filter((d) => {
-      if (d.isSet) return false;
+    const list = menuDishes.filter((d) => {
       const byCat = categoryId === 'all' || d.categoryId === categoryId;
       const byQ = !q || d.name.toLowerCase().includes(q);
       return byCat && byQ;
     });
     return [...list.filter((d) => d.isAvailable), ...list.filter((d) => !d.isAvailable)];
-  }, [dishes.data, categoryId, search]);
+  }, [menuDishes, categoryId, search]);
 
   const replaceWithLine = useCallback((line: CartLine) => {
     if (!replacementTarget) return;
@@ -111,20 +122,31 @@ export function MenuScreen() {
     );
   }, [clearReplacement, navigation, push, replaceRejected, replacementTarget]);
 
+  const onAddSet = useCallback((set: Dish, components: CartSetComponent[]) => {
+    const line = buildSetLine(set, components);
+    if (replacementTarget) {
+      replaceWithLine(line);
+      return;
+    }
+    addLineToCart(line);
+    push({ message: `${set.name} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
+  }, [addLineToCart, push, replaceWithLine, replacementTarget]);
+
   const onAddDish = useCallback((dish: Dish) => {
     if (dish.isSet) {
-      const line = buildSetLine(dish);
-      if (replacementTarget) {
-        replaceWithLine(line);
-        return;
-      }
-      addLineToCart(line);
-      push({ message: `${dish.name} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
+      onAddSet(dish, defaultSetComponents(dish));
       return;
     }
     if (dish.variants && dish.variants.length > 0) {
       setVariantDish(dish);
       return;
+    }
+    if (dish.trackInventory) {
+      const currentQty = currentDishQuantity(dish.id);
+      if (typeof dish.stock === 'number' && currentQty >= dish.stock) {
+        push({ message: `Недостаточно на складе. Остаток: ${dish.stock}`, type: 'error', at: new Date().toISOString() });
+        return;
+      }
     }
     if (replacementTarget) {
       replaceWithLine({ dish, quantity: 1 });
@@ -133,7 +155,7 @@ export function MenuScreen() {
     const nextQty = currentDishQuantity(dish.id) + 1;
     addToCart(dish);
     push({ message: `${dish.name} ×${nextQty} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
-  }, [addLineToCart, addToCart, push, replaceWithLine, replacementTarget]);
+  }, [addToCart, onAddSet, push, replaceWithLine, replacementTarget]);
 
   const onDecDish = useCallback((dish: Dish) => {
     const lines = useCart.getState().lines;
@@ -145,11 +167,12 @@ export function MenuScreen() {
     <DishCard
       dish={item}
       qty={cartQuantities[item.id] ?? 0}
+      lineCount={cartLineCounts[item.id] ?? 0}
       disabled={!item.isAvailable}
       onAdd={onAddDish}
       onDec={onDecDish}
     />
-  ), [cartQuantities, onAddDish, onDecDish]);
+  ), [cartLineCounts, cartQuantities, onAddDish, onDecDish]);
 
   const dishKey = useCallback((dish: Dish) => dish.id, []);
 
@@ -168,26 +191,75 @@ export function MenuScreen() {
     }
     if (cartLines.length === 0) return;
     const idempotencyKey = makeIdempotencyKey();
-    const done = () => {
-      clearCartTable();
+    const done = (mode: 'create' | 'update', orderId?: string) => {
+      clearCart();
       setCartOpen(false);
-      navigation.navigate('Orders');
+      if (mode === 'update' && orderId) {
+        navigation.navigate('Orders', { screen: 'OrderDetail', params: { orderId } });
+      } else {
+        navigation.navigate('Orders');
+      }
     };
     const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
 
-    if (activeOrderId) {
-      addItems.mutate({ orderId: activeOrderId, idempotencyKey, lines: cartLines }, { onSuccess: done, onError });
+    if (editingOrderId) {
+      editOrder.mutate(
+        { orderId: editingOrderId, comment: orderComment, lines: cartLines },
+        {
+          onSuccess: (updated) => {
+            push({ message: 'Изменения сохранены', type: 'success', at: new Date().toISOString() });
+            done('update', updated.id);
+          },
+          onError,
+        },
+      );
+    } else if (activeOrderId) {
+      addItems.mutate(
+        { orderId: activeOrderId, idempotencyKey, lines: cartLines },
+        {
+          onSuccess: (updated) => {
+            push({
+              message: cartOnlyNone ? 'Позиции добавлены в заказ' : 'Заказ отправлен на кухню',
+              type: 'success',
+              at: new Date().toISOString(),
+            });
+            done('update', updated.id);
+          },
+          onError,
+        },
+      );
     } else {
       createOrder.mutate(
         { tableId, idempotencyKey, comment: orderComment, lines: cartLines },
-        { onSuccess: done, onError },
+        {
+          onSuccess: () => {
+            push({
+              message: cartOnlyNone ? 'Заказ создан' : 'Заказ отправлен на кухню',
+              type: 'success',
+              at: new Date().toISOString(),
+            });
+            done('create');
+          },
+          onError,
+        },
       );
     }
   };
 
   const count = cartCount;
-  const submitting = createOrder.isPending || addItems.isPending || replaceRejected.isPending;
-  const submitLabel = activeOrderId ? 'Добавить к заказу' : 'Отправить на кухню';
+  const submitting = createOrder.isPending || addItems.isPending || editOrder.isPending || replaceRejected.isPending;
+  const stationInfo = cartStations(cartLines, categories.data ?? []);
+  const cartOnlyNone = cartLines.length > 0 && !stationInfo.hasPrep;
+  const cartSendLabel = cartOnlyNone
+    ? 'Добавить в заказ'
+    : stationInfo.kitchen
+      ? 'Отправить на кухню'
+      : 'Отправить в бар';
+  const submitLabel = editingOrderId
+    ? 'Сохранить изменения'
+    : activeOrderId
+      ? 'Добавить к заказу'
+      : cartSendLabel;
   const replacing = !!replacementTarget;
 
   return (
@@ -217,7 +289,13 @@ export function MenuScreen() {
       <PillTabs
         items={[{ key: 'all', label: 'Все' }, ...sortedCategories.map((c) => ({ key: c.id, label: c.name }))]}
         value={categoryId}
-        onChange={setCategoryId}
+        onChange={(next) => {
+          if (next !== 'all' && setsCategoryIds.has(next)) {
+            setSetPickerOpen(true);
+            return;
+          }
+          setCategoryId(next);
+        }}
         style={{ paddingHorizontal: spacing.md, marginBottom: spacing.md }}
       />
 
@@ -257,6 +335,18 @@ export function MenuScreen() {
           </Pressable>
         </View>
       ) : (
+      <>
+      {editingOrderId ? (
+        <View style={styles.editingBar}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.editingLabel}>Редактирование заказа</Text>
+            <Text style={styles.editingName} numberOfLines={1}>{editingOrderNumber}</Text>
+          </View>
+          <Pressable onPress={cancelEditing} style={styles.replacementCancel}>
+            <Text style={styles.replacementCancelText}>Отмена</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <View style={styles.cartBar}>
         <Pressable
           style={styles.cartInfo}
@@ -277,6 +367,7 @@ export function MenuScreen() {
           style={{ flex: 1 }}
         />
       </View>
+      </>
       )}
 
       <CartSheet
@@ -292,6 +383,14 @@ export function MenuScreen() {
         onClose={() => setVariantDish(null)}
         onAdd={(variant) => {
           if (variantDish) {
+            if (variantDish.trackInventory && typeof variant.stock === 'number') {
+              const currentQty = currentVariantQuantity(variant.id);
+              if (currentQty >= variant.stock) {
+                push({ message: `Недостаточно на складе. Остаток: ${variant.stock}`, type: 'error', at: new Date().toISOString() });
+                setVariantDish(null);
+                return;
+              }
+            }
             if (replacementTarget) {
               replaceWithLine({ dish: variantDish, variant, quantity: 1 });
               setVariantDish(null);
@@ -306,6 +405,32 @@ export function MenuScreen() {
             });
           }
           setVariantDish(null);
+        }}
+      />
+
+      <SetPickerSheet
+        visible={setPickerOpen}
+        sets={sets}
+        onClose={() => setSetPickerOpen(false)}
+        onPick={(set) => {
+          onAddSet(set, defaultSetComponents(set));
+          setSetPickerOpen(false);
+        }}
+        onConfigure={(set) => {
+          setSetPickerOpen(false);
+          setConfigSet(set);
+        }}
+      />
+
+      <SetConfigSheet
+        visible={!!configSet}
+        set={configSet}
+        menuDishes={menuDishes}
+        categories={sortedCategories}
+        onClose={() => setConfigSet(null)}
+        onAdd={(set, components) => {
+          onAddSet(set, components);
+          setConfigSet(null);
         }}
       />
 
@@ -332,31 +457,42 @@ function orderItemName(item: { dishNameSnapshot: string; dishVariantNameSnapshot
 const DishCard = memo(function DishCard({
   dish,
   qty,
+  lineCount,
   disabled,
   onAdd,
   onDec,
 }: {
   dish: Dish;
   qty: number;
+  lineCount: number;
   disabled: boolean;
   onAdd: (dish: Dish) => void;
   onDec: (dish: Dish) => void;
 }) {
   const hasVariants = dish.variants.length > 0;
   const active = qty > 0;
-  const unit = hasVariants
-    ? Math.min(...dish.variants.map((v) => Number(v.price)))
-    : Number(dish.price);
+  const unit = minDishUnitPrice(dish);
+  const originalUnit = hasVariants ? Math.min(...dish.variants.map((v) => Number(v.price))) : Number(dish.price);
+  const hasDiscount = !hasVariants && unit !== originalUnit;
+  const isOutOfStock = dish.trackInventory && (hasVariants
+    ? dish.variants.every((variant) => typeof variant.stock === 'number' && variant.stock <= 0)
+    : typeof dish.stock === 'number' && dish.stock <= 0);
+  const isDisabled = disabled || isOutOfStock;
+  const canDecrement = !hasVariants || lineCount === 1;
 
   return (
     <Pressable
-      disabled={disabled}
+      disabled={isDisabled}
       onPress={() => onAdd(dish)}
-      style={[styles.dish, active && styles.dishActive, disabled && styles.dishDisabled]}
+      style={[styles.dish, active && styles.dishActive, isDisabled && styles.dishDisabled]}
     >
       {!dish.isAvailable ? (
         <View style={styles.unavailable}>
           <Text style={styles.unavailableText}>Недоступно</Text>
+        </View>
+      ) : isOutOfStock ? (
+        <View style={styles.unavailable}>
+          <Text style={styles.unavailableText}>Нет в наличии</Text>
         </View>
       ) : null}
       <Text style={styles.dishName} numberOfLines={2}>
@@ -364,7 +500,7 @@ const DishCard = memo(function DishCard({
       </Text>
       {hasVariants ? (
         <Text style={styles.dishSub} numberOfLines={1}>
-          {dish.variants.map((v) => v.name).join(' / ')}
+          {variantNamesLine(dish.variants)}
         </Text>
       ) : dish.description ? (
         <Text style={styles.dishSub} numberOfLines={1}>
@@ -374,8 +510,9 @@ const DishCard = memo(function DishCard({
       <View style={styles.dishBottom}>
         <Text style={styles.dishPrice}>
           {hasVariants ? `от ${money(unit)}` : money(unit)}
+          {hasDiscount ? <Text style={styles.oldPrice}> {money(originalUnit)}</Text> : null}
         </Text>
-        {active ? (
+        {active && canDecrement ? (
           <Pressable
             style={styles.qtyBadge}
             onPress={(event) => {
@@ -385,6 +522,10 @@ const DishCard = memo(function DishCard({
           >
             <Text style={styles.qtyBadgeText}>{qty}</Text>
           </Pressable>
+        ) : active ? (
+          <View style={styles.qtyCounter}>
+            <Text style={styles.qtyCounterText}>{qty}</Text>
+          </View>
         ) : null}
       </View>
     </Pressable>
@@ -392,6 +533,7 @@ const DishCard = memo(function DishCard({
 }, (prev, next) =>
   prev.dish === next.dish &&
   prev.qty === next.qty &&
+  prev.lineCount === next.lineCount &&
   prev.disabled === next.disabled &&
   prev.onAdd === next.onAdd &&
   prev.onDec === next.onDec
@@ -448,6 +590,337 @@ function VariantSheet({
   );
 }
 
+function SetPickerSheet({
+  visible,
+  sets,
+  onClose,
+  onPick,
+  onConfigure,
+}: {
+  visible: boolean;
+  sets: Dish[];
+  onClose: () => void;
+  onPick: (set: Dish) => void;
+  onConfigure: (set: Dish) => void;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (visible) setSelectedId(sets[0]?.id ?? null);
+  }, [sets, visible]);
+
+  const selected = sets.find((set) => set.id === selectedId) ?? null;
+
+  return (
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title="Сеты"
+      sheet
+      maxHeight="82%"
+      footer={
+        <View style={{ paddingBottom: spacing.sm }}>
+          <Button title="Добавить" onPress={() => selected && onPick(selected)} disabled={!selected} style={{ flex: 1 }} />
+        </View>
+      }
+    >
+      <Text style={styles.variantHint}>Выберите сет</Text>
+      {sets.length === 0 ? (
+        <Text style={styles.notFound}>Сетов пока нет</Text>
+      ) : (
+        <View style={styles.setList}>
+          {sets.map((set) => {
+            const selectedSet = set.id === selectedId;
+            const count = (set.setComponents ?? []).reduce((sum, component) => sum + component.quantity, 0);
+            return (
+              <Pressable
+                key={set.id}
+                onPress={() => setSelectedId(set.id)}
+                style={[styles.setRow, selectedSet && styles.setRowSelected]}
+              >
+                <View style={[styles.radio, selectedSet && { borderColor: colors.primary }]}>
+                  {selectedSet ? <View style={styles.radioDot} /> : null}
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.setName} numberOfLines={1}>{set.name}</Text>
+                  <Text style={styles.setSub}>{count} блюд</Text>
+                </View>
+                <Text style={styles.setPrice}>{money(set.price)}</Text>
+                <Pressable
+                  hitSlop={10}
+                  onPress={(event) => {
+                    event.stopPropagation();
+                    onConfigure(set);
+                  }}
+                  style={styles.setEyeBtn}
+                >
+                  <PwaIcon name="eye" size={24} color={colors.textLight} strokeWidth={2} />
+                </Pressable>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+    </BottomSheet>
+  );
+}
+
+function SetConfigSheet({
+  visible,
+  set,
+  menuDishes,
+  categories,
+  onClose,
+  onAdd,
+}: {
+  visible: boolean;
+  set: Dish | null;
+  menuDishes: Dish[];
+  categories: Category[];
+  onClose: () => void;
+  onAdd: (set: Dish, components: CartSetComponent[]) => void;
+}) {
+  const [components, setComponents] = useState<CartSetComponent[]>([]);
+  const [replacingId, setReplacingId] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [categoryId, setCategoryId] = useState<string>('all');
+
+  React.useEffect(() => {
+    if (!set || !visible) return;
+    setComponents(defaultSetComponents(set));
+    setReplacingId(null);
+    setSearch('');
+    setCategoryId('all');
+  }, [set, visible]);
+
+  const currentPrice = set ? calcSetPrice(set.price, components) : 0;
+  const replacing = components.find((component) => component.componentId === replacingId) ?? null;
+  const availableDishes = useMemo(() => menuDishes.filter((dish) => dish.isAvailable && !dish.isSet), [menuDishes]);
+  const replacementCategories = useMemo(() => {
+    const ids = new Set(availableDishes.map((dish) => dish.categoryId));
+    return categories.filter((category) => ids.has(category.id));
+  }, [availableDishes, categories]);
+  const replacementOptions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return availableDishes.filter((dish) => {
+      const byCat = categoryId === 'all' || dish.categoryId === categoryId;
+      const bySearch = !q || dish.name.toLowerCase().includes(q);
+      return byCat && bySearch;
+    });
+  }, [availableDishes, categoryId, search]);
+
+  const patchComponent = (componentId: string, patch: Partial<CartSetComponent>) => {
+    setComponents((current) => current.map((component) => (
+      component.componentId === componentId ? { ...component, ...patch } : component
+    )));
+  };
+
+  const toggleRemove = (component: CartSetComponent) => {
+    patchComponent(
+      component.componentId,
+      component.action === 'removed'
+        ? { action: 'default' }
+        : { action: 'removed', finalDishId: undefined, finalName: undefined, finalPrice: undefined },
+    );
+  };
+
+  const resetComponent = (componentId: string) => {
+    patchComponent(componentId, {
+      action: 'default',
+      finalDishId: undefined,
+      finalName: undefined,
+      finalPrice: undefined,
+    });
+  };
+
+  const applyReplacement = (dish: Dish) => {
+    if (!replacingId) return;
+    patchComponent(replacingId, {
+      action: 'replaced',
+      finalDishId: dish.id,
+      finalName: dish.name,
+      finalPrice: dish.price,
+    });
+    setReplacingId(null);
+    setSearch('');
+    setCategoryId('all');
+  };
+
+  if (!set) return null;
+  const hasChanges = components.some((component) => component.action !== 'default');
+
+  return (
+    <>
+      <BottomSheet
+        visible={visible}
+        onClose={onClose}
+        title="Настроить сет"
+        sheet
+        maxHeight="86%"
+        footer={
+          <View style={{ paddingBottom: spacing.sm }}>
+            <Button
+              title={hasChanges ? `Добавить · ${money(currentPrice)}` : 'Добавить в заказ'}
+              onPress={() => onAdd(set, components)}
+            />
+          </View>
+        }
+      >
+        <View style={styles.setSummary}>
+          <Text style={styles.setSummaryName} numberOfLines={1}>{set.name}</Text>
+          <View style={styles.setSummaryPrices}>
+            {Math.abs(Number(set.price) - currentPrice) > 0.01 ? (
+              <Text style={styles.setSummaryOldPrice}>{money(set.price)}</Text>
+            ) : null}
+            <Text style={[styles.setSummaryPrice, !hasChanges && styles.setSummaryPricePlain]}>
+              {money(currentPrice)}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.variantHint}>Состав сета ({components.length} позиций)</Text>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+          <View style={styles.componentList}>
+            {components.map((component) => {
+              const removed = component.action === 'removed';
+              const replaced = component.action === 'replaced';
+              const delta = replaced
+                ? (Number(component.finalPrice ?? 0) - Number(component.originalPrice)) * component.quantity
+                : 0;
+              return (
+                <View
+                  key={component.componentId}
+                  style={[styles.componentRow, removed && styles.componentRowRemoved, replaced && styles.componentRowReplaced]}
+                >
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text
+                      style={[styles.componentName, removed && styles.componentRemovedText]}
+                      numberOfLines={1}
+                    >
+                      {component.originalName}
+                      {component.quantity > 1 ? ` ×${component.quantity}` : ''}
+                    </Text>
+                    {replaced ? (
+                      <View style={styles.componentReplacementLine}>
+                        <View style={styles.componentReplacementChip}>
+                          <Text style={styles.componentReplacementChipText} numberOfLines={1}>→ {component.finalName}</Text>
+                        </View>
+                        {Math.abs(delta) > 0.01 ? (
+                          <Text style={[styles.componentDelta, delta < 0 && { color: colors.success }]}>
+                            {delta > 0 ? '+' : '−'}{money(Math.abs(delta))}
+                          </Text>
+                        ) : null}
+                      </View>
+                    ) : null}
+                  </View>
+                  {removed || replaced ? (
+                    <Pressable onPress={() => resetComponent(component.componentId)} style={styles.componentTextButton}>
+                      <Text style={styles.componentTextButtonPrimary}>{removed ? 'Вернуть' : 'Отменить'}</Text>
+                    </Pressable>
+                  ) : (
+                    <View style={styles.componentActions}>
+                      {component.removable ? (
+                        <Pressable onPress={() => toggleRemove(component)} style={styles.componentTextButton}>
+                          <Text style={styles.componentTextButtonDanger}>Убрать</Text>
+                        </Pressable>
+                      ) : null}
+                      {component.replaceable ? (
+                        <Pressable onPress={() => setReplacingId(component.componentId)} style={styles.componentTextButton}>
+                          <Text style={styles.componentTextButtonPrimary}>Заменить</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        </ScrollView>
+      </BottomSheet>
+      <ReplacementPickerModal
+        visible={!!replacingId}
+        replacing={replacing}
+        search={search}
+        categoryId={categoryId}
+        categories={replacementCategories}
+        options={replacementOptions}
+        onSearch={setSearch}
+        onCategory={setCategoryId}
+        onClose={() => setReplacingId(null)}
+        onPick={applyReplacement}
+      />
+    </>
+  );
+}
+
+function ReplacementPickerModal({
+  visible,
+  replacing,
+  search,
+  categoryId,
+  categories,
+  options,
+  onSearch,
+  onCategory,
+  onClose,
+  onPick,
+}: {
+  visible: boolean;
+  replacing: CartSetComponent | null;
+  search: string;
+  categoryId: string;
+  categories: Category[];
+  options: Dish[];
+  onSearch: (value: string) => void;
+  onCategory: (value: string) => void;
+  onClose: () => void;
+  onPick: (dish: Dish) => void;
+}) {
+  return (
+    <RNModal visible={visible} animationType="slide" onRequestClose={onClose}>
+      <SafeAreaView style={styles.replacementSafe} edges={['top']}>
+        <View style={styles.replacementHeader}>
+          <Pressable onPress={onClose} hitSlop={12} style={styles.replacementBack}>
+            <PwaIcon name="chevronLeft" size={28} color={colors.textSecondary} strokeWidth={2.2} />
+          </Pressable>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.replacementTitle}>Выберите замену</Text>
+            {replacing ? <Text style={styles.replacementSubtitle}>вместо: {replacing.originalName}</Text> : null}
+          </View>
+        </View>
+        <View style={styles.replacementContent}>
+          <View style={styles.replacementSearch}>
+            <PwaIcon name="search" size={20} color={colors.textLight} strokeWidth={2} />
+            <TextInput
+              placeholder="Поиск блюда"
+              placeholderTextColor={colors.textLight}
+              value={search}
+              onChangeText={onSearch}
+              style={styles.replacementSearchInput}
+            />
+          </View>
+          <PillTabs
+            items={[{ key: 'all', label: 'Все' }, ...categories.map((category) => ({ key: category.id, label: category.name }))]}
+            value={categoryId}
+            onChange={onCategory}
+            style={{ marginTop: spacing.md, marginBottom: spacing.md }}
+          />
+          <ScrollView showsVerticalScrollIndicator={false}>
+            <View style={styles.replacementGrid}>
+              {options.map((dish) => (
+                <Pressable key={dish.id} onPress={() => onPick(dish)} style={styles.replacementDish}>
+                  <Text style={styles.replacementDishName} numberOfLines={2}>{dish.name}</Text>
+                  <Text style={styles.replacementDishPrice}>{money(minDishUnitPrice(dish))}</Text>
+                </Pressable>
+              ))}
+            </View>
+            {options.length === 0 ? <Text style={styles.notFound}>Ничего не найдено</Text> : null}
+          </ScrollView>
+        </View>
+      </SafeAreaView>
+    </RNModal>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md },
@@ -497,6 +970,7 @@ const styles = StyleSheet.create({
   dishSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   dishBottom: { marginTop: 'auto', flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   dishPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  oldPrice: { fontSize: fontSize.xs, fontWeight: '400', color: colors.textLight, textDecorationLine: 'line-through' },
   qtyBadge: {
     minWidth: waiterLayout.roundButton,
     height: waiterLayout.roundButton,
@@ -509,6 +983,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
   },
   qtyBadgeText: { color: colors.red500, fontWeight: '600', fontSize: fontSize.tab },
+  qtyCounter: {
+    minWidth: waiterLayout.roundButton,
+    height: waiterLayout.roundButton,
+    borderRadius: waiterLayout.roundButton / 2,
+    backgroundColor: colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  qtyCounterText: { color: colors.primary, fontWeight: '600', fontSize: fontSize.sm },
   unavailable: {
     position: 'absolute',
     right: 8,
@@ -566,6 +1050,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   replacementCancelText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
+  editingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.primaryFaint,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  editingLabel: { fontSize: fontSize.xs, color: colors.primary, fontWeight: '700' },
+  editingName: { marginTop: 2, fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '600' },
 
   variantHint: { fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary, marginBottom: spacing.sm, marginTop: 4 },
   variant: {
@@ -591,4 +1087,123 @@ const styles = StyleSheet.create({
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
   variantName: { flex: 1, fontSize: fontSize.md, fontWeight: '500', color: colors.textPrimary },
   variantPrice: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
+  setPickerFooter: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
+  setList: { gap: spacing.sm, paddingBottom: spacing.sm },
+  setRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+  },
+  setRowSelected: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
+  setName: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  setSub: { marginTop: 2, fontSize: fontSize.xs, color: colors.textMuted },
+  setPrice: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
+  setEyeBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  setSummary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    marginBottom: spacing.md,
+  },
+  setSummaryName: { flex: 1, fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
+  setSummaryPrices: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  setSummaryOldPrice: {
+    fontSize: fontSize.base,
+    fontWeight: '500',
+    color: colors.textLight,
+    textDecorationLine: 'line-through',
+  },
+  setSummaryPrice: { fontSize: fontSize.base, fontWeight: '700', color: colors.primary },
+  setSummaryPricePlain: { color: colors.textPrimary },
+  componentList: { gap: spacing.sm, paddingBottom: spacing.md },
+  componentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+  },
+  componentRowRemoved: { backgroundColor: colors.background, opacity: 0.72 },
+  componentRowReplaced: { borderColor: 'rgba(0,91,255,0.28)', backgroundColor: colors.primaryFaint },
+  componentName: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '500' },
+  componentRemovedText: { color: colors.textLight, textDecorationLine: 'line-through' },
+  componentReplacement: { marginTop: 2, fontSize: fontSize.xs, color: colors.primary, fontWeight: '600' },
+  componentReplacementLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 8, flexWrap: 'wrap' },
+  componentReplacementChip: {
+    maxWidth: 170,
+    borderRadius: radius.sm,
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+  },
+  componentReplacementChipText: { fontSize: fontSize.sm, color: colors.primary, fontWeight: '700' },
+  componentDelta: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '700' },
+  componentActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  componentTextButton: { minHeight: 30, justifyContent: 'center', paddingHorizontal: 2 },
+  componentTextButtonPrimary: { fontSize: fontSize.sm, color: colors.primary, fontWeight: '700' },
+  componentTextButtonDanger: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '700' },
+  sheetHint: { fontSize: fontSize.sm, color: colors.textMuted, marginBottom: spacing.sm },
+  searchWrapInSheet: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    height: waiterLayout.inputHeight,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+  },
+  replacementSafe: { flex: 1, backgroundColor: colors.white },
+  replacementHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
+  replacementBack: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  replacementTitle: { fontSize: fontSize.lg, color: colors.textPrimary, fontWeight: '700' },
+  replacementSubtitle: { marginTop: 2, fontSize: fontSize.base, color: colors.textMuted },
+  replacementContent: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  replacementSearch: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    borderRadius: radius.md,
+    backgroundColor: colors.white,
+    height: 54,
+    paddingHorizontal: spacing.md,
+  },
+  replacementSearchInput: { flex: 1, fontSize: fontSize.lg, color: colors.textPrimary, padding: 0 },
+  replacementGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingBottom: spacing.md },
+  replacementDish: {
+    width: '48.5%',
+    height: 104,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+  },
+  replacementDishName: { flex: 1, fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary, lineHeight: 20 },
+  replacementDishPrice: { marginTop: 'auto', fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
 });

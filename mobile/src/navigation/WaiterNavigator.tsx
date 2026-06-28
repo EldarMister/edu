@@ -28,7 +28,9 @@ export function WaiterNavigator() {
   const insets = useSafeAreaInsets();
   const orders = useActiveOrders();
   const shiftQ = useCurrentShift();
-  const ordersCount = orders.data?.length ?? 0;
+  const ordersCount = (orders.data ?? []).filter(
+    (order) => order.requiresWaiterDecision || order.status === 'ready' || order.status === 'rejected',
+  ).length;
 
   const shiftActive = shiftQ.data?.status === 'active';
   const shiftResolved = shiftQ.isFetched || shiftQ.data !== undefined;

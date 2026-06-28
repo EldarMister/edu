@@ -7,6 +7,8 @@ export interface AppNotification {
   message: string;
   type?: NotificationType;
   at: string;
+  orderId?: string;
+  orderNumber?: string;
   durationMs?: number;
 }
 

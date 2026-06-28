@@ -6,10 +6,35 @@ import type {
   Dish,
   Hall,
   Order,
+  OrderStatus,
   PaymentMethod,
+  Receipt,
+  ReceiptPrintRequest,
   ReceiptPrintType,
   WaiterShift,
 } from '@/types';
+
+export interface CabinetRecentOrder {
+  id: string;
+  orderNumber: string;
+  tableNumber: number;
+  finalAmount: string;
+  status: OrderStatus;
+  createdAt: string;
+}
+
+export interface WaiterCabinetData {
+  stats: { completed: number; cancelled: number; revenue: string };
+  recentOrders: CabinetRecentOrder[];
+}
+
+export function useWaiterCabinet(period: 'day' | 'week' | 'month' = 'week', enabled = true) {
+  return useQuery({
+    queryKey: ['waiter', 'cabinet', period],
+    queryFn: async () => (await api.get<WaiterCabinetData>(`/orders/cabinet?period=${period}`)).data,
+    enabled,
+  });
+}
 
 export function useHalls() {
   return useQuery({
@@ -183,6 +208,26 @@ export function useAddItems() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
+
+export function useEditOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (payload: { orderId: string; comment?: string; lines: CartLine[] }) => {
+      const { data } = await api.patch<Order>(`/orders/${payload.orderId}`, {
+        comment: payload.comment?.trim() || undefined,
+        items: linesToItems(payload.lines),
+      });
+      return data;
+    },
+    retry: networkRetry,
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
   });
 }
@@ -273,6 +318,7 @@ export function usePay() {
       method: PaymentMethod;
       cashAmount?: number;
       qrAmount?: number;
+      splitPayments?: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[];
     }) => (await api.post<Order>('/payments', p)).data,
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
@@ -282,11 +328,15 @@ export function usePay() {
   });
 }
 
+export async function fetchReceipt(orderId: string): Promise<Receipt> {
+  return (await api.get<Receipt>(`/payments/${orderId}/receipt`)).data;
+}
+
 /** Официант создаёт запрос на печать чека/счёта (уходит администратору). */
 export function useCreateReceiptPrintRequest() {
   return useMutation({
     mutationFn: async (vars: { orderId: string; type?: ReceiptPrintType }) =>
-      (await api.post('/receipt-prints', vars)).data,
+      (await api.post<ReceiptPrintRequest>('/receipt-prints', vars)).data,
     retry: networkRetry,
   });
 }

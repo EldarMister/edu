@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { Button, EmptyState, Loading } from '@/components/ui';
@@ -8,32 +8,40 @@ import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing } from '@/theme';
+import { ORDER_STATUS } from '@/theme/status';
 import { useNotifications } from '@/store/notifications';
 import {
   useActiveOrders,
   useCancelOrder,
+  useCancelReadyItem,
+  useClaimQrOrder,
   usePickedUp,
   useRemoveRejectedItem,
   useServed,
   useToPayment,
   useResolvePartialRejection,
   useCreateReceiptPrintRequest,
+  useDishes,
+  fetchReceipt,
 } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
+import { useReceiptPrint } from '@/store/receiptPrint';
 import { useReplacement } from '@/store/replacement';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, hallSuffix, money } from '@/utils/format';
+import { orderToCartLines } from '@/utils/orderCart';
 import { PaymentSheet } from './PaymentSheet';
-import type { CartLine, Dish, DishVariant, Order, OrderItem } from '@/types';
+import type { Order, OrderItem } from '@/types';
 
 type R = RouteProp<{ OrderDetail: { orderId: string } }, 'OrderDetail'>;
-const DETAIL_EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready'];
+const DETAIL_EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
 
 export function OrderDetailScreen() {
   const route = useRoute<R>();
   const navigation = useNavigation<any>();
   const { orderId } = route.params;
   const orders = useActiveOrders();
+  const dishes = useDishes();
   const order = orders.data?.find((o) => o.id === orderId) ?? null;
 
   const pickedUp = usePickedUp();
@@ -41,14 +49,36 @@ export function OrderDetailScreen() {
   const toPayment = useToPayment();
   const resolve = useResolvePartialRejection();
   const removeRejected = useRemoveRejectedItem();
+  const cancelReadyItem = useCancelReadyItem();
   const cancelOrder = useCancelOrder();
+  const claimQr = useClaimQrOrder();
   const print = useCreateReceiptPrintRequest();
   const selectTable = useCart((s) => s.selectTable);
+  const clearCart = useCart((s) => s.clear);
+  const startEditing = useCart((s) => s.startEditing);
+  const beginPrint = useReceiptPrint((s) => s.begin);
   const setReplacementTarget = useReplacement((s) => s.setTarget);
   const [payOpen, setPayOpen] = useState(false);
+  const [billItem, setBillItem] = useState<OrderItem | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [actionCooldown, setActionCooldown] = useState(0);
   const push = useNotifications((s) => s.push);
 
   const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
+
+  React.useEffect(() => {
+    if (order?.status === 'waiting_payment') setPayOpen(true);
+  }, [order?.id, order?.status]);
+
+  React.useEffect(() => {
+    if (actionCooldown <= 0) return undefined;
+    const id = setTimeout(() => setActionCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => clearTimeout(id);
+  }, [actionCooldown]);
+
+  React.useEffect(() => {
+    setActionCooldown(0);
+  }, [order?.id]);
 
   if (orders.isLoading && !order) return <Loading />;
   if (!order) {
@@ -59,7 +89,41 @@ export function OrderDetailScreen() {
     );
   }
 
-  const busy = pickedUp.isPending || served.isPending || toPayment.isPending || resolve.isPending;
+  const unclaimedQr = order.source === 'qr' && !order.waiter;
+  const busy = pickedUp.isPending || served.isPending || toPayment.isPending || resolve.isPending || claimQr.isPending;
+  const cooldownActive = actionCooldown > 0;
+  const stationItems = order.items.filter((item) => item.prepStation !== 'none');
+  const hasReadyStationItem = stationItems.some((item) => item.status === 'ready');
+  const billCorrection = ['ready', 'picked_up', 'served'].includes(order.status);
+
+  const runProtectedAction = (action: () => void) => {
+    setActionCooldown(5);
+    action();
+  };
+
+  const requestPreliminaryReceipt = () => {
+    Promise.all([
+      print.mutateAsync({ orderId: order.id, type: 'preliminary' }),
+      fetchReceipt(order.id),
+    ])
+      .then(([request, receipt]) => beginPrint(request, receipt))
+      .catch(onError);
+  };
+
+  const confirmCancelReadyItem = () => {
+    if (!billItem) return;
+    cancelReadyItem.mutate(
+      { orderId: order.id, itemId: billItem.id, reason: cancelReason.trim() },
+      {
+        onSuccess: () => {
+          push({ message: `${orderItemName(billItem)} отменено`, type: 'success', at: new Date().toISOString() });
+          setBillItem(null);
+          setCancelReason('');
+        },
+        onError,
+      },
+    );
+  };
 
   if (order.status === 'partially_rejected' && order.requiresWaiterDecision) {
     return (
@@ -99,8 +163,9 @@ export function OrderDetailScreen() {
             { orderId: order.id, reason: 'Клиент отменил заказ после частичного отказа кухни' },
             {
               onSuccess: () => {
+                clearCart();
                 push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
-                navigation.goBack();
+                navigation.getParent()?.navigate('Tables');
               },
               onError,
             },
@@ -111,6 +176,27 @@ export function OrderDetailScreen() {
   }
 
   const mainAction = () => {
+    if (unclaimedQr) {
+      return (
+        <Button
+          title="Взять заказ"
+          loading={claimQr.isPending}
+          disabled={busy}
+          onPress={() =>
+            claimQr.mutate(order.id, {
+              onSuccess: (updated) => {
+                selectTable(
+                  { id: updated.table.id, number: updated.table.number, hallName: updated.table.hall?.name },
+                  updated.id,
+                );
+                push({ message: `QR-заказ взят · Стол ${updated.table.number}`, type: 'success', at: new Date().toISOString() });
+              },
+              onError,
+            })
+          }
+        />
+      );
+    }
     if (order.requiresWaiterDecision) {
       return (
         <Button
@@ -122,30 +208,83 @@ export function OrderDetailScreen() {
         />
       );
     }
+    if (
+      hasReadyStationItem &&
+      !['paid', 'cancelled', 'rejected', 'waiting_payment', 'picked_up', 'served', 'ready'].includes(order.status)
+    ) {
+      return (
+        <Button
+          title={cooldownActive ? String(actionCooldown) : 'Забрал с кухни'}
+          loading={busy && !cooldownActive}
+          disabled={cooldownActive}
+          onPress={() => runProtectedAction(() => pickedUp.mutate(order.id, { onError }))}
+        />
+      );
+    }
     switch (order.status) {
       case 'ready':
         return (
-          <Button title="Забрать" style={{ flex: 1 }} loading={busy} onPress={() => pickedUp.mutate(order.id, { onError })} />
+          <Button
+            title={cooldownActive ? String(actionCooldown) : 'Вынес гостям'}
+            loading={busy && !cooldownActive}
+            disabled={cooldownActive}
+            onPress={() => runProtectedAction(() => served.mutate(order.id, { onError }))}
+          />
         );
       case 'picked_up':
         return (
-          <Button title="Подать" style={{ flex: 1 }} loading={busy} onPress={() => served.mutate(order.id, { onError })} />
+          <Button
+            title={cooldownActive ? String(actionCooldown) : 'Вынес гостям'}
+            loading={busy && !cooldownActive}
+            disabled={cooldownActive}
+            onPress={() => runProtectedAction(() => served.mutate(order.id, { onError }))}
+          />
         );
       case 'served':
         return (
-          <Button
-            title="Перейти к оплате"
-            style={{ flex: 1 }}
-            loading={busy}
-            onPress={() =>
-              toPayment.mutate(order.id, { onError, onSuccess: () => setPayOpen(true) })
-            }
-          />
+          <View style={styles.actions}>
+            <Button
+              title="Счёт"
+              variant="secondary"
+              style={{ width: 110 }}
+              loading={print.isPending}
+              onPress={requestPreliminaryReceipt}
+            />
+            <Button
+              title={cooldownActive ? String(actionCooldown) : 'Перейти к оплате'}
+              style={{ flex: 1 }}
+              loading={busy && !cooldownActive}
+              disabled={cooldownActive}
+              onPress={() =>
+                runProtectedAction(() => toPayment.mutate(order.id, { onError, onSuccess: () => setPayOpen(true) }))
+              }
+            />
+          </View>
         );
       case 'waiting_payment':
-        return <Button title="Оплатить" style={{ flex: 1 }} onPress={() => setPayOpen(true)} />;
+        return (
+          <View style={styles.waitingPaymentBox}>
+            <Text style={styles.waitingPaymentText}>Ожидает оплаты</Text>
+          </View>
+        );
+      case 'sent_to_kitchen':
+      case 'accepted_by_kitchen':
+      case 'cooking':
+      case 'partially_rejected':
+        return (
+          <View style={styles.statusInfoBox}>
+            <PwaIcon name="info" size={16} color={colors.primary} strokeWidth={2} />
+            <Text style={styles.statusInfoText}>{ORDER_STATUS[order.status].label} - ожидаем кухню</Text>
+          </View>
+        );
+      case 'rejected':
+        return (
+          <View style={styles.rejectedInfoBox}>
+            <Text style={styles.rejectedInfoText}>Кухня отказала в заказе</Text>
+          </View>
+        );
       default:
-        return <View style={{ flex: 1 }} />;
+        return null;
     }
   };
 
@@ -161,12 +300,23 @@ export function OrderDetailScreen() {
         </Text>
         <View style={styles.titleActions}>
           <OrderBadge status={order.status} />
-          {DETAIL_EDITABLE.includes(order.status) ? (
+          {unclaimedQr ? (
+            <View style={styles.qrBadge}>
+              <Text style={styles.qrBadgeText}>QR</Text>
+            </View>
+          ) : null}
+          {DETAIL_EDITABLE.includes(order.status) && !unclaimedQr ? (
             <Pressable
               onPress={() => {
-                selectTable(
+                const lines = orderToCartLines(order, dishes.data ?? []);
+                if (lines.length === 0) {
+                  push({ message: 'Не удалось восстановить позиции заказа для редактирования', type: 'error', at: new Date().toISOString() });
+                  return;
+                }
+                startEditing(
                   { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
-                  order.id,
+                  { id: order.id, orderNumber: order.orderNumber, comment: order.comment },
+                  lines,
                 );
                 navigation.navigate('Menu');
               }}
@@ -181,34 +331,33 @@ export function OrderDetailScreen() {
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
         {order.items.map((it) => (
-          <ItemCard key={it.id} item={it} />
+          <ItemCard
+            key={it.id}
+            item={it}
+            billCorrection={billCorrection}
+            disabled={cancelReadyItem.isPending}
+            onCancel={() => {
+              setBillItem(it);
+              setCancelReason('');
+            }}
+          />
         ))}
       </ScrollView>
 
       <View style={styles.footer}>
+        {unclaimedQr ? (
+          <View style={styles.qrInfoBox}>
+            <Text style={styles.qrInfoText}>Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.</Text>
+          </View>
+        ) : null}
+        {order.comment ? (
+          <Text style={styles.orderComment}>{order.comment}</Text>
+        ) : null}
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel}>Итого</Text>
           <NumberTicker value={Number(order.finalAmount)} style={styles.totalValue} digitHeight={32} />
         </View>
-        <View style={styles.actions}>
-          <Button
-            title="Счёт"
-            variant="secondary"
-            style={{ width: 110 }}
-            loading={print.isPending}
-            onPress={() =>
-              print.mutate(
-                { orderId: order.id, type: 'preliminary' },
-                {
-                  onSuccess: () =>
-                    push({ message: 'Запрос на печать отправлен администратору', type: 'success', at: new Date().toISOString() }),
-                  onError,
-                },
-              )
-            }
-          />
-          {mainAction()}
-        </View>
+        {mainAction()}
       </View>
 
       <PaymentSheet
@@ -217,8 +366,19 @@ export function OrderDetailScreen() {
         onClose={() => setPayOpen(false)}
         onPaid={() => {
           setPayOpen(false);
-          navigation.goBack();
+          navigation.getParent()?.navigate('Tables');
         }}
+      />
+      <CancelReadyItemSheet
+        item={billItem}
+        reason={cancelReason}
+        submitting={cancelReadyItem.isPending}
+        onReasonChange={setCancelReason}
+        onClose={() => {
+          setBillItem(null);
+          setCancelReason('');
+        }}
+        onConfirm={confirmCancelReadyItem}
       />
     </SafeAreaView>
   );
@@ -230,26 +390,113 @@ function orderItemName(item: OrderItem) {
     : item.dishNameSnapshot;
 }
 
-function ItemCard({ item }: { item: OrderItem }) {
+function safeComment(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if ([...value].every((char) => char === '�' || char === ' ')) return null;
+  return value;
+}
+
+function ItemCard({
+  item,
+  billCorrection,
+  disabled,
+  onCancel,
+}: {
+  item: OrderItem;
+  billCorrection: boolean;
+  disabled: boolean;
+  onCancel: () => void;
+}) {
   const name = orderItemName(item);
   const done = item.status === 'ready' || item.status === 'served';
   const rejected = item.status === 'rejected' || item.status === 'cancelled';
+  const cooking = item.status === 'accepted' || item.status === 'cooking';
+  const comment = safeComment(item.comment);
+  const clickable = billCorrection && (item.status === 'ready' || item.status === 'served') && !disabled;
+  const hasExtra = comment || ((rejected || item.status === 'cancelled') && item.rejectReason);
   return (
-    <View style={styles.itemCard}>
-      <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={2}>
-        {name}
-        {item.takeaway ? '  · с собой' : ''}
-      </Text>
-      <Text style={styles.itemQty}>×{item.quantity}</Text>
-      <View style={styles.itemRight}>
-        <Text style={styles.itemPrice}>{money(item.finalPrice)}</Text>
-        {done ? (
-          <Text style={styles.itemDone}>✓ Готово</Text>
-        ) : rejected ? (
-          <Text style={styles.itemRejected}>Отказ</Text>
-        ) : null}
+    <Pressable disabled={!clickable} onPress={onCancel} style={[styles.itemCard, clickable && styles.itemCardClickable]}>
+      <View style={styles.itemMainRow}>
+        <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={2}>
+          {name}
+          {item.takeaway ? '  · с собой' : ''}
+        </Text>
+        <Text style={styles.itemQty}>×{item.quantity}</Text>
+        <View style={styles.itemRight}>
+          <Text style={styles.itemPrice}>{money(item.finalPrice)}</Text>
+          {done ? (
+            <Text style={styles.itemDone}>✓ Готово</Text>
+          ) : cooking ? (
+            <Text style={styles.itemCooking}>Готовится</Text>
+          ) : rejected ? (
+            <Text style={styles.itemRejected}>{item.status === 'cancelled' ? 'Отменено' : 'Отказано'}</Text>
+          ) : null}
+        </View>
       </View>
-    </View>
+      {hasExtra ? (
+        <View style={styles.itemExtra}>
+          {comment ? <Text style={styles.itemComment}>{comment}</Text> : null}
+          {rejected && item.rejectReason ? (
+            <Text style={styles.itemRejectReason}>
+              {item.status === 'cancelled' ? 'Причина' : 'Отказ'}: {item.rejectReason}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function CancelReadyItemSheet({
+  item,
+  reason,
+  submitting,
+  onReasonChange,
+  onClose,
+  onConfirm,
+}: {
+  item: OrderItem | null;
+  reason: string;
+  submitting: boolean;
+  onReasonChange: (value: string) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <BottomSheet
+      visible={!!item}
+      onClose={onClose}
+      title="Действие с блюдом"
+      footer={
+        <View style={styles.cancelReadyFooter}>
+          <Button
+            title="Отменить блюдо"
+            variant="danger"
+            loading={submitting}
+            disabled={reason.trim().length < 2}
+            onPress={onConfirm}
+          />
+          <Button title="Закрыть" variant="secondary" disabled={submitting} onPress={onClose} />
+        </View>
+      }
+    >
+      {item ? (
+        <View style={styles.cancelReadyDish}>
+          <Text style={styles.cancelReadyName}>{orderItemName(item)}</Text>
+          <Text style={styles.cancelReadyMeta}>×{item.quantity} · {money(item.finalPrice)}</Text>
+        </View>
+      ) : null}
+      <Text style={styles.cancelReadyLabel}>Причина отмены</Text>
+      <TextInput
+        value={reason}
+        onChangeText={onReasonChange}
+        multiline
+        maxLength={160}
+        placeholder="Например: клиент отказался"
+        placeholderTextColor={colors.textLight}
+        style={styles.cancelReadyInput}
+      />
+    </BottomSheet>
   );
 }
 
@@ -343,72 +590,6 @@ function PartialRejectionScreen({
   );
 }
 
-function ReplacementSheet({
-  item,
-  dishes,
-  onClose,
-  onReplace,
-  onSelectTable,
-}: {
-  item: OrderItem | null;
-  dishes: Dish[];
-  onClose: () => void;
-  onReplace: (line: CartLine) => void;
-  onSelectTable: () => void;
-}) {
-  const [variantDish, setVariantDish] = React.useState<Dish | null>(null);
-  React.useEffect(() => setVariantDish(null), [item]);
-  const available = dishes.filter((dish) => !dish.isSet && dish.isAvailable);
-  if (!item) return null;
-  const addDish = (dish: Dish, variant?: DishVariant) => {
-    onSelectTable();
-    onReplace({ dish, variant, quantity: 1 });
-  };
-
-  return (
-    <>
-      <BottomSheet visible={!!item} onClose={onClose} title="Выберите замену" maxHeight="78%">
-        <Text style={styles.sheetHint}>Заменить: {orderItemName(item)}</Text>
-        <ScrollView showsVerticalScrollIndicator={false}>
-          <View style={styles.replacementList}>
-            {available.map((dish) => (
-              <Pressable
-                key={dish.id}
-                onPress={() => {
-                  if (dish.variants.length > 0) setVariantDish(dish);
-                  else addDish(dish);
-                }}
-                style={styles.replacementItem}
-              >
-                <Text style={styles.replacementName}>{dish.name}</Text>
-                <Text style={styles.replacementPrice}>
-                  {dish.variants.length > 0
-                    ? `от ${money(Math.min(...dish.variants.map((variant) => Number(variant.price))))}`
-                    : money(dish.price)}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-        </ScrollView>
-      </BottomSheet>
-      <BottomSheet visible={!!variantDish} onClose={() => setVariantDish(null)} title={variantDish?.name} maxHeight="62%">
-        <View style={styles.replacementList}>
-          {(variantDish?.variants ?? []).map((variant) => (
-            <Pressable
-              key={variant.id}
-              onPress={() => variantDish && addDish(variantDish, variant)}
-              style={styles.replacementItem}
-            >
-              <Text style={styles.replacementName}>{variant.name}</Text>
-              <Text style={styles.replacementPrice}>{money(variant.price)}</Text>
-            </Pressable>
-          ))}
-        </View>
-      </BottomSheet>
-    </>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
   titleRow: {
@@ -425,6 +606,8 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   titleMuted: { fontSize: fontSize.base, fontWeight: '400', color: colors.textMuted },
   titleActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.sm },
+  qrBadge: { borderRadius: 6, backgroundColor: colors.primarySoft, paddingHorizontal: 7, paddingVertical: 3 },
+  qrBadgeText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primary },
   editOrderBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -439,22 +622,26 @@ const styles = StyleSheet.create({
   editOrderText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
   list: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg, gap: spacing.sm, paddingBottom: spacing.md },
   itemCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: 14,
+    gap: 4,
   },
+  itemCardClickable: { borderColor: 'rgba(0,91,255,0.4)', backgroundColor: colors.primaryFaint },
+  itemMainRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   itemName: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary },
   itemRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
   itemQty: { fontSize: fontSize.base, color: colors.textMuted },
   itemRight: { alignItems: 'flex-end', gap: 2, minWidth: 72 },
   itemPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   itemDone: { fontSize: fontSize.sm, color: colors.success, fontWeight: '600' },
+  itemCooking: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: '500' },
   itemRejected: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '600' },
+  itemExtra: { gap: 2 },
+  itemComment: { fontSize: fontSize.xs, color: colors.textMuted },
+  itemRejectReason: { fontSize: fontSize.xs, color: colors.danger },
   footer: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
@@ -467,6 +654,73 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
   totalValue: { fontSize: 22, fontWeight: '600', color: colors.textPrimary },
   actions: { flexDirection: 'row', gap: spacing.sm },
+  qrInfoBox: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(0,91,255,0.2)',
+    backgroundColor: colors.primaryFaint,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  qrInfoText: { fontSize: fontSize.sm, color: colors.primary, lineHeight: 18 },
+  orderComment: {
+    borderRadius: radius.sm,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+  },
+  waitingPaymentBox: {
+    borderRadius: radius.md,
+    backgroundColor: colors.purple100,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  waitingPaymentText: { fontSize: fontSize.sm, color: colors.purple600 },
+  statusInfoBox: {
+    minHeight: 44,
+    borderRadius: radius.md,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  statusInfoText: { flexShrink: 1, fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center' },
+  rejectedInfoBox: {
+    borderRadius: radius.md,
+    backgroundColor: colors.dangerSoft,
+    paddingVertical: spacing.md,
+    alignItems: 'center',
+  },
+  rejectedInfoText: { fontSize: fontSize.sm, color: colors.danger },
+  cancelReadyFooter: { gap: spacing.sm, paddingBottom: spacing.sm },
+  cancelReadyDish: {
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  cancelReadyName: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  cancelReadyMeta: { marginTop: 4, fontSize: fontSize.sm, color: colors.textMuted },
+  cancelReadyLabel: { marginBottom: 6, fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
+  cancelReadyInput: {
+    minHeight: 96,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: fontSize.base,
+    color: colors.textPrimary,
+    textAlignVertical: 'top',
+  },
   partialList: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: spacing.sm },
   sectionTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary, marginTop: 2 },
   partialStack: { gap: spacing.sm },
@@ -565,19 +819,4 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   rejectBadgeText: { fontSize: fontSize.sm, fontWeight: '700', color: colors.danger },
-  sheetHint: { fontSize: fontSize.sm, color: colors.textMuted, marginBottom: spacing.sm },
-  replacementList: { gap: spacing.sm, paddingBottom: spacing.md },
-  replacementItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-  },
-  replacementName: { flex: 1, fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
-  replacementPrice: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
 });

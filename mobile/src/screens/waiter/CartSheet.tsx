@@ -1,12 +1,13 @@
 import React from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, RoundBtn } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
-import { useCart, linePrice } from '@/store/cart';
+import { cartLineName, linePrice, useCart } from '@/store/cart';
+import { setChanged } from '@/utils/set';
 import { money } from '@/utils/format';
 
 /** Корзина как нижний лист поверх меню — повторяет PWA CartSheet. */
@@ -24,7 +25,8 @@ export function CartSheet({
   submitLabel: string;
 }) {
   const insets = useSafeAreaInsets();
-  const { lines, setQuantity, setTakeaway, clear, total } = useCart();
+  const { lines, comment, setQuantity, setTakeaway, setAllTakeaway, setOrderComment, clear, total } = useCart();
+  const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const hasLines = lines.length > 0;
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
 
@@ -60,7 +62,7 @@ export function CartSheet({
             <Text style={styles.takeawayLabel}>С собой</Text>
             <TakeawaySwitch
               on={allTakeaway}
-              onChange={(v) => lines.forEach((_, i) => setTakeaway(i, v))}
+              onChange={setAllTakeaway}
             />
           </View>
         ) : null}
@@ -72,19 +74,22 @@ export function CartSheet({
             <Text style={styles.empty}>Корзина пуста</Text>
           </View>
         ) : (
-          lines.map((l, i) => (
+          lines.map((l, i) => {
+            const key = l.lineId ?? `${l.dish.id}-${l.variant?.id ?? ''}-${i}`;
+            const isSet = !!l.set;
+            const open = !!expanded[key];
+            return (
             <View
-              key={l.lineId ?? `${l.dish.id}-${l.variant?.id ?? ''}-${i}`}
+              key={key}
               style={[styles.line, i > 0 && styles.lineBorder]}
             >
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.lineName} numberOfLines={1}>
-                  {l.dish.name}
-                  {l.variant ? ` · ${l.variant.name}` : ''}
-                </Text>
+                <Pressable disabled={!isSet} onPress={() => setExpanded((current) => ({ ...current, [key]: !open }))}>
+                  <Text style={styles.lineName} numberOfLines={1}>{cartLineName(l)}</Text>
+                </Pressable>
                 {l.set ? (
                   <Text style={styles.lineSub}>
-                    {l.set.components.filter((c) => c.action !== 'removed').length} блюд
+                    {setChanged(l) ? 'Состав изменён' : `${l.set.components.length} блюд`} · {open ? 'скрыть' : 'состав'}
                   </Text>
                 ) : null}
                 {l.takeaway ? (
@@ -100,10 +105,33 @@ export function CartSheet({
                 <RoundBtn kind="inc" onPress={() => setQuantity(i, l.quantity + 1)} />
               </View>
               <Text style={styles.linePrice}>{money(linePrice(l))}</Text>
+              {isSet && open ? (
+                <View style={styles.setComponents}>
+                  {l.set!.components.map((component) => (
+                    <Text key={component.componentId} style={styles.setComponentText} numberOfLines={1}>
+                      {component.action === 'removed'
+                        ? `− ${component.originalName}`
+                        : component.action === 'replaced'
+                          ? `${component.originalName} → ${component.finalName}`
+                          : component.originalName}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
             </View>
-          ))
+            );
+          })
         )}
       </ScrollView>
+      {hasLines ? (
+        <TextInput
+          value={comment}
+          onChangeText={setOrderComment}
+          placeholder="Комментарий к заказу"
+          placeholderTextColor={colors.textLight}
+          style={styles.commentInput}
+        />
+      ) : null}
     </BottomSheet>
   );
 }
@@ -159,7 +187,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xxl,
   },
   empty: { textAlign: 'center', color: colors.textMuted, fontSize: fontSize.sm },
-  line: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
+  line: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.md, paddingVertical: spacing.sm },
   lineBorder: { borderTopWidth: 1, borderTopColor: colors.border },
   lineName: { fontSize: fontSize.base, color: colors.textPrimary },
   lineSub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
@@ -180,6 +208,19 @@ const styles = StyleSheet.create({
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   qty: { width: 20, textAlign: 'center', fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
   linePrice: { width: 70, textAlign: 'right', fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  setComponents: { width: '100%', gap: 2, paddingLeft: 2, marginTop: -2 },
+  setComponentText: { fontSize: fontSize.xs, color: colors.textMuted },
+  commentInput: {
+    height: 42,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+  },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

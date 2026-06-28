@@ -75,10 +75,23 @@ export function TablesScreen() {
       { id: tbl.id, number: tbl.number, hallName: currentHall?.name },
       activeOrder?.id ?? null,
     );
-    navigation.navigate('Menu');
+    if (activeOrder) {
+      navigation.navigate('Orders', { screen: 'OrderDetail', params: { orderId: activeOrder.id } });
+    } else {
+      navigation.navigate('Menu');
+    }
   }, [currentHall?.name, navigation, ordersByTable, push, selectTable, user?.id]);
 
   const tables = currentHall?.tables ?? [];
+  const tableColumns = useMemo(() => {
+    const count = tables.length;
+    if (count <= 2) return 1;
+    if (count <= 6) return 2;
+    if (count > 10) return 4;
+    return 3;
+  }, [tables.length]);
+  const tableWidth = tableColumns === 1 ? '100%' : tableColumns === 2 ? '48%' : tableColumns === 4 ? '23%' : '31%';
+  const tableMinHeight = tables.length === 1 ? 300 : tables.length === 2 ? 156 : tables.length <= 6 ? 132 : 104;
   const selectedTable = useMemo(
     () => (halls.data ?? []).flatMap((h) => h.tables).find((tbl) => tbl.id === selectedTableId) ?? null,
     [halls.data, selectedTableId],
@@ -143,7 +156,11 @@ export function TablesScreen() {
     return (
       <Pressable
         onPress={() => onTablePress(tbl)}
-        style={[styles.table, selected ? styles.tableSelected : null]}
+        style={[
+          styles.table,
+          { width: tableWidth, minHeight: tableMinHeight },
+          selected ? styles.tableSelected : null,
+        ]}
       >
         {!selected ? <View style={[styles.dot, { backgroundColor: meta.dot }]} /> : null}
         <Text style={[styles.tableNumber, selected && { color: colors.white }]}>
@@ -151,7 +168,7 @@ export function TablesScreen() {
         </Text>
       </Pressable>
     );
-  }, [onTablePress, selectedTableId]);
+  }, [onTablePress, selectedTableId, tableMinHeight, tableWidth]);
 
   const keyTable = React.useCallback((tbl: TableItem) => tbl.id, []);
 
@@ -198,13 +215,14 @@ export function TablesScreen() {
         ) : null}
 
         <FlatList
+          key={`tables-${tableColumns}`}
           data={halls.isLoading ? [] : tables}
           renderItem={renderTable}
           keyExtractor={keyTable}
-          numColumns={3}
+          numColumns={tableColumns}
           style={styles.tableList}
           contentContainerStyle={styles.grid}
-          columnWrapperStyle={styles.gridRow}
+          columnWrapperStyle={tableColumns > 1 ? styles.gridRow : undefined}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={halls.isFetching} onRefresh={() => halls.refetch()} />

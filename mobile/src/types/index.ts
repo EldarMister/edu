@@ -208,6 +208,52 @@ export interface Order {
   fiscalizedAt?: string | null;
 }
 
+export interface Receipt {
+  cafeName: string;
+  address?: string | null;
+  phone?: string | null;
+  phone2?: string | null;
+  instagram?: string | null;
+  website?: string | null;
+  orderNumber: string;
+  tableNumber: number;
+  waiter: string;
+  date: string;
+  items: {
+    dishNameSnapshot: string;
+    dishVariantNameSnapshot?: string | null;
+    quantity: number;
+    priceSnapshot: string;
+    finalPrice: string;
+  }[];
+  totalAmount: string;
+  discountAmount: string;
+  serviceChargeAmount: string;
+  finalAmount: string;
+  paymentMethod: PaymentMethod | null;
+  payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
+  thanks: string;
+}
+
+export type ReceiptPrintStatus = 'pending' | 'approved' | 'rejected' | 'printed';
+
+export interface ReceiptPrintRequest {
+  id: string;
+  source?: 'request' | 'order';
+  priority?: boolean;
+  orderId: string;
+  orderNumber: string;
+  tableNumber: number;
+  type: ReceiptPrintType;
+  waiterId: string;
+  waiterName: string;
+  amount: string;
+  status: ReceiptPrintStatus | null;
+  createdAt: string;
+  decidedAt?: string | null;
+  voice?: { text?: string | null } | null;
+}
+
 /** Компонент сета в корзине (с применённым изменением). */
 export interface CartSetComponent {
   componentId: string;
