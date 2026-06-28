@@ -371,7 +371,7 @@ export function StaffPage() {
           member={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
           onManagePermissions={
-            editing !== 'new' && editing && canManagePermissions && editing.role !== 'OWNER' && editing.id !== currentUser?.id
+            editing !== 'new' && editing && canManagePermissions && editing.role === 'ADMIN' && editing.id !== currentUser?.id
               ? () => {
                   setPermissionsFor(editing);
                   setEditing(null);
