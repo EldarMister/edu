@@ -254,9 +254,9 @@ export function OrdersPage() {
                 <col className="w-[16%]" />
                 <col className="w-[8%]" />
                 <col className="w-[14%]" />
-                <col className="w-[10%]" />
-                <col className="w-[17%]" />
-                <col className="w-[16%]" />
+                <col className="w-[9%]" />
+                <col className="w-[22%]" />
+                <col className="w-[12%]" />
                 <col className="w-[76px]" />
               </colgroup>
               <thead className="sticky top-0 z-10">
@@ -266,7 +266,7 @@ export function OrdersPage() {
                   <Th>{tr('Стол')}</Th>
                   <Th>{tr('Официант')}</Th>
                   <Th className="text-right">{tr('Сумма')}</Th>
-                  <Th>{tr('Статус заказа')}</Th>
+                  <Th className="pl-4">{tr('Статус заказа')}</Th>
                   <Th>{tr('Способ оплаты')}</Th>
                   <Th className="px-1 text-center">{tr('Действия')}</Th>
                 </tr>
@@ -295,7 +295,7 @@ export function OrdersPage() {
                     </Td>
                     <Td className="text-text-secondary">{ord.waiter?.name ?? 'QR menu'}</Td>
                     <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
-                    <Td>
+                    <Td className="pl-4">
                       <OrderStatusBadges order={ord} size="sm" />
                     </Td>
                     <Td className="whitespace-nowrap text-text-secondary">{paymentCell(ord)}</Td>
