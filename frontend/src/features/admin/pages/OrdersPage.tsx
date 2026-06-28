@@ -255,8 +255,8 @@ export function OrdersPage() {
                 <col className="w-[8%]" />
                 <col className="w-[14%]" />
                 <col className="w-[10%]" />
-                <col className="w-[13%]" />
-                <col className="w-[20%]" />
+                <col className="w-[17%]" />
+                <col className="w-[16%]" />
                 <col className="w-[76px]" />
               </colgroup>
               <thead className="sticky top-0 z-10">

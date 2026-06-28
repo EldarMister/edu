@@ -21,7 +21,7 @@ export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?
 export function OrderStatusBadges({
   order,
   size = 'md',
-  className = 'flex flex-wrap items-center justify-end gap-1',
+  className = 'flex flex-nowrap items-center justify-end gap-1',
 }: {
   order: Order;
   size?: 'sm' | 'md';
@@ -37,7 +37,7 @@ export function OrderStatusBadges({
       {chips.map((c) => (
         <span
           key={c.station}
-          className={`inline-flex items-center whitespace-nowrap font-medium ${sizeCls} ${c.badge}`}
+          className={`inline-flex shrink-0 items-center whitespace-nowrap font-medium ${sizeCls} ${c.badge}`}
         >
           {t(c.stationLabel)}: {t(c.label)}
         </span>

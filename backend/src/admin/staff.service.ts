@@ -121,9 +121,10 @@ export class StaffService {
     }
     const user = await this.prisma.user.findUnique({ where: { id }, select: STAFF_SELECT });
     if (!user) throw new NotFoundException('Сотрудник не найден');
-    // Права владельца всегда полные — менять нельзя.
-    if (user.role === Role.OWNER) {
-      throw new ForbiddenException('Права владельца изменить нельзя');
+    // Права доступа настраиваются только для администраторов. Для официантов,
+    // кухни, бара и владельца используются фиксированные права по роли.
+    if (user.role !== Role.ADMIN) {
+      throw new ForbiddenException('Права доступа можно менять только у администратора');
     }
     // Нельзя редактировать собственные права (защита от само-эскалации).
     if (id === actor.id) {
