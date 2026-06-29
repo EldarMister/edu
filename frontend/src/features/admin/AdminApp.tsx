@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { TouchEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/store/auth';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -103,6 +104,12 @@ const SECTIONS: { key: Section; label: string; icon: typeof IconStats; perm: Sec
   { key: 'settings', label: 'Настройки', icon: IconSettings, perm: 'settings' },
 ];
 
+const MOBILE_NAV_EDGE_ZONE = 28;
+const MOBILE_NAV_OPEN_DISTANCE = 72;
+const MOBILE_NAV_VERTICAL_TOLERANCE = 48;
+const MOBILE_NAV_REACH_OFFSET = 96;
+const MOBILE_NAV_PULL_LIMIT = 132;
+const MOBILE_NAV_PULL_TRIGGER = 52;
 
 export function AdminApp() {
   const { user, logout } = useAuth();
@@ -119,6 +126,11 @@ export function AdminApp() {
   });
   const [section, setSection] = useState<Section>(isOwner ? 'stats' : 'orders');
   const [mobileNav, setMobileNav] = useState(false);
+  const [mobileNavReach, setMobileNavReach] = useState(false);
+  const [mobileNavDragY, setMobileNavDragY] = useState<number | null>(null);
+  const edgeSwipe = useRef<{ x: number; y: number } | null>(null);
+  const drawerPull = useRef<{ y: number; base: number } | null>(null);
+  const mobileNavOffsetY = mobileNavDragY ?? (mobileNavReach ? MOBILE_NAV_REACH_OFFSET : 0);
 
   // Если текущий раздел стал недоступен (право отозвали) — уходим на первый доступный.
   useEffect(() => {
@@ -126,6 +138,14 @@ export function AdminApp() {
       setSection(sections[0].key);
     }
   }, [sections, section]);
+
+  useEffect(() => {
+    if (!mobileNav) {
+      setMobileNavReach(false);
+      setMobileNavDragY(null);
+      drawerPull.current = null;
+    }
+  }, [mobileNav]);
   const invalidateReceipts = () =>
     qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
 
@@ -178,30 +198,92 @@ export function AdminApp() {
     setMobileNav(false);
   }
 
+  function handleAppTouchStart(event: TouchEvent<HTMLDivElement>) {
+    const isDesktop = typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
+    if (mobileNav || isDesktop || (!isAdmin && !isOwner)) return;
+    const touch = event.touches[0];
+    if (!touch || touch.clientX > MOBILE_NAV_EDGE_ZONE) {
+      edgeSwipe.current = null;
+      return;
+    }
+    edgeSwipe.current = { x: touch.clientX, y: touch.clientY };
+  }
+
+  function handleAppTouchMove(event: TouchEvent<HTMLDivElement>) {
+    const start = edgeSwipe.current;
+    if (!start || mobileNav) return;
+    const touch = event.touches[0];
+    if (!touch) return;
+    const dx = touch.clientX - start.x;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dy) > MOBILE_NAV_VERTICAL_TOLERANCE && Math.abs(dy) > dx) {
+      edgeSwipe.current = null;
+      return;
+    }
+    if (dx > MOBILE_NAV_OPEN_DISTANCE && Math.abs(dy) < MOBILE_NAV_VERTICAL_TOLERANCE) {
+      event.preventDefault();
+      edgeSwipe.current = null;
+      setMobileNav(true);
+    }
+  }
+
+  function handleAppTouchEnd() {
+    edgeSwipe.current = null;
+  }
+
+  function handleDrawerTouchStart(event: TouchEvent<HTMLDivElement>) {
+    const touch = event.touches[0];
+    if (!touch) return;
+    drawerPull.current = { y: touch.clientY, base: mobileNavReach ? MOBILE_NAV_REACH_OFFSET : 0 };
+    setMobileNavDragY(drawerPull.current.base);
+  }
+
+  function handleDrawerTouchMove(event: TouchEvent<HTMLDivElement>) {
+    const start = drawerPull.current;
+    const touch = event.touches[0];
+    if (!start || !touch) return;
+    const dy = touch.clientY - start.y;
+    if (Math.abs(dy) < 6) return;
+    event.preventDefault();
+    setMobileNavDragY(Math.max(0, Math.min(MOBILE_NAV_PULL_LIMIT, start.base + dy)));
+  }
+
+  function handleDrawerTouchEnd() {
+    const nextOffset = mobileNavDragY ?? (mobileNavReach ? MOBILE_NAV_REACH_OFFSET : 0);
+    setMobileNavReach(nextOffset >= MOBILE_NAV_PULL_TRIGGER);
+    setMobileNavDragY(null);
+    drawerPull.current = null;
+  }
+
   const current = sections.find((s) => s.key === section) ?? sections[0];
 
-  const sidebar = (
+  const renderSidebar = (navOffsetY = 0) => (
     <aside className="flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
       <div className="flex h-16 items-center px-5">
         <BrandLogo />
       </div>
-      <nav className="flex-1 space-y-1 px-3 py-2">
-        {sections.map((s) => {
-          const Icon = s.icon;
-          const active = s.key === section;
-          return (
-            <button
-              key={s.key}
-              onClick={() => go(s.key)}
-              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${
-                active ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-              }`}
-            >
-              <Icon />
-              {t(s.label)}
-            </button>
-          );
-        })}
+      <nav className="flex-1 overflow-hidden px-3 py-2">
+        <div
+          className="space-y-1 transition-transform duration-200 ease-out"
+          style={{ transform: `translateY(${navOffsetY}px)` }}
+        >
+          {sections.map((s) => {
+            const Icon = s.icon;
+            const active = s.key === section;
+            return (
+              <button
+                key={s.key}
+                onClick={() => go(s.key)}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${
+                  active ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
+                }`}
+              >
+                <Icon />
+                {t(s.label)}
+              </button>
+            );
+          })}
+        </div>
       </nav>
       <div className="border-t border-border p-3">
         <button
@@ -217,15 +299,33 @@ export function AdminApp() {
   );
 
   return (
-    <div className="flex h-full bg-background">
+    <div
+      className="flex h-full bg-background"
+      onTouchStart={handleAppTouchStart}
+      onTouchMove={handleAppTouchMove}
+      onTouchEnd={handleAppTouchEnd}
+      onTouchCancel={handleAppTouchEnd}
+    >
       {/* Desktop sidebar */}
-      <div className="hidden lg:block">{sidebar}</div>
+      <div className="hidden lg:block">{renderSidebar()}</div>
 
       {/* Mobile drawer */}
       {mobileNav && (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-black/40" onClick={() => setMobileNav(false)} />
-          <div className="absolute inset-y-0 left-0">{sidebar}</div>
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setMobileNav(false)}
+            onTouchMove={(event) => event.preventDefault()}
+          />
+          <div
+            className="absolute inset-y-0 left-0"
+            onTouchStart={handleDrawerTouchStart}
+            onTouchMove={handleDrawerTouchMove}
+            onTouchEnd={handleDrawerTouchEnd}
+            onTouchCancel={handleDrawerTouchEnd}
+          >
+            {renderSidebar(mobileNavOffsetY)}
+          </div>
         </div>
       )}
 
