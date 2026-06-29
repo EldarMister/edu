@@ -296,7 +296,11 @@ export function OrdersPage() {
                     <Td className="text-text-secondary">{ord.waiter?.name ?? 'QR menu'}</Td>
                     <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
                     <Td className="pl-4">
-                      <OrderStatusBadges order={ord} size="sm" />
+                      <OrderStatusBadges
+                        order={ord}
+                        size="sm"
+                        className="flex flex-nowrap items-center justify-start gap-1"
+                      />
                     </Td>
                     <Td className="whitespace-nowrap text-text-secondary">{paymentCell(ord)}</Td>
                     <Td className="px-1">
