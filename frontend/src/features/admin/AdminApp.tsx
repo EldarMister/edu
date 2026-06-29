@@ -104,10 +104,11 @@ const SECTIONS: { key: Section; label: string; icon: typeof IconStats; perm: Sec
   { key: 'settings', label: 'Настройки', icon: IconSettings, perm: 'settings' },
 ];
 
-const MOBILE_NAV_EDGE_ZONE = 44;
+const MOBILE_NAV_EDGE_ZONE = 68;
 const MOBILE_NAV_OPEN_DISTANCE = 72;
+const MOBILE_NAV_CLOSE_DISTANCE = 70;
+const MOBILE_NAV_SELECT_STEP = 44;
 const MOBILE_NAV_VERTICAL_TOLERANCE = 48;
-const MOBILE_NAV_SHIFT_LIMIT = 140;
 
 export function AdminApp() {
   const { user, logout } = useAuth();
@@ -124,9 +125,8 @@ export function AdminApp() {
   });
   const [section, setSection] = useState<Section>(isOwner ? 'stats' : 'orders');
   const [mobileNav, setMobileNav] = useState(false);
-  const [mobileNavOffsetY, setMobileNavOffsetY] = useState(0);
   const edgeSwipe = useRef<{ x: number; y: number } | null>(null);
-  const drawerPull = useRef<{ y: number; base: number } | null>(null);
+  const drawerPull = useRef<{ x: number; y: number; index: number } | null>(null);
 
   // Если текущий раздел стал недоступен (право отозвали) — уходим на первый доступный.
   useEffect(() => {
@@ -137,7 +137,6 @@ export function AdminApp() {
 
   useEffect(() => {
     if (!mobileNav) {
-      setMobileNavOffsetY(0);
       drawerPull.current = null;
     }
   }, [mobileNav]);
@@ -229,17 +228,30 @@ export function AdminApp() {
   function handleDrawerTouchStart(event: TouchEvent<HTMLDivElement>) {
     const touch = event.touches[0];
     if (!touch) return;
-    drawerPull.current = { y: touch.clientY, base: mobileNavOffsetY };
+    const currentIndex = Math.max(0, sections.findIndex((s) => s.key === section));
+    drawerPull.current = { x: touch.clientX, y: touch.clientY, index: currentIndex };
   }
 
   function handleDrawerTouchMove(event: TouchEvent<HTMLDivElement>) {
     const start = drawerPull.current;
     const touch = event.touches[0];
     if (!start || !touch) return;
+    const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
-    if (Math.abs(dy) < 6) return;
+    if (dx < -MOBILE_NAV_CLOSE_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
+      event.preventDefault();
+      setMobileNav(false);
+      drawerPull.current = null;
+      return;
+    }
+    if (Math.abs(dy) < 6 || Math.abs(dx) > Math.abs(dy)) return;
+    const step = Math.trunc(dy / MOBILE_NAV_SELECT_STEP);
+    if (step === 0) return;
+    const nextIndex = Math.max(0, Math.min(sections.length - 1, start.index + step));
+    const nextSection = sections[nextIndex];
+    if (!nextSection || nextSection.key === section) return;
     event.preventDefault();
-    setMobileNavOffsetY(Math.max(0, Math.min(MOBILE_NAV_SHIFT_LIMIT, start.base + dy)));
+    setSection(nextSection.key);
   }
 
   function handleDrawerTouchEnd() {
@@ -248,33 +260,28 @@ export function AdminApp() {
 
   const current = sections.find((s) => s.key === section) ?? sections[0];
 
-  const renderSidebar = (navOffsetY = 0) => (
+  const renderSidebar = () => (
     <aside className="flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
       <div className="flex h-16 items-center px-5">
         <BrandLogo />
       </div>
-      <nav className="flex-1 overflow-hidden px-3 py-2">
-        <div
-          className="space-y-1 transition-transform duration-200 ease-out"
-          style={{ transform: `translateY(${navOffsetY}px)` }}
-        >
-          {sections.map((s) => {
-            const Icon = s.icon;
-            const active = s.key === section;
-            return (
-              <button
-                key={s.key}
-                onClick={() => go(s.key)}
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${
-                  active ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-                }`}
-              >
-                <Icon />
-                {t(s.label)}
-              </button>
-            );
-          })}
-        </div>
+      <nav className="flex-1 space-y-1 px-3 py-2">
+        {sections.map((s) => {
+          const Icon = s.icon;
+          const active = s.key === section;
+          return (
+            <button
+              key={s.key}
+              onClick={() => go(s.key)}
+              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${
+                active ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
+              }`}
+            >
+              <Icon />
+              {t(s.label)}
+            </button>
+          );
+        })}
       </nav>
       <div className="border-t border-border p-3">
         <button
@@ -315,7 +322,7 @@ export function AdminApp() {
             onTouchEnd={handleDrawerTouchEnd}
             onTouchCancel={handleDrawerTouchEnd}
           >
-            {renderSidebar(mobileNavOffsetY)}
+            {renderSidebar()}
           </div>
         </div>
       )}
