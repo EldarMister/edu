@@ -104,12 +104,10 @@ const SECTIONS: { key: Section; label: string; icon: typeof IconStats; perm: Sec
   { key: 'settings', label: 'Настройки', icon: IconSettings, perm: 'settings' },
 ];
 
-const MOBILE_NAV_EDGE_ZONE = 28;
+const MOBILE_NAV_EDGE_ZONE = 44;
 const MOBILE_NAV_OPEN_DISTANCE = 72;
 const MOBILE_NAV_VERTICAL_TOLERANCE = 48;
-const MOBILE_NAV_REACH_OFFSET = 96;
-const MOBILE_NAV_PULL_LIMIT = 132;
-const MOBILE_NAV_PULL_TRIGGER = 52;
+const MOBILE_NAV_SHIFT_LIMIT = 140;
 
 export function AdminApp() {
   const { user, logout } = useAuth();
@@ -126,11 +124,9 @@ export function AdminApp() {
   });
   const [section, setSection] = useState<Section>(isOwner ? 'stats' : 'orders');
   const [mobileNav, setMobileNav] = useState(false);
-  const [mobileNavReach, setMobileNavReach] = useState(false);
-  const [mobileNavDragY, setMobileNavDragY] = useState<number | null>(null);
+  const [mobileNavOffsetY, setMobileNavOffsetY] = useState(0);
   const edgeSwipe = useRef<{ x: number; y: number } | null>(null);
   const drawerPull = useRef<{ y: number; base: number } | null>(null);
-  const mobileNavOffsetY = mobileNavDragY ?? (mobileNavReach ? MOBILE_NAV_REACH_OFFSET : 0);
 
   // Если текущий раздел стал недоступен (право отозвали) — уходим на первый доступный.
   useEffect(() => {
@@ -141,8 +137,7 @@ export function AdminApp() {
 
   useEffect(() => {
     if (!mobileNav) {
-      setMobileNavReach(false);
-      setMobileNavDragY(null);
+      setMobileNavOffsetY(0);
       drawerPull.current = null;
     }
   }, [mobileNav]);
@@ -234,8 +229,7 @@ export function AdminApp() {
   function handleDrawerTouchStart(event: TouchEvent<HTMLDivElement>) {
     const touch = event.touches[0];
     if (!touch) return;
-    drawerPull.current = { y: touch.clientY, base: mobileNavReach ? MOBILE_NAV_REACH_OFFSET : 0 };
-    setMobileNavDragY(drawerPull.current.base);
+    drawerPull.current = { y: touch.clientY, base: mobileNavOffsetY };
   }
 
   function handleDrawerTouchMove(event: TouchEvent<HTMLDivElement>) {
@@ -245,13 +239,10 @@ export function AdminApp() {
     const dy = touch.clientY - start.y;
     if (Math.abs(dy) < 6) return;
     event.preventDefault();
-    setMobileNavDragY(Math.max(0, Math.min(MOBILE_NAV_PULL_LIMIT, start.base + dy)));
+    setMobileNavOffsetY(Math.max(0, Math.min(MOBILE_NAV_SHIFT_LIMIT, start.base + dy)));
   }
 
   function handleDrawerTouchEnd() {
-    const nextOffset = mobileNavDragY ?? (mobileNavReach ? MOBILE_NAV_REACH_OFFSET : 0);
-    setMobileNavReach(nextOffset >= MOBILE_NAV_PULL_TRIGGER);
-    setMobileNavDragY(null);
     drawerPull.current = null;
   }
 
