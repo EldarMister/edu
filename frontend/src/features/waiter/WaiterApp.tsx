@@ -49,6 +49,7 @@ import { CartPanel } from './CartPanel';
 import { CartSheet } from './CartSheet';
 import { cartStations } from '@/lib/prep-station';
 import { OrderPanel } from './OrderPanel';
+import { ShiftGate } from './ShiftGate';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
 import { WaiterCabinet } from './WaiterCabinet';
@@ -124,6 +125,8 @@ export function WaiterApp() {
   const [replacementTarget, setReplacementTarget] = useState<ReplacementTarget | null>(null);
   const [idemKey, setIdemKey] = useState(() => clientId());
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
+  // Запуск смены пошёл: гейт удерживается, пока не доиграет анимация успеха.
+  const [shiftGateBusy, setShiftGateBusy] = useState(false);
 
   const availableWaitersQ = useAvailableWaiters(tableModal === 'transfer');
 
@@ -775,6 +778,32 @@ export function WaiterApp() {
   );
 
   const desktopView: DesktopTab = activeNavTab === 'orders' || activeNavTab === 'profile' ? activeNavTab : 'tables';
+
+  // Экран «Смена не начата» поверх контента, пока смена не активна (по референсу).
+  const showShiftGate = shiftGateBusy || !activeShift;
+  if (showShiftGate) {
+    return (
+      <div className="flex h-full flex-col bg-background">
+        <OfflineBanner />
+        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-white py-2 pl-2 pr-4 sm:pl-4">
+          <div className="flex items-center gap-2">
+            <BrandLogo />
+          </div>
+          <div className="flex items-center gap-3">
+            <ConnectionStatus />
+            <span className={`text-xs ${activeShift ? 'text-success' : 'text-text-muted'}`}>
+              <span className="hidden sm:inline">{activeShift ? t('Смена активна') : t('Смена не начата')}</span>
+              <span className="sm:hidden">{activeShift ? t('Смена активна') : t('Нет смены')}</span>
+            </span>
+            <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
+          </div>
+        </header>
+        <main className="min-h-0 flex-1 overflow-hidden">
+          <ShiftGate onBusyChange={setShiftGateBusy} />
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col bg-background">
