@@ -23,6 +23,7 @@ export type PwaIconName =
   | 'rotateCcw'
   | 'check'
   | 'eye'
+  | 'speaker'
   | 'dotsVertical';
 
 export function PwaIcon({
@@ -112,6 +113,13 @@ export function PwaIcon({
         <>
           <Path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" {...common} strokeWidth={2} />
           <Circle cx="12" cy="12" r="3" {...common} strokeWidth={2} />
+        </>
+      )}
+      {name === 'speaker' && (
+        <>
+          <Path d="M11 5 6 9H3v6h3l5 4V5Z" {...common} strokeWidth={2} />
+          <Path d="M15.5 8.5a5 5 0 0 1 0 7" {...common} strokeWidth={2} />
+          <Path d="M18.5 5.5a9 9 0 0 1 0 13" {...common} strokeWidth={2} />
         </>
       )}
       {name === 'dotsVertical' && (

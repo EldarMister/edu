@@ -13,6 +13,40 @@ export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitche
   });
 }
 
+export interface StopListDish {
+  id: string;
+  name: string;
+  isAvailable: boolean;
+}
+export interface StopListCategory {
+  id: string;
+  name: string;
+  dishes: StopListDish[];
+}
+
+export function useStopList(enabled: boolean, station: PrepStation = 'kitchen') {
+  return useQuery({
+    queryKey: ['kitchen', 'stop-list', station],
+    queryFn: async () =>
+      (await api.get<StopListCategory[]>(`/kitchen/stop-list?station=${station}`)).data,
+    enabled,
+  });
+}
+
+export function useSaveStopList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (items: { dishId: string; isAvailable: boolean }[]) =>
+      (await api.patch<StopListCategory[]>('/kitchen/stop-list', { items })).data,
+    retry: networkRetry,
+    onSuccess: () => {
+      // Стоп-лист общий по составу, но фильтруется по станции — обновляем оба экрана.
+      qc.invalidateQueries({ queryKey: ['kitchen', 'stop-list'] });
+      qc.invalidateQueries({ queryKey: ['dishes'] });
+    },
+  });
+}
+
 function invalidateKitchen(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: ['kitchen'] });
   qc.invalidateQueries({ queryKey: ['orders'] });
@@ -96,12 +130,17 @@ export function useRejectItems(station: PrepStation = 'kitchen') {
       orderId: string;
       itemIds: string[];
       setComponentIds: string[];
+      /** Частичный отказ по количеству для обычных позиций. */
+      partial?: { itemId: string; quantity: number }[];
       reason?: string;
+      comment?: string;
     }) =>
       (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/reject-batch?station=${station}`, {
         itemIds: p.itemIds,
         setComponentIds: p.setComponentIds,
+        partial: p.partial,
         reason: p.reason,
+        comment: p.comment,
       })).data,
     retry: networkRetry,
     onSettled: () => invalidateKitchen(qc),

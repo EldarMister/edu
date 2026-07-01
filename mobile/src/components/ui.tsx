@@ -1,6 +1,8 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -220,6 +222,40 @@ export function SegmentTabs<T extends string>({
   );
 }
 
+/** Тумблер — повторяет PWA Toggle (track 36×20, анимированный бегунок). */
+export function Toggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+  const progress = React.useRef(new Animated.Value(checked ? 1 : 0)).current;
+
+  React.useEffect(() => {
+    Animated.timing(progress, {
+      toValue: checked ? 1 : 0,
+      duration: 180,
+      easing: Easing.bezier(0.4, 0, 0.2, 1),
+      useNativeDriver: false,
+    }).start();
+  }, [checked, progress]);
+
+  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [2, 18] });
+  const backgroundColor = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [colors.slate300, colors.primary],
+  });
+
+  return (
+    <Pressable
+      accessibilityRole="switch"
+      accessibilityState={{ checked }}
+      onPress={() => onChange(!checked)}
+      hitSlop={8}
+      style={styles.toggle}
+    >
+      <Animated.View style={[styles.toggleTrack, { backgroundColor }]}>
+        <Animated.View style={[styles.toggleThumb, { transform: [{ translateX }] }]} />
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 /** Круглая кнопка ±, как в корзине PWA (dec красная, inc синяя). */
 export function RoundBtn({ kind, onPress }: { kind: 'inc' | 'dec'; onPress: () => void }) {
   const isDec = kind === 'dec';
@@ -302,6 +338,9 @@ const styles = StyleSheet.create({
   segmentCount: { backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: radius.pill, paddingHorizontal: 6, paddingVertical: 1 },
   segmentCountText: { color: colors.white, fontSize: fontSize.xs },
 
+  toggle: { width: 36, height: 20 },
+  toggleTrack: { width: 36, height: 20, borderRadius: 10, justifyContent: 'center' },
+  toggleThumb: { width: 16, height: 16, borderRadius: 8, backgroundColor: colors.white },
   roundBtn: {
     width: waiterLayout.roundButton,
     height: waiterLayout.roundButton,
