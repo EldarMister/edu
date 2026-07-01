@@ -3,6 +3,7 @@ import {
   Animated,
   Easing,
   Modal as RNModal,
+  PanResponder,
   Pressable,
   StyleSheet,
   Text,
@@ -12,6 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, spacing, waiterLayout } from '@/theme';
 import { PwaIcon } from './PwaIcon';
+
+const CLOSE_DRAG_DISTANCE = 110;
 
 /**
  * Нижний лист / модалка — повторяет PWA Modal на мобильном (items-end):
@@ -43,6 +46,42 @@ export function BottomSheet({
 }) {
   const [render, setRender] = React.useState(visible);
   const progress = React.useRef(new Animated.Value(0)).current;
+  const dragY = React.useRef(new Animated.Value(0)).current;
+  const panResponder = React.useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          sheet && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderGrant: () => {
+          dragY.stopAnimation();
+          dragY.setValue(0);
+        },
+        onPanResponderMove: (_, gesture) => {
+          dragY.setValue(Math.max(0, gesture.dy));
+        },
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dy > CLOSE_DRAG_DISTANCE) {
+            onClose();
+            return;
+          }
+          Animated.spring(dragY, {
+            toValue: 0,
+            speed: 24,
+            bounciness: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          Animated.spring(dragY, {
+            toValue: 0,
+            speed: 24,
+            bounciness: 0,
+            useNativeDriver: true,
+          }).start();
+        },
+      }),
+    [dragY, onClose, sheet],
+  );
 
   React.useEffect(() => {
     let frame: ReturnType<typeof requestAnimationFrame> | null = null;
@@ -50,6 +89,7 @@ export function BottomSheet({
     if (visible) {
       setRender(true);
       progress.setValue(0);
+      dragY.setValue(0);
       frame = requestAnimationFrame(() => {
         Animated.timing(progress, {
           toValue: 1,
@@ -70,9 +110,12 @@ export function BottomSheet({
       isInteraction: false,
       useNativeDriver: true,
     }).start(({ finished }) => {
-      if (finished) setRender(false);
+      if (finished) {
+        setRender(false);
+        dragY.setValue(0);
+      }
     });
-  }, [progress, visible]);
+  }, [dragY, progress, visible]);
 
   if (!render) return null;
 
@@ -106,7 +149,7 @@ export function BottomSheet({
             styles.sheet,
             maxHeight != null && { maxHeight },
             bottomInset != null && { marginBottom: bottomInset },
-            { opacity, transform: [{ translateY }] },
+            { opacity, transform: [{ translateY }, { translateY: dragY }] },
           ]}
         >
         <SafeAreaView
@@ -114,7 +157,7 @@ export function BottomSheet({
           edges={['bottom']}
         >
           {sheet ? (
-            <View style={styles.handleWrap}>
+            <View style={styles.handleWrap} {...panResponder.panHandlers}>
               <View style={styles.handle} />
               {title ? <Text style={styles.sheetTitle}>{title}</Text> : null}
             </View>
