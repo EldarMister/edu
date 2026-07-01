@@ -12,7 +12,7 @@ import { linePrice, useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
 import { useReplacement } from '@/store/replacement';
 import { buildSetLine, calcSetPrice, defaultSetComponents } from '@/utils/set';
-import { makeIdempotencyKey, minDishUnitPrice, money, variantNamesLine } from '@/utils/format';
+import { dishUnitPrice, makeIdempotencyKey, minDishUnitPrice, money, variantNamesLine } from '@/utils/format';
 import { cartStations } from '@/utils/prepStation';
 import { apiError } from '@/lib/api';
 import { useConnectionStatus } from '@/services/socket';
@@ -571,17 +571,24 @@ function VariantSheet({
       <View style={{ gap: spacing.sm, paddingBottom: spacing.sm }}>
         {variants.map((v) => {
           const isSel = v.id === selectedId;
+          // Цена варианта с учётом скидки блюда (как в PWA VariantPickerSheet).
+          const price = dishUnitPrice(v.price, dish.discountType, dish.discountValue);
+          const isOutOfStock = dish.trackInventory && typeof v.stock === 'number' && v.stock <= 0;
           return (
             <Pressable
               key={v.id}
+              disabled={isOutOfStock}
               onPress={() => setSelectedId(v.id)}
-              style={[styles.variant, isSel && styles.variantSel]}
+              style={[styles.variant, isSel && styles.variantSel, isOutOfStock && styles.variantDisabled]}
             >
               <View style={[styles.radio, isSel && { borderColor: colors.primary }]}>
                 {isSel ? <View style={styles.radioDot} /> : null}
               </View>
-              <Text style={styles.variantName}>{v.name}</Text>
-              <Text style={styles.variantPrice}>{money(v.price)}</Text>
+              <Text style={styles.variantName}>
+                {v.name}
+                {isOutOfStock ? <Text style={styles.variantOutOfStock}>  Нет в наличии</Text> : null}
+              </Text>
+              <Text style={styles.variantPrice}>{money(price)}</Text>
             </Pressable>
           );
         })}
@@ -1075,6 +1082,8 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   variantSel: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
+  variantDisabled: { opacity: 0.5 },
+  variantOutOfStock: { fontSize: fontSize.xs, fontWeight: '500', color: colors.red500 },
   radio: {
     width: 20,
     height: 20,

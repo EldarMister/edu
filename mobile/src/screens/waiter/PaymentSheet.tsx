@@ -284,18 +284,10 @@ export function PaymentSheet({
                   <Image source={{ uri: qrSrc }} style={styles.qrImage} resizeMode="contain" />
                 </>
               ) : (
-                <Text style={styles.qrMissing}>QR-код не настроен. Выберите другой способ оплаты.</Text>
+                <Text style={styles.qrMissing}>QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.</Text>
               )}
             </View>
-          ) : selected === 'cash' ? (
-            <View style={styles.qrBox}>
-              <Text style={styles.qrHint}>Примите оплату наличными — {money(total)}</Text>
-            </View>
-          ) : selected === 'card' ? (
-            <View style={styles.qrBox}>
-              <Text style={styles.qrHint}>Примите оплату картой через терминал — {money(total)}</Text>
-            </View>
-          ) : (
+          ) : selected === 'cash' || selected === 'card' ? null : (
             <View style={{ gap: spacing.md }}>
               <View style={styles.mixedRow}>
                 <Text style={styles.mixedLabel}>Наличные</Text>
@@ -667,13 +659,16 @@ function SplitBillSheet({
                   {payment.paid ? (
                     <Text style={styles.splitAmountText}>{money(amounts[index])}</Text>
                   ) : (
-                    <TextInput
-                      value={amountInputs[index] ?? ''}
-                      onChangeText={(value) => onAmountChange(index, value)}
-                      keyboardType="decimal-pad"
-                      editable={!busy}
-                      style={styles.splitAmountInput}
-                    />
+                    <View style={styles.splitAmountWrap}>
+                      <TextInput
+                        value={amountInputs[index] ?? ''}
+                        onChangeText={(value) => onAmountChange(index, value)}
+                        keyboardType="decimal-pad"
+                        editable={!busy}
+                        style={styles.splitAmountInput}
+                      />
+                      <Text style={styles.splitAmountCurrency}>с</Text>
+                    </View>
                   )}
                 </View>
 
@@ -925,6 +920,8 @@ const styles = StyleSheet.create({
   splitTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   splitTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   splitAmountText: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
+  splitAmountWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  splitAmountCurrency: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   splitAmountInput: {
     width: 104,
     height: 38,

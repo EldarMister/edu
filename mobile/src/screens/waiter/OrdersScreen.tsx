@@ -217,9 +217,13 @@ export function OrdersScreen() {
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.undoTitle} numberOfLines={1}>
                 {displayOrderNumber(pendingCancel.order.orderNumber)} · Стол {pendingCancel.order.table.number}
+                {hallSuffix(pendingCancel.order.table)} — отмена заказа
               </Text>
               <Text style={styles.undoSub}>
-                Отменится через {String(Math.max(0, Math.ceil((pendingCancel.deadline - now) / 1000))).padStart(2, '0')} сек
+                Отменится через{' '}
+                <Text style={styles.undoSeconds}>
+                  {String(Math.max(0, Math.ceil((pendingCancel.deadline - now) / 1000))).padStart(2, '0')} сек
+                </Text>
               </Text>
             </View>
             <Pressable onPress={undoCancel} style={styles.undoBtn}>
@@ -265,11 +269,11 @@ function CancelOrderSheet({
     <BottomSheet
       visible={!!order}
       onClose={onClose}
-      title="Отменить заказ"
+      title="Отменить заказ?"
       footer={
         <View style={styles.cancelFooter}>
           <Button title="Назад" variant="secondary" onPress={onClose} style={{ flex: 1 }} />
-          <Button title="Отменить" variant="danger" loading={submitting} onPress={onConfirm} style={{ flex: 1 }} />
+          <Button title="Отменить заказ" variant="danger" loading={submitting} onPress={onConfirm} style={{ flex: 1 }} />
         </View>
       }
     >
@@ -464,6 +468,7 @@ const styles = StyleSheet.create({
   },
   undoTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   undoSub: { marginTop: 2, fontSize: fontSize.sm, color: colors.textMuted },
+  undoSeconds: { fontWeight: '600', color: colors.danger },
   undoBtn: {
     height: 38,
     borderRadius: 12,
