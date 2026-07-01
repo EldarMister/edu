@@ -159,11 +159,6 @@ export function useRealtimeSync() {
       push({ message, type: n.type ?? 'info', orderId: n.orderId, orderNumber, at: n.at });
       void beep('notify');
     };
-    const notifyWaiter = () => {
-      invalidateOrders();
-      push({ message: 'Статус заказа обновлён', type: 'info', at: new Date().toISOString() });
-      void beep('notify');
-    };
     const onReceiptApproved = (req: ReceiptPrintRequest) => {
       invalidateOrders();
       const st = useReceiptPrint.getState();
@@ -226,7 +221,7 @@ export function useRealtimeSync() {
       speakWaiterOrder(order);
     };
     const onWaiterOrderChanged = (order: VoicedOrder) => {
-      notifyWaiter();
+      invalidateOrders();
       speakWaiterOrder(order);
     };
 
