@@ -6,8 +6,8 @@ import Constants from 'expo-constants';
 import { Button, Card } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
-import { OrderBadge } from '@/components/StatusBadge';
 import { colors, fontSize, radius, spacing } from '@/theme';
+import { ORDER_STATUS } from '@/theme/status';
 import { beep } from '@/lib/sound';
 import { useAuth } from '@/store/auth';
 import { useLocale, type Locale } from '@/store/locale';
@@ -21,7 +21,7 @@ import {
   type PushStatus,
 } from '@/services/push';
 import { displayOrderNumber, money, timeHM } from '@/utils/format';
-import type { WaiterShift } from '@/types';
+import type { OrderStatus, WaiterShift } from '@/types';
 
 const ROLE_LABEL: Record<string, string> = {
   WAITER: 'Официант',
@@ -469,10 +469,26 @@ function CabinetOrderRow({ order, onPress }: { order: CabinetRecentOrder; onPres
       <Text style={styles.cabinetOrderAmount} numberOfLines={1}>
         {money(order.finalAmount)}
       </Text>
-      <OrderBadge status={order.status} size="sm" />
+      <CabinetStatusBadge status={order.status} />
       <PwaIcon name="chevronRight" size={14} color={colors.textLight} strokeWidth={2} />
     </Pressable>
   );
+}
+
+function CabinetStatusBadge({ status }: { status: OrderStatus }) {
+  const meta = cabinetStatusMeta(status);
+  return (
+    <View style={[styles.cabinetStatusBadge, { backgroundColor: meta.bg }]}>
+      <Text style={[styles.cabinetStatusText, { color: meta.fg }]}>{meta.label}</Text>
+    </View>
+  );
+}
+
+function cabinetStatusMeta(status: OrderStatus) {
+  if (status === 'paid') return { label: 'Оплачен', bg: colors.successSoft, fg: colors.success };
+  if (status === 'cancelled') return { label: 'Отменён', bg: colors.dangerSoft, fg: colors.danger };
+  if (status === 'rejected') return { label: 'Отказан', bg: colors.dangerSoft, fg: colors.danger };
+  return { label: ORDER_STATUS[status]?.label ?? status, bg: colors.slate100, fg: colors.textMuted };
 }
 
 function PeriodPickerSheet({
@@ -696,6 +712,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textPrimary,
   },
+  cabinetStatusBadge: { borderRadius: 6, paddingHorizontal: spacing.sm, paddingVertical: 2 },
+  cabinetStatusText: { fontSize: fontSize.xs, fontWeight: '600' },
   periodSheetBody: { gap: 0, paddingTop: spacing.sm },
   periodOption: {
     minHeight: 50,
