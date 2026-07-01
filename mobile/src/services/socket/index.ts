@@ -27,7 +27,9 @@ export function getSocket(): Socket {
   if (!socket) {
     socket = io(API_URL, {
       auth: { token },
-      transports: ['websocket'],
+      // Как в PWA: websocket предпочтительнее, polling оставляем fallback для
+      // нестабильной мобильной сети и прокси, где чистый websocket не поднимается.
+      transports: ['websocket', 'polling'],
       autoConnect: false,
       reconnection: true,
       reconnectionDelay: 1000,
