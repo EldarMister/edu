@@ -335,8 +335,10 @@ export async function fetchReceipt(orderId: string): Promise<Receipt> {
 /** Официант создаёт запрос на печать чека/счёта (уходит администратору). */
 export function useCreateReceiptPrintRequest() {
   return useMutation({
-    mutationFn: async (vars: { orderId: string; type?: ReceiptPrintType }) =>
-      (await api.post<ReceiptPrintRequest>('/receipt-prints', vars)).data,
+    mutationFn: async (vars: string | { orderId: string; type?: ReceiptPrintType }) => {
+      const body = typeof vars === 'string' ? { orderId: vars } : vars;
+      return (await api.post<ReceiptPrintRequest>('/receipt-prints', body)).data;
+    },
     retry: networkRetry,
   });
 }
