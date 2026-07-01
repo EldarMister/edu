@@ -12,7 +12,7 @@ import { beep } from '@/lib/sound';
 import { useAuth } from '@/store/auth';
 import { useLocale, type Locale } from '@/store/locale';
 import { useNotifications } from '@/store/notifications';
-import { useCurrentShift, useEndShift, useWaiterCabinet, type CabinetRecentOrder } from '@/services/api/waiter';
+import { useCurrentShift, useEndShift, useOrderDetails, useWaiterCabinet, type CabinetRecentOrder } from '@/services/api/waiter';
 import { disconnectSocket } from '@/services/socket';
 import {
   playNotificationSoundTest,
@@ -20,8 +20,16 @@ import {
   useWaiterPushNotifications,
   type PushStatus,
 } from '@/services/push';
-import { displayOrderNumber, money, timeHM } from '@/utils/format';
-import type { OrderStatus, WaiterShift } from '@/types';
+import {
+  displayOrderNumber,
+  hallSuffix,
+  isSplitPayment,
+  money,
+  orderItemDisplayName,
+  paymentMethodLabel,
+  timeHM,
+} from '@/utils/format';
+import type { Order, OrderItemStatus, OrderStatus, WaiterShift } from '@/types';
 
 const ROLE_LABEL: Record<string, string> = {
   WAITER: 'Официант',
@@ -35,6 +43,15 @@ const PERIODS: { key: 'day' | 'week' | 'month'; label: string; title: string }[]
   { key: 'week', label: 'За 7 дней', title: 'Статистика за 7 дней' },
   { key: 'month', label: 'За месяц', title: 'Статистика за месяц' },
 ];
+const ITEM_STATUS: Record<OrderItemStatus, string> = {
+  new: 'Новое',
+  accepted: 'Принято',
+  cooking: 'Готовится',
+  ready: 'Готово',
+  rejected: 'Отказано',
+  served: 'Подано',
+  cancelled: 'Отменено',
+};
 
 export function ProfileScreen() {
   const user = useAuth((s) => s.user);
@@ -308,7 +325,9 @@ function WaiterCabinetScreen({
   const setLocale = useLocale((s) => s.setLocale);
   const [period, setPeriod] = React.useState<'day' | 'week' | 'month'>('week');
   const [periodOpen, setPeriodOpen] = React.useState(false);
+  const [detailId, setDetailId] = React.useState<string | null>(null);
   const cabinet = useWaiterCabinet(period);
+  const detail = useOrderDetails(detailId);
   const periodMeta = PERIODS.find((item) => item.key === period) ?? PERIODS[1];
   const groups = groupCabinetOrders(cabinet.data?.recentOrders ?? []);
 
@@ -316,11 +335,6 @@ function WaiterCabinetScreen({
     onBack();
     navigation.navigate('Orders');
   };
-  const openOrder = (orderId: string) => {
-    onBack();
-    navigation.navigate('Orders', { screen: 'OrderDetail', params: { orderId } });
-  };
-
   return (
     <>
       <SafeAreaView style={styles.safe} edges={[]}>
@@ -378,7 +392,7 @@ function WaiterCabinetScreen({
                     <Text style={styles.orderGroupLabel}>{group.label}</Text>
                     <View style={styles.cabinetOrdersList}>
                       {group.orders.map((order) => (
-                        <CabinetOrderRow key={order.id} order={order} onPress={() => openOrder(order.id)} />
+                        <CabinetOrderRow key={order.id} order={order} onPress={() => setDetailId(order.id)} />
                       ))}
                     </View>
                   </View>
@@ -399,6 +413,12 @@ function WaiterCabinetScreen({
           setPeriod(next);
           setPeriodOpen(false);
         }}
+      />
+      <OrderDetailsSheet
+        visible={!!detailId}
+        order={detail.data ?? null}
+        loading={detail.isLoading || detail.isFetching}
+        onClose={() => setDetailId(null)}
       />
     </>
   );
@@ -482,6 +502,136 @@ function CabinetStatusBadge({ status }: { status: OrderStatus }) {
       <Text style={[styles.cabinetStatusText, { color: meta.fg }]}>{meta.label}</Text>
     </View>
   );
+}
+
+function OrderDetailsSheet({
+  visible,
+  order,
+  loading,
+  onClose,
+}: {
+  visible: boolean;
+  order: Order | null;
+  loading: boolean;
+  onClose: () => void;
+}) {
+  const showMixedBreakdown = order?.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
+  return (
+    <BottomSheet
+      visible={visible}
+      onClose={onClose}
+      title={order ? `Заказ ${displayOrderNumber(order.orderNumber)}` : 'Заказ'}
+      maxHeight="88%"
+    >
+      {loading && !order ? (
+        <Text style={styles.cabinetMuted}>Загрузка заказа...</Text>
+      ) : !order ? (
+        <Text style={styles.cabinetError}>Не удалось загрузить заказ</Text>
+      ) : (
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.orderDetailsBody}>
+          <View>
+            <Text style={styles.detailSectionTitle}>Информация</Text>
+            <View style={styles.detailInfoBox}>
+              <DetailRow label="Статус" value={ORDER_STATUS[order.status]?.label ?? order.status} />
+              <DetailRow label="Официант" value={order.waiter?.name ?? 'QR menu'} />
+              <DetailRow label="Дата" value={`${new Date(order.createdAt).toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`} />
+              <DetailRow label="Сумма" value={money(order.finalAmount)} strong />
+              <DetailRow label="Стол" value={`Стол ${order.table.number}${hallSuffix(order.table)}`} />
+              <DetailRow label="Оплата" value={order.paymentMethod ? detailPaymentLabel(order) : '—'} />
+              {showMixedBreakdown ? (
+                <>
+                  <DetailRow label="Наличными" value={money(mixedSumBy(order, 'cash'))} />
+                  <DetailRow label="QR" value={money(mixedSumBy(order, 'qr'))} />
+                </>
+              ) : null}
+            </View>
+          </View>
+
+          {isSplitPayment(order) && order.payments?.length ? (
+            <View style={styles.detailNoteBox}>
+              <Text style={styles.detailNoteTitle}>Платежи</Text>
+              {order.payments.map((payment, index) => (
+                <View key={`${payment.method}-${index}`} style={styles.detailPaymentRow}>
+                  <Text style={styles.detailPaymentLabel}>Платеж {index + 1} — {paymentMethodLabel(payment.method)}</Text>
+                  <Text style={styles.detailPaymentAmount}>{money(payment.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
+
+          {order.comment ? (
+            <View style={styles.detailNoteBox}>
+              <Text style={styles.detailNoteTitle}>Комментарий</Text>
+              <Text style={styles.detailComment}>{order.comment}</Text>
+            </View>
+          ) : null}
+
+          <View>
+            <View style={styles.detailSectionHead}>
+              <Text style={styles.detailSectionTitle}>Блюда</Text>
+              <Text style={styles.detailItemsCount}>{order.items.length} поз.</Text>
+            </View>
+            <View style={styles.detailItemsBox}>
+              {order.items.map((item) => (
+                <View key={item.id} style={styles.detailItemRow}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.detailItemName}>
+                      {item.quantity}× {orderItemDisplayName(item)}
+                    </Text>
+                    {item.comment ? <Text style={styles.detailItemComment}>{item.comment}</Text> : null}
+                    {item.rejectReason ? <Text style={styles.detailItemReject}>Отказ: {item.rejectReason}</Text> : null}
+                  </View>
+                  <View style={styles.detailItemRight}>
+                    <Text style={styles.detailItemPrice}>{money(item.finalPrice)}</Text>
+                    <Text style={styles.detailItemStatus}>{ITEM_STATUS[item.status]}</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.detailTotals}>
+            <DetailTotal label="Итого" value={money(order.totalAmount)} />
+            {Number(order.discountAmount) > 0 ? <DetailTotal label="Скидка" value={money(order.discountAmount)} /> : null}
+            {Number(order.serviceChargeAmount) > 0 ? <DetailTotal label="Обслуживание" value={money(order.serviceChargeAmount)} /> : null}
+            <DetailTotal label="К оплате" value={money(order.finalAmount)} strong />
+          </View>
+        </ScrollView>
+      )}
+    </BottomSheet>
+  );
+}
+
+function DetailRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <View style={styles.detailInfoRow}>
+      <Text style={styles.detailInfoLabel}>{label}</Text>
+      <Text style={[styles.detailInfoValue, strong && styles.detailInfoValueStrong]} numberOfLines={2}>
+        {value}
+      </Text>
+    </View>
+  );
+}
+
+function DetailTotal({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return (
+    <View style={styles.detailTotalRow}>
+      <Text style={[styles.detailTotalLabel, strong && styles.detailTotalStrong]}>{label}</Text>
+      <Text style={[styles.detailTotalValue, strong && styles.detailTotalStrong]}>{value}</Text>
+    </View>
+  );
+}
+
+function detailPaymentLabel(order: Order): string {
+  if (isSplitPayment(order)) return 'Раздельная';
+  if (order.paymentMethod === 'mixed' && order.payments && order.payments.length > 1) return 'Смешанная';
+  return paymentMethodLabel(order.paymentMethod);
+}
+
+function mixedSumBy(order: { payments?: { method: string; amount: string }[] }, method: string): number {
+  return (order.payments ?? [])
+    .filter((payment) => payment.method === method)
+    .reduce((sum, payment) => sum + Number(payment.amount), 0);
 }
 
 function cabinetStatusMeta(status: OrderStatus) {
@@ -714,6 +864,52 @@ const styles = StyleSheet.create({
   },
   cabinetStatusBadge: { borderRadius: 6, paddingHorizontal: spacing.sm, paddingVertical: 2 },
   cabinetStatusText: { fontSize: fontSize.xs, fontWeight: '600' },
+  orderDetailsBody: { gap: spacing.lg, paddingBottom: spacing.md },
+  detailSectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  detailSectionTitle: { marginBottom: spacing.sm, fontSize: fontSize.sm, fontWeight: '800', color: colors.textPrimary },
+  detailItemsCount: { fontSize: fontSize.xs, color: colors.textMuted },
+  detailInfoBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, overflow: 'hidden' },
+  detailInfoRow: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  detailInfoLabel: { flex: 1, fontSize: fontSize.sm, color: colors.textMuted },
+  detailInfoValue: { flex: 1.25, textAlign: 'right', fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+  detailInfoValueStrong: { color: colors.primary },
+  detailNoteBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.background, padding: spacing.md },
+  detailNoteTitle: { marginBottom: 6, fontSize: fontSize.xs, fontWeight: '800', color: colors.textMuted },
+  detailComment: { fontSize: fontSize.sm, color: colors.textPrimary, lineHeight: 20 },
+  detailPaymentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, paddingVertical: 3 },
+  detailPaymentLabel: { flex: 1, fontSize: fontSize.sm, color: colors.textSecondary },
+  detailPaymentAmount: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textPrimary },
+  detailItemsBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, overflow: 'hidden' },
+  detailItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  detailItemName: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary, lineHeight: 19 },
+  detailItemComment: { marginTop: 3, fontSize: fontSize.xs, color: colors.warning },
+  detailItemReject: { marginTop: 3, fontSize: fontSize.xs, color: colors.danger },
+  detailItemRight: { alignItems: 'flex-end', minWidth: 72 },
+  detailItemPrice: { fontSize: fontSize.sm, fontWeight: '800', color: colors.textPrimary },
+  detailItemStatus: { marginTop: 2, fontSize: fontSize.xs, color: colors.textMuted },
+  detailTotals: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, gap: spacing.sm },
+  detailTotalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
+  detailTotalLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
+  detailTotalValue: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '700' },
+  detailTotalStrong: { fontSize: fontSize.base, color: colors.textPrimary, fontWeight: '800' },
   periodSheetBody: { gap: 0, paddingTop: spacing.sm },
   periodOption: {
     minHeight: 50,
