@@ -290,42 +290,46 @@ export function OrderDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
-      <View style={styles.titleRow}>
-        <Text style={styles.title}>
-          Заказ {displayOrderNumber(order.orderNumber)}{' '}
-          <Text style={styles.titleMuted}>
-            Стол {order.table.number}
-            {hallSuffix(order.table)}
+      <View style={styles.titleBlock}>
+        <View style={styles.titleMainRow}>
+          <Text style={styles.title} numberOfLines={1}>
+            Заказ {displayOrderNumber(order.orderNumber)}{' '}
+            <Text style={styles.titleMuted}>
+              Стол {order.table.number}
+              {hallSuffix(order.table)}
+            </Text>
           </Text>
-        </Text>
-        <View style={styles.titleActions}>
-          <OrderStatusBadges order={order} size="sm" />
-          {unclaimedQr ? (
-            <View style={styles.qrBadge}>
-              <Text style={styles.qrBadgeText}>QR</Text>
-            </View>
-          ) : null}
-          {DETAIL_EDITABLE.includes(order.status) && !unclaimedQr ? (
-            <Pressable
-              onPress={() => {
-                const lines = orderToCartLines(order, dishes.data ?? []);
-                if (lines.length === 0) {
-                  push({ message: 'Не удалось восстановить позиции заказа для редактирования', type: 'error', at: new Date().toISOString() });
-                  return;
-                }
-                startEditing(
-                  { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
-                  { id: order.id, orderNumber: order.orderNumber, comment: order.comment },
-                  lines,
-                );
-                navigation.navigate('Menu');
-              }}
-              style={styles.editOrderBtn}
-            >
-              <PwaIcon name="pencil" size={14} color={colors.textSecondary} />
-              <Text style={styles.editOrderText}>Изменить</Text>
-            </Pressable>
-          ) : null}
+          <View style={styles.titleActions}>
+            {unclaimedQr ? (
+              <View style={styles.qrBadge}>
+                <Text style={styles.qrBadgeText}>QR</Text>
+              </View>
+            ) : null}
+            {DETAIL_EDITABLE.includes(order.status) && !unclaimedQr ? (
+              <Pressable
+                onPress={() => {
+                  const lines = orderToCartLines(order, dishes.data ?? []);
+                  if (lines.length === 0) {
+                    push({ message: 'Не удалось восстановить позиции заказа для редактирования', type: 'error', at: new Date().toISOString() });
+                    return;
+                  }
+                  startEditing(
+                    { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
+                    { id: order.id, orderNumber: order.orderNumber, comment: order.comment },
+                    lines,
+                  );
+                  navigation.navigate('Menu');
+                }}
+                style={styles.editOrderBtn}
+              >
+                <PwaIcon name="pencil" size={14} color={colors.textSecondary} />
+                <Text style={styles.editOrderText}>Изменить</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </View>
+        <View style={styles.statusRow}>
+          <OrderStatusBadges order={order} size="sm" align="start" />
         </View>
       </View>
 
@@ -592,6 +596,20 @@ function PartialRejectionScreen({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
+  titleBlock: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    paddingTop: 20,
+    paddingBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  titleMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+  },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -606,6 +624,7 @@ const styles = StyleSheet.create({
   title: { flex: 1, fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   titleMuted: { fontSize: fontSize.base, fontWeight: '400', color: colors.textMuted },
   titleActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.sm },
+  statusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', minHeight: 24 },
   qrBadge: { borderRadius: 6, backgroundColor: colors.primarySoft, paddingHorizontal: 7, paddingVertical: 3 },
   qrBadgeText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primary },
   editOrderBtn: {

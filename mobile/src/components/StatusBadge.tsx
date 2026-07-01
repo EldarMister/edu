@@ -23,12 +23,20 @@ export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?
 }
 
 /** Станционные бейджи заказа — зеркало PWA OrderStatusBadges. */
-export function OrderStatusBadges({ order, size = 'md' }: { order: Order; size?: 'sm' | 'md' }) {
+export function OrderStatusBadges({
+  order,
+  size = 'md',
+  align = 'end',
+}: {
+  order: Order;
+  size?: 'sm' | 'md';
+  align?: 'start' | 'end';
+}) {
   const chips = orderStationStatuses(order);
   if (chips.length === 0) return <OrderBadge status={order.status} size={size} />;
 
   return (
-    <View style={styles.badgesRow}>
+    <View style={[styles.badgesRow, align === 'start' && styles.badgesRowStart]}>
       {chips.map((chip) => (
         <View
           key={chip.station}
@@ -59,6 +67,7 @@ export function TableBadge({ status }: { status: TableStatus }) {
 
 const styles = StyleSheet.create({
   badgesRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: spacing.xs, maxWidth: 220 },
+  badgesRowStart: { justifyContent: 'flex-start', maxWidth: '100%' },
   badge: { alignSelf: 'flex-start', alignItems: 'center', justifyContent: 'center' },
   sm: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   md: { borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 4 },
