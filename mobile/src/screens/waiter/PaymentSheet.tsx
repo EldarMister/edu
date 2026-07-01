@@ -58,6 +58,11 @@ const SPLIT_METHOD_LABELS: Record<SplitMethod, string> = {
   cash: 'Наличные',
   mixed: 'Смешанная',
 };
+const SPLIT_METHODS: { key: SplitMethod; label: string }[] = [
+  { key: 'qr', label: SPLIT_METHOD_LABELS.qr },
+  { key: 'cash', label: SPLIT_METHOD_LABELS.cash },
+  { key: 'mixed', label: SPLIT_METHOD_LABELS.mixed },
+];
 
 function amountValue(value: string): number {
   return Number(value.replace(',', '.')) || 0;
@@ -109,13 +114,6 @@ export function PaymentSheet({
     if (mixedAvailable) list.push({ key: 'mixed', label: METHOD_LABELS.mixed });
     return list;
   }, [enabled, mixedAvailable]);
-  const splitMethods = useMemo(() => {
-    const list: { key: SplitMethod; label: string }[] = [];
-    if (enabled.includes('qr')) list.push({ key: 'qr', label: SPLIT_METHOD_LABELS.qr });
-    if (enabled.includes('cash')) list.push({ key: 'cash', label: SPLIT_METHOD_LABELS.cash });
-    if (mixedAvailable) list.push({ key: 'mixed', label: SPLIT_METHOD_LABELS.mixed });
-    return list;
-  }, [enabled, mixedAvailable]);
 
   const close = () => {
     const paid = !!receipt;
@@ -149,7 +147,7 @@ export function PaymentSheet({
   const qrNum = amountValue(qrInput);
   const entered = round2(cashNum + qrNum);
   const remaining = round2(total - entered);
-  const mixedValid = selected === 'mixed' && Math.abs(remaining) < 0.01 && cashNum > 0 && qrNum > 0;
+  const mixedValid = selected === 'mixed' && Math.abs(remaining) < 0.01;
   const qrMissing = selected === 'qr' && !qrSrc;
   const confirmDisabled = pay.isPending || qrMissing || (selected === 'mixed' && !mixedValid);
 
@@ -236,7 +234,7 @@ export function PaymentSheet({
               title="Разделить счёт"
               variant="secondary"
               onPress={() => setSplitOpen(true)}
-              disabled={pay.isPending || splitMethods.length === 0}
+              disabled={pay.isPending}
               style={styles.splitButton}
             />
             <Button
@@ -341,7 +339,6 @@ export function PaymentSheet({
       <SplitBillSheet
         visible={splitOpen}
         total={total}
-        splitMethods={splitMethods}
         submitting={pay.isPending}
         onClose={() => setSplitOpen(false)}
         onComplete={handleSplitComplete}
@@ -528,33 +525,29 @@ function PaymentSuccessOverlay({ visible, total }: { visible: boolean; total: nu
 function SplitBillSheet({
   visible,
   total,
-  splitMethods,
   submitting,
   onClose,
   onComplete,
 }: {
   visible: boolean;
   total: number;
-  splitMethods: { key: SplitMethod; label: string }[];
   submitting: boolean;
   onClose: () => void;
   onComplete: (totals: { cash: number; qr: number; payments: SplitPart[] }) => Promise<void>;
 }) {
-  const defaultMethod = splitMethods[0]?.key ?? 'cash';
   const [count, setCount] = useState(2);
   const [completing, setCompleting] = useState(false);
   const [payments, setPayments] = useState(() =>
-    Array.from({ length: 2 }, () => ({ method: defaultMethod, cash: '', qr: '', paid: false })),
+    Array.from({ length: 2 }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })),
   );
   const [amountInputs, setAmountInputs] = useState(() => splitAmounts(total, 2));
 
   React.useEffect(() => {
     if (!visible) return;
-    const nextMethod = splitMethods[0]?.key ?? 'cash';
     setCount(2);
-    setPayments(Array.from({ length: 2 }, () => ({ method: nextMethod, cash: '', qr: '', paid: false })));
+    setPayments(Array.from({ length: 2 }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })));
     setAmountInputs(splitAmounts(total, 2));
-  }, [splitMethods, total, visible]);
+  }, [total, visible]);
 
   const amounts = useMemo(() => amountInputs.map((value) => round2(amountValue(value))), [amountInputs]);
   const assignedSum = round2(amounts.reduce((sum, amount) => sum + amount, 0));
@@ -568,7 +561,7 @@ function SplitBillSheet({
     if (anyPaid) return;
     const normalized = Math.max(2, Math.min(10, next));
     setCount(normalized);
-    setPayments(Array.from({ length: normalized }, () => ({ method: defaultMethod, cash: '', qr: '', paid: false })));
+    setPayments(Array.from({ length: normalized }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })));
     setAmountInputs(splitAmounts(total, normalized));
   };
 
@@ -662,10 +655,7 @@ function SplitBillSheet({
         </View>
       </View>
 
-      {splitMethods.length === 0 ? (
-        <Text style={styles.qrMissing}>Для раздельной оплаты включите QR или наличные в настройках кассы.</Text>
-      ) : (
-        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
+      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
           <View style={styles.splitList}>
             {payments.map((payment, index) => (
               <View key={index} style={[styles.splitCard, payment.paid && styles.splitCardPaid]}>
@@ -689,7 +679,7 @@ function SplitBillSheet({
                 ) : (
                   <>
                     <View style={styles.splitMethodRow}>
-                      {splitMethods.map((method) => {
+                      {SPLIT_METHODS.map((method) => {
                         const active = payment.method === method.key;
                         return (
                           <Pressable
@@ -748,8 +738,7 @@ function SplitBillSheet({
               <Text style={styles.splitError}>Сумма платежей должна быть равна {money(total)}</Text>
             ) : null}
           </View>
-        </ScrollView>
-      )}
+      </ScrollView>
 
       <View style={styles.splitFooter}>
         <Text style={styles.splitHint}>Осталось к оплате</Text>
