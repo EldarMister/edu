@@ -186,22 +186,6 @@ export function TablesScreen() {
               <PwaIcon name="pencil" size={16} color={selectedTable ? colors.textSecondary : colors.textLight} />
               <Text style={[styles.editBtnText, selectedTable && styles.editBtnTextActive]}>Редактировать</Text>
             </Pressable>
-            {actionsOpen ? (
-              <View style={styles.tableActionsMenu}>
-                <Pressable onPress={() => openTableAction('close')} style={styles.tableActionItem}>
-                  <PwaIcon name="close" size={16} color={colors.textLight} />
-                  <Text style={styles.tableActionText}>Закрыть стол</Text>
-                </Pressable>
-                <Pressable onPress={() => openTableAction('move')} style={styles.tableActionItem}>
-                  <PwaIcon name="move" size={16} color={colors.textLight} />
-                  <Text style={styles.tableActionText}>Перенести стол</Text>
-                </Pressable>
-                <Pressable onPress={() => openTableAction('transfer')} style={styles.tableActionItem}>
-                  <PwaIcon name="transfer" size={16} color={colors.textLight} />
-                  <Text style={styles.tableActionText}>Передать стол</Text>
-                </Pressable>
-              </View>
-            ) : null}
           </View>
         </View>
 
@@ -244,6 +228,26 @@ export function TablesScreen() {
           ))}
         </View>
       </View>
+
+      {actionsOpen ? (
+        <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setActionsOpen(false)} />
+          <View style={styles.tableActionsMenu}>
+            <Pressable onPress={() => openTableAction('close')} style={styles.tableActionItem}>
+              <PwaIcon name="close" size={16} color={colors.textLight} />
+              <Text style={styles.tableActionText}>Закрыть стол</Text>
+            </Pressable>
+            <Pressable onPress={() => openTableAction('move')} style={styles.tableActionItem}>
+              <PwaIcon name="move" size={16} color={colors.textLight} />
+              <Text style={styles.tableActionText}>Перенести стол</Text>
+            </Pressable>
+            <Pressable onPress={() => openTableAction('transfer')} style={styles.tableActionItem}>
+              <PwaIcon name="transfer" size={16} color={colors.textLight} />
+              <Text style={styles.tableActionText}>Передать стол</Text>
+            </Pressable>
+          </View>
+        </View>
+      ) : null}
 
       <CloseTableSheet
         visible={tableModal === 'close'}
@@ -471,8 +475,8 @@ const styles = StyleSheet.create({
   editBtnTextActive: { color: colors.textSecondary },
   tableActionsMenu: {
     position: 'absolute',
-    right: 0,
-    top: 38,
+    right: spacing.xs,
+    top: spacing.sm + 38,
     width: 180,
     borderWidth: 1,
     borderColor: colors.border,
