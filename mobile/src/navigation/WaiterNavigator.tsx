@@ -7,6 +7,7 @@ import { colors, fontSize, waiterLayout } from '@/theme';
 import { WaiterHeader } from '@/components/WaiterHeader';
 import { OfflineBanner } from '@/components/ConnectionStatus';
 import { ShiftRequiredScreen } from '@/components/ShiftRequiredScreen';
+import { Loading } from '@/components/ui';
 import { PwaIcon, type PwaIconName } from '@/components/PwaIcon';
 import { TablesScreen } from '@/screens/waiter/TablesScreen';
 import { MenuScreen } from '@/screens/waiter/MenuScreen';
@@ -36,6 +37,7 @@ export function WaiterNavigator() {
   const shiftResolved = shiftQ.isFetched || shiftQ.data !== undefined;
   // Пока идёт запуск смены, оверлей удерживается, даже когда смена уже активна.
   const [busy, setBusy] = React.useState(false);
+  const showShiftLoading = !shiftResolved;
   const showGate = busy || (shiftResolved && !shiftActive);
   // Высота нижней навигации — оверлей не перекрывает её, вкладки остаются доступны.
   const tabBarHeight = waiterLayout.navBarHeight + Math.max(insets.bottom, 4);
@@ -80,8 +82,12 @@ export function WaiterNavigator() {
           <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Профиль' }} />
         </Tab.Navigator>
 
-        {/* Смена не начата: оверлей поверх контента вкладки, нижняя навигация остаётся видимой. */}
-        {showGate ? (
+        {/* Первичная проверка смены / смена не начата: контент вкладки перекрыт, нижняя навигация остаётся видимой. */}
+        {showShiftLoading ? (
+          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: tabBarHeight, backgroundColor: colors.white }}>
+            <Loading />
+          </View>
+        ) : showGate ? (
           <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: tabBarHeight }}>
             <ShiftRequiredScreen onBusyChange={setBusy} />
           </View>
