@@ -12,7 +12,7 @@ const SUCCESS_HOLD_MS = 680;
 const FADE_MS = 260;
 
 /** Размер кругового индикатора загрузки. */
-const RING_SIZE = 132;
+const RING_SIZE = 188;
 const RING_STROKE = 4;
 const RING_R = (RING_SIZE - RING_STROKE) / 2;
 const RING_C = 2 * Math.PI * RING_R;
@@ -91,13 +91,13 @@ export function ShiftGate({ onBusyChange }: { onBusyChange: (busy: boolean) => v
       style={{ opacity: fadingOut ? 0 : 1, transitionDuration: `${FADE_MS}ms` }}
     >
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-8">
-        {/* Зона анимации: пульсирующее свечение + плитка логотипа / индикатор / успех */}
-        <div className="relative flex h-[220px] w-[220px] items-center justify-center">
+        {/* Зона анимации: волны наружу + полупрозрачный круг с дышащим свечением внутри */}
+        <div className="relative flex h-[280px] w-[280px] items-center justify-center">
           {phase !== 'success' && (
-            <div className="shift-halo" aria-hidden>
-              <span className="shift-halo-ring shift-halo-ring-outer" />
-              <span className="shift-halo-ring shift-halo-ring-mid" />
-              <span className="shift-halo-glow" />
+            <div className="absolute inset-0" aria-hidden>
+              <span className="shift-wave" />
+              <span className="shift-wave shift-wave-2" />
+              <span className="shift-glow" />
             </div>
           )}
 
@@ -134,10 +134,10 @@ export function ShiftGate({ onBusyChange }: { onBusyChange: (busy: boolean) => v
             </svg>
           </div>
 
-          {/* Белый круг с логотипом EP (появляется с лёгким масштабированием) */}
+          {/* Полупрозрачный круг с логотипом EP — свечение просвечивает сквозь него */}
           {phase !== 'success' && (
-            <div className="animate-card-pop relative flex h-[118px] w-[118px] items-center justify-center rounded-full bg-white">
-              <img src="/ep-mark.png" alt="EDU POS" className="h-[46px] w-[72px] object-contain" />
+            <div className="animate-card-pop relative flex h-[172px] w-[172px] items-center justify-center rounded-full bg-white/55">
+              <img src="/ep-mark.png" alt="EDU POS" className="h-[54px] w-[86px] object-contain" />
             </div>
           )}
 
