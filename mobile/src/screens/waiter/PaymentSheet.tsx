@@ -338,6 +338,7 @@ export function PaymentSheet({
 
       <SplitBillSheet
         visible={splitOpen}
+        orderId={order.id}
         total={total}
         submitting={pay.isPending}
         onClose={() => setSplitOpen(false)}
@@ -524,12 +525,14 @@ function PaymentSuccessOverlay({ visible, total }: { visible: boolean; total: nu
 
 function SplitBillSheet({
   visible,
+  orderId,
   total,
   submitting,
   onClose,
   onComplete,
 }: {
   visible: boolean;
+  orderId: string;
   total: number;
   submitting: boolean;
   onClose: () => void;
@@ -543,11 +546,11 @@ function SplitBillSheet({
   const [amountInputs, setAmountInputs] = useState(() => splitAmounts(total, 2));
 
   React.useEffect(() => {
-    if (!visible) return;
     setCount(2);
+    setCompleting(false);
     setPayments(Array.from({ length: 2 }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })));
     setAmountInputs(splitAmounts(total, 2));
-  }, [total, visible]);
+  }, [orderId, total]);
 
   const amounts = useMemo(() => amountInputs.map((value) => round2(amountValue(value))), [amountInputs]);
   const assignedSum = round2(amounts.reduce((sum, amount) => sum + amount, 0));
