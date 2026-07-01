@@ -1,36 +1,39 @@
 import React from 'react';
 import { Animated, Easing, Image, StyleSheet, View } from 'react-native';
-import Svg, { Circle, Path } from 'react-native-svg';
+import Svg, { Circle, Defs, Path, RadialGradient, Stop } from 'react-native-svg';
 import { colors } from '@/theme';
 
 export type ShiftAnimState = 'idle' | 'loading' | 'success';
 
-const SIZE = 132; // общий диаметр зоны анимации
-const TILE = 84; // плитка с логотипом / круг успеха
-const STROKE = 4; // толщина кольца прогресса
-const R = (SIZE - STROKE) / 2;
+const GLOW = 260; // диаметр зоны свечения
+const LOGO_W = 100; // ширина логотипа EP
+const LOGO_H = 64;
+const RING = 150; // диаметр кругового индикатора загрузки
+const STROKE = 4;
+const R = (RING - STROKE) / 2;
 const C = 2 * Math.PI * R;
+const SUCCESS = 96; // диаметр синего круга успеха
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-// Фирменный знак EP (из frontend/public/edupos.png, фон убран в прозрачность).
+// Фирменный знак EP (E тёмно-синий, P ярко-синий) — assets/ep-mark.png.
 const EP_MARK = require('../../assets/ep-mark.png');
 
 /**
- * Центральная анимация старта смены (строго по референсу /designe):
- * idle — логотип EP + мягкая пульсация кольца;
+ * Центральная анимация старта смены (строго по референсу designe/Смена не начата):
+ * idle — логотип EP на мягком голубом свечении с тонкими полупрозрачными кольцами;
  * loading — круговой индикатор заполняется по часовой стрелке;
  * success — белая галочка в синем круге.
  */
 export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
   const enter = React.useRef(new Animated.Value(0)).current;
-  const pulse = React.useRef(new Animated.Value(0)).current;
+  const breathe = React.useRef(new Animated.Value(0)).current;
   const progress = React.useRef(new Animated.Value(0)).current;
   const ringOpacity = React.useRef(new Animated.Value(0)).current;
   const logoOpacity = React.useRef(new Animated.Value(1)).current;
   const success = React.useRef(new Animated.Value(0)).current;
 
-  // Появление логотипа с лёгким масштабированием + мягкая пульсация кольца.
+  // Появление логотипа + мягкое «дыхание» свечения.
   React.useEffect(() => {
     Animated.timing(enter, {
       toValue: 1,
@@ -40,28 +43,31 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
     }).start();
 
     const loop = Animated.loop(
-      Animated.timing(pulse, {
-        toValue: 1,
-        duration: 1600,
-        easing: Easing.inOut(Easing.ease),
-        useNativeDriver: true,
-      }),
+      Animated.sequence([
+        Animated.timing(breathe, {
+          toValue: 1,
+          duration: 1600,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(breathe, {
+          toValue: 0,
+          duration: 1600,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
     );
     loop.start();
     return () => loop.stop();
-  }, [enter, pulse]);
+  }, [enter, breathe]);
 
   React.useEffect(() => {
     if (state === 'loading') {
       progress.setValue(0);
       logoOpacity.setValue(1);
       success.setValue(0);
-      Animated.timing(ringOpacity, {
-        toValue: 1,
-        duration: 240,
-        useNativeDriver: true,
-      }).start();
-      // Прогресс заполняется по часовой стрелке.
+      Animated.timing(ringOpacity, { toValue: 1, duration: 240, useNativeDriver: true }).start();
       Animated.timing(progress, {
         toValue: 1,
         duration: 980,
@@ -72,12 +78,7 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
       Animated.parallel([
         Animated.timing(ringOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
         Animated.timing(logoOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.spring(success, {
-          toValue: 1,
-          friction: 6,
-          tension: 120,
-          useNativeDriver: true,
-        }),
+        Animated.spring(success, { toValue: 1, friction: 6, tension: 120, useNativeDriver: true }),
       ]).start();
     } else {
       progress.setValue(0);
@@ -88,120 +89,96 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
   }, [state, ringOpacity, progress, logoOpacity, success]);
 
   const enterScale = enter.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
-  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.82, 1.16] });
-  const pulseOpacity = pulse.interpolate({
-    inputRange: [0, 0.15, 1],
-    outputRange: [0, 0.45, 0],
-  });
+  const glowScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.06] });
+  const glowOpacity = breathe.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] });
   const dashOffset = progress.interpolate({ inputRange: [0, 1], outputRange: [C, 0] });
   const successScale = success.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
 
   return (
     <View style={styles.wrap}>
-      {/* Мягкое статичное свечение */}
-      <View style={styles.halo} />
-
-      {/* Аккуратная пульсация кольца (скрыта в состоянии успеха) */}
+      {/* Мягкое голубое свечение + тонкие полупрозрачные кольца (скрыто при успехе) */}
       {state !== 'success' ? (
         <Animated.View
-          style={[styles.pulseRing, { opacity: pulseOpacity, transform: [{ scale: pulseScale }] }]}
-        />
-      ) : null}
-
-      <Animated.View style={[styles.stack, { transform: [{ scale: enterScale }] }]}>
-        {/* Круговой индикатор загрузки */}
-        <Animated.View style={[styles.ring, { opacity: ringOpacity }]}>
-          <Svg width={SIZE} height={SIZE}>
-            <Circle cx={SIZE / 2} cy={SIZE / 2} r={R} stroke={colors.primarySoft} strokeWidth={STROKE} fill="none" />
-            <AnimatedCircle
-              cx={SIZE / 2}
-              cy={SIZE / 2}
-              r={R}
-              stroke={colors.primary}
-              strokeWidth={STROKE}
-              strokeLinecap="round"
-              fill="none"
-              strokeDasharray={C}
-              strokeDashoffset={dashOffset}
-            />
-          </Svg>
-        </Animated.View>
-
-        {/* Плитка с логотипом EP */}
-        <Animated.View style={[styles.tile, { opacity: logoOpacity }]}>
-          <Image source={EP_MARK} style={styles.mark} resizeMode="contain" />
-        </Animated.View>
-
-        {/* Успех: галочка в синем круге */}
-        <Animated.View
-          style={[styles.success, { opacity: success, transform: [{ scale: successScale }] }]}
+          style={[styles.glow, { opacity: glowOpacity, transform: [{ scale: glowScale }] }]}
           pointerEvents="none"
         >
-          <Svg width={28} height={28} viewBox="0 0 24 24" fill="none">
-            <Path
-              d="M6 12.5 L10 16.5 L18 8"
-              stroke={colors.white}
-              strokeWidth={2.6}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+          <Svg width={GLOW} height={GLOW}>
+            <Defs>
+              <RadialGradient id="shiftGlow" cx="50%" cy="50%" r="50%">
+                <Stop offset="0" stopColor="#FFFFFF" stopOpacity={1} />
+                <Stop offset="0.34" stopColor="#DDE8FF" stopOpacity={0.85} />
+                <Stop offset="0.62" stopColor="#9EBBFF" stopOpacity={0.42} />
+                <Stop offset="0.82" stopColor="#005BFF" stopOpacity={0.12} />
+                <Stop offset="1" stopColor="#005BFF" stopOpacity={0} />
+              </RadialGradient>
+            </Defs>
+            <Circle cx={GLOW / 2} cy={GLOW / 2} r={GLOW / 2} fill="url(#shiftGlow)" />
+            {/* Тонкие кольца вокруг свечения */}
+            <Circle cx={GLOW / 2} cy={GLOW / 2} r={GLOW * 0.34} stroke="rgba(0,91,255,0.10)" strokeWidth={1} fill="none" />
+            <Circle cx={GLOW / 2} cy={GLOW / 2} r={GLOW * 0.44} stroke="rgba(0,91,255,0.07)" strokeWidth={1} fill="none" />
           </Svg>
         </Animated.View>
+      ) : null}
+
+      {/* Круговой индикатор загрузки (старт сверху, по часовой стрелке) */}
+      <Animated.View style={[styles.ring, { opacity: ringOpacity }]}>
+        <Svg width={RING} height={RING}>
+          <Circle cx={RING / 2} cy={RING / 2} r={R} stroke={colors.primarySoft} strokeWidth={STROKE} fill="none" />
+          <AnimatedCircle
+            cx={RING / 2}
+            cy={RING / 2}
+            r={R}
+            stroke={colors.primary}
+            strokeWidth={STROKE}
+            strokeLinecap="round"
+            fill="none"
+            strokeDasharray={C}
+            strokeDashoffset={dashOffset}
+          />
+        </Svg>
+      </Animated.View>
+
+      {/* Логотип EP — прямо на свечении, без плитки */}
+      <Animated.View style={[styles.logo, { opacity: logoOpacity, transform: [{ scale: enterScale }] }]}>
+        <Image source={EP_MARK} style={styles.mark} resizeMode="contain" />
+      </Animated.View>
+
+      {/* Успех: белая галочка в синем круге */}
+      <Animated.View
+        style={[styles.success, { opacity: success, transform: [{ scale: successScale }] }]}
+        pointerEvents="none"
+      >
+        <Svg width={34} height={34} viewBox="0 0 24 24" fill="none">
+          <Path
+            d="M6 12.5 L10 16.5 L18 8"
+            stroke={colors.white}
+            strokeWidth={2.6}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </Svg>
       </Animated.View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { width: SIZE, height: SIZE, alignItems: 'center', justifyContent: 'center' },
-  stack: { width: SIZE, height: SIZE, alignItems: 'center', justifyContent: 'center' },
-  halo: {
-    position: 'absolute',
-    width: SIZE,
-    height: SIZE,
-    borderRadius: SIZE / 2,
-    backgroundColor: colors.primaryFaint,
-  },
-  pulseRing: {
-    position: 'absolute',
-    width: SIZE * 0.92,
-    height: SIZE * 0.92,
-    borderRadius: SIZE,
-    borderWidth: 2,
-    borderColor: colors.primarySoft,
-  },
-  // Поворот на -90°, чтобы заполнение начиналось сверху и шло по часовой стрелке.
+  wrap: { width: GLOW, height: GLOW, alignItems: 'center', justifyContent: 'center' },
+  glow: { position: 'absolute', width: GLOW, height: GLOW },
   ring: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    width: SIZE,
-    height: SIZE,
+    width: RING,
+    height: RING,
+    // -90°, чтобы заполнение начиналось сверху и шло по часовой стрелке.
     transform: [{ rotate: '-90deg' }],
   },
-  tile: {
-    width: TILE,
-    height: TILE,
-    borderRadius: 22,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    shadowColor: '#0F172A',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 2,
-  },
-  mark: { width: 54, height: 35 },
+  logo: { alignItems: 'center', justifyContent: 'center' },
+  mark: { width: LOGO_W, height: LOGO_H },
   success: {
     position: 'absolute',
-    top: (SIZE - TILE) / 2,
-    left: (SIZE - TILE) / 2,
-    width: TILE,
-    height: TILE,
-    borderRadius: TILE / 2,
+    width: SUCCESS,
+    height: SUCCESS,
+    borderRadius: SUCCESS / 2,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',

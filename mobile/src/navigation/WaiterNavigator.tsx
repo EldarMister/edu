@@ -35,15 +35,29 @@ export function WaiterNavigator() {
 
   const shiftActive = shiftQ.data?.status === 'active';
   const shiftResolved = shiftQ.isFetched || shiftQ.data !== undefined;
-  // Пока идёт запуск смены, оверлей удерживается, даже когда смена уже активна.
+  // Пока идёт запуск смены, экран удерживается, даже когда смена уже активна.
   const [busy, setBusy] = React.useState(false);
   const showShiftLoading = !shiftResolved;
   const showGate = busy || (shiftResolved && !shiftActive);
-  // Высота нижней навигации — оверлей не перекрывает её, вкладки остаются доступны.
   const tabBarHeight = waiterLayout.navBarHeight + Math.max(insets.bottom, 4);
 
+  // Первичная проверка смены — белый экран с лоадером (без шапки/навигации).
+  if (showShiftLoading) {
+    return (
+      <SafeAreaView style={styles.plainSafe} edges={['top', 'bottom']}>
+        <Loading />
+      </SafeAreaView>
+    );
+  }
+
+  // Смена не начата — отдельный полноэкранный экран без шапки и нижней навигации.
+  if (showGate) {
+    return <ShiftRequiredScreen onBusyChange={setBusy} />;
+  }
+
+  // Смена активна — обычный рабочий интерфейс: шапка + вкладки.
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.primary }} edges={['top']}>
+    <SafeAreaView style={styles.workSafe} edges={['top']}>
       <OfflineBanner />
       <WaiterHeader />
       <View style={{ flex: 1 }}>
@@ -74,30 +88,17 @@ export function WaiterNavigator() {
         >
           <Tab.Screen name="Tables" component={TablesScreen} options={{ title: 'Столы' }} />
           <Tab.Screen name="Menu" component={MenuScreen} options={{ title: 'Меню' }} />
-          <Tab.Screen
-            name="Orders"
-            component={OrdersNavigator}
-            options={{ title: 'Заказы' }}
-          />
+          <Tab.Screen name="Orders" component={OrdersNavigator} options={{ title: 'Заказы' }} />
           <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Профиль' }} />
         </Tab.Navigator>
-
-        {/* Первичная проверка смены / смена не начата: контент вкладки перекрыт, нижняя навигация остаётся видимой. */}
-        {showShiftLoading ? (
-          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: tabBarHeight, backgroundColor: colors.white }}>
-            <Loading />
-          </View>
-        ) : showGate ? (
-          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: tabBarHeight }}>
-            <ShiftRequiredScreen onBusyChange={setBusy} />
-          </View>
-        ) : null}
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  plainSafe: { flex: 1, backgroundColor: colors.white },
+  workSafe: { flex: 1, backgroundColor: colors.primary },
   iconWrap: {
     width: 28,
     height: 24,
