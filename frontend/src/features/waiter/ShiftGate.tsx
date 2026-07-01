@@ -134,10 +134,10 @@ export function ShiftGate({ onBusyChange }: { onBusyChange: (busy: boolean) => v
             </svg>
           </div>
 
-          {/* Плитка с логотипом EP (появляется с лёгким масштабированием) */}
+          {/* Белый круг с логотипом EP (появляется с лёгким масштабированием) */}
           {phase !== 'success' && (
-            <div className="animate-card-pop relative flex h-24 w-24 items-center justify-center rounded-[22px] border border-border bg-white shadow-card">
-              <img src="/ep-mark.png" alt="EDU POS" className="h-[38px] w-[60px] object-contain" />
+            <div className="animate-card-pop relative flex h-[118px] w-[118px] items-center justify-center rounded-full bg-white">
+              <img src="/ep-mark.png" alt="EDU POS" className="h-[46px] w-[72px] object-contain" />
             </div>
           )}
 
