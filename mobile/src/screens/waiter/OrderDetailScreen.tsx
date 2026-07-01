@@ -5,7 +5,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import { Button, EmptyState, Loading } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
-import { OrderBadge } from '@/components/StatusBadge';
+import { OrderStatusBadges } from '@/components/StatusBadge';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { ORDER_STATUS } from '@/theme/status';
@@ -299,7 +299,7 @@ export function OrderDetailScreen() {
           </Text>
         </Text>
         <View style={styles.titleActions}>
-          <OrderBadge status={order.status} />
+          <OrderStatusBadges order={order} size="sm" />
           {unclaimedQr ? (
             <View style={styles.qrBadge}>
               <Text style={styles.qrBadgeText}>QR</Text>
