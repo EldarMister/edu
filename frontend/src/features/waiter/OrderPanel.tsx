@@ -469,6 +469,8 @@ function ActionButton({
   // Позиции «Без отправки» (prepStation === 'none') не участвуют в кухне/баре.
   const stationItems = order.items.filter((item) => item.prepStation !== 'none');
   const hasReadyStationItem = stationItems.some((item) => item.status === 'ready');
+  const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
+  const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
   const cooldownActive = actionCooldown > 0;
 
   useEffect(() => {
@@ -548,21 +550,28 @@ function ActionButton({
   }
   if (s === 'served') {
     return (
-      <div className="flex gap-2">
-        <button
-          className="btn btn-lg shrink-0 border border-primary bg-white px-4 font-medium text-primary hover:bg-primary/5"
-          disabled={preliminaryPending}
-          onClick={onPreliminaryReceipt}
-        >
-          {preliminaryPending ? <Spinner /> : t('Счёт')}
-        </button>
-        <button
-          className="btn-primary btn-lg flex-1 font-semibold"
-          disabled={submitting || cooldownActive}
-          onClick={() => runProtectedAction(onToPayment)}
-        >
-          {cooldownActive ? actionCooldown : spin ?? t('Перейти к оплате')}
-        </button>
+      <div className="space-y-2">
+        {!allActiveItemsServed && (
+          <div className="rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">
+            {t('Нельзя перейти к оплате: есть неподанные блюда.')}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <button
+            className="btn btn-lg shrink-0 border border-primary bg-white px-4 font-medium text-primary hover:bg-primary/5"
+            disabled={preliminaryPending}
+            onClick={onPreliminaryReceipt}
+          >
+            {preliminaryPending ? <Spinner /> : t('Счёт')}
+          </button>
+          <button
+            className="btn-primary btn-lg flex-1 font-semibold"
+            disabled={submitting || cooldownActive || !allActiveItemsServed}
+            onClick={() => runProtectedAction(onToPayment)}
+          >
+            {cooldownActive ? actionCooldown : spin ?? t('Перейти к оплате')}
+          </button>
+        </div>
       </div>
     );
   }

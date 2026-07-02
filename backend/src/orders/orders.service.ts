@@ -64,6 +64,11 @@ const POPULARITY_EXCLUDED_ITEM_STATUSES = new Set<OrderItemStatus>([
   OrderItemStatus.rejected,
   OrderItemStatus.cancelled,
 ]);
+const PAYMENT_ALLOWED_ITEM_STATUSES = new Set<OrderItemStatus>([
+  OrderItemStatus.rejected,
+  OrderItemStatus.cancelled,
+  OrderItemStatus.served,
+]);
 
 @Injectable()
 export class OrdersService {
@@ -1728,27 +1733,31 @@ export class OrdersService {
         where: { orderId, status: OrderItemStatus.ready },
         data: { status: OrderItemStatus.served },
       });
-      await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.served } });
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
+      const nextTableStatus = this.tableStatusForOrderStatus(nextStatus) ?? TableStatus.served;
+      await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
       return tx.order.update({
         where: { id: orderId },
-        data: { status: OrderStatus.served, requiresWaiterDecision: false },
+        data: { status: nextStatus, requiresWaiterDecision: false },
         include: orderInclude,
       });
     });
     this.emitStatusChanged(updated);
-    this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.served, updated.table.hallId);
+    this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
     return updated;
   }
 
   /** Перевод к оплате. */
   async toPayment(orderId: string, waiterId: string) {
-    const order = await this.assertOwnedOrder(orderId, waiterId);
+    await this.assertOwnedOrder(orderId, waiterId);
+    const order = await this.findById(orderId);
     if (order.requiresWaiterDecision) {
       throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
     }
     if (([OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ нельзя оплатить');
     }
+    this.ensureAllActiveItemsServed(order);
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.table.update({
         where: { id: order.tableId },
@@ -1782,6 +1791,7 @@ export class OrdersService {
     if (order.status === OrderStatus.paid) {
       return order;
     }
+    this.ensureAllActiveItemsServed(order);
 
     // Смешанная/раздельная оплата: суммы частей должны точно совпадать с итогом заказа.
     const final = Number(order.finalAmount);
@@ -2459,6 +2469,16 @@ export class OrdersService {
   private ensureNoPendingWaiterDecision(order: { requiresWaiterDecision: boolean }) {
     if (order.requiresWaiterDecision) {
       throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
+    }
+  }
+
+  private ensureAllActiveItemsServed(order: { items: { status: OrderItemStatus }[] }) {
+    const activeItems = order.items.filter(
+      (item) => item.status !== OrderItemStatus.rejected && item.status !== OrderItemStatus.cancelled,
+    );
+    const hasPendingItem = activeItems.some((item) => !PAYMENT_ALLOWED_ITEM_STATUSES.has(item.status));
+    if (activeItems.length === 0 || hasPendingItem) {
+      throw new BadRequestException('Нельзя оплатить заказ: есть неподанные блюда');
     }
   }
 
