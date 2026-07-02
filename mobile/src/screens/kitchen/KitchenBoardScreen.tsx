@@ -129,8 +129,6 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   const [stopListOpen, setStopListOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
-  // 'auto' — следовать датчику наклона (по умолчанию), 'landscape' — принудительно альбом.
-  const [orientationMode, setOrientationMode] = useState<'auto' | 'landscape'>('auto');
   const [pending, setPending] = useState<PendingAction | null>(null);
   const orders = useKitchenOrders(tab, station);
   const accept = useAccept(station);
@@ -144,24 +142,14 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
     return () => clearInterval(id);
   }, []);
 
-  // Кухня — единственный экран, где разрешён поворот. По умолчанию следуем датчику
-  // (планшет наклонили → альбом), при выходе возвращаем портрет всему приложению.
+  // Кухня — единственный экран, где разрешён поворот. Следуем системной настройке
+  // устройства (auto-rotate вкл → крутится, заблокировано → фиксировано), как обычные
+  // приложения. При выходе возвращаем портрет всему приложению.
   useEffect(() => {
     ScreenOrientation.unlockAsync().catch(() => {});
     return () => {
       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
     };
-  }, []);
-
-  const toggleOrientation = useCallback(() => {
-    setOrientationMode((mode) => {
-      if (mode === 'auto') {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
-        return 'landscape';
-      }
-      ScreenOrientation.unlockAsync().catch(() => {});
-      return 'auto';
-    });
   }, []);
 
   // Новый заказ: звук + вибрация + тост (по настройкам) + озвучка станции.
@@ -283,17 +271,6 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         </View>
         <FastPressable onPress={() => setStatsOpen(true)} style={styles.voiceBtn} hitSlop={6}>
           <PwaIcon name="chart" size={18} color={colors.primary} />
-        </FastPressable>
-        <FastPressable
-          onPress={toggleOrientation}
-          style={[styles.voiceBtn, orientationMode === 'landscape' && styles.iconBtnActive]}
-          hitSlop={6}
-        >
-          <PwaIcon
-            name="screenRotate"
-            size={18}
-            color={orientationMode === 'landscape' ? colors.white : colors.primary}
-          />
         </FastPressable>
         <FastPressable onPress={() => setVoiceOpen(true)} style={styles.voiceBtn} hitSlop={6}>
           <PwaIcon name="speaker" size={18} color={colors.primary} />
@@ -873,7 +850,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconBtnActive: { backgroundColor: colors.primary },
   stopListBtn: {
     height: 38,
     borderRadius: radius.sm,

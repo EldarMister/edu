@@ -25,7 +25,6 @@ export type PwaIconName =
   | 'eye'
   | 'speaker'
   | 'chart'
-  | 'screenRotate'
   | 'dotsVertical';
 
 export function PwaIcon({
@@ -115,12 +114,6 @@ export function PwaIcon({
         <>
           <Path d="M3 3v18h18" {...common} strokeWidth={2} />
           <Path d="M7 15v3M12 10v8M17 6v12" {...common} strokeWidth={2.4} />
-        </>
-      )}
-      {name === 'screenRotate' && (
-        <>
-          <Rect x="4" y="3" width="9" height="15" rx="1.6" {...common} strokeWidth={2} />
-          <Path d="M16 8a5.5 5.5 0 0 1 2 4.2M18 12.2l1.7-1.1M18 12.2l-1.5-1.3" {...common} strokeWidth={2} />
         </>
       )}
       {name === 'eye' && (
