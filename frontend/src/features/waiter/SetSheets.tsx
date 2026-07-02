@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CartSetComponent, Category, Dish, DishVariant } from '@/types';
-import { money } from '@/lib/format';
+import { dishUnitPrice, minDishUnitPrice, money, variantNamesLine } from '@/lib/format';
+import { useT } from '@/lib/i18n';
+import { VariantPickerSheet } from './VariantPickerSheet';
 
 const SHEET_MS = 440;
 const SHEET_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
@@ -250,6 +252,7 @@ export function SetConfigSheet({
   onClose: () => void;
   onAdd: (components: CartSetComponent[]) => void;
 }) {
+  const t = useT();
   const [components, setComponents] = useState<CartSetComponent[]>([]);
   const [replacingId, setReplacingId] = useState<string | null>(null);
   const [variantDish, setVariantDish] = useState<Dish | null>(null);
@@ -338,52 +341,6 @@ export function SetConfigSheet({
   // Режим выбора блюда замены — полноэкранный overlay поверх sheet
   if (replacingId) {
     const replacingComp = components.find((c) => c.componentId === replacingId);
-    if (variantDish) {
-      return (
-        <div className="fixed inset-0 z-[80] flex flex-col bg-white">
-          <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
-            <button
-              onClick={() => setVariantDish(null)}
-              aria-label="Назад"
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-text-secondary hover:bg-background"
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="m15 18-6-6 6-6" />
-              </svg>
-            </button>
-            <div className="min-w-0 flex-1">
-              <h2 className="truncate text-[15px] font-semibold text-text-primary">{variantDish.name}</h2>
-              <p className="truncate text-xs text-text-muted">Выберите размер</p>
-            </div>
-          </div>
-
-          <div className="no-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3" role="radiogroup">
-            {variantDish.variants.map((variant) => {
-              const isOutOfStock =
-                variantDish.trackInventory && typeof variant.stock === 'number' && variant.stock <= 0;
-              return (
-                <button
-                  key={variant.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={false}
-                  disabled={isOutOfStock}
-                  onClick={() => !isOutOfStock && applyReplace(replacingId, variantDish, variant)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-white px-3.5 py-3.5 text-left transition-colors hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <span className="min-w-0 flex-1 text-[16px] font-medium text-text-primary">
-                    {variant.name}
-                    {isOutOfStock && <span className="ml-2 text-xs font-medium text-red-500">Нет в наличии</span>}
-                  </span>
-                  <span className="shrink-0 text-[16px] font-semibold text-text-primary">{money(variant.price)}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="fixed inset-0 z-[80] flex flex-col bg-white">
         {/* Шапка */}
@@ -398,9 +355,9 @@ export function SetConfigSheet({
             </svg>
           </button>
           <div className="min-w-0 flex-1">
-            <h2 className="text-[15px] font-semibold text-text-primary">Выберите замену</h2>
+            <h2 className="text-[15px] font-semibold text-text-primary">{t('Выберите замену')}</h2>
             {replacingComp && (
-              <p className="truncate text-xs text-text-muted">вместо: {replacingComp.originalName}</p>
+              <p className="truncate text-xs text-text-muted">{t('вместо')}: {replacingComp.originalName}</p>
             )}
           </div>
         </div>
@@ -415,7 +372,7 @@ export function SetConfigSheet({
             </span>
             <input
               className="input pl-9"
-              placeholder="Поиск блюда"
+              placeholder={t('Поиск блюда')}
               value={search}
               autoFocus
               onChange={(e) => setSearch(e.target.value)}
@@ -431,7 +388,7 @@ export function SetConfigSheet({
               activeCat === 'all' ? 'bg-primary text-white' : 'border border-border bg-white text-text-secondary hover:bg-background'
             }`}
           >
-            Все
+            {t('Все')}
           </button>
           {availableCats.map((c) => (
             <button
@@ -449,30 +406,70 @@ export function SetConfigSheet({
         {/* Список блюд */}
         <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           {replaceOptions.length === 0 ? (
-            <p className="py-12 text-center text-sm text-text-muted">Ничего не найдено</p>
+            <p className="py-12 text-center text-sm text-text-muted">{t('Ничего не найдено')}</p>
           ) : (
             <div className="grid grid-cols-2 gap-2.5 pt-1 pb-4">
-              {replaceOptions.map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => {
-                    if (d.variants.length > 0) setVariantDish(d);
-                    else applyReplace(replacingId, d);
-                  }}
-                  className="flex h-[90px] flex-col rounded-xl border border-border bg-white px-3 py-2.5 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 active:bg-primary/10"
-                >
-                  <span className="line-clamp-2 min-w-0 flex-1 text-[14px] font-medium leading-snug text-text-primary">
-                    {d.name}
-                  </span>
-                  <span className="mt-auto text-[14px] font-semibold text-text-primary">
-                    {money(d.price)}
-                  </span>
-                </button>
-              ))}
+              {replaceOptions.map((d) => {
+                const hasVariants = d.variants.length > 0;
+                const hasDiscount = !hasVariants && d.discountType !== 'none' && Number(d.discountValue) > 0;
+                const finalUnit = hasVariants ? minDishUnitPrice(d) : dishUnitPrice(d.price, d.discountType, d.discountValue);
+                const isOutOfStock = d.trackInventory && (hasVariants
+                  ? d.variants.every((v) => typeof v.stock === 'number' && v.stock <= 0)
+                  : typeof d.stock === 'number' && d.stock <= 0);
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    disabled={isOutOfStock}
+                    onClick={() => {
+                      if (hasVariants) setVariantDish(d);
+                      else applyReplace(replacingId, d);
+                    }}
+                    className="relative flex h-[100px] flex-col rounded-xl border border-border bg-white px-3 py-2 text-left transition-colors hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {isOutOfStock && (
+                      <span className="absolute right-2 top-2 rounded-md bg-red-100 px-1.5 py-0.5 text-[11px] font-medium text-red-600">
+                        {t('Нет в наличии')}
+                      </span>
+                    )}
+                    <span
+                      className={`line-clamp-2 text-[15px] font-medium leading-snug text-text-primary ${
+                        isOutOfStock ? 'pr-20' : ''
+                      }`}
+                    >
+                      {d.name}
+                    </span>
+                    {hasVariants ? (
+                      <span className="mt-0.5 line-clamp-1 text-xs text-text-muted">{variantNamesLine(d.variants)}</span>
+                    ) : d.description ? (
+                      <span className="mt-0.5 line-clamp-1 text-xs text-text-muted">{d.description}</span>
+                    ) : null}
+                    <div className="mt-auto flex items-end justify-between pt-2">
+                      <span className="text-[15px] font-semibold text-text-primary">
+                        {hasVariants ? `${t('от')} ${money(finalUnit)}` : money(finalUnit)}
+                        {hasDiscount && (
+                          <span className="ml-1.5 text-xs font-normal text-text-light line-through">
+                            {money(d.price)}
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
+        <VariantPickerSheet
+          dish={variantDish}
+          onClose={() => setVariantDish(null)}
+          actionLabel={t('Заменить')}
+          zIndexClass="z-[90]"
+          onAdd={(variant) => {
+            if (!variantDish) return;
+            applyReplace(replacingId, variantDish, variant);
+          }}
+        />
       </div>
     );
   }
