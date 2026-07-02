@@ -10,6 +10,7 @@ import { useAuth } from '@/store/auth';
 import { disconnectSocket } from '@/services/socket';
 import { unregisterPushDevice } from '@/services/push';
 import { StatisticsScreen } from '@/screens/admin/StatisticsScreen';
+import { OrdersScreen } from '@/screens/admin/OrdersScreen';
 import { AdminPlaceholderScreen } from '@/screens/admin/AdminPlaceholderScreen';
 
 type Section =
@@ -86,6 +87,8 @@ export function AdminNavigator() {
       <View style={styles.body}>
         {section === 'stats' && isOwner ? (
           <StatisticsScreen />
+        ) : section === 'orders' ? (
+          <OrdersScreen />
         ) : (
           <AdminPlaceholderScreen title={current?.label ?? ''} />
         )}

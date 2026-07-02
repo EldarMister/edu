@@ -21,6 +21,49 @@ export function isSplitPayment(order: {
   return (order.payments ?? []).some((payment) => payment.source === 'split');
 }
 
+/** Короткое название способа оплаты для таблицы заказов: qr → «QR». */
+export function paymentMethodShort(method: string | null | undefined): string {
+  switch (method) {
+    case 'qr':
+      return 'QR';
+    case 'cash':
+      return 'Наличные';
+    case 'card':
+      return 'Карта';
+    case 'mixed':
+      return 'Смешанная';
+    default:
+      return '—';
+  }
+}
+
+export function splitPaymentSummary(order: { payments?: { amount: string }[] }): string {
+  const parts = (order.payments ?? []).map((p) => money(p.amount));
+  return parts.length ? `Раздельная оплата: ${parts.join(' / ')}` : 'Раздельная оплата';
+}
+
+export function paymentDisplayLabel(order: {
+  paymentMethod: string | null;
+  payments?: { method: string; amount: string; source?: string | null }[];
+}): string {
+  if (isSplitPayment(order)) return 'Раздельная оплата';
+  return paymentMethodLabel(order.paymentMethod);
+}
+
+/** Ячейка способа оплаты: для смешанной — «Смешанная (нал / QR)». */
+export function paymentCell(order: {
+  paymentMethod: string | null;
+  payments?: { method: string; amount: string; source?: string | null }[];
+}): string {
+  if (!order.paymentMethod) return '—';
+  if (isSplitPayment(order)) return splitPaymentSummary(order);
+  if (order.paymentMethod !== 'mixed') return paymentMethodShort(order.paymentMethod);
+  const sumBy = (m: string) =>
+    (order.payments ?? []).filter((p) => p.method === m).reduce((acc, p) => acc + Number(p.amount), 0);
+  if (!order.payments?.length) return 'Смешанная';
+  return `Смешанная (${money(sumBy('cash'))} / ${money(sumBy('qr'))})`;
+}
+
 /** Сумма: «1 250 с» или «1 250,50 с». */
 export function money(value: string | number): string {
   const n = typeof value === 'string' ? Number(value) : value;
