@@ -33,6 +33,9 @@ export function cartTotal(lines: CartLine[]): number {
 interface CartState {
   lines: CartLine[];
   comment: string;
+  /** Открыто ли поле комментария. Закрытое поле не уходит с заказом,
+   *  но текст сохраняется (снова покажется при открытии). */
+  commentOpen: boolean;
   carts: Record<string, TableCart>;
   /** Выбранный стол (контекст меню/корзины), как в PWA. */
   tableId: string | null;
@@ -54,6 +57,8 @@ interface CartState {
   cancelEditing: () => void;
   replaceLines: (lines: CartLine[], comment?: string | null) => void;
   setOrderComment: (comment: string) => void;
+  /** Показать/скрыть поле комментария (закрытое не уходит с заказом). */
+  setCommentOpen: (open: boolean) => void;
   add: (dish: Dish, variant?: DishVariant) => void;
   addLine: (line: CartLine) => void;
   setQuantity: (index: number, quantity: number) => void;
@@ -91,6 +96,7 @@ function syncActiveCart(
 export const useCart = create<CartState>((set, get) => ({
   lines: [],
   comment: '',
+  commentOpen: false,
   carts: {},
   tableId: null,
   tableNumber: null,
@@ -110,6 +116,7 @@ export const useCart = create<CartState>((set, get) => ({
         editingOrderNumber: null,
         lines: cart.lines,
         comment: cart.comment,
+        commentOpen: (cart.comment ?? '').trim().length > 0,
       };
     }),
   moveDraftTo: (table, activeOrderId = null) =>
@@ -127,6 +134,7 @@ export const useCart = create<CartState>((set, get) => ({
         editingOrderNumber: null,
         lines: draft.lines,
         comment: draft.comment,
+        commentOpen: (draft.comment ?? '').trim().length > 0,
         carts,
       };
     }),
@@ -140,6 +148,7 @@ export const useCart = create<CartState>((set, get) => ({
       editingOrderNumber: null,
       lines: [],
       comment: '',
+      commentOpen: false,
       ...syncActiveCart(s.tableId, s.carts, [], ''),
     })),
   startEditing: (table, order, lines) =>
@@ -152,6 +161,7 @@ export const useCart = create<CartState>((set, get) => ({
       editingOrderNumber: order.orderNumber,
       lines,
       comment: order.comment ?? '',
+      commentOpen: (order.comment ?? '').trim().length > 0,
       ...syncActiveCart(table.id, s.carts, lines, order.comment ?? ''),
     })),
   cancelEditing: () =>
@@ -160,12 +170,14 @@ export const useCart = create<CartState>((set, get) => ({
       editingOrderNumber: null,
       lines: [],
       comment: '',
+      commentOpen: false,
       ...syncActiveCart(s.tableId, s.carts, [], ''),
     })),
   replaceLines: (lines, comment = '') =>
     set((s) => ({
       lines,
       comment: comment ?? '',
+      commentOpen: (comment ?? '').trim().length > 0,
       ...syncActiveCart(s.tableId, s.carts, lines, comment ?? ''),
     })),
   setOrderComment: (comment) =>
@@ -173,6 +185,7 @@ export const useCart = create<CartState>((set, get) => ({
       comment,
       ...syncActiveCart(s.tableId, s.carts, s.lines, comment),
     })),
+  setCommentOpen: (open) => set({ commentOpen: open }),
   add: (dish, variant) =>
     set((s) => {
       const idx = s.lines.findIndex((l) => sameLine(l, dish, variant));
@@ -226,7 +239,7 @@ export const useCart = create<CartState>((set, get) => ({
     set((s) => {
       const carts = { ...s.carts };
       if (s.tableId) delete carts[s.tableId];
-      return { lines: [], comment: '', carts, editingOrderId: null, editingOrderNumber: null };
+      return { lines: [], comment: '', commentOpen: false, carts, editingOrderId: null, editingOrderNumber: null };
     }),
   total: () => cartTotal(get().lines),
   count: () => get().lines.reduce((sum, l) => sum + l.quantity, 0),

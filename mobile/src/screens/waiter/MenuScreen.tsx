@@ -40,6 +40,7 @@ export function MenuScreen() {
   const editingOrderId = useCart((s) => s.editingOrderId);
   const editingOrderNumber = useCart((s) => s.editingOrderNumber);
   const orderComment = useCart((s) => s.comment);
+  const orderCommentOpen = useCart((s) => s.commentOpen);
   const cartLines = useCart((s) => s.lines);
   const addToCart = useCart((s) => s.add);
   const addLineToCart = useCart((s) => s.addLine);
@@ -205,7 +206,7 @@ export function MenuScreen() {
 
     if (editingOrderId) {
       editOrder.mutate(
-        { orderId: editingOrderId, comment: orderComment, lines: cartLines },
+        { orderId: editingOrderId, comment: orderCommentOpen ? orderComment : '', lines: cartLines },
         {
           onSuccess: (updated) => {
             push({ message: 'Изменения сохранены', type: 'success', at: new Date().toISOString() });
@@ -231,7 +232,7 @@ export function MenuScreen() {
       );
     } else {
       createOrder.mutate(
-        { tableId, idempotencyKey, comment: orderComment, lines: cartLines },
+        { tableId, idempotencyKey, comment: orderCommentOpen ? orderComment : '', lines: cartLines },
         {
           onSuccess: () => {
             push({

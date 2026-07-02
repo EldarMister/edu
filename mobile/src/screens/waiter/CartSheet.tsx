@@ -26,7 +26,8 @@ export function CartSheet({
   submitLabel: string;
 }) {
   const insets = useSafeAreaInsets();
-  const { lines, comment, setQuantity, setTakeaway, setAllTakeaway, setOrderComment, clear, total } = useCart();
+  const { lines, comment, commentOpen, setQuantity, setTakeaway, setAllTakeaway, setOrderComment, setCommentOpen, clear, total } =
+    useCart();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const hasLines = lines.length > 0;
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
@@ -39,9 +40,16 @@ export function CartSheet({
       </View>
       <Button title={submitLabel} onPress={onSubmit} loading={submitting} disabled={!hasLines} />
       {hasLines ? (
-        <FastPressable onPress={() => clear()} style={styles.clearBtn}>
-          <Text style={styles.clearText}>Очистить</Text>
-        </FastPressable>
+        <View style={styles.actionsRow}>
+          <FastPressable onPress={() => clear()} style={styles.clearBtn}>
+            <Text style={styles.clearText}>Очистить</Text>
+          </FastPressable>
+          <FastPressable onPress={() => setCommentOpen(!commentOpen)} style={styles.clearBtn}>
+            <Text style={[styles.clearText, commentOpen && styles.commentToggleActive]}>
+              {commentOpen ? 'Скрыть комментарий' : 'Комментарий'}
+            </Text>
+          </FastPressable>
+        </View>
       ) : null}
     </View>
   );
@@ -124,13 +132,14 @@ export function CartSheet({
           })
         )}
       </ScrollView>
-      {hasLines ? (
+      {hasLines && commentOpen ? (
         <TextInput
           value={comment}
           onChangeText={setOrderComment}
           placeholder="Комментарий к заказу"
           placeholderTextColor={colors.textLight}
           style={styles.commentInput}
+          autoFocus
         />
       ) : null}
     </BottomSheet>
@@ -227,8 +236,10 @@ const styles = StyleSheet.create({
   },
   totalLabel: { fontSize: fontSize.base, color: colors.textSecondary, fontWeight: '500' },
   totalValue: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
-  clearBtn: { height: 36, alignItems: 'center', justifyContent: 'center' },
+  actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  clearBtn: { height: 36, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm },
   clearText: { color: colors.primary, fontSize: fontSize.sm, fontWeight: '500' },
+  commentToggleActive: { color: colors.textSecondary },
   switchPress: {
     width: 36,
     height: 20,
