@@ -190,7 +190,10 @@ export function CartSheet({
             <div className="mt-2 flex items-center justify-between gap-2">
               <button
                 className="h-9 text-sm font-medium text-primary hover:underline"
-                onClick={() => clear()}
+                onClick={() => {
+                  clear();
+                  onClose();
+                }}
               >
                 {t('Очистить')}
               </button>

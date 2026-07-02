@@ -29,7 +29,7 @@ export function Select({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
 
   const selected = options.find((o) => o.value === value);
 
@@ -37,12 +37,20 @@ export function Select({
     const el = triggerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setPos({ top: r.bottom + 6, left: r.left, width: r.width });
+    const gap = 6;
+    const edge = 8;
+    const desiredHeight = Math.min(256, options.length * 40 + 8);
+    const spaceBelow = window.innerHeight - r.bottom - edge;
+    const spaceAbove = r.top - edge;
+    const openUp = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
+    const maxHeight = Math.max(80, Math.min(256, (openUp ? spaceAbove : spaceBelow) - gap));
+    const top = openUp ? Math.max(edge, r.top - gap - Math.min(desiredHeight, maxHeight)) : r.bottom + gap;
+    setPos({ top, left: r.left, width: r.width, maxHeight });
   }
 
   useLayoutEffect(() => {
     if (open) place();
-  }, [open]);
+  }, [open, options.length]);
 
   useEffect(() => {
     if (!open) return;
@@ -106,8 +114,8 @@ export function Select({
         createPortal(
           <div
             ref={menuRef}
-            className="fixed z-[70] max-h-64 overflow-y-auto rounded-xl border border-border bg-white p-1 shadow-soft"
-            style={{ top: pos.top, left: pos.left, width: pos.width }}
+            className="fixed z-[70] overflow-y-auto rounded-xl border border-border bg-white p-1 shadow-soft"
+            style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
           >
             {options.map((o) => {
               const active = o.value === value;

@@ -776,6 +776,25 @@ export class OrdersService {
       : item.dishNameSnapshot;
   }
 
+  private waiterLocationVoice(order: { table: { number: number; hall?: { name?: string | null } | null } }) {
+    const hallName = order.table.hall?.name?.trim();
+    return [hallName ? `Зал ${hallName}` : null, `Стол номер ${tableNumberVoice(order.table.number)}`]
+      .filter(Boolean)
+      .join('. ');
+  }
+
+  private readyItemsWaiterText(
+    names: string[],
+    order: { table: { number: number; hall?: { name?: string | null } | null } },
+  ) {
+    const uniqueNames = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+    const location = this.waiterLocationVoice(order);
+    if (uniqueNames.length === 1) {
+      return `Блюдо ${uniqueNames[0]} готово. ${location}.`;
+    }
+    return `Готовы блюда: ${uniqueNames.join(', ')}. ${location}.`;
+  }
+
   /** Человеко-читаемая сводка различий составов: «добавил X ×1, убрал Y ×2». */
   private describeItemDiff(before: Map<string, number>, after: Map<string, number>) {
     const added: string[] = [];
@@ -1152,7 +1171,12 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    this.emitStatusChanged(
+      updated,
+      updated.status === OrderStatus.ready
+        ? undefined
+        : { waiterText: this.readyItemsWaiterText([this.orderItemName(item)], updated) },
+    );
     if (updated.status !== order.status) {
       const tableStatus = this.tableStatusForOrderStatus(updated.status);
       if (tableStatus) {
@@ -1217,6 +1241,16 @@ export class OrdersService {
     if (doneCount === 0) {
       throw new BadRequestException('Нет блюд, которые можно отметить готовыми');
     }
+    const readyNames = [
+      ...order.items
+        .filter((it) => targetIds.includes(it.id))
+        .map((it) => this.orderItemName(it)),
+      ...targetComponents.map((c) =>
+        c.action === 'replaced' && c.finalNameSnapshot
+          ? c.finalNameSnapshot
+          : c.originalNameSnapshot,
+      ),
+    ];
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (targetIds.length > 0) {
@@ -1263,7 +1297,12 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    this.emitStatusChanged(
+      updated,
+      updated.status === OrderStatus.ready
+        ? undefined
+        : { waiterText: this.readyItemsWaiterText(readyNames, updated) },
+    );
     if (updated.status !== order.status) {
       const tableStatus = this.tableStatusForOrderStatus(updated.status);
       if (tableStatus) {
