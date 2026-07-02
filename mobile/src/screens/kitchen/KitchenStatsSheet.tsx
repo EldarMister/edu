@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Modal as RNModal,
   ScrollView,
   StyleSheet,
   Text,
@@ -10,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
+import { FullscreenSheet } from '@/components/FullscreenSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { money } from '@/utils/format';
@@ -77,7 +77,7 @@ export function KitchenStatsSheet({
   const preparedDishes = useMemo(() => (d ? [...d.dishes].sort((a, b) => b.count - a.count) : []), [d]);
 
   return (
-    <RNModal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <FullscreenSheet visible={visible} onClose={onClose} style={styles.screen}>
       <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Статистика</Text>
@@ -173,7 +173,7 @@ export function KitchenStatsSheet({
       {hourlyOpen ? (
         <HourlyModal station={station} initialPeriod={period} onClose={() => setHourlyOpen(false)} />
       ) : null}
-    </RNModal>
+    </FullscreenSheet>
   );
 }
 
@@ -342,21 +342,27 @@ function DetailModalShell({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const [open, setOpen] = React.useState(true);
+  const close = React.useCallback(() => setOpen(false), []);
+  const dismiss = React.useCallback(() => {
+    onClose();
+  }, [onClose]);
+
   return (
-    <RNModal visible animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <FullscreenSheet visible={open} onClose={close} onDismiss={dismiss} style={styles.screen}>
       <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
         <View style={styles.header}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.headerTitle}>{title}</Text>
             {subtitle ? <Text style={styles.headerSub}>{subtitle}</Text> : null}
           </View>
-          <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
+          <FastPressable onPress={close} hitSlop={12} style={styles.closeBtn}>
             <PwaIcon name="close" size={22} color={colors.textLight} />
           </FastPressable>
         </View>
         {children}
       </SafeAreaView>
-    </RNModal>
+    </FullscreenSheet>
   );
 }
 

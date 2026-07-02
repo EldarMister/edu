@@ -1,8 +1,15 @@
 import React from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  interpolate,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
 import { colors, fontSize, radius, spacing } from '@/theme';
+import { popTiming } from '@/components/motion';
 import { type AppNotification, useNotifications } from '@/store/notifications';
 
 const TOAST_EXIT_MS = 260;
@@ -55,15 +62,13 @@ export function Toaster() {
 
 function Toast({ toast }: { toast: RenderedToast }) {
   const dismiss = useNotifications((s) => s.dismiss);
-  const progress = React.useRef(new Animated.Value(0)).current;
+  const progress = useSharedValue(0);
 
   React.useEffect(() => {
-    Animated.timing(progress, {
-      toValue: toast.exiting ? 0 : 1,
+    progress.value = withTiming(toast.exiting ? 0 : 1, {
       duration: toast.exiting ? TOAST_EXIT_MS : 180,
-      easing: Easing.bezier(0.16, 1, 0.3, 1),
-      useNativeDriver: true,
-    }).start();
+      easing: popTiming.easing,
+    });
   }, [progress, toast.exiting]);
 
   React.useEffect(() => {
@@ -73,18 +78,20 @@ function Toast({ toast }: { toast: RenderedToast }) {
     return () => clearTimeout(timer);
   }, [dismiss, toast.durationMs, toast.exiting, toast.id, toast.type]);
 
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [toast.exiting ? 0 : 18, 0] });
-  const translateY = progress.interpolate({ inputRange: [0, 1], outputRange: [toast.exiting ? -18 : 8, 0] });
-  const scale = progress.interpolate({ inputRange: [0, 1], outputRange: [0.98, 1] });
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [
+      { translateX: interpolate(progress.value, [0, 1], [toast.exiting ? 0 : 18, 0]) },
+      { translateY: interpolate(progress.value, [0, 1], [toast.exiting ? -18 : 8, 0]) },
+      { scale: interpolate(progress.value, [0, 1], [0.98, 1]) },
+    ],
+  }));
 
   return (
     <Animated.View
       style={[
         styles.toastShell,
-        {
-          opacity: progress,
-          transform: [{ translateX }, { translateY }, { scale }],
-        },
+        animatedStyle,
       ]}
     >
       <FastPressable onPress={() => dismiss(toast.id)} style={styles.toast}>

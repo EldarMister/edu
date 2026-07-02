@@ -1,26 +1,27 @@
 import React from 'react';
 import {
-  Animated,
-  Easing,
   Modal as RNModal,
-  PanResponder,
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
   type ViewStyle,
 } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, spacing, waiterLayout } from '@/theme';
 import { PwaIcon } from './PwaIcon';
 import { FastPressable } from './FastPressable';
+import { sheetTiming } from './motion';
 
 const CLOSE_DRAG_DISTANCE = 110;
-// Паритет с PWA: панель чисто «выдвигается» на всю свою высоту (translateY 100%→0)
-// за 240ms с cubic-bezier(0.4,0,0.2,1), без затухания самой панели — только фон.
-const SHEET_ENTER_MS = 240;
-const SHEET_EXIT_MS = 220;
 const SHEET_FALLBACK_H = 900;
-const SHEET_EASE = Easing.bezier(0.4, 0, 0.2, 1);
 
 /**
  * Нижний лист / модалка — повторяет PWA Modal на мобильном (items-end):
@@ -51,116 +52,104 @@ export function BottomSheet({
   bottomInset?: number;
 }) {
   const [render, setRender] = React.useState(visible);
-  // translateY анимируется напрямую (не через progress-интерполяцию), чтобы
-  // выезжать ровно на измеренную высоту листа — как PWA translateY(100%).
-  const translateY = React.useRef(new Animated.Value(SHEET_FALLBACK_H)).current;
-  const backdropOpacity = React.useRef(new Animated.Value(0)).current;
-  const dragY = React.useRef(new Animated.Value(0)).current;
+  const translateY = useSharedValue(SHEET_FALLBACK_H);
+  const backdropOpacity = useSharedValue(0);
+  const dragY = useSharedValue(0);
   const sheetHeightRef = React.useRef(SHEET_FALLBACK_H);
   const pendingEnterRef = React.useRef(false);
-  const panResponder = React.useMemo(
+  const closeFromGesture = React.useCallback(() => {
+    onClose();
+  }, [onClose]);
+  const panGesture = React.useMemo(
     () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          sheet && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-        onPanResponderGrant: () => {
-          dragY.stopAnimation();
-          dragY.setValue(0);
-        },
-        onPanResponderMove: (_, gesture) => {
-          dragY.setValue(Math.max(0, gesture.dy));
-        },
-        onPanResponderRelease: (_, gesture) => {
-          if (gesture.dy > CLOSE_DRAG_DISTANCE) {
-            onClose();
+      Gesture.Pan()
+        .enabled(sheet)
+        .activeOffsetY([8, 9999])
+        .failOffsetX([-16, 16])
+        .onBegin(() => {
+          dragY.value = 0;
+        })
+        .onUpdate((event) => {
+          dragY.value = Math.max(0, event.translationY);
+        })
+        .onEnd((event) => {
+          if (event.translationY > CLOSE_DRAG_DISTANCE || event.velocityY > 900) {
+            runOnJS(closeFromGesture)();
             return;
           }
-          Animated.spring(dragY, {
-            toValue: 0,
-            speed: 24,
-            bounciness: 0,
-            useNativeDriver: true,
-          }).start();
-        },
-        onPanResponderTerminate: () => {
-          Animated.spring(dragY, {
-            toValue: 0,
-            speed: 24,
-            bounciness: 0,
-            useNativeDriver: true,
-          }).start();
-        },
-      }),
-    [dragY, onClose, sheet],
+          dragY.value = withTiming(0, {
+            duration: sheetTiming.exitMs,
+            easing: sheetTiming.easing,
+          });
+        })
+        .onFinalize(() => {
+          if (dragY.value > 0 && dragY.value < CLOSE_DRAG_DISTANCE) {
+            dragY.value = withTiming(0, {
+              duration: sheetTiming.exitMs,
+              easing: sheetTiming.easing,
+            });
+          }
+        }),
+    [closeFromGesture, dragY, sheet],
   );
 
   React.useEffect(() => {
-    translateY.stopAnimation();
-    backdropOpacity.stopAnimation();
     if (visible) {
       // Держим лист скрытым до onLayout, где узнаем точную высоту и запустим въезд.
-      translateY.setValue(sheetHeightRef.current);
-      backdropOpacity.setValue(0);
-      dragY.setValue(0);
+      translateY.value = sheetHeightRef.current;
+      backdropOpacity.value = 0;
+      dragY.value = 0;
       pendingEnterRef.current = true;
       setRender(true);
       return;
     }
     pendingEnterRef.current = false;
-    Animated.parallel([
-      Animated.timing(translateY, {
-        toValue: sheetHeightRef.current,
-        duration: SHEET_EXIT_MS,
-        easing: SHEET_EASE,
-        isInteraction: false,
-        useNativeDriver: true,
-      }),
-      Animated.timing(dragY, {
-        toValue: 0,
-        duration: SHEET_EXIT_MS,
-        easing: SHEET_EASE,
-        isInteraction: false,
-        useNativeDriver: true,
-      }),
-      Animated.timing(backdropOpacity, {
-        toValue: 0,
-        duration: SHEET_EXIT_MS,
-        easing: SHEET_EASE,
-        isInteraction: false,
-        useNativeDriver: true,
-      }),
-    ]).start(({ finished }) => {
-      if (finished) setRender(false);
+    dragY.value = withTiming(0, {
+      duration: sheetTiming.exitMs,
+      easing: sheetTiming.easing,
     });
+    backdropOpacity.value = withTiming(0, {
+      duration: sheetTiming.exitMs,
+      easing: sheetTiming.easing,
+    });
+    translateY.value = withTiming(
+      sheetHeightRef.current,
+      {
+        duration: sheetTiming.exitMs,
+        easing: sheetTiming.easing,
+      },
+      (finished) => {
+        if (finished) runOnJS(setRender)(false);
+      },
+    );
   }, [backdropOpacity, dragY, translateY, visible]);
 
   const handleSheetLayout = React.useCallback(
-    (e: { nativeEvent: { layout: { height: number } } }) => {
+    (e: LayoutChangeEvent) => {
       const h = e.nativeEvent.layout.height;
       if (h > 0) sheetHeightRef.current = h;
       if (pendingEnterRef.current && h > 0) {
         pendingEnterRef.current = false;
-        translateY.setValue(h);
-        Animated.parallel([
-          Animated.timing(translateY, {
-            toValue: 0,
-            duration: SHEET_ENTER_MS,
-            easing: SHEET_EASE,
-            isInteraction: false,
-            useNativeDriver: true,
-          }),
-          Animated.timing(backdropOpacity, {
-            toValue: 1,
-            duration: SHEET_ENTER_MS,
-            easing: SHEET_EASE,
-            isInteraction: false,
-            useNativeDriver: true,
-          }),
-        ]).start();
+        translateY.value = h;
+        translateY.value = withTiming(0, {
+          duration: sheetTiming.enterMs,
+          easing: sheetTiming.easing,
+        });
+        backdropOpacity.value = withTiming(1, {
+          duration: sheetTiming.enterMs,
+          easing: sheetTiming.easing,
+        });
       }
     },
     [backdropOpacity, translateY],
   );
+
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value + dragY.value }],
+  }));
 
   if (!render) return null;
 
@@ -175,7 +164,11 @@ export function BottomSheet({
     >
       <View style={styles.backdrop}>
         <Animated.View
-          style={[styles.backdropFill, bottomInset != null && { bottom: bottomInset }, { opacity: backdropOpacity }]}
+          style={[
+            styles.backdropFill,
+            bottomInset != null && { bottom: bottomInset },
+            backdropStyle,
+          ]}
           pointerEvents="box-none"
         >
           <FastPressable
@@ -189,7 +182,7 @@ export function BottomSheet({
             styles.sheet,
             maxHeight != null && { maxHeight },
             bottomInset != null && { marginBottom: bottomInset },
-            { transform: [{ translateY }, { translateY: dragY }] },
+            sheetStyle,
           ]}
         >
         <SafeAreaView
@@ -197,10 +190,12 @@ export function BottomSheet({
           edges={['bottom']}
         >
           {sheet ? (
-            <View style={styles.handleWrap} {...panResponder.panHandlers}>
-              <View style={styles.handle} />
-              {title ? <Text style={styles.sheetTitle}>{title}</Text> : null}
-            </View>
+            <GestureDetector gesture={panGesture}>
+              <View style={styles.handleWrap}>
+                <View style={styles.handle} />
+                {title ? <Text style={styles.sheetTitle}>{title}</Text> : null}
+              </View>
+            </GestureDetector>
           ) : title ? (
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>

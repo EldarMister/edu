@@ -1,18 +1,24 @@
 import React, { useMemo, useState } from 'react';
 import {
-  Animated,
-  Easing,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Loading, PillTabs } from '@/components/ui';
+import { popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { TABLE_STATUS } from '@/theme/status';
@@ -45,7 +51,7 @@ export function TablesScreen() {
   const [hallId, setHallId] = useState<string | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [actionsRender, setActionsRender] = useState(false);
-  const actionsProgress = React.useRef(new Animated.Value(0)).current;
+  const actionsProgress = useSharedValue(0);
   const [tableModal, setTableModal] = useState<TableModal>(null);
   const [gridSize, setGridSize] = useState({ width: 0, height: 0 });
 
@@ -110,26 +116,32 @@ export function TablesScreen() {
   React.useEffect(() => {
     if (actionsOpen) {
       setActionsRender(true);
-      actionsProgress.stopAnimation();
-      actionsProgress.setValue(0);
-      Animated.timing(actionsProgress, {
-        toValue: 1,
-        duration: 160,
-        easing: Easing.bezier(0.16, 1, 0.3, 1),
-        useNativeDriver: true,
-      }).start();
+      actionsProgress.value = 0;
+      actionsProgress.value = withTiming(1, {
+        duration: popTiming.enterMs,
+        easing: popTiming.easing,
+      });
       return;
     }
-    actionsProgress.stopAnimation();
-    Animated.timing(actionsProgress, {
-      toValue: 0,
-      duration: 120,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setActionsRender(false);
-    });
+    actionsProgress.value = withTiming(
+      0,
+      {
+        duration: popTiming.exitMs,
+        easing: popTiming.easing,
+      },
+      (finished) => {
+        if (finished) runOnJS(setActionsRender)(false);
+      },
+    );
   }, [actionsOpen, actionsProgress]);
+
+  const actionsMenuStyle = useAnimatedStyle(() => ({
+    opacity: actionsProgress.value,
+    transform: [
+      { translateY: interpolate(actionsProgress.value, [0, 1], [-6, 0]) },
+      { scale: interpolate(actionsProgress.value, [0, 1], [0.98, 1]) },
+    ],
+  }));
 
   const doCloseTable = () => {
     if (!selectedTable) return;
@@ -293,23 +305,7 @@ export function TablesScreen() {
           <Animated.View
             style={[
               styles.tableActionsMenu,
-              {
-                opacity: actionsProgress,
-                transform: [
-                  {
-                    translateY: actionsProgress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-6, 0],
-                    }),
-                  },
-                  {
-                    scale: actionsProgress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.98, 1],
-                    }),
-                  },
-                ],
-              },
+              actionsMenuStyle,
             ]}
           >
             <FastPressable onPress={() => openTableAction('close')} style={styles.tableActionItem}>

@@ -1,10 +1,18 @@
 import React, { memo } from 'react';
-import { Animated, Easing, FlatList, RefreshControl, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { FlatList, RefreshControl, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, EmptyState, Loading } from '@/components/ui';
+import { popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
 import { NumberTicker } from '@/components/NumberTicker';
@@ -38,7 +46,8 @@ export function OrdersScreen() {
   const claimQr = useClaimQrOrder();
   const [menuFor, setMenuFor] = React.useState<{ order: Order; top: number; left: number } | null>(null);
   const [menuRender, setMenuRender] = React.useState<{ order: Order; top: number; left: number } | null>(null);
-  const menuProgress = React.useRef(new Animated.Value(0)).current;
+  const menuProgress = useSharedValue(0);
+  const clearMenuRender = React.useCallback(() => setMenuRender(null), []);
   const [cancelTarget, setCancelTarget] = React.useState<Order | null>(null);
   const [cancelReason, setCancelReason] = React.useState<string>(DEFAULT_CANCEL_REASON);
   const [cancelOther, setCancelOther] = React.useState('');
@@ -56,30 +65,36 @@ export function OrdersScreen() {
   }, [orders.data]);
 
   const closeMenu = React.useCallback(() => {
-    menuProgress.stopAnimation();
     setMenuFor(null);
-    Animated.timing(menuProgress, {
-      toValue: 0,
-      duration: 120,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setMenuRender(null);
+    menuProgress.value = withTiming(
+      0,
+      {
+        duration: popTiming.exitMs,
+        easing: popTiming.easing,
+      },
+      (finished) => {
+        if (finished) runOnJS(clearMenuRender)();
+      },
+    );
+  }, [clearMenuRender, menuProgress]);
+
+  const showMenu = React.useCallback((next: { order: Order; top: number; left: number }) => {
+    setMenuFor(next);
+    setMenuRender(next);
+    menuProgress.value = 0;
+    menuProgress.value = withTiming(1, {
+      duration: popTiming.enterMs,
+      easing: popTiming.easing,
     });
   }, [menuProgress]);
 
-  const showMenu = React.useCallback((next: { order: Order; top: number; left: number }) => {
-    menuProgress.stopAnimation();
-    setMenuFor(next);
-    setMenuRender(next);
-    menuProgress.setValue(0);
-    Animated.timing(menuProgress, {
-      toValue: 1,
-      duration: 160,
-      easing: Easing.bezier(0.16, 1, 0.3, 1),
-      useNativeDriver: true,
-    }).start();
-  }, [menuProgress]);
+  const menuStyle = useAnimatedStyle(() => ({
+    opacity: menuProgress.value,
+    transform: [
+      { translateY: interpolate(menuProgress.value, [0, 1], [-6, 0]) },
+      { scale: interpolate(menuProgress.value, [0, 1], [0.98, 1]) },
+    ],
+  }));
 
   const openOrder = React.useCallback((order: Order) => {
     navigation.navigate('OrderDetail', { orderId: order.id });
@@ -225,22 +240,8 @@ export function OrdersScreen() {
               {
                 top: menuRender.top,
                 left: menuRender.left,
-                opacity: menuProgress,
-                transform: [
-                  {
-                    translateY: menuProgress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [-6, 0],
-                    }),
-                  },
-                  {
-                    scale: menuProgress.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0.98, 1],
-                    }),
-                  },
-                ],
               },
+              menuStyle,
             ]}
           >
             {EDITABLE.includes(menuRender.order.status) ? (

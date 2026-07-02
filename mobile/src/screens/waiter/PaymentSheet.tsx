@@ -1,8 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Animated,
-  Easing,
   Image,
   Modal as RNModal,
   ScrollView,
@@ -11,9 +9,18 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import Animated, {
+  interpolate,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
+import { cardPopTiming, popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, softShadow, spacing } from '@/theme';
 import { fetchReceipt, useCreateReceiptPrintRequest, usePay } from '@/services/api/waiter';
@@ -449,75 +456,49 @@ function ReceiptSheet({
 }
 
 function PaymentSuccessOverlay({ visible, total }: { visible: boolean; total: number }) {
-  const card = React.useRef(new Animated.Value(0)).current;
-  const check = React.useRef(new Animated.Value(0)).current;
+  const card = useSharedValue(0);
+  const check = useSharedValue(0);
 
   React.useEffect(() => {
     if (!visible) {
-      card.setValue(0);
-      check.setValue(0);
+      card.value = 0;
+      check.value = 0;
       return;
     }
-    Animated.parallel([
-      Animated.timing(card, {
-        toValue: 1,
-        duration: 280,
-        easing: Easing.bezier(0.16, 1, 0.3, 1),
-        useNativeDriver: true,
+    card.value = 0;
+    check.value = 0;
+    card.value = withTiming(1, {
+      duration: cardPopTiming.enterMs,
+      easing: cardPopTiming.easing,
+    });
+    check.value = withDelay(
+      120,
+      withTiming(1, {
+        duration: cardPopTiming.checkMs,
+        easing: cardPopTiming.easing,
       }),
-      Animated.sequence([
-        Animated.delay(120),
-        Animated.timing(check, {
-          toValue: 1,
-          duration: 450,
-          easing: Easing.bezier(0.16, 1, 0.3, 1),
-          useNativeDriver: true,
-        }),
-      ]),
-    ]).start();
+    );
   }, [card, check, visible]);
+
+  const cardStyle = useAnimatedStyle(() => ({
+    opacity: card.value,
+    transform: [
+      { scale: interpolate(card.value, [0, 1], [0.94, 1]) },
+      { translateY: interpolate(card.value, [0, 1], [8, 0]) },
+    ],
+  }));
+  const checkStyle = useAnimatedStyle(() => ({
+    opacity: check.value,
+    transform: [
+      { scale: interpolate(check.value, [0, 0.6, 1], [0.4, 1.12, 1]) },
+    ],
+  }));
 
   return (
     <RNModal visible={visible} transparent animationType="none" statusBarTranslucent>
       <View style={styles.successBackdrop}>
-        <Animated.View
-          style={[
-            styles.successCard,
-            {
-              opacity: card,
-              transform: [
-                {
-                  scale: card.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.94, 1],
-                  }),
-                },
-                {
-                  translateY: card.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [8, 0],
-                  }),
-                },
-              ],
-            },
-          ]}
-        >
-          <Animated.View
-            style={[
-              styles.successIcon,
-              {
-                opacity: check,
-                transform: [
-                  {
-                    scale: check.interpolate({
-                      inputRange: [0, 0.6, 1],
-                      outputRange: [0.4, 1.12, 1],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          >
+        <Animated.View style={[styles.successCard, cardStyle]}>
+          <Animated.View style={[styles.successIcon, checkStyle]}>
             <PwaIcon name="check" size={34} color={colors.success} strokeWidth={2.5} />
           </Animated.View>
           <Text style={styles.successTitle}>Оплата принята</Text>
@@ -813,30 +794,37 @@ function SplitMethodSelect({
   onToggle: () => void;
   onChange: (value: SplitMethod) => void;
 }) {
-  const progress = React.useRef(new Animated.Value(open ? 1 : 0)).current;
+  const progress = useSharedValue(open ? 1 : 0);
   const [renderOpen, setRenderOpen] = React.useState(open);
 
   React.useEffect(() => {
-    progress.stopAnimation();
     if (open) {
       setRenderOpen(true);
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: 150,
-        easing: Easing.bezier(0.16, 1, 0.3, 1),
-        useNativeDriver: true,
-      }).start();
+      progress.value = withTiming(1, {
+        duration: popTiming.enterMs,
+        easing: popTiming.easing,
+      });
       return;
     }
-    Animated.timing(progress, {
-      toValue: 0,
-      duration: 110,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setRenderOpen(false);
-    });
+    progress.value = withTiming(
+      0,
+      {
+        duration: popTiming.exitMs,
+        easing: popTiming.easing,
+      },
+      (finished) => {
+        if (finished) runOnJS(setRenderOpen)(false);
+      },
+    );
   }, [open, progress]);
+
+  const menuStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [
+      { translateY: interpolate(progress.value, [0, 1], [-6, 0]) },
+      { scale: interpolate(progress.value, [0, 1], [0.98, 1]) },
+    ],
+  }));
 
   return (
     <View style={styles.methodSelectWrap}>
@@ -855,23 +843,7 @@ function SplitMethodSelect({
         <Animated.View
           style={[
             styles.methodSelectMenu,
-            {
-              opacity: progress,
-              transform: [
-                {
-                  translateY: progress.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-6, 0],
-                  }),
-                },
-                {
-                  scale: progress.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.98, 1],
-                  }),
-                },
-              ],
-            },
+            menuStyle,
           ]}
         >
           {SPLIT_METHODS.map((method) => {
@@ -1056,7 +1028,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   splitCardPaid: { borderColor: 'rgba(22,163,74,0.36)', backgroundColor: colors.successSoft },
-  splitCardMenuOpen: { zIndex: 20, elevation: 12 },
+  splitCardMenuOpen: { zIndex: 20, elevation: 3 },
   splitTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   splitTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   splitAmountText: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },

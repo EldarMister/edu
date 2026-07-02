@@ -1,10 +1,11 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
+import { FullscreenSheet } from '@/components/FullscreenSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
@@ -885,7 +886,7 @@ function ReplacementPickerModal({
   onPick: (dish: Dish) => void;
 }) {
   return (
-    <RNModal visible={visible} animationType="none" statusBarTranslucent onRequestClose={onClose}>
+    <FullscreenSheet visible={visible} onClose={onClose} style={styles.replacementSafe}>
       <SafeAreaView style={styles.replacementSafe} edges={['top']}>
         <View style={styles.replacementHeader}>
           <FastPressable onPress={onClose} hitSlop={12} style={styles.replacementBack}>
@@ -926,7 +927,7 @@ function ReplacementPickerModal({
           </ScrollView>
         </View>
       </SafeAreaView>
-    </RNModal>
+    </FullscreenSheet>
   );
 }
 
