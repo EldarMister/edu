@@ -25,6 +25,8 @@ export function BottomSheet({
   footer,
   sheet = false,
   bodyStyle,
+  maxHeight,
+  bottomInset = 0,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -34,12 +36,14 @@ export function BottomSheet({
   /** true — стиль «нижний лист» с хваталкой вместо шапки-крестика. */
   sheet?: boolean;
   bodyStyle?: ViewStyle;
+  maxHeight?: ViewStyle['maxHeight'];
+  bottomInset?: number;
 }) {
   return (
     <RNModal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <Pressable style={styles.backdropFill} onPress={onClose} />
-        <SafeAreaView style={styles.sheet} edges={['bottom']}>
+        <SafeAreaView style={[styles.sheet, maxHeight ? { maxHeight } : null, bottomInset ? { marginBottom: bottomInset } : null]} edges={['bottom']}>
           {sheet ? (
             <View style={styles.handleWrap}>
               <View style={styles.handle} />

@@ -13,6 +13,7 @@ import { Server, Socket } from 'socket.io';
 import { ROOMS, SERVER_EVENTS, QR_CLIENT_EVENTS } from './events';
 import { getJwtAccessSecret } from '../auth/jwt.config';
 import { PrismaService } from '../prisma/prisma.service';
+import { assertCafeActive } from '../platform/cafe-status';
 
 const QR_OFFLINE_CART_TTL_MS = 60 * 60 * 1000;
 const QR_OFFLINE_CART_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
@@ -20,6 +21,7 @@ const QR_OFFLINE_CART_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 interface SocketUser {
   id: string;
   role: string;
+  cafeId: string | null;
 }
 
 /**
@@ -79,7 +81,17 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       const payload = await this.jwt.verifyAsync<{ sub: string; role: string }>(token, {
         secret: getJwtAccessSecret(),
       });
-      const user: SocketUser = { id: payload.sub, role: payload.role };
+      const dbUser = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { id: true, role: true, cafeId: true, isActive: true },
+      });
+      if (!dbUser || !dbUser.isActive) {
+        client.disconnect(true);
+        return;
+      }
+      await assertCafeActive(this.prisma, dbUser.cafeId);
+
+      const user: SocketUser = { id: dbUser.id, role: dbUser.role, cafeId: dbUser.cafeId };
       client.data.user = user;
 
       if (user.role === 'KITCHEN' || user.role === 'BAR') {
