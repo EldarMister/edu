@@ -10,6 +10,6 @@ export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_API_URL).repl
 export const API_BASE = `${API_URL}/api`;
 
 // Публичный веб-адрес PWA — база QR-меню столов (origin/menu/:token). В PWA это
-// window.location.origin. Задайте EXPO_PUBLIC_WEB_URL реальным адресом фронта;
-// по умолчанию совпадает с API-хостом (для валидного, но не обязательно рабочего URL).
-export const WEB_URL = (process.env.EXPO_PUBLIC_WEB_URL ?? API_URL).replace(/\/$/, '');
+// window.location.origin. Переопределяется через EXPO_PUBLIC_WEB_URL.
+const DEFAULT_WEB_URL = 'https://edu-pos.up.railway.app';
+export const WEB_URL = (process.env.EXPO_PUBLIC_WEB_URL ?? DEFAULT_WEB_URL).replace(/\/$/, '');

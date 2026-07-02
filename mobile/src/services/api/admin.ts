@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/utils/orderCache';
-import type { Order, OrderStatus, PaymentMethod, Role, TableStatus } from '@/types';
+import type { Order, OrderStatus, PaymentMethod, PrepStation, Role, TableStatus } from '@/types';
 
 const get = async <T,>(url: string) => (await api.get<T>(url)).data;
 
@@ -240,6 +240,168 @@ export function useTableMutations() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/admin/tables/${id}`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove };
+}
+
+// ---------- Меню: категории, блюда, сеты (порт PWA) ----------
+export interface AdminCategory {
+  id: string;
+  name: string;
+  sortOrder: number;
+  isActive: boolean;
+  prepStation: PrepStation;
+  _count: { dishes: number };
+}
+export interface AdminDishVariant {
+  id: string;
+  name: string;
+  price: string;
+  sortOrder: number;
+  stock?: number;
+  initialStock?: number;
+  unit?: string;
+}
+export interface AdminSetComponent {
+  id: string;
+  quantity: number;
+  removable: boolean;
+  replaceable: boolean;
+  dishVariantId?: string | null;
+  dishVariant?: { id: string; name: string; price: string; dish: { id: string; name: string } } | null;
+  dish?: { id: string; name: string; price: string } | null;
+}
+export interface AdminDish {
+  id: string;
+  name: string;
+  description: string | null;
+  price: string;
+  categoryId: string;
+  category: { id: string; name: string };
+  discountType: 'none' | 'percent' | 'fixed';
+  discountValue: string;
+  isAvailable: boolean;
+  isActive: boolean;
+  cookingTime: number | null;
+  trackInventory?: boolean;
+  stock?: number;
+  initialStock?: number;
+  unit?: string;
+  prepStation: PrepStation | null;
+  voiceName?: string | null;
+  isSet?: boolean;
+  setComponents?: AdminSetComponent[];
+  variants: AdminDishVariant[];
+  imageUrl?: string | null;
+}
+export interface DishInput {
+  name: string;
+  categoryId: string;
+  price?: number;
+  description?: string;
+  discountType?: 'none' | 'percent' | 'fixed';
+  discountValue?: number;
+  isAvailable?: boolean;
+  isActive?: boolean;
+  trackInventory?: boolean;
+  stock?: number;
+  initialStock?: number;
+  unit?: string;
+  prepStation?: PrepStation | null;
+  voiceName?: string | null;
+  variants?: { id?: string; name: string; price: number; stock?: number; initialStock?: number; unit?: string }[];
+  imageUrl?: string;
+}
+export interface SetComponentInput {
+  dishId: string;
+  dishVariantId?: string;
+  quantity?: number;
+  removable?: boolean;
+  replaceable?: boolean;
+}
+export interface SetInput {
+  name: string;
+  price: number;
+  components: SetComponentInput[];
+}
+
+export function useMenuOverview() {
+  return useQuery({
+    queryKey: ['admin', 'menu', 'overview'],
+    queryFn: () =>
+      get<{ dishesCount: number; categoriesCount: number; activeDishesCount: number; avgPrice: number }>(
+        '/admin/menu/overview',
+      ),
+  });
+}
+export function useAdminCategories() {
+  return useQuery({ queryKey: ['admin', 'categories'], queryFn: () => get<AdminCategory[]>('/admin/categories') });
+}
+export function useAdminDishes(categoryId: string, search: string) {
+  const parts: string[] = [];
+  if (categoryId) parts.push(`categoryId=${categoryId}`);
+  if (search) parts.push(`search=${encodeURIComponent(search)}`);
+  const q = parts.join('&');
+  return useQuery({
+    queryKey: ['admin', 'dishes', categoryId, search],
+    queryFn: () => get<AdminDish[]>(`/admin/dishes${q ? `?${q}` : ''}`),
+  });
+}
+export function useCategoryMutations() {
+  const invalidate = useInvalidate([['admin', 'categories'], ['admin', 'menu', 'overview'], ['admin', 'dishes']]);
+  const create = useMutation({
+    mutationFn: (b: { name: string; prepStation?: PrepStation }) => api.post('/admin/categories', b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number }) =>
+      api.patch(`/admin/categories/${id}`, b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: ({ id, strategy, targetCategoryId }: { id: string; strategy?: 'move' | 'delete'; targetCategoryId?: string }) =>
+      api.delete(`/admin/categories/${id}`, { data: { strategy, targetCategoryId } }).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const reorder = useMutation({
+    mutationFn: (ids: string[]) => api.patch('/admin/categories/reorder', { ids }).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove, reorder };
+}
+export function useDishMutations() {
+  const invalidate = useInvalidate([['admin', 'dishes'], ['admin', 'menu', 'overview'], ['admin', 'warehouse']]);
+  const create = useMutation({
+    mutationFn: (b: DishInput) => api.post('/admin/dishes', b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...b }: { id: string } & Partial<DishInput>) => api.patch(`/admin/dishes/${id}`, b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/dishes/${id}`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove };
+}
+export function useAdminSets() {
+  return useQuery({ queryKey: ['admin', 'sets'], queryFn: () => get<AdminDish[]>('/admin/sets') });
+}
+export function useSetMutations() {
+  const invalidate = useInvalidate([['admin', 'sets'], ['admin', 'dishes'], ['admin', 'menu', 'overview'], ['admin', 'categories']]);
+  const create = useMutation({
+    mutationFn: (b: SetInput) => api.post('/admin/sets', b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...b }: { id: string } & Partial<SetInput> & { isActive?: boolean }) =>
+      api.patch(`/admin/sets/${id}`, b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/sets/${id}`).then((r) => r.data),
     onSuccess: invalidate,
   });
   return { create, update, remove };

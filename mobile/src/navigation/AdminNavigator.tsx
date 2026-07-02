@@ -12,6 +12,7 @@ import { unregisterPushDevice } from '@/services/push';
 import { StatisticsScreen } from '@/screens/admin/StatisticsScreen';
 import { OrdersScreen } from '@/screens/admin/OrdersScreen';
 import { TablesScreen } from '@/screens/admin/TablesScreen';
+import { MenuScreen } from '@/screens/admin/MenuScreen';
 import { AdminPlaceholderScreen } from '@/screens/admin/AdminPlaceholderScreen';
 
 type Section =
@@ -92,6 +93,8 @@ export function AdminNavigator() {
           <OrdersScreen />
         ) : section === 'tables' ? (
           <TablesScreen />
+        ) : section === 'menu' ? (
+          <MenuScreen />
         ) : (
           <AdminPlaceholderScreen title={current?.label ?? ''} />
         )}
