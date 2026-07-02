@@ -1,8 +1,10 @@
 import React from 'react';
 import {
+  Keyboard,
   Modal as RNModal,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type LayoutChangeEvent,
   type ViewStyle,
@@ -22,6 +24,17 @@ import { sheetTiming } from './motion';
 
 const CLOSE_DRAG_DISTANCE = 110;
 const SHEET_FALLBACK_H = 900;
+
+function dismissKeyboard() {
+  const textInputState = TextInput.State as unknown as {
+    currentlyFocusedInput?: () => { blur?: () => void } | null;
+    blurTextInput?: (input: unknown) => void;
+  };
+  const focusedInput = textInputState.currentlyFocusedInput?.() ?? null;
+  focusedInput?.blur?.();
+  if (focusedInput) textInputState.blurTextInput?.(focusedInput);
+  Keyboard.dismiss();
+}
 
 type BottomSheetSnapshot = {
   title?: string;
@@ -81,7 +94,8 @@ export function BottomSheet({
   const dragY = useSharedValue(0);
   const sheetHeightRef = React.useRef(SHEET_FALLBACK_H);
   const pendingEnterRef = React.useRef(false);
-  const closeFromGesture = React.useCallback(() => {
+  const handleClose = React.useCallback(() => {
+    dismissKeyboard();
     onClose();
   }, [onClose]);
   const panGesture = React.useMemo(
@@ -98,7 +112,7 @@ export function BottomSheet({
         })
         .onEnd((event) => {
           if (event.translationY > CLOSE_DRAG_DISTANCE || event.velocityY > 900) {
-            runOnJS(closeFromGesture)();
+            runOnJS(handleClose)();
             return;
           }
           dragY.value = withTiming(0, {
@@ -114,11 +128,12 @@ export function BottomSheet({
             });
           }
         }),
-    [closeFromGesture, content.sheet, dragY],
+    [handleClose, content.sheet, dragY],
   );
 
   React.useEffect(() => {
     if (visible) {
+      dismissKeyboard();
       // Держим лист скрытым до onLayout, где узнаем точную высоту и запустим въезд.
       translateY.value = sheetHeightRef.current;
       backdropOpacity.value = 0;
@@ -127,6 +142,7 @@ export function BottomSheet({
       setRender(true);
       return;
     }
+    dismissKeyboard();
     pendingEnterRef.current = false;
     dragY.value = withTiming(0, {
       duration: sheetTiming.exitMs,
@@ -184,7 +200,7 @@ export function BottomSheet({
       transparent
       statusBarTranslucent
       hardwareAccelerated
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
       <View style={styles.backdrop}>
         <Animated.View
@@ -197,46 +213,50 @@ export function BottomSheet({
         >
           <FastPressable
             style={StyleSheet.absoluteFill}
-            onPress={onClose}
+            onPress={handleClose}
           />
         </Animated.View>
-        <Animated.View
-          onLayout={handleSheetLayout}
-          style={[
-            styles.sheet,
-            content.maxHeight != null && { maxHeight: content.maxHeight },
-            content.bottomInset != null && { marginBottom: content.bottomInset },
-            sheetStyle,
-          ]}
+        <View
+          pointerEvents="box-none"
+          style={[styles.sheetViewport, content.bottomInset != null && { bottom: content.bottomInset }]}
         >
-        <SafeAreaView
-          style={styles.sheetSafe}
-          edges={['bottom']}
-        >
-          {content.sheet ? (
-            <GestureDetector gesture={panGesture}>
-              <View style={styles.handleWrap}>
-                <View style={styles.handle} />
-                {content.title ? <Text style={styles.sheetTitle}>{content.title}</Text> : null}
+          <Animated.View
+            onLayout={handleSheetLayout}
+            style={[
+              styles.sheet,
+              content.maxHeight != null && { maxHeight: content.maxHeight },
+              sheetStyle,
+            ]}
+          >
+          <SafeAreaView
+            style={styles.sheetSafe}
+            edges={['bottom']}
+          >
+            {content.sheet ? (
+              <GestureDetector gesture={panGesture}>
+                <View style={styles.handleWrap}>
+                  <View style={styles.handle} />
+                  {content.title ? <Text style={styles.sheetTitle}>{content.title}</Text> : null}
+                </View>
+              </GestureDetector>
+            ) : content.title ? (
+              <View style={styles.header}>
+                <Text style={styles.title}>{content.title}</Text>
+                <FastPressable
+                  onPress={handleClose}
+                  hitSlop={12}
+                >
+                  <PwaIcon name="close" size={22} color={colors.textLight} />
+                </FastPressable>
               </View>
-            </GestureDetector>
-          ) : content.title ? (
-            <View style={styles.header}>
-              <Text style={styles.title}>{content.title}</Text>
-              <FastPressable
-                onPress={onClose}
-                hitSlop={12}
-              >
-                <PwaIcon name="close" size={22} color={colors.textLight} />
-              </FastPressable>
-            </View>
-          ) : null}
+            ) : null}
 
-          <View style={[styles.body, content.bodyStyle]}>{content.children}</View>
+            <View style={[styles.body, content.bodyStyle]}>{content.children}</View>
 
-          {content.footer ? <View style={styles.footer}>{content.footer}</View> : null}
-        </SafeAreaView>
-        </Animated.View>
+            {content.footer ? <View style={styles.footer}>{content.footer}</View> : null}
+          </SafeAreaView>
+          </Animated.View>
+        </View>
       </View>
     </RNModal>
   );
@@ -245,6 +265,15 @@ export function BottomSheet({
 const styles = StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end' },
   backdropFill: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheetViewport: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'flex-end',
+    overflow: 'hidden',
+  },
   sheet: {
     backgroundColor: colors.card,
     borderTopLeftRadius: waiterLayout.sheetRadius,
