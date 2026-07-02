@@ -128,7 +128,10 @@ async function currentPushStatus(): Promise<PushStatus> {
   const { status } = await Notifications.getPermissionsAsync();
   if (status === 'denied') return 'denied';
   if (status !== 'granted') return 'default';
-  return registeredToken ? 'subscribed' : 'checking';
+  // Разрешение ОС выдано — для пользователя уведомления «включены». Регистрация
+  // push-токена на сервере идёт в фоне (best-effort) и не должна держать кнопку
+  // «Включить уведомления» в интерфейсе.
+  return 'subscribed';
 }
 
 export function usePushNotifications(enabled: boolean) {
@@ -156,11 +159,12 @@ export function usePushNotifications(enabled: boolean) {
       try {
         const next = await currentPushStatus();
         if (cancelled) return;
-        if (next === 'checking') {
-          await enable();
-          return;
-        }
         setStatus(next);
+        // Разрешение есть, но токен ещё не отправлен на сервер — регистрируем в фоне,
+        // не меняя статус в интерфейсе (кнопка не всплывает).
+        if (next === 'subscribed' && !registeredToken) {
+          void registerForPushNotifications();
+        }
       } catch {
         if (!cancelled) setStatus('error');
       }
@@ -168,7 +172,7 @@ export function usePushNotifications(enabled: boolean) {
     return () => {
       cancelled = true;
     };
-  }, [enable, enabled]);
+  }, [enabled]);
 
   return { status, enable };
 }

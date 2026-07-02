@@ -13,6 +13,7 @@ type VoiceItem = {
   status: string;
   prepStation?: 'kitchen' | 'bar' | 'none' | string | null;
   quantity?: number | null;
+  comment?: string | null;
   dishNameSnapshot: string;
   dishVariantNameSnapshot?: string | null;
   dishVoiceSnapshot?: string | null;
@@ -27,8 +28,21 @@ type VoiceItem = {
 
 type VoiceOrder = {
   orderNumber: string;
+  comment?: string | null;
   items: VoiceItem[];
 };
+
+const QR_ORDER_COMMENT = 'Заказ из QR-меню';
+
+/** Осмысленный комментарий для озвучки: без QR-метки и префикса «Гость N ·». */
+function voiceComment(raw?: string | null): string | null {
+  if (!raw) return null;
+  let value = raw.trim();
+  if (!value || value === QR_ORDER_COMMENT) return null;
+  value = value.replace(/^Гость\s+\d+\s*·\s*/iu, '').trim();
+  if (/^Гость\s+\d+$/iu.test(value)) return null;
+  return value || null;
+}
 
 type VoiceStation = 'kitchen' | 'bar';
 
@@ -204,9 +218,12 @@ function setHeadVoice(item: VoiceItem): string {
  * («два Запечённый филадельфия»). Убранные компоненты проговариваются отдельно.
  */
 function itemVoiceFragment(item: VoiceItem): string {
+  const itemComment = voiceComment(item.comment);
+  const commentSuffix = itemComment ? `. Комментарий: ${itemComment}` : '';
+
   if (!isSetItem(item)) {
     const qty = item.quantity && item.quantity > 1 ? `${numberToWordsRu(item.quantity)} ` : '';
-    return `${qty}${dishVoice(item)}`;
+    return `${qty}${dishVoice(item)}${commentSuffix}`;
   }
 
   const components = item.setComponents ?? [];
@@ -238,7 +255,7 @@ function itemVoiceFragment(item: VoiceItem): string {
     const n = c.originalNameSnapshot.trim();
     if (n) parts.push(`убрали ${n}`);
   }
-  return parts.join('. ');
+  return `${parts.join('. ')}${commentSuffix}`;
 }
 
 /** Блюда заказа (без отказанных/отменённых) для озвучки. */
@@ -256,7 +273,9 @@ export function buildNewOrderText(order: VoiceOrder, station: VoiceStation = 'ki
   const dishes = activeDishNames(order, station);
   if (dishes.length === 0) return null;
   const head = `Новый заказ. Номер ${num}.`;
-  return applyPronunciation(`${head} Состав заказа: ${dishes.join('. ')}.`);
+  const orderComment = voiceComment(order.comment);
+  const commentTail = orderComment ? ` Комментарий к заказу: ${orderComment}.` : '';
+  return applyPronunciation(`${head} Состав заказа: ${dishes.join('. ')}.${commentTail}`);
 }
 
 /** «Заказ номер пятьдесят четыре отменён.» */

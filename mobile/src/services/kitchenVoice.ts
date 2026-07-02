@@ -1,6 +1,7 @@
 import { Audio } from 'expo-av';
 import { api } from '@/lib/api';
 import { configureAudioPlayback } from '@/lib/sound';
+import { deleteTempFile, wavBufferToTempFile } from '@/lib/ttsFile';
 import {
   getKitchenVoiceSettings,
   type KitchenVoiceScenario,
@@ -77,11 +78,15 @@ class KitchenVoice {
       },
       { responseType: 'arraybuffer', timeout: 45_000 },
     );
-    const uri = `data:audio/wav;base64,${arrayBufferToBase64(res.data)}`;
-    await this.playUri(uri, settings.speechRate);
+    const path = await wavBufferToTempFile(res.data);
+    try {
+      await this.playFile(path, settings.speechRate);
+    } finally {
+      await deleteTempFile(path);
+    }
   }
 
-  private async playUri(uri: string, rate: number) {
+  private async playFile(uri: string, rate: number) {
     await configureAudioPlayback();
     const { sound } = await Audio.Sound.createAsync(
       { uri },
@@ -102,31 +107,6 @@ class KitchenVoice {
       void sound.unloadAsync().catch(() => undefined);
     });
   }
-}
-
-function arrayBufferToBase64(buffer: ArrayBuffer) {
-  const bytes = new Uint8Array(buffer);
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  let output = '';
-  let i = 0;
-  for (; i + 2 < bytes.length; i += 3) {
-    output += alphabet[bytes[i] >> 2];
-    output += alphabet[((bytes[i] & 3) << 4) | (bytes[i + 1] >> 4)];
-    output += alphabet[((bytes[i + 1] & 15) << 2) | (bytes[i + 2] >> 6)];
-    output += alphabet[bytes[i + 2] & 63];
-  }
-  if (i < bytes.length) {
-    output += alphabet[bytes[i] >> 2];
-    if (i + 1 < bytes.length) {
-      output += alphabet[((bytes[i] & 3) << 4) | (bytes[i + 1] >> 4)];
-      output += alphabet[(bytes[i + 1] & 15) << 2];
-      output += '=';
-    } else {
-      output += alphabet[(bytes[i] & 3) << 4];
-      output += '==';
-    }
-  }
-  return output;
 }
 
 export const kitchenVoice = new KitchenVoice();
