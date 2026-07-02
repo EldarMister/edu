@@ -23,6 +23,16 @@ import { sheetTiming } from './motion';
 const CLOSE_DRAG_DISTANCE = 110;
 const SHEET_FALLBACK_H = 900;
 
+type BottomSheetSnapshot = {
+  title?: string;
+  children: React.ReactNode;
+  footer?: React.ReactNode;
+  sheet: boolean;
+  bodyStyle?: ViewStyle;
+  maxHeight?: ViewStyle['maxHeight'];
+  bottomInset?: number;
+};
+
 /**
  * Нижний лист / модалка — повторяет PWA Modal на мобильном (items-end):
  * затемнение фона rgba(0,0,0,0.4), белый лист со скруглением сверху,
@@ -52,6 +62,20 @@ export function BottomSheet({
   bottomInset?: number;
 }) {
   const [render, setRender] = React.useState(visible);
+  const currentSnapshot: BottomSheetSnapshot = {
+    title,
+    children,
+    footer,
+    sheet,
+    bodyStyle,
+    maxHeight,
+    bottomInset,
+  };
+  const visibleSnapshotRef = React.useRef(currentSnapshot);
+  if (visible) {
+    visibleSnapshotRef.current = currentSnapshot;
+  }
+  const content = visible ? currentSnapshot : visibleSnapshotRef.current;
   const translateY = useSharedValue(SHEET_FALLBACK_H);
   const backdropOpacity = useSharedValue(0);
   const dragY = useSharedValue(0);
@@ -63,7 +87,7 @@ export function BottomSheet({
   const panGesture = React.useMemo(
     () =>
       Gesture.Pan()
-        .enabled(sheet)
+        .enabled(content.sheet)
         .activeOffsetY([8, 9999])
         .failOffsetX([-16, 16])
         .onBegin(() => {
@@ -90,7 +114,7 @@ export function BottomSheet({
             });
           }
         }),
-    [closeFromGesture, dragY, sheet],
+    [closeFromGesture, content.sheet, dragY],
   );
 
   React.useEffect(() => {
@@ -166,7 +190,7 @@ export function BottomSheet({
         <Animated.View
           style={[
             styles.backdropFill,
-            bottomInset != null && { bottom: bottomInset },
+            content.bottomInset != null && { bottom: content.bottomInset },
             backdropStyle,
           ]}
           pointerEvents="box-none"
@@ -180,8 +204,8 @@ export function BottomSheet({
           onLayout={handleSheetLayout}
           style={[
             styles.sheet,
-            maxHeight != null && { maxHeight },
-            bottomInset != null && { marginBottom: bottomInset },
+            content.maxHeight != null && { maxHeight: content.maxHeight },
+            content.bottomInset != null && { marginBottom: content.bottomInset },
             sheetStyle,
           ]}
         >
@@ -189,16 +213,16 @@ export function BottomSheet({
           style={styles.sheetSafe}
           edges={['bottom']}
         >
-          {sheet ? (
+          {content.sheet ? (
             <GestureDetector gesture={panGesture}>
               <View style={styles.handleWrap}>
                 <View style={styles.handle} />
-                {title ? <Text style={styles.sheetTitle}>{title}</Text> : null}
+                {content.title ? <Text style={styles.sheetTitle}>{content.title}</Text> : null}
               </View>
             </GestureDetector>
-          ) : title ? (
+          ) : content.title ? (
             <View style={styles.header}>
-              <Text style={styles.title}>{title}</Text>
+              <Text style={styles.title}>{content.title}</Text>
               <FastPressable
                 onPress={onClose}
                 hitSlop={12}
@@ -208,9 +232,9 @@ export function BottomSheet({
             </View>
           ) : null}
 
-          <View style={[styles.body, bodyStyle]}>{children}</View>
+          <View style={[styles.body, content.bodyStyle]}>{content.children}</View>
 
-          {footer ? <View style={styles.footer}>{footer}</View> : null}
+          {content.footer ? <View style={styles.footer}>{content.footer}</View> : null}
         </SafeAreaView>
         </Animated.View>
       </View>
