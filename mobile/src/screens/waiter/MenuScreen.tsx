@@ -1,7 +1,8 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, Modal as RNModal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Modal as RNModal, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -276,13 +277,13 @@ export function MenuScreen() {
             style={styles.searchInput}
           />
         </View>
-        <Pressable style={[styles.tableChip, tablePickerOpen && styles.tableChipActive]} onPress={() => setTablePickerOpen(true)}>
+        <FastPressable style={[styles.tableChip, tablePickerOpen && styles.tableChipActive]} onPress={() => setTablePickerOpen(true)}>
           <Text style={styles.tableChipText}>
             Стол {tableNumber}
             {hallName ? ` · ${hallName}` : ''}
           </Text>
           <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} />
-        </Pressable>
+        </FastPressable>
       </View>
 
       {/* Категории */}
@@ -330,9 +331,9 @@ export function MenuScreen() {
               {replacementTarget ? orderItemName(replacementTarget.item) : ''}
             </Text>
           </View>
-          <Pressable onPress={clearReplacement} style={styles.replacementCancel}>
+          <FastPressable onPress={clearReplacement} style={styles.replacementCancel}>
             <Text style={styles.replacementCancelText}>Отмена</Text>
-          </Pressable>
+          </FastPressable>
         </View>
       ) : (
       <>
@@ -342,13 +343,13 @@ export function MenuScreen() {
             <Text style={styles.editingLabel}>Редактирование заказа</Text>
             <Text style={styles.editingName} numberOfLines={1}>{editingOrderNumber}</Text>
           </View>
-          <Pressable onPress={cancelEditing} style={styles.replacementCancel}>
+          <FastPressable onPress={cancelEditing} style={styles.replacementCancel}>
             <Text style={styles.replacementCancelText}>Отмена</Text>
-          </Pressable>
+          </FastPressable>
         </View>
       ) : null}
       <View style={styles.cartBar}>
-        <Pressable
+        <FastPressable
           style={styles.cartInfo}
           disabled={count === 0}
           onPress={() => setCartOpen(true)}
@@ -358,7 +359,7 @@ export function MenuScreen() {
             <Text style={styles.cartCount}>{count} {pozLabel(count)}</Text>
             <NumberTicker value={cartTotal} style={styles.cartTotal} digitHeight={17} />
           </View>
-        </Pressable>
+        </FastPressable>
         <Button
           title={submitLabel}
           onPress={onSubmit}
@@ -481,7 +482,7 @@ const DishCard = memo(function DishCard({
   const canDecrement = !hasVariants || lineCount === 1;
 
   return (
-    <Pressable
+    <FastPressable
       disabled={isDisabled}
       onPress={() => onAdd(dish)}
       style={[styles.dish, active && styles.dishActive, isDisabled && styles.dishDisabled]}
@@ -513,7 +514,7 @@ const DishCard = memo(function DishCard({
           {hasDiscount ? <Text style={styles.oldPrice}> {money(originalUnit)}</Text> : null}
         </Text>
         {active && canDecrement ? (
-          <Pressable
+          <FastPressable
             style={styles.qtyBadge}
             onPress={(event) => {
               event.stopPropagation();
@@ -521,14 +522,14 @@ const DishCard = memo(function DishCard({
             }}
           >
             <Text style={styles.qtyBadgeText}>{qty}</Text>
-          </Pressable>
+          </FastPressable>
         ) : active ? (
           <View style={styles.qtyCounter}>
             <Text style={styles.qtyCounterText}>{qty}</Text>
           </View>
         ) : null}
       </View>
-    </Pressable>
+    </FastPressable>
   );
 }, (prev, next) =>
   prev.dish === next.dish &&
@@ -575,7 +576,7 @@ function VariantSheet({
           const price = dishUnitPrice(v.price, dish.discountType, dish.discountValue);
           const isOutOfStock = dish.trackInventory && typeof v.stock === 'number' && v.stock <= 0;
           return (
-            <Pressable
+            <FastPressable
               key={v.id}
               disabled={isOutOfStock}
               onPress={() => setSelectedId(v.id)}
@@ -589,7 +590,7 @@ function VariantSheet({
                 {isOutOfStock ? <Text style={styles.variantOutOfStock}>  Нет в наличии</Text> : null}
               </Text>
               <Text style={styles.variantPrice}>{money(price)}</Text>
-            </Pressable>
+            </FastPressable>
           );
         })}
       </View>
@@ -640,7 +641,7 @@ function SetPickerSheet({
             const selectedSet = set.id === selectedId;
             const count = (set.setComponents ?? []).reduce((sum, component) => sum + component.quantity, 0);
             return (
-              <Pressable
+              <FastPressable
                 key={set.id}
                 onPress={() => setSelectedId(set.id)}
                 style={[styles.setRow, selectedSet && styles.setRowSelected]}
@@ -653,7 +654,7 @@ function SetPickerSheet({
                   <Text style={styles.setSub}>{count} блюд</Text>
                 </View>
                 <Text style={styles.setPrice}>{money(set.price)}</Text>
-                <Pressable
+                <FastPressable
                   hitSlop={10}
                   onPress={(event) => {
                     event.stopPropagation();
@@ -662,8 +663,8 @@ function SetPickerSheet({
                   style={styles.setEyeBtn}
                 >
                   <PwaIcon name="eye" size={24} color={colors.textLight} strokeWidth={2} />
-                </Pressable>
-              </Pressable>
+                </FastPressable>
+              </FastPressable>
             );
           })}
         </View>
@@ -820,20 +821,20 @@ function SetConfigSheet({
                     ) : null}
                   </View>
                   {removed || replaced ? (
-                    <Pressable onPress={() => resetComponent(component.componentId)} style={styles.componentTextButton}>
+                    <FastPressable onPress={() => resetComponent(component.componentId)} style={styles.componentTextButton}>
                       <Text style={styles.componentTextButtonPrimary}>{removed ? 'Вернуть' : 'Отменить'}</Text>
-                    </Pressable>
+                    </FastPressable>
                   ) : (
                     <View style={styles.componentActions}>
                       {component.removable ? (
-                        <Pressable onPress={() => toggleRemove(component)} style={styles.componentTextButton}>
+                        <FastPressable onPress={() => toggleRemove(component)} style={styles.componentTextButton}>
                           <Text style={styles.componentTextButtonDanger}>Убрать</Text>
-                        </Pressable>
+                        </FastPressable>
                       ) : null}
                       {component.replaceable ? (
-                        <Pressable onPress={() => setReplacingId(component.componentId)} style={styles.componentTextButton}>
+                        <FastPressable onPress={() => setReplacingId(component.componentId)} style={styles.componentTextButton}>
                           <Text style={styles.componentTextButtonPrimary}>Заменить</Text>
-                        </Pressable>
+                        </FastPressable>
                       ) : null}
                     </View>
                   )}
@@ -883,12 +884,12 @@ function ReplacementPickerModal({
   onPick: (dish: Dish) => void;
 }) {
   return (
-    <RNModal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <RNModal visible={visible} animationType="none" statusBarTranslucent onRequestClose={onClose}>
       <SafeAreaView style={styles.replacementSafe} edges={['top']}>
         <View style={styles.replacementHeader}>
-          <Pressable onPress={onClose} hitSlop={12} style={styles.replacementBack}>
+          <FastPressable onPress={onClose} hitSlop={12} style={styles.replacementBack}>
             <PwaIcon name="chevronLeft" size={28} color={colors.textSecondary} strokeWidth={2.2} />
-          </Pressable>
+          </FastPressable>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={styles.replacementTitle}>Выберите замену</Text>
             {replacing ? <Text style={styles.replacementSubtitle}>вместо: {replacing.originalName}</Text> : null}
@@ -914,10 +915,10 @@ function ReplacementPickerModal({
           <ScrollView showsVerticalScrollIndicator={false}>
             <View style={styles.replacementGrid}>
               {options.map((dish) => (
-                <Pressable key={dish.id} onPress={() => onPick(dish)} style={styles.replacementDish}>
+                <FastPressable key={dish.id} onPress={() => onPick(dish)} style={styles.replacementDish}>
                   <Text style={styles.replacementDishName} numberOfLines={2}>{dish.name}</Text>
                   <Text style={styles.replacementDishPrice}>{money(minDishUnitPrice(dish))}</Text>
-                </Pressable>
+                </FastPressable>
               ))}
             </View>
             {options.length === 0 ? <Text style={styles.notFound}>Ничего не найдено</Text> : null}

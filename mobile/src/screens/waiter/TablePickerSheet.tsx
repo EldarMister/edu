@@ -1,6 +1,7 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet } from '@/components/BottomSheet';
+import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { TABLE_STATUS } from '@/theme/status';
@@ -93,7 +94,7 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
                 const selected = tbl.id === currentTableId;
                 const meta = TABLE_STATUS[tbl.status];
                 return (
-                  <Pressable
+                  <FastPressable
                     key={tbl.id}
                     onPress={() => pick(tbl, hall.name)}
                     style={[styles.table, selected && styles.tableSelected]}
@@ -102,7 +103,7 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
                     <Text style={[styles.tableNumber, selected && { color: colors.white }]}>
                       {tbl.number}
                     </Text>
-                  </Pressable>
+                  </FastPressable>
                 );
               })}
             </View>

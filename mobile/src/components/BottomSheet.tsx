@@ -4,7 +4,6 @@ import {
   Easing,
   Modal as RNModal,
   PanResponder,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -13,8 +12,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, spacing, waiterLayout } from '@/theme';
 import { PwaIcon } from './PwaIcon';
+import { FastPressable } from './FastPressable';
 
 const CLOSE_DRAG_DISTANCE = 110;
+// Паритет с PWA: панель чисто «выдвигается» на всю свою высоту (translateY 100%→0)
+// за 240ms с cubic-bezier(0.4,0,0.2,1), без затухания самой панели — только фон.
+const SHEET_ENTER_MS = 240;
+const SHEET_EXIT_MS = 220;
+const SHEET_FALLBACK_H = 900;
+const SHEET_EASE = Easing.bezier(0.4, 0, 0.2, 1);
 
 /**
  * Нижний лист / модалка — повторяет PWA Modal на мобильном (items-end):
@@ -45,8 +51,13 @@ export function BottomSheet({
   bottomInset?: number;
 }) {
   const [render, setRender] = React.useState(visible);
-  const progress = React.useRef(new Animated.Value(0)).current;
+  // translateY анимируется напрямую (не через progress-интерполяцию), чтобы
+  // выезжать ровно на измеренную высоту листа — как PWA translateY(100%).
+  const translateY = React.useRef(new Animated.Value(SHEET_FALLBACK_H)).current;
+  const backdropOpacity = React.useRef(new Animated.Value(0)).current;
   const dragY = React.useRef(new Animated.Value(0)).current;
+  const sheetHeightRef = React.useRef(SHEET_FALLBACK_H);
+  const pendingEnterRef = React.useRef(false);
   const panResponder = React.useMemo(
     () =>
       PanResponder.create({
@@ -84,72 +95,101 @@ export function BottomSheet({
   );
 
   React.useEffect(() => {
-    let frame: ReturnType<typeof requestAnimationFrame> | null = null;
-    progress.stopAnimation();
+    translateY.stopAnimation();
+    backdropOpacity.stopAnimation();
     if (visible) {
-      setRender(true);
-      progress.setValue(0);
+      // Держим лист скрытым до onLayout, где узнаем точную высоту и запустим въезд.
+      translateY.setValue(sheetHeightRef.current);
+      backdropOpacity.setValue(0);
       dragY.setValue(0);
-      frame = requestAnimationFrame(() => {
-        Animated.timing(progress, {
-          toValue: 1,
-          duration: 300,
-          easing: Easing.out(Easing.cubic),
-          isInteraction: false,
-          useNativeDriver: true,
-        }).start();
-      });
-      return () => {
-        if (frame) cancelAnimationFrame(frame);
-      };
+      pendingEnterRef.current = true;
+      setRender(true);
+      return;
     }
-    Animated.timing(progress, {
-      toValue: 0,
-      duration: 240,
-      easing: Easing.in(Easing.cubic),
-      isInteraction: false,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) {
-        setRender(false);
-        dragY.setValue(0);
-      }
+    pendingEnterRef.current = false;
+    Animated.parallel([
+      Animated.timing(translateY, {
+        toValue: sheetHeightRef.current,
+        duration: SHEET_EXIT_MS,
+        easing: SHEET_EASE,
+        isInteraction: false,
+        useNativeDriver: true,
+      }),
+      Animated.timing(dragY, {
+        toValue: 0,
+        duration: SHEET_EXIT_MS,
+        easing: SHEET_EASE,
+        isInteraction: false,
+        useNativeDriver: true,
+      }),
+      Animated.timing(backdropOpacity, {
+        toValue: 0,
+        duration: SHEET_EXIT_MS,
+        easing: SHEET_EASE,
+        isInteraction: false,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) setRender(false);
     });
-  }, [dragY, progress, visible]);
+  }, [backdropOpacity, dragY, translateY, visible]);
+
+  const handleSheetLayout = React.useCallback(
+    (e: { nativeEvent: { layout: { height: number } } }) => {
+      const h = e.nativeEvent.layout.height;
+      if (h > 0) sheetHeightRef.current = h;
+      if (pendingEnterRef.current && h > 0) {
+        pendingEnterRef.current = false;
+        translateY.setValue(h);
+        Animated.parallel([
+          Animated.timing(translateY, {
+            toValue: 0,
+            duration: SHEET_ENTER_MS,
+            easing: SHEET_EASE,
+            isInteraction: false,
+            useNativeDriver: true,
+          }),
+          Animated.timing(backdropOpacity, {
+            toValue: 1,
+            duration: SHEET_ENTER_MS,
+            easing: SHEET_EASE,
+            isInteraction: false,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }
+    },
+    [backdropOpacity, translateY],
+  );
 
   if (!render) return null;
-
-  const translateY = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [96, 0],
-  });
-  const opacity = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 1],
-  });
 
   return (
     <RNModal
       visible={render}
       animationType="none"
       transparent
-      statusBarTranslucent={false}
+      statusBarTranslucent
       hardwareAccelerated
       onRequestClose={onClose}
     >
       <View style={styles.backdrop}>
         <Animated.View
-          style={[styles.backdropFill, bottomInset != null && { bottom: bottomInset }, { opacity }]}
+          style={[styles.backdropFill, bottomInset != null && { bottom: bottomInset }, { opacity: backdropOpacity }]}
           pointerEvents="box-none"
         >
-          <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+          <FastPressable
+            style={StyleSheet.absoluteFill}
+            onPress={onClose}
+          />
         </Animated.View>
         <Animated.View
+          onLayout={handleSheetLayout}
           style={[
             styles.sheet,
             maxHeight != null && { maxHeight },
             bottomInset != null && { marginBottom: bottomInset },
-            { opacity, transform: [{ translateY }, { translateY: dragY }] },
+            { transform: [{ translateY }, { translateY: dragY }] },
           ]}
         >
         <SafeAreaView
@@ -164,9 +204,12 @@ export function BottomSheet({
           ) : title ? (
             <View style={styles.header}>
               <Text style={styles.title}>{title}</Text>
-              <Pressable onPress={onClose} hitSlop={12}>
+              <FastPressable
+                onPress={onClose}
+                hitSlop={12}
+              >
                 <PwaIcon name="close" size={22} color={colors.textLight} />
-              </Pressable>
+              </FastPressable>
             </View>
           ) : null}
 
@@ -182,7 +225,7 @@ export function BottomSheet({
 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end' },
-  backdropFill: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.34)' },
+  backdropFill: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
     backgroundColor: colors.card,
     borderTopLeftRadius: waiterLayout.sheetRadius,

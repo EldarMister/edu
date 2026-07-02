@@ -18,9 +18,9 @@ export function NumberTicker({
     <View style={styles.wrap}>
       {text.split('').map((ch, index) =>
         /\d/.test(ch) ? (
-          <Digit key={`${index}-${ch}`} digit={Number(ch)} height={digitHeight} textStyle={style} />
+          <Digit key={`digit-${index}`} digit={Number(ch)} height={digitHeight} textStyle={style} />
         ) : (
-          <Text key={`${index}-${ch}`} style={style}>
+          <Text key={`char-${index}`} style={style}>
             {ch}
           </Text>
         ),

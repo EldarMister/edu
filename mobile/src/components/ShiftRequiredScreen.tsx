@@ -1,6 +1,7 @@
 import React from 'react';
-import { ActivityIndicator, Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { FastPressable } from '@/components/FastPressable';
 import { ShiftStartAnimation, type ShiftAnimState } from './ShiftStartAnimation';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { useStartShift } from '@/services/api/waiter';
@@ -105,9 +106,9 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
         <View style={styles.footer}>
           {phase === 'idle' ? (
             <Animated.View style={{ transform: [{ scale: btnScale }] }}>
-              <Pressable style={styles.button} onPress={onStart}>
+              <FastPressable style={styles.button} onPress={onStart}>
                 <Text style={styles.buttonText}>Начать смену</Text>
-              </Pressable>
+              </FastPressable>
             </Animated.View>
           ) : phase === 'loading' ? (
             <View style={styles.footerLoading}>

@@ -1,8 +1,9 @@
 import React from 'react';
-import { Animated, Easing, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Easing, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, RoundBtn } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
+import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
@@ -38,9 +39,9 @@ export function CartSheet({
       </View>
       <Button title={submitLabel} onPress={onSubmit} loading={submitting} disabled={!hasLines} />
       {hasLines ? (
-        <Pressable onPress={() => clear()} style={styles.clearBtn}>
+        <FastPressable onPress={() => clear()} style={styles.clearBtn}>
           <Text style={styles.clearText}>Очистить</Text>
-        </Pressable>
+        </FastPressable>
       ) : null}
     </View>
   );
@@ -84,19 +85,19 @@ export function CartSheet({
               style={[styles.line, i > 0 && styles.lineBorder]}
             >
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Pressable disabled={!isSet} onPress={() => setExpanded((current) => ({ ...current, [key]: !open }))}>
+                <FastPressable disabled={!isSet} onPress={() => setExpanded((current) => ({ ...current, [key]: !open }))}>
                   <Text style={styles.lineName} numberOfLines={1}>{cartLineName(l)}</Text>
-                </Pressable>
+                </FastPressable>
                 {l.set ? (
                   <Text style={styles.lineSub}>
                     {setChanged(l) ? 'Состав изменён' : `${l.set.components.length} блюд`} · {open ? 'скрыть' : 'состав'}
                   </Text>
                 ) : null}
                 {l.takeaway ? (
-                  <Pressable onPress={() => setTakeaway(i, false)} style={styles.takeawayChip} hitSlop={6}>
+                  <FastPressable onPress={() => setTakeaway(i, false)} style={styles.takeawayChip} hitSlop={6}>
                     <PwaIcon name="bag" size={12} color={colors.textSecondary} strokeWidth={2} />
                     <Text style={styles.takeawayChipText}>С собой</Text>
-                  </Pressable>
+                  </FastPressable>
                 ) : null}
               </View>
               <View style={styles.stepper}>
@@ -144,28 +145,23 @@ function TakeawaySwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) 
       toValue: on ? 1 : 0,
       duration: 180,
       easing: Easing.bezier(0.4, 0, 0.2, 1),
-      useNativeDriver: false,
+      useNativeDriver: true,
     }).start();
   }, [on, progress]);
 
   const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [2, 18] });
-  const backgroundColor = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [colors.slate300, colors.primary],
-  });
-
   return (
-    <Pressable
+    <FastPressable
       accessibilityRole="switch"
       accessibilityState={{ checked: on }}
       onPress={() => onChange(!on)}
       style={styles.switchPress}
       hitSlop={8}
     >
-      <Animated.View style={[styles.switchTrack, { backgroundColor }]}>
+      <View style={[styles.switchTrack, { backgroundColor: on ? colors.primary : colors.slate300 }]}>
         <Animated.View style={[styles.switchThumb, { transform: [{ translateX }] }]} />
-      </Animated.View>
-    </Pressable>
+      </View>
+    </FastPressable>
   );
 }
 

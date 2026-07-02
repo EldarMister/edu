@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -59,6 +60,7 @@ export function OrderDetailScreen() {
   const beginPrint = useReceiptPrint((s) => s.begin);
   const setReplacementTarget = useReplacement((s) => s.setTarget);
   const [payOpen, setPayOpen] = useState(false);
+  const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [billItem, setBillItem] = useState<OrderItem | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [actionCooldown, setActionCooldown] = useState(0);
@@ -67,7 +69,14 @@ export function OrderDetailScreen() {
   const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
 
   React.useEffect(() => {
-    if (order?.status === 'waiting_payment') setPayOpen(true);
+    if (order) setPaymentOrder(order);
+  }, [order]);
+
+  React.useEffect(() => {
+    if (order?.status === 'waiting_payment') {
+      setPaymentOrder(order);
+      setPayOpen(true);
+    }
   }, [order?.id, order?.status]);
 
   React.useEffect(() => {
@@ -84,7 +93,20 @@ export function OrderDetailScreen() {
   if (!order) {
     return (
       <SafeAreaView style={styles.safe} edges={[]}>
-        <EmptyState text="Заказ не найден" />
+        {payOpen && paymentOrder ? (
+          <PaymentSheet
+            order={paymentOrder}
+            visible={payOpen}
+            onClose={() => setPayOpen(false)}
+            onPaid={() => {
+              setPayOpen(false);
+              setPaymentOrder(null);
+              navigation.getParent()?.navigate('Tables');
+            }}
+          />
+        ) : (
+          <EmptyState text="Заказ не найден" />
+        )}
       </SafeAreaView>
     );
   }
@@ -94,6 +116,8 @@ export function OrderDetailScreen() {
   const cooldownActive = actionCooldown > 0;
   const stationItems = order.items.filter((item) => item.prepStation !== 'none');
   const hasReadyStationItem = stationItems.some((item) => item.status === 'ready');
+  const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
+  const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
   const billCorrection = ['ready', 'picked_up', 'served'].includes(order.status);
 
   const runProtectedAction = (action: () => void) => {
@@ -242,23 +266,38 @@ export function OrderDetailScreen() {
         );
       case 'served':
         return (
-          <View style={styles.actions}>
-            <Button
-              title="Счёт"
-              variant="secondary"
-              style={{ width: 110 }}
-              loading={print.isPending}
-              onPress={requestPreliminaryReceipt}
-            />
-            <Button
-              title={cooldownActive ? String(actionCooldown) : 'Перейти к оплате'}
-              style={{ flex: 1 }}
-              loading={busy && !cooldownActive}
-              disabled={cooldownActive}
-              onPress={() =>
-                runProtectedAction(() => toPayment.mutate(order.id, { onError, onSuccess: () => setPayOpen(true) }))
-              }
-            />
+          <View style={{ gap: spacing.sm }}>
+            {!allActiveItemsServed ? (
+              <View style={styles.warningBox}>
+                <Text style={styles.warningText}>Нельзя перейти к оплате: есть неподанные блюда.</Text>
+              </View>
+            ) : null}
+            <View style={styles.actions}>
+              <Button
+                title="Счёт"
+                variant="secondary"
+                style={{ width: 110 }}
+                loading={print.isPending}
+                onPress={requestPreliminaryReceipt}
+              />
+              <Button
+                title={cooldownActive ? String(actionCooldown) : 'Перейти к оплате'}
+                style={{ flex: 1 }}
+                loading={busy && !cooldownActive}
+                disabled={cooldownActive || !allActiveItemsServed}
+                onPress={() =>
+                  runProtectedAction(() =>
+                    toPayment.mutate(order.id, {
+                      onError,
+                      onSuccess: () => {
+                        setPaymentOrder(order);
+                        setPayOpen(true);
+                      },
+                    })
+                  )
+                }
+              />
+            </View>
           </View>
         );
       case 'waiting_payment':
@@ -306,7 +345,7 @@ export function OrderDetailScreen() {
               </View>
             ) : null}
             {DETAIL_EDITABLE.includes(order.status) && !unclaimedQr ? (
-              <Pressable
+              <FastPressable
                 onPress={() => {
                   const lines = orderToCartLines(order, dishes.data ?? []);
                   if (lines.length === 0) {
@@ -324,7 +363,7 @@ export function OrderDetailScreen() {
               >
                 <PwaIcon name="pencil" size={14} color={colors.textSecondary} />
                 <Text style={styles.editOrderText}>Изменить</Text>
-              </Pressable>
+              </FastPressable>
             ) : null}
           </View>
         </View>
@@ -365,11 +404,12 @@ export function OrderDetailScreen() {
       </View>
 
       <PaymentSheet
-        order={order}
+        order={paymentOrder ?? order}
         visible={payOpen}
         onClose={() => setPayOpen(false)}
         onPaid={() => {
           setPayOpen(false);
+          setPaymentOrder(null);
           navigation.getParent()?.navigate('Tables');
         }}
       />
@@ -419,7 +459,7 @@ function ItemCard({
   const clickable = billCorrection && (item.status === 'ready' || item.status === 'served') && !disabled;
   const hasExtra = comment || ((rejected || item.status === 'cancelled') && item.rejectReason);
   return (
-    <Pressable disabled={!clickable} onPress={onCancel} style={[styles.itemCard, clickable && styles.itemCardClickable]}>
+    <FastPressable disabled={!clickable} onPress={onCancel} style={[styles.itemCard, clickable && styles.itemCardClickable]}>
       <View style={styles.itemMainRow}>
         <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={2}>
           {name}
@@ -447,7 +487,7 @@ function ItemCard({
           ) : null}
         </View>
       ) : null}
-    </Pressable>
+    </FastPressable>
   );
 }
 
@@ -564,12 +604,12 @@ function PartialRejectionScreen({
               </View>
               {item.rejectReason ? <Text style={styles.rejectReason}>{item.rejectReason}</Text> : null}
               <View style={styles.rejectActions}>
-                <Pressable disabled={busy} onPress={() => onReplacePress(item)} style={styles.replaceBtn}>
+                <FastPressable disabled={busy} onPress={() => onReplacePress(item)} style={styles.replaceBtn}>
                   <Text style={styles.replaceBtnText}>Заменить</Text>
-                </Pressable>
-                <Pressable disabled={busy} onPress={() => onRemove(item)} style={styles.removeBtn}>
+                </FastPressable>
+                <FastPressable disabled={busy} onPress={() => onRemove(item)} style={styles.removeBtn}>
                   <Text style={styles.removeBtnText}>Убрать</Text>
-                </Pressable>
+                </FastPressable>
               </View>
             </View>
           ))}
@@ -586,9 +626,9 @@ function PartialRejectionScreen({
           <Text style={styles.warningText}>Кухня отказала часть заказа. Решите по каждой отказанной позиции.</Text>
         </View>
         <Button title="Продолжить без отказанных блюд" onPress={onContinue} loading={busy} style={styles.partialContinueBtn} />
-        <Pressable disabled={busy} onPress={onCancel} style={styles.cancelWholeBtn}>
+        <FastPressable disabled={busy} onPress={onCancel} style={styles.cancelWholeBtn}>
           <Text style={styles.cancelWholeText}>Отменить весь заказ</Text>
-        </Pressable>
+        </FastPressable>
       </ScrollView>
     </SafeAreaView>
   );

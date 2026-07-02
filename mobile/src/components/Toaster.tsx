@@ -1,6 +1,7 @@
 import React from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { FastPressable } from '@/components/FastPressable';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { type AppNotification, useNotifications } from '@/store/notifications';
 
@@ -86,11 +87,11 @@ function Toast({ toast }: { toast: RenderedToast }) {
         },
       ]}
     >
-      <Pressable onPress={() => dismiss(toast.id)} style={styles.toast}>
+      <FastPressable onPress={() => dismiss(toast.id)} style={styles.toast}>
         <Text numberOfLines={1} style={styles.toastText}>
           {toast.message}
         </Text>
-      </Pressable>
+      </FastPressable>
     </Animated.View>
   );
 }

@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Easing,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -14,6 +13,7 @@ import {
 } from 'react-native';
 import { colors, radius, spacing, fontSize, cardShadow, waiterLayout } from '@/theme';
 import { PwaIcon } from './PwaIcon';
+import { FastPressable } from './FastPressable';
 
 type ButtonVariant = 'primary' | 'secondary' | 'danger';
 type ButtonSize = 'lg' | 'md';
@@ -47,7 +47,7 @@ export function Button({
     variant === 'secondary' ? (danger ? colors.danger : colors.textPrimary) : colors.white;
 
   return (
-    <Pressable
+    <FastPressable
       onPress={onPress}
       disabled={isDisabled}
       style={[
@@ -69,7 +69,7 @@ export function Button({
           {title}
         </Text>
       )}
-    </Pressable>
+    </FastPressable>
   );
 }
 
@@ -93,9 +93,12 @@ export function Card({
   ];
   if (onPress) {
     return (
-      <Pressable onPress={onPress} style={content}>
+      <FastPressable
+        onPress={onPress}
+        style={content}
+      >
         {children}
-      </Pressable>
+      </FastPressable>
     );
   }
   return <View style={content}>{children}</View>;
@@ -173,9 +176,13 @@ export function PillTabs<T extends string>({
         {items.map((it) => {
           const active = it.key === value;
           return (
-            <Pressable key={it.key} onPress={() => onChange(it.key)} style={[styles.pill, active && styles.pillActive]}>
+            <FastPressable
+              key={it.key}
+              onPress={() => onChange(it.key)}
+              style={[styles.pill, active && styles.pillActive]}
+            >
               <Text style={[styles.pillText, active && styles.pillTextActive]}>{it.label}</Text>
-            </Pressable>
+            </FastPressable>
           );
         })}
       </ScrollView>
@@ -204,7 +211,7 @@ export function SegmentTabs<T extends string>({
       {items.map((it) => {
         const active = it.key === value;
         return (
-          <Pressable
+          <FastPressable
             key={it.key}
             onPress={() => onChange(it.key)}
             style={[styles.segment, active && styles.segmentActive]}
@@ -215,14 +222,14 @@ export function SegmentTabs<T extends string>({
                 <Text style={styles.segmentCountText}>{count}</Text>
               </View>
             ) : null}
-          </Pressable>
+          </FastPressable>
         );
       })}
     </ScrollView>
   );
 }
 
-/** Тумблер — повторяет PWA Toggle (track 36×20, анимированный бегунок). */
+/** Тумблер — повторяет PWA Toggle (track 44×24, анимированный бегунок). */
 export function Toggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
   const progress = React.useRef(new Animated.Value(checked ? 1 : 0)).current;
 
@@ -231,28 +238,23 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (val
       toValue: checked ? 1 : 0,
       duration: 180,
       easing: Easing.bezier(0.4, 0, 0.2, 1),
-      useNativeDriver: false,
+      useNativeDriver: true,
     }).start();
   }, [checked, progress]);
 
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [2, 18] });
-  const backgroundColor = progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [colors.slate300, colors.primary],
-  });
-
+  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [2, 22] });
   return (
-    <Pressable
+    <FastPressable
       accessibilityRole="switch"
       accessibilityState={{ checked }}
       onPress={() => onChange(!checked)}
       hitSlop={8}
       style={styles.toggle}
     >
-      <Animated.View style={[styles.toggleTrack, { backgroundColor }]}>
+      <View style={[styles.toggleTrack, { backgroundColor: checked ? colors.primary : colors.slate300 }]}>
         <Animated.View style={[styles.toggleThumb, { transform: [{ translateX }] }]} />
-      </Animated.View>
-    </Pressable>
+      </View>
+    </FastPressable>
   );
 }
 
@@ -260,7 +262,7 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (val
 export function RoundBtn({ kind, onPress }: { kind: 'inc' | 'dec'; onPress: () => void }) {
   const isDec = kind === 'dec';
   return (
-    <Pressable
+    <FastPressable
       onPress={onPress}
       style={[
         styles.roundBtn,
@@ -268,7 +270,7 @@ export function RoundBtn({ kind, onPress }: { kind: 'inc' | 'dec'; onPress: () =
       ]}
     >
       <PwaIcon name={isDec ? 'minus' : 'plus'} size={14} color={isDec ? colors.red500 : colors.primary} />
-    </Pressable>
+    </FastPressable>
   );
 }
 
@@ -338,9 +340,19 @@ const styles = StyleSheet.create({
   segmentCount: { backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: radius.pill, paddingHorizontal: 6, paddingVertical: 1 },
   segmentCountText: { color: colors.white, fontSize: fontSize.xs },
 
-  toggle: { width: 36, height: 20 },
-  toggleTrack: { width: 36, height: 20, borderRadius: 10, justifyContent: 'center' },
-  toggleThumb: { width: 16, height: 16, borderRadius: 8, backgroundColor: colors.white },
+  toggle: { width: 44, height: 24 },
+  toggleTrack: { width: 44, height: 24, borderRadius: 12, justifyContent: 'center' },
+  toggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.white,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.14,
+    shadowRadius: 2,
+    elevation: 2,
+  },
   roundBtn: {
     width: waiterLayout.roundButton,
     height: waiterLayout.roundButton,

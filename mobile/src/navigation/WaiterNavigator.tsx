@@ -3,10 +3,12 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { colors, fontSize, waiterLayout } from '@/theme';
 import { WaiterHeader } from '@/components/WaiterHeader';
 import { OfflineBanner } from '@/components/ConnectionStatus';
 import { ShiftRequiredScreen } from '@/components/ShiftRequiredScreen';
+import { FastPressable } from '@/components/FastPressable';
 import { Loading } from '@/components/ui';
 import { PwaIcon, type PwaIconName } from '@/components/PwaIcon';
 import { TablesScreen } from '@/screens/waiter/TablesScreen';
@@ -39,7 +41,7 @@ export function WaiterNavigator() {
   const [busy, setBusy] = React.useState(false);
   const showShiftLoading = !shiftResolved;
   const showGate = busy || (shiftResolved && !shiftActive);
-  const tabBarHeight = waiterLayout.navBarHeight + Math.max(insets.bottom, 4);
+  const tabBarHeight = waiterLayout.navBarHeight + insets.bottom;
 
   // Первичная проверка смены — белый экран с лоадером (без шапки/навигации).
   if (showShiftLoading) {
@@ -62,17 +64,12 @@ export function WaiterNavigator() {
       <WaiterHeader />
       <View style={{ flex: 1 }}>
         <Tab.Navigator
+          tabBar={(props) => <WaiterTabBar {...props} ordersCount={ordersCount} />}
           screenOptions={({ route }) => ({
             headerShown: false,
             tabBarActiveTintColor: colors.primary,
             tabBarInactiveTintColor: colors.textMuted,
-            tabBarStyle: {
-              height: tabBarHeight,
-              borderTopColor: colors.border,
-              backgroundColor: colors.white,
-              paddingTop: 8,
-              paddingBottom: Math.max(insets.bottom, 4),
-            },
+            tabBarStyle: { height: tabBarHeight },
             tabBarLabelStyle: { fontSize: fontSize.xs, marginTop: 2 },
             tabBarIcon: ({ color }) => (
               <View style={styles.iconWrap}>
@@ -96,9 +93,89 @@ export function WaiterNavigator() {
   );
 }
 
+function WaiterTabBar({ state, descriptors, navigation, ordersCount }: BottomTabBarProps & { ordersCount: number }) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View style={[styles.tabBar, { paddingBottom: insets.bottom }]}>
+      <View style={styles.tabBarRow}>
+        {state.routes.map((route, index) => {
+          const focused = state.index === index;
+          const options = descriptors[route.key]?.options;
+          const label =
+            typeof options?.tabBarLabel === 'string'
+              ? options.tabBarLabel
+              : options?.title ?? route.name;
+          const color = focused ? colors.primary : colors.textMuted;
+          const badge = route.name === 'Orders' ? ordersCount : 0;
+
+          const onPress = () => {
+            const event = navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
+
+            if (!focused && !event.defaultPrevented) {
+              navigation.navigate(route.name, route.params);
+            }
+          };
+
+          return (
+            <FastPressable
+              key={route.key}
+              accessibilityRole="button"
+              accessibilityState={focused ? { selected: true } : undefined}
+              accessibilityLabel={options?.tabBarAccessibilityLabel}
+              testID={options?.tabBarButtonTestID}
+              onPress={onPress}
+              style={styles.tabButton}
+            >
+              <View style={styles.iconWrap}>
+                <PwaIcon name={ICONS[route.name as keyof WaiterTabParamList]} size={22} color={color} />
+                {badge > 0 ? (
+                  <View style={styles.ordersBadge}>
+                    <Text style={styles.ordersBadgeText}>{badge > 99 ? '99+' : badge}</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+                {label}
+              </Text>
+            </FastPressable>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   plainSafe: { flex: 1, backgroundColor: colors.white },
   workSafe: { flex: 1, backgroundColor: colors.primary },
+  tabBar: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.white,
+  },
+  tabBarRow: {
+    height: waiterLayout.navBarHeight,
+    flexDirection: 'row',
+  },
+  tabButton: {
+    flex: 1,
+    height: waiterLayout.navBarHeight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 9,
+    paddingBottom: 9,
+    gap: 4,
+  },
+  tabLabel: {
+    fontSize: fontSize.xs,
+    lineHeight: 14,
+    fontWeight: '400',
+  },
   iconWrap: {
     width: 28,
     height: 24,

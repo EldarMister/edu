@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { PanResponder, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import { BottomSheet } from '@/components/BottomSheet';
+import { FastPressable } from '@/components/FastPressable';
 import { Button, Toggle } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { kitchenVoice } from '@/services/kitchenVoice';
@@ -54,7 +55,7 @@ export function KitchenVoiceSettingsSheet({
           {KITCHEN_SPEAKERS.map((speaker) => {
             const active = settings.speaker === speaker.value;
             return (
-              <Pressable
+              <FastPressable
                 key={speaker.value}
                 onPress={() => patch({ speaker: speaker.value })}
                 style={[styles.speakerRow, active && styles.speakerRowActive]}
@@ -63,7 +64,7 @@ export function KitchenVoiceSettingsSheet({
                   {active ? <View style={styles.radioDot} /> : null}
                 </View>
                 <Text style={[styles.speakerName, active && { color: colors.primary }]}>{speaker.label}</Text>
-              </Pressable>
+              </FastPressable>
             );
           })}
         </View>
@@ -85,20 +86,11 @@ export function KitchenVoiceSettingsSheet({
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Скорость озвучки</Text>
-        <View style={styles.rateRow}>
-          {KITCHEN_SPEECH_RATES.map((rate) => {
-            const active = settings.speechRate === rate;
-            return (
-              <Pressable
-                key={rate}
-                onPress={() => patch({ speechRate: rate as KitchenSpeechRate })}
-                style={[styles.rateChip, active && styles.rateChipActive]}
-              >
-                <Text style={[styles.rateText, active && styles.rateTextActive]}>{rate.toFixed(1)}x</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <SpeedSlider
+          rates={KITCHEN_SPEECH_RATES}
+          value={settings.speechRate}
+          onChange={(rate) => patch({ speechRate: rate })}
+        />
       </View>
 
       <View style={[styles.section, { paddingBottom: spacing.md }]}>
@@ -115,6 +107,96 @@ export function KitchenVoiceSettingsSheet({
         ) : null}
       </View>
     </BottomSheet>
+  );
+}
+
+/** Дискретный ползунок скорости — паритет с PWA SpeedSlider: дорожка с заливкой,
+ *  точки-остановки, круглый ползунок и подписи; тап и перетаскивание по дорожке. */
+function SpeedSlider({
+  rates,
+  value,
+  onChange,
+}: {
+  rates: KitchenSpeechRate[];
+  value: KitchenSpeechRate;
+  onChange: (rate: KitchenSpeechRate) => void;
+}) {
+  const n = rates.length;
+  const index = Math.max(0, rates.indexOf(value));
+  const posOf = (i: number) => (n > 1 ? (i / (n - 1)) * 100 : 0);
+  const pct = posOf(index);
+
+  const trackRef = useRef<View>(null);
+  const widthRef = useRef(0);
+  const pageXRef = useRef(0);
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const ratesRef = useRef(rates);
+  ratesRef.current = rates;
+
+  const setFromX = (absX: number) => {
+    const w = widthRef.current;
+    if (w <= 0) return;
+    const rts = ratesRef.current;
+    const ratio = Math.min(1, Math.max(0, (absX - pageXRef.current) / w));
+    const next = rts[Math.round(ratio * (rts.length - 1))];
+    if (next !== valueRef.current) onChangeRef.current(next);
+  };
+
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (e) => {
+        const pageX = e.nativeEvent.pageX;
+        trackRef.current?.measureInWindow((x, _y, w) => {
+          pageXRef.current = x;
+          if (w > 0) widthRef.current = w;
+          setFromX(pageX);
+        });
+      },
+      onPanResponderMove: (e) => setFromX(e.nativeEvent.pageX),
+    }),
+  ).current;
+
+  const onLayout = (e: LayoutChangeEvent) => {
+    widthRef.current = e.nativeEvent.layout.width;
+  };
+
+  return (
+    <View style={styles.sliderWrap}>
+      <View ref={trackRef} onLayout={onLayout} style={styles.sliderTrack} {...pan.panHandlers}>
+        <View style={styles.sliderRail} />
+        <View style={[styles.sliderFill, { width: `${pct}%` }]} />
+        {rates.map((r, i) => (
+          <View
+            key={r}
+            style={[
+              styles.sliderDot,
+              { left: `${posOf(i)}%` },
+              i <= index ? styles.sliderDotOn : styles.sliderDotOff,
+            ]}
+          />
+        ))}
+        <View style={[styles.sliderThumb, { left: `${pct}%` }]} />
+      </View>
+      <View style={styles.sliderLabels}>
+        {rates.map((r, i) => {
+          const active = r === value;
+          return (
+            <FastPressable
+              key={r}
+              onPress={() => onChange(r)}
+              style={[styles.sliderLabelHit, { left: `${posOf(i)}%` }]}
+            >
+              <Text style={[styles.sliderLabel, active && styles.sliderLabelActive]}>{r.toFixed(1)}x</Text>
+            </FastPressable>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
@@ -150,19 +232,40 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   settingLabel: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
-  rateRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  rateChip: {
-    minWidth: 52,
-    height: 36,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
+  sliderWrap: { paddingHorizontal: 10 },
+  sliderTrack: { height: 28, justifyContent: 'center' },
+  sliderRail: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 11,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: colors.background,
   },
-  rateChipActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
-  rateText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textMuted },
-  rateTextActive: { color: colors.primary },
+  sliderFill: { position: 'absolute', left: 0, top: 11, height: 6, borderRadius: 999, backgroundColor: colors.primary },
+  sliderDot: { position: 'absolute', top: 10, width: 8, height: 8, marginLeft: -4, borderRadius: 4 },
+  sliderDotOn: { backgroundColor: colors.primary },
+  sliderDotOff: { backgroundColor: colors.slate300 },
+  sliderThumb: {
+    position: 'absolute',
+    top: 4,
+    width: 20,
+    height: 20,
+    marginLeft: -10,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    backgroundColor: colors.card,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 2,
+  },
+  sliderLabels: { position: 'relative', marginTop: spacing.sm, height: 18 },
+  sliderLabelHit: { position: 'absolute', width: 40, marginLeft: -20, alignItems: 'center', paddingVertical: 1 },
+  sliderLabel: { fontSize: fontSize.xs, fontWeight: '700', color: colors.textMuted },
+  sliderLabelActive: { color: colors.primary },
   testMessage: { marginTop: spacing.sm, fontSize: fontSize.xs, textAlign: 'center' },
 });

@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
+import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, Field } from '@/components/ui';
 import { BrandLogo } from '@/components/BrandLogo';
 import { colors, fontSize, spacing } from '@/theme';
@@ -77,13 +77,13 @@ export function LoginScreen() {
               onSubmitEditing={onSubmit}
               returnKeyType="go"
               rightSlot={
-                <Pressable onPress={() => setShowPassword((v) => !v)} hitSlop={8}>
+                <FastPressable onPress={() => setShowPassword((v) => !v)} hitSlop={8}>
                   <Ionicons
                     name={showPassword ? 'eye-off-outline' : 'eye-outline'}
                     size={20}
                     color={colors.textLight}
                   />
-                </Pressable>
+                </FastPressable>
               }
             />
 

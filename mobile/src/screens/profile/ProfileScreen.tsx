@@ -1,8 +1,9 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Constants from 'expo-constants';
+import { FastPressable } from '@/components/FastPressable';
 import { Button, Card } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -147,7 +148,7 @@ export function ProfileScreen() {
 
           {/* Смена (только официант) */}
           {isWaiter ? (
-            <Card style={{ gap: 0 }}>
+          <Card style={styles.shiftCard}>
               <View style={styles.cardHead}>
                 <Text style={styles.cardTitle}>Смена</Text>
                 <View
@@ -179,15 +180,15 @@ export function ProfileScreen() {
           ) : null}
 
           {/* Уведомления */}
-          <Card style={{ gap: spacing.md }}>
+          <Card style={styles.notificationCard}>
             <View style={styles.cardHead}>
               <Text style={styles.cardTitle}>Уведомления</Text>
-              <Pressable style={styles.notifToggle} onPress={() => setNotifOpen((v) => !v)}>
+              <FastPressable style={styles.notifToggle} onPress={() => setNotifOpen((v) => !v)}>
                 <Text style={styles.viewAll}>{notifOpen ? 'Скрыть' : 'Показать'}</Text>
                 <View style={notifOpen ? styles.chevronUp : undefined}>
                   <PwaIcon name="chevronDown" size={14} color={colors.primary} strokeWidth={2.2} />
                 </View>
-              </Pressable>
+              </FastPressable>
             </View>
 
             {notifOpen ? (
@@ -232,7 +233,7 @@ export function ProfileScreen() {
                       </View>
                     ))}
                     {history.length > 3 ? (
-                      <Pressable
+                      <FastPressable
                         style={styles.showAllNotifs}
                         onPress={() => setShowAllNotif((value) => !value)}
                       >
@@ -242,7 +243,7 @@ export function ProfileScreen() {
                         <View style={showAllNotif ? styles.chevronUp : undefined}>
                           <PwaIcon name="chevronDown" size={14} color={colors.primary} strokeWidth={2.2} />
                         </View>
-                      </Pressable>
+                      </FastPressable>
                     ) : null}
                   </View>
                 )}
@@ -340,9 +341,9 @@ function WaiterCabinetScreen({
       <SafeAreaView style={styles.safe} edges={[]}>
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           <View style={styles.cabinetHeaderRow}>
-            <Pressable onPress={onBack} hitSlop={12} style={styles.backButton}>
+            <FastPressable onPress={onBack} hitSlop={12} style={styles.backButton}>
               <PwaIcon name="chevronLeft" size={24} color={colors.textSecondary} strokeWidth={2.2} />
-            </Pressable>
+            </FastPressable>
             <Text style={styles.cabinetTitle}>Личный кабинет</Text>
           </View>
 
@@ -354,10 +355,10 @@ function WaiterCabinetScreen({
           <Card style={styles.cabinetSection}>
             <View style={styles.cabinetSectionHead}>
               <Text style={styles.cabinetSectionTitle}>{periodMeta.title}</Text>
-              <Pressable style={styles.periodSelect} onPress={() => setPeriodOpen(true)}>
+              <FastPressable style={styles.periodSelect} onPress={() => setPeriodOpen(true)}>
                 <Text style={styles.periodSelectText}>{periodMeta.label}</Text>
                 <PwaIcon name="chevronDown" size={16} color={colors.textLight} strokeWidth={2.2} />
-              </Pressable>
+              </FastPressable>
             </View>
 
             {cabinet.isLoading ? (
@@ -376,9 +377,9 @@ function WaiterCabinetScreen({
           <Card style={styles.cabinetSection}>
             <View style={styles.recentHead}>
               <Text style={styles.cabinetSectionTitle}>Последние заказы</Text>
-              <Pressable onPress={openOrders}>
+              <FastPressable onPress={openOrders}>
                 <Text style={styles.viewAll}>Смотреть все</Text>
-              </Pressable>
+              </FastPressable>
             </View>
 
             {cabinet.isLoading ? (
@@ -434,7 +435,7 @@ function LanguageSwitch({ locale, onChange }: { locale: Locale; onChange: (local
       {items.map((item) => {
         const active = locale === item.key;
         return (
-          <Pressable
+          <FastPressable
             key={item.key}
             onPress={() => onChange(item.key)}
             style={[styles.languageButton, active && styles.languageButtonActive]}
@@ -442,7 +443,7 @@ function LanguageSwitch({ locale, onChange }: { locale: Locale; onChange: (local
             <Text style={[styles.languageButtonText, active && styles.languageButtonTextActive]}>
               {item.label}
             </Text>
-          </Pressable>
+          </FastPressable>
         );
       })}
     </View>
@@ -478,7 +479,7 @@ function StatRow({
 
 function CabinetOrderRow({ order, onPress }: { order: CabinetRecentOrder; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={styles.cabinetOrderRow}>
+    <FastPressable onPress={onPress} style={styles.cabinetOrderRow}>
       <Text style={styles.cabinetOrderNo} numberOfLines={1}>
         {displayOrderNumber(order.orderNumber)}
       </Text>
@@ -491,7 +492,7 @@ function CabinetOrderRow({ order, onPress }: { order: CabinetRecentOrder; onPres
       </Text>
       <CabinetStatusBadge status={order.status} />
       <PwaIcon name="chevronRight" size={14} color={colors.textLight} strokeWidth={2} />
-    </Pressable>
+    </FastPressable>
   );
 }
 
@@ -657,7 +658,7 @@ function PeriodPickerSheet({
       {PERIODS.map((item) => {
         const active = value === item.key;
         return (
-          <Pressable
+          <FastPressable
             key={item.key}
             onPress={() => onChange(item.key)}
             style={[styles.periodOption, active && styles.periodOptionActive]}
@@ -666,7 +667,7 @@ function PeriodPickerSheet({
               {item.label}
             </Text>
             {active ? <PwaIcon name="check" size={18} color={colors.primary} strokeWidth={2.5} /> : null}
-          </Pressable>
+          </FastPressable>
         );
       })}
     </BottomSheet>
@@ -728,8 +729,8 @@ function pushStatusText(status: PushStatus) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
   container: { padding: spacing.md, gap: spacing.lg },
-  panelTitle: { fontSize: 24, fontWeight: '700', color: colors.textPrimary },
-  userCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.lg },
+  panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
+  userCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: 20 },
   avatar: {
     width: 48,
     height: 48,
@@ -742,6 +743,8 @@ const styles = StyleSheet.create({
   userName: { fontSize: 17, fontWeight: '600', color: colors.textPrimary },
   userMeta: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
 
+  shiftCard: { gap: 0, padding: 20 },
+  notificationCard: { gap: spacing.md, padding: 20 },
   cardHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   cardTitle: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   pill: { borderRadius: radius.pill, paddingHorizontal: spacing.md, paddingVertical: 4 },
@@ -775,18 +778,18 @@ const styles = StyleSheet.create({
   shiftSummaryLabel: { flex: 1, fontSize: fontSize.sm, color: colors.textMuted },
   shiftSummaryValue: { maxWidth: '54%', fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '600' },
 
-  cabinetHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm },
-  backButton: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  cabinetTitle: { fontSize: 24, fontWeight: '800', color: colors.textPrimary },
+  cabinetHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: 0 },
+  backButton: { width: 36, height: 36, marginLeft: -4, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  cabinetTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   languageCard: {
-    minHeight: 82,
+    minHeight: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
     padding: spacing.lg,
   },
-  languageLabel: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  languageLabel: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
   languageSwitch: {
     flexDirection: 'row',
     borderWidth: 1,
@@ -795,16 +798,16 @@ const styles = StyleSheet.create({
     padding: 2,
     backgroundColor: colors.white,
   },
-  languageButton: { borderRadius: 6, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  languageButton: { borderRadius: 6, paddingHorizontal: spacing.md, paddingVertical: 6 },
   languageButtonActive: { backgroundColor: colors.primary },
-  languageButtonText: { fontSize: fontSize.base, fontWeight: '600', color: colors.textSecondary },
+  languageButtonText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },
   languageButtonTextActive: { color: colors.white },
-  cabinetSection: { gap: spacing.md, padding: spacing.lg },
+  cabinetSection: { gap: spacing.md, padding: 20 },
   cabinetSectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
-  cabinetSectionTitle: { flex: 1, fontSize: fontSize.lg, fontWeight: '800', color: colors.textPrimary },
+  cabinetSectionTitle: { flex: 1, fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   periodSelect: {
-    minWidth: 132,
-    height: 46,
+    width: 144,
+    height: 40,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -815,55 +818,55 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     backgroundColor: colors.white,
   },
-  periodSelectText: { fontSize: fontSize.base, color: colors.textPrimary, fontWeight: '500' },
+  periodSelectText: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '500' },
   statRows: { borderTopWidth: 1, borderTopColor: colors.border },
   statRow: {
-    minHeight: 58,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
   },
-  statLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, minWidth: 0, flex: 1 },
+  statLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 },
   statIcon: {
-    width: 30,
-    height: 30,
+    width: 28,
+    height: 28,
     borderRadius: radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.background,
   },
   statRowLabel: { flex: 1, fontSize: fontSize.base, color: colors.textSecondary },
-  statRowValue: { fontSize: fontSize.base, fontWeight: '800', color: colors.textPrimary },
-  orderGroups: { gap: spacing.lg },
-  orderGroup: { gap: spacing.sm },
-  orderGroupLabel: { fontSize: fontSize.xs, fontWeight: '700', color: colors.textLight },
+  statRowValue: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  orderGroups: { gap: spacing.md },
+  orderGroup: { gap: 4 },
+  orderGroupLabel: { fontSize: fontSize.xs, fontWeight: '500', color: colors.textLight, textTransform: 'uppercase' },
   cabinetOrdersList: { borderTopWidth: 1, borderTopColor: colors.border },
   cabinetOrderRow: {
-    minHeight: 52,
+    minHeight: 42,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingVertical: 9,
+    paddingVertical: 10,
   },
-  cabinetOrderNo: { width: 52, fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
+  cabinetOrderNo: { width: 52, fontSize: fontSize.sm, fontWeight: '500', color: colors.textPrimary },
   cabinetOrderTable: { width: 58, fontSize: fontSize.sm, color: colors.textMuted },
   cabinetOrderTime: { width: 45, fontSize: fontSize.sm, color: colors.textLight },
   cabinetOrderAmount: {
     flex: 1,
     minWidth: 58,
     textAlign: 'right',
-    fontSize: fontSize.base,
-    fontWeight: '700',
+    fontSize: fontSize.sm,
+    fontWeight: '500',
     color: colors.textPrimary,
   },
   cabinetStatusBadge: { borderRadius: 6, paddingHorizontal: spacing.sm, paddingVertical: 2 },
-  cabinetStatusText: { fontSize: fontSize.xs, fontWeight: '600' },
+  cabinetStatusText: { fontSize: fontSize.xs, fontWeight: '500' },
   orderDetailsBody: { gap: spacing.lg, paddingBottom: spacing.md },
   detailSectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
   detailSectionTitle: { marginBottom: spacing.sm, fontSize: fontSize.sm, fontWeight: '800', color: colors.textPrimary },

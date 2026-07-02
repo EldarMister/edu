@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -9,7 +8,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
+import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, EmptyState, Loading, SegmentTabs } from '@/components/ui';
 import { OrderBadge } from '@/components/StatusBadge';
 import { AppHeader } from '@/components/AppHeader';
@@ -246,9 +245,9 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         right={
           <>
             <ConnectionStatus />
-            <Pressable onPress={onLogout} hitSlop={8}>
+            <FastPressable onPress={onLogout} hitSlop={8}>
               <Text style={styles.logout}>Выйти</Text>
-            </Pressable>
+            </FastPressable>
           </>
         }
       />
@@ -257,12 +256,12 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         <View style={{ flex: 1, minWidth: 0 }}>
           <SegmentTabs items={TABS} value={tab} onChange={setTab} count={list.length} />
         </View>
-        <Pressable onPress={() => setVoiceOpen(true)} style={styles.voiceBtn} hitSlop={6}>
+        <FastPressable onPress={() => setVoiceOpen(true)} style={styles.voiceBtn} hitSlop={6}>
           <PwaIcon name="speaker" size={18} color={colors.primary} />
-        </Pressable>
-        <Pressable onPress={() => setStopListOpen(true)} style={styles.stopListBtn} hitSlop={6}>
+        </FastPressable>
+        <FastPressable onPress={() => setStopListOpen(true)} style={styles.stopListBtn} hitSlop={6}>
           <Text style={styles.stopListText}>Стоп-лист</Text>
-        </Pressable>
+        </FastPressable>
       </View>
 
       {orders.isLoading ? (
@@ -324,9 +323,9 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
                 <Text style={styles.undoSeconds}>{String(undoSecondsLeft).padStart(2, '0')} сек</Text>
               </Text>
             </View>
-            <Pressable onPress={() => setPending(null)} style={styles.undoBtn}>
+            <FastPressable onPress={() => setPending(null)} style={styles.undoBtn}>
               <Text style={styles.undoBtnText}>Отменить</Text>
-            </Pressable>
+            </FastPressable>
           </View>
         </View>
       ) : null}
@@ -503,7 +502,13 @@ function KitchenCard({
   };
 
   // Единая строка позиции — и для обычных блюд, и для блюд внутри сета.
-  const renderLine = (id: string, status: OrderItemStatus, content: React.ReactNode, isComponent = false) => {
+  const renderLine = (
+    id: string,
+    status: OrderItemStatus,
+    content: React.ReactNode,
+    isComponent = false,
+    trailing: React.ReactNode = null,
+  ) => {
     const selectable = isSelectable(status, id);
     const pendingItem = pendingItemIds.includes(id);
     const rejected = status === 'rejected' || (pendingItem && pendingType === 'reject');
@@ -513,7 +518,7 @@ function KitchenCard({
     const checked = selected.has(id);
 
     return (
-      <Pressable
+      <FastPressable
         key={id}
         disabled={!selectable}
         onPress={() => toggle(id)}
@@ -521,20 +526,23 @@ function KitchenCard({
       >
         {selectable && selectionMode ? (
           <View style={[styles.checkbox, checked && styles.checkboxOn]}>
-            {checked ? <Ionicons name="checkmark" size={13} color={colors.white} /> : null}
+            {checked ? <PwaIcon name="check" size={14} color={colors.white} /> : null}
           </View>
         ) : null}
-        <Text
-          style={[
-            styles.itemText,
-            isComponent && styles.itemComponent,
-            rejected && styles.itemRejected,
-            isReady && styles.itemDone,
-            isFresh && styles.itemFresh,
-          ]}
-        >
-          {content}
-        </Text>
+        <View style={styles.itemContent}>
+          <Text
+            style={[
+              styles.itemText,
+              isComponent && styles.itemComponent,
+              rejected && styles.itemRejected,
+              isReady && styles.itemDone,
+              isFresh && styles.itemFresh,
+            ]}
+          >
+            {content}
+          </Text>
+          {trailing}
+        </View>
         {isFresh ? (
           <View style={styles.freshBadge}>
             <Text style={styles.freshBadgeText}>Новое</Text>
@@ -542,7 +550,7 @@ function KitchenCard({
         ) : null}
         {isReady ? <Text style={styles.itemFlagDone}>✓ Готово</Text> : null}
         {rejected ? <Text style={styles.itemFlagRej}>Отказ</Text> : null}
-      </Pressable>
+      </FastPressable>
     );
   };
 
@@ -553,10 +561,19 @@ function KitchenCard({
         <Text style={styles.itemQty}>{it.quantity}× </Text>
         {orderItemDisplayName(it)}
         {itemComment ? <Text style={styles.itemCommentInline}> · {itemComment}</Text> : null}
-        {it.takeaway && !allTakeaway ? <Text style={styles.takeawayInline}>  · с собой</Text> : null}
       </Text>
     );
   };
+
+  // Точечная метка «с собой» — пилюля с иконкой пакета (паритет с PWA), только если
+  // весь заказ не навынос. Рисуется как View рядом с текстом, а не inline в Text.
+  const takeawayPill = (it: Order['items'][number]) =>
+    it.takeaway && !allTakeaway ? (
+      <View style={styles.takeawayPill}>
+        <PwaIcon name="bag" size={11} color={colors.primary} strokeWidth={2} />
+        <Text style={styles.takeawayPillText}>с собой</Text>
+      </View>
+    ) : null;
 
   return (
     <Card style={{ gap: 0 }}>
@@ -627,7 +644,7 @@ function KitchenCard({
             const rejectQty = rejectQtys[it.id] ?? it.quantity;
             return (
               <View key={it.id}>
-                {renderLine(it.id, it.status, itemHeader(it))}
+                {renderLine(it.id, it.status, itemHeader(it), false, takeawayPill(it))}
                 {showStepper ? (
                   <View style={styles.stepperRow}>
                     <Text style={styles.stepperLabel}>Отказать:</Text>
@@ -655,7 +672,7 @@ function KitchenCard({
           return (
             <View key={it.id}>
               <View style={styles.setHeadRow}>
-                <Pressable
+                <FastPressable
                   disabled={!setSelectable}
                   onPress={() => toggleSet(setSelectableIds, setAllSelected)}
                   style={styles.setHeadPress}
@@ -665,19 +682,22 @@ function KitchenCard({
                       style={[styles.checkbox, (setAllSelected || setSomeSelected) && styles.checkboxOn]}
                     >
                       {setAllSelected ? (
-                        <Ionicons name="checkmark" size={13} color={colors.white} />
+                        <PwaIcon name="check" size={14} color={colors.white} />
                       ) : setSomeSelected ? (
-                        <Ionicons name="remove" size={13} color={colors.white} />
+                        <PwaIcon name="minus" size={14} color={colors.white} strokeWidth={2.5} />
                       ) : null}
                     </View>
                   ) : null}
-                  <Text style={styles.itemText}>{itemHeader(it)}</Text>
-                </Pressable>
-                <Pressable onPress={() => toggleCollapsed(it.id)} hitSlop={8} style={styles.collapseBtn}>
+                  <View style={styles.itemContent}>
+                    <Text style={styles.itemText}>{itemHeader(it)}</Text>
+                    {takeawayPill(it)}
+                  </View>
+                </FastPressable>
+                <FastPressable onPress={() => toggleCollapsed(it.id)} hitSlop={8} style={styles.collapseBtn}>
                   <View style={isCollapsed ? undefined : styles.chevronUp}>
                     <PwaIcon name="chevronDown" size={16} color={colors.textMuted} strokeWidth={2.5} />
                   </View>
-                </Pressable>
+                </FastPressable>
               </View>
               {!isCollapsed ? (
                 <View style={styles.setComponents}>
@@ -718,9 +738,9 @@ function KitchenCard({
               ) : null}
             </View>
           </View>
-          <Pressable onPress={clearSelection} style={styles.clearSelection} hitSlop={6}>
+          <FastPressable onPress={clearSelection} style={styles.clearSelection} hitSlop={6}>
             <Text style={styles.clearSelectionText}>Снять выбор</Text>
-          </Pressable>
+          </FastPressable>
         </>
       ) : canSelect ? (
         <View style={styles.actions}>
@@ -770,21 +790,21 @@ function QtyStepper({
   const clamp = (v: number) => Math.max(min, Math.min(max, v));
   return (
     <View style={styles.stepper}>
-      <Pressable
+      <FastPressable
         disabled={value <= min}
         onPress={() => onChange(clamp(value - 1))}
         style={[styles.stepperBtn, value <= min && { opacity: 0.4 }]}
       >
         <PwaIcon name="minus" size={13} color={colors.textSecondary} />
-      </Pressable>
+      </FastPressable>
       <Text style={styles.stepperValue}>{value}</Text>
-      <Pressable
+      <FastPressable
         disabled={value >= max}
         onPress={() => onChange(clamp(value + 1))}
         style={[styles.stepperBtn, value >= max && { opacity: 0.4 }]}
       >
         <PwaIcon name="plus" size={13} color={colors.textSecondary} />
-      </Pressable>
+      </FastPressable>
     </View>
   );
 }
@@ -875,10 +895,20 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
   },
   itemRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  itemText: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary },
+  itemContent: { flex: 1, minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
+  itemText: { flexShrink: 1, fontSize: fontSize.base, color: colors.textPrimary },
   itemQty: { fontWeight: '700' },
   itemCommentInline: { color: colors.warning, fontWeight: '500' },
-  takeawayInline: { color: colors.primary, fontWeight: '600', fontSize: fontSize.sm },
+  takeawayPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    borderRadius: radius.pill,
+    backgroundColor: colors.primarySoft,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  takeawayPillText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primary },
   itemComponent: { fontSize: fontSize.sm, color: colors.textSecondary },
   itemRejected: { color: colors.danger, textDecorationLine: 'line-through' },
   itemDone: { color: colors.textMuted },
@@ -964,6 +994,9 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
   },
   actionsTop: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
     marginTop: spacing.lg,
     borderTopWidth: 1,
     borderTopColor: colors.border,
@@ -971,7 +1004,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   selectedText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },
-  actionsBtns: { flexDirection: 'row', gap: spacing.sm, justifyContent: 'flex-end' },
+  actionsBtns: { flexDirection: 'row', gap: spacing.sm, marginLeft: 'auto' },
   clearSelection: { alignSelf: 'flex-start', marginTop: spacing.sm },
   clearSelectionText: { fontSize: fontSize.xs, fontWeight: '600', color: colors.primary },
 

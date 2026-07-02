@@ -1,8 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import {
-  FlatList,
-  Pressable,
+  Animated,
+  Easing,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -10,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { BottomSheet } from '@/components/BottomSheet';
+import { FastPressable } from '@/components/FastPressable';
 import { Button, Loading, PillTabs } from '@/components/ui';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
@@ -42,7 +44,10 @@ export function TablesScreen() {
   const selectedTableId = useCart((s) => s.tableId);
   const [hallId, setHallId] = useState<string | null>(null);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [actionsRender, setActionsRender] = useState(false);
+  const actionsProgress = React.useRef(new Animated.Value(0)).current;
   const [tableModal, setTableModal] = useState<TableModal>(null);
+  const [gridSize, setGridSize] = useState({ width: 0, height: 0 });
 
   const closeTable = useCloseTable();
   const moveTable = useMoveTable();
@@ -83,15 +88,10 @@ export function TablesScreen() {
   }, [currentHall?.name, navigation, ordersByTable, push, selectTable, user?.id]);
 
   const tables = currentHall?.tables ?? [];
-  const tableColumns = useMemo(() => {
-    const count = tables.length;
-    if (count <= 2) return 1;
-    if (count <= 6) return 2;
-    if (count > 10) return 4;
-    return 3;
-  }, [tables.length]);
-  const tableWidth = tableColumns === 1 ? '100%' : tableColumns === 2 ? '48%' : tableColumns === 4 ? '23%' : '31%';
-  const tableMinHeight = tables.length === 1 ? 300 : tables.length === 2 ? 156 : tables.length <= 6 ? 132 : 104;
+  const tableLayout = useMemo(
+    () => getTableLayout(tables.length, gridSize.width, gridSize.height),
+    [gridSize.height, gridSize.width, tables.length],
+  );
   const selectedTable = useMemo(
     () => (halls.data ?? []).flatMap((h) => h.tables).find((tbl) => tbl.id === selectedTableId) ?? null,
     [halls.data, selectedTableId],
@@ -106,6 +106,30 @@ export function TablesScreen() {
     }
     setTableModal(modal);
   };
+
+  React.useEffect(() => {
+    if (actionsOpen) {
+      setActionsRender(true);
+      actionsProgress.stopAnimation();
+      actionsProgress.setValue(0);
+      Animated.timing(actionsProgress, {
+        toValue: 1,
+        duration: 160,
+        easing: Easing.bezier(0.16, 1, 0.3, 1),
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+    actionsProgress.stopAnimation();
+    Animated.timing(actionsProgress, {
+      toValue: 0,
+      duration: 120,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setActionsRender(false);
+    });
+  }, [actionsOpen, actionsProgress]);
 
   const doCloseTable = () => {
     if (!selectedTable) return;
@@ -150,27 +174,43 @@ export function TablesScreen() {
     );
   };
 
-  const renderTable = React.useCallback(({ item: tbl }: { item: TableItem }) => {
+  const renderTable = React.useCallback((tbl: TableItem) => {
     const meta = TABLE_STATUS[tbl.status];
     const selected = tbl.id === selectedTableId;
     return (
-      <Pressable
+      <FastPressable
         onPress={() => onTablePress(tbl)}
         style={[
           styles.table,
-          { width: tableWidth, minHeight: tableMinHeight },
+          {
+            width: tableLayout.cardWidth,
+            height: tableLayout.cardHeight,
+            minHeight: tableLayout.minHeight,
+          },
           selected ? styles.tableSelected : null,
         ]}
       >
-        {!selected ? <View style={[styles.dot, { backgroundColor: meta.dot }]} /> : null}
-        <Text style={[styles.tableNumber, selected && { color: colors.white }]}>
+        {!selected ? (
+          <View
+            style={[
+              styles.dot,
+              tableLayout.roomy && styles.dotRoomy,
+              { backgroundColor: meta.dot },
+            ]}
+          />
+        ) : null}
+        <Text
+          style={[
+            styles.tableNumber,
+            { fontSize: tableLayout.fontSize },
+            selected && { color: colors.white },
+          ]}
+        >
           {tbl.number}
         </Text>
-      </Pressable>
+      </FastPressable>
     );
-  }, [onTablePress, selectedTableId, tableMinHeight, tableWidth]);
-
-  const keyTable = React.useCallback((tbl: TableItem) => tbl.id, []);
+  }, [onTablePress, selectedTableId, tableLayout]);
 
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
@@ -178,14 +218,14 @@ export function TablesScreen() {
         <View style={styles.titleRow}>
           <Text style={styles.panelTitle}>Выбор стола</Text>
           <View style={styles.actionsAnchor}>
-            <Pressable
+            <FastPressable
               disabled={!selectedTable}
               onPress={() => setActionsOpen((v) => !v)}
               style={[styles.editBtn, !selectedTable && styles.editBtnDisabled]}
             >
               <PwaIcon name="pencil" size={16} color={selectedTable ? colors.textSecondary : colors.textLight} />
               <Text style={[styles.editBtnText, selectedTable && styles.editBtnTextActive]}>Редактировать</Text>
-            </Pressable>
+            </FastPressable>
           </View>
         </View>
 
@@ -198,54 +238,93 @@ export function TablesScreen() {
           />
         ) : null}
 
-        <FlatList
-          key={`tables-${tableColumns}`}
-          data={halls.isLoading ? [] : tables}
-          renderItem={renderTable}
-          keyExtractor={keyTable}
-          numColumns={tableColumns}
+        <View
           style={styles.tableList}
-          contentContainerStyle={styles.grid}
-          columnWrapperStyle={tableColumns > 1 ? styles.gridRow : undefined}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl refreshing={halls.isFetching} onRefresh={() => halls.refetch()} />
-          }
-          ListEmptyComponent={halls.isLoading ? <Loading /> : null}
-          removeClippedSubviews
-          initialNumToRender={12}
-          maxToRenderPerBatch={9}
-          windowSize={5}
-        />
+          onLayout={(event) => {
+            const { width, height } = event.nativeEvent.layout;
+            setGridSize((current) =>
+              Math.abs(current.width - width) > 1 || Math.abs(current.height - height) > 1
+                ? { width, height }
+                : current,
+            );
+          }}
+        >
+          {halls.isLoading ? (
+            <Loading />
+          ) : (
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl refreshing={halls.isFetching} onRefresh={() => halls.refetch()} />
+              }
+              contentContainerStyle={[
+                styles.grid,
+                tableLayout.fill ? styles.gridFill : null,
+              ]}
+            >
+              <View style={styles.tableGrid}>
+                {tables.map((table) => (
+                  <React.Fragment key={table.id}>{renderTable(table)}</React.Fragment>
+                ))}
+              </View>
+            </ScrollView>
+          )}
+        </View>
 
         {/* Легенда */}
-        <View style={styles.legend}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.legend}
+          contentContainerStyle={styles.legendContent}
+        >
           {LEGEND.map((s) => (
             <View key={s} style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: TABLE_STATUS[s].dot }]} />
               <Text style={styles.legendText}>{TABLE_STATUS[s].label}</Text>
             </View>
           ))}
-        </View>
+        </ScrollView>
       </View>
 
-      {actionsOpen ? (
+      {actionsRender ? (
         <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setActionsOpen(false)} />
-          <View style={styles.tableActionsMenu}>
-            <Pressable onPress={() => openTableAction('close')} style={styles.tableActionItem}>
+          <FastPressable style={StyleSheet.absoluteFill} onPress={() => setActionsOpen(false)} />
+          <Animated.View
+            style={[
+              styles.tableActionsMenu,
+              {
+                opacity: actionsProgress,
+                transform: [
+                  {
+                    translateY: actionsProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-6, 0],
+                    }),
+                  },
+                  {
+                    scale: actionsProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.98, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            <FastPressable onPress={() => openTableAction('close')} style={styles.tableActionItem}>
               <PwaIcon name="close" size={16} color={colors.textLight} />
               <Text style={styles.tableActionText}>Закрыть стол</Text>
-            </Pressable>
-            <Pressable onPress={() => openTableAction('move')} style={styles.tableActionItem}>
+            </FastPressable>
+            <FastPressable onPress={() => openTableAction('move')} style={styles.tableActionItem}>
               <PwaIcon name="move" size={16} color={colors.textLight} />
               <Text style={styles.tableActionText}>Перенести стол</Text>
-            </Pressable>
-            <Pressable onPress={() => openTableAction('transfer')} style={styles.tableActionItem}>
+            </FastPressable>
+            <FastPressable onPress={() => openTableAction('transfer')} style={styles.tableActionItem}>
               <PwaIcon name="transfer" size={16} color={colors.textLight} />
               <Text style={styles.tableActionText}>Передать стол</Text>
-            </Pressable>
-          </View>
+            </FastPressable>
+          </Animated.View>
         </View>
       ) : null}
 
@@ -371,13 +450,13 @@ function MoveTableSheet({
               <Text style={styles.sheetSectionTitle}>{group.name}</Text>
               <View style={styles.pickGrid}>
                 {group.tables.map((tbl) => (
-                  <Pressable
+                  <FastPressable
                     key={tbl.id}
                     onPress={() => setTarget(tbl.id)}
                     style={[styles.pickTable, target === tbl.id && styles.pickTableSelected]}
                   >
                     <Text style={[styles.pickTableText, target === tbl.id && styles.pickTableTextSelected]}>{tbl.number}</Text>
-                  </Pressable>
+                  </FastPressable>
                 ))}
               </View>
             </View>
@@ -436,7 +515,7 @@ function TransferTableSheet({
       ) : (
         <View style={styles.waiterList}>
           {list.map((waiter) => (
-            <Pressable
+            <FastPressable
               key={waiter.id}
               onPress={() => setSelectedId(waiter.id)}
               style={[styles.waiterPick, selectedId === waiter.id && styles.waiterPickSelected]}
@@ -445,12 +524,75 @@ function TransferTableSheet({
                 <Text style={styles.waiterAvatarText}>{waiter.name[0]}</Text>
               </View>
               <Text style={styles.waiterName}>{waiter.name}</Text>
-            </Pressable>
+            </FastPressable>
           ))}
         </View>
       )}
     </BottomSheet>
   );
+}
+
+function getTableLayout(count: number, width: number, height: number) {
+  const gap = spacing.md;
+  const usableWidth = Math.max(0, width);
+  const usableHeight = Math.max(0, height);
+  const fallbackWidth = usableWidth || 340;
+  const fallbackHeight = usableHeight || 420;
+  const fullscreenSingle = count === 1;
+  const splitVertical = count === 2;
+  const roomyTwoColumn = count >= 3 && count <= 6;
+  const compactGrid = count > 10;
+  const columns = fullscreenSingle || splitVertical ? 1 : roomyTwoColumn ? 2 : compactGrid ? 4 : 3;
+  const rows = fullscreenSingle ? 1 : splitVertical ? 2 : roomyTwoColumn ? Math.ceil(count / 2) : Math.ceil(count / columns);
+  const cardWidth =
+    columns === 1
+      ? fallbackWidth
+      : Math.floor((fallbackWidth - gap * (columns - 1)) / columns);
+  const fillCardHeight = Math.floor((fallbackHeight - gap * Math.max(0, rows - 1)) / rows);
+  const squareHeight = cardWidth;
+  const roomy = fullscreenSingle || splitVertical || roomyTwoColumn;
+
+  if (fullscreenSingle) {
+    return {
+      cardWidth,
+      cardHeight: Math.min(Math.max(fillCardHeight, 300), 460),
+      minHeight: 300,
+      fontSize: 54,
+      fill: true,
+      roomy: true,
+    };
+  }
+
+  if (splitVertical) {
+    return {
+      cardWidth,
+      cardHeight: Math.max(fillCardHeight, 156),
+      minHeight: 0,
+      fontSize: 44,
+      fill: true,
+      roomy: true,
+    };
+  }
+
+  if (roomyTwoColumn) {
+    return {
+      cardWidth,
+      cardHeight: Math.max(fillCardHeight, 118),
+      minHeight: 0,
+      fontSize: 38,
+      fill: true,
+      roomy: true,
+    };
+  }
+
+  return {
+    cardWidth,
+    cardHeight: Math.max(squareHeight, compactGrid ? 74 : 104),
+    minHeight: compactGrid ? 74 : 104,
+    fontSize: compactGrid ? 20 : 24,
+    fill: false,
+    roomy,
+  };
 }
 
 const styles = StyleSheet.create({
@@ -488,12 +630,17 @@ const styles = StyleSheet.create({
   tableActionItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   tableActionText: { fontSize: fontSize.sm, color: colors.textSecondary },
 
-  tableList: { flex: 1 },
-  grid: { paddingBottom: spacing.md },
-  gridRow: { justifyContent: 'space-between', marginBottom: spacing.md },
+  tableList: { flex: 1, minHeight: 0 },
+  grid: { paddingBottom: spacing.md, flexGrow: 1 },
+  gridFill: { minHeight: '100%' },
+  tableGrid: {
+    minHeight: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignContent: 'flex-start',
+    gap: spacing.md,
+  },
   table: {
-    width: '31%',
-    aspectRatio: 1,
     minHeight: 104,
     borderRadius: waiterLayout.tableCardRadius,
     borderWidth: 1,
@@ -504,17 +651,15 @@ const styles = StyleSheet.create({
   },
   tableSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
   dot: { position: 'absolute', right: 8, top: 8, width: 10, height: 10, borderRadius: 5 },
-  tableNumber: { fontSize: 24, fontWeight: '500', color: colors.textPrimary },
+  dotRoomy: { right: 16, top: 16, width: 16, height: 16, borderRadius: 8 },
+  tableNumber: { fontWeight: '500', color: colors.textPrimary },
 
   legend: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.xs,
+    flexGrow: 0,
   },
+  legendContent: { gap: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.xs },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
   legendText: { fontSize: fontSize.xs, color: colors.textMuted },

@@ -1,8 +1,9 @@
 import React, { memo } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import { Animated, Easing, FlatList, RefreshControl, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { BottomSheet } from '@/components/BottomSheet';
+import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, EmptyState, Loading } from '@/components/ui';
 import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
@@ -36,6 +37,8 @@ export function OrdersScreen() {
   const cancel = useCancelOrder();
   const claimQr = useClaimQrOrder();
   const [menuFor, setMenuFor] = React.useState<{ order: Order; top: number; left: number } | null>(null);
+  const [menuRender, setMenuRender] = React.useState<{ order: Order; top: number; left: number } | null>(null);
+  const menuProgress = React.useRef(new Animated.Value(0)).current;
   const [cancelTarget, setCancelTarget] = React.useState<Order | null>(null);
   const [cancelReason, setCancelReason] = React.useState<string>(DEFAULT_CANCEL_REASON);
   const [cancelOther, setCancelOther] = React.useState('');
@@ -52,12 +55,38 @@ export function OrdersScreen() {
     });
   }, [orders.data]);
 
+  const closeMenu = React.useCallback(() => {
+    menuProgress.stopAnimation();
+    setMenuFor(null);
+    Animated.timing(menuProgress, {
+      toValue: 0,
+      duration: 120,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setMenuRender(null);
+    });
+  }, [menuProgress]);
+
+  const showMenu = React.useCallback((next: { order: Order; top: number; left: number }) => {
+    menuProgress.stopAnimation();
+    setMenuFor(next);
+    setMenuRender(next);
+    menuProgress.setValue(0);
+    Animated.timing(menuProgress, {
+      toValue: 1,
+      duration: 160,
+      easing: Easing.bezier(0.16, 1, 0.3, 1),
+      useNativeDriver: true,
+    }).start();
+  }, [menuProgress]);
+
   const openOrder = React.useCallback((order: Order) => {
     navigation.navigate('OrderDetail', { orderId: order.id });
   }, [navigation]);
 
   const editOrder = React.useCallback((order: Order) => {
-    setMenuFor(null);
+    closeMenu();
     const lines = orderToCartLines(order, dishes.data ?? []);
     if (lines.length === 0) {
       push({ message: 'Не удалось восстановить позиции заказа для редактирования', type: 'error', at: new Date().toISOString() });
@@ -69,7 +98,7 @@ export function OrdersScreen() {
       lines,
     );
     navigation.navigate('Menu');
-  }, [dishes.data, navigation, push, startEditing]);
+  }, [closeMenu, dishes.data, navigation, push, startEditing]);
 
   const commitCancel = React.useCallback((pending: PendingCancel) => {
     setPendingCancel((current) => (
@@ -96,11 +125,11 @@ export function OrdersScreen() {
   }, [commitCancel, pendingCancel]);
 
   const requestCancelOrder = React.useCallback((order: Order) => {
-    setMenuFor(null);
+    closeMenu();
     setCancelReason(DEFAULT_CANCEL_REASON);
     setCancelOther('');
     setCancelTarget(order);
-  }, []);
+  }, [closeMenu]);
 
   const confirmCancelOrder = React.useCallback(() => {
     if (!cancelTarget) return;
@@ -143,21 +172,22 @@ export function OrdersScreen() {
       onOpen={openOrder}
       onClaim={claimOrder}
       onToggleMenu={(event) => {
+        if (menuFor?.order.id === item.id) {
+          closeMenu();
+          return;
+        }
         const { pageX, pageY } = event.nativeEvent;
         rootRef.current?.measureInWindow((rootX, rootY) => {
           const menuWidth = 244;
-          setMenuFor((current) => {
-            if (current?.order.id === item.id) return null;
-            const left = Math.min(
-              screenWidth - menuWidth - spacing.lg,
-              Math.max(spacing.lg, pageX - rootX - menuWidth + 28),
-            );
-            return { order: item, top: Math.max(spacing.sm, pageY - rootY + 8), left };
-          });
+          const left = Math.min(
+            screenWidth - menuWidth - spacing.lg,
+            Math.max(spacing.lg, pageX - rootX - menuWidth + 28),
+          );
+          showMenu({ order: item, top: Math.max(spacing.sm, pageY - rootY + 8), left });
         });
       }}
     />
-  ), [claimOrder, claimQr.isPending, menuFor?.order.id, openOrder, screenWidth]);
+  ), [claimOrder, claimQr.isPending, closeMenu, menuFor?.order.id, openOrder, screenWidth, showMenu]);
 
   const keyOrder = React.useCallback((order: Order) => order.id, []);
 
@@ -186,26 +216,49 @@ export function OrdersScreen() {
           />
         )}
       </View>
-      {menuFor ? (
+      {menuRender ? (
         <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-          <Pressable style={StyleSheet.absoluteFill} onPress={() => setMenuFor(null)} />
-          <View style={[styles.actionsMenuOverlay, { top: menuFor.top, left: menuFor.left }]}>
-            {EDITABLE.includes(menuFor.order.status) ? (
-              <Pressable
-                onPress={() => editOrder(menuFor.order)}
+          <FastPressable style={StyleSheet.absoluteFill} onPress={closeMenu} />
+          <Animated.View
+            style={[
+              styles.actionsMenuOverlay,
+              {
+                top: menuRender.top,
+                left: menuRender.left,
+                opacity: menuProgress,
+                transform: [
+                  {
+                    translateY: menuProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-6, 0],
+                    }),
+                  },
+                  {
+                    scale: menuProgress.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [0.98, 1],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          >
+            {EDITABLE.includes(menuRender.order.status) ? (
+              <FastPressable
+                onPress={() => editOrder(menuRender.order)}
                 style={styles.menuItem}
               >
                 <Text style={styles.menuItemText}>Редактировать заказ</Text>
-              </Pressable>
+              </FastPressable>
             ) : null}
-            <Pressable
-              disabled={!CANCELLABLE.includes(menuFor.order.status)}
-              onPress={() => requestCancelOrder(menuFor.order)}
-              style={[styles.menuItem, !CANCELLABLE.includes(menuFor.order.status) && { opacity: 0.4 }]}
+            <FastPressable
+              disabled={!CANCELLABLE.includes(menuRender.order.status)}
+              onPress={() => requestCancelOrder(menuRender.order)}
+              style={[styles.menuItem, !CANCELLABLE.includes(menuRender.order.status) && { opacity: 0.4 }]}
             >
               <Text style={[styles.menuItemText, styles.menuDanger]}>Отменить заказ</Text>
-            </Pressable>
-          </View>
+            </FastPressable>
+          </Animated.View>
         </View>
       ) : null}
       {pendingCancel ? (
@@ -226,9 +279,9 @@ export function OrdersScreen() {
                 </Text>
               </Text>
             </View>
-            <Pressable onPress={undoCancel} style={styles.undoBtn}>
+            <FastPressable onPress={undoCancel} style={styles.undoBtn}>
               <Text style={styles.undoBtnText}>Вернуть</Text>
-            </Pressable>
+            </FastPressable>
           </View>
         </View>
       ) : null}
@@ -291,7 +344,7 @@ function CancelOrderSheet({
         {CANCEL_REASONS.map((item) => {
           const active = reason === item;
           return (
-            <Pressable
+            <FastPressable
               key={item}
               onPress={() => onReasonChange(item)}
               style={[styles.cancelReasonRow, active && styles.cancelReasonRowActive]}
@@ -300,7 +353,7 @@ function CancelOrderSheet({
                 {active ? <View style={styles.cancelRadioDot} /> : null}
               </View>
               <Text style={[styles.cancelReasonText, active && styles.cancelReasonTextActive]}>{item}</Text>
-            </Pressable>
+            </FastPressable>
           );
         })}
       </View>
@@ -362,7 +415,7 @@ const OrderCard = memo(function OrderCard({
         <View style={styles.headRight}>
           <OrderBadge status={order.status} />
           {unclaimedQr ? (
-            <Pressable
+            <FastPressable
               disabled={claimPending}
               onPress={(event) => {
                 event.stopPropagation();
@@ -371,13 +424,13 @@ const OrderCard = memo(function OrderCard({
               style={[styles.claimBtn, claimPending && { opacity: 0.6 }]}
             >
               <Text style={styles.claimText}>{claimPending ? 'Берём...' : 'Взять'}</Text>
-            </Pressable>
+            </FastPressable>
           ) : null}
           <NumberTicker value={Number(order.finalAmount)} style={styles.money} digitHeight={20} />
         </View>
 
         {!unclaimedQr ? (
-          <Pressable
+          <FastPressable
             onPress={(event) => {
               event.stopPropagation();
               onToggleMenu(event);
@@ -386,7 +439,7 @@ const OrderCard = memo(function OrderCard({
             style={[styles.dots, menuOpen && styles.dotsActive]}
           >
             <PwaIcon name="dotsVertical" size={16} color={colors.textLight} />
-          </Pressable>
+          </FastPressable>
         ) : null}
       </View>
     </Card>

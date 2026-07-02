@@ -5,17 +5,17 @@ import {
   Easing,
   Image,
   Modal as RNModal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
-import { colors, fontSize, radius, spacing } from '@/theme';
+import { colors, fontSize, radius, softShadow, spacing } from '@/theme';
 import { fetchReceipt, useCreateReceiptPrintRequest, usePay } from '@/services/api/waiter';
 import { usePublicSettings, resolveQrSrc } from '@/services/api/settings';
 import { apiError } from '@/lib/api';
@@ -103,6 +103,7 @@ export function PaymentSheet({
   const [successVisible, setSuccessVisible] = useState(false);
   const [successDone, setSuccessDone] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [renderOrder, setRenderOrder] = useState<Order | null>(order);
 
   const enabled = settings.data?.paymentMethods ?? DEFAULT_PAYMENT_METHODS;
   const qrSrc = resolveQrSrc(settings.data?.qrImageUrl);
@@ -129,6 +130,14 @@ export function PaymentSheet({
   };
 
   React.useEffect(() => {
+    if (order) setRenderOrder(order);
+  }, [order]);
+
+  React.useEffect(() => {
+    if (!visible && !successVisible && !receipt) setRenderOrder(null);
+  }, [receipt, successVisible, visible]);
+
+  React.useEffect(() => {
     if (!successVisible) return undefined;
     setSuccessDone(false);
     const timer = setTimeout(() => setSuccessDone(true), 1300);
@@ -139,9 +148,10 @@ export function PaymentSheet({
     if (successVisible && successDone && receipt) setSuccessVisible(false);
   }, [receipt, successDone, successVisible]);
 
-  if (!order) return null;
+  const activeOrder = order ?? renderOrder;
+  if (!activeOrder) return null;
 
-  const total = Number(order.finalAmount);
+  const total = Number(activeOrder.finalAmount);
   const selected = tabs.some((item) => item.key === tab) ? tab : tabs[0]?.key ?? 'qr';
   const cashNum = amountValue(cashInput);
   const qrNum = amountValue(qrInput);
@@ -149,7 +159,9 @@ export function PaymentSheet({
   const remaining = round2(total - entered);
   const mixedValid = selected === 'mixed' && Math.abs(remaining) < 0.01;
   const qrMissing = selected === 'qr' && !qrSrc;
-  const confirmDisabled = pay.isPending || qrMissing || (selected === 'mixed' && !mixedValid);
+  const activeItems = activeOrder.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
+  const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
+  const confirmDisabled = pay.isPending || qrMissing || (selected === 'mixed' && !mixedValid) || !allActiveItemsServed;
 
   const complement = (value: string) => {
     const trimmed = value.trim();
@@ -178,7 +190,7 @@ export function PaymentSheet({
     setReceipt(null);
     setSuccessVisible(true);
     try {
-      setReceipt(await fetchReceipt(order.id));
+      setReceipt(await fetchReceipt(activeOrder.id));
     } catch (e) {
       setSuccessVisible(false);
       push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
@@ -188,7 +200,7 @@ export function PaymentSheet({
   const requestPrint = async () => {
     if (!receipt) return;
     try {
-      const request = await print.mutateAsync({ orderId: order.id, type: 'receipt' });
+      const request = await print.mutateAsync({ orderId: activeOrder.id, type: 'receipt' });
       beginPrint(request, receipt);
       push({ message: 'Запрос на печать отправлен администратору', type: 'success', at: new Date().toISOString() });
       close();
@@ -200,8 +212,8 @@ export function PaymentSheet({
   const submit = () => {
     if (confirmDisabled) return;
     const payload: PaymentPayload = selected === 'mixed'
-      ? { orderId: order.id, method: 'mixed', cashAmount: cashNum, qrAmount: qrNum }
-      : { orderId: order.id, method: selected };
+      ? { orderId: activeOrder.id, method: 'mixed', cashAmount: cashNum, qrAmount: qrNum }
+      : { orderId: activeOrder.id, method: selected };
     void completePayment(payload).catch(() => undefined);
   };
 
@@ -217,8 +229,8 @@ export function PaymentSheet({
     const splitMethod: PaymentMethod =
       cash > 0 && qr > 0 ? 'mixed' : qr > 0 ? 'qr' : 'cash';
     const payload: PaymentPayload = payments.length > 1
-      ? { orderId: order.id, method: splitMethod, splitPayments: payments }
-      : { orderId: order.id, method: splitMethod };
+      ? { orderId: activeOrder.id, method: splitMethod, splitPayments: payments }
+      : { orderId: activeOrder.id, method: splitMethod };
     return completePayment(payload);
   };
 
@@ -234,7 +246,7 @@ export function PaymentSheet({
               title="Разделить счёт"
               variant="secondary"
               onPress={() => setSplitOpen(true)}
-              disabled={pay.isPending}
+              disabled={pay.isPending || !allActiveItemsServed}
               style={styles.splitButton}
             />
             <Button
@@ -248,8 +260,8 @@ export function PaymentSheet({
         }
       >
         <Text style={styles.subtitle}>
-          Стол {order.table.number}
-          {hallSuffix(order.table)} · {displayOrderNumber(order.orderNumber)}
+          Стол {activeOrder.table.number}
+          {hallSuffix(activeOrder.table)} · {displayOrderNumber(activeOrder.orderNumber)}
         </Text>
 
         <View style={styles.totalRow}>
@@ -257,12 +269,18 @@ export function PaymentSheet({
           <Text style={styles.totalValue}>{money(total)}</Text>
         </View>
 
+        {!allActiveItemsServed ? (
+          <View style={styles.warningBox}>
+            <Text style={styles.warningText}>Нельзя принять оплату: есть неподанные блюда.</Text>
+          </View>
+        ) : null}
+
         <Text style={styles.sectionLabel}>Способ оплаты</Text>
         <View style={styles.tabs}>
           {tabs.map((item) => {
             const active = selected === item.key;
             return (
-              <Pressable
+              <FastPressable
                 key={item.key}
                 onPress={() => setTab(item.key)}
                 style={[styles.tab, active && styles.tabActive]}
@@ -270,7 +288,7 @@ export function PaymentSheet({
                 <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>
                   {item.label}
                 </Text>
-              </Pressable>
+              </FastPressable>
             );
           })}
         </View>
@@ -330,7 +348,7 @@ export function PaymentSheet({
 
       <SplitBillSheet
         visible={splitOpen}
-        orderId={order.id}
+        orderId={activeOrder.id}
         total={total}
         submitting={pay.isPending}
         onClose={() => setSplitOpen(false)}
@@ -460,7 +478,7 @@ function PaymentSuccessOverlay({ visible, total }: { visible: boolean; total: nu
   }, [card, check, visible]);
 
   return (
-    <RNModal visible={visible} transparent animationType="none" statusBarTranslucent={false}>
+    <RNModal visible={visible} transparent animationType="none" statusBarTranslucent>
       <View style={styles.successBackdrop}>
         <Animated.View
           style={[
@@ -536,12 +554,14 @@ function SplitBillSheet({
     Array.from({ length: 2 }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })),
   );
   const [amountInputs, setAmountInputs] = useState(() => splitAmounts(total, 2));
+  const [methodMenuIndex, setMethodMenuIndex] = useState<number | null>(null);
 
   React.useEffect(() => {
     setCount(2);
     setCompleting(false);
     setPayments(Array.from({ length: 2 }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })));
     setAmountInputs(splitAmounts(total, 2));
+    setMethodMenuIndex(null);
   }, [orderId, total]);
 
   const amounts = useMemo(() => amountInputs.map((value) => round2(amountValue(value))), [amountInputs]);
@@ -555,6 +575,7 @@ function SplitBillSheet({
   const changeCount = (next: number) => {
     if (anyPaid) return;
     const normalized = Math.max(2, Math.min(10, next));
+    setMethodMenuIndex(null);
     setCount(normalized);
     setPayments(Array.from({ length: normalized }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })));
     setAmountInputs(splitAmounts(total, normalized));
@@ -603,6 +624,7 @@ function SplitBillSheet({
 
   const payOne = async (index: number) => {
     if (!canPay(index) || busy) return;
+    setMethodMenuIndex(null);
     const next = payments.map((payment, i) => (i === index ? { ...payment, paid: true } : payment));
     setPayments(next);
     if (!next.every((payment) => payment.paid)) return;
@@ -650,10 +672,22 @@ function SplitBillSheet({
         </View>
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        style={{ maxHeight: 460 }}
+        onScrollBeginDrag={() => setMethodMenuIndex(null)}
+        keyboardShouldPersistTaps="handled"
+      >
           <View style={styles.splitList}>
             {payments.map((payment, index) => (
-              <View key={index} style={[styles.splitCard, payment.paid && styles.splitCardPaid]}>
+              <View
+                key={index}
+                style={[
+                  styles.splitCard,
+                  payment.paid && styles.splitCardPaid,
+                  methodMenuIndex === index && styles.splitCardMenuOpen,
+                ]}
+              >
                 <View style={styles.splitTopRow}>
                   <Text style={styles.splitTitle}>Платёж {index + 1}</Text>
                   {payment.paid ? (
@@ -673,25 +707,30 @@ function SplitBillSheet({
                 </View>
 
                 {payment.paid ? (
-                  <Text style={styles.paidText}>Оплачен · {SPLIT_METHOD_LABELS[payment.method]}</Text>
+                  <View style={styles.paidRow}>
+                    <PwaIcon name="check" size={16} color={colors.success} strokeWidth={2.5} />
+                    <Text style={styles.paidText}>Оплачен · {SPLIT_METHOD_LABELS[payment.method]}</Text>
+                  </View>
                 ) : (
                   <>
-                    <View style={styles.splitMethodRow}>
-                      {SPLIT_METHODS.map((method) => {
-                        const active = payment.method === method.key;
-                        return (
-                          <Pressable
-                            key={method.key}
-                            disabled={busy}
-                            onPress={() => patchPayment(index, { method: method.key })}
-                            style={[styles.splitMethod, active && styles.splitMethodActive]}
-                          >
-                            <Text style={[styles.splitMethodText, active && styles.splitMethodTextActive]} numberOfLines={1}>
-                              {method.label}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
+                    <View style={styles.splitActionRow}>
+                      <SplitMethodSelect
+                        value={payment.method}
+                        open={methodMenuIndex === index}
+                        disabled={busy}
+                        onToggle={() => setMethodMenuIndex((current) => (current === index ? null : index))}
+                        onChange={(method) => {
+                          patchPayment(index, { method });
+                          setMethodMenuIndex(null);
+                        }}
+                      />
+                      <Button
+                        title={`Оплатить · ${money(amounts[index])}`}
+                        onPress={() => void payOne(index)}
+                        loading={busy && index === payments.findIndex((item) => !item.paid)}
+                        disabled={!canPay(index) || busy}
+                        style={{ flex: 1 }}
+                      />
                     </View>
 
                     {payment.method === 'mixed' ? (
@@ -721,13 +760,6 @@ function SplitBillSheet({
                       </View>
                     ) : null}
 
-                    <Button
-                      title={`Оплатить · ${money(amounts[index])}`}
-                      size="md"
-                      onPress={() => void payOne(index)}
-                      loading={busy && index === payments.findIndex((item) => !item.paid)}
-                      disabled={!canPay(index) || busy}
-                    />
                   </>
                 )}
               </View>
@@ -758,9 +790,108 @@ function CounterButton({
   onPress: () => void;
 }) {
   return (
-    <Pressable disabled={disabled} onPress={onPress} style={[styles.counterButton, disabled && { opacity: 0.4 }]}>
+    <FastPressable
+      disabled={disabled}
+      onPress={onPress}
+      style={[styles.counterButton, disabled && { opacity: 0.4 }]}
+    >
       <Text style={styles.counterButtonText}>{label}</Text>
-    </Pressable>
+    </FastPressable>
+  );
+}
+
+function SplitMethodSelect({
+  value,
+  open,
+  disabled,
+  onToggle,
+  onChange,
+}: {
+  value: SplitMethod;
+  open: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+  onChange: (value: SplitMethod) => void;
+}) {
+  const progress = React.useRef(new Animated.Value(open ? 1 : 0)).current;
+  const [renderOpen, setRenderOpen] = React.useState(open);
+
+  React.useEffect(() => {
+    progress.stopAnimation();
+    if (open) {
+      setRenderOpen(true);
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 150,
+        easing: Easing.bezier(0.16, 1, 0.3, 1),
+        useNativeDriver: true,
+      }).start();
+      return;
+    }
+    Animated.timing(progress, {
+      toValue: 0,
+      duration: 110,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) setRenderOpen(false);
+    });
+  }, [open, progress]);
+
+  return (
+    <View style={styles.methodSelectWrap}>
+      <FastPressable
+        disabled={disabled}
+        onPress={onToggle}
+        style={[styles.methodSelectTrigger, open && styles.methodSelectTriggerOpen, disabled && { opacity: 0.5 }]}
+      >
+        <Text style={styles.methodSelectText} numberOfLines={1}>
+          {SPLIT_METHOD_LABELS[value]}
+        </Text>
+        <PwaIcon name="chevronDown" size={16} color={colors.textLight} strokeWidth={2} />
+      </FastPressable>
+
+      {renderOpen ? (
+        <Animated.View
+          style={[
+            styles.methodSelectMenu,
+            {
+              opacity: progress,
+              transform: [
+                {
+                  translateY: progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-6, 0],
+                  }),
+                },
+                {
+                  scale: progress.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.98, 1],
+                  }),
+                },
+              ],
+            },
+          ]}
+        >
+          {SPLIT_METHODS.map((method) => {
+            const active = method.key === value;
+            return (
+              <FastPressable
+                key={method.key}
+                onPress={() => onChange(method.key)}
+                style={[styles.methodOption, active && styles.methodOptionActive]}
+              >
+                <Text style={[styles.methodOptionText, active && styles.methodOptionTextActive]} numberOfLines={1}>
+                  {method.label}
+                </Text>
+                {active ? <PwaIcon name="check" size={16} color={colors.primary} strokeWidth={2.2} /> : null}
+              </FastPressable>
+            );
+          })}
+        </Animated.View>
+      ) : null}
+    </View>
   );
 }
 
@@ -769,6 +900,14 @@ const styles = StyleSheet.create({
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.md },
   totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
   totalValue: { fontSize: fontSize.xxl, fontWeight: '700', color: colors.textPrimary },
+  warningBox: {
+    marginTop: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.warningSoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  warningText: { fontSize: fontSize.sm, color: colors.warning, lineHeight: 18 },
   sectionLabel: { fontSize: fontSize.base, color: colors.textSecondary, marginTop: spacing.lg, marginBottom: spacing.sm },
   tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   tab: {
@@ -821,7 +960,7 @@ const styles = StyleSheet.create({
   splitButton: { width: 148 },
   successBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.34)',
+    backgroundColor: 'rgba(0,0,0,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
     padding: spacing.lg,
@@ -917,6 +1056,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   splitCardPaid: { borderColor: 'rgba(22,163,74,0.36)', backgroundColor: colors.successSoft },
+  splitCardMenuOpen: { zIndex: 20, elevation: 12 },
   splitTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   splitTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   splitAmountText: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
@@ -934,20 +1074,58 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.textPrimary,
   },
-  splitMethodRow: { flexDirection: 'row', gap: spacing.sm },
-  splitMethod: {
-    flex: 1,
-    minHeight: 38,
+  splitActionRow: {
+    position: 'relative',
+    zIndex: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  methodSelectWrap: {
+    position: 'relative',
+    zIndex: 20,
+    width: 132,
+    flexShrink: 0,
+  },
+  methodSelectTrigger: {
+    height: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md,
   },
-  splitMethodActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
-  splitMethodText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.textSecondary },
-  splitMethodTextActive: { color: colors.primary },
+  methodSelectTriggerOpen: { borderColor: colors.primary, backgroundColor: colors.white },
+  methodSelectText: { flex: 1, minWidth: 0, fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+  methodSelectMenu: {
+    position: 'absolute',
+    top: 54,
+    left: 0,
+    right: 0,
+    zIndex: 30,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.white,
+    padding: 4,
+    ...softShadow,
+  },
+  methodOption: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+  },
+  methodOptionActive: { backgroundColor: colors.primaryFaint },
+  methodOptionText: { flex: 1, minWidth: 0, fontSize: fontSize.sm, color: colors.textSecondary },
+  methodOptionTextActive: { color: colors.primary, fontWeight: '600' },
   splitMixedGrid: { flexDirection: 'row', gap: spacing.sm },
   splitInputLabel: { fontSize: fontSize.xs, color: colors.textMuted, marginBottom: 4 },
   splitMixedInput: {
@@ -960,6 +1138,7 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textPrimary,
   },
+  paidRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   paidText: { fontSize: fontSize.sm, color: colors.success, fontWeight: '700' },
   splitError: { color: colors.danger, fontSize: fontSize.sm, textAlign: 'center', paddingTop: spacing.sm },
   splitFooter: {

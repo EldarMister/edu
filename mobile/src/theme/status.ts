@@ -71,7 +71,9 @@ export interface StationStatusChip {
   fg: string;
 }
 
-export function orderStationStatuses(order: Pick<Order, 'items'>): StationStatusChip[] {
+export function orderStationStatuses(order: Pick<Order, 'items' | 'status'>): StationStatusChip[] {
+  if (['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status)) return [];
+
   const kitchen = aggregateStationStatus(order.items.filter((item) => item.prepStation === 'kitchen'));
   const bar = aggregateStationStatus(order.items.filter((item) => item.prepStation === 'bar'));
   if (!kitchen || !bar || kitchen === bar) return [];
