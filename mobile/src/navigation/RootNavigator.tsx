@@ -13,6 +13,7 @@ import { useSocketLifecycle } from '@/services/socket';
 import { LoginScreen } from '@/screens/auth/LoginScreen';
 import { WaiterNavigator } from './WaiterNavigator';
 import { KitchenNavigator, BarNavigator } from './KitchenNavigator';
+import { AdminNavigator } from './AdminNavigator';
 import { StaffScreen } from '@/screens/staff/StaffScreen';
 import type { RootStackParamList } from './types';
 
@@ -75,6 +76,14 @@ export function RootNavigator() {
             {() => (
               <AuthedArea>
                 <BarNavigator />
+              </AuthedArea>
+            )}
+          </Stack.Screen>
+        ) : user.role === 'ADMIN' || user.role === 'OWNER' ? (
+          <Stack.Screen name="Admin">
+            {() => (
+              <AuthedArea>
+                <AdminNavigator />
               </AuthedArea>
             )}
           </Stack.Screen>

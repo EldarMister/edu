@@ -15,5 +15,6 @@ export type RootStackParamList = {
   Waiter: undefined;
   Kitchen: undefined;
   Bar: undefined;
+  Admin: undefined;
   Staff: undefined;
 };
