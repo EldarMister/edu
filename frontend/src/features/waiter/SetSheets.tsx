@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CartSetComponent, Category, Dish } from '@/types';
+import type { CartSetComponent, Category, Dish, DishVariant } from '@/types';
 import { money } from '@/lib/format';
 
 const SHEET_MS = 440;
@@ -252,6 +252,7 @@ export function SetConfigSheet({
 }) {
   const [components, setComponents] = useState<CartSetComponent[]>([]);
   const [replacingId, setReplacingId] = useState<string | null>(null);
+  const [variantDish, setVariantDish] = useState<Dish | null>(null);
   const [search, setSearch] = useState('');
   const [activeCat, setActiveCat] = useState<string>('all');
 
@@ -260,6 +261,7 @@ export function SetConfigSheet({
     if (set && open) {
       setComponents(defaultSetComponents(set));
       setReplacingId(null);
+      setVariantDish(null);
       setSearch('');
       setActiveCat('all');
     }
@@ -277,30 +279,44 @@ export function SetConfigSheet({
   function toggleRemove(c: CartSetComponent) {
     patch(c.componentId, c.action === 'removed'
       ? { action: 'default' }
-      : { action: 'removed', finalDishId: undefined, finalName: undefined, finalPrice: undefined });
+      : {
+          action: 'removed',
+          finalDishId: undefined,
+          finalVariantId: undefined,
+          finalName: undefined,
+          finalPrice: undefined,
+        });
   }
 
-  function applyReplace(componentId: string, dish: Dish) {
+  function applyReplace(componentId: string, dish: Dish, variant?: DishVariant) {
     patch(componentId, {
       action: 'replaced',
       finalDishId: dish.id,
-      finalName: dish.name,
-      finalPrice: dish.price,
+      finalVariantId: variant?.id,
+      finalName: variant ? `${dish.name} ${variant.name}` : dish.name,
+      finalPrice: variant?.price ?? dish.price,
     });
     setReplacingId(null);
+    setVariantDish(null);
     setSearch('');
     setActiveCat('all');
   }
 
   function beginReplace(component: CartSetComponent) {
-    const originalDish = menuDishes.find((d) => d.id === component.originalDishId);
     setReplacingId(component.componentId);
+    setVariantDish(null);
     setSearch('');
-    setActiveCat(originalDish?.categoryId ?? 'all');
+    setActiveCat('all');
   }
 
   function cancelChange(componentId: string) {
-    patch(componentId, { action: 'default', finalDishId: undefined, finalName: undefined, finalPrice: undefined });
+    patch(componentId, {
+      action: 'default',
+      finalDishId: undefined,
+      finalVariantId: undefined,
+      finalName: undefined,
+      finalPrice: undefined,
+    });
   }
 
   // Список категорий для фильтрации в режиме замены
@@ -322,12 +338,58 @@ export function SetConfigSheet({
   // Режим выбора блюда замены — полноэкранный overlay поверх sheet
   if (replacingId) {
     const replacingComp = components.find((c) => c.componentId === replacingId);
+    if (variantDish) {
+      return (
+        <div className="fixed inset-0 z-[80] flex flex-col bg-white">
+          <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+            <button
+              onClick={() => setVariantDish(null)}
+              aria-label="Назад"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-text-secondary hover:bg-background"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </button>
+            <div className="min-w-0 flex-1">
+              <h2 className="truncate text-[15px] font-semibold text-text-primary">{variantDish.name}</h2>
+              <p className="truncate text-xs text-text-muted">Выберите размер</p>
+            </div>
+          </div>
+
+          <div className="no-scrollbar min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-3" role="radiogroup">
+            {variantDish.variants.map((variant) => {
+              const isOutOfStock =
+                variantDish.trackInventory && typeof variant.stock === 'number' && variant.stock <= 0;
+              return (
+                <button
+                  key={variant.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={false}
+                  disabled={isOutOfStock}
+                  onClick={() => !isOutOfStock && applyReplace(replacingId, variantDish, variant)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-white px-3.5 py-3.5 text-left transition-colors hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <span className="min-w-0 flex-1 text-[16px] font-medium text-text-primary">
+                    {variant.name}
+                    {isOutOfStock && <span className="ml-2 text-xs font-medium text-red-500">Нет в наличии</span>}
+                  </span>
+                  <span className="shrink-0 text-[16px] font-semibold text-text-primary">{money(variant.price)}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="fixed inset-0 z-[80] flex flex-col bg-white">
         {/* Шапка */}
         <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
           <button
-            onClick={() => { setReplacingId(null); setSearch(''); setActiveCat('all'); }}
+            onClick={() => { setReplacingId(null); setVariantDish(null); setSearch(''); setActiveCat('all'); }}
             aria-label="Назад"
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-text-secondary hover:bg-background"
           >
@@ -394,7 +456,10 @@ export function SetConfigSheet({
                 <button
                   key={d.id}
                   type="button"
-                  onClick={() => applyReplace(replacingId, d)}
+                  onClick={() => {
+                    if (d.variants.length > 0) setVariantDish(d);
+                    else applyReplace(replacingId, d);
+                  }}
                   className="flex h-[90px] flex-col rounded-xl border border-border bg-white px-3 py-2.5 text-left transition-colors hover:border-primary/50 hover:bg-primary/5 active:bg-primary/10"
                 >
                   <span className="line-clamp-2 min-w-0 flex-1 text-[14px] font-medium leading-snug text-text-primary">

@@ -305,6 +305,10 @@ export function WaiterApp() {
           );
           const components = it.setComponents.map((sc) => {
             const def = defs.get(defKey(sc.originalDishId ?? '', sc.originalVariantNameSnapshot));
+            const finalDish = sc.finalDishId ? dishById.get(sc.finalDishId) : undefined;
+            const finalVariant = sc.finalVariantId
+              ? finalDish?.variants.find((candidate) => candidate.id === sc.finalVariantId)
+              : undefined;
             return {
               componentId: def?.id ?? sc.id,
               originalDishId: sc.originalDishId ?? '',
@@ -312,12 +316,17 @@ export function WaiterApp() {
               originalName: sc.originalVariantNameSnapshot
                 ? `${sc.originalNameSnapshot} ${sc.originalVariantNameSnapshot}`
                 : sc.originalNameSnapshot,
+              originalPrice: def?.dishVariant?.price ?? def?.dish.price ?? '0',
               quantity: sc.quantity,
               removable: def?.removable ?? true,
               replaceable: def?.replaceable ?? true,
               action: sc.action,
               finalDishId: sc.finalDishId ?? undefined,
-              finalName: sc.finalNameSnapshot ?? undefined,
+              finalVariantId: sc.finalVariantId ?? undefined,
+              finalName: sc.finalNameSnapshot
+                ? [sc.finalNameSnapshot, sc.finalVariantNameSnapshot].filter(Boolean).join(' ')
+                : undefined,
+              finalPrice: finalVariant?.price ?? finalDish?.price,
             };
           });
           return {

@@ -28,6 +28,10 @@ export class SetComponentInputDto {
   @IsString()
   finalDishId?: string;
 
+  @IsOptional()
+  @IsString()
+  finalVariantId?: string;
+
   @IsEnum(SetComponentAction)
   action: SetComponentAction;
 }

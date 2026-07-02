@@ -363,9 +363,10 @@ model DishVariant {
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  dish          Dish           @relation(fields: [dishId], references: [id], onDelete: Cascade)
-  orderItems    OrderItem[]
-  setComponents SetComponent[]
+  dish               Dish                    @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  orderItems         OrderItem[]
+  setComponents      SetComponent[]
+  finalOrderSetItems OrderItemSetComponent[] @relation("FinalVariant")
 
   @@index([dishId])
   @@map("dish_variants")
@@ -537,7 +538,9 @@ model OrderItemSetComponent {
   // Снимок названия варианта блюда состава (например, «1 л»), если он выбран.
   originalVariantNameSnapshot String?            @map("original_variant_name_snapshot")
   finalDishId                 String?            @map("final_dish_id")
+  finalVariantId              String?            @map("final_variant_id")
   finalNameSnapshot           String?            @map("final_name_snapshot")
+  finalVariantNameSnapshot    String?            @map("final_variant_name_snapshot")
   action                      SetComponentAction @default(default)
   // Кухня отмечает каждое блюдо состава сета отдельно (как обычную позицию).
   status                      OrderItemStatus    @default(new)
@@ -548,11 +551,13 @@ model OrderItemSetComponent {
   priceDelta                  Decimal            @default(0) @map("price_delta") @db.Decimal(10, 2)
   createdAt                   DateTime           @default(now()) @map("created_at")
 
-  orderItem    OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
-  originalDish Dish?     @relation("OrigDish", fields: [originalDishId], references: [id], onDelete: SetNull)
-  finalDish    Dish?     @relation("FinalDish", fields: [finalDishId], references: [id])
+  orderItem    OrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  originalDish Dish?        @relation("OrigDish", fields: [originalDishId], references: [id], onDelete: SetNull)
+  finalDish    Dish?        @relation("FinalDish", fields: [finalDishId], references: [id])
+  finalVariant DishVariant? @relation("FinalVariant", fields: [finalVariantId], references: [id], onDelete: SetNull)
 
   @@index([orderItemId])
+  @@index([finalVariantId])
   @@map("order_item_set_components")
 }
 

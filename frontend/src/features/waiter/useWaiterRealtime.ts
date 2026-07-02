@@ -77,7 +77,7 @@ function rejectedDishNames(order: Order): string[] {
       if (component.status !== 'rejected') continue;
       names.push(
         component.action === 'replaced' && component.finalNameSnapshot
-          ? component.finalNameSnapshot
+          ? [component.finalNameSnapshot, component.finalVariantNameSnapshot].filter(Boolean).join(' ')
           : component.originalNameSnapshot,
       );
     }

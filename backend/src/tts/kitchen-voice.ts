@@ -21,6 +21,7 @@ type VoiceItem = {
     status: string;
     originalNameSnapshot: string;
     finalNameSnapshot?: string | null;
+    finalVariantNameSnapshot?: string | null;
     quantity?: number | null;
   }[];
 };
@@ -218,7 +219,11 @@ function itemVoiceFragment(item: VoiceItem): string {
   const order: string[] = [];
   for (const c of components) {
     if (!alive(c)) continue;
-    const name = (c.action === 'replaced' && c.finalNameSnapshot ? c.finalNameSnapshot : c.originalNameSnapshot).trim();
+    const name = (
+      c.action === 'replaced' && c.finalNameSnapshot
+        ? [c.finalNameSnapshot, c.finalVariantNameSnapshot].filter(Boolean).join(' ')
+        : c.originalNameSnapshot
+    ).trim();
     if (!name) continue;
     const qty = c.quantity && c.quantity > 0 ? c.quantity : 1;
     if (!counts.has(name)) order.push(name);
@@ -284,7 +289,11 @@ function diffActiveNames(item: VoiceItem): string[] {
 
   return components
     .filter((c) => c.status !== 'rejected' && c.status !== 'cancelled' && c.action !== 'removed')
-    .map((c) => (c.action === 'replaced' && c.finalNameSnapshot ? c.finalNameSnapshot : c.originalNameSnapshot))
+    .map((c) =>
+      c.action === 'replaced' && c.finalNameSnapshot
+        ? [c.finalNameSnapshot, c.finalVariantNameSnapshot].filter(Boolean).join(' ')
+        : c.originalNameSnapshot,
+    )
     .map((s) => s.trim())
     .filter(Boolean);
 }

@@ -379,6 +379,7 @@ export class StaffService {
                 status: true,
                 originalNameSnapshot: true,
                 finalNameSnapshot: true,
+                finalVariantNameSnapshot: true,
               },
             },
           },
@@ -526,7 +527,10 @@ export class StaffService {
           if (sc.action === 'removed' || sc.status === OrderItemStatus.rejected || sc.status === OrderItemStatus.cancelled) {
             continue;
           }
-          const compName = (sc.action === 'replaced' ? sc.finalNameSnapshot : sc.originalNameSnapshot) ?? sc.originalNameSnapshot;
+          const compName =
+            sc.action === 'replaced' && sc.finalNameSnapshot
+              ? [sc.finalNameSnapshot, sc.finalVariantNameSnapshot].filter(Boolean).join(' ')
+              : sc.originalNameSnapshot;
           line.components.set(compName, (line.components.get(compName) ?? 0) + sc.quantity * it.quantity);
         }
       }

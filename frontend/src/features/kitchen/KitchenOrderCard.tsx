@@ -202,11 +202,14 @@ export function KitchenOrderCard({
       ? `${sc.originalNameSnapshot} ${sc.originalVariantNameSnapshot}`
       : sc.originalNameSnapshot;
     if (sc.action !== 'replaced') return orig;
+    const final = sc.finalVariantNameSnapshot
+      ? `${sc.finalNameSnapshot} ${sc.finalVariantNameSnapshot}`
+      : sc.finalNameSnapshot;
     return (
       <span className="inline-flex flex-wrap items-center gap-1.5">
         <span className="text-text-muted line-through">{orig}</span>
         <span className="font-semibold text-text-muted">&gt;</span>
-        <span className="font-semibold text-primary">{sc.finalNameSnapshot}</span>
+        <span className="font-semibold text-primary">{final}</span>
       </span>
     );
   };
