@@ -7,6 +7,7 @@ import { colors } from '@/theme';
 import { useAuth } from '@/store/auth';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { registerForPushNotifications } from '@/services/push';
+import { PttOverlay } from '@/features/ptt/PttOverlay';
 import { LoginScreen } from '@/screens/auth/LoginScreen';
 import { WaiterNavigator } from './WaiterNavigator';
 import { KitchenNavigator, BarNavigator } from './KitchenNavigator';
@@ -21,7 +22,12 @@ function AuthedArea({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     void registerForPushNotifications();
   }, []);
-  return <View style={{ flex: 1 }}>{children}</View>;
+  return (
+    <View style={{ flex: 1 }}>
+      {children}
+      <PttOverlay />
+    </View>
+  );
 }
 
 export function RootNavigator() {

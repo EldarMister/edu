@@ -20,6 +20,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.edupos.mobile",
       "infoPlist": {
+        "NSMicrophoneUsageDescription": "EDU POS использует микрофон для внутренней рации Push-to-Talk.",
         "UIBackgroundModes": [
           "remote-notification"
         ]
@@ -33,6 +34,7 @@
       },
       "permissions": [
         "INTERNET",
+        "RECORD_AUDIO",
         "VIBRATE",
         "POST_NOTIFICATIONS"
       ]

@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from '@/store/auth';
 import { api } from '@/lib/api';
 import type { AuthUser } from '@/types';
 import { ProtectedRoute, homeForRole } from '@/routes/ProtectedRoute';
 import { Toaster } from '@/components/Toaster';
 import { UpdateModal } from '@/components/UpdateModal';
+import { PttOverlay } from '@/features/ptt/PttOverlay';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { WaiterApp } from '@/features/waiter/WaiterApp';
 import { KitchenApp } from '@/features/kitchen/KitchenApp';
@@ -19,6 +20,12 @@ export function App() {
   const user = useAuth((s) => s.user);
   const accessToken = useAuth((s) => s.accessToken);
   const updateUser = useAuth((s) => s.updateUser);
+  const location = useLocation();
+  const showPtt =
+    !!user &&
+    ['/waiter', '/kitchen', '/bar', '/admin', '/owner'].some((prefix) =>
+      location.pathname.startsWith(prefix),
+    );
 
   // Подтягиваем актуальные права доступа при загрузке (старые сессии могли войти
   // до появления permissions; владелец мог изменить права сотрудника).
@@ -106,6 +113,7 @@ export function App() {
           element={<Navigate to={user ? homeForRole(user.role) : '/login'} replace />}
         />
       </Routes>
+      {showPtt && <PttOverlay waiterMode={location.pathname.startsWith('/waiter')} />}
       <Toaster />
       <UpdateModal />
     </>
