@@ -27,6 +27,8 @@ export type PwaIconName =
   | 'chart'
   | 'trash'
   | 'qr'
+  | 'radio'
+  | 'power'
   | 'dotsVertical';
 
 export function PwaIcon({
@@ -124,6 +126,21 @@ export function PwaIcon({
           <Rect x="14" y="3" width="7" height="7" rx="1" {...common} strokeWidth={2} />
           <Rect x="3" y="14" width="7" height="7" rx="1" {...common} strokeWidth={2} />
           <Path d="M14 14h3v3M21 14v3M17 21h4M14 18v3" {...common} strokeWidth={2} />
+        </>
+      )}
+      {name === 'radio' && (
+        <>
+          <Path d="M9 4h6M12 4v4" {...common} strokeWidth={2} />
+          <Rect x="6.5" y="7.5" width="11" height="13" rx="2.5" {...common} strokeWidth={2} />
+          <Path d="M10 11.5h4M10 15h4" {...common} strokeWidth={2} />
+          <Circle cx="9.5" cy="18" r="0.8" fill={color} />
+          <Circle cx="14.5" cy="18" r="0.8" fill={color} />
+        </>
+      )}
+      {name === 'power' && (
+        <>
+          <Path d="M12 2v10" {...common} strokeWidth={2.2} />
+          <Path d="M6.4 6.6a8 8 0 1 0 11.2 0" {...common} strokeWidth={2.2} />
         </>
       )}
       {name === 'chart' && (

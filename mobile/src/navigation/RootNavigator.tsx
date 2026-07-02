@@ -10,6 +10,7 @@ import { useAuth } from '@/store/auth';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { registerForPushNotifications } from '@/services/push';
 import { useSocketLifecycle } from '@/services/socket';
+import { PttOverlay } from '@/features/ptt/PttOverlay';
 import { LoginScreen } from '@/screens/auth/LoginScreen';
 import { WaiterNavigator } from './WaiterNavigator';
 import { KitchenNavigator, BarNavigator } from './KitchenNavigator';
@@ -29,6 +30,7 @@ function AuthedArea({ children }: { children: React.ReactNode }) {
   return (
     <View style={{ flex: 1 }}>
       {children}
+      <PttOverlay />
       <ReceiptPrintSheet />
       <Toaster />
     </View>
