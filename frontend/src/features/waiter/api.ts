@@ -156,6 +156,7 @@ function linesToItems(lines: CartLine[]) {
           originalDishId: c.originalDishId,
           originalVariantId: c.originalVariantId,
           finalDishId: c.action === 'replaced' ? c.finalDishId : undefined,
+          finalVariantId: c.action === 'replaced' ? c.finalVariantId : undefined,
           action: c.action,
         }))
       : undefined,
