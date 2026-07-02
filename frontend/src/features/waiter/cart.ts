@@ -5,6 +5,9 @@ import { dishUnitPrice } from '@/lib/format';
 interface TableCart {
   lines: CartLine[];
   comment: string;
+  // Открыто ли поле комментария. Закрытое поле НЕ отправляется с заказом,
+  // но текст сохраняется (снова покажется при открытии).
+  commentOpen: boolean;
 }
 
 interface CartState {
@@ -12,6 +15,7 @@ interface CartState {
   // Зеркало корзины активного стола (для удобства потребителей).
   lines: CartLine[];
   comment: string;
+  commentOpen: boolean;
   // Черновики корзин по каждому столу — не сбрасываются при переключении.
   carts: Record<string, TableCart>;
   selectTable: (tableId: string) => void;
@@ -29,10 +33,12 @@ interface CartState {
   /** Пометить «с собой» все позиции (тумблер на весь заказ). */
   setAllTakeaway: (takeaway: boolean) => void;
   setComment: (comment: string) => void;
+  /** Показать/скрыть поле комментария (закрытое не уходит с заказом). */
+  setCommentOpen: (open: boolean) => void;
   clear: () => void;
 }
 
-const EMPTY: TableCart = { lines: [], comment: '' };
+const EMPTY: TableCart = { lines: [], comment: '', commentOpen: false };
 
 export function cartLineKeyFromParts(dishId: string, variantId?: string | null) {
   return `${dishId}:${variantId ?? 'base'}`;
@@ -68,6 +74,7 @@ function mutate(s: CartState, fn: (cart: TableCart) => TableCart): Partial<CartS
   return {
     lines: next.lines,
     comment: next.comment,
+    commentOpen: next.commentOpen,
     carts: { ...s.carts, [s.tableId]: next },
   };
 }
@@ -76,6 +83,7 @@ export const useCart = create<CartState>((set) => ({
   tableId: null,
   lines: [],
   comment: '',
+  commentOpen: false,
   carts: {},
 
   // Переключение стола сохраняет корзину прежнего и восстанавливает корзину нового.
@@ -83,7 +91,7 @@ export const useCart = create<CartState>((set) => ({
     set((s) => {
       if (s.tableId === tableId) return s;
       const c = s.carts[tableId] ?? EMPTY;
-      return { tableId, lines: c.lines, comment: c.comment };
+      return { tableId, lines: c.lines, comment: c.comment, commentOpen: c.commentOpen };
     }),
 
   // Переносит черновик текущего стола на целевой (перезаписывает его черновик) и переключается.
@@ -94,7 +102,13 @@ export const useCart = create<CartState>((set) => ({
       const carts = { ...s.carts };
       delete carts[s.tableId];
       carts[targetTableId] = current;
-      return { tableId: targetTableId, lines: current.lines, comment: current.comment, carts };
+      return {
+        tableId: targetTableId,
+        lines: current.lines,
+        comment: current.comment,
+        commentOpen: current.commentOpen,
+        carts,
+      };
     }),
 
   add: (dish, variant) =>
@@ -126,8 +140,9 @@ export const useCart = create<CartState>((set) => ({
     ),
 
   // Загружает позиции существующего заказа в корзину активного стола (режим редактирования).
+  // Если у заказа уже есть комментарий — поле сразу открыто.
   replaceLines: (lines, comment) =>
-    set((s) => mutate(s, () => ({ lines, comment }))),
+    set((s) => mutate(s, () => ({ lines, comment, commentOpen: comment.trim().length > 0 }))),
 
   inc: (lineKey) =>
     set((s) =>
@@ -171,13 +186,15 @@ export const useCart = create<CartState>((set) => ({
 
   setComment: (comment) => set((s) => mutate(s, (c) => ({ ...c, comment }))),
 
+  setCommentOpen: (open) => set((s) => mutate(s, (c) => ({ ...c, commentOpen: open }))),
+
   // Очищает корзину активного стола (после отправки заказа).
   clear: () =>
     set((s) => {
-      if (!s.tableId) return { lines: [], comment: '' };
+      if (!s.tableId) return { lines: [], comment: '', commentOpen: false };
       const carts = { ...s.carts };
       delete carts[s.tableId];
-      return { lines: [], comment: '', carts };
+      return { lines: [], comment: '', commentOpen: false, carts };
     }),
 }));
 

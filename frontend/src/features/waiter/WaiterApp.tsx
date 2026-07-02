@@ -353,7 +353,11 @@ export function WaiterApp() {
   async function saveEditOrder() {
     if (!editingOrderId) return;
     try {
-      await editOrder.mutateAsync({ orderId: editingOrderId, comment: cart.comment, lines: cart.lines });
+      await editOrder.mutateAsync({
+        orderId: editingOrderId,
+        comment: cart.commentOpen ? cart.comment : '',
+        lines: cart.lines,
+      });
       cart.clear();
       setEditingOrderId(null);
       push({ message: t('Изменения сохранены'), type: 'success', at: new Date().toISOString() });
@@ -596,7 +600,7 @@ export function WaiterApp() {
       } else {
         await create.mutateAsync({
           tableId: selectedTable.id,
-          comment: cart.comment,
+          comment: cart.commentOpen ? cart.comment : '',
           idempotencyKey: idemKey,
           lines: cart.lines,
         });

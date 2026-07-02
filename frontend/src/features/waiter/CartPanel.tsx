@@ -31,7 +31,8 @@ export function CartPanel({
   onCancelEdit?: () => void;
 }) {
   const t = useT();
-  const { lines, comment, inc, dec, setComment, setLineTakeaway, setAllTakeaway, clear } = useCart();
+  const { lines, comment, commentOpen, inc, dec, setComment, setCommentOpen, setLineTakeaway, setAllTakeaway, clear } =
+    useCart();
   const totals = cartTotals(lines);
   const hasLines = lines.length > 0;
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
@@ -75,14 +76,17 @@ export function CartPanel({
         )}
       </div>
 
-      {/* Низ: общий комментарий + итоги + кнопки */}
+      {/* Низ: общий комментарий (по кнопке) + итоги + кнопки */}
       <div className="border-t border-border pt-3">
-        <input
-          className="input mb-3 h-10 text-sm"
-          placeholder={t('Комментарий к заказу')}
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-        />
+        {commentOpen && (
+          <input
+            className="input mb-3 h-10 text-sm"
+            placeholder={t('Комментарий к заказу')}
+            value={comment}
+            onChange={(e) => setComment(e.target.value)}
+            autoFocus
+          />
+        )}
 
         <div className="space-y-1 text-sm">
           {totals.discount > 0 && (
@@ -123,12 +127,22 @@ export function CartPanel({
         </button>
 
         {hasLines && (
-          <button
-            className="mt-2 h-9 w-full text-sm font-medium text-primary hover:underline"
-            onClick={() => clear()}
-          >
-            {t('Очистить')}
-          </button>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <button
+              className="h-9 text-sm font-medium text-primary hover:underline"
+              onClick={() => clear()}
+            >
+              {t('Очистить')}
+            </button>
+            <button
+              className={`h-9 text-sm font-medium hover:underline ${
+                commentOpen ? 'text-text-secondary' : 'text-primary'
+              }`}
+              onClick={() => setCommentOpen(!commentOpen)}
+            >
+              {commentOpen ? t('Скрыть комментарий') : t('Комментарий')}
+            </button>
+          </div>
         )}
       </div>
     </div>
