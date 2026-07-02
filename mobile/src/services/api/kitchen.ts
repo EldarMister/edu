@@ -13,6 +13,55 @@ export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitche
   });
 }
 
+// ---------- Статистика кухни (паритет с PWA useKitchenStats) ----------
+export type KitchenStatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
+
+export interface KitchenStatsDish {
+  name: string;
+  count: number;
+  revenue: number;
+  avgMin: number;
+  minMin: number;
+  maxMin: number;
+  timed: boolean;
+}
+export interface KitchenStats {
+  cards: {
+    revenue: number;
+    prepared: number;
+    rejections: number;
+    avgPrepMin: number;
+  };
+  prepared: {
+    total: number;
+    avgPerDay: number;
+    uniqueDishes: number;
+    maxPerDay: number;
+  };
+  dishes: KitchenStatsDish[];
+  rejections: { name: string; count: number }[];
+  hourly: { hour: number; count: number; revenue: number }[];
+  period: KitchenStatsPeriod;
+  range: { from: string | null; to: string | null };
+}
+
+export function useKitchenStats(
+  params: { period: KitchenStatsPeriod; from?: string; to?: string },
+  station: PrepStation = 'kitchen',
+  enabled = true,
+) {
+  // Строим query вручную (URLSearchParams в RN ненадёжен) — как остальной kitchen API.
+  const parts = [`period=${params.period}`, `station=${station}`];
+  if (params.from) parts.push(`from=${params.from}`);
+  if (params.to) parts.push(`to=${params.to}`);
+  const query = parts.join('&');
+  return useQuery({
+    queryKey: ['kitchen', 'statistics', station, params],
+    queryFn: async () => (await api.get<KitchenStats>(`/kitchen/statistics?${query}`)).data,
+    enabled,
+  });
+}
+
 export interface StopListDish {
   id: string;
   name: string;

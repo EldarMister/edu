@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, EmptyState, Loading, SegmentTabs } from '@/components/ui';
 import { OrderBadge } from '@/components/StatusBadge';
@@ -42,6 +43,7 @@ import {
 import { apiError } from '@/lib/api';
 import { StopListSheet } from './StopListSheet';
 import { KitchenVoiceSettingsSheet } from './KitchenVoiceSettingsSheet';
+import { KitchenStatsSheet } from './KitchenStatsSheet';
 import type { Order, OrderItemStatus, OrderSetComponent, OrderStatus, PrepStation } from '@/types';
 
 const TABS: { key: KitchenTab; label: string }[] = [
@@ -126,6 +128,9 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   const [now, setNow] = useState(() => Date.now());
   const [stopListOpen, setStopListOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
+  // 'auto' — следовать датчику наклона (по умолчанию), 'landscape' — принудительно альбом.
+  const [orientationMode, setOrientationMode] = useState<'auto' | 'landscape'>('auto');
   const [pending, setPending] = useState<PendingAction | null>(null);
   const orders = useKitchenOrders(tab, station);
   const accept = useAccept(station);
@@ -137,6 +142,26 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
+  }, []);
+
+  // Кухня — единственный экран, где разрешён поворот. По умолчанию следуем датчику
+  // (планшет наклонили → альбом), при выходе возвращаем портрет всему приложению.
+  useEffect(() => {
+    ScreenOrientation.unlockAsync().catch(() => {});
+    return () => {
+      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    };
+  }, []);
+
+  const toggleOrientation = useCallback(() => {
+    setOrientationMode((mode) => {
+      if (mode === 'auto') {
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE).catch(() => {});
+        return 'landscape';
+      }
+      ScreenOrientation.unlockAsync().catch(() => {});
+      return 'auto';
+    });
   }, []);
 
   // Новый заказ: звук + вибрация + тост (по настройкам) + озвучка станции.
@@ -256,6 +281,20 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         <View style={{ flex: 1, minWidth: 0 }}>
           <SegmentTabs items={TABS} value={tab} onChange={setTab} count={list.length} />
         </View>
+        <FastPressable onPress={() => setStatsOpen(true)} style={styles.voiceBtn} hitSlop={6}>
+          <PwaIcon name="chart" size={18} color={colors.primary} />
+        </FastPressable>
+        <FastPressable
+          onPress={toggleOrientation}
+          style={[styles.voiceBtn, orientationMode === 'landscape' && styles.iconBtnActive]}
+          hitSlop={6}
+        >
+          <PwaIcon
+            name="screenRotate"
+            size={18}
+            color={orientationMode === 'landscape' ? colors.white : colors.primary}
+          />
+        </FastPressable>
         <FastPressable onPress={() => setVoiceOpen(true)} style={styles.voiceBtn} hitSlop={6}>
           <PwaIcon name="speaker" size={18} color={colors.primary} />
         </FastPressable>
@@ -332,6 +371,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
 
       <StopListSheet visible={stopListOpen} station={station} onClose={() => setStopListOpen(false)} />
       <KitchenVoiceSettingsSheet visible={voiceOpen} onClose={() => setVoiceOpen(false)} />
+      <KitchenStatsSheet visible={statsOpen} station={station} onClose={() => setStatsOpen(false)} />
     </SafeAreaView>
   );
 }
@@ -833,6 +873,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  iconBtnActive: { backgroundColor: colors.primary },
   stopListBtn: {
     height: 38,
     borderRadius: radius.sm,

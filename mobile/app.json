@@ -3,7 +3,7 @@
     "name": "EDU POS",
     "slug": "edu-pos-mobile",
     "version": "0.1.1",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/app-icon.png",
     "scheme": "edupos",
     "userInterfaceStyle": "light",
