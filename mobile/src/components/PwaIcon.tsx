@@ -25,6 +25,8 @@ export type PwaIconName =
   | 'eye'
   | 'speaker'
   | 'chart'
+  | 'trash'
+  | 'qr'
   | 'dotsVertical';
 
 export function PwaIcon({
@@ -110,6 +112,20 @@ export function PwaIcon({
         </>
       )}
       {name === 'check' && <Path d="M20 6 9 17l-5-5" {...common} strokeWidth={2.5} />}
+      {name === 'trash' && (
+        <>
+          <Path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" {...common} strokeWidth={2} />
+          <Path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" {...common} strokeWidth={2} />
+        </>
+      )}
+      {name === 'qr' && (
+        <>
+          <Rect x="3" y="3" width="7" height="7" rx="1" {...common} strokeWidth={2} />
+          <Rect x="14" y="3" width="7" height="7" rx="1" {...common} strokeWidth={2} />
+          <Rect x="3" y="14" width="7" height="7" rx="1" {...common} strokeWidth={2} />
+          <Path d="M14 14h3v3M21 14v3M17 21h4M14 18v3" {...common} strokeWidth={2} />
+        </>
+      )}
       {name === 'chart' && (
         <>
           <Path d="M3 3v18h18" {...common} strokeWidth={2} />

@@ -1,9 +1,14 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/utils/orderCache';
-import type { Order, OrderStatus, PaymentMethod, Role } from '@/types';
+import type { Order, OrderStatus, PaymentMethod, Role, TableStatus } from '@/types';
 
 const get = async <T,>(url: string) => (await api.get<T>(url)).data;
+
+function useInvalidate(keys: string[][]) {
+  const qc = useQueryClient();
+  return () => keys.forEach((k) => qc.invalidateQueries({ queryKey: k }));
+}
 
 // ---------- Статистика (порт PWA features/admin/api useStatistics) ----------
 export type StatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
@@ -169,4 +174,73 @@ export function useRetryFiscal() {
       qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
     },
   });
+}
+
+// ---------- Столы и залы (порт PWA) ----------
+export interface AdminTableItem {
+  id: string;
+  number: number;
+  seats: number;
+  status: TableStatus;
+  isActive: boolean;
+  hallId: string;
+  qrToken?: string;
+}
+export interface AdminHall {
+  id: string;
+  name: string;
+  isActive: boolean;
+  sortOrder: number;
+  tables: AdminTableItem[];
+}
+
+export function useTablesOverview() {
+  return useQuery({
+    queryKey: ['admin', 'tables', 'overview'],
+    queryFn: () =>
+      get<{ hallsCount: number; tablesCount: number; activeTablesCount: number; occupiedCount: number }>(
+        '/admin/tables/overview',
+      ),
+  });
+}
+
+export function useAdminHalls() {
+  return useQuery({ queryKey: ['admin', 'halls'], queryFn: () => get<AdminHall[]>('/admin/halls') });
+}
+
+export function useHallMutations() {
+  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
+  const create = useMutation({
+    mutationFn: (b: { name: string }) => api.post('/admin/halls', b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean }) =>
+      api.patch(`/admin/halls/${id}`, b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/halls/${id}`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove };
+}
+
+export function useTableMutations() {
+  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
+  const create = useMutation({
+    mutationFn: (b: { hallId: string; number: number; seats: number }) =>
+      api.post('/admin/tables', b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...b }: { id: string; number?: number; seats?: number; isActive?: boolean }) =>
+      api.patch(`/admin/tables/${id}`, b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/tables/${id}`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove };
 }
