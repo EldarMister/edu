@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { Order } from '@/types';
+import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import { ORDER_STATUS } from '@/lib/status';
 import { displayOrderNumber, hallSuffix, money, orderItemDisplayName } from '@/lib/format';
@@ -53,6 +53,32 @@ function safeComment(s: string | null | undefined): string | null {
   if (!s) return null;
   if ([...s].every(c => c === '�' || c === ' ')) return null;
   return s;
+}
+
+function setComponentLabel(sc: OrderSetComponent) {
+  const original = sc.originalVariantNameSnapshot
+    ? `${sc.originalNameSnapshot} ${sc.originalVariantNameSnapshot}`
+    : sc.originalNameSnapshot;
+  if (sc.action !== 'replaced') return { original, final: null };
+  const final = sc.finalVariantNameSnapshot
+    ? `${sc.finalNameSnapshot} ${sc.finalVariantNameSnapshot}`
+    : sc.finalNameSnapshot;
+  return { original, final };
+}
+
+function itemStatusText(status: OrderItemStatus, t: (value: string) => string) {
+  if (status === 'ready' || status === 'served') return t('Готово');
+  if (status === 'cooking' || status === 'accepted') return t('Готовится');
+  if (status === 'rejected') return t('Отказано');
+  if (status === 'cancelled') return t('Отменено');
+  return t('Ожидает');
+}
+
+function itemStatusClass(status: OrderItemStatus) {
+  if (status === 'ready' || status === 'served') return 'text-green-600 bg-green-50';
+  if (status === 'rejected' || status === 'cancelled') return 'text-danger bg-danger/5';
+  if (status === 'cooking' || status === 'accepted') return 'text-text-secondary bg-background';
+  return 'text-warning bg-warning/10';
 }
 
 export function OrderPanel({
@@ -158,8 +184,9 @@ export function OrderPanel({
           const cancelled = it.status === 'cancelled';
           const waitingItem = waitingDecision && !rejected;
           const comment = safeComment(it.comment);
+          const setParts = it.setComponents ?? [];
           const clickable = billCorrection && (it.status === 'ready' || it.status === 'served');
-          const hasExtra = comment || ((rejected || cancelled) && it.rejectReason) || waitingItem;
+          const hasExtra = setParts.length > 0 || comment || ((rejected || cancelled) && it.rejectReason) || waitingItem;
           return (
             <button
               key={it.id}
@@ -215,7 +242,43 @@ export function OrderPanel({
                 </div>
               </div>
               {hasExtra && (
-                <div className="mt-0.5 text-xs">
+                <div className="mt-1.5 text-xs">
+                  {setParts.length > 0 && (
+                    <div className="mb-1.5 space-y-1 rounded-lg border border-border/70 bg-white/70 px-2 py-1.5">
+                      {setParts.map((sc) => {
+                        const removed = sc.action === 'removed' || sc.status === 'cancelled';
+                        const scRejected = sc.status === 'rejected';
+                        const label = setComponentLabel(sc);
+                        return (
+                          <div key={sc.id} className="flex items-center gap-2">
+                            <span
+                              className={`min-w-0 flex-1 truncate ${
+                                removed || scRejected ? 'text-danger line-through' : 'text-text-secondary'
+                              }`}
+                            >
+                              {label.final ? (
+                                <>
+                                  <span className="text-text-muted line-through">{label.original}</span>
+                                  <span className="mx-1 text-text-muted">&gt;</span>
+                                  <span className="font-medium text-primary">{label.final}</span>
+                                </>
+                              ) : (
+                                label.original
+                              )}
+                            </span>
+                            {sc.quantity > 1 && (
+                              <span className="shrink-0 text-[11px] text-text-muted">×{sc.quantity}</span>
+                            )}
+                            <span
+                              className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold ${itemStatusClass(sc.status)}`}
+                            >
+                              {itemStatusText(sc.status, t)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                   {comment && <p className="text-text-muted">{comment}</p>}
                   {rejected && it.rejectReason && <p className="text-danger">{t('Отказ')}: {it.rejectReason}</p>}
                   {cancelled && it.rejectReason && <p className="text-danger">{t('Причина')}: {it.rejectReason}</p>}
