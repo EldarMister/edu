@@ -33,7 +33,8 @@ export function CartSheet({
   submitLabel: string;
 }) {
   const t = useT();
-  const { lines, inc, dec, setLineTakeaway, setAllTakeaway, clear } = useCart();
+  const { lines, comment, commentOpen, inc, dec, setComment, setCommentOpen, setLineTakeaway, setAllTakeaway, clear } =
+    useCart();
   const totals = cartTotals(lines);
   const hasLines = lines.length > 0;
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
@@ -162,6 +163,16 @@ export function CartSheet({
 
         {/* Итог + действия */}
         <div className="shrink-0 px-4 pt-3">
+          {commentOpen && (
+            <input
+              className="input mb-3 h-10 text-sm"
+              placeholder={t('Комментарий к заказу')}
+              value={comment}
+              onChange={(e) => setComment(e.target.value)}
+              autoFocus
+            />
+          )}
+
           <div className="flex items-center justify-between border-t border-border pt-3">
             <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
             <NumberTicker value={totals.final} className="text-lg font-semibold text-text-primary" />
@@ -176,12 +187,22 @@ export function CartSheet({
           </button>
 
           {hasLines && (
-            <button
-              className="mt-2 h-9 w-full text-sm font-medium text-primary hover:underline"
-              onClick={() => clear()}
-            >
-              {t('Очистить')}
-            </button>
+            <div className="mt-2 flex items-center justify-between gap-2">
+              <button
+                className="h-9 text-sm font-medium text-primary hover:underline"
+                onClick={() => clear()}
+              >
+                {t('Очистить')}
+              </button>
+              <button
+                className={`h-9 text-sm font-medium hover:underline ${
+                  commentOpen ? 'text-text-secondary' : 'text-primary'
+                }`}
+                onClick={() => setCommentOpen(!commentOpen)}
+              >
+                {commentOpen ? t('Скрыть комментарий') : t('Комментарий')}
+              </button>
+            </div>
           )}
         </div>
       </div>
