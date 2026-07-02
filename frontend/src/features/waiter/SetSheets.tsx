@@ -292,6 +292,13 @@ export function SetConfigSheet({
     setActiveCat('all');
   }
 
+  function beginReplace(component: CartSetComponent) {
+    const originalDish = menuDishes.find((d) => d.id === component.originalDishId);
+    setReplacingId(component.componentId);
+    setSearch('');
+    setActiveCat(originalDish?.categoryId ?? 'all');
+  }
+
   function cancelChange(componentId: string) {
     patch(componentId, { action: 'default', finalDishId: undefined, finalName: undefined, finalPrice: undefined });
   }
@@ -489,7 +496,7 @@ export function SetConfigSheet({
                   {c.replaceable && (
                     <button
                       type="button"
-                      onClick={() => setReplacingId(c.componentId)}
+                      onClick={() => beginReplace(c)}
                       className="rounded-lg px-2 py-1 text-[13px] font-medium text-primary hover:bg-primary/5"
                     >
                       Заменить
