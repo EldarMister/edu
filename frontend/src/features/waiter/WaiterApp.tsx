@@ -877,7 +877,7 @@ export function WaiterApp() {
       </main>
 
       {/* MOBILE: одна панель + нижняя навигация */}
-      <main className="flex-1 overflow-hidden bg-white px-1 py-0 lg:hidden">
+      <main className="flex-1 overflow-hidden bg-white px-1 pb-0 pt-0.5 lg:hidden">
         {tab === 'tables' && tablesPanel}
         {tab === 'menu' && mobileMenuNode}
         {tab === 'cart' && rightPanel}
@@ -946,12 +946,7 @@ export function WaiterApp() {
       {pendingCancel && (
         <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 lg:bottom-6 lg:px-5">
           <div className="pointer-events-auto flex w-full max-w-2xl items-center gap-3.5 rounded-2xl border border-border bg-white px-4 py-3.5 shadow-soft sm:px-5">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger text-white">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 7v6h6" />
-                <path d="M3 13a9 9 0 1 0 3-7.7L3 8" />
-              </svg>
-            </span>
+            <UndoActionIcon />
             <div className="min-w-0 flex-1">
               <p className="truncate text-[15px] font-semibold text-text-primary">
                 {displayOrderNumber(pendingCancel.order.orderNumber)} · {t('Стол')} {pendingCancel.order.table.number}{hallSuffix(pendingCancel.order.table)} — {t('отмена заказа')}
@@ -1072,6 +1067,22 @@ export function WaiterApp() {
   );
 }
 
+function UndoActionIcon() {
+  return (
+    <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[radial-gradient(circle_at_32%_28%,#ff6b6b_0%,#ef4444_44%,#dc2626_100%)] text-white shadow-[0_8px_22px_rgba(239,68,68,0.24)]">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path
+          d="M13.8 7.8H8.2m0 0 2.45-2.45M8.2 7.8l2.45 2.45M8.65 7.8h5.65a4.65 4.65 0 1 1 0 9.3h-3.4"
+          stroke="currentColor"
+          strokeWidth="2.35"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  );
+}
+
 function Panel({
   title,
   action,
@@ -1082,7 +1093,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`flex h-full flex-col bg-white px-1 ${title || action ? 'py-2' : 'py-0'} lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4 lg:shadow-card`}>
+    <section className={`flex h-full flex-col bg-white px-1 ${title || action ? 'py-2' : 'pb-0 pt-0.5'} lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4 lg:shadow-card`}>
       {(title || action) && (
         <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
           {title ? (

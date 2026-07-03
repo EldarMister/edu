@@ -74,11 +74,10 @@ function useSocketConnected() {
 function RadioIcon({ size = 28, className = '' }: { size?: number; className?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path d="M9 4h6M12 4v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <rect x="6.5" y="7.5" width="11" height="13" rx="2.5" stroke="currentColor" strokeWidth="2" />
-      <path d="M10 11.5h4M10 15h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="9.5" cy="18" r="0.8" fill="currentColor" />
-      <circle cx="14.5" cy="18" r="0.8" fill="currentColor" />
+      <path d="M10.5 3.5h3M12 3.5v3.25" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <rect x="7" y="6.5" width="10" height="14" rx="2.25" stroke="currentColor" strokeWidth="2" />
+      <circle cx="12" cy="10.3" r="0.9" fill="currentColor" />
+      <path d="M10 13.3h4M10 15.8h4M10 18.3h4" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
     </svg>
   );
 }
@@ -393,20 +392,24 @@ export function PttOverlay({
   return (
     <>
       {!buttonHidden && (
-        <button
-          type="button"
-          aria-label="Рация"
-          onClick={() => setOpen(true)}
-          className="fixed right-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-transform active:scale-95"
+        <div
+          className="fixed right-2 z-[70] flex h-[82px] w-[82px] items-center justify-center"
           style={{ bottom: floatingBottom }}
         >
-          <RadioIcon size={26} />
-          <span
-            className={`absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white ${
-              connected ? 'bg-success' : 'bg-danger'
+          <span className="pointer-events-none absolute h-[82px] w-[82px] rounded-full bg-primary/[0.06]" />
+          <span className="pointer-events-none absolute h-[68px] w-[68px] rounded-full bg-primary/10" />
+          <span className="pointer-events-none absolute h-[58px] w-[58px] rounded-full bg-primary/[0.14]" />
+          <button
+            type="button"
+            aria-label="Рация"
+            onClick={() => setOpen(true)}
+            className={`relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-transform active:scale-95 ${
+              connected ? 'bg-primary' : 'bg-text-muted'
             }`}
-          />
-        </button>
+          >
+            <RadioIcon size={25} />
+          </button>
+        </div>
       )}
 
       {open && (
