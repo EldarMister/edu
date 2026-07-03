@@ -30,6 +30,7 @@ const BASE64_RE = /^[A-Za-z0-9+/=]+$/;
 interface SocketUser {
   id: string;
   role: string;
+  name?: string;
   cafeId: string | null;
 }
 
@@ -122,7 +123,7 @@ export class PttGateway implements OnGatewayDisconnect {
     this.locks.set(key, lock);
     this.server.to(this.room(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_BUSY, {
       channel,
-      speaker: { id: user.id, role: user.role },
+      speaker: { id: user.id, role: user.role, name: user.name },
       startedAt: new Date().toISOString(),
     });
     return { ok: true, channel };

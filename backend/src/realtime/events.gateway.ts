@@ -21,6 +21,7 @@ const QR_OFFLINE_CART_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 interface SocketUser {
   id: string;
   role: string;
+  name: string;
   cafeId: string | null;
 }
 
@@ -83,7 +84,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       });
       const dbUser = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-        select: { id: true, role: true, cafeId: true, isActive: true },
+        select: { id: true, role: true, name: true, cafeId: true, isActive: true },
       });
       if (!dbUser || !dbUser.isActive) {
         client.disconnect(true);
@@ -91,7 +92,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       }
       await assertCafeActive(this.prisma, dbUser.cafeId);
 
-      const user: SocketUser = { id: dbUser.id, role: dbUser.role, cafeId: dbUser.cafeId };
+      const user: SocketUser = { id: dbUser.id, role: dbUser.role, name: dbUser.name, cafeId: dbUser.cafeId };
       client.data.user = user;
 
       if (user.role === 'KITCHEN' || user.role === 'BAR') {

@@ -30,9 +30,11 @@ export type PttPresencePayload = {
 
 export type PttBusyPayload = {
   channel: PttChannel;
-  speaker?: { id: string; role: string };
+  speaker?: { id: string; role: string; name?: string };
   startedAt?: string;
 };
+
+export type RadioState = 'idle' | 'recording' | 'receiving' | 'error';
 
 export type PttFreePayload = {
   channel: PttChannel;
