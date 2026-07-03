@@ -1068,19 +1068,7 @@ export function WaiterApp() {
 }
 
 function UndoActionIcon() {
-  return (
-    <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[radial-gradient(circle_at_32%_28%,#ff6b6b_0%,#ef4444_44%,#dc2626_100%)] text-white shadow-[0_8px_22px_rgba(239,68,68,0.24)]">
-      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path
-          d="M13.8 7.8H8.2m0 0 2.45-2.45M8.2 7.8l2.45 2.45M8.65 7.8h5.65a4.65 4.65 0 1 1 0 9.3h-3.4"
-          stroke="currentColor"
-          strokeWidth="2.35"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    </span>
-  );
+  return <img src="/иконка отмены.png" width={64} height={64} className="h-16 w-16 shrink-0" alt="" />;
 }
 
 function Panel({
