@@ -291,6 +291,22 @@
   .animate-sheet-up {
     animation: sheet-up 0.24s cubic-bezier(0.4, 0, 0.2, 1) both;
   }
+  /* Рация: мягкая пульсация свечения вокруг PTT-круга (говорите / говорит другой). */
+  @keyframes ptt-glow-pulse {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.55;
+    }
+    50% {
+      transform: scale(1.12);
+      opacity: 1;
+    }
+  }
+  .animate-ptt-glow {
+    animation: ptt-glow-pulse 1.6s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
   .revenue-chart-svg text {
     letter-spacing: 0;
   }

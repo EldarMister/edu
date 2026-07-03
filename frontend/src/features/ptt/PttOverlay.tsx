@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type PointerEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { getSocket, useConnectionStatus } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
@@ -10,7 +10,10 @@ import {
   type PttChannel,
   type PttFreePayload,
   type PttPresencePayload,
+  type RadioState,
 } from './types';
+
+const CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
 
 function defaultChannelForRole(role?: string): PttChannel {
   if (role === 'WAITER') return 'waiters';
@@ -19,13 +22,18 @@ function defaultChannelForRole(role?: string): PttChannel {
   return 'general';
 }
 
-function staffPlural(n: number) {
-  const a = Math.abs(n) % 100;
-  const b = Math.abs(n) % 10;
-  if (a > 10 && a < 20) return 'сотрудников';
-  if (b === 1) return 'сотрудник';
-  if (b >= 2 && b <= 4) return 'сотрудника';
-  return 'сотрудников';
+function isPttChannel(value: unknown): value is PttChannel {
+  return PTT_CHANNELS.some((item) => item.key === value);
+}
+
+function initialChannel(role?: string): PttChannel {
+  try {
+    const stored = localStorage.getItem(CHANNEL_STORAGE_KEY);
+    if (isPttChannel(stored)) return stored;
+  } catch {
+    /* приватный режим — падаем на дефолт */
+  }
+  return defaultChannelForRole(role);
 }
 
 function useMediaQuery(query: string) {
@@ -56,47 +64,167 @@ function RadioIcon({ size = 28, className = '' }: { size?: number; className?: s
   );
 }
 
-function PowerIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M12 2v10" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-      <path d="M6.4 6.6a8 8 0 1 0 11.2 0" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />
-    </svg>
-  );
-}
-
 function CloseIcon() {
   return (
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
       <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
     </svg>
   );
 }
 
-function Waveform({ active }: { active: boolean }) {
-  const bars = [8, 12, 16, 18, 28, 38, 28, 22, 34, 44, 54, 78, 48, 36, 28, 24, 32, 38, 34, 28, 22, 16, 12, 8];
+/** Визуальные параметры круга и статусной метки по состоянию рации. */
+const STATE_STYLES: Record<
+  RadioState,
+  { circle: string; glow: string; pulse: boolean; label: string }
+> = {
+  idle: {
+    circle: 'bg-primary',
+    glow: 'rgba(0, 91, 255, 0.16)',
+    pulse: false,
+    label: 'border-primary/30 text-primary',
+  },
+  recording: {
+    circle: 'bg-success',
+    glow: 'rgba(22, 163, 74, 0.22)',
+    pulse: true,
+    label: 'border-success/40 text-success',
+  },
+  receiving: {
+    circle: 'bg-warning',
+    glow: 'rgba(245, 158, 11, 0.24)',
+    pulse: true,
+    label: 'border-warning/40 text-warning',
+  },
+  error: {
+    circle: 'bg-danger',
+    glow: 'rgba(239, 68, 68, 0.2)',
+    pulse: false,
+    label: 'border-danger/40 text-danger',
+  },
+};
+
+function RadioHeader({ onClose }: { onClose: () => void }) {
   return (
-    <div className="relative flex h-56 items-center justify-center overflow-hidden">
-      <div className="absolute h-56 w-56 rounded-full bg-primary/5" />
-      <div className="absolute h-80 w-80 rounded-full border-[36px] border-primary/[0.035]" />
-      <div className="relative flex items-center gap-2">
-        {bars.map((height, index) => {
-          const distance = Math.abs(index - (bars.length - 1) / 2);
-          const strong = distance < 5;
-          return (
-            <span
-              key={`${height}-${index}`}
-              className={`w-2 rounded-full transition-all duration-200 ${
-                strong ? 'bg-primary' : 'bg-primary/25'
-              } ${active ? 'animate-pulse' : ''}`}
-              style={{
-                height: active ? height + (index % 3) * 7 : height,
-                animationDelay: `${index * 35}ms`,
-              }}
-            />
-          );
-        })}
+    <>
+      <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-slate-300" />
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-text-primary">Рация</h2>
+        <button
+          type="button"
+          className="flex h-9 w-9 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-background"
+          onClick={onClose}
+          aria-label="Закрыть"
+        >
+          <CloseIcon />
+        </button>
       </div>
+    </>
+  );
+}
+
+function RadioChannelTabs({
+  channel,
+  onChange,
+}: {
+  channel: PttChannel;
+  onChange: (next: PttChannel) => void;
+}) {
+  return (
+    <div className="no-scrollbar mb-3 flex gap-2 overflow-x-auto">
+      {PTT_CHANNELS.map((item) => (
+        <button
+          key={item.key}
+          type="button"
+          onClick={() => onChange(item.key)}
+          className={`shrink-0 rounded-full border px-4 py-2 text-sm font-medium transition-colors ${
+            item.key === channel
+              ? 'border-primary bg-primary text-white'
+              : 'border-border bg-white text-text-secondary hover:bg-background'
+          }`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onlineCount: number }) {
+  return (
+    <div className="mb-4 flex h-10 items-center justify-between rounded-xl border border-border bg-background/60 px-4">
+      <span className="text-sm font-semibold text-text-primary">{channelLabel}</span>
+      <span className="flex items-center gap-1.5 text-sm text-text-muted">
+        <span className="h-2 w-2 rounded-full bg-success" />
+        {onlineCount} онлайн
+      </span>
+    </div>
+  );
+}
+
+function PushToTalkCircle({
+  state,
+  disabled,
+  size,
+  onPressStart,
+  onPressStop,
+}: {
+  state: RadioState;
+  disabled: boolean;
+  size: number;
+  onPressStart: (event: PointerEvent<HTMLButtonElement>) => void;
+  onPressStop: () => void;
+}) {
+  const view = STATE_STYLES[state];
+  return (
+    <div className="relative flex items-center justify-center py-3" style={{ minHeight: size + 40 }}>
+      {/* Мягкое свечение вокруг круга; пульсирует, пока идёт передача или приём. */}
+      <span
+        className={`pointer-events-none absolute rounded-full ${view.pulse ? 'animate-ptt-glow' : ''}`}
+        style={{
+          width: size + 44,
+          height: size + 44,
+          background: `radial-gradient(closest-side, ${view.glow}, transparent 100%)`,
+        }}
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        onPointerDown={onPressStart}
+        onPointerUp={onPressStop}
+        onPointerCancel={onPressStop}
+        onLostPointerCapture={onPressStop}
+        onContextMenu={(event) => event.preventDefault()}
+        aria-label="Нажмите и удерживайте, чтобы говорить"
+        className={`relative flex touch-none select-none items-center justify-center rounded-full text-white transition-all duration-200 disabled:opacity-70 ${view.circle} ${
+          state === 'recording' ? 'scale-[1.04]' : ''
+        }`}
+        style={{ width: size, height: size, boxShadow: `0 0 0 10px ${view.glow}` }}
+      >
+        <RadioIcon size={Math.round(size * 0.42)} />
+      </button>
+    </div>
+  );
+}
+
+function RadioStatusText({
+  state,
+  title,
+  hint,
+  hintDanger = false,
+}: {
+  state: RadioState;
+  title: string;
+  hint: string;
+  hintDanger?: boolean;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-1.5 pb-1">
+      <span
+        className={`rounded-full border bg-white px-4 py-1 text-sm font-semibold ${STATE_STYLES[state].label}`}
+      >
+        {title}
+      </span>
+      <p className={`text-[13px] ${hintDanger ? 'font-medium text-danger' : 'text-text-muted'}`}>{hint}</p>
     </div>
   );
 }
@@ -106,47 +234,52 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
   const connected = useConnectionStatus();
   const isMobile = useMediaQuery('(max-width: 1023px)');
   const [open, setOpen] = useState(false);
-  const [enabled, setEnabled] = useState(true);
-  const [channel, setChannel] = useState<PttChannel>(() => defaultChannelForRole(user?.role));
+  const [channel, setChannel] = useState<PttChannel>(() => initialChannel(user?.role));
   const [onlineCount, setOnlineCount] = useState(1);
-  const [busySpeakerId, setBusySpeakerId] = useState<string | null>(null);
+  const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
 
   const selected = useMemo(
     () => PTT_CHANNELS.find((item) => item.key === channel) ?? PTT_CHANNELS[0],
     [channel],
   );
-  const sender = useAudioPttSender(channel, enabled);
-  const receiver = useAudioPttReceiver(channel, enabled);
-  const activeWave = sender.talking || receiver.receiving;
+  const sender = useAudioPttSender(channel, true);
+  useAudioPttReceiver(channel, true);
   const floatingBottom = waiterMode && isMobile ? 148 : 24;
   const sheetBottom = waiterMode && isMobile ? 58 : 0;
 
+  const joinSeqRef = useRef(0);
   const joinChannel = useCallback(() => {
     const sock = getSocket();
-    sock.emit(PTT_EVENTS.JOIN, { channel }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
-      if (ack?.ok && typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);
-    });
+    // Сервер аутентифицирует сокет асинхронно (JWT + БД), поэтому join сразу
+    // после connect может отвергнуться — ретраим с паузой несколько раз.
+    // seq отменяет устаревшие ретраи при смене канала/переподключении.
+    const seq = ++joinSeqRef.current;
+    const attempt = (retriesLeft: number) => {
+      if (joinSeqRef.current !== seq) return;
+      sock.emit(PTT_EVENTS.JOIN, { channel }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
+        if (joinSeqRef.current !== seq) return;
+        if (ack?.ok) {
+          if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);
+          return;
+        }
+        if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 1500);
+      });
+    };
+    attempt(3);
   }, [channel]);
 
   useEffect(() => {
-    setChannel(defaultChannelForRole(user?.role));
+    setChannel(initialChannel(user?.role));
   }, [user?.role]);
 
   useEffect(() => {
     const sock = getSocket();
-    if (!enabled) {
-      sock.emit(PTT_EVENTS.JOIN, { channel: null });
-      setOnlineCount(0);
-      setBusySpeakerId(null);
-      return undefined;
-    }
-
     joinChannel();
     sock.on('connect', joinChannel);
     return () => {
       sock.off('connect', joinChannel);
     };
-  }, [enabled, joinChannel]);
+  }, [joinChannel]);
 
   useEffect(() => {
     const sock = getSocket();
@@ -154,10 +287,12 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
       if (payload.channel === channel) setOnlineCount(payload.onlineCount);
     };
     const onBusy = (payload: PttBusyPayload) => {
-      if (payload.channel === channel) setBusySpeakerId(payload.speaker?.id ?? 'unknown');
+      if (payload.channel === channel) {
+        setBusySpeaker({ id: payload.speaker?.id ?? 'unknown', name: payload.speaker?.name });
+      }
     };
     const onFree = (payload: PttFreePayload) => {
-      if (payload.channel === channel) setBusySpeakerId(null);
+      if (payload.channel === channel) setBusySpeaker(null);
     };
     sock.on(PTT_EVENTS.PRESENCE, onPresence);
     sock.on(PTT_EVENTS.CHANNEL_BUSY, onBusy);
@@ -172,13 +307,13 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
   const changeChannel = (next: PttChannel) => {
     if (next === channel) return;
     sender.stop();
-    setBusySpeakerId(null);
+    setBusySpeaker(null);
     setChannel(next);
-  };
-
-  const disableRadio = () => {
-    sender.stop();
-    setEnabled(false);
+    try {
+      localStorage.setItem(CHANNEL_STORAGE_KEY, next);
+    } catch {
+      /* приватный режим */
+    }
   };
 
   const onPressStart = (event: PointerEvent<HTMLButtonElement>) => {
@@ -188,21 +323,45 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
 
   const onPressStop = () => sender.stop();
 
+  const receivingFromOther = !!busySpeaker && busySpeaker.id !== user?.id && !sender.talking;
+  const state: RadioState = !connected
+    ? 'error'
+    : sender.talking
+      ? 'recording'
+      : receivingFromOther
+        ? 'receiving'
+        : 'idle';
+
+  const statusTitle =
+    state === 'error'
+      ? 'Ошибка подключения'
+      : state === 'recording'
+        ? 'Вы говорите'
+        : state === 'receiving'
+          ? `Говорит: ${busySpeaker?.name ?? 'Сотрудник'}`
+          : 'Готово к разговору';
+
+  const statusHint =
+    state === 'error'
+      ? 'Повторите попытку'
+      : state === 'recording'
+        ? 'Отпустите для остановки'
+        : state === 'receiving'
+          ? 'Нажмите и удерживайте для ответа'
+          : (sender.deniedReason ?? 'Нажмите и удерживайте');
+
   return (
     <>
       <button
         type="button"
         aria-label="Рация"
-        onClick={() => {
-          setEnabled(true);
-          setOpen(true);
-        }}
-        className="fixed right-6 z-[70] flex h-20 w-20 items-center justify-center rounded-full bg-primary text-white shadow-[0_12px_28px_rgba(0,91,255,0.35)] transition-transform active:scale-95"
+        onClick={() => setOpen(true)}
+        className="fixed right-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-[0_8px_20px_rgba(0,91,255,0.32)] transition-transform active:scale-95"
         style={{ bottom: `calc(${floatingBottom}px + env(safe-area-inset-bottom, 0px))` }}
       >
-        <RadioIcon size={38} />
+        <RadioIcon size={26} />
         <span
-          className={`absolute right-1.5 top-1.5 h-5 w-5 rounded-full border-[3px] border-white ${
+          className={`absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white ${
             connected ? 'bg-success' : 'bg-text-light'
           }`}
         />
@@ -213,95 +372,33 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
           <button
             type="button"
             aria-label="Закрыть рацию"
-            className="absolute inset-0 bg-black/40"
+            className="absolute inset-0 animate-fade-in bg-black/30"
             onClick={() => setOpen(false)}
           />
           <section
-            className="absolute left-0 right-0 rounded-t-[26px] border border-border bg-white px-4 pb-6 pt-3 shadow-soft sm:px-8"
+            className="absolute left-0 right-0 mx-auto max-w-xl animate-sheet-up rounded-t-[24px] border border-border bg-white px-4 pt-2 shadow-soft sm:px-6"
             style={{
               bottom: `calc(${sheetBottom}px + env(safe-area-inset-bottom, 0px))`,
-              maxHeight: sheetBottom ? 'calc(88dvh - 58px)' : '88dvh',
+              paddingBottom: sheetBottom ? 16 : 'max(16px, env(safe-area-inset-bottom, 0px))',
+              maxHeight: '55dvh',
             }}
           >
-            <div className="mx-auto mb-6 h-1.5 w-20 rounded-full bg-slate-300" />
-            <div className="mb-7 flex items-center justify-between">
-              <h2 className="text-2xl font-semibold text-text-primary">Рация</h2>
-              <button
-                type="button"
-                className="flex h-11 w-11 items-center justify-center rounded-full text-text-muted transition-colors hover:bg-background"
-                onClick={() => setOpen(false)}
-                aria-label="Закрыть"
-              >
-                <CloseIcon />
-              </button>
-            </div>
-
-            <div className="no-scrollbar mb-6 flex gap-3 overflow-x-auto">
-              {PTT_CHANNELS.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => changeChannel(item.key)}
-                  className={`shrink-0 rounded-xl border px-5 py-3 text-[15px] font-medium transition-colors ${
-                    item.key === channel
-                      ? 'border-primary bg-primary text-white'
-                      : 'border-border bg-white text-text-secondary hover:bg-background'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="mb-5 flex items-center gap-5 rounded-2xl border border-border bg-white px-5 py-4">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <RadioIcon size={34} />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[22px] font-semibold text-text-primary">Канал: {selected.label}</p>
-                <p className="mt-2 flex items-center gap-3 text-[15px] text-text-muted">
-                  <span className="h-3 w-3 rounded-full bg-success" />
-                  {onlineCount} {staffPlural(onlineCount)} онлайн
-                </p>
-              </div>
-            </div>
-
-            <Waveform active={activeWave} />
-
-            <p className="mb-6 text-center text-[17px] font-medium text-text-muted">
-              Говорите в канал «{selected.label}»
-            </p>
-            {(sender.deniedReason || (busySpeakerId && busySpeakerId !== user?.id && !sender.talking)) && (
-              <p className="mb-3 text-center text-sm font-medium text-danger">
-                {sender.deniedReason ?? 'Канал занят'}
-              </p>
-            )}
-
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                disabled={!enabled || (!!busySpeakerId && busySpeakerId !== user?.id)}
-                onPointerDown={onPressStart}
-                onPointerUp={onPressStop}
-                onPointerCancel={onPressStop}
-                onLostPointerCapture={onPressStop}
-                onContextMenu={(event) => event.preventDefault()}
-                className={`flex h-20 min-w-0 flex-1 touch-none items-center justify-center gap-4 rounded-full bg-primary px-5 text-[18px] font-semibold text-white transition-all disabled:opacity-60 ${
-                  sender.talking ? 'scale-[0.98] bg-primary-hover' : ''
-                }`}
-              >
-                <RadioIcon size={34} />
-                <span className="truncate">Зажмите для разговора</span>
-              </button>
-              <button
-                type="button"
-                onClick={disableRadio}
-                className="flex h-16 shrink-0 items-center justify-center gap-2 rounded-2xl border border-border bg-white px-4 text-sm font-semibold text-text-secondary transition-colors hover:bg-background"
-              >
-                <PowerIcon />
-                <span className="hidden min-[390px]:inline">Отключить</span>
-              </button>
-            </div>
+            <RadioHeader onClose={() => setOpen(false)} />
+            <RadioChannelTabs channel={channel} onChange={changeChannel} />
+            <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
+            <PushToTalkCircle
+              state={state}
+              disabled={state === 'error' || receivingFromOther}
+              size={isMobile ? 128 : 144}
+              onPressStart={onPressStart}
+              onPressStop={onPressStop}
+            />
+            <RadioStatusText
+              state={state}
+              title={statusTitle}
+              hint={statusHint}
+              hintDanger={state === 'idle' && !!sender.deniedReason}
+            />
           </section>
         </div>
       )}

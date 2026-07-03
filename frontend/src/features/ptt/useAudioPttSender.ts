@@ -136,6 +136,9 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     const sock = getSocket();
     const onDenied = (payload: PttDeniedPayload) => {
       if (payload.channel && payload.channel !== channel) return;
+      // Сервер шлёт talk_denied и на неудачный ptt_join (например, гонка с
+      // аутентификацией сокета) — это не про текущую попытку говорить.
+      if (!holdRef.current && !activeRef.current) return;
       setDeniedReason(payload.reason === 'busy' ? 'Канал занят' : 'Разговор недоступен');
       stop();
     };
