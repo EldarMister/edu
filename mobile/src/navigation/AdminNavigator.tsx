@@ -14,6 +14,7 @@ import { OrdersScreen } from '@/screens/admin/OrdersScreen';
 import { TablesScreen } from '@/screens/admin/TablesScreen';
 import { MenuScreen } from '@/screens/admin/MenuScreen';
 import { StaffScreen } from '@/screens/admin/StaffScreen';
+import { AuditScreen } from '@/screens/admin/AuditScreen';
 import { AdminPlaceholderScreen } from '@/screens/admin/AdminPlaceholderScreen';
 
 type Section =
@@ -98,6 +99,8 @@ export function AdminNavigator() {
           <MenuScreen />
         ) : section === 'staff' ? (
           <StaffScreen />
+        ) : section === 'audit' && isOwner ? (
+          <AuditScreen />
         ) : (
           <AdminPlaceholderScreen title={current?.label ?? ''} />
         )}

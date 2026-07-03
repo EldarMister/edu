@@ -213,6 +213,57 @@ export function useSetCashHanded() {
   });
 }
 
+// ---------- Журнал действий (аудит, порт PWA) ----------
+export interface AuditLogEntry {
+  id: string;
+  createdAt: string;
+  userId: string | null;
+  userName: string | null;
+  userRole: Role | null;
+  actionType: string;
+  entityType: string;
+  entityId: string | null;
+  tableId: string | null;
+  orderId: string | null;
+  description: string | null;
+  oldValue: unknown;
+  newValue: unknown;
+  metadata: Record<string, unknown> | null;
+}
+export interface AuditLogPage {
+  items: AuditLogEntry[];
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
+export interface AuditFilterOptions {
+  users: { id: string; name: string }[];
+  actionTypes: string[];
+}
+export interface AuditQueryParams {
+  from?: string;
+  to?: string;
+  userId?: string;
+  actionType?: string;
+  page: number;
+}
+export function useAuditLogs(params: AuditQueryParams) {
+  const parts: string[] = [];
+  if (params.from) parts.push(`from=${params.from}`);
+  if (params.to) parts.push(`to=${params.to}`);
+  if (params.userId) parts.push(`userId=${params.userId}`);
+  if (params.actionType) parts.push(`actionType=${params.actionType}`);
+  parts.push(`page=${params.page}`, 'limit=50');
+  return useQuery({
+    queryKey: ['audit', 'list', params],
+    queryFn: () => get<AuditLogPage>(`/audit-logs?${parts.join('&')}`),
+  });
+}
+export function useAuditFilters() {
+  return useQuery({ queryKey: ['audit', 'filters'], queryFn: () => get<AuditFilterOptions>('/audit-logs/filters') });
+}
+
 export function useCancelOrder() {
   const qc = useQueryClient();
   return useMutation({
