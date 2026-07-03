@@ -10,6 +10,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigationState } from '@react-navigation/native';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -21,6 +22,7 @@ import {
   stopPttBackgroundRuntime,
   updatePttBackgroundChannel,
 } from './backgroundRuntime';
+import { useRadioVisibility } from './radioVisibility';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
 import { useAudioPttSender } from './useAudioPttSender';
 import {
@@ -46,6 +48,22 @@ function defaultChannelForRole(role?: string): PttChannel {
 
 function isPttChannel(value: unknown): value is PttChannel {
   return PTT_CHANNELS.some((item) => item.key === value);
+}
+
+/** Активная вкладка официанта и лист вкладки «Заказы» из дерева навигации. */
+function readWaiterNav(state: unknown): { tab?: string; ordersLeaf?: string } {
+  const s = state as { index?: number; routes?: any[] } | undefined;
+  const root = s?.routes?.[s.index ?? 0];
+  const tabState = root?.state as { index?: number; routes?: any[] } | undefined;
+  if (!tabState?.routes) return {};
+  const tabRoute = tabState.routes[tabState.index ?? 0];
+  const tab = tabRoute?.name as string | undefined;
+  let ordersLeaf: string | undefined;
+  const stack = tabRoute?.state as { index?: number; routes?: any[] } | undefined;
+  if (tab === 'Orders' && stack?.routes) {
+    ordersLeaf = stack.routes[stack.index ?? stack.routes.length - 1]?.name;
+  }
+  return { tab, ordersLeaf };
 }
 
 /** Визуальные параметры круга и статусной метки по состоянию рации (как в PWA). */
@@ -200,6 +218,25 @@ export function PttOverlay() {
   );
   const sender = useAudioPttSender(channel, true);
   const { speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
+
+  // Кнопка рации у официанта — только на «Столах», списке «Заказов» и «Профиле».
+  // Прячем на «Меню», подробном заказе и в личном кабинете. Другие роли — без
+  // ограничений. Оверлей остаётся смонтированным, приём аудио не прерывается.
+  const cabinetOpen = useRadioVisibility((s) => s.cabinetOpen);
+  const waiterNav = useNavigationState((state) => (isWaiter ? readWaiterNav(state) : null));
+  const buttonVisible = React.useMemo(() => {
+    if (!isWaiter || !waiterNav) return true;
+    const { tab, ordersLeaf } = waiterNav;
+    if (!tab) return true;
+    if (tab === 'Menu') return false;
+    if (tab === 'Orders') return ordersLeaf !== 'OrderDetail';
+    if (tab === 'Profile') return !cabinetOpen;
+    return true;
+  }, [isWaiter, waiterNav, cabinetOpen]);
+
+  React.useEffect(() => {
+    if (!buttonVisible) setOpen(false);
+  }, [buttonVisible]);
   // Имя последнего говорившего (из channel_busy) — фолбэк на время
   // воспроизведения, если бэкенд не кладёт senderName в аудио-сообщение.
   const lastSpeakerNameRef = React.useRef<string | undefined>(undefined);
@@ -332,15 +369,17 @@ export function PttOverlay() {
 
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
-      <FastPressable
-        accessibilityRole="button"
-        accessibilityLabel="Рация"
-        onPress={() => setOpen(true)}
-        style={[styles.floatButton, { bottom: floatingBottom }]}
-      >
-        <PwaIcon name="radio" size={26} color={colors.white} strokeWidth={2.1} />
-        <View style={[styles.onlineDot, { backgroundColor: connected ? colors.success : colors.textLight }]} />
-      </FastPressable>
+      {buttonVisible && (
+        <FastPressable
+          accessibilityRole="button"
+          accessibilityLabel="Рация"
+          onPress={() => setOpen(true)}
+          style={[styles.floatButton, { bottom: floatingBottom }]}
+        >
+          <PwaIcon name="radio" size={26} color={colors.white} strokeWidth={2.1} />
+          <View style={[styles.onlineDot, { backgroundColor: connected ? colors.success : colors.textLight }]} />
+        </FastPressable>
+      )}
 
       <BottomSheet
         visible={open}

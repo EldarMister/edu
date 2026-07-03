@@ -11,6 +11,7 @@ import { colors, fontSize, radius, spacing } from '@/theme';
 import { ORDER_STATUS } from '@/theme/status';
 import { beep } from '@/lib/sound';
 import { useAuth } from '@/store/auth';
+import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { useLocale, type Locale } from '@/store/locale';
 import { useNotifications } from '@/store/notifications';
 import { useCurrentShift, useEndShift, useOrderDetails, useWaiterCabinet, type CabinetRecentOrder } from '@/services/api/waiter';
@@ -68,6 +69,14 @@ export function ProfileScreen() {
   const [showAllNotif, setShowAllNotif] = React.useState(false);
   const [cabinetOpen, setCabinetOpen] = React.useState(false);
   const [shiftSummary, setShiftSummary] = React.useState<WaiterShift | null>(null);
+  const setRadioCabinetOpen = useRadioVisibility((s) => s.setCabinetOpen);
+
+  // Пробрасываем открытость личного кабинета в стор, чтобы PttOverlay спрятал
+  // кнопку рации, пока кабинет открыт (кабинет — внутренний экран, не маршрут).
+  React.useEffect(() => {
+    setRadioCabinetOpen(isWaiter && cabinetOpen);
+    return () => setRadioCabinetOpen(false);
+  }, [isWaiter, cabinetOpen, setRadioCabinetOpen]);
   const shift = isWaiter ? shiftQuery.data : null;
   const shiftActive = shift?.status === 'active';
   const visibleNotifs = showAllNotif ? history : history.slice(0, 3);
