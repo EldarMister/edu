@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
@@ -65,10 +65,12 @@ export function OrderDetailScreen() {
   const [cancelReason, setCancelReason] = useState('');
   const [actionCooldown, setActionCooldown] = useState(0);
   const push = useNotifications((s) => s.push);
+  const latestOrderRef = React.useRef<Order | null>(null);
 
   const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
 
   React.useEffect(() => {
+    latestOrderRef.current = order;
     if (order) setPaymentOrder(order);
   }, [order]);
 
@@ -78,6 +80,17 @@ export function OrderDetailScreen() {
       setPayOpen(true);
     }
   }, [order?.id, order?.status]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      const focusedOrder = latestOrderRef.current;
+      if (focusedOrder?.status === 'waiting_payment') {
+        setPaymentOrder(focusedOrder);
+        setPayOpen(true);
+      }
+      return undefined;
+    }, [orderId]),
+  );
 
   React.useEffect(() => {
     if (actionCooldown <= 0) return undefined;
@@ -302,8 +315,17 @@ export function OrderDetailScreen() {
         );
       case 'waiting_payment':
         return (
-          <View style={styles.waitingPaymentBox}>
-            <Text style={styles.waitingPaymentText}>Ожидает оплаты</Text>
+          <View style={{ gap: spacing.sm }}>
+            <View style={styles.waitingPaymentBox}>
+              <Text style={styles.waitingPaymentText}>Ожидает оплаты</Text>
+            </View>
+            <Button
+              title="Открыть оплату"
+              onPress={() => {
+                setPaymentOrder(order);
+                setPayOpen(true);
+              }}
+            />
           </View>
         );
       case 'sent_to_kitchen':
@@ -640,7 +662,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     paddingHorizontal: spacing.lg,
-    paddingTop: 2,
+    paddingTop: 4,
     paddingBottom: 5,
     gap: 4,
   },
@@ -657,7 +679,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     paddingHorizontal: spacing.lg,
-    paddingTop: 2,
+    paddingTop: 4,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
   },

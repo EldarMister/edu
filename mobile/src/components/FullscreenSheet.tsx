@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal as RNModal, StyleSheet, useWindowDimensions, View, type ViewStyle } from 'react-native';
 import Animated, {
+  cancelAnimation,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -24,9 +25,20 @@ export function FullscreenSheet({
   const { height } = useWindowDimensions();
   const [render, setRender] = React.useState(visible);
   const translateY = useSharedValue(height || 900);
+  const transitionSeqRef = React.useRef(0);
+  const finishClose = React.useCallback(
+    (seq: number) => {
+      if (transitionSeqRef.current !== seq) return;
+      setRender(false);
+      onDismiss?.();
+    },
+    [onDismiss],
+  );
 
   React.useEffect(() => {
+    const seq = ++transitionSeqRef.current;
     const offscreen = height || 900;
+    cancelAnimation(translateY);
     if (visible) {
       setRender(true);
       translateY.value = offscreen;
@@ -44,13 +56,10 @@ export function FullscreenSheet({
         easing: sheetTiming.easing,
       },
       (finished) => {
-        if (finished) {
-          runOnJS(setRender)(false);
-          if (onDismiss) runOnJS(onDismiss)();
-        }
+        if (finished) runOnJS(finishClose)(seq);
       },
     );
-  }, [height, onDismiss, translateY, visible]);
+  }, [finishClose, height, translateY, visible]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: translateY.value }],

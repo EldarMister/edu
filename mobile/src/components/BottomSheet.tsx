@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  cancelAnimation,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
@@ -94,10 +95,14 @@ export function BottomSheet({
   const dragY = useSharedValue(0);
   const sheetHeightRef = React.useRef(SHEET_FALLBACK_H);
   const pendingEnterRef = React.useRef(false);
+  const transitionSeqRef = React.useRef(0);
   const handleClose = React.useCallback(() => {
     dismissKeyboard();
     onClose();
   }, [onClose]);
+  const finishClose = React.useCallback((seq: number) => {
+    if (transitionSeqRef.current === seq) setRender(false);
+  }, []);
   const panGesture = React.useMemo(
     () =>
       Gesture.Pan()
@@ -132,6 +137,10 @@ export function BottomSheet({
   );
 
   React.useEffect(() => {
+    const seq = ++transitionSeqRef.current;
+    cancelAnimation(translateY);
+    cancelAnimation(backdropOpacity);
+    cancelAnimation(dragY);
     if (visible) {
       dismissKeyboard();
       // Держим лист скрытым до onLayout, где узнаем точную высоту и запустим въезд.
@@ -159,10 +168,10 @@ export function BottomSheet({
         easing: sheetTiming.easing,
       },
       (finished) => {
-        if (finished) runOnJS(setRender)(false);
+        if (finished) runOnJS(finishClose)(seq);
       },
     );
-  }, [backdropOpacity, dragY, translateY, visible]);
+  }, [backdropOpacity, dragY, finishClose, translateY, visible]);
 
   const handleSheetLayout = React.useCallback(
     (e: LayoutChangeEvent) => {
