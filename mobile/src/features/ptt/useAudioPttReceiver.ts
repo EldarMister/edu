@@ -87,9 +87,9 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       queueRef.current.push(payload);
       pump();
     };
-    sock.on(PTT_EVENTS.AUDIO_STREAM, onAudio);
+    sock.on(PTT_EVENTS.AUDIO_MESSAGE, onAudio);
     return () => {
-      sock.off(PTT_EVENTS.AUDIO_STREAM, onAudio);
+      sock.off(PTT_EVENTS.AUDIO_MESSAGE, onAudio);
     };
   }, [channel, enabled, pump, userId]);
 

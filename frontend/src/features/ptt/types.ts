@@ -12,7 +12,6 @@ export type PttAudioPayload = {
   senderId: string;
   senderRole?: string;
   mimeType: string;
-  seq?: number;
   chunk: string;
   sentAt?: string;
 };
@@ -45,11 +44,10 @@ export type PttFreePayload = {
 export const PTT_EVENTS = {
   JOIN: 'ptt_join',
   START_TALK: 'ptt_start_talk',
-  CHUNK: 'ptt_chunk',
   STOP_TALK: 'ptt_stop_talk',
   CHANNEL_BUSY: 'ptt_channel_busy',
   CHANNEL_FREE: 'ptt_channel_free',
-  AUDIO_STREAM: 'ptt_audio_stream',
+  AUDIO_MESSAGE: 'ptt_audio_message',
   TALK_DENIED: 'ptt_talk_denied',
   PRESENCE: 'ptt_presence',
 } as const;

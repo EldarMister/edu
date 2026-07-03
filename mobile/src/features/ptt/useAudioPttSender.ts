@@ -4,7 +4,6 @@ import * as FileSystem from 'expo-file-system';
 import { getSocket } from '@/services/socket';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
 
-const SEGMENT_MS = 760;
 const MIME_TYPE = 'audio/mp4';
 
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
@@ -69,85 +68,49 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
   const holdRef = React.useRef(false);
   const finishingRef = React.useRef(false);
   const recordingRef = React.useRef<Audio.Recording | null>(null);
-  const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const seqRef = React.useRef(0);
-  const finishSegmentRef = React.useRef<(continueLoop: boolean) => Promise<void>>(async () => undefined);
 
-  const clearTimer = React.useCallback(() => {
-    if (!timerRef.current) return;
-    clearTimeout(timerRef.current);
-    timerRef.current = null;
-  }, []);
-
-  const recordSegment = React.useCallback(async () => {
-    if (!activeRef.current || recordingRef.current || finishingRef.current) return;
-    const recording = new Audio.Recording();
-    recordingRef.current = recording;
-    try {
-      await recording.prepareToRecordAsync(RECORDING_OPTIONS);
-      await recording.startAsync();
-      timerRef.current = setTimeout(() => {
-        void finishSegmentRef.current(true);
-      }, SEGMENT_MS);
-    } catch {
-      recordingRef.current = null;
-      activeRef.current = false;
-      setTalking(false);
-      setDeniedReason('Не удалось включить микрофон');
-      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      await configurePlaybackAudio().catch(() => undefined);
-    }
-  }, [channel]);
-
-  const finishSegment = React.useCallback(async (continueLoop: boolean) => {
-    if (finishingRef.current) return;
+  // Telegram-модель: единая непрерывная запись. На отпускании кнопки
+  // останавливаем запись, читаем итоговый .m4a целиком в base64, отправляем
+  // одним эвентом ptt_audio_message и только затем освобождаем канал.
+  const finishRecording = React.useCallback(async () => {
     const recording = recordingRef.current;
-    if (!recording) return;
-    finishingRef.current = true;
-    clearTimer();
     recordingRef.current = null;
+    if (!recording) {
+      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+      return;
+    }
     let uri: string | null = null;
     try {
       await recording.stopAndUnloadAsync();
       uri = recording.getURI();
-      const shouldContinue = activeRef.current && continueLoop;
-      if (shouldContinue) {
-        finishingRef.current = false;
-        void recordSegment();
-      }
       if (uri) {
         const chunk = await FileSystem.readAsStringAsync(uri, {
           encoding: FileSystem.EncodingType.Base64,
         });
         if (chunk) {
-          getSocket().emit(PTT_EVENTS.CHUNK, {
-            channel,
-            mimeType: MIME_TYPE,
-            seq: seqRef.current,
-            chunk,
-          });
-          seqRef.current += 1;
+          getSocket().emit(PTT_EVENTS.AUDIO_MESSAGE, { channel, mimeType: MIME_TYPE, chunk });
         }
       }
     } catch {
-      // Android can throw E_AUDIO_NODATA when stopped too early. Discard that segment.
+      // Слишком короткая запись может кинуть E_AUDIO_NODATA — просто отбрасываем.
     } finally {
+      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
       if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
-      if (!activeRef.current || !continueLoop) finishingRef.current = false;
+      await configurePlaybackAudio().catch(() => undefined);
     }
-  }, [channel, clearTimer, recordSegment]);
-  finishSegmentRef.current = finishSegment;
+  }, [channel]);
 
   const stop = React.useCallback(() => {
     holdRef.current = false;
-    if (!activeRef.current && !recordingRef.current) return;
+    if (!activeRef.current) return;
     activeRef.current = false;
     setTalking(false);
-    void finishSegmentRef.current(false).finally(() => {
-      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      void configurePlaybackAudio().catch(() => undefined);
+    if (finishingRef.current) return;
+    finishingRef.current = true;
+    void finishRecording().finally(() => {
+      finishingRef.current = false;
     });
-  }, [channel]);
+  }, [finishRecording]);
 
   const start = React.useCallback(async () => {
     if (!enabled || activeRef.current) return false;
@@ -183,12 +146,27 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       await configurePlaybackAudio().catch(() => undefined);
       return false;
     }
-    seqRef.current = 0;
+
+    try {
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(RECORDING_OPTIONS);
+      await recording.startAsync();
+      recordingRef.current = recording;
+    } catch {
+      recordingRef.current = null;
+      setDeniedReason('Не удалось включить микрофон');
+      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+      await configurePlaybackAudio().catch(() => undefined);
+      return false;
+    }
+
+    // Запись уже пишется в recordingRef — только теперь помечаем сессию активной,
+    // чтобы stop() во время подготовки не оставил осиротевший рекордер.
     activeRef.current = true;
     setTalking(true);
-    void recordSegment();
+    if (!holdRef.current) stop();
     return true;
-  }, [channel, enabled, recordSegment]);
+  }, [channel, enabled, stop]);
 
   React.useEffect(() => {
     const sock = getSocket();

@@ -15,16 +15,17 @@ type PttChannel = (typeof PTT_CHANNELS)[number];
 const PTT_EVENTS = {
   JOIN: 'ptt_join',
   START_TALK: 'ptt_start_talk',
-  CHUNK: 'ptt_chunk',
   STOP_TALK: 'ptt_stop_talk',
   CHANNEL_BUSY: 'ptt_channel_busy',
   CHANNEL_FREE: 'ptt_channel_free',
-  AUDIO_STREAM: 'ptt_audio_stream',
+  AUDIO_MESSAGE: 'ptt_audio_message',
   TALK_DENIED: 'ptt_talk_denied',
   PRESENCE: 'ptt_presence',
 } as const;
 
-const MAX_CHUNK_CHARS = 512_000;
+// Целый аудиофайл (Telegram-модель) заметно больше отдельного чанка —
+// допускаем ~8 МБ base64, чего хватает на длинное голосовое сообщение.
+const MAX_AUDIO_CHARS = 8_000_000;
 const BASE64_RE = /^[A-Za-z0-9+/=]+$/;
 
 interface SocketUser {
@@ -50,10 +51,9 @@ interface TalkBody {
   channel?: PttChannel;
 }
 
-interface ChunkBody extends TalkBody {
+interface AudioMessageBody extends TalkBody {
   chunk?: string;
   mimeType?: string;
-  seq?: number;
 }
 
 @WebSocketGateway({
@@ -129,8 +129,8 @@ export class PttGateway implements OnGatewayDisconnect {
     return { ok: true, channel };
   }
 
-  @SubscribeMessage(PTT_EVENTS.CHUNK)
-  handleChunk(@ConnectedSocket() client: Socket, @MessageBody() body: ChunkBody) {
+  @SubscribeMessage(PTT_EVENTS.AUDIO_MESSAGE)
+  handleAudioMessage(@ConnectedSocket() client: Socket, @MessageBody() body: AudioMessageBody) {
     const user = this.getUser(client);
     if (!user) return this.deny(client, body?.channel, 'unauthorized');
 
@@ -143,14 +143,15 @@ export class PttGateway implements OnGatewayDisconnect {
     }
 
     const chunk = body?.chunk;
-    if (!this.isValidChunk(chunk)) return { ok: false, reason: 'invalid_chunk' };
+    if (!this.isValidAudio(chunk)) return { ok: false, reason: 'invalid_audio' };
 
-    client.to(this.room(user.cafeId, channel)).emit(PTT_EVENTS.AUDIO_STREAM, {
+    // Telegram-модель: получили цельный base64-файл — моментально
+    // проксируем его всем остальным участникам комнаты.
+    client.to(this.room(user.cafeId, channel)).emit(PTT_EVENTS.AUDIO_MESSAGE, {
       channel,
       senderId: user.id,
       senderRole: user.role,
       mimeType: typeof body.mimeType === 'string' ? body.mimeType.slice(0, 80) : 'application/octet-stream',
-      seq: Number.isFinite(body.seq) ? body.seq : undefined,
       chunk,
       sentAt: new Date().toISOString(),
     });
@@ -225,11 +226,11 @@ export class PttGateway implements OnGatewayDisconnect {
     return typeof value === 'string' && PTT_CHANNELS.includes(value as PttChannel);
   }
 
-  private isValidChunk(chunk: unknown): chunk is string {
+  private isValidAudio(chunk: unknown): chunk is string {
     return (
       typeof chunk === 'string' &&
       chunk.length > 0 &&
-      chunk.length <= MAX_CHUNK_CHARS &&
+      chunk.length <= MAX_AUDIO_CHARS &&
       BASE64_RE.test(chunk)
     );
   }

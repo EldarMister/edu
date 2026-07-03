@@ -20,7 +20,7 @@ module.exports = function withPttBackgroundService(config) {
 
     service.$ = service.$ ?? {};
     service.$['android:exported'] = 'false';
-    service.$['android:foregroundServiceType'] = 'mediaPlayback|microphone';
+    service.$['android:foregroundServiceType'] = 'mediaPlayback';
     service.$['tools:node'] = 'merge';
 
     return configWithManifest;

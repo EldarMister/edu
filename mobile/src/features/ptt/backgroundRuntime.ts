@@ -235,7 +235,7 @@ function onBackgroundWaiterOrderChanged(order: WaiterVoicedOrder) {
 
 function ensureBackgroundAudioSubscription() {
   if (subscribedToAudio) return;
-  getSocket().on(PTT_EVENTS.AUDIO_STREAM, onBackgroundAudio);
+  getSocket().on(PTT_EVENTS.AUDIO_MESSAGE, onBackgroundAudio);
   subscribedToAudio = true;
 }
 
@@ -253,7 +253,7 @@ function ensureBackgroundRealtimeSubscription() {
 
 function removeBackgroundAudioSubscription() {
   if (!subscribedToAudio) return;
-  getSocket().off(PTT_EVENTS.AUDIO_STREAM, onBackgroundAudio);
+  getSocket().off(PTT_EVENTS.AUDIO_MESSAGE, onBackgroundAudio);
   subscribedToAudio = false;
   audioQueue.length = 0;
 }
@@ -326,7 +326,10 @@ export async function startPttBackgroundRuntime(channel: PttChannel) {
       },
       color: '#005BFF',
       linkingURI: 'edupos://ptt',
-      foregroundServiceType: ['mediaPlayback', 'microphone'],
+      // Только mediaPlayback: фоновая служба лишь ВОСПРОИЗВОДИТ входящий звук.
+      // Тип microphone на Android 14 требует уже выданного RECORD_AUDIO в момент
+      // старта службы (сразу после логина его ещё нет) и роняет приложение.
+      foregroundServiceType: ['mediaPlayback'],
       parameters: {},
     });
   } catch (error) {
