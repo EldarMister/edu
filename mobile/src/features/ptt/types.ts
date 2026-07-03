@@ -13,6 +13,7 @@ export type PttAudioPayload = {
   channel: PttChannel;
   senderId: string;
   senderRole?: string;
+  senderName?: string;
   mimeType: string;
   chunk: string;
   sentAt?: string;

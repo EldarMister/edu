@@ -43,9 +43,12 @@ async function playFile(uri: string) {
   });
 }
 
+export type PttPlayingSpeaker = { id: string; name?: string; role?: string };
+
 export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
   const userId = useAuth((s) => s.user?.id);
   const [receiving, setReceiving] = React.useState(false);
+  const [speaker, setSpeaker] = React.useState<PttPlayingSpeaker | null>(null);
   const queueRef = React.useRef<PttAudioPayload[]>([]);
   const playingRef = React.useRef(false);
 
@@ -54,10 +57,14 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     const next = queueRef.current.shift();
     if (!next) {
       setReceiving(false);
+      setSpeaker(null);
       return;
     }
     playingRef.current = true;
     setReceiving(true);
+    // Пока играет файл — канал занят этим говорящим (half-duplex: кнопка
+    // блокируется на всё воспроизведение, а не только пока держали).
+    setSpeaker({ id: next.senderId, name: next.senderName, role: next.senderRole });
     void writeChunkToFile(next)
       .then(async (path) => {
         try {
@@ -77,6 +84,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     if (!enabled) {
       queueRef.current = [];
       setReceiving(false);
+      setSpeaker(null);
       return undefined;
     }
 
@@ -93,5 +101,5 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     };
   }, [channel, enabled, pump, userId]);
 
-  return { receiving };
+  return { receiving, speaker };
 }

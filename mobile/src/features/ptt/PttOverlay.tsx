@@ -199,7 +199,10 @@ export function PttOverlay() {
     [channel],
   );
   const sender = useAudioPttSender(channel, true);
-  useAudioPttReceiver(channel, true);
+  const { speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
+  // Имя последнего говорившего (из channel_busy) — фолбэк на время
+  // воспроизведения, если бэкенд не кладёт senderName в аудио-сообщение.
+  const lastSpeakerNameRef = React.useRef<string | undefined>(undefined);
   const floatingBottom = isWaiter
     ? waiterLayout.navBarHeight + waiterLayout.cartBarHeight + insets.bottom + spacing.xl
     : insets.bottom + spacing.xl;
@@ -269,6 +272,7 @@ export function PttOverlay() {
     const onBusy = (payload: PttBusyPayload) => {
       if (payload.channel === channel) {
         setBusySpeaker({ id: payload.speaker?.id ?? 'unknown', name: payload.speaker?.name });
+        if (payload.speaker?.name) lastSpeakerNameRef.current = payload.speaker.name;
       }
     };
     const onFree = (payload: PttFreePayload) => {
@@ -292,7 +296,14 @@ export function PttOverlay() {
     updatePttBackgroundChannel(next);
   };
 
-  const receivingFromOther = !!busySpeaker && busySpeaker.id !== user?.id && !sender.talking;
+  // «Занято» = кто-то держит кнопку (channel_busy) ИЛИ у нас сейчас играет
+  // входящий файл (playingSpeaker). Второе продлевает блокировку на всё
+  // воспроизведение — иначе после отпускания канал выглядел бы свободным,
+  // пока длинное сообщение ещё звучит.
+  const receivingFromOther =
+    !sender.talking && (!!playingSpeaker || (!!busySpeaker && busySpeaker.id !== user?.id));
+  const speakerName =
+    playingSpeaker?.name ?? busySpeaker?.name ?? lastSpeakerNameRef.current ?? 'Сотрудник';
   const state: RadioState = !connected
     ? 'error'
     : sender.talking
@@ -307,7 +318,7 @@ export function PttOverlay() {
       : state === 'recording'
         ? 'Вы говорите'
         : state === 'receiving'
-          ? `Говорит: ${busySpeaker?.name ?? 'Сотрудник'}`
+          ? `Говорит: ${speakerName}`
           : 'Готово к разговору';
 
   const statusHint =
