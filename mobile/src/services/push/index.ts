@@ -47,6 +47,36 @@ async function ensureAndroidNotificationChannels(): Promise<void> {
   });
 }
 
+export async function scheduleRealtimeLocalNotification({
+  title,
+  body,
+  data,
+}: {
+  title: string;
+  body: string;
+  data?: Record<string, unknown>;
+}): Promise<boolean> {
+  await ensureAndroidNotificationChannels();
+  const { status } = await Notifications.getPermissionsAsync();
+  if (status !== 'granted') return false;
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title,
+        body,
+        sound: NOTIFICATION_SOUND,
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+        vibrate: [0, 250, 250, 250],
+        data: data ?? {},
+      },
+      trigger: Platform.OS === 'android' ? { channelId: ORDER_NOTIFICATION_CHANNEL_ID } : null,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function playNotificationSoundTest(): Promise<boolean> {
   await ensureAndroidNotificationChannels();
 

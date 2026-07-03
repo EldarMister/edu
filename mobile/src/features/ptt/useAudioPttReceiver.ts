@@ -1,4 +1,5 @@
 import React from 'react';
+import { AppState, Platform } from 'react-native';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { configureAudioPlayback } from '@/lib/sound';
@@ -8,6 +9,7 @@ import { PTT_EVENTS, type PttAudioPayload, type PttChannel } from './types';
 
 function extensionForMime(mimeType: string) {
   if (mimeType.includes('webm')) return 'webm';
+  if (mimeType.includes('mp4')) return 'm4a';
   if (mimeType.includes('mpeg')) return 'mp3';
   return 'm4a';
 }
@@ -80,6 +82,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
 
     const sock = getSocket();
     const onAudio = (payload: PttAudioPayload) => {
+      if (Platform.OS === 'android' && AppState.currentState !== 'active') return;
       if (payload.channel !== channel || payload.senderId === userId) return;
       queueRef.current.push(payload);
       pump();

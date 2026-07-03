@@ -7,6 +7,8 @@ export const PTT_CHANNELS = [
 
 export type PttChannel = (typeof PTT_CHANNELS)[number]['key'];
 
+export const PTT_CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
+
 export type PttAudioPayload = {
   channel: PttChannel;
   senderId: string;

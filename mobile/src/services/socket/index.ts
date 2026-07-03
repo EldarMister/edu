@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import { useAuth } from '@/store/auth';
 import { API_URL } from '@/config/env';
+import { isPttBackgroundRuntimeActive } from '@/features/ptt/backgroundFlag';
 
 let socket: Socket | null = null;
 const OFFLINE_GRACE_MS = 5500;
@@ -12,7 +13,7 @@ function socketIsConnecting(sock: Socket) {
 }
 
 function shouldConnectNow() {
-  return AppState.currentState === 'active' && !!useAuth.getState().accessToken;
+  return (AppState.currentState === 'active' || isPttBackgroundRuntimeActive()) && !!useAuth.getState().accessToken;
 }
 
 function connectIfNeeded(sock: Socket) {

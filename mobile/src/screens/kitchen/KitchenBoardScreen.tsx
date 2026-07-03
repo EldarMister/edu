@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AppState,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -31,6 +33,8 @@ import { disconnectSocket } from '@/services/socket';
 import { unregisterPushDevice } from '@/services/push';
 import { kitchenVoice } from '@/services/kitchenVoice';
 import { getKitchenVoiceSettings } from '@/services/kitchenVoiceSettings';
+import { stationVoice, type StationVoicedOrder } from '@/services/realtimeVoice';
+import { isPttBackgroundRuntimeActive } from '@/features/ptt/backgroundFlag';
 import { beep } from '@/lib/sound';
 import {
   displayOrderNumber,
@@ -71,17 +75,8 @@ type PendingAction = {
   deadline: number;
 };
 
-/** Заказ из сокета может нести готовый текст озвучки (формирует backend). */
-type VoicedOrder = Order & {
-  voice?: {
-    text?: string | null;
-    byStation?: Partial<Record<Exclude<PrepStation, 'none'>, string | null>>;
-  } | null;
-};
-
-function stationVoice(order: VoicedOrder, station: PrepStation): string | null {
-  if (station === 'none') return null;
-  return order.voice?.byStation?.[station] ?? order.voice?.text ?? null;
+function backgroundRuntimeHandlesAudio() {
+  return Platform.OS === 'android' && AppState.currentState !== 'active' && isPttBackgroundRuntimeActive();
 }
 
 /** Русское склонение: 1 позиция, 2 позиции, 5 позиций. */
@@ -153,11 +148,12 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   }, []);
 
   // Новый заказ: звук + вибрация + тост (по настройкам) + озвучка станции.
-  useSocketEvent<VoicedOrder>(
+  useSocketEvent<StationVoicedOrder>(
     SERVER_EVENTS.KITCHEN_NEW_ORDER,
     (order) => {
       const text = stationVoice(order, station);
       if (!text) return;
+      if (backgroundRuntimeHandlesAudio()) return;
       const settings = getKitchenVoiceSettings();
       if (settings.notificationsEnabled) {
         void beep('newOrder');
@@ -176,11 +172,12 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   );
 
   // Backend добавляет voice.text только для полной отмены/отказа — озвучиваем.
-  useSocketEvent<VoicedOrder>(
+  useSocketEvent<StationVoicedOrder>(
     SERVER_EVENTS.ORDER_STATUS_CHANGED,
     (order) => {
       const text = stationVoice(order, station);
       if (!text) return;
+      if (backgroundRuntimeHandlesAudio()) return;
       if (getKitchenVoiceSettings().notificationsEnabled) void beep('notify');
       kitchenVoice.enqueue(text);
     },

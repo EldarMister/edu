@@ -17,7 +17,7 @@ export async function configureAudioPlayback() {
   await Audio.setAudioModeAsync({
     allowsRecordingIOS: false,
     playsInSilentModeIOS: true,
-    staysActiveInBackground: false,
+    staysActiveInBackground: true,
     shouldDuckAndroid: true,
     playThroughEarpieceAndroid: false,
   });

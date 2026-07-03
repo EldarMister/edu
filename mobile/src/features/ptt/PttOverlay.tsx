@@ -16,9 +16,15 @@ import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, softShadow, spacing, waiterLayout } from '@/theme';
 import { getSocket, useConnectionStatus } from '@/services/socket';
 import { useAuth } from '@/store/auth';
+import {
+  startPttBackgroundRuntime,
+  stopPttBackgroundRuntime,
+  updatePttBackgroundChannel,
+} from './backgroundRuntime';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
 import { useAudioPttSender } from './useAudioPttSender';
 import {
+  PTT_CHANNEL_STORAGE_KEY,
   PTT_CHANNELS,
   PTT_EVENTS,
   type PttBusyPayload,
@@ -28,7 +34,6 @@ import {
   type RadioState,
 } from './types';
 
-const CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
 const CIRCLE_SIZE = 132;
 const GLOW_SIZE = CIRCLE_SIZE + 44;
 
@@ -224,7 +229,7 @@ export function PttOverlay() {
   // Последний выбранный канал переживает перезапуск приложения.
   React.useEffect(() => {
     let cancelled = false;
-    void AsyncStorage.getItem(CHANNEL_STORAGE_KEY).then((stored) => {
+    void AsyncStorage.getItem(PTT_CHANNEL_STORAGE_KEY).then((stored) => {
       if (cancelled) return;
       setChannel(isPttChannel(stored) ? stored : defaultChannelForRole(user?.role));
     });
@@ -232,6 +237,20 @@ export function PttOverlay() {
       cancelled = true;
     };
   }, [user?.role]);
+
+  React.useEffect(() => {
+    if (!user?.id) return undefined;
+    void startPttBackgroundRuntime(channel);
+    return () => {
+      void stopPttBackgroundRuntime();
+    };
+    // Runtime должен жить всё время авторизованной staff-сессии.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  React.useEffect(() => {
+    updatePttBackgroundChannel(channel);
+  }, [channel]);
 
   React.useEffect(() => {
     const sock = getSocket();
@@ -270,7 +289,7 @@ export function PttOverlay() {
     sender.stop();
     setBusySpeaker(null);
     setChannel(next);
-    void AsyncStorage.setItem(CHANNEL_STORAGE_KEY, next);
+    updatePttBackgroundChannel(next);
   };
 
   const receivingFromOther = !!busySpeaker && busySpeaker.id !== user?.id && !sender.talking;
