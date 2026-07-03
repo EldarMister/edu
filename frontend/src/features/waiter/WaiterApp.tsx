@@ -877,7 +877,7 @@ export function WaiterApp() {
       </main>
 
       {/* MOBILE: одна панель + нижняя навигация */}
-      <main className="flex-1 overflow-hidden bg-white px-1 py-2 lg:hidden">
+      <main className="flex-1 overflow-hidden bg-white px-1 py-0 lg:hidden">
         {tab === 'tables' && tablesPanel}
         {tab === 'menu' && mobileMenuNode}
         {tab === 'cart' && rightPanel}
@@ -1082,7 +1082,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex h-full flex-col bg-white px-1 py-2 lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4 lg:shadow-card">
+    <section className={`flex h-full flex-col bg-white px-1 ${title || action ? 'py-2' : 'py-0'} lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4 lg:shadow-card`}>
       {(title || action) && (
         <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
           {title ? (
