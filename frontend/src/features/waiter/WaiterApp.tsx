@@ -233,6 +233,14 @@ export function WaiterApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingCancel]);
 
+  useEffect(() => {
+    const hasMenuCartBar = tab === 'menu' && !replacementTarget && !showShiftGate;
+    document.documentElement.style.setProperty('--edu-ptt-floating-bottom', hasMenuCartBar ? '132px' : '76px');
+    return () => {
+      document.documentElement.style.removeProperty('--edu-ptt-floating-bottom');
+    };
+  }, [replacementTarget, showShiftGate, tab]);
+
   if (hallsQ.isLoading || categoriesQ.isLoading || dishesQ.isLoading || currentShiftQ.isLoading) {
     return <FullScreenLoader />;
   }

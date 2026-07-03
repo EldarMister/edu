@@ -291,7 +291,7 @@
   .animate-sheet-up {
     animation: sheet-up 0.24s cubic-bezier(0.4, 0, 0.2, 1) both;
   }
-  /* Рация: мягкая пульсация свечения вокруг PTT-круга (говорите / говорит другой). */
+  /* Рация: лёгкие состояния центральной PTT-кнопки. */
   @keyframes ptt-glow-pulse {
     0%,
     100% {
@@ -305,6 +305,72 @@
   }
   .animate-ptt-glow {
     animation: ptt-glow-pulse 1.6s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+  @keyframes ptt-soft-pulse {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.72;
+    }
+    50% {
+      transform: scale(1.08);
+      opacity: 0.3;
+    }
+  }
+  .animate-ptt-soft-pulse {
+    animation: ptt-soft-pulse 1.7s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+  @keyframes ptt-ripple {
+    0% {
+      transform: scale(0.86);
+      opacity: 0.5;
+    }
+    70% {
+      opacity: 0.18;
+    }
+    100% {
+      transform: scale(1.28);
+      opacity: 0;
+    }
+  }
+  .animate-ptt-ripple {
+    animation: ptt-ripple 1.35s ease-out infinite;
+    will-change: transform, opacity;
+  }
+  @keyframes ptt-shake {
+    0%,
+    100% {
+      transform: translateX(0);
+    }
+    25% {
+      transform: translateX(-3px);
+    }
+    50% {
+      transform: translateX(3px);
+    }
+    75% {
+      transform: translateX(-2px);
+    }
+  }
+  .animate-ptt-shake {
+    animation: ptt-shake 0.34s ease-in-out both;
+  }
+  @keyframes ptt-wave {
+    0%,
+    100% {
+      transform: scaleY(0.62);
+      opacity: 0.55;
+    }
+    50% {
+      transform: scaleY(1.18);
+      opacity: 1;
+    }
+  }
+  .animate-ptt-wave {
+    animation: ptt-wave 0.8s ease-in-out infinite;
+    transform-origin: center;
     will-change: transform, opacity;
   }
   .revenue-chart-svg text {

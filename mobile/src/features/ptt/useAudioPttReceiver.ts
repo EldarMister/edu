@@ -7,6 +7,7 @@ import { PTT_EVENTS, type PttAudioPayload, type PttChannel } from './types';
 
 function extensionForMime(mimeType: string) {
   if (mimeType.includes('webm')) return 'webm';
+  if (mimeType.includes('mp4')) return 'm4a';
   if (mimeType.includes('mpeg')) return 'mp3';
   return 'm4a';
 }
