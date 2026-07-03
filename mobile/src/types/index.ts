@@ -106,7 +106,9 @@ export interface OrderSetComponent {
   originalNameSnapshot: string;
   originalVariantNameSnapshot?: string | null;
   finalDishId: string | null;
+  finalVariantId?: string | null;
   finalNameSnapshot: string | null;
+  finalVariantNameSnapshot?: string | null;
   quantity: number;
 }
 
@@ -266,6 +268,7 @@ export interface CartSetComponent {
   replaceable: boolean;
   action: SetComponentAction;
   finalDishId?: string;
+  finalVariantId?: string;
   finalName?: string;
   finalPrice?: string;
 }

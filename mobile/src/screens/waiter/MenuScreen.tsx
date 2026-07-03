@@ -633,7 +633,7 @@ function SetPickerSheet({
       {sets.length === 0 ? (
         <Text style={styles.notFound}>Сетов пока нет</Text>
       ) : (
-        <View style={styles.setList}>
+        <ScrollView showsVerticalScrollIndicator={false} style={styles.setScroll} contentContainerStyle={styles.setList}>
           {sets.map((set) => {
             const selectedSet = set.id === selectedId;
             const count = (set.setComponents ?? []).reduce((sum, component) => sum + component.quantity, 0);
@@ -664,7 +664,7 @@ function SetPickerSheet({
               </FastPressable>
             );
           })}
-        </View>
+        </ScrollView>
       )}
     </BottomSheet>
   );
@@ -687,6 +687,7 @@ function SetConfigSheet({
 }) {
   const [components, setComponents] = useState<CartSetComponent[]>([]);
   const [replacingId, setReplacingId] = useState<string | null>(null);
+  const [variantDish, setVariantDish] = useState<Dish | null>(null);
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string>('all');
 
@@ -694,6 +695,7 @@ function SetConfigSheet({
     if (!set || !visible) return;
     setComponents(defaultSetComponents(set));
     setReplacingId(null);
+    setVariantDish(null);
     setSearch('');
     setCategoryId('all');
   }, [set, visible]);
@@ -738,17 +740,29 @@ function SetConfigSheet({
     });
   };
 
-  const applyReplacement = (dish: Dish) => {
+  const applyReplacement = (dish: Dish, variant?: DishVariant) => {
     if (!replacingId) return;
     patchComponent(replacingId, {
       action: 'replaced',
       finalDishId: dish.id,
-      finalName: dish.name,
-      finalPrice: dish.price,
+      finalVariantId: variant?.id,
+      finalName: variant ? `${dish.name} ${variant.name}` : dish.name,
+      finalPrice: variant?.price ?? dish.price,
     });
     setReplacingId(null);
+    setVariantDish(null);
     setSearch('');
     setCategoryId('all');
+  };
+
+  // Выбор блюда на замену: если у блюда есть размеры — сначала показываем экран
+  // выбора размера (как в PWA), иначе применяем сразу.
+  const pickReplacementDish = (dish: Dish) => {
+    if (dish.variants && dish.variants.length > 0) {
+      setVariantDish(dish);
+      return;
+    }
+    applyReplacement(dish);
   };
 
   if (!set) return null;
@@ -848,10 +862,16 @@ function SetConfigSheet({
         categoryId={categoryId}
         categories={replacementCategories}
         options={replacementOptions}
+        variantDish={variantDish}
         onSearch={setSearch}
         onCategory={setCategoryId}
-        onClose={() => setReplacingId(null)}
-        onPick={applyReplacement}
+        onClose={() => {
+          setReplacingId(null);
+          setVariantDish(null);
+        }}
+        onPick={pickReplacementDish}
+        onPickVariant={(variant) => variantDish && applyReplacement(variantDish, variant)}
+        onBackFromVariant={() => setVariantDish(null)}
       />
     </>
   );
@@ -864,10 +884,13 @@ function ReplacementPickerModal({
   categoryId,
   categories,
   options,
+  variantDish,
   onSearch,
   onCategory,
   onClose,
   onPick,
+  onPickVariant,
+  onBackFromVariant,
 }: {
   visible: boolean;
   replacing: CartSetComponent | null;
@@ -875,52 +898,97 @@ function ReplacementPickerModal({
   categoryId: string;
   categories: Category[];
   options: Dish[];
+  variantDish: Dish | null;
   onSearch: (value: string) => void;
   onCategory: (value: string) => void;
   onClose: () => void;
   onPick: (dish: Dish) => void;
+  onPickVariant: (variant: DishVariant) => void;
+  onBackFromVariant: () => void;
 }) {
   return (
     <FullscreenSheet visible={visible} onClose={onClose} style={styles.replacementSafe}>
       <SafeAreaView style={styles.replacementSafe} edges={['top']}>
-        <View style={styles.replacementHeader}>
-          <FastPressable onPress={onClose} hitSlop={12} style={styles.replacementBack}>
-            <PwaIcon name="chevronLeft" size={28} color={colors.textSecondary} strokeWidth={2.2} />
-          </FastPressable>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.replacementTitle}>Выберите замену</Text>
-            {replacing ? <Text style={styles.replacementSubtitle}>вместо: {replacing.originalName}</Text> : null}
-          </View>
-        </View>
-        <View style={styles.replacementContent}>
-          <View style={styles.replacementSearch}>
-            <PwaIcon name="search" size={20} color={colors.textLight} strokeWidth={2} />
-            <TextInput
-              placeholder="Поиск блюда"
-              placeholderTextColor={colors.textLight}
-              value={search}
-              onChangeText={onSearch}
-              style={styles.replacementSearchInput}
-            />
-          </View>
-          <PillTabs
-            items={[{ key: 'all', label: 'Все' }, ...categories.map((category) => ({ key: category.id, label: category.name }))]}
-            value={categoryId}
-            onChange={onCategory}
-            style={{ marginTop: spacing.md, marginBottom: spacing.md }}
-          />
-          <ScrollView showsVerticalScrollIndicator={false}>
-            <View style={styles.replacementGrid}>
-              {options.map((dish) => (
-                <FastPressable key={dish.id} onPress={() => onPick(dish)} style={styles.replacementDish}>
-                  <Text style={styles.replacementDishName} numberOfLines={2}>{dish.name}</Text>
-                  <Text style={styles.replacementDishPrice}>{money(minDishUnitPrice(dish))}</Text>
-                </FastPressable>
-              ))}
+        {variantDish ? (
+          // Экран выбора размера блюда-замены (как в PWA).
+          <>
+            <View style={styles.replacementHeader}>
+              <FastPressable onPress={onBackFromVariant} hitSlop={12} style={styles.replacementBack}>
+                <PwaIcon name="chevronLeft" size={28} color={colors.textSecondary} strokeWidth={2.2} />
+              </FastPressable>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.replacementTitle} numberOfLines={1}>{variantDish.name}</Text>
+                <Text style={styles.replacementSubtitle}>Выберите размер</Text>
+              </View>
             </View>
-            {options.length === 0 ? <Text style={styles.notFound}>Ничего не найдено</Text> : null}
-          </ScrollView>
-        </View>
+            <ScrollView showsVerticalScrollIndicator={false} style={styles.replacementContent}>
+              <View style={{ gap: spacing.sm, paddingVertical: spacing.md }}>
+                {variantDish.variants
+                  .slice()
+                  .sort((a, b) => a.sortOrder - b.sortOrder)
+                  .map((variant) => {
+                    const isOutOfStock =
+                      variantDish.trackInventory && typeof variant.stock === 'number' && variant.stock <= 0;
+                    return (
+                      <FastPressable
+                        key={variant.id}
+                        disabled={isOutOfStock}
+                        onPress={() => onPickVariant(variant)}
+                        style={[styles.variant, isOutOfStock && styles.variantDisabled]}
+                      >
+                        <Text style={styles.variantName}>
+                          {variant.name}
+                          {isOutOfStock ? <Text style={styles.variantOutOfStock}>  Нет в наличии</Text> : null}
+                        </Text>
+                        <Text style={styles.variantPrice}>{money(variant.price)}</Text>
+                      </FastPressable>
+                    );
+                  })}
+              </View>
+            </ScrollView>
+          </>
+        ) : (
+          <>
+            <View style={styles.replacementHeader}>
+              <FastPressable onPress={onClose} hitSlop={12} style={styles.replacementBack}>
+                <PwaIcon name="chevronLeft" size={28} color={colors.textSecondary} strokeWidth={2.2} />
+              </FastPressable>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.replacementTitle}>Выберите замену</Text>
+                {replacing ? <Text style={styles.replacementSubtitle}>вместо: {replacing.originalName}</Text> : null}
+              </View>
+            </View>
+            <View style={styles.replacementContent}>
+              <View style={styles.replacementSearch}>
+                <PwaIcon name="search" size={20} color={colors.textLight} strokeWidth={2} />
+                <TextInput
+                  placeholder="Поиск блюда"
+                  placeholderTextColor={colors.textLight}
+                  value={search}
+                  onChangeText={onSearch}
+                  style={styles.replacementSearchInput}
+                />
+              </View>
+              <PillTabs
+                items={[{ key: 'all', label: 'Все' }, ...categories.map((category) => ({ key: category.id, label: category.name }))]}
+                value={categoryId}
+                onChange={onCategory}
+                style={{ marginTop: spacing.md, marginBottom: spacing.md }}
+              />
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <View style={styles.replacementGrid}>
+                  {options.map((dish) => (
+                    <FastPressable key={dish.id} onPress={() => onPick(dish)} style={styles.replacementDish}>
+                      <Text style={styles.replacementDishName} numberOfLines={2}>{dish.name}</Text>
+                      <Text style={styles.replacementDishPrice}>{money(minDishUnitPrice(dish))}</Text>
+                    </FastPressable>
+                  ))}
+                </View>
+                {options.length === 0 ? <Text style={styles.notFound}>Ничего не найдено</Text> : null}
+              </ScrollView>
+            </View>
+          </>
+        )}
       </SafeAreaView>
     </FullscreenSheet>
   );
@@ -1087,6 +1155,7 @@ const styles = StyleSheet.create({
   variantName: { flex: 1, fontSize: fontSize.md, fontWeight: '500', color: colors.textPrimary },
   variantPrice: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
   setPickerFooter: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
+  setScroll: { maxHeight: 440 },
   setList: { gap: spacing.sm, paddingBottom: spacing.sm },
   setRow: {
     flexDirection: 'row',

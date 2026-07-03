@@ -481,7 +481,7 @@ function ItemCard({
   const clickable = billCorrection && (item.status === 'ready' || item.status === 'served') && !disabled;
   const hasExtra = comment || ((rejected || item.status === 'cancelled') && item.rejectReason);
   return (
-    <FastPressable disabled={!clickable} onPress={onCancel} style={[styles.itemCard, clickable && styles.itemCardClickable]}>
+    <FastPressable disabled={!clickable} onPress={onCancel} style={styles.itemCard}>
       <View style={styles.itemMainRow}>
         <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={2}>
           {name}
@@ -710,7 +710,6 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 3,
   },
-  itemCardClickable: { borderColor: 'rgba(0,91,255,0.4)', backgroundColor: colors.primaryFaint },
   itemMainRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   itemName: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary },
   itemRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },

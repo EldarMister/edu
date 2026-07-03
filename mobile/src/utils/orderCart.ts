@@ -23,6 +23,9 @@ export function orderToCartLines(order: Order, dishes: Dish[]): CartLine[] {
         const components: CartSetComponent[] = item.setComponents.map((component) => {
           const def = defs.get(defKey(component.originalDishId, component.originalVariantNameSnapshot));
           const finalDish = component.finalDishId ? dishById.get(component.finalDishId) : undefined;
+          const finalVariant = component.finalVariantId
+            ? finalDish?.variants.find((v) => v.id === component.finalVariantId)
+            : undefined;
           const originalName = component.originalVariantNameSnapshot
             ? `${component.originalNameSnapshot} ${component.originalVariantNameSnapshot}`
             : component.originalNameSnapshot;
@@ -38,8 +41,9 @@ export function orderToCartLines(order: Order, dishes: Dish[]): CartLine[] {
             replaceable: def?.replaceable ?? true,
             action: component.action,
             finalDishId: component.finalDishId ?? undefined,
+            finalVariantId: component.finalVariantId ?? undefined,
             finalName: component.finalNameSnapshot ?? undefined,
-            finalPrice: finalDish?.price,
+            finalPrice: finalVariant?.price ?? finalDish?.price,
           };
         });
 
