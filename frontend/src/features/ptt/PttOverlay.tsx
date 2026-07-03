@@ -250,7 +250,13 @@ function RadioStatusText({
   );
 }
 
-export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
+export function PttOverlay({
+  waiterMode = false,
+  buttonHidden = false,
+}: {
+  waiterMode?: boolean;
+  buttonHidden?: boolean;
+}) {
   const user = useAuth((s) => s.user);
   const connected = useSocketConnected();
   const isMobile = useMediaQuery('(max-width: 1023px)');
@@ -345,6 +351,12 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
 
   const onPressStop = () => sender.stop();
 
+  // Кнопку прячем на некоторых экранах официанта — при этом лист закрываем,
+  // но сам оверлей остаётся смонтированным (приём аудио не прерывается).
+  useEffect(() => {
+    if (buttonHidden) setOpen(false);
+  }, [buttonHidden]);
+
   // «Занято» = кто-то держит кнопку (channel_busy) ИЛИ у нас сейчас играет
   // входящий файл (receiving). Второе продлевает блокировку на всё
   // воспроизведение — иначе после отпускания канал выглядел бы свободным,
@@ -380,20 +392,22 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
 
   return (
     <>
-      <button
-        type="button"
-        aria-label="Рация"
-        onClick={() => setOpen(true)}
-        className="fixed right-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-transform active:scale-95"
-        style={{ bottom: floatingBottom }}
-      >
-        <RadioIcon size={26} />
-        <span
-          className={`absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white ${
-            connected ? 'bg-success' : 'bg-danger'
-          }`}
-        />
-      </button>
+      {!buttonHidden && (
+        <button
+          type="button"
+          aria-label="Рация"
+          onClick={() => setOpen(true)}
+          className="fixed right-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-transform active:scale-95"
+          style={{ bottom: floatingBottom }}
+        >
+          <RadioIcon size={26} />
+          <span
+            className={`absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white ${
+              connected ? 'bg-success' : 'bg-danger'
+            }`}
+          />
+        </button>
+      )}
 
       {open && (
         <div className="fixed inset-0 z-[90]">

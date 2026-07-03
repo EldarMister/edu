@@ -52,6 +52,7 @@ import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
 import { WaiterCabinet } from './WaiterCabinet';
+import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { PaymentModal } from './PaymentModal';
 import { ReceiptPrintSheet } from './ReceiptPrintSheet';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
@@ -240,6 +241,17 @@ export function WaiterApp() {
       document.documentElement.style.removeProperty('--edu-ptt-floating-bottom');
     };
   }, [replacementTarget, showShiftGate, tab]);
+
+  // Кнопка рации у официанта — только на «Столах», списке «Заказов» и «Профиле».
+  // На подробном заказе, в меню/корзине и личном кабинете её прячем.
+  const radioButtonVisible =
+    activeNavTab === 'tables' ||
+    (activeNavTab === 'orders' && !viewingOrder) ||
+    (activeNavTab === 'profile' && !cabinetOpen);
+  useEffect(() => {
+    useRadioVisibility.getState().setWaiterButtonVisible(radioButtonVisible);
+    return () => useRadioVisibility.getState().setWaiterButtonVisible(true);
+  }, [radioButtonVisible]);
 
   if (hallsQ.isLoading || categoriesQ.isLoading || dishesQ.isLoading || currentShiftQ.isLoading) {
     return <FullScreenLoader />;
