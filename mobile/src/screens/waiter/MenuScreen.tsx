@@ -1043,7 +1043,7 @@ const styles = StyleSheet.create({
   dishSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   dishBottom: { marginTop: 'auto', flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   dishPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
-  oldPrice: { fontSize: fontSize.xs, fontWeight: '400', color: colors.textLight, textDecorationLine: 'line-through' },
+  oldPrice: { fontSize: 12, fontWeight: '400', color: colors.textLight, textDecorationLine: 'line-through' },
   qtyBadge: {
     minWidth: waiterLayout.roundButton,
     height: waiterLayout.roundButton,
