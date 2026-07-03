@@ -264,7 +264,7 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
     [channel],
   );
   const sender = useAudioPttSender(channel, true);
-  useAudioPttReceiver(channel, true);
+  const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
 
   const bottomNavInset = waiterMode && isMobile ? WAITER_NAV_INSET : 0;
   const floatingBottom = waiterMode && isMobile
@@ -345,7 +345,13 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
 
   const onPressStop = () => sender.stop();
 
-  const speakingOther = !!busySpeaker && busySpeaker.id !== user?.id && !sender.talking;
+  // «Занято» = кто-то держит кнопку (channel_busy) ИЛИ у нас сейчас играет
+  // входящий файл (receiving). Второе продлевает блокировку на всё
+  // воспроизведение — иначе после отпускания канал выглядел бы свободным,
+  // пока длинное сообщение ещё звучит.
+  const otherSpeaker = playingSpeaker ?? busySpeaker;
+  const speakingOther =
+    !sender.talking && (receiving || (!!busySpeaker && busySpeaker.id !== user?.id));
   const state: RadioState = !connected
     ? 'error'
     : sender.talking
@@ -360,7 +366,7 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
       : state === 'speakingSelf'
         ? 'Вы говорите'
         : state === 'speakingOther'
-          ? `Говорит: ${busySpeaker?.name ?? 'Сотрудник'}`
+          ? `Говорит: ${otherSpeaker?.name ?? 'Сотрудник'}`
           : 'Готово к разговору';
 
   const statusHint =

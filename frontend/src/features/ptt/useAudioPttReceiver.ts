@@ -30,9 +30,12 @@ function playHtmlAudio(blob: Blob): Promise<void> {
   });
 }
 
+export type PttPlayingSpeaker = { id: string; name?: string; role?: string };
+
 export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
   const userId = useAuth((s) => s.user?.id);
   const [receiving, setReceiving] = useState(false);
+  const [speaker, setSpeaker] = useState<PttPlayingSpeaker | null>(null);
   const queueRef = useRef<PttAudioPayload[]>([]);
   const playingRef = useRef(false);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -67,10 +70,14 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     const next = queueRef.current.shift();
     if (!next) {
       setReceiving(false);
+      setSpeaker(null);
       return;
     }
     playingRef.current = true;
     setReceiving(true);
+    // Пока играет файл — канал занят этим говорящим (half-duplex: кнопка
+    // блокируется на всё время воспроизведения, а не только пока держали).
+    setSpeaker({ id: next.senderId, name: next.senderName, role: next.senderRole });
     void playPayload(next)
       .catch(() => undefined)
       .finally(() => {
@@ -83,6 +90,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     if (!enabled) {
       queueRef.current = [];
       setReceiving(false);
+      setSpeaker(null);
       return undefined;
     }
 
@@ -98,5 +106,5 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     };
   }, [channel, enabled, pump, userId]);
 
-  return { receiving };
+  return { receiving, speaker };
 }
