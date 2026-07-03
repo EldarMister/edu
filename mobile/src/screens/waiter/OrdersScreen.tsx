@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import {
   FlatList,
+  Image,
   RefreshControl,
   StyleSheet,
   Text,
@@ -33,6 +34,9 @@ import { displayOrderNumber, hallSuffix, timeHM } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
 import { apiError } from '@/lib/api';
 import type { Order } from '@/types';
+
+/** Кастомная PNG-иконка отмены действия (красный круг) — как на PWA. */
+const UNDO_ACTION_ICON = require('../../../assets/undo-action-icon.png');
 
 const EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
 const CANCELLABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready', 'partially_rejected'];
@@ -273,9 +277,8 @@ export function OrdersScreen() {
       {pendingCancel ? (
         <View pointerEvents="box-none" style={styles.undoOuter}>
           <View style={styles.undoCard}>
-            <View style={styles.undoIcon}>
-              <PwaIcon name="undoAction" size={32} color={colors.white} strokeWidth={2.35} />
-            </View>
+            <Image source={UNDO_ACTION_ICON} style={styles.undoIcon} resizeMode="contain" />
+
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.undoTitle} numberOfLines={1}>
                 {displayOrderNumber(pendingCancel.order.orderNumber)} · Стол {pendingCancel.order.table.number}
@@ -535,17 +538,8 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   undoIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.danger,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    elevation: 5,
+    width: 48,
+    height: 48,
   },
   undoTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   undoSub: { marginTop: 2, fontSize: fontSize.sm, color: colors.textMuted },

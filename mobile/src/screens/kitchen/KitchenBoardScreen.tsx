@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AppState,
+  Image,
   Platform,
   RefreshControl,
   ScrollView,
@@ -18,6 +19,9 @@ import { AppHeader } from '@/components/AppHeader';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
+
+/** Кастомная PNG-иконка отмены действия (красный круг) — как на PWA. */
+const UNDO_ACTION_ICON = require('../../../assets/undo-action-icon.png');
 import {
   useKitchenOrders,
   useAccept,
@@ -323,9 +327,8 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
       {pending ? (
         <View pointerEvents="box-none" style={styles.undoOuter}>
           <View style={styles.undoCard}>
-            <View style={styles.undoIcon}>
-              <PwaIcon name="undoAction" size={32} color={colors.white} strokeWidth={2.35} />
-            </View>
+            <Image source={UNDO_ACTION_ICON} style={styles.undoIcon} resizeMode="contain" />
+
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.undoTitle} numberOfLines={1}>
                 {pendingCount} {pluralPositions(pendingCount)}{' '}
@@ -1047,17 +1050,8 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   undoIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: colors.danger,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    elevation: 5,
+    width: 48,
+    height: 48,
   },
   undoTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   undoSub: { marginTop: 2, fontSize: fontSize.sm, color: colors.textMuted },

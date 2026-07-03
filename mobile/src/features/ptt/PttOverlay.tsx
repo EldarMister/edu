@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Animated, {
   Easing,
@@ -38,6 +38,9 @@ import {
 
 const CIRCLE_SIZE = 132;
 const GLOW_SIZE = CIRCLE_SIZE + 44;
+
+/** Кастомная PNG-иконка рации (белая) — как на PWA (/рация.png). */
+const RADIO_ICON = require('../../../assets/radio-icon.png');
 
 function defaultChannelForRole(role?: string): PttChannel {
   if (role === 'WAITER') return 'waiters';
@@ -175,7 +178,7 @@ function PushToTalkCircle({
           disabled && styles.circleDisabled,
         ]}
       >
-        <PwaIcon name="radio" size={54} color={colors.white} strokeWidth={2.1} />
+        <Image source={RADIO_ICON} style={styles.circleIcon} resizeMode="contain" />
       </FastPressable>
     </View>
   );
@@ -240,9 +243,12 @@ export function PttOverlay() {
   // Имя последнего говорившего (из channel_busy) — фолбэк на время
   // воспроизведения, если бэкенд не кладёт senderName в аудио-сообщение.
   const lastSpeakerNameRef = React.useRef<string | undefined>(undefined);
-  // PWA waiter mode pins the external radio button at 148px from the
-  // viewport bottom, above the cart bar and bottom nav.
-  const floatingBottom = isWaiter ? 148 + insets.bottom : insets.bottom + spacing.xl;
+  // Кнопка сидит чуть выше нижней навигации (как на PWA ~78px). Показывается
+  // только на Столах/Заказах/Профиле, где нет бара корзины, поэтому её можно
+  // опустить к самой навигации.
+  const floatingBottom = isWaiter
+    ? waiterLayout.navBarHeight + spacing.lg + insets.bottom
+    : insets.bottom + spacing.xl;
   const sheetBottomInset = isWaiter ? waiterLayout.navBarHeight + insets.bottom : undefined;
 
   const joinSeqRef = React.useRef(0);
@@ -380,7 +386,7 @@ export function PttOverlay() {
             onPress={() => setOpen(true)}
             style={[styles.floatButton, !connected && styles.floatButtonOffline]}
           >
-            <PwaIcon name="radio" size={25} color={colors.white} strokeWidth={2} />
+            <Image source={RADIO_ICON} style={styles.floatButtonIcon} resizeMode="contain" />
           </FastPressable>
         </View>
       )}
@@ -534,6 +540,8 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   circleDisabled: { opacity: 0.7 },
+  circleIcon: { width: Math.round(CIRCLE_SIZE * 0.42), height: Math.round(CIRCLE_SIZE * 0.42) },
+  floatButtonIcon: { width: 26, height: 26 },
   statusWrap: { alignItems: 'center', gap: 6, paddingBottom: spacing.xs },
   statusLabel: {
     maxWidth: '90%',
