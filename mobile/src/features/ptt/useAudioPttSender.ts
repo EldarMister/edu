@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system';
 import { getSocket } from '@/services/socket';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
 
-const SEGMENT_MS = 420;
+const SEGMENT_MS = 760;
 const MIME_TYPE = 'audio/mp4';
 
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
@@ -13,24 +13,24 @@ const RECORDING_OPTIONS: Audio.RecordingOptions = {
     extension: '.m4a',
     outputFormat: Audio.AndroidOutputFormat.MPEG_4,
     audioEncoder: Audio.AndroidAudioEncoder.AAC,
-    sampleRate: 16000,
+    sampleRate: 24000,
     numberOfChannels: 1,
-    bitRate: 32000,
+    bitRate: 64000,
   },
   ios: {
     extension: '.m4a',
     outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-    audioQuality: Audio.IOSAudioQuality.MEDIUM,
-    sampleRate: 16000,
+    audioQuality: Audio.IOSAudioQuality.HIGH,
+    sampleRate: 24000,
     numberOfChannels: 1,
-    bitRate: 32000,
+    bitRate: 64000,
     linearPCMBitDepth: 16,
     linearPCMIsBigEndian: false,
     linearPCMIsFloat: false,
   },
   web: {
     mimeType: 'audio/webm',
-    bitsPerSecond: 32000,
+    bitsPerSecond: 64000,
   },
 };
 
@@ -110,6 +110,11 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     try {
       await recording.stopAndUnloadAsync();
       uri = recording.getURI();
+      const shouldContinue = activeRef.current && continueLoop;
+      if (shouldContinue) {
+        finishingRef.current = false;
+        void recordSegment();
+      }
       if (uri) {
         const chunk = await FileSystem.readAsStringAsync(uri, {
           encoding: FileSystem.EncodingType.Base64,
@@ -128,8 +133,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       // Android can throw E_AUDIO_NODATA when stopped too early. Discard that segment.
     } finally {
       if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
-      finishingRef.current = false;
-      if (activeRef.current && continueLoop) void recordSegment();
+      if (!activeRef.current || !continueLoop) finishingRef.current = false;
     }
   }, [channel, clearTimer, recordSegment]);
   finishSegmentRef.current = finishSegment;
