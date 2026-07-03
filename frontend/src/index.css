@@ -357,22 +357,6 @@
   .animate-ptt-shake {
     animation: ptt-shake 0.34s ease-in-out both;
   }
-  @keyframes ptt-wave {
-    0%,
-    100% {
-      transform: scaleY(0.62);
-      opacity: 0.55;
-    }
-    50% {
-      transform: scaleY(1.18);
-      opacity: 1;
-    }
-  }
-  .animate-ptt-wave {
-    animation: ptt-wave 0.8s ease-in-out infinite;
-    transform-origin: center;
-    will-change: transform, opacity;
-  }
   .revenue-chart-svg text {
     letter-spacing: 0;
   }

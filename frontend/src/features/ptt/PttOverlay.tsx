@@ -97,32 +97,27 @@ const STATE_STYLES: Record<
     circle: string;
     ring: string;
     label: string;
-    wave: string;
   }
 > = {
   ready: {
     circle: 'bg-primary',
     ring: 'border-primary/25',
     label: 'border-primary/35 text-primary',
-    wave: 'bg-primary',
   },
   speakingSelf: {
     circle: 'bg-success',
     ring: 'border-success/25',
     label: 'border-success/40 text-success',
-    wave: 'bg-success',
   },
   speakingOther: {
     circle: 'bg-warning',
     ring: 'border-warning/30',
     label: 'border-warning/40 text-warning',
-    wave: 'bg-warning',
   },
   error: {
     circle: 'bg-danger',
     ring: 'border-danger/30',
     label: 'border-danger/40 text-danger',
-    wave: 'bg-danger',
   },
 };
 
@@ -180,26 +175,6 @@ function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onl
         <span className="h-2 w-2 rounded-full bg-success" />
         {onlineCount} онлайн
       </span>
-    </div>
-  );
-}
-
-function Waveform({ active, state }: { active: boolean; state: RadioState }) {
-  const bars = [10, 14, 20, 28, 18, 34, 42, 30, 22, 16, 12];
-  return (
-    <div className="mb-1 flex h-12 items-center justify-center gap-1.5">
-      {bars.map((height, index) => (
-        <span
-          key={`${height}-${index}`}
-          className={`w-1.5 rounded-full ${active ? STATE_STYLES[state].wave : 'bg-primary/20'} ${
-            active ? 'animate-ptt-wave' : ''
-          }`}
-          style={{
-            height,
-            animationDelay: `${index * 55}ms`,
-          }}
-        />
-      ))}
     </div>
   );
 }
@@ -289,7 +264,7 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
     [channel],
   );
   const sender = useAudioPttSender(channel, true);
-  const receiver = useAudioPttReceiver(channel, true);
+  useAudioPttReceiver(channel, true);
 
   const bottomNavInset = waiterMode && isMobile ? WAITER_NAV_INSET : 0;
   const floatingBottom = waiterMode && isMobile
@@ -378,7 +353,6 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
       : speakingOther
         ? 'speakingOther'
         : 'ready';
-  const activeWave = sender.talking || speakingOther || receiver.receiving;
 
   const statusTitle =
     state === 'error'
@@ -435,7 +409,6 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
             <RadioHeader onClose={() => setOpen(false)} />
             <RadioChannelTabs channel={channel} onChange={changeChannel} />
             <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
-            <Waveform active={activeWave} state={state} />
             <PushToTalkCircle
               state={state}
               disabled={state === 'error' || speakingOther}
