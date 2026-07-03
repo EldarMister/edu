@@ -370,15 +370,19 @@ export function PttOverlay() {
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       {buttonVisible && (
-        <FastPressable
-          accessibilityRole="button"
-          accessibilityLabel="Рация"
-          onPress={() => setOpen(true)}
-          style={[styles.floatButton, { bottom: floatingBottom }]}
-        >
-          <PwaIcon name="radio" size={26} color={colors.white} strokeWidth={2.1} />
-          <View style={[styles.onlineDot, { backgroundColor: connected ? colors.success : colors.textLight }]} />
-        </FastPressable>
+        <View pointerEvents="box-none" style={[styles.floatButtonWrap, { bottom: floatingBottom }]}>
+          <View pointerEvents="none" style={styles.floatRingOuter} />
+          <View pointerEvents="none" style={styles.floatRingMiddle} />
+          <View pointerEvents="none" style={styles.floatRingInner} />
+          <FastPressable
+            accessibilityRole="button"
+            accessibilityLabel="Рация"
+            onPress={() => setOpen(true)}
+            style={[styles.floatButton, !connected && styles.floatButtonOffline]}
+          >
+            <PwaIcon name="radio" size={25} color={colors.white} strokeWidth={2} />
+          </FastPressable>
+        </View>
       )}
 
       <BottomSheet
@@ -410,9 +414,37 @@ export function PttOverlay() {
 }
 
 const styles = StyleSheet.create({
-  floatButton: {
+  floatButtonWrap: {
     position: 'absolute',
-    right: spacing.lg,
+    right: spacing.sm,
+    width: 82,
+    height: 82,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 90,
+  },
+  floatRingOuter: {
+    position: 'absolute',
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: 'rgba(0, 91, 255, 0.06)',
+  },
+  floatRingMiddle: {
+    position: 'absolute',
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: 'rgba(0, 91, 255, 0.1)',
+  },
+  floatRingInner: {
+    position: 'absolute',
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: 'rgba(0, 91, 255, 0.14)',
+  },
+  floatButton: {
     width: 56,
     height: 56,
     borderRadius: 28,
@@ -425,16 +457,7 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 7,
   },
-  onlineDot: {
-    position: 'absolute',
-    right: 1,
-    top: 1,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    borderWidth: 2,
-    borderColor: colors.white,
-  },
+  floatButtonOffline: { backgroundColor: colors.textMuted },
   sheetBody: {
     paddingTop: 0,
     paddingBottom: spacing.md,

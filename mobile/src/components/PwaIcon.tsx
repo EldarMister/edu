@@ -21,6 +21,7 @@ export type PwaIconName =
   | 'clock'
   | 'info'
   | 'rotateCcw'
+  | 'undoAction'
   | 'check'
   | 'eye'
   | 'speaker'
@@ -113,6 +114,13 @@ export function PwaIcon({
           <Path d="M3 13a9 9 0 1 0 3-7.7L3 8" {...common} strokeWidth={2} />
         </>
       )}
+      {name === 'undoAction' && (
+        <Path
+          d="M13.8 7.8H8.2m0 0 2.45-2.45M8.2 7.8l2.45 2.45M8.65 7.8h5.65a4.65 4.65 0 1 1 0 9.3h-3.4"
+          {...common}
+          strokeWidth={2.35}
+        />
+      )}
       {name === 'check' && <Path d="M20 6 9 17l-5-5" {...common} strokeWidth={2.5} />}
       {name === 'trash' && (
         <>
@@ -130,11 +138,10 @@ export function PwaIcon({
       )}
       {name === 'radio' && (
         <>
-          <Path d="M9 4h6M12 4v4" {...common} strokeWidth={2} />
-          <Rect x="6.5" y="7.5" width="11" height="13" rx="2.5" {...common} strokeWidth={2} />
-          <Path d="M10 11.5h4M10 15h4" {...common} strokeWidth={2} />
-          <Circle cx="9.5" cy="18" r="0.8" fill={color} />
-          <Circle cx="14.5" cy="18" r="0.8" fill={color} />
+          <Path d="M10.5 3.5h3M12 3.5v3.25" {...common} strokeWidth={2} />
+          <Rect x="7" y="6.5" width="10" height="14" rx="2.25" {...common} strokeWidth={2} />
+          <Circle cx="12" cy="10.3" r="0.9" fill={color} />
+          <Path d="M10 13.3h4M10 15.8h4M10 18.3h4" {...common} strokeWidth={1.75} />
         </>
       )}
       {name === 'power' && (

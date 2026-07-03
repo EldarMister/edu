@@ -324,7 +324,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         <View pointerEvents="box-none" style={styles.undoOuter}>
           <View style={styles.undoCard}>
             <View style={styles.undoIcon}>
-              <PwaIcon name="rotateCcw" size={20} color={colors.white} strokeWidth={2.2} />
+              <PwaIcon name="undoAction" size={32} color={colors.white} strokeWidth={2.35} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.undoTitle} numberOfLines={1}>
@@ -1047,12 +1047,17 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   undoIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: colors.danger,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: colors.danger,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.22,
+    shadowRadius: 12,
+    elevation: 5,
   },
   undoTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   undoSub: { marginTop: 2, fontSize: fontSize.sm, color: colors.textMuted },
