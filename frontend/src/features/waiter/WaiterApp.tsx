@@ -243,11 +243,12 @@ export function WaiterApp() {
   }, [replacementTarget, showShiftGate, tab]);
 
   // Кнопка рации у официанта — только на «Столах», списке «Заказов» и «Профиле».
-  // На подробном заказе, в меню/корзине и личном кабинете её прячем.
+  // На подробном заказе, в меню/корзине, личном кабинете и экране «Смена не начата» её прячем.
   const radioButtonVisible =
-    activeNavTab === 'tables' ||
-    (activeNavTab === 'orders' && !viewingOrder) ||
-    (activeNavTab === 'profile' && !cabinetOpen);
+    !showShiftGate &&
+    (activeNavTab === 'tables' ||
+      (activeNavTab === 'orders' && !viewingOrder) ||
+      (activeNavTab === 'profile' && !cabinetOpen));
   useEffect(() => {
     useRadioVisibility.getState().setWaiterButtonVisible(radioButtonVisible);
     return () => useRadioVisibility.getState().setWaiterButtonVisible(true);
@@ -1068,7 +1069,7 @@ export function WaiterApp() {
 }
 
 function UndoActionIcon() {
-  return <img src="/иконка отмены.png" width={64} height={64} className="h-16 w-16 shrink-0" alt="" />;
+  return <img src="/иконка отмены.png" width={48} height={48} className="h-12 w-12 shrink-0" alt="" />;
 }
 
 function Panel({

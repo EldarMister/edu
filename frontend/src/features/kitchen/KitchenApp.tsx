@@ -290,5 +290,5 @@ export function KitchenApp({
 }
 
 function UndoActionIcon() {
-  return <img src="/иконка отмены.png" width={64} height={64} className="h-16 w-16 shrink-0" alt="" />;
+  return <img src="/иконка отмены.png" width={48} height={48} className="h-12 w-12 shrink-0" alt="" />;
 }

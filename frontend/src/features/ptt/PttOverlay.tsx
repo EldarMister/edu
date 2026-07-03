@@ -195,7 +195,7 @@ function PushToTalkCircle({
   onPressStop: () => void;
 }) {
   const view = STATE_STYLES[state];
-  const rippleCount = state === 'speakingSelf' ? 3 : state === 'ready' || state === 'speakingOther' || state === 'error' ? 1 : 0;
+  const rippleCount = state === 'speakingSelf' ? 3 : state === 'speakingOther' ? 1 : 0;
   return (
     <div className="relative flex items-center justify-center py-2" style={{ minHeight: size + 30 }}>
       {Array.from({ length: rippleCount }).map((_, index) => (
@@ -392,23 +392,28 @@ export function PttOverlay({
           ? 'Дождитесь освобождения канала'
           : (sender.deniedReason ?? 'Нажмите и удерживайте');
 
+  const outerView = STATE_STYLES[state];
+  const outerSpeaking = state === 'speakingSelf' || state === 'speakingOther';
+
   return (
     <>
       {!buttonHidden && (
         <div
-          className="fixed right-2 z-[70] flex h-[82px] w-[82px] items-center justify-center"
+          className="fixed right-2 z-[70] flex h-14 w-14 items-center justify-center"
           style={{ bottom: floatingBottom }}
         >
-          <span className="pointer-events-none absolute h-[82px] w-[82px] rounded-full bg-primary/[0.06]" />
-          <span className="pointer-events-none absolute h-[68px] w-[68px] rounded-full bg-primary/10" />
-          <span className="pointer-events-none absolute h-[58px] w-[58px] rounded-full bg-primary/[0.14]" />
+          {/* Кольцо вокруг кнопки — только пока идёт передача или приём. */}
+          {outerSpeaking && (
+            <span
+              className={`pointer-events-none absolute animate-ptt-soft-pulse rounded-full border ${outerView.ring}`}
+              style={{ width: 74, height: 74 }}
+            />
+          )}
           <button
             type="button"
             aria-label="Рация"
             onClick={() => setOpen(true)}
-            className={`relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-transform active:scale-95 ${
-              connected ? 'bg-primary' : 'bg-text-muted'
-            }`}
+            className={`relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:scale-95 ${outerView.circle}`}
           >
             <RadioIcon size={25} />
           </button>
