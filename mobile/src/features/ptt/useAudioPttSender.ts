@@ -1,6 +1,7 @@
 import React from 'react';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
+import { configureAudioPlayback } from '@/lib/sound';
 import { getSocket } from '@/services/socket';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
 
@@ -51,16 +52,6 @@ async function configureRecordingAudio() {
   });
 }
 
-async function configurePlaybackAudio() {
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: false,
-    playsInSilentModeIOS: true,
-    staysActiveInBackground: true,
-    shouldDuckAndroid: true,
-    playThroughEarpieceAndroid: false,
-  });
-}
-
 export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
   const [talking, setTalking] = React.useState(false);
   const [deniedReason, setDeniedReason] = React.useState<string | null>(null);
@@ -96,7 +87,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     } finally {
       getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
       if (uri) await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => undefined);
-      await configurePlaybackAudio().catch(() => undefined);
+      await configureAudioPlayback().catch(() => undefined);
     }
   }, [channel]);
 
@@ -138,12 +129,12 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     } catch {
       setDeniedReason('Не удалось включить микрофон');
       getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      await configurePlaybackAudio().catch(() => undefined);
+      await configureAudioPlayback().catch(() => undefined);
       return false;
     }
     if (!holdRef.current) {
       getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      await configurePlaybackAudio().catch(() => undefined);
+      await configureAudioPlayback().catch(() => undefined);
       return false;
     }
 
@@ -156,7 +147,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       recordingRef.current = null;
       setDeniedReason('Не удалось включить микрофон');
       getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-      await configurePlaybackAudio().catch(() => undefined);
+      await configureAudioPlayback().catch(() => undefined);
       return false;
     }
 

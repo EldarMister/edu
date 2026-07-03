@@ -20,7 +20,7 @@ import { FastPressable } from '@/components/FastPressable';
 import { Button, Loading, PillTabs } from '@/components/ui';
 import { popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
-import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
+import { colors, fontSize, radius, softShadow, spacing, waiterLayout } from '@/theme';
 import { TABLE_STATUS } from '@/theme/status';
 import { useAuth } from '@/store/auth';
 import {
@@ -615,13 +615,15 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: spacing.xs,
     top: spacing.sm + 38,
-    width: 180,
+    width: 192,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
     backgroundColor: colors.white,
+    paddingVertical: 4,
     overflow: 'hidden',
     zIndex: 50,
+    ...softShadow,
   },
   tableActionItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
   tableActionText: { fontSize: fontSize.sm, color: colors.textSecondary },

@@ -64,6 +64,28 @@ function itemName(item: Order['items'][number]): string {
     : item.dishNameSnapshot;
 }
 
+function uniqueNames(names: string[]): string[] {
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+}
+
+function componentName(component: NonNullable<Order['items'][number]['setComponents']>[number]): string {
+  return component.action === 'replaced' && component.finalNameSnapshot
+    ? component.finalNameSnapshot
+    : component.originalNameSnapshot;
+}
+
+function itemNamesByStatus(order: Order, statuses: Order['items'][number]['status'][]): string[] {
+  const wanted = new Set(statuses);
+  const names: string[] = [];
+  for (const item of order.items ?? []) {
+    if (wanted.has(item.status)) names.push(itemName(item));
+    for (const component of item.setComponents ?? []) {
+      if (wanted.has(component.status)) names.push(componentName(component));
+    }
+  }
+  return uniqueNames(names);
+}
+
 function rejectedDishNames(order: Order): string[] {
   const names: string[] = [];
   for (const item of order.items ?? []) {
@@ -77,26 +99,48 @@ function rejectedDishNames(order: Order): string[] {
       );
     }
   }
-  return [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+  return uniqueNames(names);
+}
+
+function voiceItemsKey(order: Order): string {
+  return (order.items ?? [])
+    .flatMap((item) => [
+      `${item.id}:${item.status}`,
+      ...(item.setComponents ?? []).map((component) => `${component.id}:${component.status}`),
+    ])
+    .join('|');
 }
 
 export function waiterVoiceText(order: WaiterVoicedOrder): string | null {
+  if (order.voice?.waiterText) return order.voice.waiterText;
+
   const location = waiterLocationText(order);
+  const readyNames = itemNamesByStatus(order, ['ready']);
+  const readyText = readyNames.length ? `Готово: ${readyNames.join(', ')}. ` : '';
+  const cancelledNames = itemNamesByStatus(order, ['cancelled']);
+  const cancelledText = cancelledNames.length ? `: ${cancelledNames.join(', ')}` : '';
   const rejectedNames = rejectedDishNames(order);
   const rejectedText = rejectedNames.length ? `: ${rejectedNames.join(', ')}` : '';
   switch (order.status) {
-    case 'accepted_by_kitchen':
     case 'cooking':
-      return order.voice?.waiterText ?? `Кухня приняла ваш заказ. ${location}`;
+    case 'accepted_by_kitchen':
+      return readyNames.length ? `${readyText}${location} Заберите.` : `Кухня приняла ваш заказ. ${location}`;
     case 'ready':
-      return `Ваш заказ готов. ${location} Заберите.`;
+      return readyNames.length ? `${readyText}${location} Заберите.` : `Ваш заказ готов. ${location} Заберите.`;
+    case 'cancelled':
+      return `Заказ отменён${cancelledText}. ${location}`;
     case 'rejected':
       return `Кухня отказала${rejectedText}. ${location}`;
     case 'partially_rejected':
       return `Кухня отказала блюдо${rejectedText}. ${location}`;
     default:
-      return null;
+      return cancelledNames.length ? `Отменено${cancelledText}. ${location}` : null;
   }
+}
+
+export function waiterVoiceKey(order: WaiterVoicedOrder, text: string | null): string | null {
+  if (!text) return null;
+  return `${order.status}:${text}:${voiceItemsKey(order)}`;
 }
 
 export function stationVoice(order: StationVoicedOrder, station: PrepStation): string | null {

@@ -240,9 +240,9 @@ export function PttOverlay() {
   // Имя последнего говорившего (из channel_busy) — фолбэк на время
   // воспроизведения, если бэкенд не кладёт senderName в аудио-сообщение.
   const lastSpeakerNameRef = React.useRef<string | undefined>(undefined);
-  const floatingBottom = isWaiter
-    ? waiterLayout.navBarHeight + waiterLayout.cartBarHeight + insets.bottom + spacing.xl
-    : insets.bottom + spacing.xl;
+  // PWA waiter mode pins the external radio button at 148px from the
+  // viewport bottom, above the cart bar and bottom nav.
+  const floatingBottom = isWaiter ? 148 + insets.bottom : insets.bottom + spacing.xl;
   const sheetBottomInset = isWaiter ? waiterLayout.navBarHeight + insets.bottom : undefined;
 
   const joinSeqRef = React.useRef(0);

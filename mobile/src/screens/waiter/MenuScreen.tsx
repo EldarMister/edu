@@ -14,7 +14,7 @@ import { linePrice, useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
 import { useReplacement } from '@/store/replacement';
 import { buildSetLine, calcSetPrice, defaultSetComponents } from '@/utils/set';
-import { dishUnitPrice, makeIdempotencyKey, minDishUnitPrice, money, variantNamesLine } from '@/utils/format';
+import { dishUnitPrice, displayOrderNumber, makeIdempotencyKey, minDishUnitPrice, money, variantNamesLine } from '@/utils/format';
 import { cartStations } from '@/utils/prepStation';
 import { apiError } from '@/lib/api';
 import { useConnectionStatus } from '@/services/socket';
@@ -47,7 +47,6 @@ export function MenuScreen() {
   const addLineToCart = useCart((s) => s.addLine);
   const setCartQuantity = useCart((s) => s.setQuantity);
   const clearCart = useCart((s) => s.clear);
-  const cancelEditing = useCart((s) => s.cancelEditing);
   const cartCount = useCart((s) => s.lines.length);
   const cartTotal = useCart((s) => s.lines.reduce((sum, line) => sum + linePrice(line), 0));
   const push = useNotifications((s) => s.push);
@@ -339,17 +338,6 @@ export function MenuScreen() {
         </View>
       ) : (
       <>
-      {editingOrderId ? (
-        <View style={styles.editingBar}>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.editingLabel}>Редактирование заказа</Text>
-            <Text style={styles.editingName} numberOfLines={1}>{editingOrderNumber}</Text>
-          </View>
-          <FastPressable onPress={cancelEditing} style={styles.replacementCancel}>
-            <Text style={styles.replacementCancelText}>Отмена</Text>
-          </FastPressable>
-        </View>
-      ) : null}
       <View style={styles.cartBar}>
         <FastPressable
           style={styles.cartInfo}
@@ -358,8 +346,15 @@ export function MenuScreen() {
         >
           <PwaIcon name="cart" size={22} color={colors.textSecondary} />
           <View>
-            <Text style={styles.cartCount}>{count} {pozLabel(count)}</Text>
+            <Text style={[styles.cartCount, editingOrderId && styles.cartCountEdit]}>
+              {editingOrderId ? 'Редактирование' : `${count} ${pozLabel(count)}`}
+            </Text>
             <NumberTicker value={cartTotal} style={styles.cartTotal} digitHeight={17} />
+            {editingOrderId ? (
+              <Text style={styles.cartOrderNumber} numberOfLines={1}>
+                {displayOrderNumber(editingOrderNumber ?? '')}
+              </Text>
+            ) : null}
           </View>
         </FastPressable>
         <Button
@@ -1024,7 +1019,9 @@ const styles = StyleSheet.create({
     borderTopColor: colors.border,
     backgroundColor: colors.white,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+    minHeight: waiterLayout.cartBarHeight,
   },
   cartInfo: {
     flexDirection: 'row',
@@ -1032,13 +1029,16 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: colors.background,
+    borderRadius: radius.sm,
+    backgroundColor: colors.white,
     paddingHorizontal: spacing.md,
     height: 48,
+    minWidth: 132,
   },
   cartCount: { fontSize: fontSize.xs, color: colors.textMuted },
+  cartCountEdit: { color: colors.primary, fontWeight: '700' },
   cartTotal: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+  cartOrderNumber: { marginTop: 1, fontSize: fontSize.xs, color: colors.textMuted },
   replacementBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1060,19 +1060,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   replacementCancelText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
-  editingBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.primaryFaint,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  editingLabel: { fontSize: fontSize.xs, color: colors.primary, fontWeight: '700' },
-  editingName: { marginTop: 2, fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '600' },
-
   variantHint: { fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary, marginBottom: spacing.sm, marginTop: 4 },
   variant: {
     flexDirection: 'row',

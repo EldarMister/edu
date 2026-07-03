@@ -131,6 +131,7 @@ function WaiterTabBar({ state, descriptors, navigation, ordersCount }: BottomTab
               onPress={onPress}
               style={styles.tabButton}
             >
+              {focused ? <View style={styles.activeTabIndicator} /> : null}
               <View style={styles.iconWrap}>
                 <PwaIcon name={ICONS[route.name as keyof WaiterTabParamList]} size={22} color={color} />
                 {badge > 0 ? (
@@ -167,9 +168,18 @@ const styles = StyleSheet.create({
     height: waiterLayout.navBarHeight,
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
     paddingTop: 9,
     paddingBottom: 9,
     gap: 4,
+  },
+  activeTabIndicator: {
+    position: 'absolute',
+    top: 0,
+    width: 48,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: colors.primary,
   },
   tabLabel: {
     fontSize: fontSize.xs,

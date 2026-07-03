@@ -10,13 +10,14 @@ import { getKitchenVoiceSettings } from '@/services/kitchenVoiceSettings';
 import { waiterVoice } from '@/services/waiterVoice';
 import {
   stationVoice,
+  waiterVoiceKey,
   waiterVoiceText,
   type StationVoicedOrder,
   type WaiterVoicedOrder,
 } from '@/services/realtimeVoice';
 import { scheduleRealtimeLocalNotification } from '@/services/push';
 import { useAuth } from '@/store/auth';
-import { beep } from '@/lib/sound';
+import { beep, configureAudioPlayback } from '@/lib/sound';
 import { displayOrderNumber } from '@/utils/format';
 import type { PrepStation } from '@/types';
 import {
@@ -33,7 +34,6 @@ const JOIN_INTERVAL_MS = 15_000;
 const RECONNECT_INTERVAL_MS = 4_000;
 
 let currentChannel: PttChannel = DEFAULT_CHANNEL;
-let configuredAudio = false;
 let subscribedToAudio = false;
 let subscribedToRealtime = false;
 let playing = false;
@@ -57,15 +57,7 @@ function isPttChannel(value: unknown): value is PttChannel {
 }
 
 async function configureBackgroundAudio() {
-  if (configuredAudio) return;
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: false,
-    playsInSilentModeIOS: true,
-    staysActiveInBackground: true,
-    shouldDuckAndroid: false,
-    playThroughEarpieceAndroid: false,
-  });
-  configuredAudio = true;
+  await configureAudioPlayback();
 }
 
 async function readStoredChannel(): Promise<PttChannel> {
@@ -161,9 +153,9 @@ function notificationBody(order: Pick<StationVoicedOrder, 'orderNumber' | 'table
   return `Заказ ${orderNumber}${table}`;
 }
 
-function markVoiced(order: Pick<WaiterVoicedOrder, 'id' | 'status'>, text: string | null) {
-  const voiceKey = `${order.status}:${text}`;
-  if (!text || voicedOrders.get(order.id) === voiceKey) return false;
+function markVoiced(order: WaiterVoicedOrder, text: string | null) {
+  const voiceKey = waiterVoiceKey(order, text);
+  if (!text || !voiceKey || voicedOrders.get(order.id) === voiceKey) return false;
   voicedOrders.set(order.id, voiceKey);
   return true;
 }

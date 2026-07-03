@@ -249,13 +249,18 @@ export function PaymentSheet({
         title="Оплата заказа"
         footer={
           <View style={styles.payActions}>
-            <Button
-              title="Разделить счёт"
-              variant="secondary"
+            <FastPressable
               onPress={() => setSplitOpen(true)}
               disabled={pay.isPending || !allActiveItemsServed}
-              style={styles.splitButton}
-            />
+              style={[
+                styles.splitButton,
+                (pay.isPending || !allActiveItemsServed) && styles.splitButtonDisabled,
+              ]}
+            >
+              <Text style={styles.splitButtonText} numberOfLines={1}>
+                Разделить счёт
+              </Text>
+            </FastPressable>
             <Button
               title={`${selected === 'cash' || selected === 'card' ? 'Принять оплату' : 'Оплачено'} · ${money(total)}`}
               onPress={submit}
@@ -929,7 +934,19 @@ const styles = StyleSheet.create({
   mixedSummaryLabel: { fontSize: fontSize.sm, color: colors.textMuted },
   mixedSummaryValue: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
   payActions: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
-  splitButton: { width: 148 },
+  splitButton: {
+    width: 148,
+    height: 48,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  splitButtonDisabled: { opacity: 0.5 },
+  splitButtonText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.primary },
   successBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.4)',
@@ -1027,7 +1044,7 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: spacing.sm,
   },
-  splitCardPaid: { borderColor: 'rgba(22,163,74,0.36)', backgroundColor: colors.successSoft },
+  splitCardPaid: { borderColor: 'rgba(22,163,74,0.36)', backgroundColor: 'rgba(22,163,74,0.05)' },
   splitCardMenuOpen: { zIndex: 20, elevation: 3 },
   splitTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
   splitTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
@@ -1035,7 +1052,7 @@ const styles = StyleSheet.create({
   splitAmountWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   splitAmountCurrency: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   splitAmountInput: {
-    width: 104,
+    width: 112,
     height: 38,
     borderWidth: 1,
     borderColor: colors.border,
@@ -1056,7 +1073,7 @@ const styles = StyleSheet.create({
   methodSelectWrap: {
     position: 'relative',
     zIndex: 20,
-    width: 132,
+    width: 126,
     flexShrink: 0,
   },
   methodSelectTrigger: {

@@ -1,5 +1,14 @@
 import React, { memo } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, TextInput, View, useWindowDimensions } from 'react-native';
+import {
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  useWindowDimensions,
+  type View as RNView,
+} from 'react-native';
 import Animated, {
   interpolate,
   runOnJS,
@@ -186,19 +195,18 @@ export function OrdersScreen() {
       claimPending={claimQr.isPending}
       onOpen={openOrder}
       onClaim={claimOrder}
-      onToggleMenu={(event) => {
+      onToggleMenu={(anchor) => {
         if (menuFor?.order.id === item.id) {
           closeMenu();
           return;
         }
-        const { pageX, pageY } = event.nativeEvent;
         rootRef.current?.measureInWindow((rootX, rootY) => {
-          const menuWidth = 244;
+          const menuWidth = 208;
           const left = Math.min(
             screenWidth - menuWidth - spacing.lg,
-            Math.max(spacing.lg, pageX - rootX - menuWidth + 28),
+            Math.max(spacing.lg, anchor.pageX - rootX + anchor.width - menuWidth),
           );
-          showMenu({ order: item, top: Math.max(spacing.sm, pageY - rootY + 8), left });
+          showMenu({ order: item, top: Math.max(spacing.sm, anchor.pageY - rootY + anchor.height + 6), left });
         });
       }}
     />
@@ -384,10 +392,11 @@ const OrderCard = memo(function OrderCard({
   claimPending: boolean;
   onOpen: (order: Order) => void;
   onClaim: (order: Order) => void;
-  onToggleMenu: (event: any) => void;
+  onToggleMenu: (anchor: { pageX: number; pageY: number; width: number; height: number }) => void;
 }) {
   const attention = order.requiresWaiterDecision || ['ready', 'rejected'].includes(order.status);
   const unclaimedQr = order.source === 'qr' && !order.waiter;
+  const dotsRef = React.useRef<RNView>(null);
 
   return (
     <Card highlighted={attention || unclaimedQr} onPress={() => onOpen(order)} style={styles.orderCard}>
@@ -432,14 +441,19 @@ const OrderCard = memo(function OrderCard({
 
         {!unclaimedQr ? (
           <FastPressable
+            ref={dotsRef}
+            accessibilityRole="button"
+            accessibilityLabel="Действия с заказом"
             onPress={(event) => {
               event.stopPropagation();
-              onToggleMenu(event);
+              dotsRef.current?.measureInWindow?.((pageX: number, pageY: number, width: number, height: number) => {
+                onToggleMenu({ pageX, pageY, width, height });
+              });
             }}
-            hitSlop={10}
+            hitSlop={12}
             style={[styles.dots, menuOpen && styles.dotsActive]}
           >
-            <PwaIcon name="dotsVertical" size={16} color={colors.textLight} />
+            <PwaIcon name="dotsVertical" size={20} color={colors.textMuted} />
           </FastPressable>
         ) : null}
       </View>
@@ -468,8 +482,15 @@ const styles = StyleSheet.create({
   metaText: { fontSize: fontSize.sm, color: colors.textLight },
   headRight: { alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 },
   money: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
-  dots: { paddingLeft: 4, paddingTop: 2 },
-  dotsActive: { borderRadius: 12, backgroundColor: colors.background },
+  dots: {
+    width: 30,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -6,
+    borderRadius: 12,
+  },
+  dotsActive: { backgroundColor: colors.background },
   claimBtn: {
     borderRadius: 8,
     backgroundColor: colors.primary,
@@ -479,11 +500,12 @@ const styles = StyleSheet.create({
   claimText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.white },
   actionsMenuOverlay: {
     position: 'absolute',
-    width: 244,
+    width: 208,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: 12,
     backgroundColor: colors.white,
+    paddingVertical: 4,
     overflow: 'hidden',
     zIndex: 100,
   },
