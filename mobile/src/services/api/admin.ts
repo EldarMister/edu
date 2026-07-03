@@ -137,6 +137,82 @@ export function useStaff(role: string, search: string) {
   });
 }
 
+// ---------- Персонал: CRUD + отчёт по сменам (порт PWA) ----------
+export interface StaffInput {
+  name: string;
+  phone: string;
+  role: Role;
+  password?: string;
+  isActive?: boolean;
+}
+export function useStaffMutations() {
+  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'staff', 'overview']]);
+  const create = useMutation({
+    mutationFn: (b: StaffInput) => api.post('/admin/staff', b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...b }: { id: string } & Partial<StaffInput>) =>
+      api.patch(`/admin/staff/${id}`, b).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/staff/${id}`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove };
+}
+
+export interface ShiftReportItem {
+  name: string;
+  qty: number;
+  amount: number;
+  components?: { name: string; qty: number }[];
+}
+export interface ShiftReportCategory {
+  categoryId: string;
+  name: string;
+  qty: number;
+  amount: number;
+  items: ShiftReportItem[];
+}
+export interface ShiftReportCancellation {
+  time: string;
+  name: string;
+  amount: number;
+  reason: string;
+}
+export interface ShiftReportRow {
+  waiterId: string;
+  name: string;
+  role: Role;
+  isWaiter: boolean;
+  shiftStart: string | null;
+  shiftEnd: string | null;
+  shiftOpen: boolean;
+  durationMin: number | null;
+  turnover: number;
+  cashDue: number;
+  cashHanded: number;
+  difference: number;
+  categories: ShiftReportCategory[];
+  cancellations: ShiftReportCancellation[];
+}
+export function useShiftReport(date: string) {
+  return useQuery({
+    queryKey: ['admin', 'staff', 'shift-report', date],
+    queryFn: () => get<ShiftReportRow[]>(`/admin/staff/shift-report${date ? `?date=${date}` : ''}`),
+  });
+}
+export function useSetCashHanded() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { waiterId: string; date?: string; cashHanded: number }) =>
+      api.post('/admin/staff/cash-handed', b).then((r) => r.data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-report'] }),
+  });
+}
+
 export function useCancelOrder() {
   const qc = useQueryClient();
   return useMutation({
