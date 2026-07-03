@@ -27,6 +27,8 @@ export function BottomSheet({
   bodyStyle,
   maxHeight,
   bottomInset = 0,
+  backdropBottomInset = 0,
+  noShadow = false,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -38,12 +40,25 @@ export function BottomSheet({
   bodyStyle?: ViewStyle;
   maxHeight?: ViewStyle['maxHeight'];
   bottomInset?: number;
+  backdropBottomInset?: number;
+  noShadow?: boolean;
 }) {
   return (
     <RNModal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={styles.backdrop}>
-        <Pressable style={styles.backdropFill} onPress={onClose} />
-        <SafeAreaView style={[styles.sheet, maxHeight ? { maxHeight } : null, bottomInset ? { marginBottom: bottomInset } : null]} edges={['bottom']}>
+        <Pressable
+          style={[styles.backdropFill, backdropBottomInset ? { bottom: backdropBottomInset } : null]}
+          onPress={onClose}
+        />
+        <SafeAreaView
+          style={[
+            styles.sheet,
+            noShadow && styles.sheetNoShadow,
+            maxHeight ? { maxHeight } : null,
+            bottomInset ? { marginBottom: bottomInset } : null,
+          ]}
+          edges={['bottom']}
+        >
           {sheet ? (
             <View style={styles.handleWrap}>
               <View style={styles.handle} />
@@ -68,14 +83,19 @@ export function BottomSheet({
 }
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  backdropFill: { ...StyleSheet.absoluteFillObject },
+  backdrop: { flex: 1, justifyContent: 'flex-end' },
+  backdropFill: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
     backgroundColor: colors.card,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     maxHeight: '92%',
     ...softShadow,
+  },
+  sheetNoShadow: {
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   },
   handleWrap: { paddingTop: 10, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300 },

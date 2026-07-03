@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system';
 import { getSocket } from '@/services/socket';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
 
-const SEGMENT_MS = 420;
+const SEGMENT_MS = 300;
 const MIME_TYPE = 'audio/mp4';
 
 const RECORDING_OPTIONS: Audio.RecordingOptions = {
@@ -190,6 +190,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     const sock = getSocket();
     const onDenied = (payload: PttDeniedPayload) => {
       if (payload.channel && payload.channel !== channel) return;
+      if (!holdRef.current && !activeRef.current) return;
       setDeniedReason(payload.reason === 'busy' ? 'Канал занят' : 'Разговор недоступен');
       stop();
     };

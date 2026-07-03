@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
-import { getSocket, useConnectionStatus } from '@/lib/socket';
+import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
 import { useAudioPttSender } from './useAudioPttSender';
@@ -14,6 +14,7 @@ import {
 } from './types';
 
 const CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
+const WAITER_NAV_INSET = 58;
 
 function defaultChannelForRole(role?: string): PttChannel {
   if (role === 'WAITER') return 'waiters';
@@ -31,7 +32,7 @@ function initialChannel(role?: string): PttChannel {
     const stored = localStorage.getItem(CHANNEL_STORAGE_KEY);
     if (isPttChannel(stored)) return stored;
   } catch {
-    /* приватный режим — падаем на дефолт */
+    /* private mode */
   }
   return defaultChannelForRole(role);
 }
@@ -50,6 +51,24 @@ function useMediaQuery(query: string) {
   }, [query]);
 
   return matches;
+}
+
+function useSocketConnected() {
+  const [connected, setConnected] = useState(() => getSocket().connected);
+
+  useEffect(() => {
+    const sock = getSocket();
+    const sync = () => setConnected(sock.connected);
+    sock.on('connect', sync);
+    sock.on('disconnect', sync);
+    sync();
+    return () => {
+      sock.off('connect', sync);
+      sock.off('disconnect', sync);
+    };
+  }, []);
+
+  return connected;
 }
 
 function RadioIcon({ size = 28, className = '' }: { size?: number; className?: string }) {
@@ -72,34 +91,38 @@ function CloseIcon() {
   );
 }
 
-/** Визуальные параметры круга и статусной метки по состоянию рации. */
 const STATE_STYLES: Record<
   RadioState,
-  { circle: string; glow: string; pulse: boolean; label: string }
+  {
+    circle: string;
+    ring: string;
+    label: string;
+    wave: string;
+  }
 > = {
-  idle: {
+  ready: {
     circle: 'bg-primary',
-    glow: 'rgba(0, 91, 255, 0.16)',
-    pulse: false,
-    label: 'border-primary/30 text-primary',
+    ring: 'border-primary/25',
+    label: 'border-primary/35 text-primary',
+    wave: 'bg-primary',
   },
-  recording: {
+  speakingSelf: {
     circle: 'bg-success',
-    glow: 'rgba(22, 163, 74, 0.22)',
-    pulse: true,
+    ring: 'border-success/25',
     label: 'border-success/40 text-success',
+    wave: 'bg-success',
   },
-  receiving: {
+  speakingOther: {
     circle: 'bg-warning',
-    glow: 'rgba(245, 158, 11, 0.24)',
-    pulse: true,
+    ring: 'border-warning/30',
     label: 'border-warning/40 text-warning',
+    wave: 'bg-warning',
   },
   error: {
     circle: 'bg-danger',
-    glow: 'rgba(239, 68, 68, 0.2)',
-    pulse: false,
+    ring: 'border-danger/30',
     label: 'border-danger/40 text-danger',
+    wave: 'bg-danger',
   },
 };
 
@@ -151,12 +174,32 @@ function RadioChannelTabs({
 
 function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onlineCount: number }) {
   return (
-    <div className="mb-4 flex h-10 items-center justify-between rounded-xl border border-border bg-background/60 px-4">
+    <div className="mb-3 flex h-10 items-center justify-between rounded-xl border border-border bg-background/60 px-4">
       <span className="text-sm font-semibold text-text-primary">{channelLabel}</span>
       <span className="flex items-center gap-1.5 text-sm text-text-muted">
         <span className="h-2 w-2 rounded-full bg-success" />
         {onlineCount} онлайн
       </span>
+    </div>
+  );
+}
+
+function Waveform({ active, state }: { active: boolean; state: RadioState }) {
+  const bars = [10, 14, 20, 28, 18, 34, 42, 30, 22, 16, 12];
+  return (
+    <div className="mb-1 flex h-12 items-center justify-center gap-1.5">
+      {bars.map((height, index) => (
+        <span
+          key={`${height}-${index}`}
+          className={`w-1.5 rounded-full ${active ? STATE_STYLES[state].wave : 'bg-primary/20'} ${
+            active ? 'animate-ptt-wave' : ''
+          }`}
+          style={{
+            height,
+            animationDelay: `${index * 55}ms`,
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -175,17 +218,22 @@ function PushToTalkCircle({
   onPressStop: () => void;
 }) {
   const view = STATE_STYLES[state];
+  const rippleCount = state === 'speakingSelf' ? 3 : state === 'ready' || state === 'speakingOther' || state === 'error' ? 1 : 0;
   return (
-    <div className="relative flex items-center justify-center py-3" style={{ minHeight: size + 40 }}>
-      {/* Мягкое свечение вокруг круга; пульсирует, пока идёт передача или приём. */}
-      <span
-        className={`pointer-events-none absolute rounded-full ${view.pulse ? 'animate-ptt-glow' : ''}`}
-        style={{
-          width: size + 44,
-          height: size + 44,
-          background: `radial-gradient(closest-side, ${view.glow}, transparent 100%)`,
-        }}
-      />
+    <div className="relative flex items-center justify-center py-2" style={{ minHeight: size + 30 }}>
+      {Array.from({ length: rippleCount }).map((_, index) => (
+        <span
+          key={index}
+          className={`pointer-events-none absolute rounded-full border ${view.ring} ${
+            state === 'speakingSelf' ? 'animate-ptt-ripple' : 'animate-ptt-soft-pulse'
+          }`}
+          style={{
+            width: size + 22 + index * 22,
+            height: size + 22 + index * 22,
+            animationDelay: `${index * 220}ms`,
+          }}
+        />
+      ))}
       <button
         type="button"
         disabled={disabled}
@@ -195,10 +243,10 @@ function PushToTalkCircle({
         onLostPointerCapture={onPressStop}
         onContextMenu={(event) => event.preventDefault()}
         aria-label="Нажмите и удерживайте, чтобы говорить"
-        className={`relative flex touch-none select-none items-center justify-center rounded-full text-white transition-all duration-200 disabled:opacity-70 ${view.circle} ${
-          state === 'recording' ? 'scale-[1.04]' : ''
-        }`}
-        style={{ width: size, height: size, boxShadow: `0 0 0 10px ${view.glow}` }}
+        className={`relative flex touch-none select-none items-center justify-center rounded-full text-white transition-all duration-200 disabled:cursor-not-allowed ${view.circle} ${
+          state === 'speakingSelf' ? 'scale-[1.12]' : ''
+        } ${state === 'error' ? 'animate-ptt-shake' : ''}`}
+        style={{ width: size, height: size }}
       >
         <RadioIcon size={Math.round(size * 0.42)} />
       </button>
@@ -219,9 +267,7 @@ function RadioStatusText({
 }) {
   return (
     <div className="flex flex-col items-center gap-1.5 pb-1">
-      <span
-        className={`rounded-full border bg-white px-4 py-1 text-sm font-semibold ${STATE_STYLES[state].label}`}
-      >
+      <span className={`rounded-full border bg-white px-4 py-1 text-sm font-semibold ${STATE_STYLES[state].label}`}>
         {title}
       </span>
       <p className={`text-[13px] ${hintDanger ? 'font-medium text-danger' : 'text-text-muted'}`}>{hint}</p>
@@ -231,11 +277,11 @@ function RadioStatusText({
 
 export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
   const user = useAuth((s) => s.user);
-  const connected = useConnectionStatus();
+  const connected = useSocketConnected();
   const isMobile = useMediaQuery('(max-width: 1023px)');
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState<PttChannel>(() => initialChannel(user?.role));
-  const [onlineCount, setOnlineCount] = useState(1);
+  const [onlineCount, setOnlineCount] = useState(0);
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
 
   const selected = useMemo(
@@ -243,16 +289,17 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
     [channel],
   );
   const sender = useAudioPttSender(channel, true);
-  useAudioPttReceiver(channel, true);
-  const floatingBottom = waiterMode && isMobile ? 148 : 24;
-  const sheetBottom = waiterMode && isMobile ? 58 : 0;
+  const receiver = useAudioPttReceiver(channel, true);
+
+  const bottomNavInset = waiterMode && isMobile ? WAITER_NAV_INSET : 0;
+  const floatingBottom = waiterMode && isMobile
+    ? 'calc(var(--edu-ptt-floating-bottom, 78px) + env(safe-area-inset-bottom, 0px))'
+    : 'calc(24px + env(safe-area-inset-bottom, 0px))';
+  const sheetBottom = `calc(${bottomNavInset}px + env(safe-area-inset-bottom, 0px))`;
 
   const joinSeqRef = useRef(0);
   const joinChannel = useCallback(() => {
     const sock = getSocket();
-    // Сервер аутентифицирует сокет асинхронно (JWT + БД), поэтому join сразу
-    // после connect может отвергнуться — ретраим с паузой несколько раз.
-    // seq отменяет устаревшие ретраи при смене канала/переподключении.
     const seq = ++joinSeqRef.current;
     const attempt = (retriesLeft: number) => {
       if (joinSeqRef.current !== seq) return;
@@ -262,10 +309,10 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
           if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);
           return;
         }
-        if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 1500);
+        if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 1000);
       });
     };
-    attempt(3);
+    attempt(5);
   }, [channel]);
 
   useEffect(() => {
@@ -312,7 +359,7 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
     try {
       localStorage.setItem(CHANNEL_STORAGE_KEY, next);
     } catch {
-      /* приватный режим */
+      /* private mode */
     }
   };
 
@@ -323,31 +370,32 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
 
   const onPressStop = () => sender.stop();
 
-  const receivingFromOther = !!busySpeaker && busySpeaker.id !== user?.id && !sender.talking;
+  const speakingOther = !!busySpeaker && busySpeaker.id !== user?.id && !sender.talking;
   const state: RadioState = !connected
     ? 'error'
     : sender.talking
-      ? 'recording'
-      : receivingFromOther
-        ? 'receiving'
-        : 'idle';
+      ? 'speakingSelf'
+      : speakingOther
+        ? 'speakingOther'
+        : 'ready';
+  const activeWave = sender.talking || speakingOther || receiver.receiving;
 
   const statusTitle =
     state === 'error'
       ? 'Ошибка подключения'
-      : state === 'recording'
+      : state === 'speakingSelf'
         ? 'Вы говорите'
-        : state === 'receiving'
+        : state === 'speakingOther'
           ? `Говорит: ${busySpeaker?.name ?? 'Сотрудник'}`
           : 'Готово к разговору';
 
   const statusHint =
     state === 'error'
       ? 'Повторите попытку'
-      : state === 'recording'
+      : state === 'speakingSelf'
         ? 'Отпустите для остановки'
-        : state === 'receiving'
-          ? 'Нажмите и удерживайте для ответа'
+        : state === 'speakingOther'
+          ? 'Дождитесь освобождения канала'
           : (sender.deniedReason ?? 'Нажмите и удерживайте');
 
   return (
@@ -356,13 +404,13 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
         type="button"
         aria-label="Рация"
         onClick={() => setOpen(true)}
-        className="fixed right-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-[0_8px_20px_rgba(0,91,255,0.32)] transition-transform active:scale-95"
-        style={{ bottom: `calc(${floatingBottom}px + env(safe-area-inset-bottom, 0px))` }}
+        className="fixed right-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-transform active:scale-95"
+        style={{ bottom: floatingBottom }}
       >
         <RadioIcon size={26} />
         <span
           className={`absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white ${
-            connected ? 'bg-success' : 'bg-text-light'
+            connected ? 'bg-success' : 'bg-danger'
           }`}
         />
       </button>
@@ -372,24 +420,26 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
           <button
             type="button"
             aria-label="Закрыть рацию"
-            className="absolute inset-0 animate-fade-in bg-black/30"
+            className="absolute left-0 right-0 top-0 animate-fade-in bg-black/30"
+            style={{ bottom: sheetBottom }}
             onClick={() => setOpen(false)}
           />
           <section
-            className="absolute left-0 right-0 mx-auto max-w-xl animate-sheet-up rounded-t-[24px] border border-border bg-white px-4 pt-2 shadow-soft sm:px-6"
+            className="absolute left-0 right-0 mx-auto max-w-xl animate-sheet-up rounded-t-[24px] border border-border bg-white px-4 pt-2 shadow-none sm:px-6"
             style={{
-              bottom: `calc(${sheetBottom}px + env(safe-area-inset-bottom, 0px))`,
-              paddingBottom: sheetBottom ? 16 : 'max(16px, env(safe-area-inset-bottom, 0px))',
+              bottom: sheetBottom,
+              paddingBottom: 16,
               maxHeight: '55dvh',
             }}
           >
             <RadioHeader onClose={() => setOpen(false)} />
             <RadioChannelTabs channel={channel} onChange={changeChannel} />
             <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
+            <Waveform active={activeWave} state={state} />
             <PushToTalkCircle
               state={state}
-              disabled={state === 'error' || receivingFromOther}
-              size={isMobile ? 128 : 144}
+              disabled={state === 'error' || speakingOther}
+              size={isMobile ? 122 : 140}
               onPressStart={onPressStart}
               onPressStop={onPressStop}
             />
@@ -397,7 +447,7 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
               state={state}
               title={statusTitle}
               hint={statusHint}
-              hintDanger={state === 'idle' && !!sender.deniedReason}
+              hintDanger={state === 'ready' && !!sender.deniedReason}
             />
           </section>
         </div>

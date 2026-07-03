@@ -11,6 +11,7 @@ export type PttAudioPayload = {
   channel: PttChannel;
   senderId: string;
   senderRole?: string;
+  senderName?: string;
   mimeType: string;
   seq?: number;
   chunk: string;
@@ -30,9 +31,11 @@ export type PttPresencePayload = {
 
 export type PttBusyPayload = {
   channel: PttChannel;
-  speaker?: { id: string; role: string };
+  speaker?: { id: string; role: string; name?: string };
   startedAt?: string;
 };
+
+export type RadioState = 'ready' | 'speakingSelf' | 'speakingOther' | 'error';
 
 export type PttFreePayload = {
   channel: PttChannel;
