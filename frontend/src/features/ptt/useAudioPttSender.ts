@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
 
-const SEGMENT_MS = 250;
+const CHUNK_MS = 240;
+const AUDIO_BITS_PER_SECOND = 64000;
 
 type Ack = { ok: boolean; reason?: string };
 
@@ -53,45 +54,48 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     setTalking(false);
     const recorder = recorderRef.current;
     if (recorder && recorder.state !== 'inactive') {
+      try {
+        recorder.requestData();
+      } catch {
+        // Some browsers throw if the recorder is already flushing.
+      }
       recorder.stop();
+      return;
     }
     cleanupStream();
     getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
   }, [channel, cleanupStream]);
 
-  const recordSegment = useCallback(async () => {
+  const startRecorder = useCallback(async () => {
     const stream = streamRef.current;
     if (!activeRef.current || !stream) return;
 
     const mimeType = pickMimeType();
-    const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-    const chunks: BlobPart[] = [];
+    const recorder = new MediaRecorder(stream, {
+      ...(mimeType ? { mimeType } : {}),
+      audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+    });
     recorderRef.current = recorder;
 
     recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) chunks.push(event.data);
-    };
-    recorder.onstop = () => {
-      const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
+      if (!event.data.size) return;
       const currentSeq = seqRef.current++;
-      void blobToBase64(blob)
+      void blobToBase64(event.data)
         .then((chunk) => {
           if (!chunk) return;
           getSocket().emit(PTT_EVENTS.CHUNK, {
             channel,
-            mimeType: blob.type || recorder.mimeType || 'audio/webm',
+            mimeType: event.data.type || recorder.mimeType || mimeType || 'audio/webm',
             seq: currentSeq,
             chunk,
           });
-        })
-        .finally(() => {
-          if (activeRef.current) void recordSegment();
         });
     };
-    recorder.start();
-    window.setTimeout(() => {
-      if (recorder.state !== 'inactive') recorder.stop();
-    }, SEGMENT_MS);
+    recorder.onstop = () => {
+      cleanupStream();
+      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+    };
+    recorder.start(CHUNK_MS);
   }, [channel]);
 
   const start = useCallback(async () => {
@@ -123,14 +127,14 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       activeRef.current = true;
       seqRef.current = 0;
       setTalking(true);
-      void recordSegment();
+      void startRecorder();
       return true;
     } catch {
       setDeniedReason('Разрешите доступ к микрофону');
       stop();
       return false;
     }
-  }, [channel, enabled, recordSegment, stop]);
+  }, [channel, enabled, startRecorder, stop]);
 
   useEffect(() => {
     const sock = getSocket();
