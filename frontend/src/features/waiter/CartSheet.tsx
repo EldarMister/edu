@@ -178,7 +178,10 @@ export function CartSheet({
           {hasLines && (
             <button
               className="mt-2 h-9 w-full text-sm font-medium text-primary hover:underline"
-              onClick={() => clear()}
+              onClick={() => {
+                clear();
+                onClose();
+              }}
             >
               {t('Очистить')}
             </button>

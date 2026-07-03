@@ -64,6 +64,11 @@ const POPULARITY_EXCLUDED_ITEM_STATUSES = new Set<OrderItemStatus>([
   OrderItemStatus.rejected,
   OrderItemStatus.cancelled,
 ]);
+const PAYMENT_ALLOWED_ITEM_STATUSES = new Set<OrderItemStatus>([
+  OrderItemStatus.rejected,
+  OrderItemStatus.cancelled,
+  OrderItemStatus.served,
+]);
 
 @Injectable()
 export class OrdersService {
@@ -563,6 +568,7 @@ export class OrdersService {
           originalDishId: string | null;
           finalDishId: string | null;
           originalVariantNameSnapshot: string | null;
+          finalVariantNameSnapshot?: string | null;
           quantity: number;
         }[]
       | undefined,
@@ -572,7 +578,7 @@ export class OrdersService {
     const sig = comps
       .map(
         (c) =>
-          `${c.action}:${c.originalDishId ?? ''}:${c.finalDishId ?? ''}:${c.originalVariantNameSnapshot ?? ''}:${c.quantity}`,
+          `${c.action}:${c.originalDishId ?? ''}:${c.finalDishId ?? ''}:${c.originalVariantNameSnapshot ?? ''}:${c.finalVariantNameSnapshot ?? ''}:${c.quantity}`,
       )
       .sort()
       .join(',');
@@ -595,6 +601,7 @@ export class OrdersService {
         originalDishId: string | null;
         finalDishId: string | null;
         originalVariantNameSnapshot: string | null;
+        finalVariantNameSnapshot?: string | null;
         quantity: number;
       }[];
     }[],
@@ -769,6 +776,25 @@ export class OrdersService {
     return item.dishVariantNameSnapshot
       ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
       : item.dishNameSnapshot;
+  }
+
+  private waiterLocationVoice(order: { table: { number: number; hall?: { name?: string | null } | null } }) {
+    const hallName = order.table.hall?.name?.trim();
+    return [hallName ? `Зал ${hallName}` : null, `Стол номер ${tableNumberVoice(order.table.number)}`]
+      .filter(Boolean)
+      .join('. ');
+  }
+
+  private readyItemsWaiterText(
+    names: string[],
+    order: { table: { number: number; hall?: { name?: string | null } | null } },
+  ) {
+    const uniqueNames = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+    const location = this.waiterLocationVoice(order);
+    if (uniqueNames.length === 1) {
+      return `Блюдо ${uniqueNames[0]} готово. ${location}.`;
+    }
+    return `Готовы блюда: ${uniqueNames.join(', ')}. ${location}.`;
   }
 
   /** Человеко-читаемая сводка различий составов: «добавил X ×1, убрал Y ×2». */
@@ -1146,7 +1172,12 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    this.emitStatusChanged(
+      updated,
+      updated.status === OrderStatus.ready
+        ? undefined
+        : { waiterText: this.readyItemsWaiterText([this.orderItemName(item)], updated) },
+    );
     if (updated.status !== order.status) {
       const tableStatus = this.tableStatusForOrderStatus(updated.status);
       if (tableStatus) {
@@ -1211,6 +1242,16 @@ export class OrdersService {
     if (doneCount === 0) {
       throw new BadRequestException('Нет блюд, которые можно отметить готовыми');
     }
+    const readyNames = [
+      ...order.items
+        .filter((it) => targetIds.includes(it.id))
+        .map((it) => this.orderItemName(it)),
+      ...targetComponents.map((c) =>
+        c.action === 'replaced' && c.finalNameSnapshot
+          ? [c.finalNameSnapshot, c.finalVariantNameSnapshot].filter(Boolean).join(' ')
+          : c.originalNameSnapshot,
+      ),
+    ];
 
     const updated = await this.prisma.$transaction(async (tx) => {
       if (targetIds.length > 0) {
@@ -1257,7 +1298,12 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    this.emitStatusChanged(
+      updated,
+      updated.status === OrderStatus.ready
+        ? undefined
+        : { waiterText: this.readyItemsWaiterText(readyNames, updated) },
+    );
     if (updated.status !== order.status) {
       const tableStatus = this.tableStatusForOrderStatus(updated.status);
       if (tableStatus) {
@@ -1302,6 +1348,7 @@ export class OrdersService {
         action: true,
         originalNameSnapshot: true,
         finalNameSnapshot: true,
+        finalVariantNameSnapshot: true,
       },
     });
   }
@@ -1462,7 +1509,9 @@ export class OrdersService {
     }
     this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_REJECTED, updated);
     const componentNames = components.map((c) =>
-      c.action === 'replaced' && c.finalNameSnapshot ? c.finalNameSnapshot : c.originalNameSnapshot,
+      c.action === 'replaced' && c.finalNameSnapshot
+        ? [c.finalNameSnapshot, c.finalVariantNameSnapshot].filter(Boolean).join(' ')
+        : c.originalNameSnapshot,
     );
     const names = [
       ...fullItems.map((it) => this.orderItemName(it)),
@@ -1727,27 +1776,31 @@ export class OrdersService {
         where: { orderId, status: OrderItemStatus.ready },
         data: { status: OrderItemStatus.served },
       });
-      await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.served } });
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
+      const nextTableStatus = this.tableStatusForOrderStatus(nextStatus) ?? TableStatus.served;
+      await tx.table.update({ where: { id: order.tableId }, data: { status: nextTableStatus } });
       return tx.order.update({
         where: { id: orderId },
-        data: { status: OrderStatus.served, requiresWaiterDecision: false },
+        data: { status: nextStatus, requiresWaiterDecision: false },
         include: orderInclude,
       });
     });
     this.emitStatusChanged(updated);
-    this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.served, updated.table.hallId);
+    this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
     return updated;
   }
 
   /** Перевод к оплате. */
   async toPayment(orderId: string, waiterId: string) {
-    const order = await this.assertOwnedOrder(orderId, waiterId);
+    await this.assertOwnedOrder(orderId, waiterId);
+    const order = await this.findById(orderId);
     if (order.requiresWaiterDecision) {
       throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
     }
     if (([OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ нельзя оплатить');
     }
+    this.ensureAllActiveItemsServed(order);
     const updated = await this.prisma.$transaction(async (tx) => {
       await tx.table.update({
         where: { id: order.tableId },
@@ -1781,6 +1834,7 @@ export class OrdersService {
     if (order.status === OrderStatus.paid) {
       return order;
     }
+    this.ensureAllActiveItemsServed(order);
 
     // Смешанная/раздельная оплата: суммы частей должны точно совпадать с итогом заказа.
     const final = Number(order.finalAmount);
@@ -2011,7 +2065,14 @@ export class OrdersService {
     const componentDishes = componentDishIds.length
       ? await this.prisma.dish.findMany({
           where: { id: { in: componentDishIds } },
-          select: { id: true, name: true, price: true, isSet: true, isActive: true },
+          select: {
+            id: true,
+            name: true,
+            price: true,
+            isSet: true,
+            isActive: true,
+            _count: { select: { variants: true } },
+          },
         })
       : [];
     const compById = new Map(componentDishes.map((d) => [d.id, d]));
@@ -2020,7 +2081,9 @@ export class OrdersService {
     const componentVariantIds = [
       ...new Set(
         items.flatMap((i) =>
-          (i.setComponents ?? []).map((c) => c.originalVariantId).filter((x): x is string => !!x),
+          (i.setComponents ?? [])
+            .flatMap((c) => [c.originalVariantId, c.finalVariantId])
+            .filter((x): x is string => !!x),
         ),
       ),
     ];
@@ -2102,7 +2165,9 @@ export class OrdersService {
           // Цена оригинала — вариант, если он задан, иначе базовая цена блюда.
           const origPrice = origVariant ? Number(origVariant.price) : Number(orig.price);
           let finalDishId: string | null = null;
+          let finalVariantId: string | null = null;
           let finalNameSnapshot: string | null = null;
+          let finalVariantNameSnapshot: string | null = null;
           let priceDelta = 0;
           if (c.action === 'removed') {
             priceDelta = -origPrice * qty;
@@ -2111,9 +2176,22 @@ export class OrdersService {
             const fin = compById.get(c.finalDishId);
             if (!fin || !fin.isActive) throw new BadRequestException('Блюдо замены недоступно');
             if (fin.isSet) throw new BadRequestException('Нельзя заменить на сет');
+            const finalVariant = c.finalVariantId ? compVariantById.get(c.finalVariantId) : null;
+            if (c.finalVariantId && (!finalVariant || finalVariant.dishId !== c.finalDishId)) {
+              throw new BadRequestException('Вариант блюда замены не найден');
+            }
+            if (fin._count.variants > 0 && !finalVariant) {
+              throw new BadRequestException(`Выберите вариант блюда «${fin.name}»`);
+            }
+            if (fin._count.variants === 0 && c.finalVariantId) {
+              throw new BadRequestException(`У блюда «${fin.name}» нет вариантов`);
+            }
             finalDishId = fin.id;
+            finalVariantId = finalVariant?.id ?? null;
             finalNameSnapshot = fin.name;
-            priceDelta = (Number(fin.price) - origPrice) * qty;
+            finalVariantNameSnapshot = finalVariant?.name ?? null;
+            const finalPrice = finalVariant ? Number(finalVariant.price) : Number(fin.price);
+            priceDelta = (finalPrice - origPrice) * qty;
           }
           setDelta += priceDelta;
           return {
@@ -2121,7 +2199,9 @@ export class OrdersService {
             originalNameSnapshot: orig.name,
             originalVariantNameSnapshot: origVariant?.name ?? null,
             finalDishId,
+            finalVariantId,
             finalNameSnapshot,
+            finalVariantNameSnapshot,
             action: c.action,
             // Удалённое из сета блюдо («без X») кухня не готовит; «без отправки» сразу готово.
             status:
@@ -2458,6 +2538,16 @@ export class OrdersService {
   private ensureNoPendingWaiterDecision(order: { requiresWaiterDecision: boolean }) {
     if (order.requiresWaiterDecision) {
       throw new BadRequestException(PARTIAL_REJECTION_PENDING_MESSAGE);
+    }
+  }
+
+  private ensureAllActiveItemsServed(order: { items: { status: OrderItemStatus }[] }) {
+    const activeItems = order.items.filter(
+      (item) => item.status !== OrderItemStatus.rejected && item.status !== OrderItemStatus.cancelled,
+    );
+    const hasPendingItem = activeItems.some((item) => !PAYMENT_ALLOWED_ITEM_STATUSES.has(item.status));
+    if (activeItems.length === 0 || hasPendingItem) {
+      throw new BadRequestException('Нельзя оплатить заказ: есть неподанные блюда');
     }
   }
 

@@ -72,6 +72,8 @@ export function PaymentModal({
 
   // Расчёты для смешанной оплаты.
   const total = Number(order.finalAmount);
+  const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
+  const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
   const mixedSelected = selected === 'mixed';
   const cashNum = Number(cashInput) || 0;
   const qrNum = Number(qrInput) || 0;
@@ -309,14 +311,14 @@ export function PaymentModal({
         <div className="flex items-center gap-2.5">
           <button
             className="btn-secondary btn-lg min-w-[126px] max-w-[158px] shrink-0 basis-[34%] whitespace-nowrap border-primary bg-white px-3 text-sm font-medium text-primary"
-            disabled={pay.isPending}
+            disabled={pay.isPending || !allActiveItemsServed}
             onClick={() => setSplitOpen(true)}
           >
             {t('Разделить счёт')}
           </button>
           <button
             className="btn-primary btn-lg min-w-0 flex-1 font-semibold"
-            disabled={pay.isPending || qrMissing || (mixedSelected && !mixedValid)}
+            disabled={pay.isPending || qrMissing || (mixedSelected && !mixedValid) || !allActiveItemsServed}
             onClick={onConfirm}
           >
             {pay.isPending ? (
@@ -337,6 +339,12 @@ export function PaymentModal({
         <span className="text-text-secondary">{t('К оплате')}</span>
         <span className="text-2xl font-semibold">{money(order.finalAmount)}</span>
       </div>
+
+      {!allActiveItemsServed && (
+        <div className="mb-4 rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">
+          {t('Нельзя принять оплату: есть неподанные блюда.')}
+        </div>
+      )}
 
       <p className="mb-2 text-sm font-medium text-text-secondary">{t('Способ оплаты')}</p>
       <div className={`grid gap-2 ${methods.length >= 3 ? 'grid-cols-3' : 'grid-cols-2'}`}>

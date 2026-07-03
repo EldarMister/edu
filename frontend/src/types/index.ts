@@ -110,6 +110,8 @@ export interface OrderSetComponent {
   /** Снимок названия варианта блюда состава (например, «1 л»). */
   originalVariantNameSnapshot?: string | null;
   finalDishId: string | null;
+  finalVariantId?: string | null;
+  finalVariantNameSnapshot?: string | null;
   finalNameSnapshot: string | null;
   quantity: number;
 }
@@ -271,6 +273,7 @@ export interface CartSetComponent {
   replaceable: boolean;
   action: SetComponentAction;
   finalDishId?: string;
+  finalVariantId?: string;
   finalName?: string;
   finalPrice?: string;
 }

@@ -77,7 +77,7 @@ function rejectedDishNames(order: Order): string[] {
       if (component.status !== 'rejected') continue;
       names.push(
         component.action === 'replaced' && component.finalNameSnapshot
-          ? component.finalNameSnapshot
+          ? [component.finalNameSnapshot, component.finalVariantNameSnapshot].filter(Boolean).join(' ')
           : component.originalNameSnapshot,
       );
     }
@@ -87,13 +87,15 @@ function rejectedDishNames(order: Order): string[] {
 
 /** Текст голосового уведомления официанту по статусу заказа (с номером стола). */
 function waiterVoiceText(order: VoicedOrder): string | null {
+  if (order.voice?.waiterText) return order.voice.waiterText;
+
   const location = waiterLocationText(order);
   const rejectedNames = rejectedDishNames(order);
   const rejectedText = rejectedNames.length ? `: ${rejectedNames.join(', ')}` : '';
   switch (order.status) {
     case 'accepted_by_kitchen':
     case 'cooking':
-      return order.voice?.waiterText ?? `Кухня приняла ваш заказ. ${location}`;
+      return null;
     case 'ready':
       return `Ваш заказ готов. ${location} Заберите.`;
     case 'rejected':
