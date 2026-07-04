@@ -1683,12 +1683,14 @@ export class OrdersService {
     if (!this.canWaiterAccessOrder(order, waiterId)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
-    if (!([OrderStatus.ready, OrderStatus.picked_up, OrderStatus.served] as OrderStatus[]).includes(order.status)) {
-      throw new BadRequestException('Отменить блюдо можно только после готовности и до оплаты');
+    if (
+      ([OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected, OrderStatus.waiting_payment] as OrderStatus[]).includes(order.status)
+    ) {
+      throw new BadRequestException('Отменить блюдо нельзя после перехода к оплате');
     }
     const item = order.items.find((it) => it.id === itemId);
     if (!item) throw new NotFoundException('Блюдо не найдено');
-    if (!([OrderItemStatus.ready, OrderItemStatus.served] as OrderItemStatus[]).includes(item.status)) {
+    if (([OrderItemStatus.rejected, OrderItemStatus.cancelled] as OrderItemStatus[]).includes(item.status)) {
       throw new BadRequestException('Это блюдо нельзя отменить на текущем этапе');
     }
 
