@@ -551,7 +551,7 @@ export function useAdminDishes(categoryId: string, search: string) {
   });
 }
 export function useCategoryMutations() {
-  const invalidate = useInvalidate([['admin', 'categories'], ['admin', 'menu', 'overview'], ['admin', 'dishes']]);
+  const invalidate = useInvalidate([['categories'], ['dishes'], ['admin', 'categories'], ['admin', 'menu', 'overview'], ['admin', 'dishes']]);
   const create = useMutation({
     mutationFn: (b: { name: string; prepStation?: PrepStation }) => api.post('/admin/categories', b).then((r) => r.data),
     onSuccess: invalidate,
@@ -573,7 +573,7 @@ export function useCategoryMutations() {
   return { create, update, remove, reorder };
 }
 export function useDishMutations() {
-  const invalidate = useInvalidate([['admin', 'dishes'], ['admin', 'menu', 'overview'], ['admin', 'warehouse']]);
+  const invalidate = useInvalidate([['dishes'], ['categories'], ['admin', 'dishes'], ['admin', 'sets'], ['admin', 'menu', 'overview'], ['admin', 'warehouse']]);
   const create = useMutation({
     mutationFn: (b: DishInput) => api.post('/admin/dishes', b).then((r) => r.data),
     onSuccess: invalidate,
@@ -592,7 +592,7 @@ export function useAdminSets() {
   return useQuery({ queryKey: ['admin', 'sets'], queryFn: () => get<AdminDish[]>('/admin/sets') });
 }
 export function useSetMutations() {
-  const invalidate = useInvalidate([['admin', 'sets'], ['admin', 'dishes'], ['admin', 'menu', 'overview'], ['admin', 'categories']]);
+  const invalidate = useInvalidate([['dishes'], ['categories'], ['admin', 'sets'], ['admin', 'dishes'], ['admin', 'menu', 'overview'], ['admin', 'categories']]);
   const create = useMutation({
     mutationFn: (b: SetInput) => api.post('/admin/sets', b).then((r) => r.data),
     onSuccess: invalidate,

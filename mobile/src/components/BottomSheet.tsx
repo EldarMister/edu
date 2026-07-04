@@ -47,6 +47,7 @@ type BottomSheetSnapshot = {
   maxHeight?: ViewStyle['maxHeight'];
   bottomInset?: number;
   backdropColor?: string;
+  fillBody?: boolean;
 };
 
 /**
@@ -67,6 +68,7 @@ export function BottomSheet({
   maxHeight,
   bottomInset,
   backdropColor,
+  fillBody = false,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -80,6 +82,8 @@ export function BottomSheet({
   maxHeight?: ViewStyle['maxHeight'];
   bottomInset?: number;
   backdropColor?: string;
+  /** true — тело растягивается (flex:1), футер закреплён снизу, скроллит только контент тела. */
+  fillBody?: boolean;
 }) {
   const [render, setRender] = React.useState(visible);
   const currentSnapshot: BottomSheetSnapshot = {
@@ -92,6 +96,7 @@ export function BottomSheet({
     maxHeight,
     bottomInset,
     backdropColor,
+    fillBody,
   };
   const visibleSnapshotRef = React.useRef(currentSnapshot);
   if (visible) {
@@ -229,12 +234,13 @@ export function BottomSheet({
             style={[
               styles.sheet,
               content.maxHeight != null && { maxHeight: content.maxHeight },
+              content.fillBody && { height: content.maxHeight ?? '92%' },
               content.panelStyle,
               sheetStyle,
             ]}
           >
           <SafeAreaView
-            style={styles.sheetSafe}
+            style={[styles.sheetSafe, content.fillBody && styles.sheetSafeFill]}
             edges={['bottom']}
           >
             {content.sheet ? (
@@ -256,7 +262,7 @@ export function BottomSheet({
               </View>
             ) : null}
 
-            <View style={[styles.body, content.bodyStyle]}>{content.children}</View>
+            <View style={[styles.body, content.fillBody && styles.bodyFill, content.bodyStyle]}>{content.children}</View>
 
             {content.footer ? <View style={styles.footer}>{content.footer}</View> : null}
           </SafeAreaView>
@@ -287,6 +293,8 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sheetSafe: { backgroundColor: colors.card },
+  sheetSafeFill: { flex: 1, minHeight: 0 },
+  bodyFill: { flex: 1, minHeight: 0 },
   handleWrap: { paddingTop: 10, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300 },
   sheetTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },

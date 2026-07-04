@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { FlatList, InteractionManager, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import Animated, {
   cancelAnimation,
   runOnJS,
@@ -7,7 +7,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { sheetTiming } from '@/components/motion';
 import { useNavigation } from '@react-navigation/native';
 import { FastPressable } from '@/components/FastPressable';
@@ -418,8 +418,13 @@ export function MenuScreen() {
           setSetPickerOpen(false);
         }}
         onConfigure={(set) => {
+          // Сначала закрываем лист «Сеты» (RN Modal), и только после его
+          // размонтирования открываем «Настроить сет» — иначе два одновременных
+          // модальных окна на Android подвешивают экран.
           setSetPickerOpen(false);
-          setConfigSet(set);
+          setTimeout(() => {
+            InteractionManager.runAfterInteractions(() => setConfigSet(set));
+          }, sheetTiming.exitMs + 180);
         }}
       />
 
@@ -613,10 +618,7 @@ function SetPickerSheet({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { height } = useWindowDimensions();
-  // Список сетов занимает доступную высоту листа (как flex-1 в PWA): при
-  // обычном числе сетов ничего не скроллится, скролл включается только если
-  // список не помещается на экран.
-  const listMaxHeight = Math.round(height * 0.62);
+  const listMaxHeight = Math.round(height * 0.56);
 
   React.useEffect(() => {
     if (visible) setSelectedId(sets[0]?.id ?? null);
@@ -630,12 +632,7 @@ function SetPickerSheet({
       onClose={onClose}
       title="Сеты"
       sheet
-      maxHeight="82%"
-      footer={
-        <View style={{ paddingBottom: spacing.sm }}>
-          <Button title="Добавить" onPress={() => selected && onPick(selected)} disabled={!selected} style={{ flex: 1 }} />
-        </View>
-      }
+      maxHeight="86%"
     >
       <Text style={styles.variantHint}>Выберите сет</Text>
       {sets.length === 0 ? (
@@ -674,6 +671,14 @@ function SetPickerSheet({
           })}
         </ScrollView>
       )}
+      <View style={styles.setPickerFooter}>
+        <Button
+          title="Добавить"
+          onPress={() => selected && onPick(selected)}
+          disabled={!selected}
+          style={styles.setPickerAddButton}
+        />
+      </View>
     </BottomSheet>
   );
 }
@@ -784,6 +789,7 @@ function SetConfigSheet({
         title="Настроить сет"
         sheet
         maxHeight="86%"
+        fillBody
         footer={
           <View style={{ paddingBottom: spacing.sm }}>
             <Button
@@ -805,7 +811,7 @@ function SetConfigSheet({
           </View>
         </View>
         <Text style={styles.variantHint}>Состав сета ({components.length} позиций)</Text>
-        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 420 }}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
           <View style={styles.componentList}>
             {components.map((component) => {
               const removed = component.action === 'removed';
@@ -914,6 +920,11 @@ function ReplacementPickerModal({
   onPickVariant: (variant: DishVariant) => void;
   onBackFromVariant: () => void;
 }) {
+  const { height: winHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  // Явная высота области контента — иначе ScrollView внутри модалки не получает
+  // ограниченную высоту через flex-цепочку и не скроллится. Шапка ≈ 60px.
+  const contentHeight = Math.max(200, winHeight - insets.top - 60);
   return (
     <FullscreenSheet visible={visible} onClose={onClose} style={styles.replacementSafe}>
       <SafeAreaView style={styles.replacementSafe} edges={['top']}>
@@ -928,7 +939,7 @@ function ReplacementPickerModal({
             ) : null}
           </View>
         </View>
-        <View style={styles.replacementContent}>
+        <View style={[styles.replacementContent, { height: contentHeight }]}>
           <View style={styles.replacementSearch}>
             <PwaIcon name="search" size={17} color={colors.textLight} strokeWidth={2} />
             <TextInput
@@ -1250,9 +1261,10 @@ const styles = StyleSheet.create({
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
   variantName: { flex: 1, fontSize: fontSize.md, fontWeight: '500', color: colors.textPrimary },
   variantPrice: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
-  setPickerFooter: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
+  setPickerFooter: { marginTop: spacing.sm },
+  setPickerAddButton: { width: '100%' },
   setScroll: { maxHeight: 440 },
-  setList: { gap: spacing.sm, paddingBottom: spacing.sm },
+  setList: { gap: spacing.sm },
   setRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1344,7 +1356,7 @@ const styles = StyleSheet.create({
   replacementBack: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   replacementTitle: { fontSize: fontSize.lg, color: colors.textPrimary, fontWeight: '700' },
   replacementSubtitle: { marginTop: 2, fontSize: fontSize.base, color: colors.textMuted },
-  replacementContent: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm },
+  replacementContent: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
   replacementSearch: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -36,6 +36,8 @@ import type { Order, OrderItem, OrderItemStatus, OrderSetComponent } from '@/typ
 
 type R = RouteProp<{ OrderDetail: { orderId: string } }, 'OrderDetail'>;
 const DETAIL_EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
+const ITEM_CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
+const DEFAULT_ITEM_CANCEL_REASON = ITEM_CANCEL_REASONS[0];
 
 export function OrderDetailScreen() {
   const route = useRoute<R>();
@@ -62,7 +64,8 @@ export function OrderDetailScreen() {
   const [payOpen, setPayOpen] = useState(false);
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [billItem, setBillItem] = useState<OrderItem | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
+  const [cancelReason, setCancelReason] = useState<string>(DEFAULT_ITEM_CANCEL_REASON);
+  const [cancelOther, setCancelOther] = useState('');
   const [actionCooldown, setActionCooldown] = useState(0);
   const push = useNotifications((s) => s.push);
   const latestOrderRef = React.useRef<Order | null>(null);
@@ -136,7 +139,7 @@ export function OrderDetailScreen() {
   const hasReadyStationItem = stationItems.some((item) => item.status === 'ready');
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
-  const billCorrection = ['ready', 'picked_up', 'served'].includes(order.status);
+  const billCorrection = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
 
   const runProtectedAction = (action: () => void) => {
     setActionCooldown(5);
@@ -154,13 +157,15 @@ export function OrderDetailScreen() {
 
   const confirmCancelReadyItem = () => {
     if (!billItem) return;
+    const reason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
     cancelReadyItem.mutate(
-      { orderId: order.id, itemId: billItem.id, reason: cancelReason.trim() },
+      { orderId: order.id, itemId: billItem.id, reason },
       {
         onSuccess: () => {
           push({ message: `${orderItemName(billItem)} отменено`, type: 'success', at: new Date().toISOString() });
           setBillItem(null);
-          setCancelReason('');
+          setCancelReason(DEFAULT_ITEM_CANCEL_REASON);
+          setCancelOther('');
         },
         onError,
       },
@@ -403,7 +408,8 @@ export function OrderDetailScreen() {
             disabled={cancelReadyItem.isPending}
             onCancel={() => {
               setBillItem(it);
-              setCancelReason('');
+              setCancelReason(DEFAULT_ITEM_CANCEL_REASON);
+              setCancelOther('');
             }}
           />
         ))}
@@ -438,11 +444,14 @@ export function OrderDetailScreen() {
       <CancelReadyItemSheet
         item={billItem}
         reason={cancelReason}
+        other={cancelOther}
         submitting={cancelReadyItem.isPending}
         onReasonChange={setCancelReason}
+        onOtherChange={setCancelOther}
         onClose={() => {
           setBillItem(null);
-          setCancelReason('');
+          setCancelReason(DEFAULT_ITEM_CANCEL_REASON);
+          setCancelOther('');
         }}
         onConfirm={confirmCancelReadyItem}
       />
@@ -498,7 +507,7 @@ function ItemCard({
   const cooking = item.status === 'accepted' || item.status === 'cooking';
   const comment = safeComment(item.comment);
   const setParts = item.setComponents ?? [];
-  const clickable = billCorrection && (item.status === 'ready' || item.status === 'served') && !disabled;
+  const clickable = billCorrection && !rejected && !disabled;
   const hasExtra = setParts.length > 0 || comment || (rejected && item.rejectReason);
   return (
     <FastPressable disabled={!clickable} onPress={onCancel} style={[styles.itemCard, rejected && styles.itemCardRejected]}>
@@ -588,15 +597,19 @@ function ItemCard({
 function CancelReadyItemSheet({
   item,
   reason,
+  other,
   submitting,
   onReasonChange,
+  onOtherChange,
   onClose,
   onConfirm,
 }: {
   item: OrderItem | null;
   reason: string;
+  other: string;
   submitting: boolean;
   onReasonChange: (value: string) => void;
+  onOtherChange: (value: string) => void;
   onClose: () => void;
   onConfirm: () => void;
 }) {
@@ -611,10 +624,8 @@ function CancelReadyItemSheet({
             title="Отменить блюдо"
             variant="danger"
             loading={submitting}
-            disabled={reason.trim().length < 2}
             onPress={onConfirm}
           />
-          <Button title="Закрыть" variant="secondary" disabled={submitting} onPress={onClose} />
         </View>
       }
     >
@@ -625,15 +636,33 @@ function CancelReadyItemSheet({
         </View>
       ) : null}
       <Text style={styles.cancelReadyLabel}>Причина отмены</Text>
-      <TextInput
-        value={reason}
-        onChangeText={onReasonChange}
-        multiline
-        maxLength={160}
-        placeholder="Например: клиент отказался"
-        placeholderTextColor={colors.textLight}
-        style={styles.cancelReadyInput}
-      />
+      <View style={styles.cancelReasonList}>
+        {ITEM_CANCEL_REASONS.map((itemReason) => {
+          const active = reason === itemReason;
+          return (
+            <FastPressable
+              key={itemReason}
+              onPress={() => onReasonChange(itemReason)}
+              style={[styles.cancelReasonRow, active && styles.cancelReasonRowActive]}
+            >
+              <View style={[styles.cancelRadio, active && styles.cancelRadioActive]}>
+                {active ? <View style={styles.cancelRadioDot} /> : null}
+              </View>
+              <Text style={[styles.cancelReasonText, active && styles.cancelReasonTextActive]}>{itemReason}</Text>
+            </FastPressable>
+          );
+        })}
+      </View>
+      {reason === 'Другое' ? (
+        <TextInput
+          value={other}
+          onChangeText={onOtherChange}
+          maxLength={160}
+          placeholder="Укажите причину"
+          placeholderTextColor={colors.textLight}
+          style={styles.cancelReadyInput}
+        />
+      ) : null}
     </BottomSheet>
   );
 }
@@ -908,8 +937,34 @@ const styles = StyleSheet.create({
   cancelReadyName: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   cancelReadyMeta: { marginTop: 4, fontSize: fontSize.sm, color: colors.textMuted },
   cancelReadyLabel: { marginBottom: 6, fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
+  cancelReasonList: { gap: spacing.sm, marginBottom: spacing.md },
+  cancelReasonRow: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  cancelReasonRowActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
+  cancelRadio: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: colors.slate300,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cancelRadioActive: { borderColor: colors.primary },
+  cancelRadioDot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: colors.primary },
+  cancelReasonText: { fontSize: fontSize.base, color: colors.textSecondary },
+  cancelReasonTextActive: { color: colors.textPrimary },
   cancelReadyInput: {
-    minHeight: 96,
+    minHeight: 44,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
