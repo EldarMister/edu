@@ -52,6 +52,7 @@ import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
 import { WaiterCabinet } from './WaiterCabinet';
+import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { PaymentModal } from './PaymentModal';
 import { ReceiptPrintSheet } from './ReceiptPrintSheet';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
@@ -240,6 +241,18 @@ export function WaiterApp() {
       document.documentElement.style.removeProperty('--edu-ptt-floating-bottom');
     };
   }, [replacementTarget, showShiftGate, tab]);
+
+  // Кнопка рации у официанта — только на «Столах», списке «Заказов» и «Профиле».
+  // На подробном заказе, в меню/корзине, личном кабинете и экране «Смена не начата» её прячем.
+  const radioButtonVisible =
+    !showShiftGate &&
+    (activeNavTab === 'tables' ||
+      (activeNavTab === 'orders' && !viewingOrder) ||
+      (activeNavTab === 'profile' && !cabinetOpen));
+  useEffect(() => {
+    useRadioVisibility.getState().setWaiterButtonVisible(radioButtonVisible);
+    return () => useRadioVisibility.getState().setWaiterButtonVisible(true);
+  }, [radioButtonVisible]);
 
   if (hallsQ.isLoading || categoriesQ.isLoading || dishesQ.isLoading || currentShiftQ.isLoading) {
     return <FullScreenLoader />;
@@ -865,7 +878,7 @@ export function WaiterApp() {
       </main>
 
       {/* MOBILE: одна панель + нижняя навигация */}
-      <main className="flex-1 overflow-hidden bg-white px-1 py-2 lg:hidden">
+      <main className="flex-1 overflow-hidden bg-white px-1 pb-0 pt-0.5 lg:hidden">
         {tab === 'tables' && tablesPanel}
         {tab === 'menu' && mobileMenuNode}
         {tab === 'cart' && rightPanel}
@@ -934,12 +947,7 @@ export function WaiterApp() {
       {pendingCancel && (
         <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 lg:bottom-6 lg:px-5">
           <div className="pointer-events-auto flex w-full max-w-2xl items-center gap-3.5 rounded-2xl border border-border bg-white px-4 py-3.5 shadow-soft sm:px-5">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger text-white">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M3 7v6h6" />
-                <path d="M3 13a9 9 0 1 0 3-7.7L3 8" />
-              </svg>
-            </span>
+            <UndoActionIcon />
             <div className="min-w-0 flex-1">
               <p className="truncate text-[15px] font-semibold text-text-primary">
                 {displayOrderNumber(pendingCancel.order.orderNumber)} · {t('Стол')} {pendingCancel.order.table.number}{hallSuffix(pendingCancel.order.table)} — {t('отмена заказа')}
@@ -1060,6 +1068,10 @@ export function WaiterApp() {
   );
 }
 
+function UndoActionIcon() {
+  return <img src="/иконка отмены.png" width={48} height={48} className="h-12 w-12 shrink-0" alt="" />;
+}
+
 function Panel({
   title,
   action,
@@ -1070,7 +1082,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex h-full flex-col bg-white px-1 py-2 lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4 lg:shadow-card">
+    <section className={`flex h-full flex-col bg-white px-1 ${title || action ? 'py-2' : 'pb-0 pt-0.5'} lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4 lg:shadow-card`}>
       {(title || action) && (
         <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
           {title ? (

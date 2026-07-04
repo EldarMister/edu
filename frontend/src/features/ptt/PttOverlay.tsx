@@ -73,13 +73,15 @@ function useSocketConnected() {
 
 function RadioIcon({ size = 28, className = '' }: { size?: number; className?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path d="M9 4h6M12 4v4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <rect x="6.5" y="7.5" width="11" height="13" rx="2.5" stroke="currentColor" strokeWidth="2" />
-      <path d="M10 11.5h4M10 15h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-      <circle cx="9.5" cy="18" r="0.8" fill="currentColor" />
-      <circle cx="14.5" cy="18" r="0.8" fill="currentColor" />
-    </svg>
+    <img
+      src="/рация.png"
+      width={size}
+      height={size}
+      className={className}
+      style={{ width: size, height: size, objectFit: 'contain' }}
+      alt=""
+      aria-hidden="true"
+    />
   );
 }
 
@@ -97,32 +99,27 @@ const STATE_STYLES: Record<
     circle: string;
     ring: string;
     label: string;
-    wave: string;
   }
 > = {
   ready: {
     circle: 'bg-primary',
     ring: 'border-primary/25',
     label: 'border-primary/35 text-primary',
-    wave: 'bg-primary',
   },
   speakingSelf: {
     circle: 'bg-success',
     ring: 'border-success/25',
     label: 'border-success/40 text-success',
-    wave: 'bg-success',
   },
   speakingOther: {
     circle: 'bg-warning',
     ring: 'border-warning/30',
     label: 'border-warning/40 text-warning',
-    wave: 'bg-warning',
   },
   error: {
     circle: 'bg-danger',
     ring: 'border-danger/30',
     label: 'border-danger/40 text-danger',
-    wave: 'bg-danger',
   },
 };
 
@@ -184,26 +181,6 @@ function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onl
   );
 }
 
-function Waveform({ active, state }: { active: boolean; state: RadioState }) {
-  const bars = [10, 14, 20, 28, 18, 34, 42, 30, 22, 16, 12];
-  return (
-    <div className="mb-1 flex h-12 items-center justify-center gap-1.5">
-      {bars.map((height, index) => (
-        <span
-          key={`${height}-${index}`}
-          className={`w-1.5 rounded-full ${active ? STATE_STYLES[state].wave : 'bg-primary/20'} ${
-            active ? 'animate-ptt-wave' : ''
-          }`}
-          style={{
-            height,
-            animationDelay: `${index * 55}ms`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
 function PushToTalkCircle({
   state,
   disabled,
@@ -218,7 +195,7 @@ function PushToTalkCircle({
   onPressStop: () => void;
 }) {
   const view = STATE_STYLES[state];
-  const rippleCount = state === 'speakingSelf' ? 3 : state === 'ready' || state === 'speakingOther' || state === 'error' ? 1 : 0;
+  const rippleCount = state === 'speakingSelf' ? 3 : state === 'speakingOther' ? 1 : 0;
   return (
     <div className="relative flex items-center justify-center py-2" style={{ minHeight: size + 30 }}>
       {Array.from({ length: rippleCount }).map((_, index) => (
@@ -275,7 +252,13 @@ function RadioStatusText({
   );
 }
 
-export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
+export function PttOverlay({
+  waiterMode = false,
+  buttonHidden = false,
+}: {
+  waiterMode?: boolean;
+  buttonHidden?: boolean;
+}) {
   const user = useAuth((s) => s.user);
   const connected = useSocketConnected();
   const isMobile = useMediaQuery('(max-width: 1023px)');
@@ -289,7 +272,7 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
     [channel],
   );
   const sender = useAudioPttSender(channel, true);
-  const receiver = useAudioPttReceiver(channel, true);
+  const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
 
   const bottomNavInset = waiterMode && isMobile ? WAITER_NAV_INSET : 0;
   const floatingBottom = waiterMode && isMobile
@@ -370,7 +353,19 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
 
   const onPressStop = () => sender.stop();
 
-  const speakingOther = !!busySpeaker && busySpeaker.id !== user?.id && !sender.talking;
+  // Кнопку прячем на некоторых экранах официанта — при этом лист закрываем,
+  // но сам оверлей остаётся смонтированным (приём аудио не прерывается).
+  useEffect(() => {
+    if (buttonHidden) setOpen(false);
+  }, [buttonHidden]);
+
+  // «Занято» = кто-то держит кнопку (channel_busy) ИЛИ у нас сейчас играет
+  // входящий файл (receiving). Второе продлевает блокировку на всё
+  // воспроизведение — иначе после отпускания канал выглядел бы свободным,
+  // пока длинное сообщение ещё звучит.
+  const otherSpeaker = playingSpeaker ?? busySpeaker;
+  const speakingOther =
+    !sender.talking && (receiving || (!!busySpeaker && busySpeaker.id !== user?.id));
   const state: RadioState = !connected
     ? 'error'
     : sender.talking
@@ -378,7 +373,6 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
       : speakingOther
         ? 'speakingOther'
         : 'ready';
-  const activeWave = sender.talking || speakingOther || receiver.receiving;
 
   const statusTitle =
     state === 'error'
@@ -386,7 +380,7 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
       : state === 'speakingSelf'
         ? 'Вы говорите'
         : state === 'speakingOther'
-          ? `Говорит: ${busySpeaker?.name ?? 'Сотрудник'}`
+          ? `Говорит: ${otherSpeaker?.name ?? 'Сотрудник'}`
           : 'Готово к разговору';
 
   const statusHint =
@@ -398,22 +392,33 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
           ? 'Дождитесь освобождения канала'
           : (sender.deniedReason ?? 'Нажмите и удерживайте');
 
+  const outerView = STATE_STYLES[state];
+  const outerSpeaking = state === 'speakingSelf' || state === 'speakingOther';
+
   return (
     <>
-      <button
-        type="button"
-        aria-label="Рация"
-        onClick={() => setOpen(true)}
-        className="fixed right-4 z-[70] flex h-14 w-14 items-center justify-center rounded-full bg-primary text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-transform active:scale-95"
-        style={{ bottom: floatingBottom }}
-      >
-        <RadioIcon size={26} />
-        <span
-          className={`absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white ${
-            connected ? 'bg-success' : 'bg-danger'
-          }`}
-        />
-      </button>
+      {!buttonHidden && (
+        <div
+          className="fixed right-2 z-[70] flex h-14 w-14 items-center justify-center"
+          style={{ bottom: floatingBottom }}
+        >
+          {/* Кольцо вокруг кнопки — только пока идёт передача или приём. */}
+          {outerSpeaking && (
+            <span
+              className={`pointer-events-none absolute animate-ptt-soft-pulse rounded-full border ${outerView.ring}`}
+              style={{ width: 74, height: 74 }}
+            />
+          )}
+          <button
+            type="button"
+            aria-label="Рация"
+            onClick={() => setOpen(true)}
+            className={`relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:scale-95 ${outerView.circle}`}
+          >
+            <RadioIcon size={25} />
+          </button>
+        </div>
+      )}
 
       {open && (
         <div className="fixed inset-0 z-[90]">
@@ -435,7 +440,6 @@ export function PttOverlay({ waiterMode = false }: { waiterMode?: boolean }) {
             <RadioHeader onClose={() => setOpen(false)} />
             <RadioChannelTabs channel={channel} onChange={changeChannel} />
             <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
-            <Waveform active={activeWave} state={state} />
             <PushToTalkCircle
               state={state}
               disabled={state === 'error' || speakingOther}

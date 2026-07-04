@@ -141,7 +141,7 @@ export function OrderPanel({
     <div className="flex h-full flex-col">
       {/* Компактная шапка: номер + стол и «Изменить» в первой строке, статусы —
           второй строкой, чтобы широкие станционные чипы не съедали номер заказа. */}
-      <div className="border-b border-border pb-2">
+      <div className="border-b border-border pb-1.5">
         <div className="flex items-center justify-between gap-2">
           <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight text-text-primary">
             {t('Заказ')} {displayOrderNumber(order.orderNumber)}
@@ -178,7 +178,7 @@ export function OrderPanel({
       </div>
 
       {/* Позиции — компактный список */}
-      <div className="no-scrollbar flex-1 space-y-1.5 overflow-y-auto py-3">
+      <div className="no-scrollbar flex-1 space-y-1.5 overflow-y-auto py-2">
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
           const cancelled = it.status === 'cancelled';

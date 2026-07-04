@@ -7,6 +7,7 @@ import { ProtectedRoute, homeForRole } from '@/routes/ProtectedRoute';
 import { Toaster } from '@/components/Toaster';
 import { UpdateModal } from '@/components/UpdateModal';
 import { PttOverlay } from '@/features/ptt/PttOverlay';
+import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { LoginPage } from '@/features/auth/LoginPage';
 import { WaiterApp } from '@/features/waiter/WaiterApp';
 import { KitchenApp } from '@/features/kitchen/KitchenApp';
@@ -21,6 +22,8 @@ export function App() {
   const accessToken = useAuth((s) => s.accessToken);
   const updateUser = useAuth((s) => s.updateUser);
   const location = useLocation();
+  const waiterButtonVisible = useRadioVisibility((s) => s.waiterButtonVisible);
+  const onWaiter = location.pathname.startsWith('/waiter');
   const showPtt =
     !!user &&
     ['/waiter', '/kitchen', '/bar', '/admin', '/owner'].some((prefix) =>
@@ -113,7 +116,7 @@ export function App() {
           element={<Navigate to={user ? homeForRole(user.role) : '/login'} replace />}
         />
       </Routes>
-      {showPtt && <PttOverlay waiterMode={location.pathname.startsWith('/waiter')} />}
+      {showPtt && <PttOverlay waiterMode={onWaiter} buttonHidden={onWaiter && !waiterButtonVisible} />}
       <Toaster />
       <UpdateModal />
     </>
