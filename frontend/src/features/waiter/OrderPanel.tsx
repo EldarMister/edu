@@ -7,6 +7,8 @@ import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
 
+const ITEM_CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
+
 function InfoIcon() {
   return (
     <svg
@@ -117,12 +119,14 @@ export function OrderPanel({
 }) {
   const t = useT();
   const [billItem, setBillItem] = useState<Order['items'][number] | null>(null);
-  const [cancelReason, setCancelReason] = useState('');
+  const [cancelReason, setCancelReason] = useState<string>(ITEM_CANCEL_REASONS[0]);
+  const [cancelOther, setCancelOther] = useState('');
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
   const unclaimedQr = order.source === 'qr' && !order.waiter;
   // Редактирование доступно, пока кухня не завершила заказ (как в списке заказов).
   const editable = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'].includes(order.status);
-  const billCorrection = ['ready', 'picked_up', 'served'].includes(order.status);
+  const billCorrection = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
+  const finalCancelReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
 
   if (waitingDecision) {
     return (
@@ -185,7 +189,7 @@ export function OrderPanel({
           const waitingItem = waitingDecision && !rejected;
           const comment = safeComment(it.comment);
           const setParts = it.setComponents ?? [];
-          const clickable = billCorrection && (it.status === 'ready' || it.status === 'served');
+          const clickable = billCorrection && !rejected && !cancelled;
           const hasExtra = setParts.length > 0 || comment || ((rejected || cancelled) && it.rejectReason) || waitingItem;
           return (
             <button
@@ -194,7 +198,8 @@ export function OrderPanel({
               disabled={!clickable || submitting}
               onClick={() => {
                 setBillItem(it);
-                setCancelReason('');
+                setCancelReason(ITEM_CANCEL_REASONS[0]);
+                setCancelOther('');
               }}
               className={`w-full rounded-lg border px-3 py-2 text-left transition-colors ${
                 rejected || cancelled
@@ -332,17 +337,14 @@ export function OrderPanel({
           <div className="space-y-2">
             <button
               className="btn-danger btn-lg w-full font-semibold"
-              disabled={submitting || cancelReason.trim().length < 2}
+              disabled={submitting}
               onClick={() => {
                 if (!billItem) return;
-                onCancelReadyItem(billItem, cancelReason.trim());
+                onCancelReadyItem(billItem, finalCancelReason);
                 setBillItem(null);
               }}
             >
               {submitting ? <Spinner /> : t('Отменить блюдо')}
-            </button>
-            <button className="btn-secondary btn-lg w-full" disabled={submitting} onClick={() => setBillItem(null)}>
-              {t('Закрыть')}
             </button>
           </div>
         }
@@ -355,16 +357,37 @@ export function OrderPanel({
                 ×{billItem.quantity} · {money(billItem.finalPrice)}
               </p>
             </div>
-            <label className="block">
-              <span className="mb-1.5 block text-sm font-medium text-text-secondary">{t('Причина отмены')}</span>
-              <textarea
-                className="input h-24 resize-none py-2.5"
-                value={cancelReason}
-                maxLength={160}
-                placeholder={t('Например: клиент отказался')}
-                onChange={(e) => setCancelReason(e.target.value)}
-              />
-            </label>
+            <div>
+              <p className="mb-2 text-sm font-medium text-text-secondary">{t('Причина отмены')}</p>
+              <div className="space-y-2">
+                {ITEM_CANCEL_REASONS.map((reason) => (
+                  <label
+                    key={reason}
+                    className={`flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-[15px] transition-colors ${
+                      cancelReason === reason ? 'border-primary bg-primary/5 text-text-primary' : 'border-border text-text-secondary'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="item-cancel-reason"
+                      className="accent-primary"
+                      checked={cancelReason === reason}
+                      onChange={() => setCancelReason(reason)}
+                    />
+                    {t(reason)}
+                  </label>
+                ))}
+              </div>
+              {cancelReason === 'Другое' && (
+                <input
+                  className="input mt-2"
+                  value={cancelOther}
+                  maxLength={160}
+                  placeholder={t('Укажите причину')}
+                  onChange={(e) => setCancelOther(e.target.value)}
+                />
+              )}
+            </div>
           </div>
         )}
       </Modal>
