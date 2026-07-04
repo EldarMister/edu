@@ -1,6 +1,14 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { sheetTiming } from '@/components/motion';
 import { useNavigation } from '@react-navigation/native';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
@@ -604,6 +612,11 @@ function SetPickerSheet({
   onConfigure: (set: Dish) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { height } = useWindowDimensions();
+  // Список сетов занимает доступную высоту листа (как flex-1 в PWA): при
+  // обычном числе сетов ничего не скроллится, скролл включается только если
+  // список не помещается на экран.
+  const listMaxHeight = Math.round(height * 0.62);
 
   React.useEffect(() => {
     if (visible) setSelectedId(sets[0]?.id ?? null);
@@ -628,7 +641,7 @@ function SetPickerSheet({
       {sets.length === 0 ? (
         <Text style={styles.notFound}>Сетов пока нет</Text>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} style={styles.setScroll} contentContainerStyle={styles.setList}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: listMaxHeight }} contentContainerStyle={styles.setList}>
           {sets.map((set) => {
             const selectedSet = set.id === selectedId;
             const count = (set.setComponents ?? []).reduce((sum, component) => sum + component.quantity, 0);
@@ -904,88 +917,178 @@ function ReplacementPickerModal({
   return (
     <FullscreenSheet visible={visible} onClose={onClose} style={styles.replacementSafe}>
       <SafeAreaView style={styles.replacementSafe} edges={['top']}>
-        {variantDish ? (
-          // Экран выбора размера блюда-замены (как в PWA).
-          <>
-            <View style={styles.replacementHeader}>
-              <FastPressable onPress={onBackFromVariant} hitSlop={12} style={styles.replacementBack}>
-                <PwaIcon name="chevronLeft" size={28} color={colors.textSecondary} strokeWidth={2.2} />
-              </FastPressable>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.replacementTitle} numberOfLines={1}>{variantDish.name}</Text>
-                <Text style={styles.replacementSubtitle}>Выберите размер</Text>
-              </View>
+        <View style={styles.replacementHeader}>
+          <FastPressable onPress={onClose} hitSlop={12} style={styles.replacementBack}>
+            <PwaIcon name="chevronLeft" size={26} color={colors.textSecondary} strokeWidth={2.2} />
+          </FastPressable>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={styles.replacementTitle}>Выберите замену</Text>
+            {replacing ? (
+              <Text style={styles.replacementSubtitle} numberOfLines={1}>вместо: {replacing.originalName}</Text>
+            ) : null}
+          </View>
+        </View>
+        <View style={styles.replacementContent}>
+          <View style={styles.replacementSearch}>
+            <PwaIcon name="search" size={17} color={colors.textLight} strokeWidth={2} />
+            <TextInput
+              placeholder="Поиск блюда"
+              placeholderTextColor={colors.textLight}
+              value={search}
+              onChangeText={onSearch}
+              style={styles.replacementSearchInput}
+            />
+          </View>
+          <PillTabs
+            items={[{ key: 'all', label: 'Все' }, ...categories.map((category) => ({ key: category.id, label: category.name }))]}
+            value={categoryId}
+            onChange={onCategory}
+            style={{ marginTop: spacing.sm, marginBottom: spacing.sm }}
+          />
+          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+            <View style={styles.replacementGrid}>
+              {options.map((dish) => {
+                const hasVariants = dish.variants.length > 0;
+                const hasDiscount = !hasVariants && dish.discountType !== 'none' && Number(dish.discountValue) > 0;
+                const finalUnit = hasVariants
+                  ? minDishUnitPrice(dish)
+                  : dishUnitPrice(dish.price, dish.discountType, dish.discountValue);
+                const isOutOfStock = dish.trackInventory && (hasVariants
+                  ? dish.variants.every((v) => typeof v.stock === 'number' && v.stock <= 0)
+                  : typeof dish.stock === 'number' && dish.stock <= 0);
+                return (
+                  <FastPressable
+                    key={dish.id}
+                    disabled={isOutOfStock}
+                    onPress={() => onPick(dish)}
+                    style={[styles.replacementDish, isOutOfStock && styles.dishDisabled]}
+                  >
+                    {isOutOfStock ? (
+                      <View style={styles.unavailable}>
+                        <Text style={styles.unavailableText}>Нет в наличии</Text>
+                      </View>
+                    ) : null}
+                    <Text style={styles.replacementDishName} numberOfLines={2}>{dish.name}</Text>
+                    {hasVariants ? (
+                      <Text style={styles.replacementDishSub} numberOfLines={1}>{variantNamesLine(dish.variants)}</Text>
+                    ) : dish.description ? (
+                      <Text style={styles.replacementDishSub} numberOfLines={1}>{dish.description}</Text>
+                    ) : null}
+                    <Text style={styles.replacementDishPrice}>
+                      {hasVariants ? `от ${money(finalUnit)}` : money(finalUnit)}
+                      {hasDiscount ? <Text style={styles.oldPrice}> {money(dish.price)}</Text> : null}
+                    </Text>
+                  </FastPressable>
+                );
+              })}
             </View>
-            <ScrollView showsVerticalScrollIndicator={false} style={styles.replacementContent}>
-              <View style={{ gap: spacing.sm, paddingVertical: spacing.md }}>
-                {variantDish.variants
-                  .slice()
-                  .sort((a, b) => a.sortOrder - b.sortOrder)
-                  .map((variant) => {
-                    const isOutOfStock =
-                      variantDish.trackInventory && typeof variant.stock === 'number' && variant.stock <= 0;
-                    return (
-                      <FastPressable
-                        key={variant.id}
-                        disabled={isOutOfStock}
-                        onPress={() => onPickVariant(variant)}
-                        style={[styles.variant, isOutOfStock && styles.variantDisabled]}
-                      >
-                        <Text style={styles.variantName}>
-                          {variant.name}
-                          {isOutOfStock ? <Text style={styles.variantOutOfStock}>  Нет в наличии</Text> : null}
-                        </Text>
-                        <Text style={styles.variantPrice}>{money(variant.price)}</Text>
-                      </FastPressable>
-                    );
-                  })}
-              </View>
-            </ScrollView>
-          </>
-        ) : (
-          <>
-            <View style={styles.replacementHeader}>
-              <FastPressable onPress={onClose} hitSlop={12} style={styles.replacementBack}>
-                <PwaIcon name="chevronLeft" size={28} color={colors.textSecondary} strokeWidth={2.2} />
-              </FastPressable>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.replacementTitle}>Выберите замену</Text>
-                {replacing ? <Text style={styles.replacementSubtitle}>вместо: {replacing.originalName}</Text> : null}
-              </View>
-            </View>
-            <View style={styles.replacementContent}>
-              <View style={styles.replacementSearch}>
-                <PwaIcon name="search" size={20} color={colors.textLight} strokeWidth={2} />
-                <TextInput
-                  placeholder="Поиск блюда"
-                  placeholderTextColor={colors.textLight}
-                  value={search}
-                  onChangeText={onSearch}
-                  style={styles.replacementSearchInput}
-                />
-              </View>
-              <PillTabs
-                items={[{ key: 'all', label: 'Все' }, ...categories.map((category) => ({ key: category.id, label: category.name }))]}
-                value={categoryId}
-                onChange={onCategory}
-                style={{ marginTop: spacing.md, marginBottom: spacing.md }}
-              />
-              <ScrollView showsVerticalScrollIndicator={false}>
-                <View style={styles.replacementGrid}>
-                  {options.map((dish) => (
-                    <FastPressable key={dish.id} onPress={() => onPick(dish)} style={styles.replacementDish}>
-                      <Text style={styles.replacementDishName} numberOfLines={2}>{dish.name}</Text>
-                      <Text style={styles.replacementDishPrice}>{money(minDishUnitPrice(dish))}</Text>
-                    </FastPressable>
-                  ))}
-                </View>
-                {options.length === 0 ? <Text style={styles.notFound}>Ничего не найдено</Text> : null}
-              </ScrollView>
-            </View>
-          </>
-        )}
+            {options.length === 0 ? <Text style={styles.notFound}>Ничего не найдено</Text> : null}
+          </ScrollView>
+        </View>
       </SafeAreaView>
+      {/* Выбор размера блюда-замены — нижний лист с кнопкой «Заменить» (как в PWA). */}
+      <InlineVariantSheet
+        dish={variantDish}
+        actionLabel="Заменить"
+        onClose={onBackFromVariant}
+        onAdd={onPickVariant}
+      />
     </FullscreenSheet>
+  );
+}
+
+/**
+ * Нижний лист выбора размера, встроенный поверх полноэкранного листа замены.
+ * Реализован как overlay (не отдельный RN Modal) — чтобы корректно рисоваться
+ * над FullscreenSheet. Radio-список + кнопка действия, как VariantPickerSheet в PWA.
+ */
+function InlineVariantSheet({
+  dish,
+  actionLabel,
+  onClose,
+  onAdd,
+}: {
+  dish: Dish | null;
+  actionLabel: string;
+  onClose: () => void;
+  onAdd: (variant: DishVariant) => void;
+}) {
+  const [render, setRender] = useState(!!dish);
+  const [renderDish, setRenderDish] = useState<Dish | null>(dish);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const translateY = useSharedValue(600);
+  const backdrop = useSharedValue(0);
+
+  React.useEffect(() => {
+    cancelAnimation(translateY);
+    cancelAnimation(backdrop);
+    if (dish) {
+      setRender(true);
+      setRenderDish(dish);
+      setSelectedId(null);
+      translateY.value = 600;
+      translateY.value = withTiming(0, { duration: sheetTiming.enterMs, easing: sheetTiming.easing });
+      backdrop.value = withTiming(1, { duration: sheetTiming.enterMs, easing: sheetTiming.easing });
+      return;
+    }
+    backdrop.value = withTiming(0, { duration: sheetTiming.exitMs, easing: sheetTiming.easing });
+    translateY.value = withTiming(600, { duration: sheetTiming.exitMs, easing: sheetTiming.easing }, (finished) => {
+      if (finished) runOnJS(setRender)(false);
+    });
+  }, [dish, backdrop, translateY]);
+
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: backdrop.value }));
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+
+  const activeDish = renderDish;
+  if (!render || !activeDish) return null;
+  const variants = activeDish.variants.slice().sort((a, b) => a.sortOrder - b.sortOrder);
+  const selected = variants.find((v) => v.id === selectedId) ?? null;
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      <Animated.View style={[StyleSheet.absoluteFill, styles.inlineBackdrop, backdropStyle]}>
+        <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} />
+      </Animated.View>
+      <Animated.View style={[styles.inlineSheet, sheetStyle]}>
+        <SafeAreaView edges={['bottom']}>
+          <View style={styles.inlineHandleWrap}>
+            <View style={styles.inlineHandle} />
+            <Text style={styles.inlineTitle}>{activeDish?.name}</Text>
+            <Text style={styles.inlineHint}>Выберите размер</Text>
+          </View>
+          <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.inlineList}>
+            {variants.map((v) => {
+              const isSel = v.id === selectedId;
+              const price = activeDish
+                ? dishUnitPrice(v.price, activeDish.discountType, activeDish.discountValue)
+                : v.price;
+              const isOutOfStock = activeDish?.trackInventory && typeof v.stock === 'number' && v.stock <= 0;
+              return (
+                <FastPressable
+                  key={v.id}
+                  disabled={isOutOfStock}
+                  onPress={() => setSelectedId(v.id)}
+                  style={[styles.variant, isSel && styles.variantSel, isOutOfStock && styles.variantDisabled]}
+                >
+                  <View style={[styles.radio, isSel && { borderColor: colors.primary }]}>
+                    {isSel ? <View style={styles.radioDot} /> : null}
+                  </View>
+                  <Text style={styles.variantName}>
+                    {v.name}
+                    {isOutOfStock ? <Text style={styles.variantOutOfStock}>  Нет в наличии</Text> : null}
+                  </Text>
+                  <Text style={styles.variantPrice}>{money(price)}</Text>
+                </FastPressable>
+              );
+            })}
+          </ScrollView>
+          <View style={styles.inlineFooter}>
+            <Button title={actionLabel} onPress={() => selected && onAdd(selected)} disabled={!selected} />
+          </View>
+        </SafeAreaView>
+      </Animated.View>
+    </View>
   );
 }
 
@@ -1241,30 +1344,49 @@ const styles = StyleSheet.create({
   replacementBack: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   replacementTitle: { fontSize: fontSize.lg, color: colors.textPrimary, fontWeight: '700' },
   replacementSubtitle: { marginTop: 2, fontSize: fontSize.base, color: colors.textMuted },
-  replacementContent: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  replacementContent: { flex: 1, paddingHorizontal: spacing.md, paddingTop: spacing.sm },
   replacementSearch: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
+    borderWidth: 1,
+    borderColor: colors.border,
     borderRadius: radius.md,
     backgroundColor: colors.white,
-    height: 54,
+    height: waiterLayout.inputHeight,
     paddingHorizontal: spacing.md,
   },
-  replacementSearchInput: { flex: 1, fontSize: fontSize.lg, color: colors.textPrimary, padding: 0 },
-  replacementGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, paddingBottom: spacing.md },
+  replacementSearchInput: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary, padding: 0 },
+  replacementGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingTop: 2, paddingBottom: spacing.md },
   replacementDish: {
     width: '48.5%',
-    height: 104,
-    borderRadius: radius.md,
+    height: waiterLayout.dishCardHeight,
+    borderRadius: waiterLayout.dishCardRadius,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.sm,
   },
-  replacementDishName: { flex: 1, fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary, lineHeight: 20 },
-  replacementDishPrice: { marginTop: 'auto', fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
+  replacementDishName: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary, lineHeight: 20 },
+  replacementDishSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  replacementDishPrice: { marginTop: 'auto', fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+
+  inlineBackdrop: { backgroundColor: 'rgba(0,0,0,0.4)' },
+  inlineSheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.card,
+    borderTopLeftRadius: waiterLayout.sheetRadius,
+    borderTopRightRadius: waiterLayout.sheetRadius,
+    overflow: 'hidden',
+  },
+  inlineHandleWrap: { paddingTop: 10, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+  inlineHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300, marginBottom: spacing.md },
+  inlineTitle: { fontSize: fontSize.xl, fontWeight: '600', color: colors.textPrimary },
+  inlineHint: { marginTop: spacing.md, fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary },
+  inlineList: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingTop: 4, paddingBottom: spacing.sm },
+  inlineFooter: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.sm },
 });

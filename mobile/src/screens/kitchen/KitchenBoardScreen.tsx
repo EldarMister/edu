@@ -7,6 +7,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   Vibration,
   View,
 } from 'react-native';
@@ -247,6 +248,15 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   const undoSecondsLeft = pending ? Math.max(0, Math.ceil((pending.deadline - now) / 1000)) : 0;
   const pendingCount = pending ? pending.itemIds.length + pending.setComponentIds.length : 0;
 
+  // Адаптивная сетка карточек, как в PWA (columns-1 sm:2 lg:3 xl:4). В альбомном
+  // режиме карточки перестают занимать всю ширину и раскладываются в 2–4 колонки.
+  const { width: winWidth } = useWindowDimensions();
+  const columns = winWidth >= 1280 ? 4 : winWidth >= 1000 ? 3 : winWidth >= 680 ? 2 : 1;
+  const colGap = spacing.lg;
+  const cardWidth = columns > 1
+    ? Math.floor((winWidth - spacing.lg * 2 - colGap * (columns - 1)) / columns)
+    : undefined;
+
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <OfflineBanner />
@@ -309,28 +319,29 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         />
       ) : (
         <ScrollView
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, columns > 1 && styles.listGrid]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={orders.isFetching} onRefresh={() => orders.refetch()} />
           }
         >
           {list.map((o) => (
-            <KitchenCard
-              key={o.id}
-              order={o}
-              tab={tab}
-              now={now}
-              submitting={accept.isPending}
-              pendingItemIds={pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []}
-              pendingType={pending?.orderId === o.id ? pending.type : null}
-              onAccept={() =>
-                accept.mutate(o.id, {
-                  onError: (err: unknown) => push({ message: apiError(err), at: new Date().toISOString() }),
-                })
-              }
-              onBatch={(type, ids) => onBatch(o.id, type, ids)}
-            />
+            <View key={o.id} style={cardWidth != null ? { width: cardWidth } : undefined}>
+              <KitchenCard
+                order={o}
+                tab={tab}
+                now={now}
+                submitting={accept.isPending}
+                pendingItemIds={pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []}
+                pendingType={pending?.orderId === o.id ? pending.type : null}
+                onAccept={() =>
+                  accept.mutate(o.id, {
+                    onError: (err: unknown) => push({ message: apiError(err), at: new Date().toISOString() }),
+                  })
+                }
+                onBatch={(type, ids) => onBatch(o.id, type, ids)}
+              />
+            </View>
           ))}
         </ScrollView>
       )}
@@ -872,6 +883,7 @@ const styles = StyleSheet.create({
   toolbarBtnText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.primary },
   toolbarBtnTextPrimary: { color: colors.white },
   list: { padding: spacing.lg, gap: spacing.lg, paddingBottom: 96 },
+  listGrid: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start' },
 
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.sm },
   orderNumber: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },

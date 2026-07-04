@@ -1,6 +1,15 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, TextInput, View } from 'react-native';
-import { OrderBadge } from '@/components/StatusBadge';
+import {
+  ActivityIndicator,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Select } from '@/components/Select';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -153,60 +162,53 @@ export function OrdersScreen() {
     }
   };
 
-  const header = (
-    <View style={styles.headerWrap}>
-      {/* Сводка */}
-      <View style={styles.summary}>
-        <Sum label="Всего заказов" value={s ? String(s.total) : '—'} />
-        <Sep />
-        <Sum label="Оплачено" value={s ? String(s.paid) : '—'} />
-        <Sep />
-        <Sum label="Не оплачено" value={s ? String(s.unpaid) : '—'} />
-        <Sep />
-        <Sum label="Отменено" value={s ? String(s.cancelled) : '—'} />
-        <Sep />
-        <Sum label="Выручка" value={s ? money(s.revenue) : '—'} />
-      </View>
-
-      {/* Фильтры */}
-      <View style={{ gap: spacing.sm }}>
-        <Select value={tab} onChange={setTab} options={STATUS_OPTIONS} title="Статус" />
-        <Select value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
-        <Select value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
-        <Select value={period} onChange={setPeriod} options={PERIOD_OPTIONS} title="Период" />
-        <TextInput
-          style={styles.search}
-          placeholder="Поиск по заказам"
-          placeholderTextColor={colors.textLight}
-          value={search}
-          onChangeText={setSearch}
-        />
-      </View>
-    </View>
-  );
+  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    if (contentOffset.y + layoutMeasurement.height >= contentSize.height - 400) {
+      if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+    }
+  };
 
   return (
     <>
-      <FlatList
-        data={items}
-        keyExtractor={(o) => o.id}
-        ListHeaderComponent={header}
-        contentContainerStyle={styles.listContent}
+      <ScrollView
+        style={styles.page}
+        contentContainerStyle={styles.pageContent}
         showsVerticalScrollIndicator={false}
-        onEndReachedThreshold={0.4}
-        onEndReached={() => {
-          if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-        }}
-        renderItem={({ item: ord }) => (
-          <OrderRow
-            order={ord}
-            onOpen={() => setDetailsOrder(ord)}
-            onEdit={() => openStatusEditor(ord)}
-            onCancel={CANCELLABLE.has(ord.status) ? () => setCancelTarget(ord) : undefined}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+      >
+        {/* Inline-сводка под заголовком */}
+        <View style={styles.summary}>
+          <Sum label="Всего заказов" value={s ? String(s.total) : '—'} />
+          <Sep />
+          <Sum label="Оплачено" value={s ? String(s.paid) : '—'} />
+          <Sep />
+          <Sum label="Не оплачено" value={s ? String(s.unpaid) : '—'} />
+          <Sep />
+          <Sum label="Отменено" value={s ? String(s.cancelled) : '—'} />
+          <Sep />
+          <Sum label="Выручка" value={s ? money(s.revenue) : '—'} />
+        </View>
+
+        {/* Фильтры */}
+        <View style={styles.filters}>
+          <Select value={tab} onChange={setTab} options={STATUS_OPTIONS} title="Статус" />
+          <Select value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
+          <Select value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
+          <Select value={period} onChange={setPeriod} options={PERIOD_OPTIONS} title="Период" />
+          <TextInput
+            style={styles.search}
+            placeholder="Поиск по заказам"
+            placeholderTextColor={colors.textLight}
+            value={search}
+            onChangeText={setSearch}
           />
-        )}
-        ListEmptyComponent={
-          ordersQ.isLoading ? (
+        </View>
+
+        {/* Таблица заказов */}
+        <View style={styles.tableCard}>
+          {ordersQ.isLoading ? (
             <View style={styles.center}>
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
@@ -215,22 +217,46 @@ export function OrdersScreen() {
               <Text style={styles.errTitle}>Не удалось загрузить заказы</Text>
               <Text style={styles.errSub}>{ordersError}</Text>
             </View>
-          ) : (
+          ) : items.length === 0 ? (
             <Text style={styles.empty}>Заказы не найдены</Text>
-          )
-        }
-        ListFooterComponent={
-          items.length > 0 ? (
-            isFetchingNextPage ? (
-              <View style={styles.footerLoad}>
-                <ActivityIndicator color={colors.primary} />
+          ) : (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ width: TABLE_WIDTH }}
+            >
+              <View style={{ width: TABLE_WIDTH }}>
+                <View style={styles.thead}>
+                  <Text style={[styles.th, { width: COL.num }]}>№ заказа</Text>
+                  <Text style={[styles.th, { width: COL.date }]}>Дата и время</Text>
+                  <Text style={[styles.th, { width: COL.table }]}>Стол</Text>
+                  <Text style={[styles.th, { width: COL.waiter }]}>Официант</Text>
+                  <Text style={[styles.th, styles.thRight, { width: COL.amount }]}>Сумма</Text>
+                  <Text style={[styles.th, { width: COL.status }]}>Статус заказа</Text>
+                  <Text style={[styles.th, { width: COL.pay }]}>Способ оплаты</Text>
+                  <Text style={[styles.th, styles.thCenter, { width: COL.act }]}>Действия</Text>
+                </View>
+                {items.map((ord) => (
+                  <OrderTableRow
+                    key={ord.id}
+                    order={ord}
+                    onOpen={() => setDetailsOrder(ord)}
+                    onEdit={() => openStatusEditor(ord)}
+                    onCancel={CANCELLABLE.has(ord.status) ? () => setCancelTarget(ord) : undefined}
+                  />
+                ))}
               </View>
-            ) : !hasNextPage ? (
-              <Text style={styles.footerDone}>Все заказы загружены</Text>
-            ) : null
-          ) : null
-        }
-      />
+            </ScrollView>
+          )}
+          {items.length > 0 && isFetchingNextPage ? (
+            <View style={styles.footerLoad}>
+              <ActivityIndicator color={colors.primary} />
+            </View>
+          ) : items.length > 0 && !hasNextPage ? (
+            <Text style={styles.footerDone}>Все заказы загружены</Text>
+          ) : null}
+        </View>
+      </ScrollView>
 
       <CancelOrderModal
         visible={!!cancelTarget}
@@ -260,7 +286,10 @@ export function OrdersScreen() {
   );
 }
 
-function OrderRow({
+const COL = { num: 70, date: 140, table: 92, waiter: 120, amount: 92, status: 186, pay: 130, act: 84 } as const;
+const TABLE_WIDTH = COL.num + COL.date + COL.table + COL.waiter + COL.amount + COL.status + COL.pay + COL.act;
+
+function OrderTableRow({
   order,
   onOpen,
   onEdit,
@@ -272,27 +301,30 @@ function OrderRow({
   onCancel?: () => void;
 }) {
   return (
-    <FastPressable onPress={onOpen} style={styles.row}>
-      <View style={styles.rowMain}>
-        <View style={styles.rowTop}>
-          <Text style={styles.orderNum}>{displayOrderNumber(order.orderNumber)}</Text>
-          <Text style={styles.amount}>{money(order.finalAmount)}</Text>
-        </View>
-        <View style={styles.rowMeta}>
-          <Text style={styles.metaText} numberOfLines={1}>
-            {new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)} · Стол{' '}
-            {order.table.number}
-            {hallSuffix(order.table)} · {order.waiter?.name ?? 'QR menu'}
-          </Text>
-        </View>
-        <View style={styles.rowBottom}>
-          <OrderBadge status={order.status} size="sm" />
-          <Text style={styles.payText} numberOfLines={1}>
-            {paymentCell(order)}
-          </Text>
-        </View>
+    <FastPressable onPress={onOpen} style={styles.tr}>
+      <Text style={[styles.td, styles.tdStrong, { width: COL.num }]} numberOfLines={1}>
+        {displayOrderNumber(order.orderNumber)}
+      </Text>
+      <Text style={[styles.td, styles.tdSecondary, { width: COL.date }]} numberOfLines={1}>
+        {new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)}
+      </Text>
+      <Text style={[styles.td, styles.tdSecondary, { width: COL.table }]} numberOfLines={1}>
+        Стол {order.table.number}
+        {hallSuffix(order.table)}
+      </Text>
+      <Text style={[styles.td, styles.tdSecondary, { width: COL.waiter }]} numberOfLines={1}>
+        {order.waiter?.name ?? 'QR menu'}
+      </Text>
+      <Text style={[styles.td, styles.tdStrong, styles.tdRight, { width: COL.amount }]} numberOfLines={1}>
+        {money(order.finalAmount)}
+      </Text>
+      <View style={[styles.tdCell, { width: COL.status }]}>
+        <OrderStatusBadges order={order} size="sm" align="start" />
       </View>
-      <View style={styles.actions}>
+      <Text style={[styles.td, styles.tdSecondary, { width: COL.pay }]} numberOfLines={1}>
+        {paymentCell(order)}
+      </Text>
+      <View style={[styles.tdCell, styles.tdActions, { width: COL.act }]}>
         <FastPressable onPress={onEdit} hitSlop={6} style={styles.actionBtn}>
           <PwaIcon name="pencil" size={16} color={colors.textMuted} />
         </FastPressable>
@@ -380,12 +412,13 @@ function Sep() {
 }
 
 const styles = StyleSheet.create({
-  listContent: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  headerWrap: { gap: spacing.md, marginBottom: spacing.sm },
+  page: { flex: 1 },
+  pageContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
   summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   sumText: { fontSize: fontSize.sm, color: colors.textSecondary },
   sumValue: { fontWeight: '500', color: colors.textPrimary },
   sumSep: { fontSize: fontSize.sm, color: colors.textLight },
+  filters: { gap: spacing.sm },
   search: {
     height: 44,
     borderWidth: 1,
@@ -401,30 +434,45 @@ const styles = StyleSheet.create({
   errTitle: { fontSize: fontSize.base, fontWeight: '600', color: colors.danger },
   errSub: { fontSize: fontSize.sm, color: colors.textMuted },
   empty: { paddingVertical: 60, textAlign: 'center', color: colors.textMuted },
-  footerLoad: { paddingVertical: spacing.lg, alignItems: 'center' },
-  footerDone: { paddingVertical: spacing.lg, textAlign: 'center', fontSize: fontSize.xs, color: colors.textLight },
+  footerLoad: { paddingVertical: spacing.md, alignItems: 'center' },
+  footerDone: { paddingVertical: spacing.md, textAlign: 'center', fontSize: fontSize.xs, color: colors.textLight },
 
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+  // Таблица заказов (как в PWA: карточка со скроллом по горизонтали).
+  tableCard: {
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.white,
     borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    marginTop: spacing.sm,
+    backgroundColor: colors.white,
+    overflow: 'hidden',
   },
-  rowMain: { flex: 1, minWidth: 0, gap: 4 },
-  rowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
-  orderNum: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
-  amount: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
-  rowMeta: {},
-  metaText: { fontSize: fontSize.xs, color: colors.textMuted },
-  rowBottom: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginTop: 2 },
-  payText: { flexShrink: 1, textAlign: 'right', fontSize: fontSize.xs, color: colors.textSecondary },
-  actions: { alignItems: 'center', gap: 6 },
+  thead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  th: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: fontSize.xs,
+    fontWeight: '500',
+    color: colors.textMuted,
+  },
+  thRight: { textAlign: 'right' },
+  thCenter: { textAlign: 'center' },
+  tr: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  td: { paddingHorizontal: 12, paddingVertical: 12, fontSize: fontSize.sm },
+  tdStrong: { fontWeight: '500', color: colors.textPrimary },
+  tdSecondary: { color: colors.textSecondary },
+  tdRight: { textAlign: 'right' },
+  tdCell: { paddingHorizontal: 12, paddingVertical: 8, justifyContent: 'center' },
+  tdActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 4 },
   actionBtn: { width: 30, height: 30, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
 
   footer: { flexDirection: 'row', gap: spacing.sm },

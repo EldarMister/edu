@@ -5,8 +5,8 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
-  type LayoutChangeEvent,
   type ViewStyle,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -98,11 +98,11 @@ export function BottomSheet({
     visibleSnapshotRef.current = currentSnapshot;
   }
   const content = visible ? currentSnapshot : visibleSnapshotRef.current;
-  const translateY = useSharedValue(SHEET_FALLBACK_H);
+  const { height: winHeight } = useWindowDimensions();
+  const offscreen = winHeight || SHEET_FALLBACK_H;
+  const translateY = useSharedValue(offscreen);
   const backdropOpacity = useSharedValue(0);
   const dragY = useSharedValue(0);
-  const sheetHeightRef = React.useRef(SHEET_FALLBACK_H);
-  const pendingEnterRef = React.useRef(false);
   const transitionSeqRef = React.useRef(0);
   const handleClose = React.useCallback(() => {
     dismissKeyboard();
@@ -151,16 +151,23 @@ export function BottomSheet({
     cancelAnimation(dragY);
     if (visible) {
       dismissKeyboard();
-      // Держим лист скрытым до onLayout, где узнаем точную высоту и запустим въезд.
-      translateY.value = sheetHeightRef.current;
-      backdropOpacity.value = 0;
+      // Мгновенный въезд из-за нижнего края экрана — без ожидания onLayout,
+      // чтобы тяжёлый контент (админка) не задерживал начало анимации.
       dragY.value = 0;
-      pendingEnterRef.current = true;
+      translateY.value = offscreen;
+      backdropOpacity.value = 0;
       setRender(true);
+      translateY.value = withTiming(0, {
+        duration: sheetTiming.enterMs,
+        easing: sheetTiming.easing,
+      });
+      backdropOpacity.value = withTiming(1, {
+        duration: sheetTiming.enterMs,
+        easing: sheetTiming.easing,
+      });
       return;
     }
     dismissKeyboard();
-    pendingEnterRef.current = false;
     dragY.value = withTiming(0, {
       duration: sheetTiming.exitMs,
       easing: sheetTiming.easing,
@@ -170,7 +177,7 @@ export function BottomSheet({
       easing: sheetTiming.easing,
     });
     translateY.value = withTiming(
-      sheetHeightRef.current,
+      offscreen,
       {
         duration: sheetTiming.exitMs,
         easing: sheetTiming.easing,
@@ -179,27 +186,7 @@ export function BottomSheet({
         if (finished) runOnJS(finishClose)(seq);
       },
     );
-  }, [backdropOpacity, dragY, finishClose, translateY, visible]);
-
-  const handleSheetLayout = React.useCallback(
-    (e: LayoutChangeEvent) => {
-      const h = e.nativeEvent.layout.height;
-      if (h > 0) sheetHeightRef.current = h;
-      if (pendingEnterRef.current && h > 0) {
-        pendingEnterRef.current = false;
-        translateY.value = h;
-        translateY.value = withTiming(0, {
-          duration: sheetTiming.enterMs,
-          easing: sheetTiming.easing,
-        });
-        backdropOpacity.value = withTiming(1, {
-          duration: sheetTiming.enterMs,
-          easing: sheetTiming.easing,
-        });
-      }
-    },
-    [backdropOpacity, translateY],
-  );
+  }, [backdropOpacity, dragY, finishClose, offscreen, translateY, visible]);
 
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: backdropOpacity.value,
@@ -239,7 +226,6 @@ export function BottomSheet({
           style={[styles.sheetViewport, content.bottomInset != null && { bottom: content.bottomInset }]}
         >
           <Animated.View
-            onLayout={handleSheetLayout}
             style={[
               styles.sheet,
               content.maxHeight != null && { maxHeight: content.maxHeight },

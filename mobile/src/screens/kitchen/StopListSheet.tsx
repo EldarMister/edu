@@ -1,9 +1,26 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { BottomSheet } from '@/components/BottomSheet';
+import {
+  Modal as RNModal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from 'react-native';
+import Animated, {
+  cancelAnimation,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Loading, Toggle } from '@/components/ui';
+import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
-import { colors, fontSize, radius, spacing } from '@/theme';
+import { sheetTiming } from '@/components/motion';
+import { colors, fontSize, radius, spacing, softShadow } from '@/theme';
 import { useSaveStopList, useStopList } from '@/services/api/kitchen';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
@@ -11,6 +28,7 @@ import type { PrepStation } from '@/types';
 
 /**
  * «Стоп-лист»: станция временно отключает свои блюда — как PWA StopListDrawer.
+ * Боковая панель справа на всю высоту (fixed inset-0 justify-end / aside h-full).
  * Toggle включён → блюдо недоступно (в стоп-листе). Сохраняется сразу при переключении.
  */
 export function StopListSheet({
@@ -25,10 +43,32 @@ export function StopListSheet({
   const stopListQ = useStopList(visible, station);
   const save = useSaveStopList();
   const push = useNotifications((s) => s.push);
+  const { width } = useWindowDimensions();
+  const panelWidth = Math.min(420, Math.round(width * 0.9));
 
+  const [render, setRender] = useState(visible);
   const [search, setSearch] = useState('');
   // Локальная доступность для мгновенного отклика: dishId → isAvailable.
   const [draft, setDraft] = useState<Record<string, boolean>>({});
+
+  const translateX = useSharedValue(panelWidth);
+  const backdrop = useSharedValue(0);
+
+  useEffect(() => {
+    cancelAnimation(translateX);
+    cancelAnimation(backdrop);
+    if (visible) {
+      setRender(true);
+      translateX.value = panelWidth;
+      translateX.value = withTiming(0, { duration: sheetTiming.enterMs, easing: sheetTiming.easing });
+      backdrop.value = withTiming(1, { duration: sheetTiming.enterMs, easing: sheetTiming.easing });
+      return;
+    }
+    backdrop.value = withTiming(0, { duration: sheetTiming.exitMs, easing: sheetTiming.easing });
+    translateX.value = withTiming(panelWidth, { duration: sheetTiming.exitMs, easing: sheetTiming.easing }, (finished) => {
+      if (finished) runOnJS(setRender)(false);
+    });
+  }, [visible, panelWidth, translateX, backdrop]);
 
   useEffect(() => {
     if (!visible) return;
@@ -64,58 +104,109 @@ export function StopListSheet({
     });
   };
 
+  const backdropStyle = useAnimatedStyle(() => ({ opacity: backdrop.value }));
+  const panelStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
+
+  if (!render) return null;
+
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Стоп-лист" maxHeight="88%">
-      <Text style={styles.subtitle}>Выберите блюда, которые временно недоступны</Text>
+    <RNModal
+      visible={render}
+      animationType="none"
+      transparent
+      statusBarTranslucent
+      hardwareAccelerated
+      onRequestClose={onClose}
+    >
+      <View style={styles.root}>
+        <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]}>
+          <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        </Animated.View>
+        <Animated.View style={[styles.panel, { width: panelWidth }, panelStyle]}>
+          <SafeAreaView style={styles.panelSafe} edges={['top', 'bottom']}>
+            <View style={styles.header}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.title}>Стоп-лист</Text>
+                <Text style={styles.subtitle}>Выберите блюда, которые временно недоступны</Text>
+              </View>
+              <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
+                <PwaIcon name="close" size={22} color={colors.textLight} strokeWidth={2} />
+              </FastPressable>
+            </View>
 
-      <View style={styles.searchWrap}>
-        <PwaIcon name="search" size={18} color={colors.textLight} strokeWidth={2} />
-        <TextInput
-          placeholder="Поиск блюда"
-          placeholderTextColor={colors.textLight}
-          value={search}
-          onChangeText={setSearch}
-          style={styles.searchInput}
-        />
-      </View>
-
-      <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
-        {stopListQ.isLoading ? (
-          <Loading />
-        ) : categories.length === 0 ? (
-          <Text style={styles.empty}>Ничего не найдено</Text>
-        ) : (
-          categories.map((cat) => (
-            <View key={cat.id} style={styles.category}>
-              <Text style={styles.categoryName}>{cat.name}</Text>
-              <View style={styles.dishList}>
-                {cat.dishes.map((dish) => {
-                  const available = draft[dish.id] ?? dish.isAvailable;
-                  return (
-                    <View key={dish.id} style={styles.dishRow}>
-                      <Text style={styles.dishName} numberOfLines={1}>
-                        {dish.name}
-                      </Text>
-                      <View style={[styles.stateBadge, !available && styles.stateBadgeStopped]}>
-                        <Text style={[styles.stateBadgeText, !available && styles.stateBadgeTextStopped]}>
-                          {available ? 'Доступно' : 'Недоступно'}
-                        </Text>
-                      </View>
-                      <Toggle checked={!available} onChange={(stopped) => toggleDish(dish.id, stopped)} />
-                    </View>
-                  );
-                })}
+            <View style={styles.searchWrapOuter}>
+              <View style={styles.searchWrap}>
+                <PwaIcon name="search" size={18} color={colors.textLight} strokeWidth={2} />
+                <TextInput
+                  placeholder="Поиск блюда"
+                  placeholderTextColor={colors.textLight}
+                  value={search}
+                  onChangeText={setSearch}
+                  style={styles.searchInput}
+                />
               </View>
             </View>
-          ))
-        )}
-      </ScrollView>
-    </BottomSheet>
+
+            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.listContent}>
+              {stopListQ.isLoading ? (
+                <Loading />
+              ) : categories.length === 0 ? (
+                <Text style={styles.empty}>Ничего не найдено</Text>
+              ) : (
+                categories.map((cat) => (
+                  <View key={cat.id} style={styles.category}>
+                    <Text style={styles.categoryName}>{cat.name}</Text>
+                    <View style={styles.dishList}>
+                      {cat.dishes.map((dish) => {
+                        const available = draft[dish.id] ?? dish.isAvailable;
+                        return (
+                          <View key={dish.id} style={styles.dishRow}>
+                            <Text style={styles.dishName} numberOfLines={1}>
+                              {dish.name}
+                            </Text>
+                            <View style={[styles.stateBadge, !available && styles.stateBadgeStopped]}>
+                              <Text style={[styles.stateBadgeText, !available && styles.stateBadgeTextStopped]}>
+                                {available ? 'Доступно' : 'Недоступно'}
+                              </Text>
+                            </View>
+                            <Toggle checked={!available} onChange={(stopped) => toggleDish(dish.id, stopped)} />
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </SafeAreaView>
+        </Animated.View>
+      </View>
+    </RNModal>
   );
 }
 
 const styles = StyleSheet.create({
-  subtitle: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2, marginBottom: spacing.md },
+  root: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
+  backdrop: { backgroundColor: 'rgba(0,0,0,0.4)' },
+  panel: {
+    height: '100%',
+    backgroundColor: colors.white,
+    ...softShadow,
+  },
+  panelSafe: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    paddingHorizontal: 20,
+    paddingVertical: spacing.lg,
+  },
+  title: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
+  subtitle: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
+  closeBtn: { width: 30, height: 30, alignItems: 'center', justifyContent: 'center', marginRight: -4 },
+  searchWrapOuter: { paddingHorizontal: 20, paddingVertical: spacing.md },
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -126,9 +217,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     backgroundColor: colors.white,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.md,
   },
   searchInput: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary, padding: 0 },
+  listContent: { paddingHorizontal: 20, paddingBottom: spacing.xl },
   empty: { paddingVertical: spacing.xl, textAlign: 'center', fontSize: fontSize.sm, color: colors.textMuted },
   category: { marginBottom: spacing.lg },
   categoryName: {
@@ -139,7 +230,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: colors.textLight,
   },
-  dishList: { gap: spacing.sm },
+  dishList: { gap: spacing.xs },
   dishRow: {
     flexDirection: 'row',
     alignItems: 'center',
