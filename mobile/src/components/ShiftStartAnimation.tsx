@@ -5,10 +5,11 @@ import { colors } from '@/theme';
 
 export type ShiftAnimState = 'idle' | 'loading' | 'success';
 
-const GLOW = 260; // диаметр зоны свечения
-const LOGO_W = 100; // ширина логотипа EP
-const LOGO_H = 64;
-const RING = 150; // диаметр кругового индикатора загрузки
+const GLOW = 280; // размер зоны анимации, как в PWA ShiftRequiredScreen.
+const LOGO_CIRCLE = 172;
+const LOGO_W = 86;
+const LOGO_H = 54;
+const RING = 188; // диаметр кругового индикатора загрузки
 const STROKE = 4;
 const R = (RING - STROKE) / 2;
 const C = 2 * Math.PI * R;
@@ -138,7 +139,7 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
         </Svg>
       </Animated.View>
 
-      {/* Логотип EP — прямо на свечении, без плитки */}
+      {/* Полупрозрачный круг с логотипом EP — как в PWA. */}
       <Animated.View style={[styles.logo, { opacity: logoOpacity, transform: [{ scale: enterScale }] }]}>
         <Image source={EP_MARK} style={styles.mark} resizeMode="contain" />
       </Animated.View>
@@ -172,7 +173,14 @@ const styles = StyleSheet.create({
     // -90°, чтобы заполнение начиналось сверху и шло по часовой стрелке.
     transform: [{ rotate: '-90deg' }],
   },
-  logo: { alignItems: 'center', justifyContent: 'center' },
+  logo: {
+    width: LOGO_CIRCLE,
+    height: LOGO_CIRCLE,
+    borderRadius: LOGO_CIRCLE / 2,
+    backgroundColor: 'rgba(255,255,255,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   mark: { width: LOGO_W, height: LOGO_H },
   success: {
     position: 'absolute',

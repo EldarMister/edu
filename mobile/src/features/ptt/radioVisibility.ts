@@ -7,10 +7,14 @@ import { create } from 'zustand';
  */
 type RadioVisibilityState = {
   cabinetOpen: boolean;
+  shiftGateOpen: boolean;
   setCabinetOpen: (open: boolean) => void;
+  setShiftGateOpen: (open: boolean) => void;
 };
 
 export const useRadioVisibility = create<RadioVisibilityState>((set) => ({
   cabinetOpen: false,
+  shiftGateOpen: false,
   setCabinetOpen: (cabinetOpen) => set({ cabinetOpen }),
+  setShiftGateOpen: (shiftGateOpen) => set({ shiftGateOpen }),
 }));

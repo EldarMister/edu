@@ -9,7 +9,7 @@ import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { cartLineName, linePrice, useCart } from '@/store/cart';
 import { setChanged } from '@/utils/set';
-import { displayOrderNumber, money } from '@/utils/format';
+import { money } from '@/utils/format';
 
 /** Корзина как нижний лист поверх меню — повторяет PWA CartSheet. */
 export function CartSheet({
@@ -30,14 +30,11 @@ export function CartSheet({
     lines,
     comment,
     commentOpen,
-    editingOrderId,
-    editingOrderNumber,
     setQuantity,
     setTakeaway,
     setAllTakeaway,
     setOrderComment,
     setCommentOpen,
-    cancelEditing,
     clear,
     total,
   } =
@@ -52,7 +49,13 @@ export function CartSheet({
         <Text style={styles.totalLabel}>Итого</Text>
         <NumberTicker value={total()} style={styles.totalValue} digitHeight={22} />
       </View>
-      <Button title={submitLabel} onPress={onSubmit} loading={submitting} disabled={!hasLines} />
+      <Button
+        title={submitLabel}
+        onPress={onSubmit}
+        loading={submitting}
+        disabled={!hasLines}
+        style={styles.submitButton}
+      />
       {hasLines ? (
         <View style={styles.actionsRow}>
           <FastPressable onPress={() => clear()} style={styles.clearBtn}>
@@ -81,16 +84,10 @@ export function CartSheet({
       <View style={styles.headRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.title} numberOfLines={1}>
-            {editingOrderId ? `Редактирование ${displayOrderNumber(editingOrderNumber ?? '')}` : 'Корзина'}
+            Корзина
           </Text>
-          {editingOrderId ? <Text style={styles.titleSub}>Изменения сохранятся в текущий заказ</Text> : null}
         </View>
         <View style={styles.headActions}>
-          {editingOrderId ? (
-            <FastPressable onPress={cancelEditing} style={styles.cancelEditBtn}>
-              <Text style={styles.cancelEditText}>Отмена</Text>
-            </FastPressable>
-          ) : null}
           {hasLines ? (
             <View style={styles.takeawayRow}>
               <Text style={styles.takeawayLabel}>С собой</Text>
@@ -205,14 +202,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: spacing.sm,
     paddingBottom: spacing.sm,
   },
   title: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
-  titleSub: { marginTop: 2, fontSize: fontSize.xs, color: colors.textMuted },
   headActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  cancelEditBtn: { minHeight: 32, justifyContent: 'center' },
-  cancelEditText: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: '600' },
   takeawayRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   takeawayLabel: { fontSize: fontSize.base, color: colors.textSecondary },
   emptyBox: {
@@ -245,6 +238,7 @@ const styles = StyleSheet.create({
   linePrice: { width: 70, textAlign: 'right', fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   setComponents: { width: '100%', gap: 2, paddingLeft: 2, marginTop: -2 },
   setComponentText: { fontSize: fontSize.xs, color: colors.textMuted },
+  submitButton: { borderRadius: radius.sm },
   commentInput: {
     height: 42,
     borderRadius: radius.md,

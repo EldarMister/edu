@@ -17,6 +17,7 @@ import {
   useCategoryMutations,
   useDishMutations,
   useMenuOverview,
+  useSetMutations,
   type AdminCategory,
   type AdminDish,
   type AdminDishVariant,
@@ -36,11 +37,12 @@ const STATION_OPTIONS = [
   { value: 'none', label: 'Без отправки' },
 ];
 
-/** Меню (владелец/админ) — порт PWA MenuPage (блюда + категории; сеты/фото/техкарта — отдельные фазы). */
+/** Меню (владелец/админ) — порт PWA MenuPage (блюда + категории + сеты). */
 export function MenuScreen() {
   const [categoryId, setCategoryId] = useState('');
   const [search, setSearch] = useState('');
   const [dishModal, setDishModal] = useState<AdminDish | null | 'new'>(null);
+  const [setModal, setSetModal] = useState<AdminDish | null | 'new'>(null);
   const [catModal, setCatModal] = useState(false);
 
   const overview = useMenuOverview();
@@ -70,7 +72,7 @@ export function MenuScreen() {
 
   const openEdit = (d: AdminDish) => {
     if (d.isSet) {
-      Alert.alert('Сеты', 'Редактор сетов появится в следующем обновлении.');
+      setSetModal(d);
       return;
     }
     setDishModal(d);
@@ -101,7 +103,7 @@ export function MenuScreen() {
           variant="secondary"
           size="md"
           style={{ flex: 1 }}
-          onPress={() => Alert.alert('Сеты', 'Редактор сетов появится в следующем обновлении.')}
+          onPress={() => setSetModal('new')}
         />
       </View>
       <Button title="+ Добавить блюдо" size="md" onPress={() => setDishModal('new')} />
@@ -145,6 +147,7 @@ export function MenuScreen() {
           onClose={() => setDishModal(null)}
         />
       ) : null}
+      {setModal !== null ? <SetModal set={setModal === 'new' ? null : setModal} onClose={() => setSetModal(null)} /> : null}
       {catModal ? <CategoryModal categories={categories} onClose={() => setCatModal(false)} /> : null}
     </>
   );
@@ -218,6 +221,15 @@ interface VariantDraft {
   price: string;
   stock: string;
   unit: string;
+}
+interface SetCompDraft {
+  uid: string;
+  dishId: string;
+  dishVariantId?: string;
+  name: string;
+  quantity: number;
+  removable: boolean;
+  replaceable: boolean;
 }
 function variantDraft(v?: AdminDishVariant): VariantDraft {
   return {
@@ -438,6 +450,240 @@ function DishModal({
   );
 }
 
+function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void }) {
+  const isEdit = !!set;
+  const { create, update } = useSetMutations();
+  const push = useNotifications((s) => s.push);
+  const [name, setName] = useState(set?.name ?? '');
+  const [price, setPrice] = useState(set ? String(Number(set.price)) : '');
+  const [components, setComponents] = useState<SetCompDraft[]>(() =>
+    (set?.setComponents ?? [])
+      .map((component): SetCompDraft | null => {
+        const dish = component.dish ?? component.dishVariant?.dish;
+        if (!dish) return null;
+        return {
+          uid: component.id,
+          dishId: dish.id,
+          name: component.dishVariant ? `${dish.name} ${component.dishVariant.name}` : dish.name,
+          quantity: component.quantity,
+          removable: component.removable,
+          replaceable: component.replaceable,
+          ...(component.dishVariant?.id ? { dishVariantId: component.dishVariant.id } : {}),
+        };
+      })
+      .filter((component): component is SetCompDraft => component !== null),
+  );
+  const [search, setSearch] = useState('');
+  const [error, setError] = useState('');
+  const dishesQ = useAdminDishes('', search.trim());
+  const pending = create.isPending || update.isPending;
+
+  type Candidate = { dishId: string; dishVariantId?: string; name: string };
+  const candidates: Candidate[] = (dishesQ.data ?? [])
+    .filter((dish) => !dish.isSet && dish.isActive)
+    .flatMap((dish): Candidate[] =>
+      dish.variants.length > 0
+        ? dish.variants.map((variant) => ({
+            dishId: dish.id,
+            dishVariantId: variant.id,
+            name: `${dish.name} ${variant.name}`,
+          }))
+        : [{ dishId: dish.id, name: dish.name }],
+    )
+    .filter(
+      (candidate) =>
+        !components.some(
+          (component) =>
+            component.dishId === candidate.dishId && component.dishVariantId === candidate.dishVariantId,
+        ),
+    );
+
+  const addComp = (candidate: Candidate) =>
+    setComponents((current) => [
+      ...current,
+      {
+        uid: `tmp-${candidate.dishId}-${candidate.dishVariantId ?? ''}-${Date.now()}`,
+        dishId: candidate.dishId,
+        dishVariantId: candidate.dishVariantId,
+        name: candidate.name,
+        quantity: 1,
+        removable: true,
+        replaceable: true,
+      },
+    ]);
+
+  const patchComp = (uid: string, patch: Partial<SetCompDraft>) =>
+    setComponents((current) => current.map((component) => (component.uid === uid ? { ...component, ...patch } : component)));
+
+  const submit = async () => {
+    setError('');
+    const priceNum = Number(price.replace(',', '.'));
+    if (!name.trim()) {
+      setError('Укажите название сета');
+      return;
+    }
+    if (!Number.isFinite(priceNum) || priceNum <= 0) {
+      setError('Цена сета должна быть больше 0');
+      return;
+    }
+    if (components.length === 0) {
+      setError('Добавьте блюда в состав сета');
+      return;
+    }
+    const body = {
+      name: name.trim(),
+      price: priceNum,
+      components: components.map((component) => ({
+        dishId: component.dishId,
+        dishVariantId: component.dishVariantId,
+        quantity: Math.max(1, component.quantity),
+        removable: component.removable,
+        replaceable: component.replaceable,
+      })),
+    };
+    try {
+      if (isEdit) {
+        await update.mutateAsync({ id: set!.id, ...body });
+        push({ message: 'Сет обновлён', at: new Date().toISOString() });
+      } else {
+        await create.mutateAsync(body);
+        push({ message: 'Сет создан', at: new Date().toISOString() });
+      }
+      onClose();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  };
+
+  return (
+    <BottomSheet
+      visible
+      onClose={onClose}
+      title={isEdit ? 'Изменить сет' : 'Новый сет'}
+      maxHeight="92%"
+      footer={<Button title={isEdit ? 'Сохранить' : 'Создать сет'} size="lg" loading={pending} onPress={submit} />}
+    >
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
+        <View style={styles.grid2}>
+          <Field label="Название" style={{ flex: 1 }}>
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="Сет-6"
+              placeholderTextColor={colors.textLight}
+            />
+          </Field>
+          <Field label="Цена" style={{ width: 116 }}>
+            <TextInput
+              style={styles.input}
+              value={price}
+              onChangeText={setPrice}
+              keyboardType="decimal-pad"
+              placeholder="0"
+              placeholderTextColor={colors.textLight}
+            />
+          </Field>
+        </View>
+
+        <View>
+          <Text style={styles.setSectionTitle}>Состав сета</Text>
+          {components.length === 0 ? (
+            <Text style={styles.setEmptyBox}>Добавьте блюда из списка ниже</Text>
+          ) : (
+            <View style={{ gap: spacing.sm }}>
+              {components.map((component) => (
+                <View key={component.uid} style={styles.setCompRow}>
+                  <View style={{ flex: 1, minWidth: 0, gap: spacing.sm }}>
+                    <Text style={styles.setCompName} numberOfLines={1}>
+                      {component.name}
+                    </Text>
+                    <View style={styles.setCompControls}>
+                      <View style={styles.qtyControl}>
+                        <FastPressable
+                          onPress={() => patchComp(component.uid, { quantity: Math.max(1, component.quantity - 1) })}
+                          hitSlop={6}
+                          style={styles.qtyBtn}
+                        >
+                          <PwaIcon name="minus" size={14} color={colors.textSecondary} strokeWidth={2} />
+                        </FastPressable>
+                        <Text style={styles.qtyValue}>{component.quantity}</Text>
+                        <FastPressable
+                          onPress={() => patchComp(component.uid, { quantity: component.quantity + 1 })}
+                          hitSlop={6}
+                          style={styles.qtyBtn}
+                        >
+                          <PwaIcon name="plus" size={14} color={colors.textSecondary} strokeWidth={2} />
+                        </FastPressable>
+                      </View>
+                      <View style={styles.setFlags}>
+                        <View style={styles.setFlag}>
+                          <Text style={styles.setFlagLabel}>убирать</Text>
+                          <Toggle
+                            checked={component.removable}
+                            onChange={(removable) => patchComp(component.uid, { removable })}
+                          />
+                        </View>
+                        <View style={styles.setFlag}>
+                          <Text style={styles.setFlagLabel}>заменять</Text>
+                          <Toggle
+                            checked={component.replaceable}
+                            onChange={(replaceable) => patchComp(component.uid, { replaceable })}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  </View>
+                  <FastPressable
+                    onPress={() => setComponents((current) => current.filter((item) => item.uid !== component.uid))}
+                    hitSlop={6}
+                    style={styles.iconBtn}
+                  >
+                    <PwaIcon name="trash" size={16} color={colors.danger} strokeWidth={2} />
+                  </FastPressable>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+
+        <View>
+          <Text style={styles.setSectionTitle}>Добавить блюдо</Text>
+          <TextInput
+            style={styles.input}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Поиск блюда"
+            placeholderTextColor={colors.textLight}
+          />
+          <View style={styles.candidateList}>
+            {candidates.map((candidate) => (
+              <FastPressable
+                key={`${candidate.dishId}-${candidate.dishVariantId ?? ''}`}
+                onPress={() => addComp(candidate)}
+                style={styles.candidateRow}
+              >
+                <Text style={styles.candidateName} numberOfLines={1}>
+                  {candidate.name}
+                </Text>
+                <PwaIcon name="plus" size={16} color={colors.primary} strokeWidth={2.4} />
+              </FastPressable>
+            ))}
+            {!dishesQ.isLoading && candidates.length === 0 ? <Text style={styles.emptySmall}>Блюда не найдены</Text> : null}
+            {dishesQ.isLoading ? (
+              <View style={styles.loadingSmall}>
+                <ActivityIndicator color={colors.primary} />
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+      </ScrollView>
+    </BottomSheet>
+  );
+}
+
 /* ---------- Категории ---------- */
 
 function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; onClose: () => void }) {
@@ -446,6 +692,8 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
   const [name, setName] = useState('');
   const [prepStation, setPrepStation] = useState<'kitchen' | 'bar' | 'none'>('kitchen');
   const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<AdminCategory | null>(null);
   const sorted = [...categories].sort((a, b) => a.sortOrder - b.sortOrder);
 
@@ -463,6 +711,18 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
   };
   const changeStation = (id: string, value: 'kitchen' | 'bar' | 'none') =>
     update.mutateAsync({ id, prepStation: value }).catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }));
+  const saveRename = async (id: string) => {
+    const newName = editName.trim();
+    const currentName = sorted.find((c) => c.id === id)?.name;
+    setEditingId(null);
+    if (!newName || newName === currentName) return;
+    try {
+      await update.mutateAsync({ id, name: newName });
+      push({ message: 'Категория переименована', at: new Date().toISOString() });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  };
   const move = (index: number, dir: -1 | 1) => {
     const next = index + dir;
     if (next < 0 || next >= sorted.length) return;
@@ -505,9 +765,38 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
                 </View>
               </FastPressable>
             </View>
-            <Text style={styles.catName} numberOfLines={1}>
-              {c.name}
-            </Text>
+            {editingId === c.id ? (
+              <View style={styles.catEditBox}>
+                <TextInput
+                  style={styles.catEditInput}
+                  value={editName}
+                  onChangeText={setEditName}
+                  autoFocus
+                  placeholder="Название"
+                  placeholderTextColor={colors.textLight}
+                  onSubmitEditing={() => saveRename(c.id)}
+                />
+                <FastPressable onPress={() => saveRename(c.id)} hitSlop={6} style={styles.iconBtn}>
+                  <PwaIcon name="check" size={16} color={colors.primary} strokeWidth={2.4} />
+                </FastPressable>
+                <FastPressable onPress={() => setEditingId(null)} hitSlop={6} style={styles.iconBtn}>
+                  <PwaIcon name="close" size={15} color={colors.textMuted} strokeWidth={2} />
+                </FastPressable>
+              </View>
+            ) : (
+              <FastPressable
+                onPress={() => {
+                  setEditingId(c.id);
+                  setEditName(c.name);
+                }}
+                style={styles.catNameBtn}
+              >
+                <Text style={styles.catName} numberOfLines={1}>
+                  {c.name}
+                </Text>
+                <PwaIcon name="pencil" size={14} color={colors.textMuted} strokeWidth={2} />
+              </FastPressable>
+            )}
             <View style={{ width: 130 }}>
               <Select value={c.prepStation ?? 'kitchen'} onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar' | 'none')} options={stationOpts} title="Направление" />
             </View>
@@ -702,9 +991,76 @@ const styles = StyleSheet.create({
   checkLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
   error: { fontSize: fontSize.sm, color: colors.danger },
 
+  setSectionTitle: { marginBottom: 6, fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },
+  setEmptyBox: {
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    fontSize: fontSize.sm,
+    color: colors.textMuted,
+  },
+  setCompRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    backgroundColor: colors.white,
+  },
+  setCompName: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
+  setCompControls: { gap: spacing.sm },
+  qtyControl: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+  },
+  qtyBtn: { width: 34, height: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
+  qtyValue: { minWidth: 34, textAlign: 'center', fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+  setFlags: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  setFlag: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  setFlagLabel: { fontSize: fontSize.xs, color: colors.textSecondary },
+  candidateList: { marginTop: spacing.sm, gap: spacing.sm, maxHeight: 260 },
+  candidateRow: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.white,
+  },
+  candidateName: { flex: 1, minWidth: 0, fontSize: fontSize.sm, color: colors.textPrimary },
+  emptySmall: { paddingVertical: spacing.md, textAlign: 'center', fontSize: fontSize.sm, color: colors.textMuted },
+  loadingSmall: { paddingVertical: spacing.md, alignItems: 'center' },
+
   catAddRow: { flexDirection: 'row', gap: spacing.sm },
   catRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, marginBottom: spacing.sm },
+  catNameBtn: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
   catName: { flex: 1, minWidth: 0, fontSize: fontSize.base, color: colors.textPrimary },
+  catEditBox: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 2 },
+  catEditInput: {
+    flex: 1,
+    minWidth: 0,
+    height: 36,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    paddingHorizontal: 10,
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+    backgroundColor: colors.white,
+  },
   catCount: { width: 44, textAlign: 'right', fontSize: fontSize.xs, color: colors.textMuted },
   hint: { fontSize: fontSize.sm, color: colors.textSecondary },
   deleteBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },

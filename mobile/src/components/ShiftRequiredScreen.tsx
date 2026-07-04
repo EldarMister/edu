@@ -1,14 +1,15 @@
 import React from 'react';
-import { ActivityIndicator, Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
 import { ShiftStartAnimation, type ShiftAnimState } from './ShiftStartAnimation';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { useStartShift } from '@/services/api/waiter';
 import { useNotifications } from '@/store/notifications';
+import { apiError } from '@/lib/api';
 
 const TEXT: Record<ShiftAnimState, { title: string; subtitle: string }> = {
-  idle: { title: 'Смена не начата', subtitle: 'Чтобы принимать заказы, начните смену' },
+  idle: { title: 'Смена не начата', subtitle: 'Начните смену, чтобы принимать заказы.' },
   loading: { title: 'Проверяем данные…', subtitle: 'Это займёт несколько секунд' },
   success: { title: 'Смена начата', subtitle: '' },
 };
@@ -18,14 +19,20 @@ const SUCCESS_HOLD_MS = 680;
 const FADE_MS = 260;
 
 /**
- * Полноэкранный экран «Смена не начата» (строго по референсу designe/Смена не начата):
- * белый фон, без шапки и нижней навигации. Логотип EP с мягким свечением выше центра,
+ * Экран «Смена не начата» под рабочей шапкой (как в PWA ShiftGate):
+ * белый overlay над рабочей областью. Логотип EP с мягким свечением выше центра,
  * текстовый блок под ним, крупная синяя кнопка «Начать смену» внизу.
  *
  * onBusyChange(true) — запуск пошёл: родитель удерживает экран до конца анимации успеха;
  * onBusyChange(false) — можно показать рабочие вкладки (после анимации либо при ошибке).
  */
-export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boolean) => void }) {
+export function ShiftRequiredScreen({
+  onBusyChange,
+  bottomSafe = true,
+}: {
+  onBusyChange: (busy: boolean) => void;
+  bottomSafe?: boolean;
+}) {
   const [phase, setPhase] = React.useState<ShiftAnimState>('idle');
   const startShift = useStartShift();
   const pushToast = useNotifications((s) => s.push);
@@ -64,7 +71,7 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
           setPhase('success');
         }, remaining);
       },
-      onError: () => {
+      onError: (err) => {
         if (successTimerRef.current) {
           clearTimeout(successTimerRef.current);
           successTimerRef.current = null;
@@ -72,7 +79,7 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
         setPhase('idle');
         onBusyChange(false);
         pushToast({
-          message: 'Не удалось начать смену. Попробуйте ещё раз.',
+          message: apiError(err),
           type: 'error',
           at: new Date().toISOString(),
         });
@@ -91,16 +98,14 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
   const { title, subtitle } = TEXT[phase];
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+    <SafeAreaView style={styles.safe} edges={bottomSafe ? ['bottom'] : []}>
       <Animated.View style={[styles.root, { opacity: fade }]}>
-        {/* Верхний блок: логотип со свечением + текст, чуть выше центра */}
-        <View style={styles.topSpacer} />
-        <View style={styles.center}>
+        {/* Верхний блок: логотип со свечением + текст, как в PWA ShiftRequiredScreen. */}
+        <View style={styles.content}>
           <ShiftStartAnimation state={phase} />
           <Text style={styles.title}>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
-        <View style={styles.bottomSpacer} />
 
         {/* Кнопка в нижней части экрана */}
         <View style={styles.footer}>
@@ -110,10 +115,6 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
                 <Text style={styles.buttonText}>Начать смену</Text>
               </FastPressable>
             </Animated.View>
-          ) : phase === 'loading' ? (
-            <View style={styles.footerLoading}>
-              <ActivityIndicator color={colors.primary} />
-            </View>
           ) : null}
         </View>
       </Animated.View>
@@ -124,13 +125,16 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
   root: { flex: 1 },
-  // Группа «логотип + текст» сидит чуть выше середины экрана.
-  topSpacer: { flex: 0.82 },
-  bottomSpacer: { flex: 1.18 },
-  center: { alignItems: 'center', paddingHorizontal: spacing.xl },
+  content: {
+    flex: 1,
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xxl,
+  },
   title: {
     marginTop: spacing.xl,
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '700',
     color: colors.textPrimary,
     textAlign: 'center',
@@ -143,14 +147,13 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   footer: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.lg,
-    minHeight: 54 + spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xl,
+    minHeight: 48 + spacing.xl,
     justifyContent: 'flex-end',
   },
-  footerLoading: { height: 54, alignItems: 'center', justifyContent: 'center' },
   button: {
-    height: 54,
+    height: 48,
     borderRadius: radius.md,
     backgroundColor: colors.primary,
     alignItems: 'center',

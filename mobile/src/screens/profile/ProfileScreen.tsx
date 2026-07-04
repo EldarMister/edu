@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Constants from 'expo-constants';
@@ -10,11 +10,13 @@ import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { ORDER_STATUS } from '@/theme/status';
 import { beep } from '@/lib/sound';
+import { apiError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { useLocale, type Locale } from '@/store/locale';
 import { useNotifications } from '@/store/notifications';
-import { useCurrentShift, useEndShift, useOrderDetails, useWaiterCabinet, type CabinetRecentOrder } from '@/services/api/waiter';
+import { useCurrentShift, useEndShift, useOrderDetails, useStartShift, useWaiterCabinet, type CabinetRecentOrder } from '@/services/api/waiter';
+import { useRetryFiscal } from '@/services/api/admin';
 import { disconnectSocket } from '@/services/socket';
 import {
   playNotificationSoundTest,
@@ -60,6 +62,7 @@ export function ProfileScreen() {
   const logout = useAuth((s) => s.logout);
   const isWaiter = user?.role === 'WAITER';
   const shiftQuery = useCurrentShift(isWaiter);
+  const startShift = useStartShift();
   const endShift = useEndShift();
   const push = useNotifications((s) => s.push);
   const history = useNotifications((s) => s.history);
@@ -124,6 +127,15 @@ export function ProfileScreen() {
     }
   };
 
+  const onStartShift = async () => {
+    try {
+      await startShift.mutateAsync();
+      push({ message: 'Смена начата', type: 'success', at: new Date().toISOString() });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  };
+
   if (isWaiter && cabinetOpen) {
     return (
       <WaiterCabinetScreen
@@ -177,14 +189,13 @@ export function ProfileScreen() {
                   <Text style={styles.shiftValue}>{timeHM(shift!.startedAt)}</Text>
                 </View>
               ) : null}
-              {shiftActive ? (
-                <Button
-                  title="Закончить смену"
-                  style={{ marginTop: spacing.lg }}
-                  loading={endShift.isPending}
-                  onPress={() => void onEndShift()}
-                />
-              ) : null}
+              <Button
+                title={shiftActive ? 'Закончить смену' : 'Начать смену'}
+                style={{ marginTop: spacing.lg }}
+                loading={shiftActive ? endShift.isPending : startShift.isPending}
+                disabled={shiftQuery.isLoading}
+                onPress={() => void (shiftActive ? onEndShift() : onStartShift())}
+              />
             </Card>
           ) : null}
 
@@ -298,7 +309,6 @@ function ShiftSummarySheet({
       visible={visible}
       onClose={onClose}
       title="Смена завершена"
-      sheet
       bodyStyle={styles.shiftSummaryBody}
       footer={<Button title="Готово" onPress={onClose} />}
     >
@@ -429,6 +439,7 @@ function WaiterCabinetScreen({
         order={detail.data ?? null}
         loading={detail.isLoading || detail.isFetching}
         onClose={() => setDetailId(null)}
+        onRetriedFiscal={() => void detail.refetch()}
       />
     </>
   );
@@ -519,11 +530,13 @@ function OrderDetailsSheet({
   order,
   loading,
   onClose,
+  onRetriedFiscal,
 }: {
   visible: boolean;
   order: Order | null;
   loading: boolean;
   onClose: () => void;
+  onRetriedFiscal: () => void;
 }) {
   const showMixedBreakdown = order?.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
   return (
@@ -606,9 +619,87 @@ function OrderDetailsSheet({
             {Number(order.serviceChargeAmount) > 0 ? <DetailTotal label="Обслуживание" value={money(order.serviceChargeAmount)} /> : null}
             <DetailTotal label="К оплате" value={money(order.finalAmount)} strong />
           </View>
+
+          <FiscalBlock order={order} onRetried={onRetriedFiscal} />
         </ScrollView>
       )}
     </BottomSheet>
+  );
+}
+
+function FiscalBlock({ order, onRetried }: { order: Order; onRetried: () => void }) {
+  const retry = useRetryFiscal();
+  const push = useNotifications((s) => s.push);
+  const hasReceipt = !!order.fiscalReceiptNumber;
+  const hasError = !hasReceipt && !!order.fiscalError;
+  if (!hasReceipt && !hasError) return null;
+
+  const onRetry = async () => {
+    try {
+      const res = await retry.mutateAsync(order.id);
+      if (res?.success) {
+        push({ message: 'Фискальный чек пробит', type: 'success', at: new Date().toISOString() });
+      } else {
+        push({
+          message: res?.error ?? 'ККМ вернул ошибку',
+          type: 'error',
+          at: new Date().toISOString(),
+        });
+      }
+      onRetried();
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  };
+
+  if (hasReceipt) {
+    const qr = order.fiscalQrCode ?? '';
+    const isImage = qr.startsWith('data:image');
+    const canOpen = !!qr && !isImage;
+    return (
+      <View style={styles.fiscalBoxSuccess}>
+        <View style={styles.fiscalTopRow}>
+          <View style={styles.fiscalSuccessBadge}>
+            <Text style={styles.fiscalSuccessBadgeText}>Фискальный чек</Text>
+          </View>
+          <Text style={styles.fiscalReceiptNumber}>№ {order.fiscalReceiptNumber}</Text>
+        </View>
+        {order.fiscalSign ? (
+          <Text style={styles.fiscalMeta}>Фискальный признак: {order.fiscalSign}</Text>
+        ) : null}
+        {qr ? (
+          isImage ? (
+            <Image source={{ uri: qr }} style={styles.fiscalQrImage} resizeMode="contain" />
+          ) : (
+            <FastPressable
+              disabled={!canOpen}
+              onPress={() => void Linking.openURL(qr)}
+              style={styles.fiscalLinkPress}
+            >
+              <Text style={styles.fiscalLink}>{qr}</Text>
+            </FastPressable>
+          )
+        ) : null}
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.fiscalBoxError}>
+      <View style={styles.fiscalErrorTopRow}>
+        <View style={styles.fiscalErrorBadge}>
+          <Text style={styles.fiscalErrorBadgeText}>Ошибка ККМ</Text>
+        </View>
+        <FastPressable
+          disabled={retry.isPending}
+          onPress={() => void onRetry()}
+          style={[styles.fiscalRetryButton, retry.isPending && styles.fiscalRetryButtonDisabled]}
+        >
+          <Text style={styles.fiscalRetryText}>{retry.isPending ? 'Повтор…' : 'Повторить'}</Text>
+        </FastPressable>
+      </View>
+      <Text style={styles.fiscalErrorText}>{order.fiscalError}</Text>
+    </View>
   );
 }
 
@@ -922,6 +1013,61 @@ const styles = StyleSheet.create({
   detailTotalLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
   detailTotalValue: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '700' },
   detailTotalStrong: { fontSize: fontSize.base, color: colors.textPrimary, fontWeight: '800' },
+  fiscalBoxSuccess: {
+    borderWidth: 1,
+    borderColor: 'rgba(22,163,74,0.30)',
+    borderRadius: radius.sm,
+    backgroundColor: colors.successSoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+  },
+  fiscalTopRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  fiscalSuccessBadge: {
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(22,163,74,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+  },
+  fiscalSuccessBadgeText: { fontSize: fontSize.xs, fontWeight: '600', color: colors.success },
+  fiscalReceiptNumber: { fontSize: fontSize.sm, fontWeight: '700', color: colors.textPrimary },
+  fiscalMeta: { marginTop: 4, fontSize: fontSize.xs, color: colors.textMuted },
+  fiscalQrImage: {
+    width: 112,
+    height: 112,
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    backgroundColor: colors.white,
+  },
+  fiscalLinkPress: { marginTop: spacing.sm },
+  fiscalLink: { fontSize: fontSize.xs, color: colors.primary },
+  fiscalBoxError: {
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.30)',
+    borderRadius: radius.sm,
+    backgroundColor: colors.dangerSoft,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+  },
+  fiscalErrorTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  fiscalErrorBadge: {
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+  },
+  fiscalErrorBadgeText: { fontSize: fontSize.xs, fontWeight: '600', color: colors.danger },
+  fiscalRetryButton: {
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.40)',
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+  },
+  fiscalRetryButtonDisabled: { opacity: 0.5 },
+  fiscalRetryText: { fontSize: fontSize.xs, fontWeight: '600', color: colors.danger },
+  fiscalErrorText: { marginTop: 6, fontSize: fontSize.xs, color: colors.danger },
   periodSheetBody: { gap: 0, paddingTop: spacing.sm },
   periodOption: {
     minHeight: 50,

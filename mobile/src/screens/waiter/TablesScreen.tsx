@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  InteractionManager,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -106,11 +107,15 @@ export function TablesScreen() {
 
   const openTableAction = (modal: TableModal) => {
     setActionsOpen(false);
+    setActionsRender(false);
+    actionsProgress.value = 0;
     if (!selectedTable) {
       push({ message: 'Сначала выберите стол', type: 'error', at: new Date().toISOString() });
       return;
     }
-    setTableModal(modal);
+    InteractionManager.runAfterInteractions(() => {
+      setTableModal(modal);
+    });
   };
 
   React.useEffect(() => {
@@ -647,7 +652,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tableSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tableSelected: { backgroundColor: 'rgba(0,91,255,0.90)', borderColor: 'rgba(0,91,255,0.90)' },
   dot: { position: 'absolute', right: 8, top: 8, width: 10, height: 10, borderRadius: 5 },
   dotRoomy: { right: 16, top: 16, width: 16, height: 16, borderRadius: 8 },
   tableNumber: { fontWeight: '500', color: colors.textPrimary },

@@ -16,6 +16,7 @@ import { MenuScreen } from '@/screens/waiter/MenuScreen';
 import { OrdersNavigator } from './OrdersNavigator';
 import { ProfileScreen } from '@/screens/profile/ProfileScreen';
 import { useActiveOrders, useCurrentShift } from '@/services/api/waiter';
+import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import type { WaiterTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<WaiterTabParamList>();
@@ -39,9 +40,17 @@ export function WaiterNavigator() {
   const shiftResolved = shiftQ.isFetched || shiftQ.data !== undefined;
   // Пока идёт запуск смены, экран удерживается, даже когда смена уже активна.
   const [busy, setBusy] = React.useState(false);
+  const [activeTab, setActiveTab] = React.useState<keyof WaiterTabParamList>('Tables');
+  const setShiftGateOpen = useRadioVisibility((s) => s.setShiftGateOpen);
   const showShiftLoading = !shiftResolved;
   const showGate = busy || (shiftResolved && !shiftActive);
+  const showGateOverlay = showGate && activeTab !== 'Profile';
   const tabBarHeight = waiterLayout.navBarHeight + insets.bottom;
+
+  React.useEffect(() => {
+    setShiftGateOpen(showGateOverlay);
+    return () => setShiftGateOpen(false);
+  }, [setShiftGateOpen, showGateOverlay]);
 
   // Первичная проверка смены — белый экран с лоадером (без шапки/навигации).
   if (showShiftLoading) {
@@ -52,19 +61,21 @@ export function WaiterNavigator() {
     );
   }
 
-  // Смена не начата — отдельный полноэкранный экран без шапки и нижней навигации.
-  if (showGate) {
-    return <ShiftRequiredScreen onBusyChange={setBusy} />;
-  }
-
-  // Смена активна — обычный рабочий интерфейс: шапка + вкладки.
+  // Обычный рабочий интерфейс. Если смена не начата, PWA показывает gate как
+  // overlay поверх рабочих вкладок, но нижняя навигация и профиль остаются доступны.
   return (
     <SafeAreaView style={styles.workSafe} edges={['top']}>
       <OfflineBanner />
       <WaiterHeader />
-      <View style={{ flex: 1 }}>
+      <View style={styles.tabsHost}>
         <Tab.Navigator
-          tabBar={(props) => <WaiterTabBar {...props} ordersCount={ordersCount} />}
+          tabBar={(props) => (
+            <WaiterTabBar
+              {...props}
+              ordersCount={ordersCount}
+              onActiveRouteChange={setActiveTab}
+            />
+          )}
           screenOptions={({ route }) => ({
             headerShown: false,
             tabBarActiveTintColor: colors.primary,
@@ -88,13 +99,32 @@ export function WaiterNavigator() {
           <Tab.Screen name="Orders" component={OrdersNavigator} options={{ title: 'Заказы' }} />
           <Tab.Screen name="Profile" component={ProfileScreen} options={{ title: 'Профиль' }} />
         </Tab.Navigator>
+        {showGateOverlay ? (
+          <View style={[styles.shiftGateOverlay, { bottom: tabBarHeight }]}>
+            <ShiftRequiredScreen onBusyChange={setBusy} bottomSafe={false} />
+          </View>
+        ) : null}
       </View>
     </SafeAreaView>
   );
 }
 
-function WaiterTabBar({ state, descriptors, navigation, ordersCount }: BottomTabBarProps & { ordersCount: number }) {
+function WaiterTabBar({
+  state,
+  descriptors,
+  navigation,
+  ordersCount,
+  onActiveRouteChange,
+}: BottomTabBarProps & {
+  ordersCount: number;
+  onActiveRouteChange: (route: keyof WaiterTabParamList) => void;
+}) {
   const insets = useSafeAreaInsets();
+  const activeRoute = state.routes[state.index]?.name as keyof WaiterTabParamList | undefined;
+
+  React.useEffect(() => {
+    if (activeRoute) onActiveRouteChange(activeRoute);
+  }, [activeRoute, onActiveRouteChange]);
 
   return (
     <View style={[styles.tabBar, { paddingBottom: insets.bottom }]}>
@@ -131,7 +161,6 @@ function WaiterTabBar({ state, descriptors, navigation, ordersCount }: BottomTab
               onPress={onPress}
               style={styles.tabButton}
             >
-              {focused ? <View style={styles.activeTabIndicator} /> : null}
               <View style={styles.iconWrap}>
                 <PwaIcon name={ICONS[route.name as keyof WaiterTabParamList]} size={22} color={color} />
                 {badge > 0 ? (
@@ -154,6 +183,15 @@ function WaiterTabBar({ state, descriptors, navigation, ordersCount }: BottomTab
 const styles = StyleSheet.create({
   plainSafe: { flex: 1, backgroundColor: colors.white },
   workSafe: { flex: 1, backgroundColor: colors.primary },
+  tabsHost: { flex: 1, position: 'relative' },
+  shiftGateOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    zIndex: 40,
+    backgroundColor: colors.white,
+  },
   tabBar: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
@@ -172,14 +210,6 @@ const styles = StyleSheet.create({
     paddingTop: 9,
     paddingBottom: 9,
     gap: 4,
-  },
-  activeTabIndicator: {
-    position: 'absolute',
-    top: 0,
-    width: 48,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: colors.primary,
   },
   tabLabel: {
     fontSize: fontSize.xs,

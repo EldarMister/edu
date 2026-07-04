@@ -213,6 +213,81 @@ export function useSetCashHanded() {
   });
 }
 
+export type ShiftHistoryPeriod = 'today' | 'week' | 'month' | 'custom';
+export type ShiftHistoryStatus = 'active' | 'unclosed' | 'closed';
+
+export interface ShiftHistoryFilters {
+  period: ShiftHistoryPeriod;
+  from?: string;
+  to?: string;
+  employeeId?: string;
+  role?: Role | '';
+}
+export interface ShiftHistoryOrder {
+  id: string;
+  orderNumber: string;
+  amount: number;
+}
+export interface ShiftHistoryRow {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  role: Role;
+  startedAt: string;
+  endedAt: string | null;
+  durationMin: number;
+  status: ShiftHistoryStatus;
+  closedBy: string | null;
+  adminComment: string | null;
+  ordersCount: number;
+  turnover: number;
+  orders: ShiftHistoryOrder[];
+}
+export interface ShiftHistoryResponse {
+  items: ShiftHistoryRow[];
+  summary: {
+    shiftsCount: number;
+    totalDurationMin: number;
+    activeCount: number;
+  };
+  range: { from: string; to: string };
+}
+
+function shiftHistoryQuery(filters: ShiftHistoryFilters): string {
+  const parts = [`period=${filters.period}`];
+  if (filters.from) parts.push(`from=${filters.from}`);
+  if (filters.to) parts.push(`to=${filters.to}`);
+  if (filters.employeeId) parts.push(`employeeId=${encodeURIComponent(filters.employeeId)}`);
+  if (filters.role) parts.push(`role=${filters.role}`);
+  return parts.join('&');
+}
+
+export function useShiftHistory(filters: ShiftHistoryFilters) {
+  const q = shiftHistoryQuery(filters);
+  return useQuery({
+    queryKey: ['admin', 'staff', 'shift-history', filters],
+    queryFn: () => get<ShiftHistoryResponse>(`/admin/staff/shift-history?${q}`),
+  });
+}
+
+export function useShiftHistoryActions() {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-history'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-report'] });
+  };
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; startedAt?: string; endedAt?: string | null }) =>
+      api.patch(`/admin/staff/shift-history/${id}`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const close = useMutation({
+    mutationFn: (id: string) => api.post(`/admin/staff/shift-history/${id}/close`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { update, close };
+}
+
 // ---------- Журнал действий (аудит, порт PWA) ----------
 export interface AuditLogEntry {
   id: string;

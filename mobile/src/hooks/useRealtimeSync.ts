@@ -48,17 +48,29 @@ export function useRealtimeSync() {
       qc.invalidateQueries({ queryKey: ['kitchen'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
     };
     const invalidateTables = () => {
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
     };
     const invalidateMenu = () => {
       qc.invalidateQueries({ queryKey: ['dishes'] });
       qc.invalidateQueries({ queryKey: ['categories'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'menu'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'categories'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'dishes'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'sets'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
     };
     const invalidateSettings = () => {
       qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
+      qc.invalidateQueries({ queryKey: ['audit'] });
     };
     const syncVisibleData = () => {
       const now = Date.now();
@@ -69,6 +81,7 @@ export function useRealtimeSync() {
       void qc.refetchQueries({ queryKey: ['waiter', 'shift'], type: 'active' });
       void qc.refetchQueries({ queryKey: ['categories'], type: 'active' });
       void qc.refetchQueries({ queryKey: ['dishes'], type: 'active' });
+      void qc.refetchQueries({ queryKey: ['admin'], type: 'active' });
     };
     const onNotificationNew = (n: RealtimeNotification) => {
       const orderNumber = n.orderNumber ? displayOrderNumber(n.orderNumber) : undefined;

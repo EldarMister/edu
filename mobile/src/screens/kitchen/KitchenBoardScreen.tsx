@@ -270,14 +270,26 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         <View style={{ flex: 1, minWidth: 0 }}>
           <SegmentTabs items={TABS} value={tab} onChange={setTab} count={list.length} />
         </View>
-        <FastPressable onPress={() => setStatsOpen(true)} style={styles.voiceBtn} hitSlop={6}>
-          <PwaIcon name="chart" size={18} color={colors.primary} />
+        <FastPressable
+          onPress={() => setStatsOpen(true)}
+          style={[styles.toolbarBtn, statsOpen && styles.toolbarBtnPrimary]}
+          hitSlop={6}
+        >
+          <Text style={[styles.toolbarBtnText, statsOpen && styles.toolbarBtnTextPrimary]}>Статистика</Text>
         </FastPressable>
-        <FastPressable onPress={() => setVoiceOpen(true)} style={styles.voiceBtn} hitSlop={6}>
+        <FastPressable
+          onPress={() => setVoiceOpen(true)}
+          style={[styles.toolbarBtn, voiceOpen && styles.toolbarBtnSoft]}
+          hitSlop={6}
+        >
           <PwaIcon name="speaker" size={18} color={colors.primary} />
+          <Text style={styles.toolbarBtnText}>Озвучка</Text>
+          <View style={voiceOpen ? styles.chevronUp : undefined}>
+            <PwaIcon name="chevronDown" size={14} color={colors.primary} strokeWidth={2.2} />
+          </View>
         </FastPressable>
-        <FastPressable onPress={() => setStopListOpen(true)} style={styles.stopListBtn} hitSlop={6}>
-          <Text style={styles.stopListText}>Стоп-лист</Text>
+        <FastPressable onPress={() => setStopListOpen(true)} style={styles.toolbarBtn} hitSlop={6}>
+          <Text style={styles.toolbarBtnText}>Стоп-лист</Text>
         </FastPressable>
       </View>
 
@@ -509,11 +521,14 @@ function KitchenCard({
       ? `${sc.originalNameSnapshot} ${sc.originalVariantNameSnapshot}`
       : sc.originalNameSnapshot;
     if (sc.action !== 'replaced') return <Text>{orig}</Text>;
+    const final = sc.finalVariantNameSnapshot
+      ? `${sc.finalNameSnapshot} ${sc.finalVariantNameSnapshot}`
+      : sc.finalNameSnapshot;
     return (
       <Text>
         <Text style={styles.replacedOld}>{orig}</Text>
         <Text style={styles.replacedArrow}> {'>'} </Text>
-        <Text style={styles.replacedNew}>{sc.finalNameSnapshot}</Text>
+        <Text style={styles.replacedNew}>{final}</Text>
       </Text>
     );
   };
@@ -840,27 +855,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: 10,
   },
-  voiceBtn: {
-    width: 38,
+  toolbarBtn: {
     height: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.primary,
     backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: 14,
   },
-  stopListBtn: {
-    height: 38,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  stopListText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.primary },
+  toolbarBtnSoft: { backgroundColor: colors.primaryFaint },
+  toolbarBtnPrimary: { backgroundColor: colors.primary },
+  toolbarBtnText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.primary },
+  toolbarBtnTextPrimary: { color: colors.white },
   list: { padding: spacing.lg, gap: spacing.lg, paddingBottom: 96 },
 
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.sm },

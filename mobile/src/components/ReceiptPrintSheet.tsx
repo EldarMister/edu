@@ -1,22 +1,32 @@
 import React from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { BottomSheet } from '@/components/BottomSheet';
+import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { useReceiptPrint } from '@/store/receiptPrint';
 import { displayOrderNumber, money, orderItemDisplayName } from '@/utils/format';
+import { beep } from '@/lib/sound';
 
 export function ReceiptPrintSheet() {
   const { request, receipt, status, sheetOpen, closeSheet, dismiss } = useReceiptPrint();
   const open = !!request && sheetOpen;
   const isPrelim = request?.type === 'preliminary';
   const title = isPrelim ? 'Печать счёта' : 'Печать чека';
+  const lastAcceptedSoundRequestId = React.useRef<string | null>(null);
 
   const primaryClose = () => {
     if (status === 'pending') closeSheet();
     else dismiss();
   };
+
+  React.useEffect(() => {
+    if (!open || status !== 'printed' || !request) return;
+    if (lastAcceptedSoundRequestId.current === request.id) return;
+    lastAcceptedSoundRequestId.current = request.id;
+    void beep('accept');
+  }, [open, request, status]);
 
   if (!request) return null;
 
@@ -25,7 +35,6 @@ export function ReceiptPrintSheet() {
       visible={open}
       onClose={primaryClose}
       sheet
-      title={title}
       maxHeight="80%"
       footer={
         <View style={{ paddingBottom: spacing.sm }}>
@@ -39,6 +48,12 @@ export function ReceiptPrintSheet() {
         </View>
       }
     >
+      <View style={styles.printHeader}>
+        <Text style={styles.printTitle}>{title}</Text>
+        <FastPressable onPress={primaryClose} hitSlop={12} style={styles.printClose}>
+          <PwaIcon name="close" size={22} color={colors.textLight} strokeWidth={2} />
+        </FastPressable>
+      </View>
       {status === 'pending' ? (
         <WaitingState isPrelim={isPrelim} />
       ) : status === 'printed' ? (
@@ -195,6 +210,21 @@ function ReceiptCard() {
 }
 
 const styles = StyleSheet.create({
+  printHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  printTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
+  printClose: {
+    width: 32,
+    height: 32,
+    marginRight: -4,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   centerState: { alignItems: 'center', paddingTop: spacing.sm },
   waitText: {
     marginTop: spacing.sm,

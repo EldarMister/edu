@@ -6,7 +6,7 @@ import { useCurrentShift } from '@/services/api/waiter';
 
 /**
  * Правый блок шапки официанта: индикатор соединения (зелёная точка + «Онлайн»)
- * и статус смены — серый «Не в смене» либо зелёный «Смена активна».
+ * и статус смены — серый «Нет смены» либо зелёный «Смена активна».
  */
 export function ShiftStatusBadge() {
   const shiftQ = useCurrentShift();
@@ -15,7 +15,7 @@ export function ShiftStatusBadge() {
     <View style={styles.row}>
       <ConnectionStatus />
       <Text style={[styles.shift, { color: active ? colors.success : colors.textMuted }]}>
-        {active ? 'Смена активна' : 'Не в смене'}
+        {active ? 'Смена активна' : 'Нет смены'}
       </Text>
     </View>
   );

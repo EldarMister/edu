@@ -3,8 +3,8 @@ import { Image } from 'react-native';
 
 /** Логотип EDU POS (тот же ассет, что в PWA). */
 export function BrandLogo({ size = 'header' }: { size?: 'header' | 'login' }) {
-  const h = size === 'login' ? 48 : 30;
-  const w = size === 'login' ? 170 : 104;
+  const h = size === 'login' ? 48 : 32;
+  const w = size === 'login' ? 171 : 114;
   return (
     <Image
       source={require('../../assets/logo.png')}

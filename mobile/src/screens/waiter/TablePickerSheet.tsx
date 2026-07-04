@@ -69,7 +69,6 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
       visible={visible}
       onClose={close}
       title="Выбор стола"
-      maxHeight="92%"
       footer={
         pending ? (
           <View style={styles.confirmFooter}>
@@ -133,6 +132,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tableSelected: { backgroundColor: colors.primary, borderColor: colors.primary },
-  dot: { position: 'absolute', right: 6, top: 6, width: 10, height: 10, borderRadius: 5 },
+  dot: { position: 'absolute', right: 8, top: 8, width: 10, height: 10, borderRadius: 5 },
   tableNumber: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
 });

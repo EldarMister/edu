@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, InteractionManager, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { FastPressable } from '@/components/FastPressable';
@@ -32,7 +32,7 @@ import { apiError } from '@/lib/api';
 import { displayOrderNumber, hallSuffix, money } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
 import { PaymentSheet } from './PaymentSheet';
-import type { Order, OrderItem } from '@/types';
+import type { Order, OrderItem, OrderItemStatus, OrderSetComponent } from '@/types';
 
 type R = RouteProp<{ OrderDetail: { orderId: string } }, 'OrderDetail'>;
 const DETAIL_EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
@@ -68,6 +68,11 @@ export function OrderDetailScreen() {
   const latestOrderRef = React.useRef<Order | null>(null);
 
   const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
+  const navigateToMenu = React.useCallback(() => {
+    InteractionManager.runAfterInteractions(() => {
+      navigation.getParent()?.navigate('Menu');
+    });
+  }, [navigation]);
 
   React.useEffect(() => {
     latestOrderRef.current = order;
@@ -178,7 +183,7 @@ export function OrderDetailScreen() {
             item,
           });
           push({ message: `Выберите блюдо на замену: ${orderItemName(item)}`, type: 'info', at: new Date().toISOString() });
-          navigation.navigate('Menu');
+          navigateToMenu();
         }}
         onRemove={(item) =>
           removeRejected.mutate(
@@ -286,13 +291,17 @@ export function OrderDetailScreen() {
               </View>
             ) : null}
             <View style={styles.actions}>
-              <Button
-                title="Счёт"
-                variant="secondary"
-                style={{ width: 110 }}
-                loading={print.isPending}
+              <FastPressable
+                disabled={print.isPending}
                 onPress={requestPreliminaryReceipt}
-              />
+                style={[styles.preReceiptBtn, print.isPending && styles.preReceiptBtnDisabled]}
+              >
+                {print.isPending ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <Text style={styles.preReceiptText}>Счёт</Text>
+                )}
+              </FastPressable>
               <Button
                 title={cooldownActive ? String(actionCooldown) : 'Перейти к оплате'}
                 style={{ flex: 1 }}
@@ -315,17 +324,8 @@ export function OrderDetailScreen() {
         );
       case 'waiting_payment':
         return (
-          <View style={{ gap: spacing.sm }}>
-            <View style={styles.waitingPaymentBox}>
-              <Text style={styles.waitingPaymentText}>Ожидает оплаты</Text>
-            </View>
-            <Button
-              title="Открыть оплату"
-              onPress={() => {
-                setPaymentOrder(order);
-                setPayOpen(true);
-              }}
-            />
+          <View style={styles.waitingPaymentBox}>
+            <Text style={styles.waitingPaymentText}>Ожидает оплаты</Text>
           </View>
         );
       case 'sent_to_kitchen':
@@ -379,7 +379,7 @@ export function OrderDetailScreen() {
                     { id: order.id, orderNumber: order.orderNumber, comment: order.comment },
                     lines,
                   );
-                  navigation.navigate('Menu');
+                  navigateToMenu();
                 }}
                 style={styles.editOrderBtn}
               >
@@ -462,6 +462,25 @@ function safeComment(value: string | null | undefined): string | null {
   return value;
 }
 
+function setComponentLabel(component: OrderSetComponent) {
+  const original = component.originalVariantNameSnapshot
+    ? `${component.originalNameSnapshot} ${component.originalVariantNameSnapshot}`
+    : component.originalNameSnapshot;
+  if (component.action !== 'replaced') return { original, final: null };
+  const final = component.finalVariantNameSnapshot
+    ? `${component.finalNameSnapshot ?? ''} ${component.finalVariantNameSnapshot}`
+    : component.finalNameSnapshot;
+  return { original, final };
+}
+
+function itemStatusText(status: OrderItemStatus) {
+  if (status === 'ready' || status === 'served') return 'Готово';
+  if (status === 'cooking' || status === 'accepted') return 'Готовится';
+  if (status === 'rejected') return 'Отказано';
+  if (status === 'cancelled') return 'Отменено';
+  return 'Ожидает';
+}
+
 function ItemCard({
   item,
   billCorrection,
@@ -478,10 +497,11 @@ function ItemCard({
   const rejected = item.status === 'rejected' || item.status === 'cancelled';
   const cooking = item.status === 'accepted' || item.status === 'cooking';
   const comment = safeComment(item.comment);
+  const setParts = item.setComponents ?? [];
   const clickable = billCorrection && (item.status === 'ready' || item.status === 'served') && !disabled;
-  const hasExtra = comment || ((rejected || item.status === 'cancelled') && item.rejectReason);
+  const hasExtra = setParts.length > 0 || comment || (rejected && item.rejectReason);
   return (
-    <FastPressable disabled={!clickable} onPress={onCancel} style={styles.itemCard}>
+    <FastPressable disabled={!clickable} onPress={onCancel} style={[styles.itemCard, rejected && styles.itemCardRejected]}>
       <View style={styles.itemMainRow}>
         <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={2}>
           {name}
@@ -501,6 +521,58 @@ function ItemCard({
       </View>
       {hasExtra ? (
         <View style={styles.itemExtra}>
+          {setParts.length > 0 ? (
+            <View style={styles.setParts}>
+              {setParts.map((component) => {
+                const removed = component.action === 'removed' || component.status === 'cancelled';
+                const componentRejected = component.status === 'rejected';
+                const label = setComponentLabel(component);
+                return (
+                  <View key={component.id} style={styles.setPartRow}>
+                    <Text
+                      style={[
+                        styles.setPartName,
+                        (removed || componentRejected) && styles.setPartRejectedName,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {label.final ? (
+                        <>
+                          <Text style={styles.setPartOld}>{label.original}</Text>
+                          <Text style={styles.setPartArrow}> &gt; </Text>
+                          <Text style={styles.setPartNew}>{label.final}</Text>
+                        </>
+                      ) : (
+                        label.original
+                      )}
+                    </Text>
+                    {component.quantity > 1 ? (
+                      <Text style={styles.setPartQty}>×{component.quantity}</Text>
+                    ) : null}
+                    <View
+                      style={[
+                        styles.setPartStatus,
+                        (component.status === 'ready' || component.status === 'served') && styles.setPartStatusDone,
+                        (component.status === 'rejected' || component.status === 'cancelled') && styles.setPartStatusDanger,
+                        (component.status === 'cooking' || component.status === 'accepted') && styles.setPartStatusCooking,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.setPartStatusText,
+                          (component.status === 'ready' || component.status === 'served') && styles.setPartStatusTextDone,
+                          (component.status === 'rejected' || component.status === 'cancelled') && styles.setPartStatusTextDanger,
+                          (component.status === 'cooking' || component.status === 'accepted') && styles.setPartStatusTextCooking,
+                        ]}
+                      >
+                        {itemStatusText(component.status)}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          ) : null}
           {comment ? <Text style={styles.itemComment}>{comment}</Text> : null}
           {rejected && item.rejectReason ? (
             <Text style={styles.itemRejectReason}>
@@ -710,6 +782,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 3,
   },
+  itemCardRejected: {
+    borderColor: 'rgba(239,68,68,0.30)',
+    backgroundColor: colors.dangerSoft,
+  },
   itemMainRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   itemName: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary },
   itemRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
@@ -719,7 +795,37 @@ const styles = StyleSheet.create({
   itemDone: { fontSize: fontSize.sm, color: colors.success, fontWeight: '600' },
   itemCooking: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: '500' },
   itemRejected: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '600' },
-  itemExtra: { gap: 2 },
+  itemExtra: { gap: 6, marginTop: 2 },
+  setParts: {
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(226,232,240,0.70)',
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(255,255,255,0.70)',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+  },
+  setPartRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  setPartName: { flex: 1, minWidth: 0, fontSize: fontSize.xs, color: colors.textSecondary },
+  setPartRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
+  setPartOld: { color: colors.textMuted, textDecorationLine: 'line-through' },
+  setPartArrow: { color: colors.textMuted, fontWeight: '700' },
+  setPartNew: { color: colors.primary, fontWeight: '700' },
+  setPartQty: { fontSize: fontSize.xs, color: colors.textMuted },
+  setPartStatus: {
+    flexShrink: 0,
+    borderRadius: 6,
+    backgroundColor: colors.warningSoft,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  setPartStatusDone: { backgroundColor: 'rgba(22,163,74,0.08)' },
+  setPartStatusDanger: { backgroundColor: colors.dangerSoft },
+  setPartStatusCooking: { backgroundColor: colors.background },
+  setPartStatusText: { fontSize: fontSize.xs, fontWeight: '600', color: colors.warning },
+  setPartStatusTextDone: { color: colors.green600 },
+  setPartStatusTextDanger: { color: colors.danger },
+  setPartStatusTextCooking: { color: colors.textSecondary },
   itemComment: { fontSize: fontSize.xs, color: colors.textMuted },
   itemRejectReason: { fontSize: fontSize.xs, color: colors.danger },
   footer: {
@@ -734,6 +840,18 @@ const styles = StyleSheet.create({
   totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
   totalValue: { fontSize: 22, fontWeight: '600', color: colors.textPrimary },
   actions: { flexDirection: 'row', gap: spacing.sm },
+  preReceiptBtn: {
+    width: 110,
+    height: 48,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  preReceiptBtnDisabled: { opacity: 0.5 },
+  preReceiptText: { color: colors.primary, fontSize: fontSize.base, fontWeight: '600' },
   qrInfoBox: {
     borderRadius: radius.md,
     borderWidth: 1,

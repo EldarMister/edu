@@ -43,8 +43,10 @@ type BottomSheetSnapshot = {
   footer?: React.ReactNode;
   sheet: boolean;
   bodyStyle?: ViewStyle;
+  panelStyle?: ViewStyle;
   maxHeight?: ViewStyle['maxHeight'];
   bottomInset?: number;
+  backdropColor?: string;
 };
 
 /**
@@ -61,8 +63,10 @@ export function BottomSheet({
   footer,
   sheet = false,
   bodyStyle,
+  panelStyle,
   maxHeight,
   bottomInset,
+  backdropColor,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -72,8 +76,10 @@ export function BottomSheet({
   /** true — стиль «нижний лист» с хваталкой вместо шапки-крестика. */
   sheet?: boolean;
   bodyStyle?: ViewStyle;
+  panelStyle?: ViewStyle;
   maxHeight?: ViewStyle['maxHeight'];
   bottomInset?: number;
+  backdropColor?: string;
 }) {
   const [render, setRender] = React.useState(visible);
   const currentSnapshot: BottomSheetSnapshot = {
@@ -82,8 +88,10 @@ export function BottomSheet({
     footer,
     sheet,
     bodyStyle,
+    panelStyle,
     maxHeight,
     bottomInset,
+    backdropColor,
   };
   const visibleSnapshotRef = React.useRef(currentSnapshot);
   if (visible) {
@@ -216,6 +224,7 @@ export function BottomSheet({
           style={[
             styles.backdropFill,
             content.bottomInset != null && { bottom: content.bottomInset },
+            content.backdropColor ? { backgroundColor: content.backdropColor } : null,
             backdropStyle,
           ]}
           pointerEvents="box-none"
@@ -234,6 +243,7 @@ export function BottomSheet({
             style={[
               styles.sheet,
               content.maxHeight != null && { maxHeight: content.maxHeight },
+              content.panelStyle,
               sheetStyle,
             ]}
           >

@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import {
   FlatList,
   Image,
+  InteractionManager,
   RefreshControl,
   StyleSheet,
   Text,
@@ -113,6 +114,12 @@ export function OrdersScreen() {
     navigation.navigate('OrderDetail', { orderId: order.id });
   }, [navigation]);
 
+  const navigateToMenu = React.useCallback(() => {
+    InteractionManager.runAfterInteractions(() => {
+      navigation.getParent()?.navigate('Menu');
+    });
+  }, [navigation]);
+
   const editOrder = React.useCallback((order: Order) => {
     closeMenu();
     const lines = orderToCartLines(order, dishes.data ?? []);
@@ -125,8 +132,8 @@ export function OrdersScreen() {
       { id: order.id, orderNumber: order.orderNumber, comment: order.comment },
       lines,
     );
-    navigation.navigate('Menu');
-  }, [closeMenu, dishes.data, navigation, push, startEditing]);
+    navigateToMenu();
+  }, [closeMenu, dishes.data, navigateToMenu, push, startEditing]);
 
   const commitCancel = React.useCallback((pending: PendingCancel) => {
     setPendingCancel((current) => (
@@ -406,13 +413,13 @@ const OrderCard = memo(function OrderCard({
       <View style={styles.row}>
         <View style={styles.headLeft}>
           <View style={styles.titleRow}>
-            <Text style={styles.orderNumber}>{displayOrderNumber(order.orderNumber)}</Text>
+            <Text style={styles.orderNumber} numberOfLines={1}>{displayOrderNumber(order.orderNumber)}</Text>
             {unclaimedQr ? (
               <View style={styles.qrTag}>
                 <Text style={styles.qrTagText}>QR</Text>
               </View>
             ) : null}
-            <Text style={styles.tableText}>
+            <Text style={styles.tableText} numberOfLines={1}>
               Стол {order.table.number}
               {hallSuffix(order.table)}
             </Text>
@@ -474,20 +481,21 @@ const styles = StyleSheet.create({
   panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.lg },
   list: { gap: spacing.sm, paddingBottom: spacing.lg },
   orderCard: { paddingHorizontal: spacing.lg, paddingVertical: 14 },
-  row: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.sm },
+  row: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.sm, minHeight: 48 },
   headLeft: { flex: 1, minWidth: 0, justifyContent: 'space-between', gap: 8 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-  orderNumber: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, minWidth: 0 },
+  orderNumber: { flexShrink: 0, fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   qrTag: { backgroundColor: colors.primarySoft, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2 },
   qrTagText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primary },
-  tableText: { fontSize: fontSize.base, color: colors.textMuted },
+  tableText: { flexShrink: 1, minWidth: 0, fontSize: fontSize.sm, color: colors.textMuted },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaText: { fontSize: fontSize.sm, color: colors.textLight },
-  headRight: { alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 },
+  headRight: { flexShrink: 0, alignItems: 'flex-end', justifyContent: 'space-between', gap: 8 },
   money: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
   dots: {
-    width: 30,
-    alignSelf: 'stretch',
+    width: 24,
+    alignSelf: 'center',
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: -6,

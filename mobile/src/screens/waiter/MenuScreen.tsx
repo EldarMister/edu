@@ -346,15 +346,10 @@ export function MenuScreen() {
         >
           <PwaIcon name="cart" size={22} color={colors.textSecondary} />
           <View>
-            <Text style={[styles.cartCount, editingOrderId && styles.cartCountEdit]}>
-              {editingOrderId ? 'Редактирование' : `${count} ${pozLabel(count)}`}
+            <Text style={styles.cartCount}>
+              {count} {pozLabel(count)}
             </Text>
             <NumberTicker value={cartTotal} style={styles.cartTotal} digitHeight={17} />
-            {editingOrderId ? (
-              <Text style={styles.cartOrderNumber} numberOfLines={1}>
-                {displayOrderNumber(editingOrderNumber ?? '')}
-              </Text>
-            ) : null}
           </View>
         </FastPressable>
         <Button
@@ -1104,9 +1099,7 @@ const styles = StyleSheet.create({
     minWidth: 132,
   },
   cartCount: { fontSize: fontSize.xs, color: colors.textMuted },
-  cartCountEdit: { color: colors.primary, fontWeight: '700' },
   cartTotal: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
-  cartOrderNumber: { marginTop: 1, fontSize: fontSize.xs, color: colors.textMuted },
   replacementBar: {
     flexDirection: 'row',
     alignItems: 'center',

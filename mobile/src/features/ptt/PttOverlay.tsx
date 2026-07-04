@@ -36,8 +36,7 @@ import {
   type RadioState,
 } from './types';
 
-const CIRCLE_SIZE = 132;
-const GLOW_SIZE = CIRCLE_SIZE + 44;
+const CIRCLE_SIZE = 122;
 
 /** Кастомная PNG-иконка рации (белая) — как на PWA (/рация.png). */
 const RADIO_ICON = require('../../../assets/radio-icon.png');
@@ -70,21 +69,24 @@ function readWaiterNav(state: unknown): { tab?: string; ordersLeaf?: string } {
 }
 
 /** Визуальные параметры круга и статусной метки по состоянию рации (как в PWA). */
-const STATE_STYLES: Record<RadioState, { circle: string; glow: string; pulse: boolean; label: string }> = {
-  idle: { circle: colors.primary, glow: 'rgba(0, 91, 255, 0.16)', pulse: false, label: colors.primary },
-  recording: { circle: colors.success, glow: 'rgba(22, 163, 74, 0.22)', pulse: true, label: colors.success },
-  receiving: { circle: colors.warning, glow: 'rgba(245, 158, 11, 0.24)', pulse: true, label: colors.warning },
-  error: { circle: colors.danger, glow: 'rgba(239, 68, 68, 0.2)', pulse: false, label: colors.danger },
+const STATE_STYLES: Record<RadioState, { circle: string; ring: string; pulse: boolean; label: string }> = {
+  ready: { circle: colors.primary, ring: 'rgba(0, 91, 255, 0.25)', pulse: false, label: colors.primary },
+  speakingSelf: { circle: colors.success, ring: 'rgba(22, 163, 74, 0.25)', pulse: true, label: colors.success },
+  speakingOther: { circle: colors.warning, ring: 'rgba(245, 158, 11, 0.3)', pulse: true, label: colors.warning },
+  error: { circle: colors.danger, ring: 'rgba(239, 68, 68, 0.3)', pulse: false, label: colors.danger },
 };
 
 function RadioHeader({ onClose }: { onClose: () => void }) {
   return (
-    <View style={styles.header}>
-      <Text style={styles.title}>Рация</Text>
-      <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
-        <PwaIcon name="close" size={26} color={colors.textMuted} strokeWidth={2} />
-      </FastPressable>
-    </View>
+    <>
+      <View style={styles.headerHandle} />
+      <View style={styles.header}>
+        <Text style={styles.title}>Рация</Text>
+        <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
+          <PwaIcon name="close" size={24} color={colors.textMuted} strokeWidth={2} />
+        </FastPressable>
+      </View>
+    </>
   );
 }
 
@@ -137,6 +139,7 @@ function PushToTalkCircle({
   onPressStop: () => void;
 }) {
   const view = STATE_STYLES[state];
+  const ringCount = state === 'speakingSelf' ? 3 : state === 'speakingOther' ? 1 : 0;
   const pulse = useSharedValue(0);
 
   React.useEffect(() => {
@@ -160,11 +163,22 @@ function PushToTalkCircle({
 
   return (
     <View style={styles.circleWrap}>
-      {/* Мягкое свечение вокруг круга; пульсирует, пока идёт передача или приём. */}
-      <Animated.View
-        pointerEvents="none"
-        style={[styles.glow, { backgroundColor: view.glow }, glowStyle]}
-      />
+      {Array.from({ length: ringCount }).map((_, index) => (
+        <Animated.View
+          key={index}
+          pointerEvents="none"
+          style={[
+            styles.ring,
+            {
+              width: CIRCLE_SIZE + 22 + index * 22,
+              height: CIRCLE_SIZE + 22 + index * 22,
+              borderRadius: (CIRCLE_SIZE + 22 + index * 22) / 2,
+              borderColor: view.ring,
+            },
+            glowStyle,
+          ]}
+        />
+      ))}
       <FastPressable
         disabled={disabled}
         onPressIn={onPressStart}
@@ -174,7 +188,7 @@ function PushToTalkCircle({
         style={[
           styles.circle,
           { backgroundColor: view.circle, shadowColor: view.circle },
-          state === 'recording' && { transform: [{ scale: 1.04 }] },
+          state === 'speakingSelf' && { transform: [{ scale: 1.12 }] },
           disabled && styles.circleDisabled,
         ]}
       >
@@ -213,7 +227,7 @@ export function PttOverlay() {
   const isWaiter = user?.role === 'WAITER';
   const [open, setOpen] = React.useState(false);
   const [channel, setChannel] = React.useState<PttChannel>(() => defaultChannelForRole(user?.role));
-  const [onlineCount, setOnlineCount] = React.useState(1);
+  const [onlineCount, setOnlineCount] = React.useState(0);
   const [busySpeaker, setBusySpeaker] = React.useState<{ id: string; name?: string } | null>(null);
   const selected = React.useMemo(
     () => PTT_CHANNELS.find((item) => item.key === channel) ?? PTT_CHANNELS[0],
@@ -226,16 +240,18 @@ export function PttOverlay() {
   // Прячем на «Меню», подробном заказе и в личном кабинете. Другие роли — без
   // ограничений. Оверлей остаётся смонтированным, приём аудио не прерывается.
   const cabinetOpen = useRadioVisibility((s) => s.cabinetOpen);
+  const shiftGateOpen = useRadioVisibility((s) => s.shiftGateOpen);
   const waiterNav = useNavigationState((state) => (isWaiter ? readWaiterNav(state) : null));
   const buttonVisible = React.useMemo(() => {
     if (!isWaiter || !waiterNav) return true;
+    if (shiftGateOpen) return false;
     const { tab, ordersLeaf } = waiterNav;
     if (!tab) return true;
     if (tab === 'Menu') return false;
     if (tab === 'Orders') return ordersLeaf !== 'OrderDetail';
     if (tab === 'Profile') return !cabinetOpen;
     return true;
-  }, [isWaiter, waiterNav, cabinetOpen]);
+  }, [isWaiter, waiterNav, cabinetOpen, shiftGateOpen]);
 
   React.useEffect(() => {
     if (!buttonVisible) setOpen(false);
@@ -266,10 +282,10 @@ export function PttOverlay() {
           if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);
           return;
         }
-        if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 1500);
+        if (retriesLeft > 0) setTimeout(() => attempt(retriesLeft - 1), 1000);
       });
     };
-    attempt(3);
+    attempt(5);
   }, [channel]);
 
   // Последний выбранный канал переживает перезапуск приложения.
@@ -350,41 +366,46 @@ export function PttOverlay() {
   const state: RadioState = !connected
     ? 'error'
     : sender.talking
-      ? 'recording'
+      ? 'speakingSelf'
       : receivingFromOther
-        ? 'receiving'
-        : 'idle';
+        ? 'speakingOther'
+        : 'ready';
 
   const statusTitle =
     state === 'error'
       ? 'Ошибка подключения'
-      : state === 'recording'
+      : state === 'speakingSelf'
         ? 'Вы говорите'
-        : state === 'receiving'
+        : state === 'speakingOther'
           ? `Говорит: ${speakerName}`
           : 'Готово к разговору';
 
   const statusHint =
     state === 'error'
       ? 'Повторите попытку'
-      : state === 'recording'
+      : state === 'speakingSelf'
         ? 'Отпустите для остановки'
-        : state === 'receiving'
-          ? 'Нажмите и удерживайте для ответа'
+        : state === 'speakingOther'
+          ? 'Дождитесь освобождения канала'
           : (sender.deniedReason ?? 'Нажмите и удерживайте');
+  const outerSpeaking = state === 'speakingSelf' || state === 'speakingOther';
+  const outerView = STATE_STYLES[state];
 
   return (
     <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
       {buttonVisible && (
         <View pointerEvents="box-none" style={[styles.floatButtonWrap, { bottom: floatingBottom }]}>
-          <View pointerEvents="none" style={styles.floatRingOuter} />
-          <View pointerEvents="none" style={styles.floatRingMiddle} />
-          <View pointerEvents="none" style={styles.floatRingInner} />
+          {outerSpeaking ? (
+            <View
+              pointerEvents="none"
+              style={[styles.floatButtonRing, { borderColor: outerView.ring }]}
+            />
+          ) : null}
           <FastPressable
             accessibilityRole="button"
             accessibilityLabel="Рация"
             onPress={() => setOpen(true)}
-            style={[styles.floatButton, !connected && styles.floatButtonOffline]}
+            style={[styles.floatButton, { backgroundColor: outerView.circle }]}
           >
             <Image source={RADIO_ICON} style={styles.floatButtonIcon} resizeMode="contain" />
           </FastPressable>
@@ -394,9 +415,10 @@ export function PttOverlay() {
       <BottomSheet
         visible={open}
         onClose={() => setOpen(false)}
-        sheet
+        panelStyle={styles.pttSheet}
         maxHeight="55%"
         bottomInset={sheetBottomInset}
+        backdropColor="rgba(0,0,0,0.3)"
         bodyStyle={styles.sheetBody}
       >
         <RadioHeader onClose={() => setOpen(false)} />
@@ -412,7 +434,7 @@ export function PttOverlay() {
           state={state}
           title={statusTitle}
           hint={statusHint}
-          hintDanger={state === 'idle' && !!sender.deniedReason}
+          hintDanger={state === 'ready' && !!sender.deniedReason}
         />
       </BottomSheet>
     </View>
@@ -423,38 +445,16 @@ const styles = StyleSheet.create({
   floatButtonWrap: {
     position: 'absolute',
     right: spacing.sm,
-    width: 82,
-    height: 82,
+    width: 56,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 90,
-  },
-  floatRingOuter: {
-    position: 'absolute',
-    width: 82,
-    height: 82,
-    borderRadius: 41,
-    backgroundColor: 'rgba(0, 91, 255, 0.06)',
-  },
-  floatRingMiddle: {
-    position: 'absolute',
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: 'rgba(0, 91, 255, 0.1)',
-  },
-  floatRingInner: {
-    position: 'absolute',
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: 'rgba(0, 91, 255, 0.14)',
   },
   floatButton: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 90,
@@ -463,10 +463,30 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 7,
   },
-  floatButtonOffline: { backgroundColor: colors.textMuted },
+  floatButtonRing: {
+    position: 'absolute',
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    borderWidth: 1,
+  },
   sheetBody: {
-    paddingTop: 0,
-    paddingBottom: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
+  },
+  pttSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  headerHandle: {
+    alignSelf: 'center',
+    width: 56,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.slate300,
+    marginBottom: spacing.md,
   },
   header: {
     flexDirection: 'row',
@@ -474,10 +494,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: spacing.md,
   },
-  title: { fontSize: 21, fontWeight: '600', color: colors.textPrimary },
+  title: { fontSize: fontSize.xl, fontWeight: '600', color: colors.textPrimary },
   closeBtn: {
-    width: 38,
-    height: 38,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -522,11 +543,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing.sm,
   },
-  glow: {
+  ring: {
     position: 'absolute',
-    width: GLOW_SIZE,
-    height: GLOW_SIZE,
-    borderRadius: GLOW_SIZE / 2,
+    borderWidth: 8,
   },
   circle: {
     width: CIRCLE_SIZE,

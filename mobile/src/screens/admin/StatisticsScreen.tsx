@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
@@ -17,12 +18,12 @@ import type { PaymentMethod } from '@/types';
 import { useStatistics, type StatsDashboard, type StatsPeriod } from '@/services/api/admin';
 import { usePublicSettings } from '@/services/api/settings';
 
-// Кастомный период (выбор дат) на mobile пока не портирован — пресеты покрывают основное.
 const PERIODS: { value: StatsPeriod; label: string }[] = [
   { value: 'today', label: 'Сегодня' },
   { value: 'week', label: 'Неделя' },
   { value: 'month', label: 'Месяц' },
   { value: 'all', label: 'Всё время' },
+  { value: 'custom', label: 'Период' },
 ];
 
 const ORDERS_LABEL: Record<StatsPeriod, string> = {
@@ -42,8 +43,20 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
 
 /** Статистика владельца — порт PWA StatisticsPage. */
 export function StatisticsScreen() {
+  const today = useMemo(() => localYmd(new Date()), []);
+  const weekAgo = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    return localYmd(d);
+  }, []);
   const [period, setPeriod] = useState<StatsPeriod>('week');
-  const statsQ = useStatistics({ period });
+  const [from, setFrom] = useState(weekAgo);
+  const [to, setTo] = useState(today);
+  const statsQ = useStatistics({
+    period,
+    from: period === 'custom' ? from : undefined,
+    to: period === 'custom' ? to : undefined,
+  });
   const publicSettingsQ = usePublicSettings();
   const d = statsQ.data;
 
@@ -74,6 +87,25 @@ export function StatisticsScreen() {
           );
         })}
       </View>
+      {period === 'custom' ? (
+        <View style={styles.dateRange}>
+          <TextInput
+            style={styles.dateInput}
+            value={from}
+            onChangeText={setFrom}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={colors.textLight}
+          />
+          <Text style={styles.dateDash}>—</Text>
+          <TextInput
+            style={styles.dateInput}
+            value={to}
+            onChangeText={setTo}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={colors.textLight}
+          />
+        </View>
+      ) : null}
 
       {statsQ.isLoading || !d ? (
         <View style={styles.loading}>
@@ -439,6 +471,10 @@ function formatTooltipLabel(raw: string): string {
   return raw;
 }
 
+function localYmd(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   loading: { paddingVertical: 60, alignItems: 'center' },
@@ -464,6 +500,19 @@ const styles = StyleSheet.create({
   },
   periodTabText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted },
   periodTabTextActive: { color: colors.primary },
+  dateRange: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  dateInput: {
+    flex: 1,
+    height: 42,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.white,
+    paddingHorizontal: spacing.md,
+    fontSize: fontSize.sm,
+    color: colors.textPrimary,
+  },
+  dateDash: { fontSize: fontSize.sm, color: colors.textMuted },
 
   splitCard: {
     flexDirection: 'row',

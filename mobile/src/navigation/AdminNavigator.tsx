@@ -7,6 +7,7 @@ import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { useAuth } from '@/store/auth';
+import { usePermissions } from '@/hooks/usePermissions';
 import { disconnectSocket } from '@/services/socket';
 import { unregisterPushDevice } from '@/services/push';
 import { StatisticsScreen } from '@/screens/admin/StatisticsScreen';
@@ -15,7 +16,10 @@ import { TablesScreen } from '@/screens/admin/TablesScreen';
 import { MenuScreen } from '@/screens/admin/MenuScreen';
 import { StaffScreen } from '@/screens/admin/StaffScreen';
 import { AuditScreen } from '@/screens/admin/AuditScreen';
+import { SettingsScreen } from '@/screens/admin/SettingsScreen';
+import { WarehouseScreen } from '@/screens/admin/WarehouseScreen';
 import { AdminPlaceholderScreen } from '@/screens/admin/AdminPlaceholderScreen';
+import type { SectionKey } from '@/types';
 
 type Section =
   | 'stats'
@@ -33,36 +37,43 @@ const SECTIONS: {
   key: Section;
   label: string;
   icon: PwaIconName;
-  ownerOnly?: boolean;
+  perm: SectionKey;
   adminOnly?: boolean;
 }[] = [
-  { key: 'stats', label: 'Статистика', icon: 'chart', ownerOnly: true },
-  { key: 'orders', label: 'Заказы', icon: 'list' },
-  { key: 'receipts', label: 'Печать чека', icon: 'clock', adminOnly: true },
-  { key: 'tables', label: 'Столы', icon: 'grid' },
-  { key: 'menu', label: 'Меню', icon: 'menu' },
-  { key: 'warehouse', label: 'Склад', icon: 'bag' },
-  { key: 'staff', label: 'Персонал', icon: 'user' },
-  { key: 'audit', label: 'Журнал', icon: 'eye', ownerOnly: true },
-  { key: 'reconcile', label: 'Сверка оплат', icon: 'transfer', ownerOnly: true },
-  { key: 'settings', label: 'Настройки', icon: 'info', ownerOnly: true },
+  { key: 'stats', label: 'Статистика', icon: 'chart', perm: 'statistics' },
+  { key: 'orders', label: 'Заказы', icon: 'list', perm: 'orders' },
+  { key: 'receipts', label: 'Печать чека', icon: 'clock', perm: 'checks', adminOnly: true },
+  { key: 'tables', label: 'Столы', icon: 'grid', perm: 'tables' },
+  { key: 'menu', label: 'Меню', icon: 'menu', perm: 'menu' },
+  { key: 'warehouse', label: 'Склад', icon: 'bag', perm: 'warehouse' },
+  { key: 'staff', label: 'Персонал', icon: 'user', perm: 'staff' },
+  { key: 'audit', label: 'Журнал', icon: 'eye', perm: 'journal' },
+  { key: 'reconcile', label: 'Сверка оплат', icon: 'transfer', perm: 'paymentReconciliation' },
+  { key: 'settings', label: 'Настройки', icon: 'info', perm: 'settings' },
 ];
 
 /** Админ/владелец — порт PWA AdminApp (сайдбар → выезжающий drawer на мобиле). */
 export function AdminNavigator() {
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
+  const { canSection } = usePermissions();
   const isOwner = user?.role === 'OWNER';
   const isAdmin = user?.role === 'ADMIN';
 
   const sections = React.useMemo(
-    () => SECTIONS.filter((s) => (!s.ownerOnly || isOwner) && (!s.adminOnly || isAdmin)),
-    [isOwner, isAdmin],
+    () => SECTIONS.filter((s) => (!s.adminOnly || isAdmin) && canSection(s.perm)),
+    [canSection, isAdmin],
   );
   const [section, setSection] = React.useState<Section>(isOwner ? 'stats' : 'orders');
   const [drawerOpen, setDrawerOpen] = React.useState(false);
 
   const current = sections.find((s) => s.key === section) ?? sections[0];
+
+  React.useEffect(() => {
+    if (sections.length > 0 && !sections.some((s) => s.key === section)) {
+      setSection(sections[0].key);
+    }
+  }, [section, sections]);
 
   const onLogout = () => {
     void unregisterPushDevice();
@@ -97,10 +108,14 @@ export function AdminNavigator() {
           <TablesScreen />
         ) : section === 'menu' ? (
           <MenuScreen />
+        ) : section === 'warehouse' ? (
+          <WarehouseScreen />
         ) : section === 'staff' ? (
           <StaffScreen />
         ) : section === 'audit' && isOwner ? (
           <AuditScreen />
+        ) : section === 'settings' ? (
+          <SettingsScreen />
         ) : (
           <AdminPlaceholderScreen title={current?.label ?? ''} />
         )}

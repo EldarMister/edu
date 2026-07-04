@@ -107,6 +107,7 @@ export function PaymentSheet({
   const [cashInput, setCashInput] = useState('');
   const [qrInput, setQrInput] = useState('');
   const [splitOpen, setSplitOpen] = useState(false);
+  const [error, setError] = useState('');
   const [successVisible, setSuccessVisible] = useState(false);
   const [successDone, setSuccessDone] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -131,6 +132,7 @@ export function PaymentSheet({
     setSuccessDone(false);
     setCashInput('');
     setQrInput('');
+    setError('');
     setTab('qr');
     onClose();
     if (paid) onPaid();
@@ -160,15 +162,17 @@ export function PaymentSheet({
 
   const total = Number(activeOrder.finalAmount);
   const selected = tabs.some((item) => item.key === tab) ? tab : tabs[0]?.key ?? 'qr';
+  const mixedSelected = selected === 'mixed';
   const cashNum = amountValue(cashInput);
   const qrNum = amountValue(qrInput);
   const entered = round2(cashNum + qrNum);
   const remaining = round2(total - entered);
-  const mixedValid = selected === 'mixed' && Math.abs(remaining) < 0.01;
+  const over = remaining < -0.01;
+  const mixedValid = mixedSelected && Math.abs(remaining) < 0.01;
   const qrMissing = selected === 'qr' && !qrSrc;
   const activeItems = activeOrder.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
-  const confirmDisabled = pay.isPending || qrMissing || (selected === 'mixed' && !mixedValid) || !allActiveItemsServed;
+  const confirmDisabled = pay.isPending || qrMissing || (mixedSelected && !mixedValid) || !allActiveItemsServed;
 
   const complement = (value: string) => {
     const trimmed = value.trim();
@@ -185,10 +189,13 @@ export function PaymentSheet({
   };
 
   const completePayment = async (payload: PaymentPayload) => {
+    setError('');
     try {
       await pay.mutateAsync(payload);
     } catch (e) {
-      push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
+      const message = apiError(e);
+      setError(message);
+      push({ message, type: 'error', at: new Date().toISOString() });
       throw e;
     }
     void beep('payment');
@@ -199,26 +206,32 @@ export function PaymentSheet({
     try {
       setReceipt(await fetchReceipt(activeOrder.id));
     } catch (e) {
+      const message = apiError(e);
       setSuccessVisible(false);
-      push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
+      setError(message);
+      push({ message, type: 'error', at: new Date().toISOString() });
     }
   };
 
   const requestPrint = async () => {
     if (!receipt) return;
+    setError('');
     try {
       const request = await print.mutateAsync({ orderId: activeOrder.id, type: 'receipt' });
       beginPrint(request, receipt);
       push({ message: 'Запрос на печать отправлен администратору', type: 'success', at: new Date().toISOString() });
       close();
     } catch (e) {
-      push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
+      const message = apiError(e);
+      setError(message);
+      push({ message, type: 'error', at: new Date().toISOString() });
     }
   };
 
   const submit = () => {
     if (confirmDisabled) return;
-    const payload: PaymentPayload = selected === 'mixed'
+    setError('');
+    const payload: PaymentPayload = mixedSelected
       ? { orderId: activeOrder.id, method: 'mixed', cashAmount: cashNum, qrAmount: qrNum }
       : { orderId: activeOrder.id, method: selected };
     void completePayment(payload).catch(() => undefined);
@@ -233,6 +246,7 @@ export function PaymentSheet({
     qr: number;
     payments: SplitPart[];
   }) => {
+    setError('');
     const splitMethod: PaymentMethod =
       cash > 0 && qr > 0 ? 'mixed' : qr > 0 ? 'qr' : 'cash';
     const payload: PaymentPayload = payments.length > 1
@@ -348,14 +362,20 @@ export function PaymentSheet({
                 </View>
                 <View style={styles.mixedSummaryRow}>
                   <Text style={styles.mixedSummaryLabel}>Осталось</Text>
-                  <Text style={[styles.mixedSummaryValue, remaining < -0.01 && { color: colors.danger }]}>
+                  <Text style={[styles.mixedSummaryValue, remaining === 0 && styles.mixedSuccess, over && styles.mixedDanger]}>
                     {money(Math.max(0, remaining))}
                   </Text>
                 </View>
               </View>
+              {over ? (
+                <Text style={styles.mixedError}>Сумма превышает итог заказа</Text>
+              ) : (
+                <Text style={styles.mixedHint}>Сумма должна совпадать с итогом заказа</Text>
+              )}
             </View>
           )}
         </View>
+        {error ? <Text style={styles.inlineError}>{error}</Text> : null}
       </BottomSheet>
 
       <SplitBillSheet
@@ -370,6 +390,7 @@ export function PaymentSheet({
         receipt={receipt}
         visible={visible && !successVisible && !!receipt}
         printing={print.isPending}
+        error={error}
         onClose={close}
         onPrint={() => void requestPrint()}
       />
@@ -382,12 +403,14 @@ function ReceiptSheet({
   receipt,
   visible,
   printing,
+  error,
   onClose,
   onPrint,
 }: {
   receipt: Receipt | null;
   visible: boolean;
   printing: boolean;
+  error?: string;
   onClose: () => void;
   onPrint: () => void;
 }) {
@@ -456,6 +479,7 @@ function ReceiptSheet({
           </View>
         ) : null}
       </View>
+      {error ? <Text style={styles.inlineError}>{error}</Text> : null}
     </BottomSheet>
   );
 }
@@ -715,7 +739,7 @@ function SplitBillSheet({
                         onPress={() => void payOne(index)}
                         loading={busy && index === payments.findIndex((item) => !item.paid)}
                         disabled={!canPay(index) || busy}
-                        style={{ flex: 1 }}
+                        style={styles.splitPayButton}
                       />
                     </View>
 
@@ -933,6 +957,11 @@ const styles = StyleSheet.create({
   mixedSummaryRow: { flexDirection: 'row', justifyContent: 'space-between' },
   mixedSummaryLabel: { fontSize: fontSize.sm, color: colors.textMuted },
   mixedSummaryValue: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+  mixedSuccess: { color: colors.success },
+  mixedDanger: { color: colors.danger },
+  mixedHint: { fontSize: fontSize.xs, color: colors.textLight },
+  mixedError: { fontSize: fontSize.sm, color: colors.danger },
+  inlineError: { marginTop: spacing.md, fontSize: fontSize.sm, color: colors.danger },
   payActions: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
   splitButton: {
     width: 148,
@@ -1070,6 +1099,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
+  splitPayButton: { flex: 1, borderRadius: radius.sm },
   methodSelectWrap: {
     position: 'relative',
     zIndex: 20,
