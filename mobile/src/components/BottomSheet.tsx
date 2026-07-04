@@ -293,8 +293,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   sheetSafe: { backgroundColor: colors.card },
-  sheetSafeFill: { flex: 1, minHeight: 0 },
-  bodyFill: { flex: 1, minHeight: 0 },
+  // flexShrink (не flexGrow): при коротком контенте лист по размеру контента
+  // (минимальный отступ до футера), при длинном — тело сжимается и его скролл
+  // включается, а футер остаётся закреплённым.
+  sheetSafeFill: { flexShrink: 1, minHeight: 0 },
+  bodyFill: { flexShrink: 1, minHeight: 0 },
   handleWrap: { paddingTop: 10, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300 },
   sheetTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },

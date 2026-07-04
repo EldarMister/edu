@@ -617,8 +617,6 @@ function SetPickerSheet({
   onConfigure: (set: Dish) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { height } = useWindowDimensions();
-  const listMaxHeight = Math.round(height * 0.56);
 
   React.useEffect(() => {
     if (visible) setSelectedId(sets[0]?.id ?? null);
@@ -633,12 +631,23 @@ function SetPickerSheet({
       title="Сеты"
       sheet
       maxHeight="86%"
+      fillBody
+      footer={
+        <View style={styles.setPickerFooter}>
+          <Button
+            title="Добавить"
+            onPress={() => selected && onPick(selected)}
+            disabled={!selected}
+            style={styles.setPickerAddButton}
+          />
+        </View>
+      }
     >
       <Text style={styles.variantHint}>Выберите сет</Text>
       {sets.length === 0 ? (
         <Text style={styles.notFound}>Сетов пока нет</Text>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: listMaxHeight }} contentContainerStyle={styles.setList}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={styles.setList}>
           {sets.map((set) => {
             const selectedSet = set.id === selectedId;
             const count = (set.setComponents ?? []).reduce((sum, component) => sum + component.quantity, 0);
@@ -671,14 +680,6 @@ function SetPickerSheet({
           })}
         </ScrollView>
       )}
-      <View style={styles.setPickerFooter}>
-        <Button
-          title="Добавить"
-          onPress={() => selected && onPick(selected)}
-          disabled={!selected}
-          style={styles.setPickerAddButton}
-        />
-      </View>
     </BottomSheet>
   );
 }
@@ -811,7 +812,7 @@ function SetConfigSheet({
           </View>
         </View>
         <Text style={styles.variantHint}>Состав сета ({components.length} позиций)</Text>
-        <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+        <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1, minHeight: 0 }}>
           <View style={styles.componentList}>
             {components.map((component) => {
               const removed = component.action === 'removed';
