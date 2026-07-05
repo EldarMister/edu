@@ -33,7 +33,7 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { IngredientStockService } from '../warehouse/ingredient-stock.service';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
-import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu } from '../tts/kitchen-voice';
+import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu, orderNumberWords } from '../tts/kitchen-voice';
 
 /** Статусы «живого» заказа, который занимает стол. */
 const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
@@ -797,6 +797,19 @@ export class OrdersService {
     return `Готовы блюда: ${uniqueNames.join(', ')}. ${location}.`;
   }
 
+  /**
+   * Озвучка официанту при ПОЛНОЙ готовности заказа: номер заказа + место + «Заберите».
+   * Без перечисления блюд — когда готово всё, официанту важен номер заказа, а не список.
+   */
+  private readyOrderWaiterText(order: {
+    orderNumber: string;
+    table: { number: number; hall?: { name?: string | null } | null };
+  }) {
+    const num = orderNumberWords(String(order.orderNumber));
+    const location = this.waiterLocationVoice(order);
+    return `Заказ номер ${num} готов. ${location}. Заберите.`;
+  }
+
   /** Человеко-читаемая сводка различий составов: «добавил X ×1, убрал Y ×2». */
   private describeItemDiff(before: Map<string, number>, after: Map<string, number>) {
     const added: string[] = [];
@@ -1007,9 +1020,13 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    const readyVoice = this.readyOrderWaiterText(updated);
+    this.emitStatusChanged(updated, { waiterText: readyVoice });
     this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.ready, updated.table.hallId);
-    this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, updated);
+    this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, {
+      ...updated,
+      voice: { waiterText: readyVoice },
+    });
     this.notifyWaiter(
       updated.waiterId,
       `Стол №${updated.table.number} — заказ готов. Заберите с кухни.`,
@@ -1172,10 +1189,11 @@ export class OrdersService {
       });
     });
 
+    const fullyReadyVoice = updated.status === OrderStatus.ready ? this.readyOrderWaiterText(updated) : null;
     this.emitStatusChanged(
       updated,
-      updated.status === OrderStatus.ready
-        ? undefined
+      fullyReadyVoice
+        ? { waiterText: fullyReadyVoice }
         : { waiterText: this.readyItemsWaiterText([this.orderItemName(item)], updated) },
     );
     if (updated.status !== order.status) {
@@ -1186,7 +1204,10 @@ export class OrdersService {
     }
 
     if (updated.status === OrderStatus.ready) {
-      this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, updated);
+      this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, {
+        ...updated,
+        voice: { waiterText: fullyReadyVoice },
+      });
       this.notifyWaiter(
         updated.waiterId,
         `Заказ ${updated.orderNumber} готов полностью`,
@@ -1298,10 +1319,11 @@ export class OrdersService {
       });
     });
 
+    const batchReadyVoice = updated.status === OrderStatus.ready ? this.readyOrderWaiterText(updated) : null;
     this.emitStatusChanged(
       updated,
-      updated.status === OrderStatus.ready
-        ? undefined
+      batchReadyVoice
+        ? { waiterText: batchReadyVoice }
         : { waiterText: this.readyItemsWaiterText(readyNames, updated) },
     );
     if (updated.status !== order.status) {
@@ -1312,7 +1334,10 @@ export class OrdersService {
     }
 
     if (updated.status === OrderStatus.ready) {
-      this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, updated);
+      this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.WAITER_ORDER_READY, {
+        ...updated,
+        voice: { waiterText: batchReadyVoice },
+      });
       this.notifyWaiter(updated.waiterId, `Заказ ${updated.orderNumber} готов полностью`, updated, 'success');
     } else {
       this.notifyWaiter(

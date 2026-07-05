@@ -13,8 +13,15 @@ import {
  * Очередь: озвучки проигрываются строго по очереди и не перебивают друг друга.
  * Если TTS-сервис недоступен — ошибка логируется, кухня продолжает работать без озвучки.
  */
+/**
+ * Озвучка актуальна только в реальном времени. Если TTS тормозит (холодный старт/
+ * ночной сон) или приложение было свёрнуто, очередь копится и позже проигрывается
+ * разом — повар слышит давно неактуальные заказы. Фразы старше этого возраста отбрасываем.
+ */
+const MAX_VOICE_AGE_MS = 30_000;
+
 class KitchenVoice {
-  private queue: string[] = [];
+  private queue: { text: string; at: number }[] = [];
   private pumping = false;
   private current: Audio.Sound | null = null;
 
@@ -23,7 +30,7 @@ class KitchenVoice {
     const value = (text ?? '').trim();
     if (!value) return;
     if (!getKitchenVoiceSettings().voiceEnabled) return;
-    this.queue.push(value);
+    this.queue.push({ text: value, at: Date.now() });
     void this.pump();
   }
 
@@ -48,10 +55,11 @@ class KitchenVoice {
     this.pumping = true;
     try {
       while (this.queue.length > 0) {
-        const text = this.queue.shift();
-        if (!text) continue;
+        const item = this.queue.shift();
+        if (!item) continue;
+        if (Date.now() - item.at > MAX_VOICE_AGE_MS) continue; // устаревшая озвучка — пропускаем
         try {
-          await this.playText(text);
+          await this.playText(item.text);
         } catch (err) {
           // Сервис недоступен — без голоса устройства, кухня продолжает работать.
           console.error('[kitchen-tts] озвучка не удалась:', err);

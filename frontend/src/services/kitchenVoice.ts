@@ -15,8 +15,15 @@ import {
   type KitchenVoiceScenario,
 } from './kitchenVoiceScenarios';
 
+/**
+ * Озвучка актуальна только в реальном времени. Если TTS тормозит (холодный старт/
+ * ночной сон) или вкладка была свёрнута, очередь копится и позже проигрывается разом —
+ * повар слышит давно неактуальные заказы. Фразы старше этого возраста отбрасываем.
+ */
+const MAX_VOICE_AGE_MS = 30_000;
+
 class KitchenVoice {
-  private queue: string[] = [];
+  private queue: { text: string; at: number }[] = [];
   private pumping = false;
   private current: HTMLAudioElement | null = null;
   // Манифест предзаписанных озвучек (какие голоса доступны без запроса на TTS).
@@ -27,7 +34,7 @@ class KitchenVoice {
     const t = (text ?? '').trim();
     if (!t) return;
     if (!getKitchenVoiceSettings().voiceEnabled) return;
-    this.queue.push(t);
+    this.queue.push({ text: t, at: Date.now() });
     void this.pump();
   }
 
@@ -82,9 +89,10 @@ class KitchenVoice {
     this.pumping = true;
     try {
       while (this.queue.length > 0) {
-        const text = this.queue.shift()!;
+        const item = this.queue.shift()!;
+        if (Date.now() - item.at > MAX_VOICE_AGE_MS) continue; // устаревшая озвучка — пропускаем
         try {
-          await this.playText(text);
+          await this.playText(item.text);
         } catch (err) {
           // Сервис недоступен или браузер заблокировал — без голоса устройства.
           console.error('[kitchen-tts] озвучка не удалась:', err);
@@ -109,7 +117,7 @@ class KitchenVoice {
         preferredModel: settings.preferredModel,
         fallbackModel: settings.fallbackModel,
       },
-      { responseType: 'blob' },
+      { responseType: 'blob', timeout: 45_000 },
     );
     const url = URL.createObjectURL(res.data as Blob);
     try {

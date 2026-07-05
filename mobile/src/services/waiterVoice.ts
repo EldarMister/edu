@@ -3,14 +3,22 @@ import { api } from '@/lib/api';
 import { configureAudioPlayback } from '@/lib/sound';
 import { deleteTempFile, wavBufferToTempFile } from '@/lib/ttsFile';
 
+/**
+ * Голосовое уведомление актуально только «здесь и сейчас». Если TTS тормозит
+ * (холодный старт/ночной сон) или приложение было свёрнуто, очередь копится и потом
+ * разом проигрывается — официант слышит «отменили заказ N» спустя час. Фразы старше
+ * этого возраста при разборе очереди отбрасываем.
+ */
+const MAX_VOICE_AGE_MS = 30_000;
+
 class WaiterVoice {
-  private queue: string[] = [];
+  private queue: { text: string; at: number }[] = [];
   private pumping = false;
 
   enqueue(text: string | null | undefined) {
     const value = (text ?? '').trim();
     if (!value) return;
-    this.queue.push(value);
+    this.queue.push({ text: value, at: Date.now() });
     void this.pump();
   }
 
@@ -19,10 +27,11 @@ class WaiterVoice {
     this.pumping = true;
     try {
       while (this.queue.length > 0) {
-        const text = this.queue.shift();
-        if (!text) continue;
+        const item = this.queue.shift();
+        if (!item) continue;
+        if (Date.now() - item.at > MAX_VOICE_AGE_MS) continue; // устаревшая озвучка — пропускаем
         try {
-          await this.playText(text);
+          await this.playText(item.text);
         } catch {
           // Озвучка не должна ломать realtime-сценарий официанта.
         }
