@@ -31,7 +31,7 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop z-50 flex items-end justify-center p-0 sm:items-center sm:p-4">
+    <div className="modal-backdrop z-[60] flex items-end justify-center p-0 sm:items-center sm:p-4">
       <div
         className="absolute inset-0"
         onClick={onClose}
