@@ -13,6 +13,7 @@ type VoiceItem = {
   status: string;
   prepStation?: 'kitchen' | 'bar' | 'none' | string | null;
   quantity?: number | null;
+  takeaway?: boolean | null;
   dishNameSnapshot: string;
   dishVariantNameSnapshot?: string | null;
   dishVoiceSnapshot?: string | null;
@@ -204,10 +205,13 @@ function setHeadVoice(item: VoiceItem): string {
  * где заменённые компоненты дают финальное блюдо, а одинаковые суммируются
  * («два Запечённый филадельфия»). Убранные компоненты проговариваются отдельно.
  */
-function itemVoiceFragment(item: VoiceItem): string {
+function itemVoiceFragment(item: VoiceItem, opts: { takeawayLabel?: boolean } = {}): string {
+  // «С собой» точечно — только когда навынос НЕ весь заказ (иначе метка озвучивается один раз).
+  const takeawaySuffix = opts.takeawayLabel && item.takeaway ? '. С собой' : '';
+
   if (!isSetItem(item)) {
     const qty = item.quantity && item.quantity > 1 ? `${numberToWordsRu(item.quantity)} ` : '';
-    return `${qty}${dishVoice(item)}`;
+    return `${qty}${dishVoice(item)}${takeawaySuffix}`;
   }
 
   const components = item.setComponents ?? [];
@@ -243,25 +247,30 @@ function itemVoiceFragment(item: VoiceItem): string {
     const n = c.originalNameSnapshot.trim();
     if (n) parts.push(`убрали ${n}`);
   }
-  return parts.join('. ');
+  return `${parts.join('. ')}${takeawaySuffix}`;
 }
 
-/** Блюда заказа (без отказанных/отменённых) для озвучки. */
-function activeDishNames(order: VoiceOrder, station: VoiceStation = 'kitchen'): string[] {
-  return order.items
-    .filter((it) => it.prepStation === station && it.status !== 'rejected' && it.status !== 'cancelled')
-    .map(itemVoiceFragment)
-    .map((s) => s.trim())
-    .filter(Boolean);
+/** Активные позиции станции (без отказанных/отменённых). */
+function activeStationItems(order: VoiceOrder, station: VoiceStation): VoiceItem[] {
+  return order.items.filter(
+    (it) => it.prepStation === station && it.status !== 'rejected' && it.status !== 'cancelled',
+  );
 }
 
 /** «Новый заказ. Номер пятьдесят четыре. Состав заказа: борщ. Маргарита. …» */
 export function buildNewOrderText(order: VoiceOrder, station: VoiceStation = 'kitchen'): string | null {
+  const items = activeStationItems(order, station);
+  if (items.length === 0) return null;
+  // «С собой»: весь заказ навынос → метка один раз; иначе — точечно у нужных блюд.
+  const allTakeaway = items.every((it) => it.takeaway);
+  const dishes = items
+    .map((it) => itemVoiceFragment(it, { takeawayLabel: !allTakeaway }))
+    .map((s) => s.trim())
+    .filter(Boolean);
   const num = orderNumberWords(order.orderNumber);
-  const dishes = activeDishNames(order, station);
-  if (dishes.length === 0) return null;
   const head = `Новый заказ. Номер ${num}.`;
-  return applyPronunciation(`${head} Состав заказа: ${dishes.join('. ')}.`);
+  const takeawayHead = allTakeaway ? ' Весь заказ с собой.' : '';
+  return applyPronunciation(`${head}${takeawayHead} Состав заказа: ${dishes.join('. ')}.`);
 }
 
 /** «Заказ номер пятьдесят четыре отменён.» */
