@@ -7,12 +7,15 @@ const SILENT_WAV =
 
 type AnnounceRef = { code?: string | null; cafe?: string | null };
 
+/** Устаревшие озвучки табло не проигрываем: очередь могла скопиться при тормозящем TTS. */
+const MAX_VOICE_AGE_MS = 30_000;
+
 /**
  * Очередь озвучек табло. Тянет готовый WAV с публичного /queue/announce и
  * проигрывает строго по очереди, не перебивая. Включается жестом пользователя.
  */
 class QueueVoice {
-  private queue: { ref: AnnounceRef; orderId: string }[] = [];
+  private queue: { ref: AnnounceRef; orderId: string; at: number }[] = [];
   private pumping = false;
   enabled = false;
 
@@ -32,7 +35,7 @@ class QueueVoice {
 
   enqueue(ref: AnnounceRef, orderId: string) {
     if (!this.enabled) return;
-    this.queue.push({ ref, orderId });
+    this.queue.push({ ref, orderId, at: Date.now() });
     void this.pump();
   }
 
@@ -41,7 +44,8 @@ class QueueVoice {
     this.pumping = true;
     try {
       while (this.queue.length > 0) {
-        const { ref, orderId } = this.queue.shift()!;
+        const { ref, orderId, at } = this.queue.shift()!;
+        if (Date.now() - at > MAX_VOICE_AGE_MS) continue; // устаревшая озвучка — пропускаем
         try {
           const params: Record<string, string> = { order: orderId };
           if (ref.code) params.code = ref.code;

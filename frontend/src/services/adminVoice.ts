@@ -1,13 +1,16 @@
 import { api } from '@/lib/api';
 
+/** Устаревшие озвучки не проигрываем: очередь могла скопиться при тормозящем TTS. */
+const MAX_VOICE_AGE_MS = 30_000;
+
 class AdminVoice {
-  private queue: string[] = [];
+  private queue: { text: string; at: number }[] = [];
   private pumping = false;
 
   enqueue(text: string | null | undefined) {
     const t = (text ?? '').trim();
     if (!t) return;
-    this.queue.push(t);
+    this.queue.push({ text: t, at: Date.now() });
     void this.pump();
   }
 
@@ -16,9 +19,10 @@ class AdminVoice {
     this.pumping = true;
     try {
       while (this.queue.length > 0) {
-        const text = this.queue.shift()!;
+        const item = this.queue.shift()!;
+        if (Date.now() - item.at > MAX_VOICE_AGE_MS) continue; // устаревшая озвучка — пропускаем
         try {
-          await this.playText(text);
+          await this.playText(item.text);
         } catch (err) {
           console.error('[admin-tts] озвучка не удалась:', err);
         }
@@ -29,7 +33,7 @@ class AdminVoice {
   }
 
   private async playText(text: string): Promise<void> {
-    const res = await api.post('/tts/synthesize', { text }, { responseType: 'blob' });
+    const res = await api.post('/tts/synthesize', { text }, { responseType: 'blob', timeout: 45_000 });
     const url = URL.createObjectURL(res.data as Blob);
     try {
       await this.playUrl(url);

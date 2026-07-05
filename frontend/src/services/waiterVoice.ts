@@ -7,14 +7,22 @@
  */
 import { api } from '@/lib/api';
 
+/**
+ * Голосовое уведомление актуально только «здесь и сейчас». Если TTS-сервис тормозит
+ * (холодный старт/ночной сон) или вкладка была свёрнута, очередь копится, а потом
+ * разом проигрывается — официант слышит «отменили заказ N» спустя час. Поэтому фразы
+ * старше этого возраста при разборе очереди отбрасываем.
+ */
+const MAX_VOICE_AGE_MS = 30_000;
+
 class WaiterVoice {
-  private queue: string[] = [];
+  private queue: { text: string; at: number }[] = [];
   private pumping = false;
 
   enqueue(text: string | null | undefined) {
     const t = (text ?? '').trim();
     if (!t) return;
-    this.queue.push(t);
+    this.queue.push({ text: t, at: Date.now() });
     void this.pump();
   }
 
@@ -23,9 +31,10 @@ class WaiterVoice {
     this.pumping = true;
     try {
       while (this.queue.length > 0) {
-        const text = this.queue.shift()!;
+        const item = this.queue.shift()!;
+        if (Date.now() - item.at > MAX_VOICE_AGE_MS) continue; // устаревшая озвучка — пропускаем
         try {
-          await this.playText(text);
+          await this.playText(item.text);
         } catch (err) {
           console.error('[waiter-tts] озвучка не удалась:', err);
         }
@@ -36,7 +45,7 @@ class WaiterVoice {
   }
 
   private async playText(text: string): Promise<void> {
-    const res = await api.post('/tts/synthesize', { text }, { responseType: 'blob' });
+    const res = await api.post('/tts/synthesize', { text }, { responseType: 'blob', timeout: 45_000 });
     const url = URL.createObjectURL(res.data as Blob);
     try {
       await this.playUrl(url);
