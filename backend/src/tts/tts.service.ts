@@ -6,16 +6,6 @@ import * as path from 'path';
 import { TTS_PROVIDER, type TtsProvider, type TtsSynthesizeOptions } from './tts-provider.interface';
 
 /**
- * Мелкие правки произношения для Silero перед синтезом.
- * «готов/готово/готовы/приготовьте…»: безударная «о» в «готов» читается как «а»
- * (аканье) — иначе синтезатор произносит «гОтов» вместо естественного «гАтов».
- * Применяется ко всей озвучке (кухня/официант/табло/админ).
- */
-function applyRuPronunciation(text: string): string {
-  return text.replace(/готов/giu, (m) => (m[0] === 'Г' ? 'Гатов' : 'гатов'));
-}
-
-/**
  * Озвучка: кэш + вызов провайдера (Silero). Один и тот же текст не генерируется
  * повторно — отдаётся из дискового кэша (ТЗ §8). Кухня не привязана к Silero
  * напрямую — всё идёт через TtsProvider (ТЗ §10).
@@ -45,7 +35,7 @@ export class TtsService {
 
   /** Возвращает WAV для текста: из кэша или сгенерировав через провайдера. */
   async synthesize(text: string, options: TtsSynthesizeOptions = {}): Promise<Buffer> {
-    const normalized = applyRuPronunciation(text.trim());
+    const normalized = text.trim();
     if (!normalized) throw new Error('Пустой текст');
 
     const key = this.keyFor(normalized, options);
