@@ -81,6 +81,7 @@ function RadioIcon({ size = 28, className = '' }: { size?: number; className?: s
       style={{ width: size, height: size, objectFit: 'contain' }}
       alt=""
       aria-hidden="true"
+      draggable={false}
     />
   );
 }
@@ -220,7 +221,7 @@ function PushToTalkCircle({
         onLostPointerCapture={onPressStop}
         onContextMenu={(event) => event.preventDefault()}
         aria-label="Нажмите и удерживайте, чтобы говорить"
-        className={`relative flex touch-none select-none items-center justify-center rounded-full text-white transition-all duration-200 disabled:cursor-not-allowed ${view.circle} ${
+        className={`ptt-no-select relative flex touch-none select-none items-center justify-center rounded-full text-white transition-all duration-200 disabled:cursor-not-allowed ${view.circle} ${
           state === 'speakingSelf' ? 'scale-[1.12]' : ''
         } ${state === 'error' ? 'animate-ptt-shake' : ''}`}
         style={{ width: size, height: size }}
@@ -413,7 +414,7 @@ export function PttOverlay({
             type="button"
             aria-label="Рация"
             onClick={() => setOpen(true)}
-            className={`relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:scale-95 ${outerView.circle}`}
+            className={`ptt-no-select relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:scale-95 ${outerView.circle}`}
           >
             <RadioIcon size={25} />
           </button>
