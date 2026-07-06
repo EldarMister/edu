@@ -166,7 +166,7 @@ function variantVoice(variant?: string | null): string {
   return raw;
 }
 
-function withVariantVoice(name: string, variant?: string | null): string {
+export function withVariantVoice(name: string, variant?: string | null): string {
   const v = variantVoice(variant);
   return v ? `${name}. ${v}` : name;
 }

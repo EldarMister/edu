@@ -33,7 +33,7 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { IngredientStockService } from '../warehouse/ingredient-stock.service';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
-import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu, orderNumberWords } from '../tts/kitchen-voice';
+import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu, orderNumberWords, withVariantVoice } from '../tts/kitchen-voice';
 
 /** Статусы «живого» заказа, который занимает стол. */
 const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
@@ -778,6 +778,20 @@ export class OrdersService {
       : item.dishNameSnapshot;
   }
 
+  /**
+   * Озвучиваемое название блюда для уведомления официанту:
+   * использует voiceName, если задан, и добавляет размер порции прописью
+   * («1 кг» → «один килограмм») — аналогично тому, как кухня озвучивает.
+   */
+  private waiterItemVoiceName(item: {
+    dishNameSnapshot: string;
+    dishVariantNameSnapshot?: string | null;
+    dishVoiceSnapshot?: string | null;
+  }) {
+    const voiceName = item.dishVoiceSnapshot?.trim() || item.dishNameSnapshot;
+    return withVariantVoice(voiceName, item.dishVariantNameSnapshot);
+  }
+
   private waiterLocationVoice(order: { table: { number: number; hall?: { name?: string | null } | null } }) {
     const hallName = order.table.hall?.name?.trim();
     return [hallName ? `Зал ${hallName}` : null, `Стол номер ${tableNumberVoice(order.table.number)}`]
@@ -1195,7 +1209,7 @@ export class OrdersService {
       updated,
       fullyReadyVoice
         ? { waiterText: fullyReadyVoice }
-        : { waiterText: this.readyItemsWaiterText([this.orderItemName(item)], updated) },
+        : { waiterText: this.readyItemsWaiterText([this.waiterItemVoiceName(item)], updated) },
     );
     if (updated.status !== order.status) {
       const tableStatus = this.tableStatusForOrderStatus(updated.status);
@@ -1267,7 +1281,7 @@ export class OrdersService {
     const readyNames = [
       ...order.items
         .filter((it) => targetIds.includes(it.id))
-        .map((it) => this.orderItemName(it)),
+        .map((it) => this.waiterItemVoiceName(it)),
       ...targetComponents.map((c) =>
         c.action === 'replaced' && c.finalNameSnapshot
           ? [c.finalNameSnapshot, c.finalVariantNameSnapshot].filter(Boolean).join(' ')
