@@ -807,7 +807,7 @@ export class OrdersService {
   }) {
     const num = orderNumberWords(String(order.orderNumber));
     const location = this.waiterLocationVoice(order);
-    return `Заказ номер ${num} готов. ${location}. Заберите.`;
+    return `Заказ номер ${num} готово. ${location}. Заберите.`;
   }
 
   /** Человеко-читаемая сводка различий составов: «добавил X ×1, убрал Y ×2». */

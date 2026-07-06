@@ -71,8 +71,8 @@ export class QueueService {
     const mode = settings?.queueDisplayMode === 'number' ? 'number' : 'table';
     const text =
       mode === 'number'
-        ? `Заказ номер ${parseInt(order.orderNumber, 10) || order.orderNumber} готов`
-        : `Стол ${order.table.number}, заказ готов`;
+        ? `Заказ номер ${parseInt(order.orderNumber, 10) || order.orderNumber} готово`
+        : `Стол ${order.table.number}, заказ готово`;
 
     return this.tts.synthesize(text);
   }
