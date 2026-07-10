@@ -6,7 +6,6 @@ import type { AuthUser } from '@/types';
 import { ProtectedRoute, homeForRole } from '@/routes/ProtectedRoute';
 import { Toaster } from '@/components/Toaster';
 import { UpdateModal } from '@/components/UpdateModal';
-import { IntroSplash } from '@/components/IntroSplash';
 import { PttOverlay } from '@/features/ptt/PttOverlay';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { LoginPage } from '@/features/auth/LoginPage';
@@ -25,8 +24,6 @@ export function App() {
   const location = useLocation();
   const waiterButtonVisible = useRadioVisibility((s) => s.waiterButtonVisible);
   const onWaiter = location.pathname.startsWith('/waiter');
-  // Заставку не показываем на ТВ-табло очереди, чтобы не прерывать монитор.
-  const onQueueBoard = location.pathname.startsWith('/queue') || location.pathname.startsWith('/q/');
   const showPtt =
     !!user &&
     ['/waiter', '/kitchen', '/bar', '/admin', '/owner'].some((prefix) =>
@@ -122,7 +119,6 @@ export function App() {
       {showPtt && <PttOverlay waiterMode={onWaiter} buttonHidden={onWaiter && !waiterButtonVisible} />}
       <Toaster />
       <UpdateModal />
-      {!onQueueBoard && <IntroSplash />}
     </>
   );
 }
