@@ -50,6 +50,7 @@ export function WeightPickerSheet({
   const [editingWeight, setEditingWeight] = useState(false);
   const [weightInput, setWeightInput] = useState(String(DEFAULT_WEIGHT));
   const dialRef = useRef<SVGSVGElement>(null);
+  const dragRef = useRef<{ lastAngle: number; scale: number } | null>(null);
 
   useEffect(() => {
     if (dish) {
@@ -85,15 +86,31 @@ export function WeightPickerSheet({
 
   const price = dishUnitPrice(renderDish.price, renderDish.discountType, renderDish.discountValue);
 
-  function updateFromPointer(event: React.PointerEvent<SVGSVGElement>) {
+  function pointerAngle(event: React.PointerEvent<SVGSVGElement>) {
     const rect = dialRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect) return null;
     const x = ((event.clientX - rect.left) / rect.width) * 360;
     const y = ((event.clientY - rect.top) / rect.height) * 360;
-    let pointerAngle = (Math.atan2(y - 180, x - 180) * 180) / Math.PI;
-    if (pointerAngle < START_ANGLE) pointerAngle += 360;
-    pointerAngle = Math.max(START_ANGLE, Math.min(END_ANGLE, pointerAngle));
-    setWeight(clampWeight(((pointerAngle - START_ANGLE) / (END_ANGLE - START_ANGLE)) * dialMax));
+    return (((Math.atan2(y - 180, x - 180) * 180) / Math.PI) + 360) % 360;
+  }
+
+  function updateFromPointer(event: React.PointerEvent<SVGSVGElement>, dragging = false) {
+    const rawAngle = pointerAngle(event);
+    if (rawAngle === null) return;
+    if (dragging && dragRef.current) {
+      let delta = rawAngle - dragRef.current.lastAngle;
+      if (delta > 180) delta -= 360;
+      if (delta < -180) delta += 360;
+      dragRef.current.lastAngle = rawAngle;
+      const scale = dragRef.current.scale;
+      setWeight((current) => clampWeight(current + (delta / (END_ANGLE - START_ANGLE)) * scale));
+      return;
+    }
+
+    let selectedAngle = rawAngle;
+    if (selectedAngle < START_ANGLE) selectedAngle += 360;
+    selectedAngle = Math.max(START_ANGLE, Math.min(END_ANGLE, selectedAngle));
+    setWeight(clampWeight(((selectedAngle - START_ANGLE) / (END_ANGLE - START_ANGLE)) * dialMax));
   }
 
   function adjust(delta: number) {
@@ -151,10 +168,19 @@ export function WeightPickerSheet({
                 className="h-full w-full touch-none select-none overflow-visible"
                 onPointerDown={(event) => {
                   event.currentTarget.setPointerCapture(event.pointerId);
+                  const rawAngle = pointerAngle(event);
+                  dragRef.current = rawAngle === null ? null : { lastAngle: rawAngle, scale: dialMax };
                   updateFromPointer(event);
                 }}
                 onPointerMove={(event) => {
-                  if (event.currentTarget.hasPointerCapture(event.pointerId)) updateFromPointer(event);
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) updateFromPointer(event, true);
+                }}
+                onPointerUp={(event) => {
+                  dragRef.current = null;
+                  event.currentTarget.releasePointerCapture?.(event.pointerId);
+                }}
+                onPointerCancel={() => {
+                  dragRef.current = null;
                 }}
                 aria-label={`${formatWeight(weight).value} ${formatWeight(weight).unit}`}
               >
