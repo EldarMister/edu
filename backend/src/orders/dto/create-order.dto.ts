@@ -45,7 +45,7 @@ export class CreateOrderItemDto {
   @IsString()
   variantId?: string;
 
-  /** Вес весового блюда в граммах. Цена блюда от веса не меняется. */
+  /** Количество в базовых единицах: граммах либо миллилитрах. */
   @IsOptional()
   @IsInt()
   @Min(1)

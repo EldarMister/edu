@@ -109,6 +109,10 @@ export interface Dish {
   isSet?: boolean;
   /** Открывать визуальный выбор веса в граммах. */
   isWeighted?: boolean;
+  /** Система автопересчёта: граммы/килограммы либо миллилитры/литры. */
+  weightedMeasure?: 'weight' | 'volume';
+  /** За сколько граммов/миллилитров указана базовая цена. */
+  weightedPriceBase?: number;
   setComponents?: SetComponentDef[];
   variants: DishVariant[];
 }

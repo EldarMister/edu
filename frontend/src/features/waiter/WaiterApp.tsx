@@ -12,7 +12,7 @@ import { BrandLogo } from '@/components/BrandLogo';
 import { FullScreenLoader, Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
 import { NumberTicker } from '@/components/NumberTicker';
-import { useCart, cartLineKey, cartLineKeyFromParts, cartTotals } from './cart';
+import { useCart, cartLineKey, cartLineKeyFromParts, cartLineName, cartTotals } from './cart';
 import { useWaiterRealtime } from './useWaiterRealtime';
 import {
   useHalls,
@@ -506,7 +506,7 @@ export function WaiterApp() {
     const key = cartLineKeyFromParts(dish.id, variant?.id, weightGrams);
     const nextQuantity = (cart.lines.find((line) => cartLineKeyFromParts(line.dish.id, line.variant?.id, line.weightGrams) === key)?.quantity ?? 0) + 1;
     cart.add(dish, variant, weightGrams);
-    const name = variant ? `${dish.name} · ${variant.name}` : weightGrams ? `${dish.name} · ${weightGrams} г` : dish.name;
+    const name = cartLineName({ dish, variant, weightGrams, quantity: 1 });
     push({ message: `${name} ×${nextQuantity} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
   }
 

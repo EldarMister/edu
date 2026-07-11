@@ -48,6 +48,8 @@ export interface AdminDish {
   voiceName?: string | null;
   isSet?: boolean;
   isWeighted?: boolean;
+  weightedMeasure?: 'weight' | 'volume';
+  weightedPriceBase?: number;
   setComponents?: AdminSetComponent[];
   variants: AdminDishVariant[];
   // Лёгкая ссылка на фото блюда (/dishes/:id/image?v=…) или null.
@@ -514,6 +516,8 @@ export interface DishInput {
   discountValue?: number;
   isAvailable?: boolean;
   isWeighted?: boolean;
+  weightedMeasure?: 'weight' | 'volume';
+  weightedPriceBase?: number;
   isActive?: boolean;
   trackInventory?: boolean;
   stock?: number;
