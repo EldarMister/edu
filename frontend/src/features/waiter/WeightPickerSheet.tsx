@@ -3,7 +3,7 @@ import type { Dish } from '@/types';
 import { dishUnitPrice, money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 
-const MAX_WEIGHT = 1000;
+const BASE_DIAL_MAX = 1000;
 const DEFAULT_WEIGHT = 500;
 const STEP = 10;
 const START_ANGLE = 135;
@@ -22,7 +22,16 @@ function arcPath(cx: number, cy: number, radius: number, from: number, to: numbe
 }
 
 function clampWeight(value: number) {
-  return Math.max(0, Math.min(MAX_WEIGHT, Math.round(value / STEP) * STEP));
+  return Math.max(0, Math.round(value / STEP) * STEP);
+}
+
+function formatWeight(value: number) {
+  if (value < 1000) return { value: String(value), unit: 'г' };
+  const kilograms = value / 1000;
+  const formatted = Number.isInteger(kilograms)
+    ? String(kilograms)
+    : kilograms.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return { value: formatted, unit: 'кг' };
 }
 
 export function WeightPickerSheet({
@@ -38,12 +47,16 @@ export function WeightPickerSheet({
   const [renderDish, setRenderDish] = useState<Dish | null>(dish);
   const [visible, setVisible] = useState(false);
   const [weight, setWeight] = useState(DEFAULT_WEIGHT);
+  const [editingWeight, setEditingWeight] = useState(false);
+  const [weightInput, setWeightInput] = useState(String(DEFAULT_WEIGHT));
   const dialRef = useRef<SVGSVGElement>(null);
 
   useEffect(() => {
     if (dish) {
       setRenderDish(dish);
       setWeight(DEFAULT_WEIGHT);
+      setEditingWeight(false);
+      setWeightInput(String(DEFAULT_WEIGHT));
       const id = requestAnimationFrame(() => setVisible(true));
       return () => cancelAnimationFrame(id);
     }
@@ -52,9 +65,11 @@ export function WeightPickerSheet({
     return () => clearTimeout(id);
   }, [dish]);
 
-  const angle = START_ANGLE + (weight / MAX_WEIGHT) * (END_ANGLE - START_ANGLE);
+  const dialMax = Math.max(BASE_DIAL_MAX, Math.ceil(weight / BASE_DIAL_MAX) * BASE_DIAL_MAX);
+  const angle = START_ANGLE + (weight / dialMax) * (END_ANGLE - START_ANGLE);
   const knob = polar(180, 180, 116, angle);
-  const weightNumberWidth = String(weight).length * 29;
+  const displayWeight = formatWeight(weight);
+  const weightNumberWidth = [...displayWeight.value].reduce((sum, character) => sum + (character === '.' ? 12 : 27), 0);
   const weightTextStart = 180 - (weightNumberWidth + 22) / 2;
   const ticks = useMemo(() => Array.from({ length: 51 }, (_, index) => {
     const tickAngle = START_ANGLE + (index / 50) * (END_ANGLE - START_ANGLE);
@@ -78,7 +93,7 @@ export function WeightPickerSheet({
     let pointerAngle = (Math.atan2(y - 180, x - 180) * 180) / Math.PI;
     if (pointerAngle < START_ANGLE) pointerAngle += 360;
     pointerAngle = Math.max(START_ANGLE, Math.min(END_ANGLE, pointerAngle));
-    setWeight(clampWeight(((pointerAngle - START_ANGLE) / (END_ANGLE - START_ANGLE)) * MAX_WEIGHT));
+    setWeight(clampWeight(((pointerAngle - START_ANGLE) / (END_ANGLE - START_ANGLE)) * dialMax));
   }
 
   function adjust(delta: number) {
@@ -129,19 +144,20 @@ export function WeightPickerSheet({
               <StepButton label="−100" onClick={() => adjust(-100)} disabled={weight === 0} />
             </div>
 
-            <svg
-              ref={dialRef}
-              viewBox="0 0 360 360"
-              className="aspect-square w-full touch-none select-none overflow-visible"
-              onPointerDown={(event) => {
-                event.currentTarget.setPointerCapture(event.pointerId);
-                updateFromPointer(event);
-              }}
-              onPointerMove={(event) => {
-                if (event.currentTarget.hasPointerCapture(event.pointerId)) updateFromPointer(event);
-              }}
-              aria-label={`${weight} ${t('грамм')}`}
-            >
+            <div className="relative aspect-square w-full">
+              <svg
+                ref={dialRef}
+                viewBox="0 0 360 360"
+                className="h-full w-full touch-none select-none overflow-visible"
+                onPointerDown={(event) => {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  updateFromPointer(event);
+                }}
+                onPointerMove={(event) => {
+                  if (event.currentTarget.hasPointerCapture(event.pointerId)) updateFromPointer(event);
+                }}
+                aria-label={`${formatWeight(weight).value} ${formatWeight(weight).unit}`}
+              >
               <defs>
                 <filter id="weight-dial-shadow" x="-30%" y="-30%" width="160%" height="170%">
                   <feDropShadow dx="0" dy="10" stdDeviation="10" floodColor="#0f172a" floodOpacity="0.10" />
@@ -160,7 +176,7 @@ export function WeightPickerSheet({
                   y1={tick.inner.y}
                   x2={tick.outer.x}
                   y2={tick.outer.y}
-                  stroke={index / 50 <= weight / MAX_WEIGHT ? '#2478ef' : '#d6deea'}
+                  stroke={index / 50 <= weight / dialMax ? '#2478ef' : '#d6deea'}
                   strokeWidth={tick.major ? 2.4 : 1.7}
                   strokeLinecap="round"
                 />
@@ -173,19 +189,55 @@ export function WeightPickerSheet({
               )}
               <circle cx={knob.x} cy={knob.y} r="11" fill="white" stroke="#1268ee" strokeWidth="7" />
 
-              <text x={weightTextStart} y="197" fill="#07152d" fontSize="50" fontWeight="700">{weight}</text>
-              <text x={weightTextStart + weightNumberWidth + 8} y="197" fill="#07152d" fontSize="22" fontWeight="600">г</text>
-              <text x="180" y="27" textAnchor="middle" fill="#60708d" fontSize="15">500</text>
-              <text x="40" y="130" textAnchor="middle" fill="#60708d" fontSize="15">250</text>
-              <text x="320" y="130" textAnchor="middle" fill="#60708d" fontSize="15">750</text>
+              <g opacity={editingWeight ? 0 : 1}>
+                <text x={weightTextStart} y="197" fill="#07152d" fontSize="50" fontWeight="700">{displayWeight.value}</text>
+                <text x={weightTextStart + weightNumberWidth + 8} y="197" fill="#07152d" fontSize="22" fontWeight="600">{displayWeight.unit}</text>
+              </g>
+              <text x="180" y="27" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax / 2).value} {formatWeight(dialMax / 2).unit}</text>
+              <text x="40" y="130" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax / 4).value} {formatWeight(dialMax / 4).unit}</text>
+              <text x="320" y="130" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight((dialMax * 3) / 4).value} {formatWeight((dialMax * 3) / 4).unit}</text>
               <text x="71" y="322" textAnchor="middle" fill="#60708d" fontSize="15">0</text>
-              <text x="289" y="322" textAnchor="middle" fill="#60708d" fontSize="15">1000</text>
-            </svg>
+              <text x="289" y="322" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax).value} {formatWeight(dialMax).unit}</text>
+              </svg>
+
+            {editingWeight ? (
+              <input
+                autoFocus
+                type="number"
+                min="0"
+                step={STEP}
+                inputMode="numeric"
+                value={weightInput}
+                onChange={(event) => setWeightInput(event.target.value)}
+                onBlur={() => {
+                  const next = Number(weightInput);
+                  setWeight(clampWeight(Number.isFinite(next) ? next : weight));
+                  setEditingWeight(false);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.currentTarget.blur();
+                  if (event.key === 'Escape') setEditingWeight(false);
+                }}
+                className="absolute left-1/2 top-[52%] w-28 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-primary bg-white/95 px-2 py-1 text-center text-[28px] font-bold text-text-primary outline-none ring-2 ring-primary/15"
+                aria-label={t('Вес в граммах')}
+              />
+            ) : (
+              <button
+                type="button"
+                className="absolute left-[29%] top-[34%] h-[34%] w-[42%] rounded-full"
+                onClick={() => {
+                  setWeightInput(String(weight));
+                  setEditingWeight(true);
+                }}
+                aria-label={`${t('Изменить вес')}: ${weight} ${t('грамм')}`}
+              />
+              )}
+            </div>
 
             <div className="flex flex-col gap-2 pt-6">
-              <StepButton label="+50" onClick={() => adjust(50)} disabled={weight === MAX_WEIGHT} />
-              <StepButton label="+100" onClick={() => adjust(100)} disabled={weight === MAX_WEIGHT} />
-              <StepButton label="+200" onClick={() => adjust(200)} disabled={weight === MAX_WEIGHT} />
+              <StepButton label="+50" onClick={() => adjust(50)} disabled={false} />
+              <StepButton label="+100" onClick={() => adjust(100)} disabled={false} />
+              <StepButton label="+200" onClick={() => adjust(200)} disabled={false} />
             </div>
           </div>
 

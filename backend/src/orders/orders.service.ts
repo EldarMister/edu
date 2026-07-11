@@ -58,6 +58,15 @@ function tableNumberVoice(value: number): string {
   return Number.isInteger(value) ? numberToWordsRu(value) : String(value);
 }
 
+function weightSnapshot(weightGrams: number): string {
+  if (weightGrams < 1000) return `${weightGrams} г`;
+  const kilograms = weightGrams / 1000;
+  const value = Number.isInteger(kilograms)
+    ? String(kilograms)
+    : kilograms.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return `${value} кг`;
+}
+
 const PARTIAL_REJECTION_PENDING_MESSAGE =
   'Ожидается решение официанта по частичному отказу';
 const POPULARITY_EXCLUDED_ITEM_STATUSES = new Set<OrderItemStatus>([
@@ -2270,7 +2279,7 @@ export class OrdersService {
         dishId: dish.id,
         dishVariantId: variant?.id,
         dishNameSnapshot: dish.name,
-        dishVariantNameSnapshot: dish.isWeighted ? `${i.weightGrams} г` : variant?.name,
+        dishVariantNameSnapshot: dish.isWeighted ? weightSnapshot(i.weightGrams!) : variant?.name,
         weightGrams: dish.isWeighted ? i.weightGrams : null,
         dishVoiceSnapshot: dish.voiceName ?? null,
         priceSnapshot: new Prisma.Decimal(unit),
