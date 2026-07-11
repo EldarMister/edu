@@ -53,6 +53,25 @@ function useMediaQuery(query: string) {
   return matches;
 }
 
+function useDocumentModalOpen() {
+  const readModalOpen = () =>
+    typeof document !== 'undefined' &&
+    (document.documentElement.classList.contains('modal-open') || document.body.classList.contains('modal-open'));
+
+  const [modalOpen, setModalOpen] = useState(readModalOpen);
+
+  useEffect(() => {
+    const sync = () => setModalOpen(readModalOpen());
+    const observer = new MutationObserver(sync);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    sync();
+    return () => observer.disconnect();
+  }, []);
+
+  return modalOpen;
+}
+
 function useSocketConnected() {
   const [connected, setConnected] = useState(() => getSocket().connected);
 
@@ -263,10 +282,13 @@ export function PttOverlay({
   const user = useAuth((s) => s.user);
   const connected = useSocketConnected();
   const isMobile = useMediaQuery('(max-width: 1023px)');
+  const modalOpen = useDocumentModalOpen();
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState<PttChannel>(() => initialChannel(user?.role));
   const [onlineCount, setOnlineCount] = useState(0);
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
+  const hideForModal = isMobile && modalOpen;
+  const effectiveButtonHidden = buttonHidden || hideForModal;
 
   const selected = useMemo(
     () => PTT_CHANNELS.find((item) => item.key === channel) ?? PTT_CHANNELS[0],
@@ -354,11 +376,11 @@ export function PttOverlay({
 
   const onPressStop = () => sender.stop();
 
-  // Кнопку прячем на некоторых экранах официанта — при этом лист закрываем,
+  // Кнопку прячем на некоторых экранах официанта и под мобильными модалками — при этом лист закрываем,
   // но сам оверлей остаётся смонтированным (приём аудио не прерывается).
   useEffect(() => {
-    if (buttonHidden) setOpen(false);
-  }, [buttonHidden]);
+    if (effectiveButtonHidden) setOpen(false);
+  }, [effectiveButtonHidden]);
 
   // «Занято» = кто-то держит кнопку (channel_busy) ИЛИ у нас сейчас играет
   // входящий файл (receiving). Второе продлевает блокировку на всё
@@ -398,7 +420,7 @@ export function PttOverlay({
 
   return (
     <>
-      {!buttonHidden && (
+      {!effectiveButtonHidden && (
         <div
           className="fixed right-2 z-[70] flex h-14 w-14 items-center justify-center"
           style={{ bottom: floatingBottom }}

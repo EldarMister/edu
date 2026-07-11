@@ -516,14 +516,16 @@ function DishModal({
                     {photoPreview ? <img src={photoPreview} alt="" className="h-full w-full object-cover" /> : <span className="text-xs text-text-muted">Нет фото</span>}
                     {photoPreview && <button type="button" onClick={removePhoto} className="absolute right-1.5 top-1.5 rounded-md bg-white/90 p-1 text-danger opacity-0 shadow group-hover:opacity-100" aria-label="Удалить фото"><IconTrash className="h-4 w-4" /></button>}
                   </div>
-                  <button type="button" className="flex h-[74px] min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-dashed border-primary/35 bg-primary/[0.02] px-3 font-medium text-primary hover:bg-primary/5" disabled={photoBusy} onClick={() => photoRef.current?.click()}>
-                    {photoBusy ? <Spinner /> : <><IconPlus className="h-4 w-4" /> Загрузить фото</>}
-                  </button>
-                </div>
-                <p className="mt-2 pl-[146px] text-[11px] text-text-muted">PNG, JPG, WEBP. Рекомендуемый размер 800×800px</p>
-                <div className="mt-2 flex gap-2">
-                  <input className="input h-9 flex-1 text-xs" placeholder="или ссылка https://..." value={photoUrlInput} onChange={(e) => setPhotoUrlInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && onPhotoUrlCommit()} onBlur={onPhotoUrlCommit} />
-                  <button type="button" className="btn-secondary h-9 shrink-0 px-3 text-xs" onClick={onPhotoUrlCommit}>По ссылке</button>
+                  <div className="min-w-0 flex-1">
+                    <button type="button" className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-primary/35 bg-primary/[0.02] px-3 text-sm font-medium text-primary hover:bg-primary/5" disabled={photoBusy} onClick={() => photoRef.current?.click()}>
+                      {photoBusy ? <Spinner /> : <><IconPlus className="h-4 w-4" /> Загрузить фото</>}
+                    </button>
+                    <p className="mt-2 text-[11px] text-text-muted">PNG, JPG, WEBP. Рекомендуемый размер 800×800px</p>
+                    <div className="mt-2 flex gap-2">
+                      <input className="input h-9 flex-1 text-xs" placeholder="или ссылка https://..." value={photoUrlInput} onChange={(e) => setPhotoUrlInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && onPhotoUrlCommit()} onBlur={onPhotoUrlCommit} />
+                      <button type="button" className="btn-secondary h-9 shrink-0 px-3 text-xs" onClick={onPhotoUrlCommit}>По ссылке</button>
+                    </div>
+                  </div>
                 </div>
               </Field>
               <div className="mt-3 space-y-3">
@@ -535,7 +537,6 @@ function DishModal({
                 <Field label="Описание">
                   <div className="relative"><textarea className="input min-h-[84px] resize-none py-2.5 pr-12" maxLength={300} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Необязательно" /><span className="absolute bottom-2 right-3 text-[11px] text-text-muted">{description.length}/300</span></div>
                 </Field>
-                <Field label="Название для озвучки"><input className="input h-11" value={voiceName} onChange={(e) => setVoiceName(e.target.value)} placeholder={name.trim() ? `Напр. «Пепперрони» (на экране — ${name.trim()})` : 'Как произносить вслух (необязательно)'} /></Field>
                 {variants.length === 0 && !isWeighted && (
                   <div className="grid grid-cols-3 gap-3">
                     <Field label="Цена (с)"><input className="input h-11" type="number" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></Field>
@@ -580,91 +581,95 @@ function DishModal({
                   <p className="mt-6 text-center text-xs text-text-muted">Система автоматически пересчитывает вес и рассчитывает итоговую цену.</p>
                 </div>
               )}
-            </section>
-          </div>
 
-          <section className="rounded-xl border border-border p-4">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <h4 className="text-base font-semibold text-text-primary">Варианты блюда</h4>
-            <button type="button" className="btn-secondary btn-md" onClick={addVariant}>
-              <IconPlus className="h-4 w-4" /> Добавить вариант
-            </button>
-          </div>
-          <div className="overflow-hidden rounded-xl border border-border overflow-x-auto">
-            <div className="grid min-w-[560px] grid-cols-[28px_minmax(120px,1fr)_100px_100px_100px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
-              <span />
-              <span>Название варианта</span>
-              <span>Цена (с)</span>
-              <span>Остаток</span>
-              <span>Ед. изм.</span>
-              <span />
-            </div>
-            {variants.length === 0 ? (
-              <div className="px-3 py-4 text-sm text-text-muted">Варианты не добавлены</div>
-            ) : (
-              <div className="min-w-[560px]">
-                {variants.map((variant, index) => (
-                  <div
-                    key={variant.uid}
-                    draggable
-                    onDragStart={() => setDragIndex(index)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={() => {
-                      if (dragIndex !== null) moveVariant(dragIndex, index);
-                      setDragIndex(null);
-                    }}
-                    onDragEnd={() => setDragIndex(null)}
-                    className={`grid grid-cols-[28px_minmax(120px,1fr)_100px_100px_100px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
-                      dragIndex === index ? 'bg-primary/5' : 'bg-white'
-                    }`}
-                  >
-                    <span className="cursor-grab select-none text-center text-lg leading-none text-text-light" title="Изменить порядок">
-                      ⋮⋮
-                    </span>
-                    <input
-                      className="input h-10"
-                      value={variant.name}
-                      placeholder="30 см"
-                      onChange={(e) => updateVariant(variant.uid, { name: e.target.value })}
-                    />
-                    <input
-                      className="input h-10"
-                      type="number"
-                      inputMode="numeric"
-                      min="0"
-                      value={variant.price}
-                      placeholder="400"
-                      onChange={(e) => updateVariant(variant.uid, { price: e.target.value })}
-                    />
-                    <input
-                      className="input h-10"
-                      type="number"
-                      inputMode="numeric"
-                      min="0"
-                      value={variant.stock}
-                      placeholder="Без учета"
-                      onChange={(e) => updateVariant(variant.uid, { stock: e.target.value })}
-                    />
-                    <Select
-                      value={variant.unit}
-                      onChange={(value) => updateVariant(variant.uid, { unit: value })}
-                      options={unitLabelOptions(variant.unit)}
-                      className="h-10 w-full"
-                    />
-                    <button
-                      type="button"
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/5"
-                      title="Удалить вариант"
-                      onClick={() => removeVariant(variant.uid)}
-                    >
-                      <IconTrash className="h-4 w-4" />
+              <div className="mt-4 space-y-4">
+                <Field label="Название для озвучки"><input className="input h-11" value={voiceName} onChange={(e) => setVoiceName(e.target.value)} placeholder={name.trim() ? `Напр. «Пепперрони» (на экране — ${name.trim()})` : 'Как произносить вслух (необязательно)'} /></Field>
+
+                <section className="rounded-xl border border-border p-4">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h4 className="text-base font-semibold text-text-primary">Варианты блюда</h4>
+                    <button type="button" className="btn-secondary btn-md" onClick={addVariant}>
+                      <IconPlus className="h-4 w-4" /> Добавить вариант
                     </button>
                   </div>
-                ))}
+                  <div className="overflow-hidden overflow-x-auto rounded-xl border border-border">
+                    <div className="grid min-w-[520px] grid-cols-[28px_minmax(118px,1fr)_92px_92px_92px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
+                      <span />
+                      <span>Название варианта</span>
+                      <span>Цена (с)</span>
+                      <span>Остаток</span>
+                      <span>Ед. изм.</span>
+                      <span />
+                    </div>
+                    {variants.length === 0 ? (
+                      <div className="px-3 py-4 text-sm text-text-muted">Варианты не добавлены</div>
+                    ) : (
+                      <div className="min-w-[520px]">
+                        {variants.map((variant, index) => (
+                          <div
+                            key={variant.uid}
+                            draggable
+                            onDragStart={() => setDragIndex(index)}
+                            onDragOver={(event) => event.preventDefault()}
+                            onDrop={() => {
+                              if (dragIndex !== null) moveVariant(dragIndex, index);
+                              setDragIndex(null);
+                            }}
+                            onDragEnd={() => setDragIndex(null)}
+                            className={`grid grid-cols-[28px_minmax(118px,1fr)_92px_92px_92px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
+                              dragIndex === index ? 'bg-primary/5' : 'bg-white'
+                            }`}
+                          >
+                            <span className="cursor-grab select-none text-center text-lg leading-none text-text-light" title="Изменить порядок">
+                              ⋮⋮
+                            </span>
+                            <input
+                              className="input h-10"
+                              value={variant.name}
+                              placeholder="30 см"
+                              onChange={(e) => updateVariant(variant.uid, { name: e.target.value })}
+                            />
+                            <input
+                              className="input h-10"
+                              type="number"
+                              inputMode="numeric"
+                              min="0"
+                              value={variant.price}
+                              placeholder="400"
+                              onChange={(e) => updateVariant(variant.uid, { price: e.target.value })}
+                            />
+                            <input
+                              className="input h-10"
+                              type="number"
+                              inputMode="numeric"
+                              min="0"
+                              value={variant.stock}
+                              placeholder="Без учета"
+                              onChange={(e) => updateVariant(variant.uid, { stock: e.target.value })}
+                            />
+                            <Select
+                              value={variant.unit}
+                              onChange={(value) => updateVariant(variant.uid, { unit: value })}
+                              options={unitLabelOptions(variant.unit)}
+                              className="h-10 w-full"
+                            />
+                            <button
+                              type="button"
+                              className="flex h-9 w-9 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/5"
+                              title="Удалить вариант"
+                              onClick={() => removeVariant(variant.uid)}
+                            >
+                              <IconTrash className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
               </div>
-            )}
+            </section>
           </div>
-          </section>
         </div>
         {error && <p className="rounded-lg bg-danger/5 px-3 py-2 text-sm text-danger">{error}</p>}
       </div>
