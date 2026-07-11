@@ -9,7 +9,6 @@ import {
   IsOptional,
   IsString,
   Min,
-  Max,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -50,7 +49,6 @@ export class CreateOrderItemDto {
   @IsOptional()
   @IsInt()
   @Min(1)
-  @Max(1000)
   weightGrams?: number;
 
   @IsInt()
