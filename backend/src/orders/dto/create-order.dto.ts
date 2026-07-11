@@ -9,6 +9,7 @@ import {
   IsOptional,
   IsString,
   Min,
+  Max,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -44,6 +45,13 @@ export class CreateOrderItemDto {
   @IsOptional()
   @IsString()
   variantId?: string;
+
+  /** Вес весового блюда в граммах. Цена блюда от веса не меняется. */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1000)
+  weightGrams?: number;
 
   @IsInt()
   @Min(1)

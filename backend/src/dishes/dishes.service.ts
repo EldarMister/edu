@@ -35,6 +35,7 @@ export class DishesService {
         discountValue: true,
         isAvailable: true,
         isSet: true,
+        isWeighted: true,
         variants: {
           orderBy: { sortOrder: 'asc' },
           select: {

@@ -4,6 +4,7 @@ import { money, dishUnitPrice, minDishUnitPrice, variantNamesLine } from '@/lib/
 import { useT } from '@/lib/i18n';
 import { SetPickerSheet, SetConfigSheet, defaultSetComponents } from './SetSheets';
 import { VariantPickerSheet } from './VariantPickerSheet';
+import { WeightPickerSheet } from './WeightPickerSheet';
 
 export function DishMenu({
   categories,
@@ -22,7 +23,7 @@ export function DishMenu({
   quantities: Record<string, number>;
   /** Число разных строк корзины у блюда (dishId → count): 1 — можно показать «минус». */
   lineCounts?: Record<string, number>;
-  onAdd: (dish: Dish, variant?: DishVariant) => void;
+  onAdd: (dish: Dish, variant?: DishVariant, weightGrams?: number) => void;
   onAddSet: (set: Dish, components: CartSetComponent[]) => void;
   onDec: (dish: Dish) => void;
   disabled?: boolean;
@@ -33,6 +34,7 @@ export function DishMenu({
   const [activeCat, setActiveCat] = useState<string>('all');
   const [search, setSearch] = useState('');
   const [variantDish, setVariantDish] = useState<Dish | null>(null);
+  const [weightDish, setWeightDish] = useState<Dish | null>(null);
   const [setPickerOpen, setSetPickerOpen] = useState(false);
   const [configSet, setConfigSet] = useState<Dish | null>(null);
 
@@ -106,7 +108,7 @@ export function DishMenu({
           const active = qty > 0;
           // «Минус» доступен, когда уменьшение однозначно: обычное блюдо или
           // в корзине ровно один выбранный размер. Несколько размеров — счётчик.
-          const canDecrement = !hasVariants || (lineCounts?.[d.id] ?? 0) === 1;
+          const canDecrement = (!hasVariants && !d.isWeighted) || (lineCounts?.[d.id] ?? 0) === 1;
           const isOutOfStock = d.trackInventory && (hasVariants
             ? d.variants.every((v) => typeof v.stock === 'number' && v.stock <= 0)
             : typeof d.stock === 'number' && d.stock <= 0);
@@ -116,7 +118,8 @@ export function DishMenu({
               key={d.id}
               disabled={isDishDisabled}
               onClick={() => {
-                if (hasVariants) setVariantDish(d);
+                if (d.isWeighted) setWeightDish(d);
+                else if (hasVariants) setVariantDish(d);
                 else onAdd(d);
               }}
               className={`relative flex h-[100px] flex-col rounded-xl border px-3 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
@@ -143,6 +146,8 @@ export function DishMenu({
               </span>
               {hasVariants ? (
                 <span className="mt-0.5 line-clamp-1 text-xs text-text-muted">{variantNamesLine(d.variants)}</span>
+              ) : d.isWeighted ? (
+                <span className="mt-0.5 line-clamp-1 text-xs font-medium text-primary">{t('Весовое')}</span>
               ) : d.description ? (
                 <span className="mt-0.5 line-clamp-1 text-xs text-text-muted">{d.description}</span>
               ) : null}
@@ -190,6 +195,16 @@ export function DishMenu({
           if (!variantDish) return;
           onAdd(variantDish, variant);
           setVariantDish(null);
+        }}
+      />
+
+      <WeightPickerSheet
+        dish={weightDish}
+        onClose={() => setWeightDish(null)}
+        onAdd={(weightGrams) => {
+          if (!weightDish) return;
+          onAdd(weightDish, undefined, weightGrams);
+          setWeightDish(null);
         }}
       />
 

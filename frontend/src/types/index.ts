@@ -107,6 +107,8 @@ export interface Dish {
   prepStation?: PrepStation | null;
   /** true — это сет (состав в setComponents). */
   isSet?: boolean;
+  /** Открывать визуальный выбор веса в граммах. */
+  isWeighted?: boolean;
   setComponents?: SetComponentDef[];
   variants: DishVariant[];
 }
@@ -194,6 +196,7 @@ export interface OrderItem {
   dishVariantId: string | null;
   dishNameSnapshot: string;
   dishVariantNameSnapshot: string | null;
+  weightGrams?: number | null;
   priceSnapshot: string;
   quantity: number;
   discountAmount: string;
@@ -308,6 +311,8 @@ export interface CartSetComponent {
 export interface CartLine {
   dish: Dish;
   variant?: DishVariant;
+  /** Выбранный вес весового блюда; цена линии остаётся ценой блюда. */
+  weightGrams?: number;
   quantity: number;
   comment?: string;
   /** «С собой» (навынос) для этой позиции. */

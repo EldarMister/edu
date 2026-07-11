@@ -364,6 +364,7 @@ export function WaiterApp() {
         return {
           dish,
           variant,
+          weightGrams: it.weightGrams ?? undefined,
           quantity: it.quantity,
           comment: it.comment ?? undefined,
           takeaway: it.takeaway ?? undefined,
@@ -487,7 +488,7 @@ export function WaiterApp() {
     }
   }
 
-  function addDishToCart(dish: Parameters<typeof cart.add>[0], variant?: DishVariant) {
+  function addDishToCart(dish: Parameters<typeof cart.add>[0], variant?: DishVariant, weightGrams?: number) {
     if (dish.trackInventory) {
       const currentQty = (variant ? cartQuantities[variant.id] : cartQuantities[dish.id]) ?? 0;
       const stock = variant ? variant.stock : dish.stock;
@@ -498,14 +499,14 @@ export function WaiterApp() {
     }
 
     if (replacementTarget) {
-      void replaceRejectedWithLine({ dish, variant, quantity: 1 });
+      void replaceRejectedWithLine({ dish, variant, weightGrams, quantity: 1 });
       return;
     }
 
-    const key = cartLineKeyFromParts(dish.id, variant?.id);
-    const nextQuantity = (cart.lines.find((line) => cartLineKeyFromParts(line.dish.id, line.variant?.id) === key)?.quantity ?? 0) + 1;
-    cart.add(dish, variant);
-    const name = variant ? `${dish.name} · ${variant.name}` : dish.name;
+    const key = cartLineKeyFromParts(dish.id, variant?.id, weightGrams);
+    const nextQuantity = (cart.lines.find((line) => cartLineKeyFromParts(line.dish.id, line.variant?.id, line.weightGrams) === key)?.quantity ?? 0) + 1;
+    cart.add(dish, variant, weightGrams);
+    const name = variant ? `${dish.name} · ${variant.name}` : weightGrams ? `${dish.name} · ${weightGrams} г` : dish.name;
     push({ message: `${name} ×${nextQuantity} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
   }
 

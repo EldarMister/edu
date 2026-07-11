@@ -125,6 +125,11 @@ export function MenuPage() {
                             Сет
                           </span>
                         )}
+                        {d.isWeighted && (
+                          <span className="inline-flex items-center rounded-md bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-700">
+                            Весовое
+                          </span>
+                        )}
                         {dishStation(d) === 'bar' && (
                           <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
                             Бар
@@ -268,6 +273,7 @@ function DishModal({
   const [description, setDescription] = useState(dish?.description ?? '');
   const [voiceName, setVoiceName] = useState(dish?.voiceName ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
+  const [isWeighted, setIsWeighted] = useState(dish?.isWeighted ?? false);
   // '' = брать направление из категории; иначе приоритет блюда.
   const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar' | 'none'>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
@@ -406,6 +412,7 @@ function DishModal({
         description: description.trim() || undefined,
         voiceName: voiceName.trim() || null,
         isAvailable,
+        isWeighted,
         // Фото отправляем только при изменении (новое data URL или '' для удаления).
         imageUrl,
         prepStation: prepStation === '' ? null : prepStation,
@@ -586,10 +593,28 @@ function DishModal({
           <input type="checkbox" checked={isAvailable} onChange={(e) => setIsAvailable(e.target.checked)} />
           Доступно для заказа
         </label>
+        <label className="flex items-start gap-2.5 rounded-xl border border-border bg-background/60 p-3 text-sm text-text-secondary">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={isWeighted}
+            onChange={(e) => {
+              const checked = e.target.checked;
+              setIsWeighted(checked);
+              if (checked) setVariants([]);
+            }}
+          />
+          <span>
+            <span className="block font-medium text-text-primary">Весовое блюдо</span>
+            <span className="mt-0.5 block text-xs text-text-muted">
+              При добавлении официант выберет вес. Цена останется фиксированной ценой блюда.
+            </span>
+          </span>
+        </label>
         <div className="pt-2">
           <div className="mb-2 flex items-center justify-between gap-3">
             <h4 className="text-[15px] font-semibold text-text-primary">Варианты блюда</h4>
-            <button type="button" className="btn-secondary btn-md" onClick={addVariant}>
+            <button type="button" className="btn-secondary btn-md" onClick={addVariant} disabled={isWeighted}>
               <IconPlus className="h-4 w-4" /> Добавить вариант
             </button>
           </div>
@@ -603,7 +628,9 @@ function DishModal({
               <span />
             </div>
             {variants.length === 0 ? (
-              <div className="px-3 py-4 text-sm text-text-muted">Варианты не добавлены</div>
+              <div className="px-3 py-4 text-sm text-text-muted">
+                {isWeighted ? 'Для весового блюда варианты не используются' : 'Варианты не добавлены'}
+              </div>
             ) : (
               <div className="min-w-[560px]">
                 {variants.map((variant, index) => (

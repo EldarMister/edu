@@ -47,6 +47,7 @@ export interface AdminDish {
   prepStation: PrepStation | null;
   voiceName?: string | null;
   isSet?: boolean;
+  isWeighted?: boolean;
   setComponents?: AdminSetComponent[];
   variants: AdminDishVariant[];
   // Лёгкая ссылка на фото блюда (/dishes/:id/image?v=…) или null.
@@ -512,6 +513,7 @@ export interface DishInput {
   discountType?: 'none' | 'percent' | 'fixed';
   discountValue?: number;
   isAvailable?: boolean;
+  isWeighted?: boolean;
   isActive?: boolean;
   trackInventory?: boolean;
   stock?: number;
