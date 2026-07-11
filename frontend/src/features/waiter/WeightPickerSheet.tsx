@@ -25,13 +25,14 @@ function clampWeight(value: number) {
   return Math.max(0, Math.round(value / STEP) * STEP);
 }
 
-function formatWeight(value: number) {
-  if (value < 1000) return { value: String(value), unit: 'г' };
-  const kilograms = value / 1000;
-  const formatted = Number.isInteger(kilograms)
-    ? String(kilograms)
-    : kilograms.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
-  return { value: formatted, unit: 'кг' };
+function formatWeight(value: number, measure: 'weight' | 'volume' = 'weight') {
+  const [smallUnit, largeUnit] = measure === 'volume' ? ['мл', 'л'] : ['г', 'кг'];
+  if (value < 1000) return { value: String(value), unit: smallUnit };
+  const scaled = value / 1000;
+  const formatted = Number.isInteger(scaled)
+    ? String(scaled)
+    : scaled.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return { value: formatted, unit: largeUnit };
 }
 
 export function WeightPickerSheet({
@@ -69,7 +70,8 @@ export function WeightPickerSheet({
   const dialMax = Math.max(BASE_DIAL_MAX, Math.ceil(weight / BASE_DIAL_MAX) * BASE_DIAL_MAX);
   const angle = START_ANGLE + (weight / dialMax) * (END_ANGLE - START_ANGLE);
   const knob = polar(180, 180, 116, angle);
-  const displayWeight = formatWeight(weight);
+  const measure = renderDish?.weightedMeasure ?? 'weight';
+  const displayWeight = formatWeight(weight, measure);
   const weightNumberWidth = [...displayWeight.value].reduce((sum, character) => sum + (character === '.' ? 12 : 27), 0);
   const weightTextStart = 180 - (weightNumberWidth + 22) / 2;
   const ticks = useMemo(() => Array.from({ length: 51 }, (_, index) => {
@@ -84,7 +86,8 @@ export function WeightPickerSheet({
 
   if (!renderDish) return null;
 
-  const price = dishUnitPrice(renderDish.price, renderDish.discountType, renderDish.discountValue);
+  const basePrice = Number(renderDish.price) * weight / (renderDish.weightedPriceBase ?? 100);
+  const price = dishUnitPrice(String(basePrice), renderDish.discountType, renderDish.discountValue);
 
   function pointerAngle(event: React.PointerEvent<SVGSVGElement>) {
     const rect = dialRef.current?.getBoundingClientRect();
@@ -182,7 +185,7 @@ export function WeightPickerSheet({
                 onPointerCancel={() => {
                   dragRef.current = null;
                 }}
-                aria-label={`${formatWeight(weight).value} ${formatWeight(weight).unit}`}
+                aria-label={`${formatWeight(weight, measure).value} ${formatWeight(weight, measure).unit}`}
               >
               <defs>
                 <filter id="weight-dial-shadow" x="-30%" y="-30%" width="160%" height="170%">
@@ -219,11 +222,11 @@ export function WeightPickerSheet({
                 <text x={weightTextStart} y="197" fill="#07152d" fontSize="50" fontWeight="700">{displayWeight.value}</text>
                 <text x={weightTextStart + weightNumberWidth + 8} y="197" fill="#07152d" fontSize="22" fontWeight="600">{displayWeight.unit}</text>
               </g>
-              <text x="180" y="27" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax / 2).value} {formatWeight(dialMax / 2).unit}</text>
-              <text x="40" y="130" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax / 4).value} {formatWeight(dialMax / 4).unit}</text>
-              <text x="320" y="130" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight((dialMax * 3) / 4).value} {formatWeight((dialMax * 3) / 4).unit}</text>
+              <text x="180" y="27" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax / 2, measure).value} {formatWeight(dialMax / 2, measure).unit}</text>
+              <text x="40" y="130" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax / 4, measure).value} {formatWeight(dialMax / 4, measure).unit}</text>
+              <text x="320" y="130" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight((dialMax * 3) / 4, measure).value} {formatWeight((dialMax * 3) / 4, measure).unit}</text>
               <text x="71" y="322" textAnchor="middle" fill="#60708d" fontSize="15">0</text>
-              <text x="289" y="322" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax).value} {formatWeight(dialMax).unit}</text>
+              <text x="289" y="322" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax, measure).value} {formatWeight(dialMax, measure).unit}</text>
               </svg>
 
             {editingWeight ? (
@@ -245,7 +248,7 @@ export function WeightPickerSheet({
                   if (event.key === 'Escape') setEditingWeight(false);
                 }}
                 className="absolute left-1/2 top-[52%] w-28 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-primary bg-white/95 px-2 py-1 text-center text-[28px] font-bold text-text-primary outline-none ring-2 ring-primary/15"
-                aria-label={t('Вес в граммах')}
+                aria-label={measure === 'volume' ? t('Объём в миллилитрах') : t('Вес в граммах')}
               />
             ) : (
               <button
@@ -255,7 +258,7 @@ export function WeightPickerSheet({
                   setWeightInput(String(weight));
                   setEditingWeight(true);
                 }}
-                aria-label={`${t('Изменить вес')}: ${weight} ${t('грамм')}`}
+                aria-label={`${t(measure === 'volume' ? 'Изменить объём' : 'Изменить вес')}: ${weight} ${measure === 'volume' ? t('миллилитров') : t('грамм')}`}
               />
               )}
             </div>

@@ -306,6 +306,10 @@ model Dish {
   isSet           Boolean      @default(false) @map("is_set")
   // Весовое блюдо открывает у официанта отдельный выбор граммов вместо обычных вариантов.
   isWeighted      Boolean      @default(false) @map("is_weighted")
+  // Система измерения весового блюда: weight (г/кг) или volume (мл/л).
+  weightedMeasure String       @default("weight") @map("weighted_measure")
+  // Количество базовых единиц, за которое указана цена (1, 100 или 1000).
+  weightedPriceBase Int        @default(100) @map("weighted_price_base")
   // Отдельное название для озвучки кухни (если задано — используется вместо name).
   voiceName       String?      @map("voice_name")
   popularityScore Float        @default(0) @map("popularity_score")

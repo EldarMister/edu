@@ -58,13 +58,14 @@ function tableNumberVoice(value: number): string {
   return Number.isInteger(value) ? numberToWordsRu(value) : String(value);
 }
 
-function weightSnapshot(weightGrams: number): string {
-  if (weightGrams < 1000) return `${weightGrams} г`;
-  const kilograms = weightGrams / 1000;
-  const value = Number.isInteger(kilograms)
-    ? String(kilograms)
-    : kilograms.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
-  return `${value} кг`;
+function weightSnapshot(amount: number, measure: string): string {
+  const [smallUnit, largeUnit] = measure === 'volume' ? ['мл', 'л'] : ['г', 'кг'];
+  if (amount < 1000) return `${amount} ${smallUnit}`;
+  const scaled = amount / 1000;
+  const value = Number.isInteger(scaled)
+    ? String(scaled)
+    : scaled.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return `${value} ${largeUnit}`;
 }
 
 const PARTIAL_REJECTION_PENDING_MESSAGE =
@@ -2154,19 +2155,16 @@ export class OrdersService {
       }
       const hasVariants = dish.variants.length > 0;
       const variant = i.variantId ? variantById.get(i.variantId) : null;
-      if (dish.isWeighted && hasVariants) {
-        throw new BadRequestException(`У весового блюда «${dish.name}» не должно быть вариантов`);
-      }
       if (dish.isWeighted && !i.weightGrams) {
         throw new BadRequestException(`Выберите вес блюда «${dish.name}»`);
       }
       if (!dish.isWeighted && i.weightGrams) {
         throw new BadRequestException(`Блюдо «${dish.name}» не является весовым`);
       }
-      if (hasVariants && !variant) {
+      if (!dish.isWeighted && hasVariants && !variant) {
         throw new BadRequestException(`Выберите вариант блюда «${dish.name}»`);
       }
-      if (!hasVariants && i.variantId) {
+      if ((!hasVariants || dish.isWeighted) && i.variantId) {
         throw new BadRequestException(`У блюда «${dish.name}» нет вариантов`);
       }
       if (variant && variant.dishId !== dish.id) {
@@ -2174,7 +2172,7 @@ export class OrdersService {
       }
 
       if (dish.trackInventory) {
-        if (hasVariants && variant) {
+        if (!dish.isWeighted && hasVariants && variant) {
           if (variant.stock !== null) {
             const current = variantDeductions.get(variant.id) ?? 0;
             if ((variant.stock ?? 0) < current + i.quantity) {
@@ -2269,8 +2267,10 @@ export class OrdersService {
         if (rows.length > 0) setComponents = { create: rows };
       }
 
-      const basePrice = variant?.price ?? dish.price;
-      const pricing = unitPricing(basePrice, dish.discountType, dish.discountValue);
+      const basePrice = dish.isWeighted
+        ? Number(dish.price) * i.weightGrams! / dish.weightedPriceBase
+        : (variant?.price ?? dish.price);
+      const pricing = unitPricing(new Prisma.Decimal(basePrice), dish.discountType, dish.discountValue);
       // Для сета корректируем цену на дельту состава (не уходим в минус).
       const unit = dish.isSet ? Math.max(0, round2(pricing.unit + setDelta)) : pricing.unit;
       const unitDiscount = dish.isSet ? 0 : pricing.unitDiscount;
@@ -2279,7 +2279,7 @@ export class OrdersService {
         dishId: dish.id,
         dishVariantId: variant?.id,
         dishNameSnapshot: dish.name,
-        dishVariantNameSnapshot: dish.isWeighted ? weightSnapshot(i.weightGrams!) : variant?.name,
+        dishVariantNameSnapshot: dish.isWeighted ? weightSnapshot(i.weightGrams!, dish.weightedMeasure) : variant?.name,
         weightGrams: dish.isWeighted ? i.weightGrams : null,
         dishVoiceSnapshot: dish.voiceName ?? null,
         priceSnapshot: new Prisma.Decimal(unit),

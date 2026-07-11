@@ -373,9 +373,6 @@ export class CatalogService {
   async createDish(dto: CreateDishDto, actor: AuditActor) {
     await this.ensureCategory(dto.categoryId);
     const variants = this.normalizeVariants(dto.variants);
-    if (dto.isWeighted && variants.length > 0) {
-      throw new BadRequestException('У весового блюда не должно быть вариантов');
-    }
     const price = this.resolveDishPrice(dto.price, variants);
     const dish = await this.prisma.dish.create({
       data: {
@@ -389,6 +386,8 @@ export class CatalogService {
         cookingTime: dto.cookingTime,
         isAvailable: dto.isAvailable ?? true,
         isWeighted: dto.isWeighted ?? false,
+        weightedMeasure: dto.weightedMeasure ?? 'weight',
+        weightedPriceBase: dto.weightedPriceBase ?? 100,
         trackInventory: dto.trackInventory ?? false,
         stock: dto.stock,
         initialStock: dto.initialStock,
@@ -435,11 +434,6 @@ export class CatalogService {
     if (!dish) throw new NotFoundException('Блюдо не найдено');
     const { variants: variantsDto, ...dishDto } = dto;
     const variants = variantsDto !== undefined ? this.normalizeVariants(variantsDto) : undefined;
-    const nextIsWeighted = dto.isWeighted ?? dish.isWeighted;
-    const nextVariantsCount = variants !== undefined ? variants.length : dish._count.variants;
-    if (nextIsWeighted && nextVariantsCount > 0) {
-      throw new BadRequestException('У весового блюда не должно быть вариантов');
-    }
     const data: Prisma.DishUpdateInput = { ...dishDto } as Prisma.DishUpdateInput;
     if (dto.trackInventory !== undefined) {
       data.trackInventory = dto.trackInventory;

@@ -51,7 +51,13 @@ export function cartLineKey(line: CartLine) {
 export function cartLineName(line: CartLine) {
   if (line.set) return line.dish.name;
   if (line.variant) return `${line.dish.name} · ${line.variant.name}`;
-  if (line.weightGrams) return `${line.dish.name} · ${line.weightGrams} г`;
+  if (line.weightGrams) {
+    const volume = line.dish.weightedMeasure === 'volume';
+    const amount = line.weightGrams;
+    const value = amount < 1000 ? amount : Number((amount / 1000).toFixed(2));
+    const unit = amount < 1000 ? (volume ? 'мл' : 'г') : (volume ? 'л' : 'кг');
+    return `${line.dish.name} · ${value} ${unit}`;
+  }
   return line.dish.name;
 }
 
@@ -61,11 +67,14 @@ export function cartSetChanged(line: CartLine) {
 }
 
 export function cartLineBasePrice(line: CartLine) {
+  if (line.dish.isWeighted && line.weightGrams) {
+    return Number(line.dish.price) * line.weightGrams / (line.dish.weightedPriceBase ?? 100);
+  }
   return line.variant?.price ?? line.dish.price;
 }
 
 export function cartLineUnitPrice(line: CartLine) {
-  return dishUnitPrice(cartLineBasePrice(line), line.dish.discountType, line.dish.discountValue);
+  return dishUnitPrice(String(cartLineBasePrice(line)), line.dish.discountType, line.dish.discountValue);
 }
 
 /** Применяет изменение к корзине активного стола и синхронизирует зеркало. */

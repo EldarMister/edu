@@ -261,26 +261,30 @@ function DishModal({
   onClose: () => void;
 }) {
   const isEdit = !!dish;
-  const { create, update } = useDishMutations();
+  const { create, update, remove } = useDishMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(dish?.name ?? '');
   const [categoryId, setCategoryId] = useState(
     dish?.categoryId ?? (defaultCategoryId || categories[0]?.id || ''),
   );
-  const [price, setPrice] = useState(dish ? (dish.variants.length > 0 ? '' : String(Number(dish.price))) : '');
+  const [price, setPrice] = useState(
+    dish ? (dish.variants.length > 0 && !dish.isWeighted ? '' : String(Number(dish.price))) : '',
+  );
   const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : '');
   const [unit, setUnit] = useState(normalizeUnitLabel(dish?.unit));
   const [description, setDescription] = useState(dish?.description ?? '');
   const [voiceName, setVoiceName] = useState(dish?.voiceName ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
   const [isWeighted, setIsWeighted] = useState(dish?.isWeighted ?? false);
+  const [weightedMeasure, setWeightedMeasure] = useState<'weight' | 'volume'>(dish?.weightedMeasure ?? 'weight');
+  const [weightedPriceBase, setWeightedPriceBase] = useState(dish?.weightedPriceBase ?? 100);
   // '' = брать направление из категории; иначе приоритет блюда.
   const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar' | 'none'>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [tab, setTab] = useState<'main' | 'recipe'>('main');
-  const pending = create.isPending || update.isPending;
+  const pending = create.isPending || update.isPending || remove.isPending;
   const recipeQ = useRecipe(isEdit ? dish.id : null);
   const hasRecipe = (recipeQ.data?.items.length ?? 0) > 0;
   const hasDishStock = variants.length > 0
@@ -391,7 +395,7 @@ function DishModal({
       setError('Цена блюда должна быть числом');
       return;
     }
-    if (filledVariants.length === 0 && (!priceValue || priceValue <= 0)) {
+    if ((filledVariants.length === 0 || isWeighted) && (!priceValue || priceValue <= 0)) {
       setError('Укажите цену блюда или добавьте варианты с ценами');
       return;
     }
@@ -413,6 +417,8 @@ function DishModal({
         voiceName: voiceName.trim() || null,
         isAvailable,
         isWeighted,
+        weightedMeasure,
+        weightedPriceBase,
         // Фото отправляем только при изменении (новое data URL или '' для удаления).
         imageUrl,
         prepStation: prepStation === '' ? null : prepStation,
@@ -442,20 +448,50 @@ function DishModal({
     }
   }
 
+  async function onDeleteDish() {
+    if (!dish || !confirm(`Удалить блюдо «${dish.name}»?`)) return;
+    setError('');
+    try {
+      await remove.mutateAsync(dish.id);
+      push({ message: 'Блюдо удалено', at: new Date().toISOString() });
+      onClose();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  const sampleAmount = 1250;
+  const smallUnit = weightedMeasure === 'weight' ? 'г' : 'мл';
+  const largeUnit = weightedMeasure === 'weight' ? 'кг' : 'л';
+  const baseLabel = weightedPriceBase === 1000 ? `1 ${largeUnit}` : `${weightedPriceBase} ${smallUnit}`;
+  const sampleTotal = Number(price || 0) * sampleAmount / weightedPriceBase;
+
   return (
     <Modal
       open
       onClose={onClose}
       title={isEdit ? 'Изменить блюдо' : 'Новое блюдо'}
-      panelClassName="max-w-xl"
+      panelClassName="sm:w-[min(1160px,calc(100vw-48px))] sm:max-w-none"
       footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={pending} onClick={onSubmit}>
-          {pending ? <Spinner /> : isEdit ? 'Сохранить' : 'Добавить'}
-        </button>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            {isEdit && (
+              <button type="button" className="btn-secondary btn-md border-danger/50 text-danger hover:bg-danger/5" disabled={pending} onClick={onDeleteDish}>
+                <IconTrash className="h-4 w-4" /> Удалить блюдо
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondary btn-md px-6" disabled={pending} onClick={onClose}>Отмена</button>
+            <button className="btn-primary btn-md min-w-36 font-semibold" disabled={pending} onClick={onSubmit}>
+              {pending ? <Spinner /> : 'Сохранить'}
+            </button>
+          </div>
+        </div>
       }
     >
       <div className="space-y-3">
-        <div className="flex gap-1 border-b border-border">
+        <div className="-mt-3 flex gap-1 border-b border-border">
           <ModalTab active={tab === 'main'} onClick={() => setTab('main')}>
             Основное
           </ModalTab>
@@ -471,150 +507,86 @@ function DishModal({
         )}
 
         <div className={tab === 'main' ? 'space-y-3' : 'hidden'}>
-        <Field label="Фото блюда">
-          <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onPhoto} />
-          <div className="flex items-center gap-3">
-            <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-background">
-              {photoPreview ? (
-                <img src={photoPreview} alt="" className="h-full w-full object-cover" />
-              ) : (
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="text-text-light">
-                  <path d="M3 7h18v12H3zM3 7l2-3h14l2 3M8 12a2 2 0 1 0 4 0 2 2 0 0 0-4 0" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.04fr)]">
+            <section className="rounded-xl border border-border p-4">
+              <Field label="Фото блюда">
+                <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onPhoto} />
+                <div className="flex gap-4">
+                  <div className="group relative flex h-[118px] w-[130px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-background">
+                    {photoPreview ? <img src={photoPreview} alt="" className="h-full w-full object-cover" /> : <span className="text-xs text-text-muted">Нет фото</span>}
+                    {photoPreview && <button type="button" onClick={removePhoto} className="absolute right-1.5 top-1.5 rounded-md bg-white/90 p-1 text-danger opacity-0 shadow group-hover:opacity-100" aria-label="Удалить фото"><IconTrash className="h-4 w-4" /></button>}
+                  </div>
+                  <button type="button" className="flex h-[74px] min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-dashed border-primary/35 bg-primary/[0.02] px-3 font-medium text-primary hover:bg-primary/5" disabled={photoBusy} onClick={() => photoRef.current?.click()}>
+                    {photoBusy ? <Spinner /> : <><IconPlus className="h-4 w-4" /> Загрузить фото</>}
+                  </button>
+                </div>
+                <p className="mt-2 pl-[146px] text-[11px] text-text-muted">PNG, JPG, WEBP. Рекомендуемый размер 800×800px</p>
+                <div className="mt-2 flex gap-2">
+                  <input className="input h-9 flex-1 text-xs" placeholder="или ссылка https://..." value={photoUrlInput} onChange={(e) => setPhotoUrlInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && onPhotoUrlCommit()} onBlur={onPhotoUrlCommit} />
+                  <button type="button" className="btn-secondary h-9 shrink-0 px-3 text-xs" onClick={onPhotoUrlCommit}>По ссылке</button>
+                </div>
+              </Field>
+              <div className="mt-3 space-y-3">
+                <Field label="Название"><input className="input h-11" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Категория"><Select className="h-11 w-full" value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ value: c.id, label: c.name }))} /></Field>
+                  <Field label="Куда отправлять"><Select className="h-11 w-full" value={prepStation} onChange={(v) => setPrepStation(v as '' | 'kitchen' | 'bar' | 'none')} options={[{ value: '', label: 'По категории' }, { value: 'kitchen', label: 'Кухня' }, { value: 'bar', label: 'Бар' }, { value: 'none', label: 'Без отправки' }]} /></Field>
+                </div>
+                <Field label="Описание">
+                  <div className="relative"><textarea className="input min-h-[84px] resize-none py-2.5 pr-12" maxLength={300} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Необязательно" /><span className="absolute bottom-2 right-3 text-[11px] text-text-muted">{description.length}/300</span></div>
+                </Field>
+                <Field label="Название для озвучки"><input className="input h-11" value={voiceName} onChange={(e) => setVoiceName(e.target.value)} placeholder={name.trim() ? `Напр. «Пепперрони» (на экране — ${name.trim()})` : 'Как произносить вслух (необязательно)'} /></Field>
+                {variants.length === 0 && !isWeighted && (
+                  <div className="grid grid-cols-3 gap-3">
+                    <Field label="Цена (с)"><input className="input h-11" type="number" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></Field>
+                    <Field label="Остаток"><input className="input h-11" type="number" inputMode="numeric" value={stock} placeholder="Без учета" onChange={(e) => setStock(e.target.value)} /></Field>
+                    <Field label="Ед. изм."><Select value={unit} onChange={setUnit} options={unitLabelOptions(unit)} className="h-11 w-full" /></Field>
+                  </div>
+                )}
+                <div className="rounded-lg border border-border bg-background/60 p-3 text-xs leading-relaxed text-text-secondary">ⓘ &nbsp;Для напитков и готовых товаров используйте остаток блюда.<br />&nbsp;&nbsp;&nbsp;&nbsp;Для блюд кухни используйте техкарту. Не включайте оба варианта.</div>
+                {isEdit && hasRecipe && hasDishStock && <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs leading-relaxed text-warning">У блюда есть техкарта и заполнен остаток. Проверьте, нужен ли двойной учёт.</div>}
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-border p-4">
+              <h4 className="text-base font-semibold text-text-primary">Настройки блюда</h4>
+              <div className="mt-3 grid grid-cols-2 divide-x divide-border">
+                <Toggle checked={isAvailable} onChange={setIsAvailable} label="Доступно для заказа" />
+                <div className="pl-6"><Toggle checked={isWeighted} onChange={setIsWeighted} label="Весовое блюдо" /></div>
+              </div>
+              {isWeighted && (
+                <div className="mt-4 rounded-xl border border-border p-4">
+                  <h5 className="font-semibold text-text-primary">Параметры весового блюда</h5>
+                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_12px_minmax(150px,.62fr)] items-end gap-2">
+                    <Field label="Ед. измерения (автоматическое масштабирование)"><Select className="h-11 w-full" value={weightedMeasure} onChange={(v) => setWeightedMeasure(v as 'weight' | 'volume')} options={[{ value: 'weight', label: 'г / кг' }, { value: 'volume', label: 'мл / л' }]} /></Field>
+                    <span className="pb-3 text-center text-text-muted">·</span>
+                    <Field label="Цена указана за"><Select className="h-11 w-full" value={String(weightedPriceBase)} onChange={(v) => setWeightedPriceBase(Number(v))} options={[1, 100, 1000].map((value) => ({ value: String(value), label: value === 1000 ? `1 ${largeUnit}` : `${value} ${smallUnit}` }))} /></Field>
+                  </div>
+                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(150px,.62fr)] gap-6">
+                    <div className="rounded-lg bg-background p-3 text-xs leading-relaxed text-text-secondary"><b className="text-primary">• {weightedMeasure === 'weight' ? 'г / кг' : 'мл / л'}</b><br />До 999 — в {smallUnit === 'г' ? 'граммах' : 'миллилитрах'}, свыше — в {largeUnit === 'кг' ? 'килограммах' : 'литрах'} (например, 1.25 {largeUnit})</div>
+                    <Field label="Цена"><div className="relative"><input className="input h-11 pr-14" type="number" min="0" step="0.01" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /><span className="absolute right-3 top-3 text-sm text-text-muted">сом</span></div><p className="mt-2 text-xs text-text-muted">Например: {price || '50'} сом за {baseLabel}</p></Field>
+                  </div>
+                </div>
               )}
-            </div>
-            <div className="flex flex-col gap-2">
-              <button type="button" className="btn-secondary btn-md px-4" disabled={photoBusy} onClick={() => photoRef.current?.click()}>
-                {photoBusy ? <Spinner /> : photoPreview ? 'Заменить файлом' : 'Загрузить фото'}
-              </button>
-              {photoPreview && (
-                <button type="button" className="text-sm font-medium text-danger hover:underline" onClick={removePhoto}>
-                  Удалить фото
-                </button>
+              {isWeighted && (
+                <div className="mt-4 rounded-xl border border-primary/20 bg-primary/[0.035] p-4">
+                  <h5 className="flex items-center gap-2 font-semibold text-text-primary"><span className="text-primary">▣</span> Пример расчёта</h5>
+                  <div className="mt-4 grid grid-cols-[1fr_1fr_24px_1fr] items-end gap-3 text-xs text-text-muted">
+                    <div><span>Выбрано количество:</span><strong className="mt-1 block text-sm text-primary">1250 {smallUnit} = 1.25 {largeUnit}</strong></div>
+                    <div><span>Цена за {baseLabel}:</span><strong className="mt-1 block text-sm text-text-primary">{Number(price || 0).toFixed(2)} сом</strong></div>
+                    <span className="pb-1 text-xl text-text-muted">→</span>
+                    <div><span>Итоговая цена:</span><strong className="mt-1 block text-sm text-primary">{sampleTotal.toFixed(2)} сом</strong></div>
+                  </div>
+                  <p className="mt-6 text-center text-xs text-text-muted">Система автоматически пересчитывает вес и рассчитывает итоговую цену.</p>
+                </div>
               )}
-              <p className="text-xs text-text-muted">Видно гостям в QR-меню. Файл: PNG, JPG, WEBP.</p>
-            </div>
+            </section>
           </div>
-          {/* Альтернатива: ссылка на фото */}
-          <div className="mt-2 flex gap-2">
-            <input
-              className="input flex-1 text-sm"
-              placeholder="или вставьте ссылку https://..."
-              value={photoUrlInput}
-              onChange={(e) => setPhotoUrlInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && onPhotoUrlCommit()}
-              onBlur={onPhotoUrlCommit}
-            />
-            <button type="button" className="btn-secondary btn-md shrink-0" onClick={onPhotoUrlCommit}>
-              По ссылке
-            </button>
-          </div>
-          <p className="mt-1 text-xs text-text-muted">Ссылка будет загружена и сохранена в QR-меню.</p>
-        </Field>
-        <Field label="Название">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Категория">
-            <Select
-              className="h-11 w-full"
-              value={categoryId}
-              onChange={setCategoryId}
-              options={categories.map((c) => ({ value: c.id, label: c.name }))}
-            />
-          </Field>
-          <Field label="Куда отправлять">
-            <Select
-              className="h-11 w-full"
-              value={prepStation}
-              onChange={(v) => setPrepStation(v as '' | 'kitchen' | 'bar' | 'none')}
-              options={[
-                { value: '', label: 'По категории' },
-                { value: 'kitchen', label: 'Кухня' },
-                { value: 'bar', label: 'Бар' },
-                { value: 'none', label: 'Без отправки' },
-              ]}
-            />
-          </Field>
-        </div>
-          {variants.length === 0 && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Field label="Цена (с)">
-              <input
-                className="input"
-                type="number"
-                inputMode="numeric"
-                value={price}
-                onChange={(e) => setPrice(e.target.value)}
-              />
-            </Field>
-            <Field label="Остаток">
-              <input
-                className="input"
-                type="number"
-                inputMode="numeric"
-                value={stock}
-                placeholder="Без учета"
-                onChange={(e) => setStock(e.target.value)}
-              />
-            </Field>
-            <Field label="Ед. изм.">
-              <Select value={unit} onChange={setUnit} options={unitLabelOptions(unit)} className="h-11 w-full" />
-            </Field>
-          </div>
-          )}
-        <div className="rounded-lg border border-border bg-background/60 p-3 text-xs leading-relaxed text-text-secondary">
-          Для напитков и готовых товаров используйте остаток блюда. Для блюд кухни используйте техкарту.
-          Не включайте оба варианта без необходимости.
-        </div>
-        {isEdit && hasRecipe && hasDishStock && (
-          <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs leading-relaxed text-warning">
-            У этого блюда есть техкарта и заполнен остаток блюда. Проверьте, нужен ли двойной учёт: готовые товары
-            учитываются остатком блюда, блюда кухни — сырьём по техкарте.
-          </div>
-        )}
-        <Field label="Описание">
-          <input
-            className="input"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Необязательно"
-          />
-        </Field>
-        <Field label="Название для озвучки">
-          <input
-            className="input"
-            value={voiceName}
-            onChange={(e) => setVoiceName(e.target.value)}
-            placeholder={name.trim() ? `Напр. «Пепперрони» (на экране — ${name.trim()})` : 'Как произносить вслух (необязательно)'}
-          />
-        </Field>
-        <label className="flex items-center gap-2.5 pt-1 text-sm text-text-secondary">
-          <input type="checkbox" checked={isAvailable} onChange={(e) => setIsAvailable(e.target.checked)} />
-          Доступно для заказа
-        </label>
-        <label className="flex items-start gap-2.5 rounded-xl border border-border bg-background/60 p-3 text-sm text-text-secondary">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={isWeighted}
-            onChange={(e) => {
-              const checked = e.target.checked;
-              setIsWeighted(checked);
-              if (checked) setVariants([]);
-            }}
-          />
-          <span>
-            <span className="block font-medium text-text-primary">Весовое блюдо</span>
-            <span className="mt-0.5 block text-xs text-text-muted">
-              При добавлении официант выберет вес. Цена останется фиксированной ценой блюда.
-            </span>
-          </span>
-        </label>
-        <div className="pt-2">
+
+          <section className="rounded-xl border border-border p-4">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <h4 className="text-[15px] font-semibold text-text-primary">Варианты блюда</h4>
-            <button type="button" className="btn-secondary btn-md" onClick={addVariant} disabled={isWeighted}>
+            <h4 className="text-base font-semibold text-text-primary">Варианты блюда</h4>
+            <button type="button" className="btn-secondary btn-md" onClick={addVariant}>
               <IconPlus className="h-4 w-4" /> Добавить вариант
             </button>
           </div>
@@ -628,9 +600,7 @@ function DishModal({
               <span />
             </div>
             {variants.length === 0 ? (
-              <div className="px-3 py-4 text-sm text-text-muted">
-                {isWeighted ? 'Для весового блюда варианты не используются' : 'Варианты не добавлены'}
-              </div>
+              <div className="px-3 py-4 text-sm text-text-muted">Варианты не добавлены</div>
             ) : (
               <div className="min-w-[560px]">
                 {variants.map((variant, index) => (
@@ -694,9 +664,9 @@ function DishModal({
               </div>
             )}
           </div>
+          </section>
         </div>
-        </div>
-        {error && <p className="text-sm text-danger">{error}</p>}
+        {error && <p className="rounded-lg bg-danger/5 px-3 py-2 text-sm text-danger">{error}</p>}
       </div>
     </Modal>
   );
@@ -713,6 +683,16 @@ function ModalTab({ active, onClick, children }: { active: boolean; onClick: () 
     >
       {children}
     </button>
+  );
+}
+
+function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (checked: boolean) => void; label: string }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-3 text-sm text-text-secondary">
+      <input type="checkbox" className="peer sr-only" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary/30 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:after:translate-x-4" />
+      <span>{label}</span>
+    </label>
   );
 }
 
