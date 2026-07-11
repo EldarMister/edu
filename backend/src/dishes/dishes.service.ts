@@ -35,6 +35,9 @@ export class DishesService {
         discountValue: true,
         isAvailable: true,
         isSet: true,
+        isWeighted: true,
+        weightedMeasure: true,
+        weightedPriceBase: true,
         variants: {
           orderBy: { sortOrder: 'asc' },
           select: {

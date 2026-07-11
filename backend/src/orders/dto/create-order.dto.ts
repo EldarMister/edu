@@ -45,6 +45,11 @@ export class CreateOrderItemDto {
   @IsString()
   variantId?: string;
 
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  weightGrams?: number;
+
   @IsInt()
   @Min(1)
   quantity: number;

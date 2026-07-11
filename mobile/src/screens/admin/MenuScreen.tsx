@@ -37,6 +37,13 @@ const STATION_OPTIONS = [
   { value: 'none', label: 'Без отправки' },
 ];
 
+function weightedBaseLabel(dish: Pick<AdminDish, 'weightedMeasure' | 'weightedPriceBase'>) {
+  const small = dish.weightedMeasure === 'volume' ? 'мл' : 'г';
+  const large = dish.weightedMeasure === 'volume' ? 'л' : 'кг';
+  const base = dish.weightedPriceBase ?? 100;
+  return base === 1000 ? `1 ${large}` : `${base} ${small}`;
+}
+
 /** Меню (владелец/админ) — порт PWA MenuPage (блюда + категории + сеты). */
 export function MenuScreen() {
   const [categoryId, setCategoryId] = useState('');
@@ -181,6 +188,7 @@ function DishRow({
             {d.name}
           </Text>
           {d.isSet ? <MiniBadge label="Сет" bg={colors.warningSoft} fg={colors.warning} /> : null}
+          {d.isWeighted ? <MiniBadge label="Весовое" bg={colors.primarySoft} fg={colors.primary} /> : null}
           {station === 'bar' ? <MiniBadge label="Бар" bg={colors.primarySoft} fg={colors.primary} /> : null}
           {station === 'none' ? <MiniBadge label="Без отправки" bg={colors.slate100} fg={colors.textMuted} /> : null}
         </View>
@@ -192,6 +200,7 @@ function DishRow({
         ) : null}
         <Text style={styles.dishMeta}>
           {d.category.name} · {hasVar ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}
+          {d.isWeighted ? ` за ${weightedBaseLabel(d)}` : ''}
           {d.trackInventory ? ` · ${stock} ${hasVar ? '' : normalizeUnitLabel(d.unit)}` : ''}
         </Text>
       </View>
@@ -264,6 +273,9 @@ function DishModal({
   const [description, setDescription] = useState(dish?.description ?? '');
   const [voiceName, setVoiceName] = useState(dish?.voiceName ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
+  const [isWeighted, setIsWeighted] = useState(dish?.isWeighted ?? false);
+  const [weightedMeasure, setWeightedMeasure] = useState<'weight' | 'volume'>(dish?.weightedMeasure ?? 'weight');
+  const [weightedPriceBase, setWeightedPriceBase] = useState(dish?.weightedPriceBase ?? 100);
   const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar' | 'none'>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<VariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [photoUrl, setPhotoUrl] = useState(dish?.imageUrl?.startsWith('http') ? dish.imageUrl : '');
@@ -306,7 +318,7 @@ function DishModal({
       setError('Цена блюда должна быть числом');
       return;
     }
-    if (filled.length === 0 && (!priceValue || priceValue <= 0)) {
+    if ((filled.length === 0 || isWeighted) && (!priceValue || priceValue <= 0)) {
       setError('Укажите цену блюда или добавьте варианты с ценами');
       return;
     }
@@ -329,13 +341,16 @@ function DishModal({
         description: description.trim() || undefined,
         voiceName: voiceName.trim() || null,
         isAvailable,
+        isWeighted,
+        weightedMeasure,
+        weightedPriceBase,
         imageUrl,
         prepStation: prepStation === '' ? null : prepStation,
-        trackInventory: filled.length > 0 ? filled.some((v) => v.stock !== '') : stock.trim() !== '',
-        stock: priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
-        initialStock: !isEdit && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
-        unit: priceValue !== undefined ? unit : undefined,
-        variants: filled.map((v) => ({
+        trackInventory: !isWeighted && (filled.length > 0 ? filled.some((v) => v.stock !== '') : stock.trim() !== ''),
+        stock: !isWeighted && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
+        initialStock: !isWeighted && !isEdit && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
+        unit: !isWeighted && priceValue !== undefined ? unit : undefined,
+        variants: isWeighted ? [] : filled.map((v) => ({
           id: v.id,
           name: v.name,
           price: Number(v.price),
@@ -379,7 +394,39 @@ function DishModal({
           <TextInput style={styles.input} value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textLight} />
         </Field>
 
-        {variants.length === 0 ? (
+        <View style={styles.checkRow}>
+          <View style={{ flex: 1, paddingRight: spacing.md }}>
+            <Text style={styles.checkLabel}>Весовое блюдо</Text>
+            <Text style={styles.checkHint}>Количество выбирается в {weightedMeasure === 'weight' ? 'г / кг' : 'мл / л'}</Text>
+          </View>
+          <Toggle checked={isWeighted} onChange={setIsWeighted} />
+        </View>
+        {isWeighted ? (
+          <View style={styles.weightedBox}>
+            <Text style={styles.weightedTitle}>Параметры весового блюда</Text>
+            <View style={styles.grid2}>
+              <Field label="Единица" style={{ flex: 1 }}>
+                <Select
+                  value={weightedMeasure}
+                  onChange={(value) => setWeightedMeasure(value as 'weight' | 'volume')}
+                  options={[{ value: 'weight', label: 'г / кг' }, { value: 'volume', label: 'мл / л' }]}
+                  title="Единица"
+                />
+              </Field>
+              <Field label="Цена за" style={{ flex: 1 }}>
+                <Select
+                  value={String(weightedPriceBase)}
+                  onChange={(value) => setWeightedPriceBase(Number(value))}
+                  options={[1, 100, 1000].map((base) => ({ value: String(base), label: weightedBaseLabel({ weightedMeasure, weightedPriceBase: base }) }))}
+                  title="Цена за"
+                />
+              </Field>
+            </View>
+            <Text style={styles.weightedHint}>Покупатель задаёт точное количество; стоимость пересчитывается автоматически.</Text>
+          </View>
+        ) : null}
+
+        {variants.length === 0 && !isWeighted ? (
           <View style={styles.grid2}>
             <Field label="Остаток (склад)" style={{ flex: 1 }}>
               <TextInput style={styles.input} value={stock} onChangeText={setStock} keyboardType="decimal-pad" placeholder="—" placeholderTextColor={colors.textLight} />
@@ -391,7 +438,7 @@ function DishModal({
         ) : null}
 
         {/* Варианты */}
-        <View>
+        {!isWeighted ? <View>
           <View style={styles.varHead}>
             <Text style={styles.fieldLabel}>Варианты</Text>
             <FastPressable onPress={() => setVariants((c) => [...c, variantDraft()])} hitSlop={6}>
@@ -427,7 +474,7 @@ function DishModal({
               </FastPressable>
             </View>
           ))}
-        </View>
+        </View> : null}
 
         <Field label="Описание">
           <TextInput style={[styles.input, styles.multiline]} value={description} onChangeText={setDescription} placeholder="Необязательно" placeholderTextColor={colors.textLight} multiline />
@@ -989,6 +1036,10 @@ const styles = StyleSheet.create({
   photoPreview: { width: '100%', height: 160, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background },
   checkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   checkLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
+  checkHint: { marginTop: 2, fontSize: fontSize.xs, color: colors.textMuted },
+  weightedBox: { gap: spacing.sm, borderWidth: 1, borderColor: colors.primarySoft, borderRadius: radius.md, backgroundColor: colors.primaryFaint, padding: spacing.md },
+  weightedTitle: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+  weightedHint: { fontSize: fontSize.xs, lineHeight: 16, color: colors.textMuted },
   error: { fontSize: fontSize.sm, color: colors.danger },
 
   setSectionTitle: { marginBottom: 6, fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },

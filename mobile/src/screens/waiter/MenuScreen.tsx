@@ -18,7 +18,7 @@ import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem } from '@/services/api/waiter';
-import { linePrice, useCart } from '@/store/cart';
+import { formatWeightedAmount, linePrice, useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
 import { useReplacement } from '@/store/replacement';
 import { buildSetLine, calcSetPrice, defaultSetComponents } from '@/utils/set';
@@ -28,6 +28,7 @@ import { apiError } from '@/lib/api';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
 import { TablePickerSheet } from './TablePickerSheet';
+import { WeightPickerSheet } from './WeightPickerSheet';
 import type { CartLine, CartSetComponent, Category, Dish, DishVariant } from '@/types';
 
 function currentDishQuantity(dishId: string): number {
@@ -73,6 +74,7 @@ export function MenuScreen() {
   const [cartOpen, setCartOpen] = useState(false);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [variantDish, setVariantDish] = useState<Dish | null>(null);
+  const [weightDish, setWeightDish] = useState<Dish | null>(null);
   const [setPickerOpen, setSetPickerOpen] = useState(false);
   const [configSet, setConfigSet] = useState<Dish | null>(null);
 
@@ -145,6 +147,10 @@ export function MenuScreen() {
   const onAddDish = useCallback((dish: Dish) => {
     if (dish.isSet) {
       onAddSet(dish, defaultSetComponents(dish));
+      return;
+    }
+    if (dish.isWeighted) {
+      setWeightDish(dish);
       return;
     }
     if (dish.variants && dish.variants.length > 0) {
@@ -409,6 +415,25 @@ export function MenuScreen() {
         }}
       />
 
+      <WeightPickerSheet
+        dish={weightDish}
+        onClose={() => setWeightDish(null)}
+        onAdd={(weightGrams) => {
+          if (!weightDish) return;
+          if (replacementTarget) {
+            replaceWithLine({ dish: weightDish, weightGrams, quantity: 1 });
+          } else {
+            addToCart(weightDish, undefined, weightGrams);
+            push({
+              message: `${weightDish.name} · ${formatWeightedAmount(weightGrams, weightDish.weightedMeasure)} добавлено`,
+              at: new Date().toISOString(),
+              durationMs: 1800,
+            });
+          }
+          setWeightDish(null);
+        }}
+      />
+
       <SetPickerSheet
         visible={setPickerOpen}
         sets={sets}
@@ -484,7 +509,7 @@ const DishCard = memo(function DishCard({
     ? dish.variants.every((variant) => typeof variant.stock === 'number' && variant.stock <= 0)
     : typeof dish.stock === 'number' && dish.stock <= 0);
   const isDisabled = disabled || isOutOfStock;
-  const canDecrement = !hasVariants || lineCount === 1;
+  const canDecrement = (!hasVariants && !dish.isWeighted) || lineCount === 1;
 
   return (
     <FastPressable

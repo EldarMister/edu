@@ -18,7 +18,7 @@ import { StaffScreen } from '@/screens/admin/StaffScreen';
 import { AuditScreen } from '@/screens/admin/AuditScreen';
 import { SettingsScreen } from '@/screens/admin/SettingsScreen';
 import { WarehouseScreen } from '@/screens/admin/WarehouseScreen';
-import { AdminPlaceholderScreen } from '@/screens/admin/AdminPlaceholderScreen';
+import { ReconciliationScreen } from '@/screens/admin/ReconciliationScreen';
 import type { SectionKey } from '@/types';
 
 type Section =
@@ -114,11 +114,11 @@ export function AdminNavigator() {
           <StaffScreen />
         ) : section === 'audit' && isOwner ? (
           <AuditScreen />
+        ) : section === 'reconcile' && isOwner ? (
+          <ReconciliationScreen />
         ) : section === 'settings' ? (
           <SettingsScreen />
-        ) : (
-          <AdminPlaceholderScreen title={current?.label ?? ''} />
-        )}
+        ) : null}
       </View>
 
       <AdminDrawer

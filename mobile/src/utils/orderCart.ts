@@ -63,6 +63,7 @@ export function orderToCartLines(order: Order, dishes: Dish[]): CartLine[] {
       return {
         dish,
         variant,
+        weightGrams: item.weightGrams ?? undefined,
         quantity: item.quantity,
         comment: item.comment ?? undefined,
         takeaway: item.takeaway ?? undefined,

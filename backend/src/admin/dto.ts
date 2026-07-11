@@ -11,6 +11,7 @@ import {
   Min,
   MaxLength,
   IsArray,
+  IsIn,
   ValidateNested,
 } from 'class-validator';
 import { Role, DiscountType, TableStatus, PrepStation, OrderStatus } from '@prisma/client';
@@ -162,6 +163,13 @@ export class CreateDishDto {
   isAvailable?: boolean;
 
   @IsOptional() @IsBoolean()
+  isWeighted?: boolean;
+  @IsOptional() @IsIn(['weight', 'volume'])
+  weightedMeasure?: 'weight' | 'volume';
+  @IsOptional() @IsInt() @IsIn([1, 100, 1000])
+  weightedPriceBase?: number;
+
+  @IsOptional() @IsBoolean()
   trackInventory?: boolean;
 
   @IsOptional() @IsInt() @Min(0)
@@ -211,6 +219,13 @@ export class UpdateDishDto {
 
   @IsOptional() @IsBoolean()
   isAvailable?: boolean;
+
+  @IsOptional() @IsBoolean()
+  isWeighted?: boolean;
+  @IsOptional() @IsIn(['weight', 'volume'])
+  weightedMeasure?: 'weight' | 'volume';
+  @IsOptional() @IsInt() @IsIn([1, 100, 1000])
+  weightedPriceBase?: number;
 
   @IsOptional() @IsBoolean()
   isActive?: boolean;

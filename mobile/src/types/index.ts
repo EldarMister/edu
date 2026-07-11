@@ -108,6 +108,9 @@ export interface Dish {
   unit?: string;
   prepStation?: PrepStation | null;
   isSet?: boolean;
+  isWeighted?: boolean;
+  weightedMeasure?: 'weight' | 'volume';
+  weightedPriceBase?: number;
   setComponents?: SetComponentDef[];
   variants: DishVariant[];
 }
@@ -192,6 +195,7 @@ export interface OrderItem {
   dishVariantId: string | null;
   dishNameSnapshot: string;
   dishVariantNameSnapshot: string | null;
+  weightGrams?: number | null;
   priceSnapshot: string;
   quantity: number;
   discountAmount: string;
@@ -304,6 +308,7 @@ export interface CartSetComponent {
 export interface CartLine {
   dish: Dish;
   variant?: DishVariant;
+  weightGrams?: number;
   quantity: number;
   comment?: string;
   takeaway?: boolean;

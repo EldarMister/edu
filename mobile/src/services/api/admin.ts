@@ -27,6 +27,17 @@ export interface StatsDashboard {
   paymentMethods: { method: PaymentMethod; amount: number; percent: number }[];
   topDishes: { name: string; amount: number; count: number }[];
   topWaiters: { name: string; amount: number; orders: number; avgCheck: number }[];
+  prepared: {
+    total: number;
+    avgPerDay: number;
+    uniqueDishes: number;
+    maxPerDay: number;
+    dishes: { name: string; count: number }[];
+  };
+  drinks: {
+    total: number;
+    dishes: { name: string; count: number }[];
+  };
   period: StatsPeriod;
   range: { from: string | null; to: string | null };
 }
@@ -40,6 +51,37 @@ export function useStatistics(params: { period: StatsPeriod; from?: string; to?:
   return useQuery({
     queryKey: ['admin', 'stats', params],
     queryFn: async () => (await api.get<StatsDashboard>(`/admin/statistics?${query}`)).data,
+  });
+}
+
+export type ReconStatus = 'matched' | 'not_found' | 'needs_review' | 'amount_mismatch' | 'extra';
+export interface ReconRow {
+  orderId: string | null;
+  orderNumber: string | null;
+  orderTime: string | null;
+  posAmount: number | null;
+  bankAmount: number | null;
+  bankTime: string | null;
+  timeDiffSec: number | null;
+  paymentMethod: string | null;
+  waiter: string | null;
+  status: ReconStatus;
+  comment: string | null;
+}
+export interface ReconResult {
+  stats: { paidCount: number; matched: number; notFound: number; needsReview: number; amountMismatch: number };
+  rows: ReconRow[];
+}
+export function useReconcilePayments() {
+  return useMutation({
+    mutationFn: async ({ uri, name, mimeType, from, to }: { uri: string; name: string; mimeType?: string | null; from: string; to: string }) => {
+      const form = new FormData();
+      form.append('file', { uri, name, type: mimeType || 'application/octet-stream' } as any);
+      form.append('from', from);
+      form.append('to', to);
+      form.append('toleranceMin', '3');
+      return (await api.post<ReconResult>('/admin/reconciliation', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data;
+    },
   });
 }
 
@@ -484,6 +526,9 @@ export interface AdminDish {
   discountType: 'none' | 'percent' | 'fixed';
   discountValue: string;
   isAvailable: boolean;
+  isWeighted?: boolean;
+  weightedMeasure?: 'weight' | 'volume';
+  weightedPriceBase?: number;
   isActive: boolean;
   cookingTime: number | null;
   trackInventory?: boolean;
@@ -505,6 +550,9 @@ export interface DishInput {
   discountType?: 'none' | 'percent' | 'fixed';
   discountValue?: number;
   isAvailable?: boolean;
+  isWeighted?: boolean;
+  weightedMeasure?: 'weight' | 'volume';
+  weightedPriceBase?: number;
   isActive?: boolean;
   trackInventory?: boolean;
   stock?: number;

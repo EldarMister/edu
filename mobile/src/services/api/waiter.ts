@@ -154,6 +154,7 @@ function linesToItems(lines: CartLine[]) {
   return lines.map((l) => ({
     dishId: l.dish.id,
     variantId: l.variant?.id,
+    weightGrams: l.weightGrams,
     quantity: l.quantity,
     comment: l.comment?.trim() || undefined,
     takeaway: l.takeaway || undefined,

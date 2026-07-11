@@ -9,17 +9,30 @@ export function linePrice(line: CartLine): number {
 }
 
 export function cartLineKey(line: CartLine): string {
-  return line.lineId ?? `${line.dish.id}:${line.variant?.id ?? 'base'}`;
+  return line.lineId ?? `${line.dish.id}:${line.variant?.id ?? 'base'}:${line.weightGrams ?? 'fixed'}`;
 }
 
 export function cartLineName(line: CartLine): string {
   if (line.set) return line.dish.name;
-  return line.variant ? `${line.dish.name} · ${line.variant.name}` : line.dish.name;
+  if (line.variant) return `${line.dish.name} · ${line.variant.name}`;
+  if (line.weightGrams) return `${line.dish.name} · ${formatWeightedAmount(line.weightGrams, line.dish.weightedMeasure)}`;
+  return line.dish.name;
+}
+
+export function formatWeightedAmount(amount: number, measure: Dish['weightedMeasure'] = 'weight') {
+  const volume = measure === 'volume';
+  if (amount < 1000) return `${amount} ${volume ? 'мл' : 'г'}`;
+  const scaled = amount / 1000;
+  const value = Number.isInteger(scaled) ? String(scaled) : scaled.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return `${value} ${volume ? 'л' : 'кг'}`;
 }
 
 export function cartLineUnitPrice(line: CartLine): number {
+  const weightedBase = line.dish.isWeighted && line.weightGrams
+    ? String(Number(line.dish.price) * line.weightGrams / (line.dish.weightedPriceBase ?? 100))
+    : undefined;
   const base = dishUnitPrice(
-    line.variant?.price ?? line.dish.price,
+    weightedBase ?? line.variant?.price ?? line.dish.price,
     line.dish.discountType,
     line.dish.discountValue,
   );
@@ -59,7 +72,7 @@ interface CartState {
   setOrderComment: (comment: string) => void;
   /** Показать/скрыть поле комментария (закрытое не уходит с заказом). */
   setCommentOpen: (open: boolean) => void;
-  add: (dish: Dish, variant?: DishVariant) => void;
+  add: (dish: Dish, variant?: DishVariant, weightGrams?: number) => void;
   addLine: (line: CartLine) => void;
   setQuantity: (index: number, quantity: number) => void;
   setComment: (index: number, comment: string) => void;
@@ -79,8 +92,8 @@ interface TableCart {
 
 const EMPTY_CART: TableCart = { lines: [], comment: '' };
 
-function sameLine(a: CartLine, dish: Dish, variant?: DishVariant): boolean {
-  return !a.set && a.dish.id === dish.id && a.variant?.id === variant?.id;
+function sameLine(a: CartLine, dish: Dish, variant?: DishVariant, weightGrams?: number): boolean {
+  return !a.set && a.dish.id === dish.id && a.variant?.id === variant?.id && a.weightGrams === weightGrams;
 }
 
 function syncActiveCart(
@@ -186,15 +199,15 @@ export const useCart = create<CartState>((set, get) => ({
       ...syncActiveCart(s.tableId, s.carts, s.lines, comment),
     })),
   setCommentOpen: (open) => set({ commentOpen: open }),
-  add: (dish, variant) =>
+  add: (dish, variant, weightGrams) =>
     set((s) => {
-      const idx = s.lines.findIndex((l) => sameLine(l, dish, variant));
+      const idx = s.lines.findIndex((l) => sameLine(l, dish, variant, weightGrams));
       let lines: CartLine[];
       if (idx >= 0) {
         lines = [...s.lines];
         lines[idx] = { ...lines[idx], quantity: lines[idx].quantity + 1 };
       } else {
-        lines = [...s.lines, { dish, variant, quantity: 1 }];
+        lines = [...s.lines, { dish, variant, weightGrams, quantity: 1 }];
       }
       return { lines, ...syncActiveCart(s.tableId, s.carts, lines, s.comment) };
     }),

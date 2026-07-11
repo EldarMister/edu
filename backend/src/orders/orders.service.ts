@@ -54,6 +54,13 @@ const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   [PaymentMethod.mixed]: 'Смешанная',
 };
 
+function weightSnapshot(amount: number, measure: string): string {
+  const [smallUnit, largeUnit] = measure === 'volume' ? ['мл', 'л'] : ['г', 'кг'];
+  if (amount < 1000) return `${amount} ${smallUnit}`;
+  const value = amount / 1000;
+  return `${Number.isInteger(value) ? value : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')} ${largeUnit}`;
+}
+
 function tableNumberVoice(value: number): string {
   return Number.isInteger(value) ? numberToWordsRu(value) : String(value);
 }
@@ -561,6 +568,7 @@ export class OrdersService {
   private editItemSig(
     dishId: string | null | undefined,
     variantId: string | null | undefined,
+    weightGrams: number | null | undefined,
     comment: string | null | undefined,
     comps:
       | {
@@ -573,7 +581,7 @@ export class OrdersService {
         }[]
       | undefined,
   ): string {
-    const base = `${dishId ?? ''}|${variantId ?? ''}|${(comment ?? '').trim()}`;
+    const base = `${dishId ?? ''}|${variantId ?? ''}|${weightGrams ?? ''}|${(comment ?? '').trim()}`;
     if (!comps || comps.length === 0) return base;
     const sig = comps
       .map(
@@ -594,6 +602,7 @@ export class OrdersService {
     oldItems: {
       dishId: string | null;
       dishVariantId: string | null;
+      weightGrams: number | null;
       comment: string | null;
       status: OrderItemStatus;
       setComponents: {
@@ -616,7 +625,7 @@ export class OrdersService {
     // Пул статусов старых позиций по подписи (может быть несколько одинаковых).
     const pool = new Map<string, OrderItemStatus[]>();
     for (const it of oldItems) {
-      const sig = this.editItemSig(it.dishId, it.dishVariantId, it.comment, it.setComponents);
+      const sig = this.editItemSig(it.dishId, it.dishVariantId, it.weightGrams, it.comment, it.setComponents);
       const arr = pool.get(sig) ?? [];
       arr.push(it.status);
       pool.set(sig, arr);
@@ -624,7 +633,7 @@ export class OrdersService {
     for (const data of itemsData) {
       if (data.prepStation === PrepStation.none) continue; // «без отправки» всегда готово
       const create = (data.setComponents as { create?: any[] } | undefined)?.create;
-      const sig = this.editItemSig(data.dishId, data.dishVariantId, data.comment, create as any);
+      const sig = this.editItemSig(data.dishId, data.dishVariantId, data.weightGrams as number | null | undefined, data.comment, create as any);
       const arr = pool.get(sig);
       if (!arr || arr.length === 0) continue;
       const carried = arr.shift()!;
@@ -2133,10 +2142,16 @@ export class OrdersService {
       }
       const hasVariants = dish.variants.length > 0;
       const variant = i.variantId ? variantById.get(i.variantId) : null;
-      if (hasVariants && !variant) {
+      if (dish.isWeighted && !i.weightGrams) {
+        throw new BadRequestException(`Выберите вес блюда «${dish.name}»`);
+      }
+      if (!dish.isWeighted && i.weightGrams) {
+        throw new BadRequestException(`Блюдо «${dish.name}» не является весовым`);
+      }
+      if (!dish.isWeighted && hasVariants && !variant) {
         throw new BadRequestException(`Выберите вариант блюда «${dish.name}»`);
       }
-      if (!hasVariants && i.variantId) {
+      if ((!hasVariants || dish.isWeighted) && i.variantId) {
         throw new BadRequestException(`У блюда «${dish.name}» нет вариантов`);
       }
       if (variant && variant.dishId !== dish.id) {
@@ -2144,7 +2159,7 @@ export class OrdersService {
       }
 
       if (dish.trackInventory) {
-        if (hasVariants && variant) {
+        if (!dish.isWeighted && hasVariants && variant) {
           if (variant.stock !== null) {
             const current = variantDeductions.get(variant.id) ?? 0;
             if ((variant.stock ?? 0) < current + i.quantity) {
@@ -2239,8 +2254,10 @@ export class OrdersService {
         if (rows.length > 0) setComponents = { create: rows };
       }
 
-      const basePrice = variant?.price ?? dish.price;
-      const pricing = unitPricing(basePrice, dish.discountType, dish.discountValue);
+      const basePrice = dish.isWeighted
+        ? Number(dish.price) * i.weightGrams! / dish.weightedPriceBase
+        : (variant?.price ?? dish.price);
+      const pricing = unitPricing(new Prisma.Decimal(basePrice), dish.discountType, dish.discountValue);
       // Для сета корректируем цену на дельту состава (не уходим в минус).
       const unit = dish.isSet ? Math.max(0, round2(pricing.unit + setDelta)) : pricing.unit;
       const unitDiscount = dish.isSet ? 0 : pricing.unitDiscount;
@@ -2249,7 +2266,8 @@ export class OrdersService {
         dishId: dish.id,
         dishVariantId: variant?.id,
         dishNameSnapshot: dish.name,
-        dishVariantNameSnapshot: variant?.name,
+        dishVariantNameSnapshot: dish.isWeighted ? weightSnapshot(i.weightGrams!, dish.weightedMeasure) : variant?.name,
+        weightGrams: dish.isWeighted ? i.weightGrams : null,
         dishVoiceSnapshot: dish.voiceName ?? null,
         priceSnapshot: new Prisma.Decimal(unit),
         quantity: i.quantity,

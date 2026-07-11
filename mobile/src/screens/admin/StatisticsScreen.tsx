@@ -14,6 +14,7 @@ import { colors, fontSize, radius, spacing } from '@/theme';
 import { money } from '@/utils/format';
 import { PwaIcon } from '@/components/PwaIcon';
 import { FastPressable } from '@/components/FastPressable';
+import { BottomSheet } from '@/components/BottomSheet';
 import type { PaymentMethod } from '@/types';
 import { useStatistics, type StatsDashboard, type StatsPeriod } from '@/services/api/admin';
 import { usePublicSettings } from '@/services/api/settings';
@@ -32,6 +33,14 @@ const ORDERS_LABEL: Record<StatsPeriod, string> = {
   month: 'Заказов за месяц',
   all: 'Заказов за всё время',
   custom: 'Заказов за период',
+};
+
+const PREPARED_LABEL: Record<StatsPeriod, string> = {
+  today: 'Приготовлено сегодня',
+  week: 'Приготовлено за неделю',
+  month: 'Приготовлено за месяц',
+  all: 'Приготовлено за всё время',
+  custom: 'Приготовлено за период',
 };
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
@@ -59,6 +68,7 @@ export function StatisticsScreen() {
   });
   const publicSettingsQ = usePublicSettings();
   const d = statsQ.data;
+  const [viewAll, setViewAll] = useState<{ title: string; rows: string[][] } | null>(null);
 
   const visiblePaymentMethods = useMemo(() => {
     if (!d) return [] as { method: Extract<PaymentMethod, 'qr' | 'cash' | 'card'>; amount: number }[];
@@ -161,8 +171,47 @@ export function StatisticsScreen() {
               empty="Нет оплаченных заказов за период"
             />
           </Panel>
+
+          <Panel title="Приготовлено блюд">
+            <MiniTable
+              columns={[{ label: '' }, { label: '', align: 'right' }]}
+              rows={[
+                ['Всего приготовлено', `${d.prepared.total} шт`],
+                ['В среднем в день', `${d.prepared.avgPerDay} шт`],
+                ['Уникальных блюд', String(d.prepared.uniqueDishes)],
+                ['Максимум за день', `${d.prepared.maxPerDay} шт`],
+              ]}
+              empty="Нет приготовленных блюд за период"
+              hideHeader
+            />
+          </Panel>
+
+          <ListCard
+            title={PREPARED_LABEL[period]}
+            columnLabel="Блюдо"
+            rows={d.prepared.dishes.map((item) => [item.name, `${item.count} шт`])}
+            empty="Нет приготовленных блюд за период"
+            onViewAll={(title, rows) => setViewAll({ title, rows })}
+          />
+
+          <ListCard
+            title="Продано напитков"
+            columnLabel="Напиток"
+            rows={d.drinks.dishes.map((item) => [item.name, `${item.count} шт`])}
+            empty="Нет продаж напитков за период"
+            onViewAll={(title, rows) => setViewAll({ title, rows })}
+          />
         </>
       )}
+      <BottomSheet visible={!!viewAll} onClose={() => setViewAll(null)} title={viewAll?.title} maxHeight="85%">
+        {viewAll ? (
+          <MiniTable
+            columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }]}
+            rows={viewAll.rows}
+            empty="—"
+          />
+        ) : null}
+      </BottomSheet>
     </ScrollView>
   );
 }
@@ -221,6 +270,37 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
   );
 }
 
+const LIST_LIMIT = 6;
+
+function ListCard({
+  title,
+  columnLabel,
+  rows,
+  empty,
+  onViewAll,
+}: {
+  title: string;
+  columnLabel: string;
+  rows: string[][];
+  empty: string;
+  onViewAll: (title: string, rows: string[][]) => void;
+}) {
+  return (
+    <Panel title={title}>
+      <MiniTable
+        columns={[{ label: columnLabel }, { label: 'Кол-во', align: 'right' }]}
+        rows={rows.slice(0, LIST_LIMIT)}
+        empty={empty}
+      />
+      {rows.length > LIST_LIMIT ? (
+        <FastPressable onPress={() => onViewAll(title, rows)} style={styles.viewAllButton}>
+          <Text style={styles.viewAllText}>Смотреть все</Text>
+        </FastPressable>
+      ) : null}
+    </Panel>
+  );
+}
+
 type Col = { label: string; align?: 'left' | 'right' };
 
 function MiniTable({
@@ -228,11 +308,13 @@ function MiniTable({
   rows,
   footer,
   empty,
+  hideHeader = false,
 }: {
   columns: Col[];
   rows: string[][];
   footer?: string[];
   empty: string;
+  hideHeader?: boolean;
 }) {
   if (rows.length === 0) return <Text style={styles.tableEmpty}>{empty}</Text>;
   const cellStyle = (i: number, kind: 'head' | 'first' | 'rest') => [
@@ -243,13 +325,15 @@ function MiniTable({
   const colFlex = (i: number) => (i === 0 ? styles.colGrow : styles.colAuto);
   return (
     <View style={{ marginTop: spacing.sm }}>
-      <View style={[styles.row, styles.rowHead]}>
-        {columns.map((c, i) => (
-          <View key={c.label} style={colFlex(i)}>
-            <Text style={cellStyle(i, 'head')}>{c.label}</Text>
-          </View>
-        ))}
-      </View>
+      {!hideHeader ? (
+        <View style={[styles.row, styles.rowHead]}>
+          {columns.map((c, i) => (
+            <View key={`${c.label}-${i}`} style={colFlex(i)}>
+              <Text style={cellStyle(i, 'head')}>{c.label}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
       {rows.map((r, ri) => (
         <View key={ri} style={[styles.row, ri < rows.length - 1 && styles.rowBorder]}>
           {r.map((cell, ci) => (
@@ -333,7 +417,9 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
   const pts = data.map((p, i) => [xAt(i), yAt(p.amount)] as const);
   const line = smoothPath(pts);
   const area = `${line} L ${xAt(n - 1)} ${H - padB} L ${xAt(0)} ${H - padB} Z`;
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(niceMax * t));
+  // Для нулевой/малой выручки округлённые деления могут совпасть (0, 0, 1, 1, 1).
+  // Убираем повторы, чтобы SVG не получал одинаковые ключи и не дёргался при ререндере.
+  const ticks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(niceMax * t)))];
 
   const maxLabels = 5;
   const step = Math.max(1, Math.ceil(n / maxLabels));
@@ -360,7 +446,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
         {ticks.map((tk) => {
           const yy = yAt(tk);
           return (
-            <G key={tk}>
+            <G key={`tick-${tk}`}>
               <Line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="#F1F5F9" strokeWidth={0.8} />
               <SvgText x={padL - 12} y={yy + 4} textAnchor="end" fontSize={11} fill={colors.textLight}>
                 {shortMoney(tk)}
@@ -572,6 +658,8 @@ const styles = StyleSheet.create({
   cellPrimary: { fontWeight: '500', color: colors.textPrimary },
   cellSecondary: { color: colors.textSecondary },
   cellFooter: { fontWeight: '700', color: colors.textPrimary },
+  viewAllButton: { alignSelf: 'flex-start', marginTop: spacing.md, paddingVertical: 2 },
+  viewAllText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.primary },
 
   tooltip: {
     position: 'absolute',

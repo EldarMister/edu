@@ -1,0 +1,29 @@
+import React, { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import { Button } from '@/components/ui';
+import { colors, fontSize, radius, spacing } from '@/theme';
+import { money } from '@/utils/format';
+import { apiError } from '@/lib/api';
+import { useNotifications } from '@/store/notifications';
+import { type ReconResult, type ReconStatus, useReconcilePayments } from '@/services/api/admin';
+
+const STATUS: Record<ReconStatus, string> = { matched: 'Совпало', not_found: 'Не найдено', needs_review: 'Требует проверки', amount_mismatch: 'Сумма отличается', extra: 'Лишняя операция' };
+const today = () => new Date().toISOString().slice(0, 10);
+const weekAgo = () => new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10);
+
+export function ReconciliationScreen() {
+  const [from, setFrom] = useState(weekAgo);
+  const [to, setTo] = useState(today);
+  const [file, setFile] = useState<DocumentPicker.DocumentPickerAsset | null>(null);
+  const [result, setResult] = useState<ReconResult | null>(null);
+  const reconcile = useReconcilePayments();
+  const push = useNotifications((s) => s.push);
+  const stats = useMemo(() => result ? [['Оплат в POS', result.stats.paidCount], ['Найдено в банке', result.stats.matched], ['Не найдено', result.stats.notFound], ['Требует проверки', result.stats.needsReview], ['Расхождения', result.stats.amountMismatch]] : [], [result]);
+  const pick = async () => { const r = await DocumentPicker.getDocumentAsync({ type: ['application/pdf', 'text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'], copyToCacheDirectory: true }); if (!r.canceled) setFile(r.assets[0]); };
+  const submit = async () => { if (!file) { push({ message: 'Сначала загрузите файл выписки', type: 'error', at: new Date().toISOString() }); return; } try { setResult(await reconcile.mutateAsync({ uri: file.uri, name: file.name, mimeType: file.mimeType, from, to })); } catch (e) { push({ message: apiError(e), type: 'error', at: new Date().toISOString() }); } };
+  return <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+    <View style={s.card}><Text style={s.label}>Период</Text><View style={s.dates}><TextInput style={s.input} value={from} onChangeText={setFrom} placeholder="YYYY-MM-DD" /><Text style={s.dash}>—</Text><TextInput style={s.input} value={to} onChangeText={setTo} placeholder="YYYY-MM-DD" /></View><Button title={file ? 'Заменить выписку' : 'Загрузить выписку'} variant="secondary" size="md" onPress={() => void pick()} /><Text style={s.file}>{file ? `Файл: ${file.name}` : 'Поддерживаются PDF, XLS, XLSX, CSV.'}</Text><Text style={s.hint}>Сверяются безналичные оплаты (QR и карта). Файл выписки не сохраняется.</Text><Button title="Начать сверку" loading={reconcile.isPending} disabled={!file} onPress={() => void submit()} /></View>
+    {!result ? <View style={s.empty}><Text style={s.emptyTitle}>Загрузите банковскую выписку</Text><Text style={s.emptyText}>Система сопоставит оплаты POS с операциями из выписки по сумме и времени.</Text></View> : <><View style={s.stats}>{stats.map(([label, value]) => <View key={String(label)} style={s.stat}><Text style={s.statLabel}>{label}</Text><Text style={s.statValue}>{value}</Text></View>)}</View><View style={s.card}><Text style={s.title}>Результаты</Text>{result.rows.length === 0 ? <Text style={s.emptyText}>Совпадений и расхождений не найдено</Text> : result.rows.map((row, i) => <View key={`${row.orderId ?? 'op'}-${i}`} style={s.row}><View style={{ flex: 1 }}><Text style={s.rowTitle}>{row.orderNumber ? `Заказ ${row.orderNumber}` : 'Операция банка'}</Text><Text style={s.rowText}>{row.waiter ?? '—'} · POS: {row.posAmount == null ? '—' : money(row.posAmount)} · Банк: {row.bankAmount == null ? '—' : money(row.bankAmount)}</Text></View><Text style={s.status}>{STATUS[row.status]}</Text></View>)}</View></>}</ScrollView>;
+}
+const s = StyleSheet.create({ content:{ padding:spacing.lg, gap:spacing.md }, card:{ gap:spacing.sm, borderWidth:1, borderColor:colors.border, borderRadius:radius.lg, backgroundColor:colors.white, padding:spacing.md }, label:{ fontSize:fontSize.sm, fontWeight:'600', color:colors.textSecondary }, dates:{ flexDirection:'row', alignItems:'center', gap:spacing.sm }, input:{ flex:1, height:42, borderWidth:1, borderColor:colors.border, borderRadius:radius.md, paddingHorizontal:spacing.sm, color:colors.textPrimary }, dash:{ color:colors.textMuted }, file:{ fontSize:fontSize.xs, fontWeight:'500', color:colors.textSecondary }, hint:{ fontSize:fontSize.xs, lineHeight:16, color:colors.textMuted }, empty:{ alignItems:'center', gap:spacing.sm, borderWidth:1, borderColor:colors.border, borderRadius:radius.lg, backgroundColor:colors.white, padding:spacing.xxl }, emptyTitle:{ fontSize:fontSize.base, fontWeight:'600', color:colors.textSecondary }, emptyText:{ textAlign:'center', fontSize:fontSize.sm, lineHeight:19, color:colors.textMuted }, stats:{ flexDirection:'row', flexWrap:'wrap', gap:spacing.sm }, stat:{ width:'47%', minHeight:82, borderWidth:1, borderColor:colors.border, borderRadius:radius.md, backgroundColor:colors.white, padding:spacing.md }, statLabel:{ fontSize:fontSize.xs, color:colors.textMuted }, statValue:{ marginTop:4, fontSize:fontSize.xxl, fontWeight:'600', color:colors.textPrimary }, title:{ fontSize:fontSize.lg, fontWeight:'600', color:colors.textPrimary }, row:{ flexDirection:'row', alignItems:'center', gap:spacing.sm, borderTopWidth:1, borderTopColor:colors.border, paddingTop:spacing.sm }, rowTitle:{ fontSize:fontSize.sm, fontWeight:'600', color:colors.textPrimary }, rowText:{ marginTop:2, fontSize:fontSize.xs, color:colors.textMuted }, status:{ maxWidth:110, textAlign:'right', fontSize:fontSize.xs, fontWeight:'500', color:colors.textSecondary } });
