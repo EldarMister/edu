@@ -163,6 +163,9 @@ export class CreateDishDto {
   isAvailable?: boolean;
 
   @IsOptional() @IsBoolean()
+  isWeighted?: boolean;
+
+  @IsOptional() @IsBoolean()
   trackInventory?: boolean;
 
   @IsOptional() @IsInt() @Min(0)
@@ -212,6 +215,9 @@ export class UpdateDishDto {
 
   @IsOptional() @IsBoolean()
   isAvailable?: boolean;
+
+  @IsOptional() @IsBoolean()
+  isWeighted?: boolean;
 
   @IsOptional() @IsBoolean()
   isActive?: boolean;

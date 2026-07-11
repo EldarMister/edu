@@ -21,7 +21,7 @@ interface CartState {
   selectTable: (tableId: string) => void;
   // Переносит текущий черновик корзины на другой стол (смена стола на экране меню).
   moveDraftTo: (targetTableId: string) => void;
-  add: (dish: Dish, variant?: DishVariant) => void;
+  add: (dish: Dish, variant?: DishVariant, weightGrams?: number) => void;
   /** Добавляет сет отдельной линией (сеты не сливаются — у каждого свой состав). */
   addSet: (dish: Dish, components: CartSetComponent[]) => void;
   replaceLines: (lines: CartLine[], comment: string) => void;
@@ -40,17 +40,19 @@ interface CartState {
 
 const EMPTY: TableCart = { lines: [], comment: '', commentOpen: false };
 
-export function cartLineKeyFromParts(dishId: string, variantId?: string | null) {
-  return `${dishId}:${variantId ?? 'base'}`;
+export function cartLineKeyFromParts(dishId: string, variantId?: string | null, weightGrams?: number | null) {
+  return `${dishId}:${variantId ?? 'base'}:${weightGrams ?? 'fixed'}`;
 }
 
 export function cartLineKey(line: CartLine) {
-  return line.lineId ?? cartLineKeyFromParts(line.dish.id, line.variant?.id);
+  return line.lineId ?? cartLineKeyFromParts(line.dish.id, line.variant?.id, line.weightGrams);
 }
 
 export function cartLineName(line: CartLine) {
   if (line.set) return line.dish.name;
-  return line.variant ? `${line.dish.name} · ${line.variant.name}` : line.dish.name;
+  if (line.variant) return `${line.dish.name} · ${line.variant.name}`;
+  if (line.weightGrams) return `${line.dish.name} · ${line.weightGrams} г`;
+  return line.dish.name;
 }
 
 /** У сета изменён состав, если есть убранные/заменённые позиции. */
@@ -111,14 +113,14 @@ export const useCart = create<CartState>((set) => ({
       };
     }),
 
-  add: (dish, variant) =>
+  add: (dish, variant, weightGrams) =>
     set((s) =>
       mutate(s, (c) => {
-        const key = cartLineKeyFromParts(dish.id, variant?.id);
+        const key = cartLineKeyFromParts(dish.id, variant?.id, weightGrams);
         const existing = c.lines.find((l) => cartLineKey(l) === key);
         const lines = existing
           ? c.lines.map((l) => (cartLineKey(l) === key ? { ...l, quantity: l.quantity + 1 } : l))
-          : [...c.lines, { dish, variant, quantity: 1 }];
+          : [...c.lines, { dish, variant, weightGrams, quantity: 1 }];
         return { ...c, lines };
       }),
     ),

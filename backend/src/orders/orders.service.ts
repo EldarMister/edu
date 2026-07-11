@@ -561,6 +561,7 @@ export class OrdersService {
   private editItemSig(
     dishId: string | null | undefined,
     variantId: string | null | undefined,
+    weightGrams: number | null | undefined,
     comment: string | null | undefined,
     comps:
       | {
@@ -573,7 +574,7 @@ export class OrdersService {
         }[]
       | undefined,
   ): string {
-    const base = `${dishId ?? ''}|${variantId ?? ''}|${(comment ?? '').trim()}`;
+    const base = `${dishId ?? ''}|${variantId ?? ''}|${weightGrams ?? ''}|${(comment ?? '').trim()}`;
     if (!comps || comps.length === 0) return base;
     const sig = comps
       .map(
@@ -594,6 +595,7 @@ export class OrdersService {
     oldItems: {
       dishId: string | null;
       dishVariantId: string | null;
+      weightGrams: number | null;
       comment: string | null;
       status: OrderItemStatus;
       setComponents: {
@@ -616,7 +618,7 @@ export class OrdersService {
     // Пул статусов старых позиций по подписи (может быть несколько одинаковых).
     const pool = new Map<string, OrderItemStatus[]>();
     for (const it of oldItems) {
-      const sig = this.editItemSig(it.dishId, it.dishVariantId, it.comment, it.setComponents);
+      const sig = this.editItemSig(it.dishId, it.dishVariantId, it.weightGrams, it.comment, it.setComponents);
       const arr = pool.get(sig) ?? [];
       arr.push(it.status);
       pool.set(sig, arr);
@@ -624,7 +626,7 @@ export class OrdersService {
     for (const data of itemsData) {
       if (data.prepStation === PrepStation.none) continue; // «без отправки» всегда готово
       const create = (data.setComponents as { create?: any[] } | undefined)?.create;
-      const sig = this.editItemSig(data.dishId, data.dishVariantId, data.comment, create as any);
+      const sig = this.editItemSig(data.dishId, data.dishVariantId, data.weightGrams as number | null | undefined, data.comment, create as any);
       const arr = pool.get(sig);
       if (!arr || arr.length === 0) continue;
       const carried = arr.shift()!;
@@ -2143,6 +2145,15 @@ export class OrdersService {
       }
       const hasVariants = dish.variants.length > 0;
       const variant = i.variantId ? variantById.get(i.variantId) : null;
+      if (dish.isWeighted && hasVariants) {
+        throw new BadRequestException(`У весового блюда «${dish.name}» не должно быть вариантов`);
+      }
+      if (dish.isWeighted && !i.weightGrams) {
+        throw new BadRequestException(`Выберите вес блюда «${dish.name}»`);
+      }
+      if (!dish.isWeighted && i.weightGrams) {
+        throw new BadRequestException(`Блюдо «${dish.name}» не является весовым`);
+      }
       if (hasVariants && !variant) {
         throw new BadRequestException(`Выберите вариант блюда «${dish.name}»`);
       }
@@ -2259,7 +2270,8 @@ export class OrdersService {
         dishId: dish.id,
         dishVariantId: variant?.id,
         dishNameSnapshot: dish.name,
-        dishVariantNameSnapshot: variant?.name,
+        dishVariantNameSnapshot: dish.isWeighted ? `${i.weightGrams} г` : variant?.name,
+        weightGrams: dish.isWeighted ? i.weightGrams : null,
         dishVoiceSnapshot: dish.voiceName ?? null,
         priceSnapshot: new Prisma.Decimal(unit),
         quantity: i.quantity,
