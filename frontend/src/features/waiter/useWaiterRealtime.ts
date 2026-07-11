@@ -83,7 +83,7 @@ function itemNamesByStatus(order: Order, statuses: Order['items'][number]['statu
   const wanted = new Set(statuses);
   const names: string[] = [];
   for (const item of order.items ?? []) {
-    if (wanted.has(item.status)) names.push(itemName(item));
+    if (item.prepStation !== 'none' && wanted.has(item.status)) names.push(itemName(item));
     for (const component of item.setComponents ?? []) {
       if (wanted.has(component.status)) names.push(componentName(component));
     }
@@ -132,7 +132,7 @@ function waiterVoiceText(order: VoicedOrder): string | null {
     case 'cooking':
       return readyNames.length ? `${readyText}${location} Заберите.` : null;
     case 'ready':
-      return readyNames.length ? `${readyText}${location} Заберите.` : `Ваш заказ готов. ${location} Заберите.`;
+      return readyNames.length ? `${readyText}${location} Заберите.` : null;
     case 'cancelled':
       return `Заказ отменён${cancelledText}. ${location}`;
     case 'rejected':
