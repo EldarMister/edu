@@ -110,24 +110,28 @@ export function OrderDetailScreen() {
     setActionCooldown(0);
   }, [order?.id]);
 
+  // После оплаты заказ сразу исчезает из active-запроса. Sheet должен
+  // оставаться на той же позиции в дереве, иначе React размонтирует его в
+  // момент показа экрана успеха и создаст заново обычный лист оплаты.
+  const paymentSheet = (
+    <PaymentSheet
+      order={paymentOrder ?? order}
+      visible={payOpen}
+      onClose={() => setPayOpen(false)}
+      onPaid={() => {
+        setPayOpen(false);
+        setPaymentOrder(null);
+        navigation.getParent()?.navigate('Tables');
+      }}
+    />
+  );
+
   if (orders.isLoading && !order) return <Loading />;
   if (!order) {
     return (
       <SafeAreaView style={styles.safe} edges={[]}>
-        {payOpen && paymentOrder ? (
-          <PaymentSheet
-            order={paymentOrder}
-            visible={payOpen}
-            onClose={() => setPayOpen(false)}
-            onPaid={() => {
-              setPayOpen(false);
-              setPaymentOrder(null);
-              navigation.getParent()?.navigate('Tables');
-            }}
-          />
-        ) : (
-          <EmptyState text="Заказ не найден" />
-        )}
+        {paymentSheet}
+        {!payOpen ? <EmptyState text="Заказ не найден" /> : null}
       </SafeAreaView>
     );
   }
@@ -356,6 +360,7 @@ export function OrderDetailScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
+      {paymentSheet}
       <View style={styles.titleBlock}>
         <View style={styles.titleMainRow}>
           <Text style={styles.title} numberOfLines={1}>
@@ -431,16 +436,6 @@ export function OrderDetailScreen() {
         {mainAction()}
       </View>
 
-      <PaymentSheet
-        order={paymentOrder ?? order}
-        visible={payOpen}
-        onClose={() => setPayOpen(false)}
-        onPaid={() => {
-          setPayOpen(false);
-          setPaymentOrder(null);
-          navigation.getParent()?.navigate('Tables');
-        }}
-      />
       <CancelReadyItemSheet
         item={billItem}
         reason={cancelReason}
