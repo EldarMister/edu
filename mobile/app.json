@@ -67,17 +67,6 @@
         }
       ],
       "expo-asset",
-      [
-        "expo-font",
-        {
-          "fonts": [
-            "./assets/fonts/Inter-Regular.ttf",
-            "./assets/fonts/Inter-Medium.ttf",
-            "./assets/fonts/Inter-SemiBold.ttf"
-          ]
-        }
-      ],
-      "./plugins/withInterFont",
       "./plugins/withPttBackgroundService"
     ],
     "extra": {

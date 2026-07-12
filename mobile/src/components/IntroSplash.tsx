@@ -1,6 +1,6 @@
 import React from 'react';
 import { Image, StyleSheet, View } from 'react-native';
-import { Audio, ResizeMode, Video, type AVPlaybackStatus } from 'expo-av';
+import { ResizeMode, Video, type AVPlaybackStatus } from 'expo-av';
 import { colors } from '@/theme';
 
 /**
@@ -22,16 +22,6 @@ export function IntroSplash({
     finishedRef.current = true;
     onDone();
   }, [onDone]);
-
-  // Звук на мобилке обязателен: разрешаем воспроизведение даже в «беззвучном»
-  // режиме iOS и не приглушаем другие звуки на Android.
-  React.useEffect(() => {
-    void Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      shouldDuckAndroid: false,
-      playThroughEarpieceAndroid: false,
-    }).catch(() => {});
-  }, []);
 
   const onStatus = React.useCallback(
     (status: AVPlaybackStatus) => {
@@ -56,8 +46,8 @@ export function IntroSplash({
         resizeMode={ResizeMode.COVER}
         shouldPlay
         isLooping={false}
-        isMuted={false}
-        volume={1}
+        isMuted
+        volume={0}
         onLoad={() => setVideoReady(true)}
         onPlaybackStatusUpdate={onStatus}
         onError={finish}
