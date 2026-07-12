@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fontSize, spacing, waiterLayout } from '@/theme';
 import { PwaIcon } from './PwaIcon';
 import { FastPressable } from './FastPressable';
-import { sheetTiming } from './motion';
+import { sheetTiming, weightSheetTiming } from './motion';
 
 const CLOSE_DRAG_DISTANCE = 110;
 const SHEET_FALLBACK_H = 900;
@@ -48,6 +48,7 @@ type BottomSheetSnapshot = {
   bottomInset?: number;
   backdropColor?: string;
   fillBody?: boolean;
+  animationPreset?: 'default' | 'weight';
 };
 
 /**
@@ -69,6 +70,7 @@ export function BottomSheet({
   bottomInset,
   backdropColor,
   fillBody = false,
+  animationPreset = 'default',
 }: {
   visible: boolean;
   onClose: () => void;
@@ -84,7 +86,10 @@ export function BottomSheet({
   backdropColor?: string;
   /** true — тело растягивается (flex:1), футер закреплён снизу, скроллит только контент тела. */
   fillBody?: boolean;
+  /** PWA-specific transition curve for custom sheets. */
+  animationPreset?: 'default' | 'weight';
 }) {
+  const timing = animationPreset === 'weight' ? weightSheetTiming : sheetTiming;
   const [render, setRender] = React.useState(visible);
   const currentSnapshot: BottomSheetSnapshot = {
     title,
@@ -134,19 +139,19 @@ export function BottomSheet({
             return;
           }
           dragY.value = withTiming(0, {
-            duration: sheetTiming.exitMs,
-            easing: sheetTiming.easing,
+            duration: timing.exitMs,
+            easing: timing.easing,
           });
         })
         .onFinalize(() => {
           if (dragY.value > 0 && dragY.value < CLOSE_DRAG_DISTANCE) {
             dragY.value = withTiming(0, {
-              duration: sheetTiming.exitMs,
-              easing: sheetTiming.easing,
+              duration: timing.exitMs,
+              easing: timing.easing,
             });
           }
         }),
-    [handleClose, content.sheet, dragY],
+    [handleClose, content.sheet, dragY, timing.easing, timing.exitMs],
   );
 
   React.useEffect(() => {
@@ -163,35 +168,35 @@ export function BottomSheet({
       backdropOpacity.value = 0;
       setRender(true);
       translateY.value = withTiming(0, {
-        duration: sheetTiming.enterMs,
-        easing: sheetTiming.easing,
+        duration: timing.enterMs,
+        easing: timing.easing,
       });
       backdropOpacity.value = withTiming(1, {
-        duration: sheetTiming.enterMs,
-        easing: sheetTiming.easing,
+        duration: timing.enterMs,
+        easing: timing.easing,
       });
       return;
     }
     dismissKeyboard();
     dragY.value = withTiming(0, {
-      duration: sheetTiming.exitMs,
-      easing: sheetTiming.easing,
+      duration: timing.exitMs,
+      easing: timing.easing,
     });
     backdropOpacity.value = withTiming(0, {
-      duration: sheetTiming.exitMs,
-      easing: sheetTiming.easing,
+      duration: timing.exitMs,
+      easing: timing.easing,
     });
     translateY.value = withTiming(
       offscreen,
       {
-        duration: sheetTiming.exitMs,
-        easing: sheetTiming.easing,
+        duration: timing.exitMs,
+        easing: timing.easing,
       },
       (finished) => {
         if (finished) runOnJS(finishClose)(seq);
       },
     );
-  }, [backdropOpacity, dragY, finishClose, offscreen, translateY, visible]);
+  }, [backdropOpacity, dragY, finishClose, offscreen, timing.easing, timing.enterMs, timing.exitMs, translateY, visible]);
 
   const backdropStyle = useAnimatedStyle(() => ({
     opacity: backdropOpacity.value,
@@ -292,12 +297,12 @@ const styles = StyleSheet.create({
     maxHeight: '92%',
     overflow: 'hidden',
   },
-  sheetSafe: { backgroundColor: colors.card },
+  sheetSafe: { backgroundColor: colors.card, flexShrink: 1, minHeight: 0 },
   // flexShrink (не flexGrow): при коротком контенте лист по размеру контента
   // (минимальный отступ до футера), при длинном — тело сжимается и его скролл
   // включается, а футер остаётся закреплённым.
-  sheetSafeFill: { flexShrink: 1, minHeight: 0 },
-  bodyFill: { flexShrink: 1, minHeight: 0 },
+  sheetSafeFill: { flex: 1, minHeight: 0 },
+  bodyFill: { flex: 1, minHeight: 0 },
   handleWrap: { paddingTop: 10, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm, gap: spacing.sm },
   handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300 },
   sheetTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
@@ -311,7 +316,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   title: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
-  body: { paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  body: { flexShrink: 1, minHeight: 0, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   footer: {
     borderTopWidth: 1,
     borderTopColor: colors.border,

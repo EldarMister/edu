@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxl,
   },
   title: {
-    marginTop: spacing.xl,
+    marginTop: spacing.xxl,
     fontSize: 22,
     fontWeight: '700',
     color: colors.textPrimary,
@@ -141,12 +141,15 @@ const styles = StyleSheet.create({
   },
   subtitle: {
     marginTop: spacing.sm,
-    fontSize: fontSize.md,
+    fontSize: fontSize.base,
     color: colors.textMuted,
     textAlign: 'center',
     lineHeight: 22,
   },
   footer: {
+    width: '100%',
+    maxWidth: 384,
+    alignSelf: 'center',
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.xl,
     minHeight: 48 + spacing.xl,

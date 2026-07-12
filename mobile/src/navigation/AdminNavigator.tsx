@@ -1,5 +1,5 @@
 import React from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon, type PwaIconName } from '@/components/PwaIcon';
@@ -40,16 +40,16 @@ const SECTIONS: {
   perm: SectionKey;
   adminOnly?: boolean;
 }[] = [
-  { key: 'stats', label: 'Статистика', icon: 'chart', perm: 'statistics' },
-  { key: 'orders', label: 'Заказы', icon: 'list', perm: 'orders' },
-  { key: 'receipts', label: 'Печать чека', icon: 'clock', perm: 'checks', adminOnly: true },
+  { key: 'stats', label: 'Статистика', icon: 'adminStats', perm: 'statistics' },
+  { key: 'orders', label: 'Заказы', icon: 'adminOrders', perm: 'orders' },
+  { key: 'receipts', label: 'Печать чека', icon: 'adminPrinter', perm: 'checks', adminOnly: true },
   { key: 'tables', label: 'Столы', icon: 'grid', perm: 'tables' },
   { key: 'menu', label: 'Меню', icon: 'menu', perm: 'menu' },
-  { key: 'warehouse', label: 'Склад', icon: 'bag', perm: 'warehouse' },
-  { key: 'staff', label: 'Персонал', icon: 'user', perm: 'staff' },
-  { key: 'audit', label: 'Журнал', icon: 'eye', perm: 'journal' },
-  { key: 'reconcile', label: 'Сверка оплат', icon: 'transfer', perm: 'paymentReconciliation' },
-  { key: 'settings', label: 'Настройки', icon: 'info', perm: 'settings' },
+  { key: 'warehouse', label: 'Склад', icon: 'adminWarehouse', perm: 'warehouse' },
+  { key: 'staff', label: 'Персонал', icon: 'adminStaff', perm: 'staff' },
+  { key: 'audit', label: 'Журнал', icon: 'adminJournal', perm: 'journal' },
+  { key: 'reconcile', label: 'Сверка оплат', icon: 'adminReconcile', perm: 'paymentReconciliation' },
+  { key: 'settings', label: 'Настройки', icon: 'adminSettings', perm: 'settings' },
 ];
 
 /** Админ/владелец — порт PWA AdminApp (сайдбар → выезжающий drawer на мобиле). */
@@ -186,7 +186,7 @@ function AdminDrawer({
           <View style={styles.drawerLogo}>
             <BrandLogo />
           </View>
-          <View style={styles.drawerNav}>
+          <ScrollView style={styles.drawerNav} contentContainerStyle={styles.drawerNavContent} showsVerticalScrollIndicator={false}>
             {sections.map((s) => {
               const active = s.key === current;
               return (
@@ -200,10 +200,10 @@ function AdminDrawer({
                 </FastPressable>
               );
             })}
-          </View>
+          </ScrollView>
           <View style={styles.drawerFooter}>
             <FastPressable onPress={onLogout} style={styles.navItem}>
-              <PwaIcon name="transfer" size={18} color={colors.textSecondary} />
+              <PwaIcon name="logout" size={18} color={colors.textSecondary} />
               <Text style={styles.navLabel}>Выйти</Text>
             </FastPressable>
           </View>
@@ -242,7 +242,8 @@ const styles = StyleSheet.create({
     borderRightColor: colors.border,
   },
   drawerLogo: { height: 64, justifyContent: 'center', paddingHorizontal: spacing.lg },
-  drawerNav: { flex: 1, paddingHorizontal: spacing.md, gap: 4 },
+  drawerNav: { flex: 1 },
+  drawerNavContent: { paddingHorizontal: spacing.md, gap: 4, paddingBottom: spacing.sm },
   navItem: {
     flexDirection: 'row',
     alignItems: 'center',

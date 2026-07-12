@@ -255,36 +255,49 @@ export function PaymentSheet({
     return completePayment(payload);
   };
 
+  // Один BottomSheet остаётся смонтированным на всём пути оплаты. Раньше лист
+  // оплаты закрывался на показе успеха, а лист чека создавался заново — из-за
+  // этого пользователь видел второй «въезд» снизу после оплаты.
+  const showReceipt = !!receipt && !successVisible;
+
   return (
     <>
       <BottomSheet
-        visible={visible && !successVisible && !receipt}
+        visible={visible}
         onClose={close}
-        title="Оплата заказа"
+        title={showReceipt ? 'Оплата принята' : 'Оплата заказа'}
         footer={
-          <View style={styles.payActions}>
-            <FastPressable
-              onPress={() => setSplitOpen(true)}
-              disabled={pay.isPending || !allActiveItemsServed}
-              style={[
-                styles.splitButton,
-                (pay.isPending || !allActiveItemsServed) && styles.splitButtonDisabled,
-              ]}
-            >
-              <Text style={styles.splitButtonText} numberOfLines={1}>
-                Разделить счёт
-              </Text>
-            </FastPressable>
-            <Button
-              title={`${selected === 'cash' || selected === 'card' ? 'Принять оплату' : 'Оплачено'} · ${money(total)}`}
-              onPress={submit}
-              loading={pay.isPending}
-              disabled={confirmDisabled}
-              style={{ flex: 1 }}
-            />
-          </View>
+          showReceipt ? (
+            <View style={styles.receiptActions}>
+              <Button title="Готово" variant="secondary" onPress={close} style={{ flex: 1 }} />
+              <Button title="Печать чека" loading={print.isPending} onPress={() => void requestPrint()} style={{ flex: 1 }} />
+            </View>
+          ) : (
+            <View style={styles.payActions}>
+              <FastPressable
+                onPress={() => setSplitOpen(true)}
+                disabled={pay.isPending || !allActiveItemsServed}
+                style={[
+                  styles.splitButton,
+                  (pay.isPending || !allActiveItemsServed) && styles.splitButtonDisabled,
+                ]}
+              >
+                <Text style={styles.splitButtonText} numberOfLines={1}>
+                  Разделить счёт
+                </Text>
+              </FastPressable>
+              <Button
+                title={`${selected === 'cash' || selected === 'card' ? 'Принять оплату' : 'Оплачено'} · ${money(total)}`}
+                onPress={submit}
+                loading={pay.isPending}
+                disabled={confirmDisabled}
+                style={{ flex: 1 }}
+              />
+            </View>
+          )
         }
       >
+        {showReceipt && receipt ? <ReceiptContent receipt={receipt} error={error} /> : <>
         <Text style={styles.subtitle}>
           Стол {activeOrder.table.number}
           {hallSuffix(activeOrder.table)} · {displayOrderNumber(activeOrder.orderNumber)}
@@ -376,6 +389,7 @@ export function PaymentSheet({
           )}
         </View>
         {error ? <Text style={styles.inlineError}>{error}</Text> : null}
+        </>}
       </BottomSheet>
 
       <SplitBillSheet
@@ -386,48 +400,20 @@ export function PaymentSheet({
         onClose={() => setSplitOpen(false)}
         onComplete={handleSplitComplete}
       />
-      <ReceiptSheet
-        receipt={receipt}
-        visible={visible && !successVisible && !!receipt}
-        printing={print.isPending}
-        error={error}
-        onClose={close}
-        onPrint={() => void requestPrint()}
-      />
       <PaymentSuccessOverlay visible={successVisible} total={total} />
     </>
   );
 }
 
-function ReceiptSheet({
+function ReceiptContent({
   receipt,
-  visible,
-  printing,
   error,
-  onClose,
-  onPrint,
 }: {
-  receipt: Receipt | null;
-  visible: boolean;
-  printing: boolean;
+  receipt: Receipt;
   error?: string;
-  onClose: () => void;
-  onPrint: () => void;
 }) {
-  if (!receipt) return null;
-
   return (
-    <BottomSheet
-      visible={visible}
-      onClose={onClose}
-      title="Оплата принята"
-      footer={
-        <View style={styles.receiptActions}>
-          <Button title="Готово" variant="secondary" onPress={onClose} style={{ flex: 1 }} />
-          <Button title="Печать чека" loading={printing} onPress={onPrint} style={{ flex: 1 }} />
-        </View>
-      }
-    >
+    <>
       <View style={styles.receiptBox}>
         <Text style={styles.receiptCafe} numberOfLines={2}>{receipt.cafeName}</Text>
         <Text style={styles.receiptMeta}>
@@ -480,7 +466,7 @@ function ReceiptSheet({
         ) : null}
       </View>
       {error ? <Text style={styles.inlineError}>{error}</Text> : null}
-    </BottomSheet>
+    </>
   );
 }
 

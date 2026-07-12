@@ -9,9 +9,9 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/app-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#005BFF"
+      "backgroundColor": "#FFFFFF"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -31,7 +31,7 @@
       "package": "com.edupos.mobile",
       "versionCode": 5,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/app-adaptive-icon.png",
+        "foregroundImage": "./assets/app-icon.png",
         "backgroundColor": "#FFFFFF"
       },
       "permissions": [
@@ -46,8 +46,8 @@
       ]
     },
     "androidStatusBar": {
-      "backgroundColor": "#005BFF",
-      "barStyle": "light-content",
+      "backgroundColor": "#FFFFFF",
+      "barStyle": "dark-content",
       "translucent": false
     },
     "plugins": [
@@ -67,7 +67,17 @@
         }
       ],
       "expo-asset",
-      "expo-font",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./assets/fonts/Inter-Regular.ttf",
+            "./assets/fonts/Inter-Medium.ttf",
+            "./assets/fonts/Inter-SemiBold.ttf"
+          ]
+        }
+      ],
+      "./plugins/withInterFont",
       "./plugins/withPttBackgroundService"
     ],
     "extra": {

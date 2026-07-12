@@ -4,6 +4,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Animated, {
   Easing,
   cancelAnimation,
+  interpolate,
   useAnimatedStyle,
   useSharedValue,
   withRepeat,
@@ -78,15 +79,12 @@ const STATE_STYLES: Record<RadioState, { circle: string; ring: string; pulse: bo
 
 function RadioHeader({ onClose }: { onClose: () => void }) {
   return (
-    <>
-      <View style={styles.headerHandle} />
-      <View style={styles.header}>
-        <Text style={styles.title}>Рация</Text>
-        <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
-          <PwaIcon name="close" size={24} color={colors.textMuted} strokeWidth={2} />
-        </FastPressable>
-      </View>
-    </>
+    <View style={styles.header}>
+      <Text style={styles.title}>Рация</Text>
+      <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
+        <PwaIcon name="close" size={24} color={colors.textMuted} strokeWidth={2} />
+      </FastPressable>
+    </View>
   );
 }
 
@@ -140,43 +138,17 @@ function PushToTalkCircle({
 }) {
   const view = STATE_STYLES[state];
   const ringCount = state === 'speakingSelf' ? 3 : state === 'speakingOther' ? 1 : 0;
-  const pulse = useSharedValue(0);
-
-  React.useEffect(() => {
-    if (view.pulse) {
-      pulse.value = withRepeat(
-        withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) }),
-        -1,
-        true,
-      );
-      return () => cancelAnimation(pulse);
-    }
-    cancelAnimation(pulse);
-    pulse.value = withTiming(0, { duration: 200 });
-    return undefined;
-  }, [pulse, view.pulse]);
-
-  const glowStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 + pulse.value * 0.12 }],
-    opacity: 0.55 + pulse.value * 0.45,
-  }));
 
   return (
     <View style={styles.circleWrap}>
       {Array.from({ length: ringCount }).map((_, index) => (
-        <Animated.View
+        <PttRipple
           key={index}
-          pointerEvents="none"
-          style={[
-            styles.ring,
-            {
-              width: CIRCLE_SIZE + 22 + index * 22,
-              height: CIRCLE_SIZE + 22 + index * 22,
-              borderRadius: (CIRCLE_SIZE + 22 + index * 22) / 2,
-              borderColor: view.ring,
-            },
-            glowStyle,
-          ]}
+          mode={state === 'speakingSelf' ? 'ripple' : 'soft'}
+          delay={index * 220}
+          size={CIRCLE_SIZE + 22 + index * 22}
+          color={view.ring}
+          borderWidth={1}
         />
       ))}
       <FastPressable
@@ -195,6 +167,61 @@ function PushToTalkCircle({
         <Image source={RADIO_ICON} style={styles.circleIcon} resizeMode="contain" />
       </FastPressable>
     </View>
+  );
+}
+
+function PttRipple({
+  mode,
+  delay = 0,
+  size,
+  color,
+  borderWidth,
+}: {
+  mode: 'ripple' | 'soft';
+  delay?: number;
+  size: number;
+  color: string;
+  borderWidth: number;
+}) {
+  const progress = useSharedValue(0);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      progress.value = 0;
+      progress.value = mode === 'ripple'
+        ? withRepeat(withTiming(1, { duration: 1350, easing: Easing.out(Easing.ease) }), -1, false)
+        : withRepeat(withTiming(1, { duration: 850, easing: Easing.inOut(Easing.ease) }), -1, true);
+    }, delay);
+    return () => {
+      clearTimeout(timer);
+      cancelAnimation(progress);
+    };
+  }, [delay, mode, progress]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        scale:
+          mode === 'ripple'
+            ? interpolate(progress.value, [0, 1], [0.86, 1.28])
+            : interpolate(progress.value, [0, 1], [1, 1.08]),
+      },
+    ],
+    opacity:
+      mode === 'ripple'
+        ? interpolate(progress.value, [0, 0.7, 1], [0.5, 0.18, 0])
+        : interpolate(progress.value, [0, 1], [0.72, 0.3]),
+  }));
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.ring,
+        { width: size, height: size, borderRadius: size / 2, borderColor: color, borderWidth },
+        animatedStyle,
+      ]}
+    />
   );
 }
 
@@ -396,10 +423,7 @@ export function PttOverlay() {
       {buttonVisible && (
         <View pointerEvents="box-none" style={[styles.floatButtonWrap, { bottom: floatingBottom }]}>
           {outerSpeaking ? (
-            <View
-              pointerEvents="none"
-              style={[styles.floatButtonRing, { borderColor: outerView.ring }]}
-            />
+            <PttRipple mode="soft" size={74} color={outerView.ring} borderWidth={1} />
           ) : null}
           <FastPressable
             accessibilityRole="button"
@@ -415,6 +439,7 @@ export function PttOverlay() {
       <BottomSheet
         visible={open}
         onClose={() => setOpen(false)}
+        sheet
         panelStyle={styles.pttSheet}
         maxHeight="55%"
         bottomInset={sheetBottomInset}
@@ -463,13 +488,6 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 7,
   },
-  floatButtonRing: {
-    position: 'absolute',
-    width: 74,
-    height: 74,
-    borderRadius: 37,
-    borderWidth: 1,
-  },
   sheetBody: {
     paddingTop: spacing.sm,
     paddingBottom: spacing.lg,
@@ -479,14 +497,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     borderWidth: 1,
     borderColor: colors.border,
-  },
-  headerHandle: {
-    alignSelf: 'center',
-    width: 56,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.slate300,
-    marginBottom: spacing.md,
   },
   header: {
     flexDirection: 'row',
@@ -545,7 +555,6 @@ const styles = StyleSheet.create({
   },
   ring: {
     position: 'absolute',
-    borderWidth: 8,
   },
   circle: {
     width: CIRCLE_SIZE,

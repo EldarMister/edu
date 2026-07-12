@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
 import { Audio, ResizeMode, Video, type AVPlaybackStatus } from 'expo-av';
 import { colors } from '@/theme';
 
@@ -16,6 +16,7 @@ export function IntroSplash({
   onDone: () => void;
 }) {
   const finishedRef = React.useRef(false);
+  const [videoReady, setVideoReady] = React.useState(false);
   const finish = React.useCallback(() => {
     if (finishedRef.current) return;
     finishedRef.current = true;
@@ -45,14 +46,19 @@ export function IntroSplash({
 
   return (
     <View style={styles.root}>
+      {/* PWA-brand frame is visible from the first native paint. Video stays
+          transparent until the decoder has produced its first frame, so there
+          is no blue/white/black flash while expo-av is initialising. */}
+      <Image source={require('../../assets/app-icon.png')} resizeMode="contain" style={styles.brandFrame} />
       <Video
         source={source}
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, !videoReady && styles.videoHidden]}
         resizeMode={ResizeMode.COVER}
         shouldPlay
         isLooping={false}
         isMuted={false}
         volume={1}
+        onLoad={() => setVideoReady(true)}
         onPlaybackStatusUpdate={onStatus}
         onError={finish}
       />
@@ -63,7 +69,11 @@ export function IntroSplash({
 const styles = StyleSheet.create({
   root: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.white,
     zIndex: 100,
   },
+  brandFrame: { width: '78%', height: '34%' },
+  videoHidden: { opacity: 0 },
 });

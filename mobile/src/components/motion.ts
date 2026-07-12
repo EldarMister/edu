@@ -6,6 +6,13 @@ export const sheetTiming = {
   easing: Easing.bezier(0.4, 0, 0.2, 1),
 } as const;
 
+/** Custom waiter weight picker transition from the PWA. */
+export const weightSheetTiming = {
+  enterMs: 420,
+  exitMs: 420,
+  easing: Easing.bezier(0.22, 1, 0.36, 1),
+} as const;
+
 export const popTiming = {
   enterMs: 160,
   exitMs: 120,
