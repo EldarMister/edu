@@ -656,7 +656,6 @@ function SetPickerSheet({
       title="Сеты"
       sheet
       maxHeight="86%"
-      fillBody
       footer={
         <View style={styles.setPickerFooter}>
           <Button
@@ -815,7 +814,6 @@ function SetConfigSheet({
         title="Настроить сет"
         sheet
         maxHeight="86%"
-        fillBody
         footer={
           <View style={{ paddingBottom: spacing.sm }}>
             <Button
