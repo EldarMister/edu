@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
-import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop, Text as SvgText, TSpan } from 'react-native-svg';
+import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -28,6 +28,10 @@ function arcPath(cx: number, cy: number, radiusValue: number, from: number, to: 
 
 function clampAmount(value: number) {
   return Math.max(0, Math.round(value / STEP) * STEP);
+}
+
+function dialMaxForAmount(value: number) {
+  return Math.max(BASE_DIAL_MAX, Math.ceil(value / BASE_DIAL_MAX) * BASE_DIAL_MAX);
 }
 
 function amountLabel(value: number, measure: Dish['weightedMeasure']) {
@@ -64,11 +68,15 @@ export function WeightPickerSheet({
     dragRef.current = null;
   }, [dish]);
 
-  const dialMax = Math.max(BASE_DIAL_MAX, Math.ceil(amount / BASE_DIAL_MAX) * BASE_DIAL_MAX);
+  const dialMax = dialMaxForAmount(amount);
   const angle = START_ANGLE + (amount / dialMax) * (END_ANGLE - START_ANGLE);
   const knob = polar(180, 180, 116, angle);
   const measure = dish?.weightedMeasure ?? 'weight';
   const display = amountLabel(amount, measure);
+  const amountNumberWidth = [...display.value].reduce((sum, character) => sum + (character === '.' ? 12 : 27), 0);
+  const amountUnitGap = 13;
+  const amountUnitWidth = [...display.unit].length * 13;
+  const amountTextStart = 180 - (amountNumberWidth + amountUnitGap + amountUnitWidth) / 2;
   const ticks = useMemo(
     () =>
       Array.from({ length: 51 }, (_, index) => {
@@ -114,7 +122,11 @@ export function WeightPickerSheet({
     if (delta > 180) delta -= 360;
     if (delta < -180) delta += 360;
     drag.lastAngle = raw;
-    setAmount((current) => clampAmount(current + (delta / (END_ANGLE - START_ANGLE)) * drag.scale));
+    setAmount((current) => {
+      const next = clampAmount(current + (delta / (END_ANGLE - START_ANGLE)) * drag.scale);
+      if (dragRef.current) dragRef.current.scale = dialMaxForAmount(next);
+      return next;
+    });
   };
 
   const commitInput = () => {
@@ -191,10 +203,10 @@ export function WeightPickerSheet({
               {amount > 0 ? <Path d={arcPath(180, 180, 116, START_ANGLE, angle)} fill="none" stroke="url(#weightedProgress)" strokeWidth="7" strokeLinecap="round" /> : null}
               <Circle cx={knob.x} cy={knob.y} r="11" fill={colors.white} stroke="#1268ee" strokeWidth="7" />
               {!editing ? (
-                <SvgText x="180" y="197" textAnchor="middle" fill="#07152d" fontWeight="700">
-                  <TSpan fontSize="50">{display.value}</TSpan>
-                  <TSpan fontSize="22" fontWeight="600"> {display.unit}</TSpan>
-                </SvgText>
+                <>
+                  <SvgText x={amountTextStart} y="197" fill="#07152d" fontSize="50" fontWeight="700">{display.value}</SvgText>
+                  <SvgText x={amountTextStart + amountNumberWidth + amountUnitGap} y="197" fill="#07152d" fontSize="22" fontWeight="600">{display.unit}</SvgText>
+                </>
               ) : null}
               <DialMark x={180} y={27} value={dialMax / 2} measure={measure} />
               <DialMark x={40} y={130} value={dialMax / 4} measure={measure} />
