@@ -828,9 +828,15 @@ export class OrdersService {
     dishNameSnapshot: string;
     dishVariantNameSnapshot?: string | null;
     dishVoiceSnapshot?: string | null;
+    weightGrams?: number | null;
   }) {
     const voiceName = item.dishVoiceSnapshot?.trim() || item.dishNameSnapshot;
-    return withVariantVoice(voiceName, item.dishVariantNameSnapshot);
+    // У старых строк могла сохраниться масса без снимка варианта. Не теряем
+    // порцию в озвучке: «500 г» должно звучать как «пол килограмма».
+    const portion =
+      item.dishVariantNameSnapshot?.trim() ||
+      (item.weightGrams ? weightSnapshot(item.weightGrams, 'weight') : null);
+    return withVariantVoice(voiceName, portion);
   }
 
   private waiterLocationVoice(order: { table: { number: number; hall?: { name?: string | null } | null } }) {
@@ -967,7 +973,9 @@ export class OrdersService {
         });
         void this.notifyKitchenNewOrder(updated);
       }
-      this.emitStatusChanged(updated);
+      // Кухня уже озвучила добавленные позиции через kitchen:new_order.
+      // Официанту не нужно заново проговаривать историю отмен в заказе.
+      this.emitStatusChanged(updated, { suppressWaiter: true });
       const addedCount = items.reduce((sum, i) => sum + i.quantity, 0);
       await this.audit.log({
         actor,
