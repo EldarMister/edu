@@ -54,6 +54,34 @@ const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   [PaymentMethod.mixed]: 'Смешанная',
 };
 
+const STATION_FINAL_ITEM_STATUSES = new Set<OrderItemStatus>([
+  OrderItemStatus.rejected,
+  OrderItemStatus.cancelled,
+  OrderItemStatus.ready,
+  OrderItemStatus.served,
+]);
+
+type StationOrder = {
+  items: { prepStation: PrepStation; status: OrderItemStatus }[];
+};
+
+function stationHasWork(order: StationOrder, station: PrepStation) {
+  return station !== PrepStation.none && order.items.some(
+    (item) => item.prepStation === station && !STATION_FINAL_ITEM_STATUSES.has(item.status),
+  );
+}
+
+function completedStationSuppressions(order: StationOrder) {
+  const suppressions: { kitchen?: boolean; bar?: boolean } = {};
+  for (const station of [PrepStation.kitchen, PrepStation.bar]) {
+    const items = order.items.filter((item) => item.prepStation === station);
+    if (items.length > 0 && items.every((item) => STATION_FINAL_ITEM_STATUSES.has(item.status))) {
+      suppressions[station] = true;
+    }
+  }
+  return suppressions;
+}
+
 function tableNumberVoice(value: number): string {
   return Number.isInteger(value) ? numberToWordsRu(value) : String(value);
 }
@@ -541,7 +569,8 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    // Станция, где всё уже готово, не должна получать позднюю озвучку отмены.
+    this.emitStatusChanged(updated, { suppressStations: completedStationSuppressions(order) });
     this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
 
     await this.audit.log({
@@ -1774,12 +1803,24 @@ export class OrdersService {
       });
     });
 
+    const stationHasOpenWork = stationHasWork(order, item.prepStation);
+    const cancellationVoice =
+      stationHasOpenWork && item.prepStation === PrepStation.kitchen
+        ? { kitchen: `Стол номер ${tableNumberVoice(updated.table.number)}. Официант отменил блюдо: ${this.orderItemName(item)}.` }
+        : stationHasOpenWork && item.prepStation === PrepStation.bar
+          ? { bar: `Стол номер ${tableNumberVoice(updated.table.number)}. Официант отменил блюдо: ${this.orderItemName(item)}.` }
+          : undefined;
+
     // При отмене одного готового блюда заказ может остаться ready. Это не
-    // новая готовность, поэтому официанту нельзя повторно озвучивать весь заказ.
-    // Полная отмена сохраняет отдельную озвучку статуса cancelled.
+    // новая готовность для официанта. Кухня слышит отмену только пока у её
+    // станции есть активная работа (например, отменили только что добавленную позицию).
     this.emitStatusChanged(
       updated,
-      updated.status === OrderStatus.cancelled ? undefined : { suppressWaiter: true },
+      {
+        suppressWaiter: updated.status !== OrderStatus.cancelled,
+        suppressStations: completedStationSuppressions(order),
+        ...(cancellationVoice ? { byStation: cancellationVoice } : {}),
+      },
     );
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
@@ -2878,13 +2919,24 @@ export class OrdersService {
 
   private emitStatusChanged(
     order: { waiterId: string | null } & Record<string, unknown>,
-    voice?: { waiterText?: string; suppressWaiter?: boolean },
+    voice?: {
+      waiterText?: string;
+      suppressWaiter?: boolean;
+      byStation?: { kitchen?: string | null; bar?: string | null };
+      suppressStations?: { kitchen?: boolean; bar?: boolean };
+    },
   ) {
     // Полная отмена/отказ — добавляем озвучку «Заказ номер … отменён» (ТЗ §4).
     const status = order.status as OrderStatus | undefined;
     let payload = order;
     if (status === OrderStatus.cancelled || status === OrderStatus.rejected) {
-      payload = { ...order, voice: { text: buildCancelText({ orderNumber: String(order.orderNumber) }) } };
+      payload = {
+        ...order,
+        voice: {
+          text: buildCancelText({ orderNumber: String(order.orderNumber) }),
+          ...voice,
+        },
+      };
     } else if (voice) {
       payload = { ...order, voice: { ...(order.voice as Record<string, unknown> | undefined), ...voice } };
     }
