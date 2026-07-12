@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import React from 'react';
-import { StatusBar, View } from 'react-native';
+import { StatusBar, Text, TextInput, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { QueryClientProvider } from '@tanstack/react-query';
@@ -12,6 +12,18 @@ import { useIntroSplash } from '@/hooks/useIntroSplash';
 import { colors } from '@/theme';
 
 const INTRO_VIDEO = require('./assets/intro.mp4');
+
+const fixedTextComponents = [Text, TextInput] as Array<
+  React.ComponentType<any> & { defaultProps?: Record<string, unknown> }
+>;
+
+fixedTextComponents.forEach((component) => {
+  component.defaultProps = {
+    ...component.defaultProps,
+    allowFontScaling: false,
+    maxFontSizeMultiplier: 1,
+  };
+});
 
 export default function App() {
   const intro = useIntroSplash();

@@ -4,7 +4,7 @@
     "slug": "edu-pos-mobile",
     "version": "0.1.1",
     "orientation": "default",
-    "icon": "./assets/app-icon.png",
+    "icon": "./assets/launcher-icon.png",
     "scheme": "edupos",
     "userInterfaceStyle": "light",
     "newArchEnabled": false,
@@ -31,7 +31,7 @@
       "package": "com.edupos.mobile",
       "versionCode": 5,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/app-icon.png",
+        "foregroundImage": "./assets/launcher-icon.png",
         "backgroundColor": "#FFFFFF"
       },
       "permissions": [
