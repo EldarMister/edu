@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  Modal as RNModal,
   ScrollView,
   StyleSheet,
   Text,
@@ -52,6 +51,7 @@ const ALL_METHODS: { key: Exclude<PaymentMethod, 'mixed'>; label: string }[] = [
   { key: 'card', label: 'Карта' },
 ];
 const DEFAULT_PAYMENT_METHODS: PaymentMethod[] = ['qr', 'cash'];
+const PAYMENT_SUCCESS_MS = 1_300;
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   qr: 'QR-код',
@@ -109,7 +109,7 @@ export function PaymentSheet({
   const [splitOpen, setSplitOpen] = useState(false);
   const [error, setError] = useState('');
   const [successVisible, setSuccessVisible] = useState(false);
-  const [successDone, setSuccessDone] = useState(false);
+  const [paymentComplete, setPaymentComplete] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [renderOrder, setRenderOrder] = useState<Order | null>(order);
 
@@ -125,11 +125,11 @@ export function PaymentSheet({
   }, [enabled, mixedAvailable]);
 
   const close = () => {
-    const paid = !!receipt;
+    const paid = paymentComplete;
     setReceipt(null);
     setSplitOpen(false);
     setSuccessVisible(false);
-    setSuccessDone(false);
+    setPaymentComplete(false);
     setCashInput('');
     setQrInput('');
     setError('');
@@ -145,17 +145,6 @@ export function PaymentSheet({
   React.useEffect(() => {
     if (!visible && !successVisible && !receipt) setRenderOrder(null);
   }, [receipt, successVisible, visible]);
-
-  React.useEffect(() => {
-    if (!successVisible) return undefined;
-    setSuccessDone(false);
-    const timer = setTimeout(() => setSuccessDone(true), 1300);
-    return () => clearTimeout(timer);
-  }, [successVisible]);
-
-  React.useEffect(() => {
-    if (successVisible && successDone && receipt) setSuccessVisible(false);
-  }, [receipt, successDone, successVisible]);
 
   const activeOrder = order ?? renderOrder;
   if (!activeOrder) return null;
@@ -202,14 +191,21 @@ export function PaymentSheet({
     push({ message: 'Оплата принята', type: 'success', at: new Date().toISOString() });
     setSplitOpen(false);
     setReceipt(null);
+    setPaymentComplete(true);
     setSuccessVisible(true);
+    const receiptPromise = fetchReceipt(activeOrder.id);
+
+    // Успешная анимация не зависит от скорости API чека: она всегда остаётся
+    // на экране достаточно долго, чтобы пользователь успел её увидеть.
+    await new Promise<void>((resolve) => setTimeout(resolve, PAYMENT_SUCCESS_MS));
     try {
-      setReceipt(await fetchReceipt(activeOrder.id));
+      setReceipt(await receiptPromise);
     } catch (e) {
       const message = apiError(e);
-      setSuccessVisible(false);
       setError(message);
       push({ message, type: 'error', at: new Date().toISOString() });
+    } finally {
+      setSuccessVisible(false);
     }
   };
 
@@ -259,20 +255,23 @@ export function PaymentSheet({
   // оплаты закрывался на показе успеха, а лист чека создавался заново — из-за
   // этого пользователь видел второй «въезд» снизу после оплаты.
   const showReceipt = !!receipt && !successVisible;
+  const showReceiptError = paymentComplete && !successVisible && !receipt;
 
   return (
     <>
       <BottomSheet
         visible={visible}
         onClose={close}
-        title={showReceipt ? 'Оплата принята' : 'Оплата заказа'}
+        title={paymentComplete ? 'Оплата принята' : 'Оплата заказа'}
         footer={
           showReceipt ? (
             <View style={styles.receiptActions}>
               <Button title="Готово" variant="secondary" onPress={close} style={{ flex: 1 }} />
               <Button title="Печать чека" loading={print.isPending} onPress={() => void requestPrint()} style={{ flex: 1 }} />
             </View>
-          ) : (
+          ) : paymentComplete ? (
+            <Button title="Готово" variant="secondary" onPress={close} />
+          ) : successVisible ? undefined : (
             <View style={styles.payActions}>
               <FastPressable
                 onPress={() => setSplitOpen(true)}
@@ -297,7 +296,7 @@ export function PaymentSheet({
           )
         }
       >
-        {showReceipt && receipt ? <ReceiptContent receipt={receipt} error={error} /> : <>
+        {successVisible ? <PaymentSuccessContent total={total} /> : showReceipt && receipt ? <ReceiptContent receipt={receipt} error={error} /> : showReceiptError ? <PaymentReceiptErrorContent error={error} /> : <>
         <Text style={styles.subtitle}>
           Стол {activeOrder.table.number}
           {hallSuffix(activeOrder.table)} · {displayOrderNumber(activeOrder.orderNumber)}
@@ -400,7 +399,6 @@ export function PaymentSheet({
         onClose={() => setSplitOpen(false)}
         onComplete={handleSplitComplete}
       />
-      <PaymentSuccessOverlay visible={successVisible} total={total} />
     </>
   );
 }
@@ -470,16 +468,11 @@ function ReceiptContent({
   );
 }
 
-function PaymentSuccessOverlay({ visible, total }: { visible: boolean; total: number }) {
+function PaymentSuccessContent({ total }: { total: number }) {
   const card = useSharedValue(0);
   const check = useSharedValue(0);
 
   React.useEffect(() => {
-    if (!visible) {
-      card.value = 0;
-      check.value = 0;
-      return;
-    }
     card.value = 0;
     check.value = 0;
     card.value = withTiming(1, {
@@ -493,7 +486,7 @@ function PaymentSuccessOverlay({ visible, total }: { visible: boolean; total: nu
         easing: cardPopTiming.easing,
       }),
     );
-  }, [card, check, visible]);
+  }, [card, check]);
 
   const cardStyle = useAnimatedStyle(() => ({
     opacity: card.value,
@@ -510,22 +503,32 @@ function PaymentSuccessOverlay({ visible, total }: { visible: boolean; total: nu
   }));
 
   return (
-    <RNModal visible={visible} transparent animationType="none" statusBarTranslucent>
-      <View style={styles.successBackdrop}>
-        <Animated.View style={[styles.successCard, cardStyle]}>
-          <Animated.View style={[styles.successIcon, checkStyle]}>
-            <PwaIcon name="check" size={34} color={colors.success} strokeWidth={2.5} />
-          </Animated.View>
-          <Text style={styles.successTitle}>Оплата принята</Text>
-          <Text style={styles.successText}>Платёж успешно подтверждён</Text>
-          <Text style={styles.successAmount}>{money(total)}</Text>
-          <View style={styles.successProgress}>
-            <ActivityIndicator size="small" color={colors.textLight} />
-            <Text style={styles.successProgressText}>Переходим к чеку…</Text>
-          </View>
+    <View style={styles.successContent}>
+      <Animated.View style={[styles.successCard, cardStyle]}>
+        <Animated.View style={[styles.successIcon, checkStyle]}>
+          <PwaIcon name="check" size={34} color={colors.success} strokeWidth={2.5} />
         </Animated.View>
-      </View>
-    </RNModal>
+        <Text style={styles.successTitle}>Оплата принята</Text>
+        <Text style={styles.successText}>Платёж успешно подтверждён</Text>
+        <Text style={styles.successAmount}>{money(total)}</Text>
+        <View style={styles.successProgress}>
+          <ActivityIndicator size="small" color={colors.textLight} />
+          <Text style={styles.successProgressText}>Переходим к чеку…</Text>
+        </View>
+      </Animated.View>
+    </View>
+  );
+}
+
+function PaymentReceiptErrorContent({ error }: { error: string }) {
+  return (
+    <View style={styles.paymentCompleteError}>
+      <PwaIcon name="check" size={30} color={colors.success} strokeWidth={2.5} />
+      <Text style={styles.paymentCompleteTitle}>Оплата принята</Text>
+      <Text style={styles.paymentCompleteText}>
+        {error || 'Чек пока не удалось загрузить. Оплата уже сохранена.'}
+      </Text>
+    </View>
   );
 }
 
@@ -962,12 +965,11 @@ const styles = StyleSheet.create({
   },
   splitButtonDisabled: { opacity: 0.5 },
   splitButtonText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.primary },
-  successBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.4)',
+  successContent: {
+    minHeight: 280,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.lg,
+    paddingVertical: spacing.xl,
   },
   successCard: {
     width: '100%',
@@ -991,6 +993,9 @@ const styles = StyleSheet.create({
   successAmount: { marginTop: spacing.md, fontSize: 24, fontWeight: '700', color: colors.textPrimary },
   successProgress: { marginTop: spacing.lg, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   successProgressText: { fontSize: fontSize.xs, color: colors.textLight },
+  paymentCompleteError: { minHeight: 220, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl },
+  paymentCompleteTitle: { marginTop: spacing.md, fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  paymentCompleteText: { marginTop: spacing.sm, fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center' },
   receiptActions: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
   receiptBox: {
     borderWidth: 1,

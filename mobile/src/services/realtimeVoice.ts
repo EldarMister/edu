@@ -1,7 +1,7 @@
 import type { Order, PrepStation } from '@/types';
 
 export type WaiterVoicedOrder = Order & {
-  voice?: { text?: string | null; waiterText?: string | null } | null;
+  voice?: { text?: string | null; waiterText?: string | null; suppressWaiter?: boolean } | null;
 };
 
 export type StationVoicedOrder = Order & {
@@ -102,16 +102,10 @@ function rejectedDishNames(order: Order): string[] {
   return uniqueNames(names);
 }
 
-function voiceItemsKey(order: Order): string {
-  return (order.items ?? [])
-    .flatMap((item) => [
-      `${item.id}:${item.status}`,
-      ...(item.setComponents ?? []).map((component) => `${component.id}:${component.status}`),
-    ])
-    .join('|');
-}
-
 export function waiterVoiceText(order: WaiterVoicedOrder): string | null {
+  // Отмена блюда из готового заказа оставляет заказ в статусе ready. Backend
+  // помечает такое событие, чтобы оно не выглядело как новое «заказ готов».
+  if (order.voice?.suppressWaiter) return null;
   if (order.voice?.waiterText) return order.voice.waiterText;
 
   const location = waiterLocationText(order);
@@ -140,7 +134,10 @@ export function waiterVoiceText(order: WaiterVoicedOrder): string | null {
 
 export function waiterVoiceKey(order: WaiterVoicedOrder, text: string | null): string | null {
   if (!text) return null;
-  return `${order.status}:${text}:${voiceItemsKey(order)}`;
+  // Один и тот же текст отмены может прийти несколькими realtime-событиями
+  // или вместе с несвязанным обновлением блюда. Дедуплицируем по сообщению,
+  // иначе официант повторно слышит уже объявленную отмену.
+  return `${order.status}:${text}`;
 }
 
 export function stationVoice(order: StationVoicedOrder, station: PrepStation): string | null {
