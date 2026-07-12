@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
-import { OrderBadge, OrderStatusBadges } from '@/components/StatusBadge';
-import { ORDER_STATUS, orderStationStatuses } from '@/lib/status';
+import { OrderStatusBadges } from '@/components/StatusBadge';
+import { ORDER_STATUS } from '@/lib/status';
 import { displayOrderNumber, hallSuffix, money, orderItemDisplayName } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
@@ -127,7 +127,6 @@ export function OrderPanel({
   const editable = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'].includes(order.status);
   const billCorrection = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
   const finalCancelReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
-  const stationStatusChips = orderStationStatuses(order);
 
   if (waitingDecision) {
     return (
@@ -148,13 +147,10 @@ export function OrderPanel({
           второй строкой, чтобы широкие станционные чипы не съедали номер заказа. */}
       <div className="border-b border-border pb-1.5">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <h2 className="min-w-0 truncate text-[15px] font-semibold leading-tight text-text-primary">
-              {t('Заказ')} {displayOrderNumber(order.orderNumber)}
-              <span className="ml-2 text-[13px] font-normal text-text-muted">{t('Стол')} {order.table.number}{hallSuffix(order.table)}</span>
-            </h2>
-            {stationStatusChips.length === 0 && <OrderBadge status={order.status} size="sm" />}
-          </div>
+          <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight text-text-primary">
+            {t('Заказ')} {displayOrderNumber(order.orderNumber)}
+            <span className="ml-2 text-[13px] font-normal text-text-muted">{t('Стол')} {order.table.number}{hallSuffix(order.table)}</span>
+          </h2>
           <div className="flex shrink-0 items-center gap-2">
             {unclaimedQr && (
               <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
@@ -175,14 +171,14 @@ export function OrderPanel({
             )}
           </div>
         </div>
-        {(waitingDecision || stationStatusChips.length > 0) && <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           {waitingDecision && (
             <span className="rounded-md bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
               {t('Нужен ответ')}
             </span>
           )}
-          {stationStatusChips.length > 0 && <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />}
-        </div>}
+          <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />
+        </div>
       </div>
 
       {/* Позиции — компактный список */}
