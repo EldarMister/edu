@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import { ActivityIndicator, InteractionManager, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
+import Svg, { Path } from 'react-native-svg';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
-import { OrderStatusBadges } from '@/components/StatusBadge';
+import { OrderBadge, OrderStatusBadges } from '@/components/StatusBadge';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing } from '@/theme';
-import { ORDER_STATUS } from '@/theme/status';
+import { ORDER_STATUS, orderStationStatuses } from '@/theme/status';
 import { useNotifications } from '@/store/notifications';
 import {
   useActiveOrders,
@@ -144,6 +145,7 @@ export function OrderDetailScreen() {
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
   const billCorrection = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
+  const stationStatusChips = orderStationStatuses(order);
 
   const runProtectedAction = (action: () => void) => {
     setActionCooldown(5);
@@ -363,13 +365,16 @@ export function OrderDetailScreen() {
       {paymentSheet}
       <View style={styles.titleBlock}>
         <View style={styles.titleMainRow}>
-          <Text style={styles.title} numberOfLines={1}>
-            Заказ {displayOrderNumber(order.orderNumber)}{' '}
-            <Text style={styles.titleMuted}>
-              Стол {order.table.number}
-              {hallSuffix(order.table)}
+          <View style={styles.titleWithStatus}>
+            <Text style={styles.title} numberOfLines={1}>
+              Заказ {displayOrderNumber(order.orderNumber)}{' '}
+              <Text style={styles.titleMuted}>
+                Стол {order.table.number}
+                {hallSuffix(order.table)}
+              </Text>
             </Text>
-          </Text>
+            {stationStatusChips.length === 0 ? <OrderBadge status={order.status} size="sm" /> : null}
+          </View>
           <View style={styles.titleActions}>
             {unclaimedQr ? (
               <View style={styles.qrBadge}>
@@ -399,9 +404,11 @@ export function OrderDetailScreen() {
             ) : null}
           </View>
         </View>
-        <View style={styles.statusRow}>
-          <OrderStatusBadges order={order} size="sm" align="start" />
-        </View>
+        {stationStatusChips.length > 0 ? (
+          <View style={styles.statusRow}>
+            <OrderStatusBadges order={order} size="sm" align="start" />
+          </View>
+        ) : null}
       </View>
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
@@ -686,9 +693,9 @@ function PartialRejectionScreen({
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
       <View style={styles.titleRow}>
-        <Text style={styles.title}>
+        <Text style={styles.partialTitle}>
           Заказ {displayOrderNumber(order.orderNumber)}{' '}
-          <Text style={styles.titleMuted}>
+          <Text style={styles.partialTitleMuted}>
             Стол {order.table.number}
             {hallSuffix(order.table)}
           </Text>
@@ -720,7 +727,6 @@ function PartialRejectionScreen({
                 <Text style={styles.rejectedDecisionPrice}>{money(item.finalPrice)}</Text>
                 <Text style={styles.rejectedStatus}>Отказано</Text>
               </View>
-              {item.rejectReason ? <Text style={styles.rejectReason}>{item.rejectReason}</Text> : null}
               <View style={styles.rejectActions}>
                 <FastPressable disabled={busy} onPress={() => onReplacePress(item)} style={styles.replaceBtn}>
                   <Text style={styles.replaceBtnText}>Заменить</Text>
@@ -740,7 +746,7 @@ function PartialRejectionScreen({
 
         <Text style={styles.sectionTitle}>3. Решение</Text>
         <View style={styles.warningBox}>
-          <Text style={styles.warningIcon}>!</Text>
+          <WarningTriangleIcon />
           <Text style={styles.warningText}>Кухня отказала часть заказа. Решите по каждой отказанной позиции.</Text>
         </View>
         <Button title="Продолжить без отказанных блюд" onPress={onContinue} loading={busy} style={styles.partialContinueBtn} />
@@ -749,6 +755,21 @@ function PartialRejectionScreen({
         </FastPressable>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function WarningTriangleIcon() {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="m21.7 18.6-8.5-15a1.4 1.4 0 0 0-2.4 0l-8.5 15A1.4 1.4 0 0 0 3.5 21h17a1.4 1.4 0 0 0 1.2-2.4Z"
+        stroke={colors.warning}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M12 9v4M12 17h.01" stroke={colors.warning} strokeWidth={2} strokeLinecap="round" />
+    </Svg>
   );
 }
 
@@ -779,7 +800,8 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     gap: spacing.sm,
   },
-  title: { flex: 1, fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  titleWithStatus: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  title: { flexShrink: 1, fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   titleMuted: { fontSize: fontSize.sm, fontWeight: '400', color: colors.textMuted },
   titleActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: spacing.sm },
   statusRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', minHeight: 20 },
@@ -970,6 +992,8 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   partialList: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: spacing.sm },
+  partialTitle: { flexShrink: 1, fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
+  partialTitleMuted: { fontSize: fontSize.sm, fontWeight: '400', color: colors.textMuted },
   sectionTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary, marginTop: 2 },
   partialStack: { gap: spacing.sm },
   activeItemCard: {
@@ -999,7 +1023,6 @@ const styles = StyleSheet.create({
   rejectedDecisionName: { flex: 1, fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted, textDecorationLine: 'line-through' },
   rejectedDecisionPrice: { minWidth: 62, textAlign: 'right', fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
   rejectedStatus: { fontSize: 12, fontWeight: '600', color: colors.danger },
-  rejectReason: { fontSize: fontSize.sm, color: colors.danger },
   rejectActions: { flexDirection: 'row', gap: spacing.sm },
   replaceBtn: {
     height: 32,
@@ -1041,18 +1064,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.warningSoft,
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
-  },
-  warningIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: colors.warning,
-    textAlign: 'center',
-    lineHeight: 22,
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-    color: colors.warning,
   },
   warningText: { flex: 1, fontSize: fontSize.sm, color: colors.warning, lineHeight: 18 },
   partialContinueBtn: { height: 44 },

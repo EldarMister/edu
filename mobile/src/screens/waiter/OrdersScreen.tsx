@@ -423,6 +423,7 @@ const OrderCard = memo(function OrderCard({
               Стол {order.table.number}
               {hallSuffix(order.table)}
             </Text>
+            <OrderBadge status={order.status} />
           </View>
           <View style={styles.metaRow}>
             <PwaIcon name="clock" size={13} color={colors.textLight} strokeWidth={2} />
@@ -433,7 +434,6 @@ const OrderCard = memo(function OrderCard({
         </View>
 
         <View style={styles.headRight}>
-          <OrderBadge status={order.status} />
           {unclaimedQr ? (
             <FastPressable
               disabled={claimPending}
