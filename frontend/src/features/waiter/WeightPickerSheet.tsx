@@ -25,6 +25,10 @@ function clampWeight(value: number) {
   return Math.max(0, Math.round(value / STEP) * STEP);
 }
 
+function dialMaxForWeight(value: number) {
+  return Math.max(BASE_DIAL_MAX, Math.ceil(value / BASE_DIAL_MAX) * BASE_DIAL_MAX);
+}
+
 function formatWeight(value: number, measure: 'weight' | 'volume' = 'weight') {
   const [smallUnit, largeUnit] = measure === 'volume' ? ['мл', 'л'] : ['г', 'кг'];
   if (value < 1000) return { value: String(value), unit: smallUnit };
@@ -67,13 +71,15 @@ export function WeightPickerSheet({
     return () => clearTimeout(id);
   }, [dish]);
 
-  const dialMax = Math.max(BASE_DIAL_MAX, Math.ceil(weight / BASE_DIAL_MAX) * BASE_DIAL_MAX);
+  const dialMax = dialMaxForWeight(weight);
   const angle = START_ANGLE + (weight / dialMax) * (END_ANGLE - START_ANGLE);
   const knob = polar(180, 180, 116, angle);
   const measure = renderDish?.weightedMeasure ?? 'weight';
   const displayWeight = formatWeight(weight, measure);
   const weightNumberWidth = [...displayWeight.value].reduce((sum, character) => sum + (character === '.' ? 12 : 27), 0);
-  const weightTextStart = 180 - (weightNumberWidth + 22) / 2;
+  const weightUnitGap = 13;
+  const weightUnitWidth = [...displayWeight.unit].length * 13;
+  const weightTextStart = 180 - (weightNumberWidth + weightUnitGap + weightUnitWidth) / 2;
   const ticks = useMemo(() => Array.from({ length: 51 }, (_, index) => {
     const tickAngle = START_ANGLE + (index / 50) * (END_ANGLE - START_ANGLE);
     const major = index % 5 === 0;
@@ -106,7 +112,11 @@ export function WeightPickerSheet({
       if (delta < -180) delta += 360;
       dragRef.current.lastAngle = rawAngle;
       const scale = dragRef.current.scale;
-      setWeight((current) => clampWeight(current + (delta / (END_ANGLE - START_ANGLE)) * scale));
+      setWeight((current) => {
+        const next = clampWeight(current + (delta / (END_ANGLE - START_ANGLE)) * scale);
+        if (dragRef.current) dragRef.current.scale = dialMaxForWeight(next);
+        return next;
+      });
       return;
     }
 
@@ -220,7 +230,7 @@ export function WeightPickerSheet({
 
               <g opacity={editingWeight ? 0 : 1}>
                 <text x={weightTextStart} y="197" fill="#07152d" fontSize="50" fontWeight="700">{displayWeight.value}</text>
-                <text x={weightTextStart + weightNumberWidth + 8} y="197" fill="#07152d" fontSize="22" fontWeight="600">{displayWeight.unit}</text>
+                <text x={weightTextStart + weightNumberWidth + weightUnitGap} y="197" fill="#07152d" fontSize="22" fontWeight="600">{displayWeight.unit}</text>
               </g>
               <text x="180" y="27" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax / 2, measure).value} {formatWeight(dialMax / 2, measure).unit}</text>
               <text x="40" y="130" textAnchor="middle" fill="#60708d" fontSize="15">{formatWeight(dialMax / 4, measure).value} {formatWeight(dialMax / 4, measure).unit}</text>
