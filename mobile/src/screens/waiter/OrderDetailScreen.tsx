@@ -7,10 +7,10 @@ import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
-import { OrderBadge, OrderStatusBadges } from '@/components/StatusBadge';
+import { OrderStatusBadges } from '@/components/StatusBadge';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing } from '@/theme';
-import { ORDER_STATUS, orderStationStatuses } from '@/theme/status';
+import { ORDER_STATUS } from '@/theme/status';
 import { useNotifications } from '@/store/notifications';
 import {
   useActiveOrders,
@@ -145,7 +145,6 @@ export function OrderDetailScreen() {
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
   const billCorrection = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
-  const stationStatusChips = orderStationStatuses(order);
 
   const runProtectedAction = (action: () => void) => {
     setActionCooldown(5);
@@ -365,16 +364,13 @@ export function OrderDetailScreen() {
       {paymentSheet}
       <View style={styles.titleBlock}>
         <View style={styles.titleMainRow}>
-          <View style={styles.titleWithStatus}>
-            <Text style={styles.title} numberOfLines={1}>
-              Заказ {displayOrderNumber(order.orderNumber)}{' '}
-              <Text style={styles.titleMuted}>
-                Стол {order.table.number}
-                {hallSuffix(order.table)}
-              </Text>
+          <Text style={styles.title} numberOfLines={1}>
+            Заказ {displayOrderNumber(order.orderNumber)}{' '}
+            <Text style={styles.titleMuted}>
+              Стол {order.table.number}
+              {hallSuffix(order.table)}
             </Text>
-            {stationStatusChips.length === 0 ? <OrderBadge status={order.status} size="sm" /> : null}
-          </View>
+          </Text>
           <View style={styles.titleActions}>
             {unclaimedQr ? (
               <View style={styles.qrBadge}>
@@ -404,11 +400,9 @@ export function OrderDetailScreen() {
             ) : null}
           </View>
         </View>
-        {stationStatusChips.length > 0 ? (
-          <View style={styles.statusRow}>
-            <OrderStatusBadges order={order} size="sm" align="start" />
-          </View>
-        ) : null}
+        <View style={styles.statusRow}>
+          <OrderStatusBadges order={order} size="sm" align="start" />
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
