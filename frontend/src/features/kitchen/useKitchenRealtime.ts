@@ -13,11 +13,13 @@ type VoicedOrder = Order & {
   voice?: {
     text?: string | null;
     byStation?: Partial<Record<Exclude<PrepStation, 'none'>, string | null>>;
+    suppressStations?: Partial<Record<Exclude<PrepStation, 'none'>, boolean>>;
   } | null;
 };
 
 function stationVoice(order: VoicedOrder, station: PrepStation): string | null {
   if (station === 'none') return null;
+  if (order.voice?.suppressStations?.[station]) return null;
   return order.voice?.byStation?.[station] ?? order.voice?.text ?? null;
 }
 

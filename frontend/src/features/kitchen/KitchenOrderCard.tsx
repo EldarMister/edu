@@ -224,7 +224,8 @@ export function KitchenOrderCard({
   ) {
     const selectable = !opts?.container && isSelectable(status, id);
     const pending = pendingItemIds.includes(id);
-    const rejected = status === 'rejected' || (pending && pendingType === 'reject');
+    const cancelled = status === 'cancelled';
+    const rejected = status === 'rejected' || cancelled || (pending && pendingType === 'reject');
     const isReady = status === 'ready' || status === 'served' || (pending && pendingType === 'ready');
     // Заказ уже в работе, а позиция всё ещё «new» — значит её добавили/заменили при
     // редактировании. Подсвечиваем, чтобы повар видел, какое блюдо изменилось.
@@ -276,8 +277,8 @@ export function KitchenOrderCard({
             Новое
           </span>
         )}
-        {isReady && <span className="shrink-0 text-[13px] font-bold text-green-600">✓ Готово</span>}
-        {rejected && <span className="shrink-0 text-[13px] font-bold text-danger">Отказ</span>}
+        {isReady && <span className="shrink-0 text-[13px] font-bold text-green-600">✓ {status === 'served' ? 'Подано гостям' : 'Готово'}</span>}
+        {rejected && <span className="shrink-0 text-[13px] font-bold text-danger">{cancelled ? 'Отменено' : 'Отказ'}</span>}
       </>
     );
 
