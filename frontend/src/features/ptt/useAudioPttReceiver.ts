@@ -96,7 +96,8 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
 
     const sock = getSocket();
     const onAudio = (payload: PttAudioPayload) => {
-      if (payload.channel !== channel || payload.senderId === userId) return;
+      const audibleForCurrentChannel = payload.channel === channel || payload.channel === 'general';
+      if (!audibleForCurrentChannel || payload.senderId === userId) return;
       queueRef.current.push(payload);
       pump();
     };

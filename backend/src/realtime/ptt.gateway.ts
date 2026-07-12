@@ -113,14 +113,14 @@ export class PttGateway implements OnGatewayDisconnect {
     if (!channel) return this.deny(client, undefined, 'not_in_channel');
 
     const key = this.lockKey(user.cafeId, channel);
-    const current = this.locks.get(key);
+    const current = this.findBlockingLock(user.cafeId, channel);
     if (current && current.socketId !== client.id) {
       return this.deny(client, channel, 'busy', current.userId);
     }
 
     const lock: TalkLock = { socketId: client.id, userId: user.id, role: user.role, name: user.name };
     this.locks.set(key, lock);
-    this.server.to(this.room(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_BUSY, {
+    this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_BUSY, {
       channel,
       speaker: { id: user.id, role: user.role, name: user.name },
       startedAt: new Date().toISOString(),
@@ -144,9 +144,9 @@ export class PttGateway implements OnGatewayDisconnect {
     const chunk = body?.chunk;
     if (!this.isValidAudio(chunk)) return { ok: false, reason: 'invalid_audio' };
 
-    // Telegram-модель: получили цельный base64-файл — моментально
-    // проксируем его всем остальным участникам комнаты.
-    client.to(this.room(user.cafeId, channel)).emit(PTT_EVENTS.AUDIO_MESSAGE, {
+    // Telegram-модель: получили цельный base64-файл. Обычные каналы слышит
+    // только своя комната, а канал «Все» транслируется во все PTT-комнаты кафе.
+    client.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.AUDIO_MESSAGE, {
       channel,
       senderId: user.id,
       senderRole: user.role,
@@ -226,7 +226,7 @@ export class PttGateway implements OnGatewayDisconnect {
       const lock = this.locks.get(key);
       if (!lock || lock.socketId !== client.id) continue;
       this.locks.delete(key);
-      this.server.to(this.room(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_FREE, {
+      this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_FREE, {
         channel,
         speakerId: user.id,
         freedAt: new Date().toISOString(),
@@ -306,6 +306,23 @@ export class PttGateway implements OnGatewayDisconnect {
       chunk.length <= MAX_AUDIO_CHARS &&
       BASE64_RE.test(chunk)
     );
+  }
+
+  private findBlockingLock(cafeId: string, channel: PttChannel): TalkLock | undefined {
+    if (channel === 'general') {
+      for (const candidate of PTT_CHANNELS) {
+        const lock = this.locks.get(this.lockKey(cafeId, candidate));
+        if (lock) return lock;
+      }
+      return undefined;
+    }
+    return this.locks.get(this.lockKey(cafeId, 'general')) ?? this.locks.get(this.lockKey(cafeId, channel));
+  }
+
+  private broadcastRooms(cafeId: string, channel: PttChannel) {
+    return channel === 'general'
+      ? PTT_CHANNELS.map((candidate) => this.room(cafeId, candidate))
+      : this.room(cafeId, channel);
   }
 
   private room(cafeId: string, channel: PttChannel) {
