@@ -66,6 +66,7 @@ export function OrdersList({
                   </span>
                 )}
                 <span className="truncate text-sm text-text-muted">{t('Стол')} {o.table.number}{hallSuffix(o.table)}</span>
+                <OrderBadge status={o.status} />
               </div>
               <p className="flex items-center gap-1.5 text-xs text-text-light">
                 <ClockIcon />
@@ -73,9 +74,8 @@ export function OrdersList({
               </p>
             </div>
 
-            {/* Правая часть: статус сверху, сумма снизу — зеркально левой */}
+            {/* Справа оставляем только действия и сумму: единый бейдж стоит после зала. */}
             <div className="flex shrink-0 flex-col items-end justify-between gap-2">
-              <OrderBadge status={o.status} />
               {unclaimedQr && (
                 <button
                   type="button"
