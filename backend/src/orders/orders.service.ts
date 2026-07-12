@@ -1774,7 +1774,13 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    // При отмене одного готового блюда заказ может остаться ready. Это не
+    // новая готовность, поэтому официанту нельзя повторно озвучивать весь заказ.
+    // Полная отмена сохраняет отдельную озвучку статуса cancelled.
+    this.emitStatusChanged(
+      updated,
+      updated.status === OrderStatus.cancelled ? undefined : { suppressWaiter: true },
+    );
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
@@ -2872,15 +2878,15 @@ export class OrdersService {
 
   private emitStatusChanged(
     order: { waiterId: string | null } & Record<string, unknown>,
-    voice?: { waiterText?: string },
+    voice?: { waiterText?: string; suppressWaiter?: boolean },
   ) {
     // Полная отмена/отказ — добавляем озвучку «Заказ номер … отменён» (ТЗ §4).
     const status = order.status as OrderStatus | undefined;
     let payload = order;
     if (status === OrderStatus.cancelled || status === OrderStatus.rejected) {
       payload = { ...order, voice: { text: buildCancelText({ orderNumber: String(order.orderNumber) }) } };
-    } else if (voice?.waiterText) {
-      payload = { ...order, voice: { ...(order.voice as Record<string, unknown> | undefined), waiterText: voice.waiterText } };
+    } else if (voice) {
+      payload = { ...order, voice: { ...(order.voice as Record<string, unknown> | undefined), ...voice } };
     }
     // QR-заказ создаётся без официанта — персональной комнаты официанта нет.
     if (order.waiterId) {

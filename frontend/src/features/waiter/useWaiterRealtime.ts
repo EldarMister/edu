@@ -10,7 +10,9 @@ import { waiterVoice } from '@/services/waiterVoice';
 import type { AppNotification, Order, ReceiptPrintRequest } from '@/types';
 import { useReceiptPrint } from './receiptPrint';
 
-type VoicedOrder = Order & { voice?: { text?: string | null; waiterText?: string | null } | null };
+type VoicedOrder = Order & {
+  voice?: { text?: string | null; waiterText?: string | null; suppressWaiter?: boolean } | null;
+};
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -107,17 +109,9 @@ function rejectedDishNames(order: Order): string[] {
   return uniqueNames(names);
 }
 
-function voiceItemsKey(order: Order): string {
-  return (order.items ?? [])
-    .flatMap((item) => [
-      `${item.id}:${item.status}`,
-      ...(item.setComponents ?? []).map((component) => `${component.id}:${component.status}`),
-    ])
-    .join('|');
-}
-
 /** Текст голосового уведомления официанту по статусу заказа (с номером стола). */
 function waiterVoiceText(order: VoicedOrder): string | null {
+  if (order.voice?.suppressWaiter) return null;
   if (order.voice?.waiterText) return order.voice.waiterText;
 
   const location = waiterLocationText(order);
@@ -146,7 +140,7 @@ function waiterVoiceText(order: VoicedOrder): string | null {
 
 function waiterVoiceKey(order: VoicedOrder, text: string | null): string | null {
   if (!text) return null;
-  return `${order.status}:${text}:${voiceItemsKey(order)}`;
+  return `${order.status}:${text}`;
 }
 
 /** Подписки официанта на real-time события сервера. */
