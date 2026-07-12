@@ -134,7 +134,9 @@ function waiterVoiceText(order: VoicedOrder): string | null {
     case 'partially_rejected':
       return `Кухня отказала блюдо${rejectedText}. ${location}`;
     default:
-      return cancelledNames.length ? `Отменено${cancelledText}. ${location}` : null;
+      // В остальных статусах отмена уже была озвучена отдельным realtime-событием.
+      // Не повторяем старую фразу при замене, переносе или других обновлениях заказа.
+      return null;
   }
 }
 

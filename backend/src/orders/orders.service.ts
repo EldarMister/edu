@@ -1642,7 +1642,9 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    // Решение по уже озвученному частичному отказу — это техническое
+    // обновление, а не новый отказ для официанта.
+    this.emitStatusChanged(updated, { suppressWaiter: true });
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
@@ -1679,7 +1681,8 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    // Не повторяем голос старого отказа, когда официант убирает другую позицию.
+    this.emitStatusChanged(updated, { suppressWaiter: true });
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
@@ -1745,7 +1748,8 @@ export class OrdersService {
       });
       void this.notifyKitchenNewOrder(updated);
     }
-    this.emitStatusChanged(updated);
+    // Новую замену озвучивает только её станция через kitchen:new_order.
+    this.emitStatusChanged(updated, { suppressWaiter: true });
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
