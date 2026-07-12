@@ -13,6 +13,7 @@ type VoiceItem = {
   status: string;
   prepStation?: 'kitchen' | 'bar' | 'none' | string | null;
   quantity?: number | null;
+  comment?: string | null;
   takeaway?: boolean | null;
   dishNameSnapshot: string;
   dishVariantNameSnapshot?: string | null;
@@ -29,10 +30,23 @@ type VoiceItem = {
 
 type VoiceOrder = {
   orderNumber: string;
+  comment?: string | null;
   items: VoiceItem[];
 };
 
 type VoiceStation = 'kitchen' | 'bar';
+
+const QR_ORDER_COMMENT = 'Заказ из QR-меню';
+
+/** Не читаем служебную QR-метку и идентификатор гостя, только смысловой текст. */
+function voiceComment(raw?: string | null): string | null {
+  if (!raw) return null;
+  let value = raw.trim();
+  if (!value || value === QR_ORDER_COMMENT) return null;
+  value = value.replace(/^Гость\s+\d+\s*·\s*/iu, '').trim();
+  if (/^Гость\s+\d+$/iu.test(value)) return null;
+  return value || null;
+}
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -206,12 +220,14 @@ function setHeadVoice(item: VoiceItem): string {
  * («два Запечённый филадельфия»). Убранные компоненты проговариваются отдельно.
  */
 function itemVoiceFragment(item: VoiceItem, opts: { takeawayLabel?: boolean } = {}): string {
+  const itemComment = voiceComment(item.comment);
+  const commentSuffix = itemComment ? `. Комментарий: ${itemComment}` : '';
   // «С собой» точечно — только когда навынос НЕ весь заказ (иначе метка озвучивается один раз).
   const takeawaySuffix = opts.takeawayLabel && item.takeaway ? '. С собой' : '';
 
   if (!isSetItem(item)) {
     const qty = item.quantity && item.quantity > 1 ? `${numberToWordsRu(item.quantity)} ` : '';
-    return `${qty}${dishVoice(item)}${takeawaySuffix}`;
+    return `${qty}${dishVoice(item)}${takeawaySuffix}${commentSuffix}`;
   }
 
   const components = item.setComponents ?? [];
@@ -247,7 +263,7 @@ function itemVoiceFragment(item: VoiceItem, opts: { takeawayLabel?: boolean } = 
     const n = c.originalNameSnapshot.trim();
     if (n) parts.push(`убрали ${n}`);
   }
-  return `${parts.join('. ')}${takeawaySuffix}`;
+  return `${parts.join('. ')}${takeawaySuffix}${commentSuffix}`;
 }
 
 /** Активные позиции станции (без отказанных/отменённых). */
@@ -270,7 +286,9 @@ export function buildNewOrderText(order: VoiceOrder, station: VoiceStation = 'ki
   const num = orderNumberWords(order.orderNumber);
   const head = `Новый заказ. Номер ${num}.`;
   const takeawayHead = allTakeaway ? ' Весь заказ с собой.' : '';
-  return applyPronunciation(`${head}${takeawayHead} Состав заказа: ${dishes.join('. ')}.`);
+  const orderComment = voiceComment(order.comment);
+  const commentTail = orderComment ? ` Комментарий к заказу: ${orderComment}.` : '';
+  return applyPronunciation(`${head}${takeawayHead} Состав заказа: ${dishes.join('. ')}.${commentTail}`);
 }
 
 /** «Заказ номер пятьдесят четыре отменён.» */
