@@ -554,7 +554,8 @@ function KitchenCard({
   ) => {
     const selectable = isSelectable(status, id);
     const pendingItem = pendingItemIds.includes(id);
-    const rejected = status === 'rejected' || (pendingItem && pendingType === 'reject');
+    const cancelled = status === 'cancelled';
+    const rejected = status === 'rejected' || cancelled || (pendingItem && pendingType === 'reject');
     const isReady = status === 'ready' || status === 'served' || (pendingItem && pendingType === 'ready');
     // Заказ уже в работе, а позиция всё ещё «new» — добавили/заменили при редактировании.
     const isFresh = tab === 'in_work' && status === 'new' && !pendingItem;
@@ -591,8 +592,8 @@ function KitchenCard({
             <Text style={styles.freshBadgeText}>Новое</Text>
           </View>
         ) : null}
-        {isReady ? <Text style={styles.itemFlagDone}>✓ Готово</Text> : null}
-        {rejected ? <Text style={styles.itemFlagRej}>Отказ</Text> : null}
+        {isReady ? <Text style={styles.itemFlagDone}>✓ {status === 'served' ? 'Подано гостям' : 'Готово'}</Text> : null}
+        {rejected ? <Text style={styles.itemFlagRej}>{cancelled ? 'Отменено' : 'Отказ'}</Text> : null}
       </FastPressable>
     );
   };
