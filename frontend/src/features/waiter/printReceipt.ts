@@ -29,6 +29,7 @@ export async function printReceipt(
 ) {
   const preliminary = opts.preliminary ?? false;
   const fiscal = preliminary ? undefined : opts.fiscal;
+  const logoSrc = `${window.location.origin}/icon1.png?v=edu-pos`;
   const date = new Date(r.date);
   const dateStr = `${date.toLocaleDateString('ru-RU')} ${timeHM(r.date)}`;
   const orderNumber = displayOrderNumber(r.orderNumber);
@@ -49,7 +50,7 @@ export async function printReceipt(
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${docTitle} ${orderNumber}</title>
   <style>
     @page { margin: 0; }
-    body { width: 80mm; margin: 0 auto; padding: 8mm 4mm; font-family: 'Inter', monospace, sans-serif; color: #000; font-size: 14px; }
+    body { width: 80mm; margin: 0 auto; padding: 2mm 4mm 3mm; font-family: 'Inter', monospace, sans-serif; color: #000; font-size: 14px; }
     h1 { font-size: 20px; text-align: center; margin: 0 0 6px; font-weight: 600; }
     .receipt-kind { text-align: center; font-size: 13px; font-weight: 700; margin: 2px 0 6px; }
     .muted { color: #333; font-size: 13px; }
@@ -63,6 +64,8 @@ export async function printReceipt(
     .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
     .row-inline { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; }
     .sep { color: #999; margin: 0 3px; }
+    .brand-footer { text-align: center; margin-top: 12px; }
+    .brand-footer img { display: block; width: 38mm; height: auto; margin: 0 auto; }
   </style></head><body>
     <h1>${escapeHtml(r.cafeName)}</h1>
     ${receiptKind ? `<div class="receipt-kind">${receiptKind}</div>` : ''}
@@ -89,6 +92,7 @@ export async function printReceipt(
     ${fiscalBlock}
     <hr/>
     <div class="center muted">${preliminary ? 'Счёт. Не является фискальным документом.' : escapeHtml(r.thanks)}</div>
+    <div class="brand-footer"><img src="${logoSrc}" alt="Edu Pos" /></div>
   </body></html>`;
 
   const w = targetWindow ?? window.open('', '_blank', 'width=380,height=640');
