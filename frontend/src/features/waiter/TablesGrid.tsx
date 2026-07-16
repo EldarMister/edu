@@ -20,17 +20,19 @@ export function TablesGrid({
   const tableCount = hall?.tables.length ?? 0;
   const fullscreenSingle = tableCount === 1;
   const splitVertical = tableCount === 2;
-  const roomyTwoColumn = tableCount >= 3 && tableCount <= 6;
-  // До 13 столов три колонки используют свободные ячейки без уменьшения карточек.
-  const compactGrid = tableCount > 13;
+  // 1–7 столов: две крупные колонки; 8–12: три; с 13 — четыре компактные.
+  const roomyTwoColumn = tableCount >= 3 && tableCount <= 7;
+  const compactGrid = tableCount >= 13;
   const gridClass = fullscreenSingle
     ? 'grid-cols-1 grid-rows-1'
     : splitVertical
       ? 'grid-cols-1 grid-rows-2'
       : roomyTwoColumn && tableCount <= 4
         ? 'grid-cols-2 grid-rows-2'
-        : roomyTwoColumn
+        : roomyTwoColumn && tableCount <= 6
           ? 'grid-cols-2 grid-rows-3'
+          : roomyTwoColumn
+            ? 'grid-cols-2 grid-rows-4'
           : compactGrid
             ? 'grid-cols-4'
             : 'grid-cols-3';

@@ -111,7 +111,27 @@ export class CatalogService {
       where: { hallId_number: { hallId: dto.hallId, number: dto.number } },
     });
     if (exists) {
-      throw new BadRequestException(`Стол №${dto.number} уже есть в этом зале`);
+      if (exists.isActive) {
+        throw new BadRequestException(`Стол №${dto.number} уже есть в этом зале`);
+      }
+
+      // Стол с историей заказов удаляется мягко, поэтому его номер остаётся
+      // занят в базе. При повторном добавлении возвращаем этот же стол в работу.
+      const restored = await this.prisma.table.update({
+        where: { id: exists.id },
+        data: {
+          isActive: true,
+          seats: dto.seats,
+          sortOrder: dto.number,
+          status: TableStatus.free,
+        },
+      });
+      this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, {
+        tableId: restored.id,
+        hallId: restored.hallId,
+        action: 'restore-table',
+      });
+      return restored;
     }
     const table = await this.prisma.table.create({
       data: { hallId: dto.hallId, number: dto.number, seats: dto.seats, sortOrder: dto.number },
