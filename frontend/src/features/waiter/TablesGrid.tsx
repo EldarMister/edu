@@ -1,9 +1,11 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { Hall, TableStatus } from '@/types';
 import { TABLE_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
 
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
+const GRID_GAP_PX = 12;
+const MIN_TABLE_SIZE_PX = 74;
 
 export function TablesGrid({
   halls,
@@ -21,39 +23,46 @@ export function TablesGrid({
   const fullscreenSingle = tableCount === 1;
   const splitVertical = tableCount === 2;
   // 3–8: две колонки; 9–19: три; с 20: четыре.
-  const roomyTwoColumn = tableCount >= 3 && tableCount <= 8;
-  const threeColumnGrid = tableCount >= 9 && tableCount <= 19;
-  const compactGrid = tableCount >= 20;
+  const adaptiveGrid = tableCount >= 3;
+  const columns = tableCount <= 8 ? 2 : tableCount <= 19 ? 3 : 4;
+  const rows = Math.max(1, Math.ceil(tableCount / columns));
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [tableSize, setTableSize] = useState(MIN_TABLE_SIZE_PX);
 
-  const gridClass = fullscreenSingle
-    ? 'grid-cols-1 grid-rows-1'
-    : splitVertical
-      ? 'grid-cols-1 grid-rows-2'
-      : roomyTwoColumn && tableCount <= 4
-        ? 'grid-cols-2 grid-rows-2'
-        : roomyTwoColumn && tableCount <= 6
-          ? 'grid-cols-2 grid-rows-3'
-          : roomyTwoColumn
-            ? 'grid-cols-2 grid-rows-4'
-          : threeColumnGrid
-            ? 'grid-cols-3'
-          : compactGrid
-            ? 'grid-cols-4'
-            : 'grid-cols-3';
-  const gridFlowClass =
-    fullscreenSingle || splitVertical || roomyTwoColumn ? 'auto-rows-fr' : 'content-start auto-rows-max';
+  // Меняем только масштаб квадратных карточек. Размер рабочей области и
+  // постоянный зазор между ячейками остаются прежними.
+  useLayoutEffect(() => {
+    if (!adaptiveGrid) return;
+    const grid = gridRef.current;
+    if (!grid) return;
+
+    const updateTableSize = () => {
+      const { width, height } = grid.getBoundingClientRect();
+      if (!width || !height) return;
+      const byWidth = (width - GRID_GAP_PX * (columns - 1)) / columns;
+      const byHeight = (height - GRID_GAP_PX * (rows - 1)) / rows;
+      setTableSize(Math.max(MIN_TABLE_SIZE_PX, Math.floor(Math.min(byWidth, byHeight))));
+    };
+
+    updateTableSize();
+    const observer = new ResizeObserver(updateTableSize);
+    observer.observe(grid);
+    return () => observer.disconnect();
+  }, [adaptiveGrid, columns, rows]);
+
   const cardSizeClass = fullscreenSingle
     ? 'min-h-[300px] h-full max-h-[460px] text-[54px] sm:min-h-[340px] sm:max-h-[520px] sm:text-6xl'
     : splitVertical
       ? 'h-full min-h-0 text-[44px] sm:text-[52px]'
-      : roomyTwoColumn
-        ? 'h-full min-h-0 text-[38px] sm:text-[44px]'
-        : compactGrid
-        ? 'aspect-square min-h-[74px] text-xl'
-        : 'aspect-square min-h-[104px] text-2xl';
-  const cardPaddingClass = fullscreenSingle || splitVertical || roomyTwoColumn ? 'p-4' : 'p-2';
+      : columns === 2
+        ? 'text-[38px] sm:text-[44px]'
+        : columns === 3
+          ? 'text-2xl'
+          : 'text-xl';
+  const cardPaddingClass = fullscreenSingle || splitVertical || columns === 2 ? 'p-4' : 'p-2';
   const dotClass =
-    fullscreenSingle || splitVertical || roomyTwoColumn ? 'right-4 top-4 h-4 w-4' : 'right-2 top-2 h-2.5 w-2.5';
+    fullscreenSingle || splitVertical || columns === 2 ? 'right-4 top-4 h-4 w-4' : 'right-2 top-2 h-2.5 w-2.5';
+  const adaptiveCardStyle = adaptiveGrid ? { width: tableSize, height: tableSize } : undefined;
 
   return (
     <div className="flex h-full flex-col">
@@ -74,8 +83,21 @@ export function TablesGrid({
         ))}
       </div>
 
-      {/* Сетка столов: мало столов -> крупнее, много -> компактнее. */}
-      <div className={`no-scrollbar grid min-h-0 flex-1 ${gridClass} ${gridFlowClass} gap-3 overflow-y-auto`}>
+      {/* Колонки и масштаб карточек подбираются отдельно; зазор всегда 12px. */}
+      <div
+        ref={gridRef}
+        className={`no-scrollbar grid min-h-0 flex-1 gap-3 overflow-y-auto ${
+          adaptiveGrid ? 'content-start justify-center justify-items-center' : 'grid-cols-1 auto-rows-fr'
+        }`}
+        style={
+          adaptiveGrid
+            ? {
+                gridTemplateColumns: `repeat(${columns}, ${tableSize}px)`,
+                gridTemplateRows: `repeat(${rows}, ${tableSize}px)`,
+              }
+            : undefined
+        }
+      >
         {hall?.tables.map((t) => {
           const meta = TABLE_STATUS[t.status];
           const selected = t.id === selectedTableId;
@@ -83,11 +105,12 @@ export function TablesGrid({
             <button
               key={t.id}
               onClick={() => onSelect(t.id)}
-              className={`relative flex w-full flex-col items-center justify-center rounded-[22px] border font-medium transition-all ${cardSizeClass} ${cardPaddingClass} ${
+              className={`relative flex ${adaptiveGrid ? '' : 'w-full'} flex-col items-center justify-center rounded-[22px] border font-medium transition-all ${cardSizeClass} ${cardPaddingClass} ${
                 selected
                   ? 'border-primary/90 bg-primary/90 text-white shadow-soft'
                   : 'border-border bg-white text-text-primary hover:border-primary/40'
               }`}
+              style={adaptiveCardStyle}
             >
               <span>{t.number}</span>
               {!selected && (
