@@ -10,14 +10,12 @@ const MIN_TABLE_HEIGHT_PX = 74;
 /**
  * Подбирает число колонок под реальные размеры свободной области, а не только
  * под количество столов. Оцениваем короткую сторону карточки: так сетка
- * получает самые крупные квадратные кнопки в неизменной рабочей области.
+ * получает самые крупные, близкие к квадрату столы без пустого места снизу.
  */
-function bestGridLayout(tableCount: number, width: number, height: number) {
-  if (tableCount <= 1) {
-    return { columns: 1, buttonSize: Math.min(width, height) };
-  }
+function bestColumnCount(tableCount: number, width: number, height: number) {
+  if (tableCount <= 1) return 1;
 
-  let bestLayout = { columns: 1, buttonSize: 0 };
+  let bestColumns = 1;
   let bestSize = 0;
 
   for (let columns = 1; columns <= Math.min(tableCount, 5); columns += 1) {
@@ -30,12 +28,12 @@ function bestGridLayout(tableCount: number, width: number, height: number) {
     const size = Math.min(cardWidth, cardHeight);
 
     if (size > bestSize) {
-      bestLayout = { columns, buttonSize: Math.floor(size) };
+      bestColumns = columns;
       bestSize = size;
     }
   }
 
-  return bestLayout;
+  return bestColumns;
 }
 
 export function TablesGrid({
@@ -52,10 +50,7 @@ export function TablesGrid({
   const hall = halls.find((h) => h.id === hallId) ?? halls[0];
   const tableCount = hall?.tables.length ?? 0;
   const gridRef = useRef<HTMLDivElement>(null);
-  const [gridLayout, setGridLayout] = useState(() => ({
-    columns: Math.min(Math.max(tableCount, 1), 3),
-    buttonSize: MIN_TABLE_HEIGHT_PX,
-  }));
+  const [gridColumns, setGridColumns] = useState(() => Math.min(Math.max(tableCount, 1), 3));
 
   useLayoutEffect(() => {
     const grid = gridRef.current;
@@ -64,12 +59,8 @@ export function TablesGrid({
     const updateColumns = () => {
       const { width, height } = grid.getBoundingClientRect();
       if (!width || !height) return;
-      const nextLayout = bestGridLayout(tableCount, width, height);
-      setGridLayout((current) =>
-        current.columns === nextLayout.columns && current.buttonSize === nextLayout.buttonSize
-          ? current
-          : nextLayout,
-      );
+      const nextColumns = bestColumnCount(tableCount, width, height);
+      setGridColumns((current) => (current === nextColumns ? current : nextColumns));
     };
 
     updateColumns();
@@ -78,17 +69,17 @@ export function TablesGrid({
     return () => observer.disconnect();
   }, [tableCount]);
 
-  const gridRows = Math.max(1, Math.ceil(tableCount / gridLayout.columns));
+  const gridRows = Math.max(1, Math.ceil(tableCount / gridColumns));
   const cardSizeClass =
-    gridLayout.columns === 1
+    gridColumns === 1
       ? 'text-[44px] sm:text-[52px]'
-      : gridLayout.columns === 2
+      : gridColumns === 2
         ? 'text-[38px] sm:text-[44px]'
-        : gridLayout.columns === 3
+        : gridColumns === 3
           ? 'text-[30px] sm:text-[34px]'
           : 'text-2xl';
-  const cardPaddingClass = gridLayout.columns <= 2 ? 'p-4' : gridLayout.columns === 3 ? 'p-3' : 'p-2';
-  const dotClass = gridLayout.columns <= 2 ? 'right-4 top-4 h-4 w-4' : gridLayout.columns === 3 ? 'right-3 top-3 h-3 w-3' : 'right-2 top-2 h-2.5 w-2.5';
+  const cardPaddingClass = gridColumns <= 2 ? 'p-4' : gridColumns === 3 ? 'p-3' : 'p-2';
+  const dotClass = gridColumns <= 2 ? 'right-4 top-4 h-4 w-4' : gridColumns === 3 ? 'right-3 top-3 h-3 w-3' : 'right-2 top-2 h-2.5 w-2.5';
 
   return (
     <div className="flex h-full flex-col">
@@ -109,13 +100,13 @@ export function TablesGrid({
         ))}
       </div>
 
-      {/* Рабочая область неизменна: пересчитываются только колонки и масштаб квадратных кнопок. */}
+      {/* Сетка всегда заполняет доступную область: число колонок пересчитывается при смене зала и размера экрана. */}
       <div
         ref={gridRef}
-        className="no-scrollbar grid min-h-0 flex-1 content-start justify-items-center gap-3 overflow-y-auto"
+        className="no-scrollbar grid min-h-0 flex-1 gap-3 overflow-y-auto"
         style={{
-          gridTemplateColumns: `repeat(${gridLayout.columns}, minmax(0, 1fr))`,
-          gridTemplateRows: `repeat(${gridRows}, ${gridLayout.buttonSize}px)`,
+          gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+          gridTemplateRows: `repeat(${gridRows}, minmax(${MIN_TABLE_HEIGHT_PX}px, 1fr))`,
         }}
       >
         {hall?.tables.map((t) => {
@@ -125,12 +116,11 @@ export function TablesGrid({
             <button
               key={t.id}
               onClick={() => onSelect(t.id)}
-              className={`relative flex aspect-square min-h-[74px] flex-col items-center justify-center rounded-[22px] border font-medium transition-all ${cardSizeClass} ${cardPaddingClass} ${
+              className={`relative flex h-full min-h-[74px] w-full flex-col items-center justify-center rounded-[22px] border font-medium transition-all ${cardSizeClass} ${cardPaddingClass} ${
                 selected
                   ? 'border-primary/90 bg-primary/90 text-white shadow-soft'
                   : 'border-border bg-white text-text-primary hover:border-primary/40'
               }`}
-              style={{ width: gridLayout.buttonSize, height: gridLayout.buttonSize }}
             >
               <span>{t.number}</span>
               {!selected && (
