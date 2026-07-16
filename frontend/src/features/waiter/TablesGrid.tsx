@@ -21,7 +21,8 @@ export function TablesGrid({
   const fullscreenSingle = tableCount === 1;
   const splitVertical = tableCount === 2;
   const roomyTwoColumn = tableCount >= 3 && tableCount <= 6;
-  const compactGrid = tableCount > 10;
+  // До 13 столов три колонки используют свободные ячейки без уменьшения карточек.
+  const compactGrid = tableCount > 13;
   const gridClass = fullscreenSingle
     ? 'grid-cols-1 grid-rows-1'
     : splitVertical
