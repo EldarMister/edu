@@ -17,6 +17,7 @@ import io
 import os
 import time
 import logging
+import threading
 from typing import Optional
 from urllib.request import urlretrieve
 
@@ -41,12 +42,14 @@ DEFAULT_SPEAKER = os.environ.get("TTS_SPEAKER", "baya")
 # вокодер-апсемплинг), а для кухонных колонок качества 24 кГц достаточно.
 DEFAULT_SAMPLE_RATE = int(os.environ.get("TTS_SAMPLE_RATE", "24000"))
 # Количество потоков CPU для torch — критично для скорости на сервере.
-# ВАЖНО: на сервере (Railway/контейнер) os.cpu_count() возвращает число ядер ХОСТА
-# (часто 32+), хотя контейнеру выделена доля CPU. Если отдать torch столько потоков —
-# начинается жёсткая конкуренция за CPU и синтез замедляется в десятки раз
-# (наблюдалось 22–26 c вместо <1 c). Поэтому ограничиваем разумным числом.
+# На Railway сервису выделены 8 vCPU, поэтому 8 потоков дают модели всю доступную
+# вычислительную мощность. Не используем os.cpu_count(): внутри контейнера он часто
+# показывает ядра хоста (32+), а не лимит сервиса; это вызывало конкуренцию потоков
+# и синтез по 22–26 секунд вместо <1 секунды.
 _cpu = os.cpu_count() or 4
-THREADS = int(os.environ.get("TTS_THREADS", str(_cpu)))
+THREADS = int(os.environ.get("TTS_THREADS", str(min(8, _cpu))))
+if THREADS < 1:
+    raise ValueError("TTS_THREADS должен быть не меньше 1")
 # Silero v3/v4 имеют предел длины одного синтеза (~1000 симв.): на длинном тексте
 # apply_tts падает или режет фразу. Длинные заказы (много блюд) бьём на куски по
 # границам предложений и склеиваем аудио — иначе озвучка таких заказов молчит.
@@ -67,8 +70,60 @@ _models: dict[str, torch.nn.Module] = {}
 
 # Один постоянный поток для всего синтеза. torch инициализируется лениво ПО ПОТОКАМ,
 # поэтому прогрев и запросы должны идти на одном и том же потоке — иначе первый
-# реальный запрос снова холодный (~5 c). Заодно синтез строго последовательный.
+# реальный запрос снова холодный (~5 c). Второй worker сейчас не нужен: текущая
+# нагрузка далека от насыщения, а вторая копия вычислений повысит RSS и цену RAM.
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts")
+
+# Метрики очереди защищены lock-ом, потому что endpoint работает в asyncio-потоке,
+# а сам синтез — в постоянном worker-потоке.
+_metrics_lock = threading.Lock()
+_requests_in_flight = 0
+_active_syntheses = 0
+_peak_requests_in_flight = 0
+
+
+def _current_rss_bytes() -> int:
+    """Текущая RSS процесса в Linux-контейнере без дополнительной зависимости."""
+    try:
+        with open("/proc/self/statm", encoding="utf-8") as statm:
+            resident_pages = int(statm.read().split()[1])
+        return resident_pages * os.sysconf("SC_PAGE_SIZE")
+    except (FileNotFoundError, IndexError, OSError, ValueError):
+        return 0
+
+
+def _metrics_snapshot() -> dict[str, int]:
+    with _metrics_lock:
+        return {
+            "requests_in_flight": _requests_in_flight,
+            "active_syntheses": _active_syntheses,
+            "peak_requests_in_flight": _peak_requests_in_flight,
+        }
+
+
+def _request_started() -> None:
+    global _requests_in_flight, _peak_requests_in_flight
+    with _metrics_lock:
+        _requests_in_flight += 1
+        _peak_requests_in_flight = max(_peak_requests_in_flight, _requests_in_flight)
+
+
+def _request_finished() -> None:
+    global _requests_in_flight
+    with _metrics_lock:
+        _requests_in_flight = max(0, _requests_in_flight - 1)
+
+
+def _worker_started() -> None:
+    global _active_syntheses
+    with _metrics_lock:
+        _active_syntheses += 1
+
+
+def _worker_finished() -> None:
+    global _active_syntheses
+    with _metrics_lock:
+        _active_syntheses = max(0, _active_syntheses - 1)
 
 
 def _ensure_model_file(name: str) -> str:
@@ -167,6 +222,27 @@ def _synthesize_with_fallback(text: str, primary: str, fallback: str, speaker: s
         return wav, fallback, time.time() - t0
 
 
+def _synthesize_from_queue(
+    queued_at: float,
+    text: str,
+    primary: str,
+    fallback: str,
+    speaker: str,
+    sample_rate: int,
+) -> tuple[bytes, str, float, float]:
+    """Синтез на worker-потоке с точным временем ожидания очереди."""
+    worker_started_at = time.perf_counter()
+    queue_wait = worker_started_at - queued_at
+    _worker_started()
+    try:
+        wav, used, synth_took = _synthesize_with_fallback(
+            text, primary, fallback, speaker, sample_rate
+        )
+        return wav, used, synth_took, queue_wait
+    finally:
+        _worker_finished()
+
+
 class SynthRequest(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     model: Optional[str] = None
@@ -207,6 +283,7 @@ app = FastAPI(title="Silero Kitchen TTS", version="1.0", lifespan=lifespan)
 
 @app.get("/health")
 def health() -> dict:
+    rss_bytes = _current_rss_bytes()
     return {
         "status": "ok",
         "default_model": DEFAULT_MODEL,
@@ -214,13 +291,21 @@ def health() -> dict:
         "speaker": DEFAULT_SPEAKER,
         "loaded": list(_models.keys()),
         "threads": THREADS,
+        "metrics": {
+            **_metrics_snapshot(),
+            "rss_bytes": rss_bytes,
+            "rss_mib": round(rss_bytes / (1024 * 1024), 1),
+        },
     }
 
 
 @app.post("/synthesize")
 async def synthesize(req: SynthRequest) -> Response:
+    request_started_at = time.perf_counter()
+    _request_started()
     text = req.text.strip()
     if not text:
+        _request_finished()
         raise HTTPException(status_code=400, detail="Пустой текст")
     speaker = req.speaker or DEFAULT_SPEAKER
     if speaker == "ksenia":
@@ -230,20 +315,65 @@ async def synthesize(req: SynthRequest) -> Response:
     fallback = req.fallback_model or FALLBACK_MODEL
 
     loop = asyncio.get_event_loop()
+    queued_at = time.perf_counter()
     try:
-        wav, used, took = await loop.run_in_executor(
-            _executor, _synthesize_with_fallback, text, primary, fallback, speaker, sample_rate
+        wav, used, took, queue_wait = await loop.run_in_executor(
+            _executor,
+            _synthesize_from_queue,
+            queued_at,
+            text,
+            primary,
+            fallback,
+            speaker,
+            sample_rate,
         )
     except Exception as exc:  # noqa: BLE001
-        log.error("Синтез не удался (включая fallback): %s", exc)
+        total_took = time.perf_counter() - request_started_at
+        metrics = _metrics_snapshot()
+        log.error(
+            "Синтез не удался (включая fallback): %s. total=%.3f c, "
+            "in_flight=%d, active=%d, peak=%d",
+            exc,
+            total_took,
+            metrics["requests_in_flight"],
+            metrics["active_syntheses"],
+            metrics["peak_requests_in_flight"],
+        )
+        _request_finished()
         raise HTTPException(status_code=503, detail="TTS недоступен") from exc
 
-    log.info("Синтез (%s): %.2f c, %d симв., %d байт", used, took, len(text), len(wav))
-    return Response(
-        content=wav,
-        media_type="audio/wav",
-        headers={"X-TTS-Model": used, "X-TTS-Seconds": f"{took:.3f}"},
-    )
+    total_took = time.perf_counter() - request_started_at
+    rss_bytes = _current_rss_bytes()
+    metrics = _metrics_snapshot()
+    try:
+        log.info(
+            "Синтез (%s): synth=%.3f c, queue=%.3f c, total=%.3f c, "
+            "%d симв., %d байт, rss=%.1f MiB, in_flight=%d, active=%d, peak=%d",
+            used,
+            took,
+            queue_wait,
+            total_took,
+            len(text),
+            len(wav),
+            rss_bytes / (1024 * 1024),
+            metrics["requests_in_flight"],
+            metrics["active_syntheses"],
+            metrics["peak_requests_in_flight"],
+        )
+        return Response(
+            content=wav,
+            media_type="audio/wav",
+            headers={
+                "X-TTS-Model": used,
+                "X-TTS-Seconds": f"{took:.3f}",
+                "X-TTS-Queue-Seconds": f"{queue_wait:.3f}",
+                "X-TTS-Total-Seconds": f"{total_took:.3f}",
+                "X-TTS-RSS-MiB": f"{rss_bytes / (1024 * 1024):.1f}",
+                "X-TTS-In-Flight": str(metrics["requests_in_flight"]),
+            },
+        )
+    finally:
+        _request_finished()
 
 
 if __name__ == "__main__":
