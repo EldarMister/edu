@@ -59,12 +59,13 @@ export class CatalogService {
     };
   }
 
-  /** Все залы со столами (включая неактивные) — для управления. */
+  /** Залы с действующими столами для управления. Архивные столы в интерфейс не попадают. */
   hallsWithTables() {
     return this.prisma.hall.findMany({
       orderBy: { sortOrder: 'asc' },
       include: {
         tables: {
+          where: { isActive: true },
           orderBy: [{ sortOrder: 'asc' }, { number: 'asc' }],
           select: {
             id: true,

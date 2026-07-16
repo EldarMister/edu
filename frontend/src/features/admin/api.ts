@@ -430,6 +430,7 @@ export function useHallMutations() {
 }
 
 export function useTableMutations() {
+  const qc = useQueryClient();
   const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
   const create = useMutation({
     mutationFn: (b: { hallId: string; number: number; seats: number }) =>
@@ -443,7 +444,18 @@ export function useTableMutations() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/admin/tables/${id}`).then((r) => r.data),
-    onSuccess: invalidate,
+    onSuccess: (_result, tableId) => {
+      // Стол исчезает из списка сразу, не дожидаясь повторного запроса.
+      // Сервер при наличии истории деактивирует стол, поэтому он больше не
+      // должен отображаться среди действующих столов владельца.
+      qc.setQueryData<AdminHall[]>(['admin', 'halls'], (halls) =>
+        halls?.map((hall) => ({
+          ...hall,
+          tables: hall.tables.filter((table) => table.id !== tableId),
+        })),
+      );
+      invalidate();
+    },
   });
   return { create, update, remove };
 }
