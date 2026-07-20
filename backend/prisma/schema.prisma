@@ -23,6 +23,13 @@ enum Role {
   OWNER
 }
 
+// Провайдер native push. EXPO остаётся default для обратной совместимости
+// с уже установленным React Native клиентом.
+enum PushProvider {
+  EXPO
+  FCM
+}
+
 // Направление приготовления/выдачи позиции: кухня или бар.
 enum PrepStation {
   kitchen
@@ -741,20 +748,22 @@ model PushSubscription {
 // Мобильное устройство пользователя для native push (React Native клиент).
 // Отдельно от PushSubscription (Web Push для PWA) — каналы не пересекаются.
 model UserDevice {
-  cafeId     String?  @map("cafe_id")
-  id         String   @id @default(uuid())
-  userId     String   @map("user_id")
-  platform   String // 'android' | 'ios' | 'web-pwa'
-  deviceId   String?  @map("device_id")
-  pushToken  String?  @unique @map("push_token")
-  appVersion String?  @map("app_version")
-  isActive   Boolean  @default(true) @map("is_active")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  cafeId      String?      @map("cafe_id")
+  id          String       @id @default(uuid())
+  userId      String       @map("user_id")
+  platform    String // 'android' | 'ios' | 'web-pwa'
+  pushProvider PushProvider @default(EXPO) @map("push_provider")
+  deviceId    String?      @map("device_id")
+  pushToken   String?      @unique @map("push_token")
+  appVersion  String?      @map("app_version")
+  isActive    Boolean      @default(true) @map("is_active")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([pushProvider, isActive])
   @@map("user_devices")
 }
 

@@ -1,8 +1,10 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import webpush, { PushSubscription as WebPushSubscription } from 'web-push';
 import { PrismaService } from '../prisma/prisma.service';
-import { Role } from '@prisma/client';
+import { PushProvider, Role } from '@prisma/client';
 import { PushSubscriptionDto, RegisterDeviceDto } from './dto';
+import { cert, getApps, initializeApp, ServiceAccount } from 'firebase-admin/app';
+import { getMessaging, Messaging } from 'firebase-admin/messaging';
 
 const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
 
@@ -13,12 +15,16 @@ export interface PushPayload {
   orderId?: string;
   orderNumber?: string;
   url?: string;
+  channel?: 'orders' | 'kitchen' | 'payments';
 }
+
+type NativeDevice = { pushToken: string | null; pushProvider: PushProvider };
 
 @Injectable()
 export class PushService {
   private readonly logger = new Logger(PushService.name);
   private configured = false;
+  private fcm: Messaging | null = null;
 
   constructor(private prisma: PrismaService) {
     const publicKey = process.env.VAPID_PUBLIC_KEY;
@@ -31,6 +37,8 @@ export class PushService {
     } else {
       this.logger.warn('Web Push is disabled: set VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY.');
     }
+
+    this.configureFcm();
   }
 
   getPublicKey() {
@@ -86,12 +94,12 @@ export class PushService {
     // Native push для роли (мобильные устройства).
     const devices = await this.prisma.userDevice.findMany({
       where: { isActive: true, pushToken: { not: null }, user: { role, isActive: true } },
-      select: { pushToken: true },
+      select: { pushToken: true, pushProvider: true },
     });
-    await this.sendNativeToTokens(
-      devices.map((d) => d.pushToken).filter((t): t is string => !!t),
-      payload,
-    );
+    await this.sendNativeToDevices(devices, {
+      ...payload,
+      channel: payload.channel ?? (role === Role.KITCHEN || role === Role.BAR ? 'kitchen' : 'orders'),
+    });
 
     if (!this.configured) return;
     const subscriptions = await this.prisma.pushSubscription.findMany({
@@ -100,7 +108,7 @@ export class PushService {
     await this.sendToSubscriptions(subscriptions, payload);
   }
 
-  // ---------- Native push (React Native через Expo Push) ----------
+  // ---------- Native push (Expo legacy + Kotlin/FCM) ----------
 
   /** Регистрирует/обновляет мобильное устройство для native push. */
   async registerDevice(userId: string, dto: RegisterDeviceDto) {
@@ -109,6 +117,7 @@ export class PushService {
       update: {
         userId,
         platform: dto.platform,
+        pushProvider: dto.provider ?? PushProvider.EXPO,
         deviceId: dto.deviceId,
         appVersion: dto.appVersion,
         isActive: true,
@@ -117,6 +126,7 @@ export class PushService {
         userId,
         pushToken: dto.pushToken,
         platform: dto.platform,
+        pushProvider: dto.provider ?? PushProvider.EXPO,
         deviceId: dto.deviceId,
         appVersion: dto.appVersion,
       },
@@ -133,16 +143,29 @@ export class PushService {
   private async sendNativeToUsers(userIds: string[], payload: PushPayload) {
     const devices = await this.prisma.userDevice.findMany({
       where: { userId: { in: userIds }, isActive: true, pushToken: { not: null } },
-      select: { pushToken: true },
+      select: { pushToken: true, pushProvider: true },
     });
-    await this.sendNativeToTokens(
-      devices.map((d) => d.pushToken).filter((t): t is string => !!t),
-      payload,
-    );
+    await this.sendNativeToDevices(devices, payload);
   }
 
-  /** Отправка через Expo Push API. Токены вида ExponentPushToken[...]. */
-  private async sendNativeToTokens(tokens: string[], payload: PushPayload) {
+  private async sendNativeToDevices(devices: NativeDevice[], payload: PushPayload) {
+    const expoTokens = devices
+      .filter((device) => device.pushProvider === PushProvider.EXPO)
+      .map((device) => device.pushToken)
+      .filter((token): token is string => !!token);
+    const fcmTokens = devices
+      .filter((device) => device.pushProvider === PushProvider.FCM)
+      .map((device) => device.pushToken)
+      .filter((token): token is string => !!token);
+
+    await Promise.all([
+      this.sendExpo(expoTokens, payload),
+      this.sendFcm(fcmTokens, payload),
+    ]);
+  }
+
+  /** Отправка через Expo Push API для существующих RN-устройств. */
+  private async sendExpo(tokens: string[], payload: PushPayload) {
     if (tokens.length === 0) return;
 
     const messages = tokens.map((to) => ({
@@ -156,6 +179,7 @@ export class PushService {
         orderId: payload.orderId,
         orderNumber: payload.orderNumber,
         url: payload.url,
+        channel: payload.channel,
       },
     }));
 
@@ -180,6 +204,80 @@ export class PushService {
       }
     } catch (err) {
       this.logger.warn(`Expo push error: ${(err as Error).message}`);
+    }
+  }
+
+  /** FCM HTTP v1 через Firebase Admin SDK. Multicast ограничен 500 токенами. */
+  private async sendFcm(tokens: string[], payload: PushPayload) {
+    if (tokens.length === 0) return;
+    if (!this.fcm) {
+      this.logger.warn('FCM push skipped: Firebase service account is not configured.');
+      return;
+    }
+
+    const data = Object.fromEntries(
+      Object.entries({
+        type: payload.type,
+        orderId: payload.orderId,
+        orderNumber: payload.orderNumber,
+        url: payload.url,
+      })
+        .filter((entry): entry is [string, string] => entry[1] != null)
+        .map(([key, value]) => [key, String(value)]),
+    );
+    const channelId = `${payload.channel ?? 'orders'}_v4`;
+
+    for (let offset = 0; offset < tokens.length; offset += 500) {
+      const batch = tokens.slice(offset, offset + 500);
+      try {
+        const response = await this.fcm.sendEachForMulticast({
+          tokens: batch,
+          notification: { title: payload.title, body: payload.body },
+          data,
+          android: {
+            priority: 'high',
+            collapseKey: payload.orderId ? `order-${payload.orderId}` : undefined,
+            notification: { channelId, sound: 'default' },
+          },
+        });
+        const invalid = response.responses.flatMap((result, index) => {
+          const code = result.error?.code;
+          return code === 'messaging/registration-token-not-registered' ||
+            code === 'messaging/invalid-registration-token'
+            ? [batch[index]]
+            : [];
+        });
+        if (invalid.length > 0) {
+          await this.prisma.userDevice.deleteMany({ where: { pushToken: { in: invalid } } });
+        }
+      } catch (err) {
+        this.logger.warn(`FCM push error: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private configureFcm() {
+    const base64 = process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+    const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    if (!base64 && !json) {
+      this.logger.warn(
+        'FCM is disabled: set FIREBASE_SERVICE_ACCOUNT_BASE64 or FIREBASE_SERVICE_ACCOUNT_JSON.',
+      );
+      return;
+    }
+
+    try {
+      const raw = base64 ? Buffer.from(base64, 'base64').toString('utf8') : json!;
+      const parsed = JSON.parse(raw) as Record<string, string>;
+      const account: ServiceAccount = {
+        projectId: parsed.project_id ?? parsed.projectId,
+        clientEmail: parsed.client_email ?? parsed.clientEmail,
+        privateKey: (parsed.private_key ?? parsed.privateKey)?.replace(/\\n/g, '\n'),
+      };
+      const app = getApps()[0] ?? initializeApp({ credential: cert(account) });
+      this.fcm = getMessaging(app);
+    } catch (err) {
+      this.logger.error(`FCM initialization failed: ${(err as Error).message}`);
     }
   }
 

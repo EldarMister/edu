@@ -3001,14 +3001,29 @@ export class OrdersService {
     });
   }
 
-  private notifyKitchenNewOrder(order: { id: string; orderNumber: string; table: { number: number } }) {
-    return this.push.notifyRole(Role.KITCHEN, {
+  private notifyKitchenNewOrder(order: {
+    id: string;
+    orderNumber: string;
+    table: { number: number };
+    items?: { prepStation: PrepStation }[];
+  }) {
+    const stations = new Set(order.items?.map((item) => item.prepStation) ?? []);
+    if (stations.size === 0) stations.add(PrepStation.kitchen);
+    const payload = {
       title: 'EDU POS',
       body: `Новый заказ ${order.orderNumber} · Стол ${order.table.number}`,
-      type: 'info',
+      type: 'info' as const,
       orderId: order.id,
       orderNumber: order.orderNumber,
-      url: '/kitchen',
-    });
+      channel: 'kitchen' as const,
+    };
+    return Promise.all([
+      stations.has(PrepStation.kitchen)
+        ? this.push.notifyRole(Role.KITCHEN, { ...payload, url: '/kitchen' })
+        : Promise.resolve(),
+      stations.has(PrepStation.bar)
+        ? this.push.notifyRole(Role.BAR, { ...payload, url: '/bar' })
+        : Promise.resolve(),
+    ]);
   }
 }
