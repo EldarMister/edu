@@ -1,6 +1,6 @@
 import QRCode from 'qrcode';
 import type { Receipt, PaymentMethod } from '@/types';
-import { displayOrderNumber, money, orderItemDisplayName, timeHM, isSplitPayment } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName, timeHM } from '@/lib/format';
 
 const METHOD_LABEL: Record<PaymentMethod, string> = {
   qr: 'QR-код',
@@ -18,7 +18,7 @@ export interface FiscalPrintData {
 }
 
 /**
- * Открывает окно печати с компактным чеком (подходит для термопринтера 58–80мм).
+ * Открывает окно печати с чеком для термопринтера 58–80 мм.
  * `preliminary: true` печатает счёт — без блока оплаты, с пометкой, что это не фискальный документ.
  * `fiscal` задан — печатается фискальный чек (заголовок, номер, ФП и QR ГНС) вместо товарного.
  */
@@ -32,14 +32,14 @@ export async function printReceipt(
   const date = new Date(r.date);
   const dateStr = `${date.toLocaleDateString('ru-RU')} ${timeHM(r.date)}`;
   const orderNumber = displayOrderNumber(r.orderNumber);
-  const docTitle = preliminary ? 'Счёт' : fiscal ? 'Фискальный чек' : 'Чек';
-  const receiptKind = preliminary ? '' : fiscal ? 'Фискальный чек' : 'Внутренний товарный чек';
+  const docTitle = preliminary ? 'Счёт' : fiscal ? 'Фискальный чек' : 'Товарный чек';
+  const receiptKind = preliminary ? 'Счёт' : fiscal ? 'Фискальный чек' : 'Товарный чек';
   const rows = r.items
     .map(
       (it) =>
-        `<tr><td>${escapeHtml(orderItemDisplayName(it))}</td><td class="c">${it.quantity}</td><td class="r">${money(
-          it.finalPrice,
-        )}</td></tr>`,
+        `<tr><td class="item-name">${escapeHtml(orderItemDisplayName(it))}</td><td class="c">${it.quantity}</td><td class="r">${money(
+          it.priceSnapshot,
+        )}</td><td class="r">${money(it.finalPrice)}</td></tr>`,
     )
     .join('');
 
@@ -48,47 +48,51 @@ export async function printReceipt(
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${docTitle} ${orderNumber}</title>
   <style>
-    @page { margin: 0; }
-    body { width: 80mm; margin: 0 auto; padding: 8mm 4mm; font-family: 'Inter', monospace, sans-serif; color: #000; font-size: 14px; }
-    h1 { font-size: 20px; text-align: center; margin: 0 0 6px; font-weight: 600; }
-    .receipt-kind { text-align: center; font-size: 13px; font-weight: 700; margin: 2px 0 6px; }
-    .muted { color: #333; font-size: 13px; }
+    @page { size: 80mm auto; margin: 0; }
+    * { box-sizing: border-box; }
+    body { width: 80mm; margin: 0 auto; padding: 7mm 4mm 8mm; color: #000; background: #fff; font-family: "Courier New", Courier, monospace; font-size: 12px; line-height: 1.35; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    h1 { font-family: Arial, sans-serif; font-size: 22px; line-height: 1.1; text-align: center; margin: 0 0 7px; font-weight: 700; letter-spacing: -0.4px; }
+    .receipt-kind { text-align: center; font-family: Arial, sans-serif; font-size: 16px; font-weight: 700; margin: 0 0 7px; }
+    .muted { font-size: 12px; }
     .center { text-align: center; }
-    hr { border: none; border-top: 1px dashed #999; margin: 12px 0; }
+    .dash { border: 0; border-top: 1px dashed #111; margin: 12px 0; height: 0; }
+    .solid { border: 0; border-top: 1px solid #111; margin: 9px 0; height: 0; }
     table { width: 100%; border-collapse: collapse; }
-    td { padding: 4px 0; vertical-align: top; }
-    .c { text-align: center; width: 36px; }
+    th { border-bottom: 1px solid #111; padding: 0 0 7px; font-family: Arial, sans-serif; font-size: 11px; font-weight: 700; text-align: left; }
+    td { border-bottom: 1px dashed #777; padding: 8px 0; vertical-align: top; }
+    tbody tr:last-child td { border-bottom: 0; }
+    .item-name { padding-right: 5px; }
+    .c { text-align: center; width: 12%; }
     .r { text-align: right; white-space: nowrap; }
-    .total { font-size: 18px; font-weight: 700; margin-top: 6px; }
-    .row { display: flex; justify-content: space-between; margin-bottom: 4px; }
-    .row-inline { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 12px; }
-    .sep { color: #999; margin: 0 3px; }
+    .order-meta { font-size: 13px; text-align: center; }
+    .total { display: flex; justify-content: space-between; align-items: baseline; font-family: Arial, sans-serif; font-size: 23px; font-weight: 700; letter-spacing: -0.3px; }
+    .pair { display: flex; justify-content: space-between; gap: 10px; margin: 6px 0; }
+    .pair > :last-child { text-align: right; }
+    .payment { font-size: 11px; }
+    .payment-value { max-width: 76%; }
+    .fiscal-qr { display: block; width: 146px; height: 146px; margin: 13px auto 2px; image-rendering: pixelated; }
+    .footer { margin-top: 14px; font-size: 13px; }
   </style></head><body>
     <h1>${escapeHtml(r.cafeName)}</h1>
-    ${receiptKind ? `<div class="receipt-kind">${receiptKind}</div>` : ''}
+    <div class="receipt-kind">${receiptKind}</div>
     ${r.address ? `<div class="center muted">${escapeHtml(r.address)}</div>` : ''}
     ${r.phone ? `<div class="center muted">${escapeHtml(r.phone)}${r.phone2 ? ', ' + escapeHtml(r.phone2) : ''}</div>` : ''}
     ${r.instagram ? `<div class="center muted">Instagram: ${escapeHtml(r.instagram)}</div>` : ''}
     ${r.website ? `<div class="center muted">Сайт: ${escapeHtml(r.website)}</div>` : ''}
     <div class="center muted">${dateStr}</div>
-    <hr/>
-    <div class="row muted" style="font-size:12px">
-      <span>${escapeHtml(orderNumber)}</span>
-      <span style="color:#999;margin:0 4px">·</span>
-      <span>Стол ${r.tableNumber}</span>
-      <span style="color:#999;margin:0 4px">·</span>
-      <span style="flex:1;text-align:right">${escapeHtml(r.waiter)}</span>
-    </div>
-    <hr/>
-    <table>${rows}</table>
-    <hr/>
-    ${Number(r.discountAmount) > 0 ? `<div class="row"><span>Сумма</span><span>${money(r.totalAmount)}</span></div><div class="row"><span>Скидка</span><span>−${money(r.discountAmount)}</span></div>` : ''}
-    ${Number(r.serviceChargeAmount) > 0 ? `<div class="row"><span>Обслуживание</span><span>${money(r.serviceChargeAmount)}</span></div>` : ''}
-    <div class="row total"><span>Итого</span><span>${money(r.finalAmount)}</span></div>
+    <div class="dash"></div>
+    <div class="order-meta">${escapeHtml(orderNumber)} · Стол ${r.tableNumber} · ${escapeHtml(r.waiter)}</div>
+    <div class="dash"></div>
+    <table><colgroup><col style="width:46%"><col style="width:12%"><col style="width:20%"><col style="width:22%"></colgroup><thead><tr><th>Наименование</th><th class="c">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead><tbody>${rows}</tbody></table>
+    <div class="solid"></div>
+    ${Number(r.discountAmount) > 0 ? `<div class="pair"><span>Сумма</span><span>${money(r.totalAmount)}</span></div><div class="pair"><span>Скидка</span><span>−${money(r.discountAmount)}</span></div>` : ''}
+    ${Number(r.serviceChargeAmount) > 0 ? `<div class="pair"><span>Обслуживание</span><span>${money(r.serviceChargeAmount)}</span></div>` : ''}
+    <div class="total"><span>Итого</span><span>${money(r.finalAmount)}</span></div>
+    <div class="solid"></div>
     ${preliminary ? '' : paymentBlock(r)}
     ${fiscalBlock}
-    <hr/>
-    <div class="center muted">${preliminary ? 'Счёт. Не является фискальным документом.' : escapeHtml(r.thanks)}</div>
+    <div class="dash"></div>
+    <div class="center footer">${preliminary ? 'Счёт. Не является фискальным документом.' : escapeHtml(r.thanks)}</div>
   </body></html>`;
 
   const w = targetWindow ?? window.open('', '_blank', 'width=380,height=640');
@@ -110,17 +114,16 @@ export async function printReceipt(
 
 /** Фискальный блок чека: номер, ФП и QR ГНС (картинка генерируется из ссылки/строки). */
 async function buildFiscalBlock(fiscal: FiscalPrintData): Promise<string> {
-  const lines: string[] = ['<hr/>'];
+  const lines: string[] = ['<div class="dash"></div>'];
   if (fiscal.receiptNumber) {
-    lines.push(`<div class="row"><span>Фискальный чек №</span><span>${escapeHtml(fiscal.receiptNumber)}</span></div>`);
+    lines.push(`<div class="pair"><span>Фискальный чек №</span><span>${escapeHtml(fiscal.receiptNumber)}</span></div>`);
   }
   if (fiscal.sign) {
-    lines.push(`<div class="row-inline"><span>ФП</span><span>${escapeHtml(fiscal.sign)}</span></div>`);
+    lines.push(`<div class="pair"><span>ФП</span><span>${escapeHtml(fiscal.sign)}</span></div>`);
   }
   const qrSrc = await fiscalQrSrc(fiscal.qrCode);
   if (qrSrc) {
-    lines.push(`<div class="center" style="margin-top:8px"><img src="${qrSrc}" width="150" height="150" alt="QR ГНС"/></div>`);
-    lines.push('<div class="center muted" style="font-size:11px">Проверка чека в ГНС по QR-коду</div>');
+    lines.push(`<img class="fiscal-qr" src="${qrSrc}" alt="QR-код проверки фискального чека"/>`);
   }
   return lines.join('');
 }
@@ -136,21 +139,14 @@ async function fiscalQrSrc(qrCode?: string): Promise<string | null> {
   }
 }
 
-/** Блок оплаты: для смешанной — в одну строку через «·», иначе один способ. */
+/** Блок оплаты: выводит каждый фактический способ и его сумму в одной строке. */
 function paymentBlock(r: Receipt): string {
-  if (isSplitPayment(r)) {
-    const parts = (r.payments ?? []).map((p, i) => `Платеж ${i + 1}: ${METHOD_LABEL[p.method]} ${money(p.amount)}`);
-    return `<div class="row muted" style="font-size:12px"><span>Оплата</span><span>Раздельная оплата</span></div>${
-      parts.length ? `<div class="muted" style="font-size:12px">${parts.map(escapeHtml).join('<br/>')}</div>` : ''
-    }`;
-  }
-  if (r.payments && r.payments.length > 1) {
-    // Все способы в одну строку: «QR-код 2 100 с · Наличные 1 500 с»
-    const parts = r.payments.map((p) => `${METHOD_LABEL[p.method]}: ${money(p.amount)}`).join(' · ');
-    return `<div class="row muted" style="font-size:12px"><span>Оплата</span><span>${parts}</span></div>`;
-  }
-  const label = r.paymentMethod ? METHOD_LABEL[r.paymentMethod] : '—';
-  return `<div class="row muted"><span>Оплата</span><span>${label}</span></div>`;
+  const parts = r.payments?.length
+    ? r.payments.map((p) => `${METHOD_LABEL[p.method]}: ${money(p.amount)}`)
+    : r.paymentMethod
+      ? [`${METHOD_LABEL[r.paymentMethod]}: ${money(r.finalAmount)}`]
+      : ['—'];
+  return `<div class="pair payment"><span>Оплата</span><span class="payment-value">${parts.map(escapeHtml).join(' &nbsp; ')}</span></div>`;
 }
 
 function escapeHtml(s: string): string {
