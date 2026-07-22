@@ -95,11 +95,17 @@ export class AdminOrdersService {
     const page = query.page ?? 1;
     const pageSize = Math.min(query.pageSize ?? 10, 50);
     const where = this.buildWhere(query);
+    const orderBy: Prisma.OrderOrderByWithRelationInput =
+      query.sort === 'amount'
+        ? { finalAmount: 'desc' }
+        : query.sort === 'date'
+          ? { createdAt: 'asc' }
+          : { createdAt: 'desc' };
 
     const [items, total] = await Promise.all([
       this.prisma.order.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: listInclude,

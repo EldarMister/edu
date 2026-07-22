@@ -235,6 +235,7 @@ export interface OrdersFilter {
   tab: string;
   search: string;
   page: number;
+  sort?: 'default' | 'date' | 'amount';
   dateFrom?: string;
   dateTo?: string;
   paymentMethod?: string;
@@ -245,6 +246,7 @@ function ordersQueryString(params: Partial<OrdersFilter>) {
   const q = new URLSearchParams();
   if (params.tab && params.tab !== 'all') q.set('tab', params.tab);
   if (params.search) q.set('search', params.search);
+  if (params.sort && params.sort !== 'default') q.set('sort', params.sort);
   if (params.dateFrom) q.set('dateFrom', params.dateFrom);
   if (params.dateTo) q.set('dateTo', params.dateTo);
   if (params.paymentMethod) q.set('paymentMethod', params.paymentMethod);
