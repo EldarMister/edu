@@ -119,7 +119,10 @@ export function StatisticsPage() {
           <section className="rounded-xl border border-border bg-white p-4 sm:p-5">
             <div className="mb-4 flex items-center justify-between gap-4">
               <h3 className="text-base font-semibold text-text-primary">Выручка за период</h3>
-              <span className="text-sm font-medium text-text-muted">{d.cards.ordersPeriod} заказов</span>
+              <div className="flex shrink-0 items-baseline gap-3 text-right">
+                <span className="text-sm font-medium text-text-muted">{d.cards.ordersPeriod} заказов</span>
+                <span className="text-base font-semibold text-text-primary">{money(d.cards.revenuePeriod)}</span>
+              </div>
             </div>
             <RevenueChart data={d.revenueSeries} />
           </section>
