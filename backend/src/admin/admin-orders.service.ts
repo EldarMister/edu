@@ -96,11 +96,11 @@ export class AdminOrdersService {
     const pageSize = Math.min(query.pageSize ?? 10, 50);
     const where = this.buildWhere(query);
     const orderBy: Prisma.OrderOrderByWithRelationInput =
-      query.sort === 'amount_desc'
+      query.sort === 'amount_desc' || (query.sort === 'amount' && query.sortDirection !== 'asc')
         ? { finalAmount: 'desc' }
-        : query.sort === 'amount_asc'
+        : query.sort === 'amount_asc' || (query.sort === 'amount' && query.sortDirection === 'asc')
           ? { finalAmount: 'asc' }
-          : query.sort === 'date_asc'
+          : query.sort === 'date_asc' || (query.sort === 'date' && query.sortDirection === 'asc')
             ? { createdAt: 'asc' }
             : { createdAt: 'desc' };
 
