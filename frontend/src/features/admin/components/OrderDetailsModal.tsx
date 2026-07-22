@@ -115,7 +115,7 @@ export function OrderDetailsModal({
               <div key={item.id} className="border-b border-border px-4 py-2.5 last:border-0">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-text-primary">
+                    <p className="text-sm font-medium text-text-primary">
                       {item.quantity}× {orderItemDisplayName(item)}
                     </p>
                     {item.comment && <p className="mt-0.5 text-xs text-warning">{item.comment}</p>}
