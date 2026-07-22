@@ -61,10 +61,18 @@ const PERIOD_OPTIONS = [
 
 type OrderSort = 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
 
-function toggleSort(current: OrderSort, field: 'date' | 'amount'): OrderSort {
-  const descending = `${field}_desc` as const;
-  const ascending = `${field}_asc` as const;
-  return current === descending ? ascending : descending;
+const SORT_OPTIONS: { value: OrderSort; label: string }[] = [
+  { value: 'default', label: 'По умолчанию' },
+  { value: 'date_desc', label: 'Дата: новые → старые' },
+  { value: 'date_asc', label: 'Дата: старые → новые' },
+  { value: 'amount_desc', label: 'Сумма: больше → меньше' },
+  { value: 'amount_asc', label: 'Сумма: меньше → больше' },
+];
+
+function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount' } {
+  if (sort.startsWith('date')) return { sort: 'date' };
+  if (sort.startsWith('amount')) return { sort: 'amount' };
+  return { sort: 'default' };
 }
 
 const ymd = (d: Date) =>
@@ -122,10 +130,20 @@ export function OrdersPage() {
 
   const dateFilter = periodRange(period, customDate);
   const filters = { search, paymentMethod, waiterId, ...dateFilter };
+  const requestSort = sortRequest(sort);
 
-  const ordersQ = useAdminOrdersInfinite({ tab, sort, ...filters });
+  const ordersQ = useAdminOrdersInfinite({ tab, ...requestSort, ...filters });
   const summaryQ = useOrdersSummary(filters);
-  const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
+  const loadedItems = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
+  const items =
+    sort === 'default'
+      ? loadedItems
+      : [...loadedItems].sort((a, b) => {
+          const comparison = sort.startsWith('date')
+            ? new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+            : Number(a.finalAmount) - Number(b.finalAmount);
+          return sort.endsWith('_asc') ? comparison : -comparison;
+        });
   const ordersError = ordersQ.isError ? apiError(ordersQ.error) : null;
   const s = summaryQ.data;
 
@@ -226,31 +244,12 @@ export function OrdersPage() {
           onChange={reset(setPeriod)}
           options={PERIOD_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
         />
-        <div className="inline-flex h-10 overflow-hidden rounded-xl border border-border bg-white text-sm">
-          <button
-            type="button"
-            className={`px-3 transition-colors ${sort === 'default' ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'}`}
-            onClick={() => setSort('default')}
-          >
-            {tr('По умолчанию')}
-          </button>
-          <button
-            type="button"
-            className={`border-l border-border px-3 transition-colors ${sort.startsWith('date') ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'}`}
-            title={sort === 'date_asc' ? tr('Дата: старые → новые') : tr('Дата: новые → старые')}
-            onClick={() => setSort((current) => toggleSort(current, 'date'))}
-          >
-            {tr('Дата')} {sort === 'date_asc' ? '↑' : '↓'}
-          </button>
-          <button
-            type="button"
-            className={`border-l border-border px-3 transition-colors ${sort.startsWith('amount') ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'}`}
-            title={sort === 'amount_asc' ? tr('Сумма: меньше → больше') : tr('Сумма: больше → меньше')}
-            onClick={() => setSort((current) => toggleSort(current, 'amount'))}
-          >
-            {tr('Сумма')} {sort === 'amount_asc' ? '↑' : '↓'}
-          </button>
-        </div>
+        <Select
+          className={`${ctrl} sm:w-56`}
+          value={sort}
+          onChange={(value) => setSort(value as OrderSort)}
+          options={SORT_OPTIONS.map((option) => ({ ...option, label: tr(option.label) }))}
+        />
         {period === 'custom' && (
           <input
             type="date"
