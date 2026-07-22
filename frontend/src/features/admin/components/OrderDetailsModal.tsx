@@ -112,18 +112,20 @@ export function OrderDetailsModal({
           </div>
           <div className="overflow-hidden rounded-xl border border-border">
             {order.items.map((item) => (
-              <div key={item.id} className="border-b border-border px-4 py-3 last:border-0">
+              <div key={item.id} className="border-b border-border px-4 py-2.5 last:border-0">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-text-primary">
+                    <p className="text-sm font-semibold text-text-primary">
                       {item.quantity}× {orderItemDisplayName(item)}
                     </p>
                     {item.comment && <p className="mt-0.5 text-xs text-warning">{item.comment}</p>}
                     {item.rejectReason && <p className="mt-0.5 text-xs text-danger">Отказ: {item.rejectReason}</p>}
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="text-sm font-semibold text-text-primary">{money(item.finalPrice)}</p>
-                    <p className="mt-0.5 text-[11px] text-text-muted">{ITEM_STATUS[item.status]}</p>
+                    <p className="whitespace-nowrap text-sm font-semibold text-text-primary">
+                      {money(item.finalPrice)}
+                      <span className="ml-1.5 text-xs font-medium text-text-muted">· {ITEM_STATUS[item.status]}</span>
+                    </p>
                   </div>
                 </div>
               </div>
