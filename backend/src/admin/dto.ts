@@ -392,8 +392,8 @@ export class OrderQueryDto {
   @IsOptional() @IsString()
   search?: string;
 
-  @IsOptional() @IsIn(['default', 'date', 'amount'])
-  sort?: 'default' | 'date' | 'amount';
+  @IsOptional() @IsIn(['default', 'date_desc', 'date_asc', 'amount_desc', 'amount_asc'])
+  sort?: 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
 
   @IsOptional() @IsString()
   dateFrom?: string;
