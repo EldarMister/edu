@@ -50,7 +50,7 @@ export async function printReceipt(
   <style>
     @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; }
-    body { width: 80mm; margin: 0 auto; padding: 7mm 4mm 8mm; color: #000; background: #fff; font-family: "Courier New", Courier, monospace; font-size: 12px; line-height: 1.35; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { width: 80mm; margin: 0 auto; padding: 7mm 4mm 8mm; color: #000; background: #fff; font-family: "Courier New", Courier, monospace; font-size: 13px; font-weight: 600; line-height: 1.32; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     h1 { font-family: Arial, sans-serif; font-size: 22px; line-height: 1.1; text-align: center; margin: 0 0 7px; font-weight: 700; letter-spacing: -0.4px; }
     .receipt-kind { text-align: center; font-family: Arial, sans-serif; font-size: 16px; font-weight: 700; margin: 0 0 7px; }
     .muted { font-size: 12px; }
@@ -65,10 +65,10 @@ export async function printReceipt(
     .c { text-align: center; width: 12%; }
     .r { text-align: right; white-space: nowrap; }
     .order-meta { font-size: 13px; text-align: center; }
-    .total { display: flex; justify-content: space-between; align-items: baseline; font-family: Arial, sans-serif; font-size: 23px; font-weight: 700; letter-spacing: -0.3px; }
+    .total { display: flex; justify-content: space-between; align-items: baseline; font-family: Arial, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: -0.1px; }
     .pair { display: flex; justify-content: space-between; gap: 10px; margin: 6px 0; }
     .pair > :last-child { text-align: right; }
-    .payment { font-size: 11px; }
+    .payment { font-size: 12px; }
     .payment-value { max-width: 76%; }
     .fiscal-qr { display: block; width: 146px; height: 146px; margin: 13px auto 2px; image-rendering: pixelated; }
     .footer { margin-top: 14px; font-size: 13px; }
