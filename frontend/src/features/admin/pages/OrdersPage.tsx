@@ -59,11 +59,13 @@ const PERIOD_OPTIONS = [
   { value: 'custom', label: 'Выбрать дату' },
 ];
 
-const SORT_OPTIONS = [
-  { value: 'default', label: 'По умолчанию' },
-  { value: 'date', label: 'По дате' },
-  { value: 'amount', label: 'По сумме' },
-];
+type OrderSort = 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
+
+function toggleSort(current: OrderSort, field: 'date' | 'amount'): OrderSort {
+  const descending = `${field}_desc` as const;
+  const ascending = `${field}_asc` as const;
+  return current === descending ? ascending : descending;
+}
 
 const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -97,7 +99,7 @@ export function OrdersPage() {
   const [period, setPeriod] = useState('all');
   const [customDate, setCustomDate] = useState('');
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState<'default' | 'date' | 'amount'>('default');
+  const [sort, setSort] = useState<OrderSort>('default');
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
@@ -224,12 +226,31 @@ export function OrdersPage() {
           onChange={reset(setPeriod)}
           options={PERIOD_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
         />
-        <Select
-          className={`${ctrl} sm:w-40`}
-          value={sort}
-          onChange={(value) => setSort(value as 'default' | 'date' | 'amount')}
-          options={SORT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
-        />
+        <div className="inline-flex h-10 overflow-hidden rounded-xl border border-border bg-white text-sm">
+          <button
+            type="button"
+            className={`px-3 transition-colors ${sort === 'default' ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'}`}
+            onClick={() => setSort('default')}
+          >
+            {tr('По умолчанию')}
+          </button>
+          <button
+            type="button"
+            className={`border-l border-border px-3 transition-colors ${sort.startsWith('date') ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'}`}
+            title={sort === 'date_asc' ? tr('Дата: старые → новые') : tr('Дата: новые → старые')}
+            onClick={() => setSort((current) => toggleSort(current, 'date'))}
+          >
+            {tr('Дата')} {sort === 'date_asc' ? '↑' : '↓'}
+          </button>
+          <button
+            type="button"
+            className={`border-l border-border px-3 transition-colors ${sort.startsWith('amount') ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'}`}
+            title={sort === 'amount_asc' ? tr('Сумма: меньше → больше') : tr('Сумма: больше → меньше')}
+            onClick={() => setSort((current) => toggleSort(current, 'amount'))}
+          >
+            {tr('Сумма')} {sort === 'amount_asc' ? '↑' : '↓'}
+          </button>
+        </div>
         {period === 'custom' && (
           <input
             type="date"

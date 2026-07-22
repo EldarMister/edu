@@ -235,7 +235,7 @@ export interface OrdersFilter {
   tab: string;
   search: string;
   page: number;
-  sort?: 'default' | 'date' | 'amount';
+  sort?: 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
   dateFrom?: string;
   dateTo?: string;
   paymentMethod?: string;

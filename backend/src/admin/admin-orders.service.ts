@@ -96,11 +96,13 @@ export class AdminOrdersService {
     const pageSize = Math.min(query.pageSize ?? 10, 50);
     const where = this.buildWhere(query);
     const orderBy: Prisma.OrderOrderByWithRelationInput =
-      query.sort === 'amount'
+      query.sort === 'amount_desc'
         ? { finalAmount: 'desc' }
-        : query.sort === 'date'
-          ? { createdAt: 'asc' }
-          : { createdAt: 'desc' };
+        : query.sort === 'amount_asc'
+          ? { finalAmount: 'asc' }
+          : query.sort === 'date_asc'
+            ? { createdAt: 'asc' }
+            : { createdAt: 'desc' };
 
     const [items, total] = await Promise.all([
       this.prisma.order.findMany({
