@@ -50,28 +50,28 @@ export async function printReceipt(
   <style>
     @page { size: 80mm auto; margin: 0; }
     * { box-sizing: border-box; }
-    body { width: 80mm; margin: 0 auto; padding: 7mm 4mm 8mm; color: #000; background: #fff; font-family: "Courier New", Courier, monospace; font-size: 13px; font-weight: 600; line-height: 1.32; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    h1 { font-family: Arial, sans-serif; font-size: 22px; line-height: 1.1; text-align: center; margin: 0 0 7px; font-weight: 700; letter-spacing: -0.4px; }
-    .receipt-kind { text-align: center; font-family: Arial, sans-serif; font-size: 16px; font-weight: 700; margin: 0 0 7px; }
+    body { width: 80mm; margin: 0 auto; padding: 6mm 3mm 7mm; color: #000; background: #fff; font-family: "Courier New", Courier, monospace; font-size: 13px; font-weight: 400; line-height: 1.28; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    h1 { font-family: Arial, sans-serif; font-size: 21px; line-height: 1.1; text-align: center; margin: 0 0 5px; font-weight: 700; letter-spacing: -0.4px; }
+    .receipt-kind { text-align: center; font-family: Arial, sans-serif; font-size: 15px; font-weight: 700; margin: 0 0 5px; }
     .muted { font-size: 12px; }
     .center { text-align: center; }
-    .dash { border: 0; border-top: 1px dashed #111; margin: 12px 0; height: 0; }
-    .solid { border: 0; border-top: 1px solid #111; margin: 9px 0; height: 0; }
+    .dash { border: 0; border-top: 1px dashed #111; margin: 9px 0; height: 0; }
+    .solid { border: 0; border-top: 1px solid #111; margin: 8px 0; height: 0; }
     table { width: 100%; border-collapse: collapse; }
-    th { border-bottom: 1px solid #111; padding: 0 0 7px; font-family: Arial, sans-serif; font-size: 11px; font-weight: 700; text-align: left; white-space: nowrap; }
-    td { border-bottom: 1px dashed #777; padding: 8px 0; vertical-align: top; }
+    th { border-bottom: 1px solid #111; padding: 0 0 6px; font-family: Arial, sans-serif; font-size: 10px; font-weight: 700; text-align: left; white-space: nowrap; }
+    td { border-bottom: 1px dashed #777; padding: 6px 0; vertical-align: top; }
     tbody tr:last-child td { border-bottom: 0; }
     .item-name { padding-right: 5px; }
-    .c { text-align: center; width: 16%; white-space: nowrap; }
+    .c { text-align: center; width: 14%; white-space: nowrap; }
     .r { text-align: right; white-space: nowrap; }
     .order-meta { font-size: 13px; text-align: center; }
     .total { display: flex; justify-content: space-between; align-items: baseline; font-family: Arial, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: -0.1px; }
-    .pair { display: flex; justify-content: space-between; gap: 10px; margin: 6px 0; }
+    .pair { display: flex; justify-content: space-between; gap: 10px; margin: 5px 0; }
     .pair > :last-child { text-align: right; }
     .payment { font-size: 12px; }
     .payment-value { max-width: 76%; }
-    .fiscal-qr { display: block; width: 146px; height: 146px; margin: 13px auto 2px; image-rendering: pixelated; }
-    .footer { margin-top: 14px; font-size: 13px; }
+    .fiscal-qr { display: block; width: 142px; height: 142px; margin: 11px auto 2px; image-rendering: pixelated; }
+    .footer { margin-top: 11px; font-size: 13px; }
   </style></head><body>
     <h1>${escapeHtml(r.cafeName)}</h1>
     <div class="receipt-kind">${receiptKind}</div>
@@ -83,7 +83,7 @@ export async function printReceipt(
     <div class="dash"></div>
     <div class="order-meta">${escapeHtml(orderNumber)} · Стол ${r.tableNumber} · ${escapeHtml(r.waiter)}</div>
     <div class="dash"></div>
-    <table><colgroup><col style="width:42%"><col style="width:16%"><col style="width:20%"><col style="width:22%"></colgroup><thead><tr><th>Наименование</th><th class="c">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><colgroup><col style="width:48%"><col style="width:14%"><col style="width:18%"><col style="width:20%"></colgroup><thead><tr><th>Наименование</th><th class="c">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="solid"></div>
     ${Number(r.discountAmount) > 0 ? `<div class="pair"><span>Сумма</span><span>${money(r.totalAmount)}</span></div><div class="pair"><span>Скидка</span><span>−${money(r.discountAmount)}</span></div>` : ''}
     ${Number(r.serviceChargeAmount) > 0 ? `<div class="pair"><span>Обслуживание</span><span>${money(r.serviceChargeAmount)}</span></div>` : ''}
