@@ -59,6 +59,12 @@ const PERIOD_OPTIONS = [
   { value: 'custom', label: 'Выбрать дату' },
 ];
 
+const SORT_OPTIONS = [
+  { value: 'default', label: 'По умолчанию' },
+  { value: 'date', label: 'По дате' },
+  { value: 'amount', label: 'По сумме' },
+];
+
 const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -91,6 +97,7 @@ export function OrdersPage() {
   const [period, setPeriod] = useState('all');
   const [customDate, setCustomDate] = useState('');
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<'default' | 'date' | 'amount'>('default');
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
@@ -114,7 +121,7 @@ export function OrdersPage() {
   const dateFilter = periodRange(period, customDate);
   const filters = { search, paymentMethod, waiterId, ...dateFilter };
 
-  const ordersQ = useAdminOrdersInfinite({ tab, ...filters });
+  const ordersQ = useAdminOrdersInfinite({ tab, sort, ...filters });
   const summaryQ = useOrdersSummary(filters);
   const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
   const ordersError = ordersQ.isError ? apiError(ordersQ.error) : null;
@@ -216,6 +223,12 @@ export function OrdersPage() {
           value={period}
           onChange={reset(setPeriod)}
           options={PERIOD_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
+        />
+        <Select
+          className={`${ctrl} sm:w-40`}
+          value={sort}
+          onChange={(value) => setSort(value as 'default' | 'date' | 'amount')}
+          options={SORT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
         />
         {period === 'custom' && (
           <input
