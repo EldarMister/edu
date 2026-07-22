@@ -58,11 +58,11 @@ export async function printReceipt(
     .dash { border: 0; border-top: 1px dashed #111; margin: 12px 0; height: 0; }
     .solid { border: 0; border-top: 1px solid #111; margin: 9px 0; height: 0; }
     table { width: 100%; border-collapse: collapse; }
-    th { border-bottom: 1px solid #111; padding: 0 0 7px; font-family: Arial, sans-serif; font-size: 11px; font-weight: 700; text-align: left; }
+    th { border-bottom: 1px solid #111; padding: 0 0 7px; font-family: Arial, sans-serif; font-size: 11px; font-weight: 700; text-align: left; white-space: nowrap; }
     td { border-bottom: 1px dashed #777; padding: 8px 0; vertical-align: top; }
     tbody tr:last-child td { border-bottom: 0; }
     .item-name { padding-right: 5px; }
-    .c { text-align: center; width: 12%; }
+    .c { text-align: center; width: 16%; white-space: nowrap; }
     .r { text-align: right; white-space: nowrap; }
     .order-meta { font-size: 13px; text-align: center; }
     .total { display: flex; justify-content: space-between; align-items: baseline; font-family: Arial, sans-serif; font-size: 20px; font-weight: 700; letter-spacing: -0.1px; }
@@ -76,14 +76,14 @@ export async function printReceipt(
     <h1>${escapeHtml(r.cafeName)}</h1>
     <div class="receipt-kind">${receiptKind}</div>
     ${r.address ? `<div class="center muted">${escapeHtml(r.address)}</div>` : ''}
-    ${r.phone ? `<div class="center muted">${escapeHtml(r.phone)}${r.phone2 ? ', ' + escapeHtml(r.phone2) : ''}</div>` : ''}
+    ${r.phone ? `<div class="center muted">${escapeHtml(formatReceiptPhone(r.phone))}${r.phone2 ? ' · ' + escapeHtml(formatReceiptPhone(r.phone2)) : ''}</div>` : ''}
     ${r.instagram ? `<div class="center muted">Instagram: ${escapeHtml(r.instagram)}</div>` : ''}
     ${r.website ? `<div class="center muted">Сайт: ${escapeHtml(r.website)}</div>` : ''}
     <div class="center muted">${dateStr}</div>
     <div class="dash"></div>
     <div class="order-meta">${escapeHtml(orderNumber)} · Стол ${r.tableNumber} · ${escapeHtml(r.waiter)}</div>
     <div class="dash"></div>
-    <table><colgroup><col style="width:46%"><col style="width:12%"><col style="width:20%"><col style="width:22%"></colgroup><thead><tr><th>Наименование</th><th class="c">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead><tbody>${rows}</tbody></table>
+    <table><colgroup><col style="width:42%"><col style="width:16%"><col style="width:20%"><col style="width:22%"></colgroup><thead><tr><th>Наименование</th><th class="c">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="solid"></div>
     ${Number(r.discountAmount) > 0 ? `<div class="pair"><span>Сумма</span><span>${money(r.totalAmount)}</span></div><div class="pair"><span>Скидка</span><span>−${money(r.discountAmount)}</span></div>` : ''}
     ${Number(r.serviceChargeAmount) > 0 ? `<div class="pair"><span>Обслуживание</span><span>${money(r.serviceChargeAmount)}</span></div>` : ''}
@@ -151,4 +151,13 @@ function paymentBlock(r: Receipt): string {
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+}
+
+/** Кыргызский номер на чеке печатаем привычными группами: +996 771 878 291. */
+function formatReceiptPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('996')) {
+    return `+996 ${digits.slice(3, 6)} ${digits.slice(6, 9)} ${digits.slice(9, 12)}`;
+  }
+  return phone;
 }
