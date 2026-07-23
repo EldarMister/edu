@@ -236,6 +236,7 @@ export interface OrdersFilter {
   search: string;
   page: number;
   sort?: 'default' | 'date' | 'amount';
+  sortDirection?: 'asc' | 'desc';
   dateFrom?: string;
   dateTo?: string;
   paymentMethod?: string;
@@ -247,6 +248,7 @@ function ordersQueryString(params: Partial<OrdersFilter>) {
   if (params.tab && params.tab !== 'all') q.set('tab', params.tab);
   if (params.search) q.set('search', params.search);
   if (params.sort && params.sort !== 'default') q.set('sort', params.sort);
+  if (params.sortDirection) q.set('sortDirection', params.sortDirection);
   if (params.dateFrom) q.set('dateFrom', params.dateFrom);
   if (params.dateTo) q.set('dateTo', params.dateTo);
   if (params.paymentMethod) q.set('paymentMethod', params.paymentMethod);
