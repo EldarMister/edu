@@ -69,9 +69,9 @@ const SORT_OPTIONS: { value: OrderSort; label: string }[] = [
   { value: 'amount_asc', label: 'Сумма: меньше → больше' },
 ];
 
-function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount' } {
-  if (sort.startsWith('date')) return { sort: 'date' };
-  if (sort.startsWith('amount')) return { sort: 'amount' };
+function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount'; sortDirection?: 'asc' | 'desc' } {
+  if (sort.startsWith('date')) return { sort: 'date', sortDirection: sort.endsWith('_asc') ? 'asc' : 'desc' };
+  if (sort.startsWith('amount')) return { sort: 'amount', sortDirection: sort.endsWith('_asc') ? 'asc' : 'desc' };
   return { sort: 'default' };
 }
 
