@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
 import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
-import { useRetryFiscal } from '../api';
+import { useCancelOrderItem, useRetryFiscal } from '../api';
+import { CancelOrderModal } from './CancelOrderModal';
 
 const ITEM_STATUS: Record<OrderItemStatus, string> = {
   new: 'Новое',
@@ -19,15 +21,40 @@ const ITEM_STATUS: Record<OrderItemStatus, string> = {
 export function OrderDetailsModal({
   order,
   onClose,
+  onOrderChange,
+  allowItemCancellation = false,
 }: {
   order: Order | null;
   onClose: () => void;
+  onOrderChange?: (order: Order) => void;
+  allowItemCancellation?: boolean;
 }) {
+  const [cancelItem, setCancelItem] = useState<Order['items'][number] | null>(null);
+  const cancelOrderItem = useCancelOrderItem();
+  const push = useNotifications((s) => s.push);
+
   if (!order) return null;
 
   const date = new Date(order.createdAt);
   const showMixedBreakdown =
     order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
+  const itemCancellationAllowed = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
+
+  async function confirmItemCancellation(reason: string) {
+    if (!cancelItem) return;
+    try {
+      const updated = await cancelOrderItem.mutateAsync({
+        orderId: order!.id,
+        itemId: cancelItem.id,
+        reason,
+      });
+      onOrderChange?.(updated);
+      setCancelItem(null);
+      push({ message: 'Блюдо отменено', type: 'success', at: new Date().toISOString() });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
 
   const infoRows: { label: string; value: React.ReactNode }[][] = [
     [
@@ -119,13 +146,34 @@ export function OrderDetailsModal({
                       {item.quantity}× {orderItemDisplayName(item)}
                     </p>
                     {item.comment && <p className="mt-0.5 text-xs text-warning">{item.comment}</p>}
-                    {item.rejectReason && <p className="mt-0.5 text-xs text-danger">Отказ: {item.rejectReason}</p>}
+                    {item.rejectReason && (
+                      <p className="mt-0.5 text-xs text-danger">
+                        {item.status === 'cancelled' ? 'Причина' : 'Отказ'}: {item.rejectReason}
+                      </p>
+                    )}
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="whitespace-nowrap text-sm font-semibold text-text-primary">
-                      {money(item.finalPrice)}
-                      <span className="ml-1.5 text-xs font-medium text-text-muted">· {ITEM_STATUS[item.status]}</span>
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="whitespace-nowrap text-sm font-semibold text-text-primary">
+                        {money(item.finalPrice)}
+                        <span className="ml-1.5 text-xs font-medium text-text-muted">· {ITEM_STATUS[item.status]}</span>
+                      </p>
+                      {allowItemCancellation &&
+                        itemCancellationAllowed &&
+                        !['rejected', 'cancelled'].includes(item.status) && (
+                        <button
+                          type="button"
+                          title="Отменить блюдо"
+                          aria-label={`Отменить блюдо ${orderItemDisplayName(item)}`}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg text-text-light transition-colors hover:bg-danger/10 hover:text-danger"
+                          onClick={() => setCancelItem(item)}
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M18 6 6 18M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -144,6 +192,19 @@ export function OrderDetailsModal({
 
         <FiscalBlock order={order} />
       </div>
+      <CancelOrderModal
+        open={!!cancelItem}
+        orderLabel={
+          cancelItem
+            ? `${cancelItem.quantity}× ${orderItemDisplayName(cancelItem)} · ${money(cancelItem.finalPrice)}`
+            : ''
+        }
+        submitting={cancelOrderItem.isPending}
+        onClose={() => setCancelItem(null)}
+        onConfirm={confirmItemCancellation}
+        title="Отменить блюдо?"
+        confirmLabel="Отменить блюдо"
+      />
     </Modal>
   );
 }

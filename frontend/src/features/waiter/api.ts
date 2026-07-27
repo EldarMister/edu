@@ -8,6 +8,7 @@ import type {
   OrderStatus,
   PaymentMethod,
   Receipt,
+  AdministratorCall,
   ReceiptPrintRequest,
   ReceiptPrintType,
   WaiterShift,
@@ -306,6 +307,14 @@ export function useCancelOrder() {
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
+  });
+}
+
+export function useCallAdministrator() {
+  return useMutation({
+    mutationFn: async (orderId: string) =>
+      (await api.post<AdministratorCall>(`/orders/${orderId}/call-administrator`)).data,
+    retry: networkRetry,
   });
 }
 

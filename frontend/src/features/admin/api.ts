@@ -357,6 +357,22 @@ export function useCancelOrder() {
   });
 }
 
+/** Отмена отдельного блюда администратором/владельцем с обязательной причиной. */
+export function useCancelOrderItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId, itemId, reason }: { orderId: string; itemId: string; reason: string }) =>
+      api.post<Order>(`/orders/${orderId}/items/${itemId}/cancel`, { reason }).then((r) => r.data),
+    onSuccess: (order) => {
+      applyOrderStatusToCache(qc, order);
+      qc.setQueryData(['admin', 'orders', 'detail', order.id], order);
+      qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'orders', 'summary'] });
+    },
+  });
+}
+
 export function useUpdateOrderStatus() {
   const qc = useQueryClient();
   return useMutation({

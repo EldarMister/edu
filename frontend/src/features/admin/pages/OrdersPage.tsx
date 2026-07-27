@@ -404,7 +404,12 @@ export function OrdersPage() {
         onClose={() => setStatusTarget(null)}
         onConfirm={confirmStatusChange}
       />
-      <OrderDetailsModal order={detailsOrder} onClose={() => setDetailsOrder(null)} />
+      <OrderDetailsModal
+        order={detailsOrder}
+        onClose={() => setDetailsOrder(null)}
+        onOrderChange={setDetailsOrder}
+        allowItemCancellation
+      />
     </div>
   );
 }

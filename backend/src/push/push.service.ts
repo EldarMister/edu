@@ -82,10 +82,11 @@ export class PushService {
     return this.notifyUser(waiterId, payload);
   }
 
-  async notifyRole(role: Role, payload: PushPayload) {
+  async notifyRole(role: Role, payload: PushPayload, cafeId?: string | null) {
+    const userWhere = { role, isActive: true, ...(cafeId ? { cafeId } : {}) };
     // Native push для роли (мобильные устройства).
     const devices = await this.prisma.userDevice.findMany({
-      where: { isActive: true, pushToken: { not: null }, user: { role, isActive: true } },
+      where: { isActive: true, pushToken: { not: null }, user: userWhere },
       select: { pushToken: true },
     });
     await this.sendNativeToTokens(
@@ -95,7 +96,7 @@ export class PushService {
 
     if (!this.configured) return;
     const subscriptions = await this.prisma.pushSubscription.findMany({
-      where: { user: { role, isActive: true } },
+      where: { user: userWhere },
     });
     await this.sendToSubscriptions(subscriptions, payload);
   }

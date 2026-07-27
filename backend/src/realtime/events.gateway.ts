@@ -104,7 +104,10 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       } else if (user.role === 'ADMIN' || user.role === 'OWNER') {
         client.join(ROOMS.ADMIN);
         client.join(ROOMS.KITCHEN); // админ видит и кухонную ленту
-        if (user.role === 'ADMIN') client.join(ROOMS.ADMIN_ONLY);
+        if (user.role === 'ADMIN') {
+          client.join(ROOMS.ADMIN_ONLY);
+          if (user.cafeId) client.join(ROOMS.cafeAdmins(user.cafeId));
+        }
       }
 
       this.logger.log(`Connected: ${user.role} ${user.id} (${client.id})`);
@@ -176,6 +179,11 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
   emitToAdminOnly(event: string, payload: unknown) {
     this.server.to(ROOMS.ADMIN_ONLY).emit(event, payload);
+  }
+
+  emitToCafeAdmins(cafeId: string | null | undefined, event: string, payload: unknown) {
+    if (!cafeId) return;
+    this.server.to(ROOMS.cafeAdmins(cafeId)).emit(event, payload);
   }
 
   /** Широковещательно (например, изменение статуса стола видят все). */

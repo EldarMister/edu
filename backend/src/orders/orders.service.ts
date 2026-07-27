@@ -539,12 +539,15 @@ export class OrdersService {
     if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ уже закрыт и не может быть отменён');
     }
-    // Официант может отменить заказ в любом активном статусе (включая принятый кухней).
-    // Единственное ограничение — заказ уже оплачен или отменён (проверено выше).
-    // Статус waiting_payment и served — только администратор/владелец.
-    const adminOnly: OrderStatus[] = [OrderStatus.waiting_payment, OrderStatus.served];
+    // Готовый, поданный или уже переданный к оплате заказ может отменить
+    // только администратор/владелец.
+    const adminOnly: OrderStatus[] = [
+      OrderStatus.ready,
+      OrderStatus.served,
+      OrderStatus.waiting_payment,
+    ];
     if (actor.role === Role.WAITER && adminOnly.includes(order.status)) {
-      throw new BadRequestException(
+      throw new ForbiddenException(
         'Отмена заказа на этом этапе доступна только администратору',
       );
     }
@@ -594,6 +597,46 @@ export class OrdersService {
     });
 
     return updated;
+  }
+
+  async callAdministrator(orderId: string, actor: AuditActor) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    if (!this.canWaiterAccessOrder(order, actor.id)) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
+
+    const waiterName = actor.name?.trim() || order.waiter?.name || 'Официант';
+    const hallName = order.table.hall?.name?.trim() || 'Без зала';
+    const message = `${hallName} · Стол ${order.table.number}: официант ${waiterName} зовёт администратора`;
+    const dto = {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      hallName,
+      tableNumber: order.table.number,
+      waiterId: actor.id,
+      waiterName,
+      createdAt: new Date().toISOString(),
+      message,
+      voice: {
+        text: `Зал ${hallName}. Стол номер ${tableNumberVoice(order.table.number)}. Официант ${waiterName} вызывает администратора.`,
+      },
+    };
+
+    this.events.emitToCafeAdmins(order.cafeId, SERVER_EVENTS.ADMINISTRATOR_CALLED, dto);
+    void this.push.notifyRole(
+      Role.ADMIN,
+      {
+        title: 'Вызов администратора',
+        body: message,
+        type: 'info',
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        url: '/admin',
+      },
+      order.cafeId,
+    );
+    return dto;
   }
 
   /** Подпись позиции для сопоставления старого и нового состава при редактировании. */
@@ -1225,6 +1268,10 @@ export class OrdersService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      if (item.status !== OrderItemStatus.served) {
+        await this.restoreInventory(tx, [item]);
+        await this.ingredientStock.restoreDishSale(tx, orderId, [item]);
+      }
       await tx.orderItem.update({
         where: { id: itemId },
         data: { status: OrderItemStatus.ready },
@@ -1765,14 +1812,14 @@ export class OrdersService {
     return updated;
   }
 
-  async cancelReadyItem(orderId: string, itemId: string, waiterId: string, reason: string) {
+  async cancelReadyItem(orderId: string, itemId: string, actor: AuditActor, reason: string) {
     const cleanReason = reason.trim();
     if (!cleanReason) {
       throw new BadRequestException('Укажите причину отмены блюда');
     }
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (!this.canWaiterAccessOrder(order, waiterId)) {
+    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
     if (
@@ -1782,6 +1829,12 @@ export class OrdersService {
     }
     const item = order.items.find((it) => it.id === itemId);
     if (!item) throw new NotFoundException('Блюдо не найдено');
+    if (
+      actor.role === Role.WAITER &&
+      ([OrderItemStatus.ready, OrderItemStatus.served] as OrderItemStatus[]).includes(item.status)
+    ) {
+      throw new ForbiddenException('Недостаточно прав для отмены готового блюда');
+    }
     if (([OrderItemStatus.rejected, OrderItemStatus.cancelled] as OrderItemStatus[]).includes(item.status)) {
       throw new BadRequestException('Это блюдо нельзя отменить на текущем этапе');
     }
@@ -1816,11 +1869,12 @@ export class OrdersService {
     });
 
     const stationHasOpenWork = stationHasWork(order, item.prepStation);
+    const actorLabel = actor.role === Role.WAITER ? 'Официант' : 'Администратор';
     const cancellationVoice =
       stationHasOpenWork && item.prepStation === PrepStation.kitchen
-        ? { kitchen: `Стол номер ${tableNumberVoice(updated.table.number)}. Официант отменил блюдо: ${this.orderItemName(item)}.` }
+        ? { kitchen: `Стол номер ${tableNumberVoice(updated.table.number)}. ${actorLabel} отменил блюдо: ${this.orderItemName(item)}.` }
         : stationHasOpenWork && item.prepStation === PrepStation.bar
-          ? { bar: `Стол номер ${tableNumberVoice(updated.table.number)}. Официант отменил блюдо: ${this.orderItemName(item)}.` }
+          ? { bar: `Стол номер ${tableNumberVoice(updated.table.number)}. ${actorLabel} отменил блюдо: ${this.orderItemName(item)}.` }
           : undefined;
 
     // При отмене одного готового блюда заказ может остаться ready. Это не
@@ -1839,13 +1893,13 @@ export class OrdersService {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
     }
     await this.audit.log({
-      actor: { id: waiterId, role: Role.WAITER, name: order.waiter?.name },
+      actor,
       actionType: AuditAction.ORDER_UPDATED,
       entityType: AuditEntity.ORDER,
       entityId: order.id,
       orderId,
       tableId: order.tableId,
-      description: `${order.waiter?.name ?? 'Официант'} отменил блюдо «${this.orderItemName(item)}» в заказе ${order.orderNumber}: ${cleanReason}`,
+      description: `${actor.name ?? actorLabel} отменил блюдо «${this.orderItemName(item)}» в заказе ${order.orderNumber}: ${cleanReason}`,
       oldValue: { itemId, status: item.status, finalAmount: Number(order.finalAmount) },
       newValue: { itemId, status: OrderItemStatus.cancelled, finalAmount: Number(updated.finalAmount), reason: cleanReason },
       metadata: { tableNumber: order.table.number, itemName: this.orderItemName(item) },

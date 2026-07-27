@@ -12,7 +12,8 @@ import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import { beep } from '@/lib/sound';
 import { adminVoice } from '@/services/adminVoice';
-import type { Order, ReceiptPrintRequest } from '@/types';
+import { useNotifications } from '@/store/notifications';
+import type { AdministratorCall, Order, ReceiptPrintRequest } from '@/types';
 import {
   IconStats,
   IconOrders,
@@ -113,6 +114,7 @@ const MOBILE_NAV_VERTICAL_TOLERANCE = 48;
 export function AdminApp() {
   const { user, logout } = useAuth();
   const qc = useQueryClient();
+  const pushNotification = useNotifications((state) => state.push);
   const t = useT();
   const { canSection } = usePermissions();
   const isOwner = user?.role === 'OWNER';
@@ -177,6 +179,18 @@ export function AdminApp() {
     invalidateReceipts();
     beep('notify');
     adminVoice.enqueue(receiptRequestVoice(request));
+  });
+  useSocketEvent<AdministratorCall>('administrator:called', (call) => {
+    beep('notify');
+    pushNotification({
+      message: call.message,
+      type: 'info',
+      orderId: call.orderId,
+      orderNumber: call.orderNumber,
+      at: call.createdAt,
+      durationMs: 12_000,
+    });
+    adminVoice.enqueue(call.voice?.text);
   });
   useSocketEvent('receipt_print_request_approved', invalidateReceipts);
   useSocketEvent('receipt_print_request_printed', invalidateReceipts);
