@@ -133,6 +133,14 @@ export function KitchenApp({
     }
   }
 
+  function acceptOrder(id: string) {
+    const isOnlyNewOrder = tab === 'new' && orders.length === 1;
+    return act(id, async () => {
+      await accept.mutateAsync(id);
+      if (isOnlyNewOrder) setTab('in_work');
+    });
+  }
+
   function onLogout() {
     disconnectSocket();
     logout();
@@ -246,7 +254,7 @@ export function KitchenApp({
                     pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []
                   }
                   pendingType={pending?.orderId === o.id ? pending.type : null}
-                  onAccept={() => act(o.id, () => accept.mutateAsync(o.id))}
+                  onAccept={() => acceptOrder(o.id)}
                   onBatch={(type, ids) => onBatch(o.id, type, ids)}
                 />
               </div>
