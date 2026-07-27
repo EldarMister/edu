@@ -11,12 +11,16 @@ export function CancelOrderModal({
   submitting,
   onClose,
   onConfirm,
+  title = 'Отменить заказ?',
+  confirmLabel = 'Отменить заказ',
 }: {
   open: boolean;
   orderLabel: string;
   submitting: boolean;
   onClose: () => void;
   onConfirm: (reason: string) => void;
+  title?: string;
+  confirmLabel?: string;
 }) {
   const [reason, setReason] = useState(REASONS[0]);
   const [comment, setComment] = useState('');
@@ -28,7 +32,7 @@ export function CancelOrderModal({
     <Modal
       open={open}
       onClose={onClose}
-      title="Отменить заказ?"
+      title={title}
       footer={
         <div className="flex gap-2">
           <button className="btn-secondary btn-lg flex-1" onClick={onClose}>
@@ -39,7 +43,7 @@ export function CancelOrderModal({
             disabled={!valid || submitting}
             onClick={() => onConfirm(finalReason)}
           >
-            {submitting ? <Spinner /> : 'Отменить заказ'}
+            {submitting ? <Spinner /> : confirmLabel}
           </button>
         </div>
       }

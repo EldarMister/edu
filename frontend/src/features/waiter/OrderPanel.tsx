@@ -97,6 +97,7 @@ export function OrderPanel({
   onReplaceRejectedItem,
   onRemoveRejectedItem,
   onCancelReadyItem,
+  onInsufficientPermissions,
   onCancelOrder,
   onEdit,
 }: {
@@ -113,6 +114,7 @@ export function OrderPanel({
   onReplaceRejectedItem: (item: Order['items'][number]) => void;
   onRemoveRejectedItem: (item: Order['items'][number]) => void;
   onCancelReadyItem: (item: Order['items'][number], reason: string) => void;
+  onInsufficientPermissions: () => void;
   onCancelOrder: () => void;
   /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
   onEdit?: () => void;
@@ -340,6 +342,11 @@ export function OrderPanel({
               disabled={submitting}
               onClick={() => {
                 if (!billItem) return;
+                if (billItem.status === 'ready' || billItem.status === 'served') {
+                  setBillItem(null);
+                  onInsufficientPermissions();
+                  return;
+                }
                 onCancelReadyItem(billItem, finalCancelReason);
                 setBillItem(null);
               }}

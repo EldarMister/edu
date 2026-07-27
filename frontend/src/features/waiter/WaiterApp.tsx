@@ -32,6 +32,7 @@ import {
   useCancelReadyItem,
   useReplaceRejectedItem,
   useCancelOrder,
+  useCallAdministrator,
   useStartShift,
   useEndShift,
   useCloseTable,
@@ -58,6 +59,7 @@ import { ReceiptPrintSheet } from './ReceiptPrintSheet';
 import { ShiftSummaryModal } from './ShiftSummaryModal';
 import { ShiftRequiredScreen } from './ShiftRequiredScreen';
 import { CancelOrderModal } from './CancelOrderModal';
+import { InsufficientPermissionsModal } from './InsufficientPermissionsModal';
 import {
   TableActionsMenu,
   TableChip,
@@ -102,6 +104,7 @@ export function WaiterApp() {
   const cancelReadyItem = useCancelReadyItem();
   const replaceRejectedItem = useReplaceRejectedItem();
   const cancelOrder = useCancelOrder();
+  const administratorCall = useCallAdministrator();
   const startShift = useStartShift();
   const endShift = useEndShift();
   const closeTable = useCloseTable();
@@ -115,6 +118,7 @@ export function WaiterApp() {
   const [paymentOrder, setPaymentOrder] = useState<Order | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
+  const [administratorCallTarget, setAdministratorCallTarget] = useState<Order | null>(null);
   const [pendingCancel, setPendingCancel] = useState<PendingCancel | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [cabinetOpen, setCabinetOpen] = useState(false);
@@ -411,6 +415,29 @@ export function WaiterApp() {
     if (pendingCancel) commitCancel(pendingCancel); // незавершённую предыдущую — фиксируем сразу
     setPendingCancel({ order: cancelTarget, reason, deadline: Date.now() + CANCEL_UNDO_SECONDS * 1000 });
     setCancelTarget(null);
+  }
+
+  function requestOrderCancellation(order: Order) {
+    if (order.status === 'ready' || order.status === 'served') {
+      setAdministratorCallTarget(order);
+      return;
+    }
+    setCancelTarget(order);
+  }
+
+  async function callAdministrator() {
+    if (!administratorCallTarget) return;
+    try {
+      await administratorCall.mutateAsync(administratorCallTarget.id);
+      setAdministratorCallTarget(null);
+      push({
+        message: t('Администратор вызван'),
+        type: 'success',
+        at: new Date().toISOString(),
+      });
+    } catch (err) {
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
   }
 
   function commitCancel(p: PendingCancel) {
@@ -766,6 +793,7 @@ export function WaiterApp() {
           onReplaceRejectedItem={(item) => replaceRejectedFromOrder(displayedOrder, item)}
           onRemoveRejectedItem={(item) => removeRejectedFromOrder(displayedOrder, item)}
           onCancelReadyItem={(item, reason) => cancelReadyItemFromOrder(displayedOrder, item, reason)}
+          onInsufficientPermissions={() => setAdministratorCallTarget(displayedOrder)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}
         />
@@ -865,7 +893,7 @@ export function WaiterApp() {
                     onClaimQr={claimQr}
                     claimPending={claimQrOrder.isPending}
                     onEdit={startEditOrder}
-                    onCancel={(o) => setCancelTarget(o)}
+                    onCancel={requestOrderCancellation}
                   />
                 </div>
               </>
@@ -895,7 +923,7 @@ export function WaiterApp() {
                   onClaimQr={claimQr}
                   claimPending={claimQrOrder.isPending}
                   onEdit={startEditOrder}
-                  onCancel={(o) => setCancelTarget(o)}
+                  onCancel={requestOrderCancellation}
                 />
               </div>
             </Panel>
@@ -991,6 +1019,13 @@ export function WaiterApp() {
         submitting={cancelOrder.isPending}
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancelOrder}
+      />
+
+      <InsufficientPermissionsModal
+        open={!!administratorCallTarget}
+        onClose={() => setAdministratorCallTarget(null)}
+        onCallAdministrator={callAdministrator}
+        submitting={administratorCall.isPending}
       />
 
       {/* Нижний лист «Печать чека» (ожидание / распечатан / отклонён) */}

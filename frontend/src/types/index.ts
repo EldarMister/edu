@@ -293,6 +293,18 @@ export interface ReceiptPrintRequest {
   voice?: { text?: string | null } | null;
 }
 
+export interface AdministratorCall {
+  orderId: string;
+  orderNumber: string;
+  hallName: string;
+  tableNumber: number;
+  waiterId: string;
+  waiterName: string;
+  createdAt: string;
+  message: string;
+  voice?: { text?: string | null } | null;
+}
+
 /** Локальная позиция корзины (до отправки на кухню). */
 /** Компонент сета в корзине (с применённым изменением). */
 export interface CartSetComponent {
