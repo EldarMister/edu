@@ -111,7 +111,14 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
           }
         >
           {list.map((o) => (
-            <KitchenCard key={o.id} order={o} tab={tab} now={now} station={station} />
+            <KitchenCard
+              key={o.id}
+              order={o}
+              tab={tab}
+              now={now}
+              station={station}
+              onAccepted={list.length === 1 ? () => setTab('in_work') : undefined}
+            />
           ))}
         </ScrollView>
       )}
@@ -124,11 +131,13 @@ function KitchenCard({
   tab,
   now,
   station,
+  onAccepted,
 }: {
   order: Order;
   tab: KitchenTab;
   now: number;
   station: PrepStation;
+  onAccepted?: () => void;
 }) {
   const accept = useAccept(station);
   const ready = useReady();
@@ -304,7 +313,7 @@ function KitchenCard({
               size="md"
               style={{ flex: 1 }}
               loading={accept.isPending}
-              onPress={() => accept.mutate(order.id, { onError })}
+              onPress={() => accept.mutate(order.id, { onError, onSuccess: onAccepted })}
             />
           ) : (
             <Button
