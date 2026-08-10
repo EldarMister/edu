@@ -13,10 +13,12 @@ import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
 import { KitchenVoiceSettings } from './KitchenVoiceSettings';
 import { KitchenStats } from './KitchenStats';
+import { usePublicSettings } from '../settings/api';
 
 const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'new', label: 'Новые' },
   { key: 'in_work', label: 'В работе' },
+  { key: 'delivery', label: 'Доставка' },
   { key: 'ready', label: 'Завершенные' },
   { key: 'rejected', label: 'Отказанные' },
 ];
@@ -53,6 +55,7 @@ export function KitchenApp({
   const { user, logout } = useAuth();
   const push = useNotifications((s) => s.push);
   const pushNotifications = usePushNotifications(user?.role === 'KITCHEN' || user?.role === 'BAR');
+  const publicSettings = usePublicSettings();
 
   const [tab, setTab] = useState<KitchenTab>('new');
   const [showStats, setShowStats] = useState(false);
@@ -74,6 +77,13 @@ export function KitchenApp({
 
   const orders = ordersQ.data ?? [];
   const counts = orders.length;
+  const visibleTabs = publicSettings.data?.deliveryEnabled
+    ? TABS
+    : TABS.filter((item) => item.key !== 'delivery');
+
+  useEffect(() => {
+    if (tab === 'delivery' && publicSettings.data?.deliveryEnabled === false) setTab('new');
+  }, [publicSettings.data?.deliveryEnabled, tab]);
 
   useEffect(() => {
     if (orders.length > 0) setNow(Date.now());
@@ -177,7 +187,7 @@ export function KitchenApp({
       {/* Вкладки + Стоп-лист */}
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-white px-5 py-2.5">
         <div className="no-scrollbar flex gap-2 overflow-x-auto">
-          {TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.key}
               onClick={() => {
@@ -236,6 +246,8 @@ export function KitchenApp({
                 ? 'Нет заказов в работе'
                 : tab === 'ready'
                   ? 'Завершённых заказов нет'
+                  : tab === 'delivery'
+                    ? 'Заказов доставки нет'
                   : 'Отказанных заказов нет'}
           </p>
         ) : (

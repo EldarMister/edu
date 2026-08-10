@@ -75,6 +75,9 @@ export class AdminOrdersService {
       where.OR = [
         { orderNumber: { contains: query.search, mode: 'insensitive' } },
         { waiter: { name: { contains: query.search, mode: 'insensitive' } } },
+        { externalOrderId: { contains: query.search, mode: 'insensitive' } },
+        { deliveryCustomerName: { contains: query.search, mode: 'insensitive' } },
+        { deliveryCustomerPhone: { contains: query.search, mode: 'insensitive' } },
       ];
     }
 

@@ -283,39 +283,39 @@ model Category {
 }
 
 model Dish {
-  cafeId          String?      @map("cafe_id")
-  id              String       @id @default(uuid())
-  categoryId      String       @map("category_id")
-  name            String
-  description     String?
-  price           Decimal      @db.Decimal(10, 2)
-  imageUrl        String?      @map("image_url")
-  discountType    DiscountType @default(none) @map("discount_type")
-  discountValue   Decimal      @default(0) @map("discount_value") @db.Decimal(10, 2)
-  cookingTime     Int?         @map("cooking_time") // минуты, опционально
-  isAvailable     Boolean      @default(true) @map("is_available") // временно отключить
-  isActive        Boolean      @default(true) @map("is_active")
-  sortOrder       Int          @default(0) @map("sort_order")
-  trackInventory  Boolean      @default(false) @map("track_inventory")
-  stock           Int?
-  initialStock    Int?         @map("initial_stock")
-  unit            String       @default("шт")
+  cafeId            String?      @map("cafe_id")
+  id                String       @id @default(uuid())
+  categoryId        String       @map("category_id")
+  name              String
+  description       String?
+  price             Decimal      @db.Decimal(10, 2)
+  imageUrl          String?      @map("image_url")
+  discountType      DiscountType @default(none) @map("discount_type")
+  discountValue     Decimal      @default(0) @map("discount_value") @db.Decimal(10, 2)
+  cookingTime       Int?         @map("cooking_time") // минуты, опционально
+  isAvailable       Boolean      @default(true) @map("is_available") // временно отключить
+  isActive          Boolean      @default(true) @map("is_active")
+  sortOrder         Int          @default(0) @map("sort_order")
+  trackInventory    Boolean      @default(false) @map("track_inventory")
+  stock             Int?
+  initialStock      Int?         @map("initial_stock")
+  unit              String       @default("шт")
   // null = наследовать направление от категории; задано — приоритет над категорией.
-  prepStation     PrepStation? @map("prep_station")
+  prepStation       PrepStation? @map("prep_station")
   // true — это «шапка» сета (состав в SetComponent), а не обычное блюдо.
-  isSet           Boolean      @default(false) @map("is_set")
+  isSet             Boolean      @default(false) @map("is_set")
   // Весовое блюдо открывает у официанта отдельный выбор граммов вместо обычных вариантов.
-  isWeighted      Boolean      @default(false) @map("is_weighted")
+  isWeighted        Boolean      @default(false) @map("is_weighted")
   // Система измерения весового блюда: weight (г/кг) или volume (мл/л).
-  weightedMeasure String       @default("weight") @map("weighted_measure")
+  weightedMeasure   String       @default("weight") @map("weighted_measure")
   // Количество базовых единиц, за которое указана цена (1, 100 или 1000).
-  weightedPriceBase Int        @default(100) @map("weighted_price_base")
+  weightedPriceBase Int          @default(100) @map("weighted_price_base")
   // Отдельное название для озвучки кухни (если задано — используется вместо name).
-  voiceName       String?      @map("voice_name")
-  popularityScore Float        @default(0) @map("popularity_score")
-  scoreUpdatedAt  DateTime?    @map("score_updated_at")
-  createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
+  voiceName         String?      @map("voice_name")
+  popularityScore   Float        @default(0) @map("popularity_score")
+  scoreUpdatedAt    DateTime?    @map("score_updated_at")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
 
   category           Category                @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   orderItems         OrderItem[]
@@ -388,8 +388,13 @@ model Order {
   tableId                String         @map("table_id")
   // nullable: заказ из QR-меню создаётся без официанта (source=qr).
   waiterId               String?        @map("waiter_id")
-  // Источник заказа: pos — создан сотрудником, qr — гостем через QR-меню.
+  // Источник заказа: pos — сотрудник, qr — QR-меню, delivery — внешнее приложение.
   source                 String         @default("pos")
+  // Идентификатор и данные внешнего заказа доставки. Для pos/qr остаются null.
+  externalOrderId        String?        @map("external_order_id")
+  deliveryCustomerName   String?        @map("delivery_customer_name")
+  deliveryCustomerPhone  String?        @map("delivery_customer_phone")
+  deliveryAddress        String?        @map("delivery_address")
   waiterShiftId          String?        @map("waiter_shift_id")
   status                 OrderStatus    @default(draft)
   totalAmount            Decimal        @default(0) @map("total_amount") @db.Decimal(10, 2)
@@ -427,7 +432,9 @@ model Order {
   qrSession            QrTableSession?
 
   @@unique([cafeId, businessDate, orderNumber])
+  @@unique([cafeId, externalOrderId])
   @@index([status])
+  @@index([source, status])
   @@index([tableId])
   @@index([waiterId])
   @@index([waiterShiftId])
@@ -690,6 +697,14 @@ model Settings {
   qrImageUrl                   String? @map("qr_image_url") // data URL загруженного QR-кода (один на заведение)
   printerConnected             Boolean @default(false) @map("printer_connected")
   allowNegativeIngredientStock Boolean @default(true) @map("allow_negative_ingredient_stock")
+
+  // Интеграция внешнего сайта/приложения доставки. Полный API-ключ не хранится:
+  // только SHA-256 и безопасный префикс для отображения владельцу.
+  deliveryEnabled      Boolean @default(false) @map("delivery_enabled")
+  deliveryApiKeyHash   String? @unique @map("delivery_api_key_hash")
+  deliveryApiKeyPrefix String? @map("delivery_api_key_prefix")
+  // Скрытый служебный стол сохраняет совместимость с единым Order workflow.
+  deliveryTableId      String? @map("delivery_table_id")
 
   // Экран очереди заказов (табло в зале): включается по желанию владельца.
   // Режим: table — показываем номера столов, number — номера заказов.

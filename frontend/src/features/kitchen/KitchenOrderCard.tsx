@@ -65,15 +65,17 @@ export function KitchenOrderCard({
   ) => void;
 }) {
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
-  const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
+  const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work' || tab === 'delivery');
   const badgeStatus = kitchenCardBadgeStatus(order, tab);
   const qrOrder = isQrOrder(order);
+  const deliveryOrder = order.source === 'delivery';
   const visibleOrderComment = kitchenOrderComment(order.comment, qrOrder);
   // Частичный отказ/ожидание решения — только если отказ есть среди позиций ЭТОЙ станции.
   // Станции независимы: отказ на баре не блокирует кухню и наоборот.
   const stationRejected = order.items.some((it) => it.status === 'rejected');
   const waitingDecision = order.requiresWaiterDecision && stationRejected;
-  const canSelect = (tab === 'new' || tab === 'in_work') && !waitingDecision;
+  const canSelect = (tab === 'new' || tab === 'in_work' || tab === 'delivery') && !waitingDecision;
+  const deliveryIsNew = deliveryOrder && order.status === 'sent_to_kitchen';
 
   // «С собой»: если все живые позиции навынос — бейдж на весь заказ, иначе помечаем точечно.
   const liveItems = order.items.filter((it) => it.status !== 'rejected' && it.status !== 'cancelled');
@@ -299,7 +301,13 @@ export function KitchenOrderCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-lg font-bold leading-tight text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
-          <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}{hallSuffix(order.table)}</p>
+          {deliveryOrder ? (
+            <p className="mt-1 text-[13px] font-medium text-primary">
+              Доставка{order.externalOrderId ? ` · ${order.externalOrderId}` : ''}
+            </p>
+          ) : (
+            <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}{hallSuffix(order.table)}</p>
+          )}
           {qrOrder && (
             <p className="mt-2 inline-flex rounded-lg bg-warning/10 px-2.5 py-1 text-[12px] font-medium text-warning">
               {QR_ORDER_COMMENT}
@@ -309,9 +317,11 @@ export function KitchenOrderCard({
         <div className="text-right">
           <p className="text-[13px] text-text-muted">
             {/* Завершённые/отказанные показываем с датой — их смотрят позже. */}
-            {tab === 'new' || tab === 'in_work' ? timeHM(order.createdAt) : `${dateDM(order.createdAt)} ${timeHM(order.createdAt)}`}
+            {tab === 'new' || tab === 'in_work' || tab === 'delivery'
+              ? timeHM(order.createdAt)
+              : `${dateDM(order.createdAt)} ${timeHM(order.createdAt)}`}
           </p>
-          {tab === 'new' || tab === 'in_work' ? (
+          {tab === 'new' || tab === 'in_work' || tab === 'delivery' ? (
             <p className={`text-[15px] font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
               {elapsed(order.createdAt, now)}
             </p>
@@ -498,7 +508,7 @@ export function KitchenOrderCard({
               >
                 Отказать выбранные
               </button>
-              {tab === 'in_work' && (
+              {(tab === 'in_work' || (tab === 'delivery' && !deliveryIsNew)) && (
                 <button
                   onClick={() => runBatch('ready')}
                   className="btn-primary h-8 rounded-lg px-2.5 text-[13px] font-semibold"
@@ -524,7 +534,7 @@ export function KitchenOrderCard({
           >
             Отменить заказ
           </button>
-          {tab === 'new' ? (
+          {tab === 'new' || deliveryIsNew ? (
             <button
               className="btn-primary btn-md flex-1 font-semibold"
               disabled={submitting}

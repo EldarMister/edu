@@ -230,7 +230,11 @@ export interface Order {
   createdAt: string;
   table: { id: string; number: number; seats: number; hallId: string; status: TableStatus; hall?: { name: string } };
   waiter: { id: string; name: string } | null;
-  source?: 'waiter' | 'qr';
+  source?: 'pos' | 'qr' | 'delivery';
+  externalOrderId?: string | null;
+  deliveryCustomerName?: string | null;
+  deliveryCustomerPhone?: string | null;
+  deliveryAddress?: string | null;
   items: OrderItem[];
   /** Разбивка оплат (для смешанной — наличные + QR). Приходит в списке заказов админки. */
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];

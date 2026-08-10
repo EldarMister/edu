@@ -27,6 +27,10 @@ export interface Settings {
   payCard: boolean;
   qrImageUrl: string | null;
   printerConnected: boolean;
+  // Интеграция сайта/приложения доставки
+  deliveryEnabled: boolean;
+  deliveryApiKeyConfigured: boolean;
+  deliveryApiKeyPrefix: string | null;
   // Экран очереди заказов (табло в зале)
   queueDisplayEnabled: boolean;
   queueDisplayMode: 'table' | 'number';
@@ -60,6 +64,7 @@ export interface PublicSettings {
   qrImageUrl: string | null;
   printerConnected: boolean;
   fiscalEnabled: boolean;
+  deliveryEnabled: boolean;
 }
 
 /** Публичные настройки (реквизиты + включённые способы оплаты) — для всех ролей. */
@@ -89,6 +94,22 @@ export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'queueDispl
 export function useTestFiscalConnection() {
   return useMutation({
     mutationFn: async () => (await api.post<{ ok: boolean }>('/fiscal/test-connection')).data,
+  });
+}
+
+/** Выпускает новый ключ доставки; полный ключ сервер показывает только в этом ответе. */
+export function useGenerateDeliveryApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      (await api.post<{ apiKey: string; prefix: string }>('/admin/settings/delivery-api-key')).data,
+    onSuccess: ({ prefix }) => {
+      qc.setQueryData<Settings>(['settings', 'admin'], (current) =>
+        current
+          ? { ...current, deliveryApiKeyConfigured: true, deliveryApiKeyPrefix: prefix }
+          : current,
+      );
+    },
   });
 }
 
