@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
-import { apiError } from '@/lib/api';
+import { API_URL, apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { useLocale, type Locale } from '@/store/locale';
+import { useAuth } from '@/store/auth';
 import {
   IconGlobe,
   IconQr,
@@ -12,7 +13,13 @@ import {
   IconCard,
   IconPrinter,
 } from '../admin/components/icons';
-import { useAdminSettings, useUpdateSettings, useTestFiscalConnection, type SettingsInput } from './api';
+import {
+  useAdminSettings,
+  useGenerateDeliveryApiKey,
+  useUpdateSettings,
+  useTestFiscalConnection,
+  type SettingsInput,
+} from './api';
 import { QrPaymentCard } from './QrPaymentCard';
 
 type FiscalProvider = '' | 'ekassa' | 'yakassa' | 'mock';
@@ -30,6 +37,7 @@ interface Form {
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
+  deliveryEnabled: boolean;
   qrGeoEnabled: boolean;
   qrGeoLat: number | null;
   qrGeoLng: number | null;
@@ -50,11 +58,14 @@ export function SettingsPage() {
   const { data, isLoading, isError, error } = useAdminSettings();
   const update = useUpdateSettings();
   const testFiscal = useTestFiscalConnection();
+  const generateDeliveryKey = useGenerateDeliveryApiKey();
   const push = useNotifications((s) => s.push);
+  const isOwner = useAuth((s) => s.user?.role === 'OWNER');
   const setLocale = useLocale((s) => s.setLocale);
   const t = useT();
   const [fiscalCheck, setFiscalCheck] = useState<'ok' | 'fail' | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [generatedDeliveryKey, setGeneratedDeliveryKey] = useState<string | null>(null);
 
   const [form, setForm] = useState<Form | null>(null);
 
@@ -73,6 +84,7 @@ export function SettingsPage() {
         payQr: data.payQr,
         payCash: data.payCash,
         payCard: data.payCard,
+        deliveryEnabled: data.deliveryEnabled,
         qrGeoEnabled: data.qrGeoEnabled,
         qrGeoLat: data.qrGeoLat,
         qrGeoLng: data.qrGeoLng,
@@ -118,6 +130,7 @@ export function SettingsPage() {
     payQr: source.payQr,
     payCash: source.payCash,
     payCard: source.payCard,
+    deliveryEnabled: source.deliveryEnabled,
     qrGeoEnabled: source.qrGeoEnabled,
     qrGeoLat: source.qrGeoLat,
     qrGeoLng: source.qrGeoLng,
@@ -206,6 +219,20 @@ export function SettingsPage() {
       }
     } catch (err) {
       setFiscalCheck('fail');
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  };
+
+  const createDeliveryKey = async () => {
+    try {
+      const result = await generateDeliveryKey.mutateAsync();
+      setGeneratedDeliveryKey(result.apiKey);
+      push({
+        message: t('Новый API-ключ создан. Скопируйте его сейчас.'),
+        type: 'success',
+        at: new Date().toISOString(),
+      });
+    } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   };
@@ -512,6 +539,85 @@ export function SettingsPage() {
                 ) : (
                   <p className="rounded-lg border border-border bg-background px-3 py-2 text-xs text-text-muted">
                     {t('Сохраните изменения — появится ссылка для монитора.')}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Интеграция сайта/приложения доставки */}
+          <div className="card p-5">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <h3 className="text-[15px] font-semibold text-text-primary">{t('Онлайн-заказы / Доставка')}</h3>
+                <p className="mt-1 text-xs text-text-muted">
+                  {t('Приём заказов с внешнего сайта или приложения через API EDU POS.')}
+                </p>
+              </div>
+              <Toggle
+                checked={form.deliveryEnabled}
+                onChange={(value) => {
+                  setGeneratedDeliveryKey(null);
+                  set('deliveryEnabled', value, 'instant');
+                }}
+              />
+            </div>
+
+            {form.deliveryEnabled && (
+              <div className="space-y-3 rounded-xl border border-border p-3">
+                <div>
+                  <p className="text-xs text-text-muted">{t('Адрес API')}</p>
+                  <code className="mt-1 block break-all rounded-lg bg-background px-3 py-2 text-xs text-text-primary">
+                    {API_URL}/api/integration/v1
+                  </code>
+                </div>
+                <div>
+                  <p className="text-xs text-text-muted">{t('API-ключ')}</p>
+                  <code className="mt-1 block break-all rounded-lg bg-background px-3 py-2 text-xs text-text-primary">
+                    {generatedDeliveryKey ?? data.deliveryApiKeyPrefix ?? t('Ключ ещё не создан')}
+                  </code>
+                  {generatedDeliveryKey && (
+                    <p className="mt-1.5 text-xs font-medium text-warning">
+                      {t('Сохраните ключ сейчас: повторно полный ключ показан не будет.')}
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {generatedDeliveryKey && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(generatedDeliveryKey);
+                        push({ message: t('Ключ скопирован'), type: 'success', at: new Date().toISOString() });
+                      }}
+                      className="rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10"
+                    >
+                      {t('Копировать ключ')}
+                    </button>
+                  )}
+                  {isOwner && (
+                    <button
+                      type="button"
+                      onClick={() => void createDeliveryKey()}
+                      disabled={dirty || !data.deliveryEnabled || generateDeliveryKey.isPending}
+                      className="rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/10 disabled:opacity-50"
+                    >
+                      {generateDeliveryKey.isPending
+                        ? t('Создаём…')
+                        : data.deliveryApiKeyConfigured
+                          ? t('Перевыпустить ключ')
+                          : t('Создать API-ключ')}
+                    </button>
+                  )}
+                </div>
+                {isOwner && (dirty || !data.deliveryEnabled) && (
+                  <p className="text-xs text-text-muted">
+                    {t('Сначала сохраните включение доставки, затем создайте ключ.')}
+                  </p>
+                )}
+                {!isOwner && (
+                  <p className="text-xs text-text-muted">
+                    {t('Создавать и перевыпускать API-ключ может только владелец.')}
                   </p>
                 )}
               </div>

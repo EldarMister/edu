@@ -1,6 +1,10 @@
 import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class UpdateSettingsDto {
+  // ---- Интеграция доставки ----
+  @IsOptional() @IsBoolean()
+  deliveryEnabled?: boolean;
+
   @IsOptional() @IsString() @MaxLength(80)
   cafeName?: string;
 

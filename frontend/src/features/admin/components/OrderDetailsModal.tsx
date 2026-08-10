@@ -39,6 +39,7 @@ export function OrderDetailsModal({
   const showMixedBreakdown =
     order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
   const itemCancellationAllowed = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
+  const isDelivery = order.source === 'delivery';
 
   async function confirmItemCancellation(reason: string) {
     if (!cancelItem) return;
@@ -59,14 +60,17 @@ export function OrderDetailsModal({
   const infoRows: { label: string; value: React.ReactNode }[][] = [
     [
       { label: 'Статус', value: <OrderStatusBadges order={order} /> },
-      { label: 'Официант', value: order.waiter?.name ?? 'QR menu' },
+      { label: isDelivery ? 'Источник' : 'Официант', value: isDelivery ? 'Доставка' : order.waiter?.name ?? 'QR menu' },
     ],
     [
       { label: 'Дата', value: `${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}` },
       { label: 'Сумма', value: money(order.finalAmount) },
     ],
     [
-      { label: 'Стол', value: `Стол ${order.table.number}${hallSuffix(order.table)}` },
+      {
+        label: isDelivery ? 'Внешний заказ' : 'Стол',
+        value: isDelivery ? order.externalOrderId ?? '—' : `Стол ${order.table.number}${hallSuffix(order.table)}`,
+      },
       { label: 'Оплата', value: order.paymentMethod ? paymentDisplayLabel(order) : '—' },
     ],
   ];
@@ -75,6 +79,17 @@ export function OrderDetailsModal({
       { label: 'Наличными', value: money(mixedSumBy(order, 'cash')) },
       { label: 'QR', value: money(mixedSumBy(order, 'qr')) },
     ]);
+  }
+  if (isDelivery) {
+    infoRows.push(
+      [
+        { label: 'Клиент', value: order.deliveryCustomerName ?? '—' },
+        { label: 'Телефон', value: order.deliveryCustomerPhone ?? '—' },
+      ],
+      [
+        { label: 'Адрес доставки', value: order.deliveryAddress ?? '—' },
+      ],
+    );
   }
 
   return (

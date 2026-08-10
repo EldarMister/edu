@@ -324,9 +324,15 @@ export function OrdersPage() {
                       {new Date(ord.createdAt).toLocaleDateString('ru-RU')} {timeHM(ord.createdAt)}
                     </Td>
                     <Td className="text-text-secondary">
-                      {tr('Стол')} {ord.table.number}{hallSuffix(ord.table)}
+                      {ord.source === 'delivery' ? '—' : <>{tr('Стол')} {ord.table.number}{hallSuffix(ord.table)}</>}
                     </Td>
-                    <Td className="text-text-secondary">{ord.waiter?.name ?? 'QR menu'}</Td>
+                    <Td className="text-text-secondary">
+                      {ord.source === 'delivery' ? (
+                        <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
+                          {tr('Доставка')}
+                        </span>
+                      ) : ord.waiter?.name ?? 'QR menu'}
+                    </Td>
                     <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
                     <Td className="pl-4">
                       <OrderStatusBadges

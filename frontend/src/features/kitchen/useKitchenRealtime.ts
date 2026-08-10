@@ -43,7 +43,9 @@ export function useKitchenRealtime(station: PrepStation = 'kitchen') {
 
       const orderNumber = displayOrderNumber(order.orderNumber);
       push({
-        message: `Новый заказ ${orderNumber} · Стол ${order.table?.number}`,
+        message: order.source === 'delivery'
+          ? `Новый заказ доставки ${orderNumber}`
+          : `Новый заказ ${orderNumber} · Стол ${order.table?.number}`,
         orderId: order.id,
         orderNumber,
         at: new Date().toISOString(),
@@ -70,5 +72,10 @@ export function useKitchenRealtime(station: PrepStation = 'kitchen') {
   useSocketEvent('menu:updated', () => {
     qc.invalidateQueries({ queryKey: ['kitchen'] });
     qc.invalidateQueries({ queryKey: ['kitchen', 'stop-list'] });
+  });
+
+  // Включение/выключение доставки владельцем сразу добавляет или скрывает вкладку.
+  useSocketEvent('settings:updated', () => {
+    qc.invalidateQueries({ queryKey: ['settings'] });
   });
 }

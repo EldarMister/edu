@@ -31,6 +31,7 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { TenantContextMiddleware } from './tenant/tenant-context.middleware';
+import { DeliveryIntegrationModule } from './delivery-integration/delivery-integration.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { TenantContextMiddleware } from './tenant/tenant-context.middleware';
     MonitoringModule,
     BackupBotModule,
     PlatformModule,
+    DeliveryIntegrationModule,
   ],
   providers: [
     // Глобально: сначала проверка JWT, затем роли, затем права доступа к разделам.

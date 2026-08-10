@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Res } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { Role } from '@prisma/client';
 import { SettingsService } from './settings.service';
@@ -37,7 +37,7 @@ export class SettingsController {
   @Roles(Role.ADMIN, Role.OWNER)
   @RequirePermission('sections.settings')
   get() {
-    return this.settings.get();
+    return this.settings.getForAdmin();
   }
 
   @Patch('admin/settings')
@@ -45,5 +45,12 @@ export class SettingsController {
   @RequirePermission('sections.settings')
   update(@Body() dto: UpdateSettingsDto, @CurrentUser() user: AuthUser) {
     return this.settings.update(dto, user);
+  }
+
+  /** Полный ключ виден только владельцу и только в ответе на выпуск/перевыпуск. */
+  @Post('admin/settings/delivery-api-key')
+  @Roles(Role.OWNER)
+  regenerateDeliveryApiKey(@CurrentUser() user: AuthUser) {
+    return this.settings.regenerateDeliveryApiKey(user);
   }
 }

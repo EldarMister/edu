@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { PaymentMethod, Prisma, Settings } from '@prisma/client';
+import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
@@ -22,6 +23,7 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   payCash: 'оплата наличными',
   payCard: 'оплата картой',
   allowNegativeIngredientStock: 'минусовой остаток сырья',
+  deliveryEnabled: 'интеграция доставки',
   queueDisplayEnabled: 'экран очереди заказов',
   queueDisplayMode: 'режим экрана очереди',
   qrGeoEnabled: 'гео-проверка QR',
@@ -70,8 +72,26 @@ export class SettingsService {
   }
 
   /** Полные настройки (для страницы владельца). */
-  async get() {
+  async get(): Promise<Settings> {
     return this.ensureQueueCode(await this.ensure());
+  }
+
+  /** Настройки для административного интерфейса без хеша внешнего API-ключа. */
+  async getForAdmin() {
+    return this.forAdmin(await this.get());
+  }
+
+  /** Никогда не отдаём хеш ключа через обычный API настроек. */
+  private forAdmin(s: Settings) {
+    const {
+      deliveryApiKeyHash: _secretHash,
+      deliveryTableId: _internalDeliveryTableId,
+      ...safe
+    } = s;
+    return {
+      ...safe,
+      deliveryApiKeyConfigured: !!_secretHash,
+    };
   }
 
   /** Генерирует короткий код табло, если оно включено, а кода ещё нет. */
@@ -110,6 +130,7 @@ export class SettingsService {
       printerConnected: s.printerConnected,
       // Включена ли ККМ — без раскрытия ключей (нужно фронтенду для подсказок/гейтинга).
       fiscalEnabled: !!s.fiscalProvider,
+      deliveryEnabled: s.deliveryEnabled,
     };
   }
 
@@ -134,7 +155,7 @@ export class SettingsService {
     return { mime: m[1], buffer: Buffer.from(m[2], 'base64') };
   }
 
-  async update(dto: UpdateSettingsDto, actor: AuditActor): Promise<Settings> {
+  async update(dto: UpdateSettingsDto, actor: AuditActor) {
     const current = await this.ensure();
 
     // Проверка: хотя бы один способ оплаты должен остаться включённым.
@@ -211,7 +232,38 @@ export class SettingsService {
       });
     }
 
-    return this.ensureQueueCode(updated);
+    return this.forAdmin(await this.ensureQueueCode(updated));
+  }
+
+  /**
+   * Выпускает новый ключ внешнего API. Полный ключ возвращается только один раз,
+   * в базе хранится SHA-256, поэтому его нельзя восстановить из настроек.
+   */
+  async regenerateDeliveryApiKey(actor: AuditActor) {
+    const current = await this.ensure();
+    if (!current.deliveryEnabled) {
+      throw new BadRequestException('Сначала включите интеграцию доставки и сохраните настройки');
+    }
+
+    const apiKey = `edu_live_${randomBytes(32).toString('base64url')}`;
+    const prefix = `${apiKey.slice(0, 17)}…`;
+    const hash = createHash('sha256').update(apiKey).digest('hex');
+    await this.prisma.settings.update({
+      where: { id: current.id },
+      data: { deliveryApiKeyHash: hash, deliveryApiKeyPrefix: prefix },
+    });
+
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.SETTINGS_UPDATED,
+      entityType: AuditEntity.SETTINGS,
+      entityId: current.id,
+      description: `${actor.name ?? 'Владелец'} выпустил новый API-ключ доставки`,
+      oldValue: { deliveryApiKey: current.deliveryApiKeyHash ? 'задан' : 'нет' },
+      newValue: { deliveryApiKey: 'обновлён' },
+    });
+
+    return { apiKey, prefix };
   }
 
   /** Список включённых способов оплаты. */

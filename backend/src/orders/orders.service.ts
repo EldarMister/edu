@@ -458,6 +458,153 @@ export class OrdersService {
     return order;
   }
 
+  /**
+   * Создаёт обычный заказ Order из внешнего приложения доставки. Вся дальнейшая
+   * обработка идёт через существующий workflow кухни; отдельной сущности заказа нет.
+   */
+  async createFromDelivery(params: {
+    externalOrderId: string;
+    customerName?: string;
+    customerPhone?: string;
+    deliveryAddress?: string;
+    comment?: string;
+    items: CreateOrderItemDto[];
+  }) {
+    const cafeId = getCafeId();
+    if (!cafeId) throw new BadRequestException('Не удалось определить кафе');
+
+    const settings = await this.settings.ensure();
+    if (!settings.deliveryEnabled) {
+      throw new ForbiddenException('Интеграция доставки выключена');
+    }
+
+    const existing = await this.prisma.order.findFirst({
+      where: { source: 'delivery', externalOrderId: params.externalOrderId },
+      include: orderInclude,
+    });
+    if (existing) return existing;
+
+    const table = await this.ensureDeliveryTable(settings.id, settings.deliveryTableId, cafeId);
+    const deliveryItems = params.items.map((item) => ({ ...item, takeaway: true }));
+    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(deliveryItems);
+    const hasPrep = itemsData.some((item) => item.prepStation !== PrepStation.none);
+    const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
+
+    let order: Awaited<ReturnType<typeof this.findById>> | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        order = await this.prisma.$transaction(async (tx) => {
+          // Доставка не получает ресторанный сервисный сбор: внешний клиент
+          // ориентируется на цены меню, которые возвращает integration API.
+          const totals = this.calcTotals(itemsData, 0);
+          const businessDate = this.businessDateOf();
+          const orderNumber = await this.nextOrderNumber(tx, businessDate);
+          await this.deductInventory(tx, dishDeductions, variantDeductions);
+          const createdOrder = await tx.order.create({
+            data: {
+              orderNumber,
+              businessDate,
+              tableId: table.id,
+              waiterId: null,
+              waiterShiftId: null,
+              source: 'delivery',
+              externalOrderId: params.externalOrderId,
+              deliveryCustomerName: params.customerName,
+              deliveryCustomerPhone: params.customerPhone,
+              deliveryAddress: params.deliveryAddress,
+              status: initialStatus,
+              comment: params.comment,
+              totalAmount: totals.total,
+              discountAmount: totals.discount,
+              serviceChargeAmount: totals.serviceCharge,
+              finalAmount: totals.final,
+              items: { create: itemsData },
+            },
+            include: orderInclude,
+          });
+          const ingredientStockWarnings = await this.ingredientStock.applyDishSale(
+            tx,
+            createdOrder.id,
+            createdOrder.items,
+          );
+          return Object.assign(createdOrder, { ingredientStockWarnings });
+        });
+        break;
+      } catch (err) {
+        if (!this.isUniqueConstraintError(err)) throw err;
+        const duplicate = await this.prisma.order.findFirst({
+          where: { source: 'delivery', externalOrderId: params.externalOrderId },
+          include: orderInclude,
+        });
+        if (duplicate) return duplicate;
+        if (attempt === 2) throw err;
+      }
+    }
+    if (!order) throw new BadRequestException('Не удалось создать заказ доставки');
+
+    if (hasPrep) {
+      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
+        ...order,
+        voice: {
+          byStation: {
+            kitchen: buildNewOrderText(order, PrepStation.kitchen),
+            bar: buildNewOrderText(order, PrepStation.bar),
+          },
+        },
+      });
+      this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
+      void this.notifyKitchenNewOrder(order);
+    }
+    this.events.emitToAdmin(SERVER_EVENTS.ORDER_NEW, order);
+
+    await this.audit.log({
+      actor: null,
+      actionType: AuditAction.ORDER_CREATED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId: order.id,
+      tableId: order.tableId,
+      description: `API доставки: создан заказ ${order.orderNumber}, сумма ${this.money(order.finalAmount)}`,
+      newValue: {
+        orderNumber: order.orderNumber,
+        externalOrderId: params.externalOrderId,
+        finalAmount: Number(order.finalAmount),
+        source: 'delivery',
+      },
+      metadata: { itemsCount: order.items.length, source: 'delivery' },
+    });
+
+    return order;
+  }
+
+  /** Создаёт невидимый служебный стол один раз для совместимости старого Order.tableId. */
+  private async ensureDeliveryTable(settingsId: string, configuredTableId: string | null, cafeId: string) {
+    if (configuredTableId) {
+      const configured = await this.prisma.table.findUnique({ where: { id: configuredTableId } });
+      if (configured?.cafeId === cafeId) return configured;
+    }
+
+    // Детерминированные id делают первый параллельный запрос безопасным: оба
+    // запроса выполнят upsert одной и той же служебной пары зал/стол.
+    const hallId = `delivery-hall:${cafeId}`;
+    const tableId = `delivery-table:${cafeId}`;
+    const hall = await this.prisma.hall.upsert({
+      where: { id: hallId },
+      update: { isActive: false },
+      create: { id: hallId, name: '__DELIVERY__', isActive: false, sortOrder: -1 },
+    });
+    const table = await this.prisma.table.upsert({
+      where: { id: tableId },
+      update: { isActive: false },
+      create: { id: tableId, hallId: hall.id, number: 0, seats: 1, isActive: false, sortOrder: -1 },
+    });
+    await this.prisma.settings.update({
+      where: { id: settingsId },
+      data: { deliveryTableId: table.id },
+    });
+    return table;
+  }
+
   /** Официант берёт свободный QR-заказ. Все официанты видят его до первого успешного claim. */
   async claimQrOrder(orderId: string, actor: AuditActor) {
     const before = await this.prisma.order.findUnique({
@@ -1226,7 +1373,7 @@ export class OrdersService {
         where: { id: orderId },
         data: {
           status: remaining === 0 ? OrderStatus.rejected : OrderStatus.partially_rejected,
-          requiresWaiterDecision: remaining > 0,
+          requiresWaiterDecision: remaining > 0 && order.source !== 'delivery',
         },
         include: orderInclude,
       });
@@ -1633,7 +1780,7 @@ export class OrdersService {
         where: { id: orderId },
         data: {
           status: remaining === 0 ? OrderStatus.rejected : OrderStatus.partially_rejected,
-          requiresWaiterDecision: remaining > 0,
+          requiresWaiterDecision: remaining > 0 && order.source !== 'delivery',
         },
         include: orderInclude,
       });
@@ -3058,6 +3205,8 @@ export class OrdersService {
   private notifyKitchenNewOrder(order: {
     id: string;
     orderNumber: string;
+    source?: string;
+    cafeId?: string | null;
     table: { number: number };
     items?: { prepStation: PrepStation }[];
   }) {
@@ -3065,7 +3214,10 @@ export class OrdersService {
     if (stations.size === 0) stations.add(PrepStation.kitchen);
     const payload = {
       title: 'EDU POS',
-      body: `Новый заказ ${order.orderNumber} · Стол ${order.table.number}`,
+      body:
+        order.source === 'delivery'
+          ? `Новый заказ доставки ${order.orderNumber}`
+          : `Новый заказ ${order.orderNumber} · Стол ${order.table.number}`,
       type: 'info' as const,
       orderId: order.id,
       orderNumber: order.orderNumber,
@@ -3073,10 +3225,10 @@ export class OrdersService {
     };
     return Promise.all([
       stations.has(PrepStation.kitchen)
-        ? this.push.notifyRole(Role.KITCHEN, { ...payload, url: '/kitchen' })
+        ? this.push.notifyRole(Role.KITCHEN, { ...payload, url: '/kitchen' }, order.cafeId)
         : Promise.resolve(),
       stations.has(PrepStation.bar)
-        ? this.push.notifyRole(Role.BAR, { ...payload, url: '/bar' })
+        ? this.push.notifyRole(Role.BAR, { ...payload, url: '/bar' }, order.cafeId)
         : Promise.resolve(),
     ]);
   }
