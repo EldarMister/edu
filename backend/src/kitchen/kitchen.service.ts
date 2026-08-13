@@ -8,14 +8,7 @@ import { AuditService, AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { StopListItemDto } from './dto/stop-list.dto';
 
-export type KitchenTab = 'new' | 'in_work' | 'delivery' | 'ready' | 'rejected';
-
-const ACTIVE_DELIVERY_STATUSES: OrderStatus[] = [
-  OrderStatus.sent_to_kitchen,
-  OrderStatus.accepted_by_kitchen,
-  OrderStatus.cooking,
-  OrderStatus.partially_rejected,
-];
+export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
 
 /** Статусы заказа, в которых станция может иметь активные позиции. */
 const ACTIVE_TAB_STATUSES: OrderStatus[] = [
@@ -111,27 +104,6 @@ export class KitchenService {
   async findByTab(tab: KitchenTab, station: PrepStation = PrepStation.kitchen) {
     const todayStart = startOfToday();
 
-    if (tab === 'delivery') {
-      const orders = await this.prisma.order.findMany({
-        where: {
-          source: 'delivery',
-          status: { in: ACTIVE_DELIVERY_STATUSES },
-          items: {
-            some: {
-              prepStation: station,
-              status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] },
-            },
-          },
-        },
-        orderBy: { createdAt: 'asc' },
-        include: orderInclude,
-      });
-      return orders.map((order) => ({
-        ...order,
-        items: order.items.filter((item) => item.prepStation === station),
-      }));
-    }
-
     if (tab === 'rejected') {
       // Отказанные — как и завершённые: только за сегодня, недавние сверху.
       const orders = await this.prisma.order.findMany({
@@ -157,7 +129,6 @@ export class KitchenService {
     const orders = await this.prisma.order.findMany({
       where: {
         ...statusWhere,
-        ...(tab === 'new' || tab === 'in_work' ? { source: { not: 'delivery' } } : {}),
         items: {
           some: {
             prepStation: station,

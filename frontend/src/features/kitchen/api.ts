@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, networkRetry } from '@/lib/api';
 import type { Order, PrepStation } from '@/types';
 
-export type KitchenTab = 'new' | 'in_work' | 'delivery' | 'ready' | 'rejected';
+export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
 
 export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitchen') {
   return useQuery({

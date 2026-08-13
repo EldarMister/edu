@@ -65,7 +65,7 @@ export function KitchenOrderCard({
   ) => void;
 }) {
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
-  const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work' || tab === 'delivery');
+  const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
   const badgeStatus = kitchenCardBadgeStatus(order, tab);
   const qrOrder = isQrOrder(order);
   const deliveryOrder = order.source === 'delivery';
@@ -74,8 +74,7 @@ export function KitchenOrderCard({
   // Станции независимы: отказ на баре не блокирует кухню и наоборот.
   const stationRejected = order.items.some((it) => it.status === 'rejected');
   const waitingDecision = order.requiresWaiterDecision && stationRejected;
-  const canSelect = (tab === 'new' || tab === 'in_work' || tab === 'delivery') && !waitingDecision;
-  const deliveryIsNew = deliveryOrder && order.status === 'sent_to_kitchen';
+  const canSelect = (tab === 'new' || tab === 'in_work') && !waitingDecision;
 
   // «С собой»: если все живые позиции навынос — бейдж на весь заказ, иначе помечаем точечно.
   const liveItems = order.items.filter((it) => it.status !== 'rejected' && it.status !== 'cancelled');
@@ -302,8 +301,8 @@ export function KitchenOrderCard({
         <div className="min-w-0">
           <p className="text-lg font-bold leading-tight text-text-primary">{displayOrderNumber(order.orderNumber)}</p>
           {deliveryOrder ? (
-            <p className="mt-1 text-[13px] font-medium text-primary">
-              Доставка{order.externalOrderId ? ` · ${order.externalOrderId}` : ''}
+            <p className="mt-1 text-[13px] text-text-muted">
+              {order.externalOrderId ? `Внешний заказ ${order.externalOrderId}` : 'Онлайн-заказ'}
             </p>
           ) : (
             <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}{hallSuffix(order.table)}</p>
@@ -317,11 +316,11 @@ export function KitchenOrderCard({
         <div className="text-right">
           <p className="text-[13px] text-text-muted">
             {/* Завершённые/отказанные показываем с датой — их смотрят позже. */}
-            {tab === 'new' || tab === 'in_work' || tab === 'delivery'
+            {tab === 'new' || tab === 'in_work'
               ? timeHM(order.createdAt)
               : `${dateDM(order.createdAt)} ${timeHM(order.createdAt)}`}
           </p>
-          {tab === 'new' || tab === 'in_work' || tab === 'delivery' ? (
+          {tab === 'new' || tab === 'in_work' ? (
             <p className={`text-[15px] font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
               {elapsed(order.createdAt, now)}
             </p>
@@ -335,11 +334,18 @@ export function KitchenOrderCard({
 
       {order.waiter && <p className="mt-0.5 text-[13px] text-text-muted">Официант: {order.waiter.name}</p>}
 
-      {allTakeaway && (
-        <div className="mt-2">
-          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
-            <TakeawayIcon /> Весь заказ с собой
-          </span>
+      {(allTakeaway || deliveryOrder) && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {allTakeaway && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
+              <TakeawayIcon /> Весь заказ с собой
+            </span>
+          )}
+          {deliveryOrder && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning">
+              <DeliveryIcon /> Доставка
+            </span>
+          )}
         </div>
       )}
 
@@ -508,7 +514,7 @@ export function KitchenOrderCard({
               >
                 Отказать выбранные
               </button>
-              {(tab === 'in_work' || (tab === 'delivery' && !deliveryIsNew)) && (
+              {tab === 'in_work' && (
                 <button
                   onClick={() => runBatch('ready')}
                   className="btn-primary h-8 rounded-lg px-2.5 text-[13px] font-semibold"
@@ -534,7 +540,7 @@ export function KitchenOrderCard({
           >
             Отменить заказ
           </button>
-          {tab === 'new' || deliveryIsNew ? (
+          {tab === 'new' ? (
             <button
               className="btn-primary btn-md flex-1 font-semibold"
               disabled={submitting}
@@ -591,6 +597,18 @@ function TakeawayIcon() {
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden>
       <path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6l-2-4Z" />
       <path d="M4 6h16M16 10a4 4 0 0 1-8 0" />
+    </svg>
+  );
+}
+
+/** Иконка доставки для бейджа внешнего онлайн-заказа. */
+function DeliveryIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden>
+      <path d="M10 17h4V5H2v12h3" />
+      <path d="M14 9h4l4 4v4h-3" />
+      <circle cx="7.5" cy="17.5" r="2.5" />
+      <circle cx="16.5" cy="17.5" r="2.5" />
     </svg>
   );
 }
