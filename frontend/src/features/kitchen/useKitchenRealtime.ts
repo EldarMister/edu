@@ -74,8 +74,4 @@ export function useKitchenRealtime(station: PrepStation = 'kitchen') {
     qc.invalidateQueries({ queryKey: ['kitchen', 'stop-list'] });
   });
 
-  // Включение/выключение доставки владельцем сразу добавляет или скрывает вкладку.
-  useSocketEvent('settings:updated', () => {
-    qc.invalidateQueries({ queryKey: ['settings'] });
-  });
 }
