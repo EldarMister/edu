@@ -2894,6 +2894,10 @@ export class OrdersService {
   private async nextOrderNumber(tx: Prisma.TransactionClient, businessDate: Date): Promise<string> {
     // Нумерация в пределах кафе (raw-запрос middleware не скоупит — фильтруем явно).
     const cafeId = getCafeId();
+    // MAX + 1 должен выполняться последовательно. Без транзакционной блокировки
+    // два параллельных заказа могут прочитать один MAX и получить одинаковый номер.
+    const lockKey = `order-number:${cafeId ?? 'global'}:${businessDate.toISOString()}`;
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
     const result: any[] = cafeId
       ? await tx.$queryRaw`
           SELECT COALESCE(MAX(CAST(REGEXP_REPLACE(order_number, '[^0-9]', '', 'g') AS INTEGER)), 0) as max_num
