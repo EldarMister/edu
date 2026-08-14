@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, UseGuards } from '@nestjs/common';
 import { Public } from '../common/decorators/public.decorator';
 import { DeliveryApiKeyGuard } from './delivery-api-key.guard';
 import { DeliveryIntegrationService } from './delivery-integration.service';
 import { CreateDeliveryOrderDto } from './dto/create-delivery-order.dto';
+import { ImportDeliveryMenuDto } from './dto/import-delivery-menu.dto';
 
 @Public()
 @UseGuards(DeliveryApiKeyGuard)
@@ -23,6 +24,11 @@ export class DeliveryIntegrationController {
   @Get('menu')
   getMenu() {
     return this.delivery.getMenu();
+  }
+
+  @Put('menu')
+  importMenu(@Body() dto: ImportDeliveryMenuDto) {
+    return this.delivery.importMenu(dto);
   }
 
   @Get('stop-list')

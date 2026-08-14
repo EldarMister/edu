@@ -1,12 +1,15 @@
 import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
-import { OrderItemStatus, OrderStatus } from '@prisma/client';
+import { OrderItemStatus, OrderStatus, Prisma } from '@prisma/client';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 import { orderInclude } from '../orders/order.helpers';
 import { setCafeId } from '../tenant/tenant-context';
 import { assertCafeActive } from '../platform/cafe-status';
+import { EventsGateway } from '../realtime/events.gateway';
+import { SERVER_EVENTS } from '../realtime/events';
 import { CreateDeliveryOrderDto } from './dto/create-delivery-order.dto';
+import { ImportDeliveryMenuDto } from './dto/import-delivery-menu.dto';
 
 const READY_ITEM_STATUSES = new Set<OrderItemStatus>([
   OrderItemStatus.ready,
@@ -26,6 +29,7 @@ export class DeliveryIntegrationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly orders: OrdersService,
+    private readonly events: EventsGateway,
   ) {}
 
   /** Проверяет ключ, активность модуля и устанавливает tenant-контекст запроса. */
@@ -132,6 +136,104 @@ export class DeliveryIntegrationService {
         })),
       })),
     };
+  }
+
+  /** Принимает полное меню доставки и безопасно обновляет каталог текущего кафе. */
+  async importMenu(dto: ImportDeliveryMenuDto) {
+    let categoriesCreated = 0;
+    let categoriesUpdated = 0;
+    let productsCreated = 0;
+    let productsUpdated = 0;
+    let modifierGroupsReceived = 0;
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const incomingCategory of dto.categories) {
+        const categoryName = incomingCategory.name.trim();
+        const existingCategory = await tx.category.findFirst({
+          where: {
+            OR: [
+              { id: incomingCategory.id },
+              { name: { equals: categoryName, mode: 'insensitive' } },
+            ],
+          },
+        });
+        const category = existingCategory
+          ? await tx.category.update({
+              where: { id: existingCategory.id },
+              data: { name: categoryName, sortOrder: incomingCategory.sortOrder, isActive: true },
+            })
+          : await tx.category.create({
+              data: {
+                id: incomingCategory.id,
+                name: categoryName,
+                sortOrder: incomingCategory.sortOrder,
+                isActive: true,
+              },
+            });
+        if (existingCategory) categoriesUpdated += 1;
+        else categoriesCreated += 1;
+
+        for (const incomingProduct of incomingCategory.products) {
+          const productName = incomingProduct.name.trim();
+          const existingProduct = await tx.dish.findFirst({
+            where: {
+              OR: [
+                { id: incomingProduct.id },
+                { name: { equals: productName, mode: 'insensitive' } },
+              ],
+            },
+          });
+          const description = [
+            incomingProduct.description.trim(),
+            incomingProduct.composition.trim()
+              ? `Состав: ${incomingProduct.composition.trim()}`
+              : '',
+          ].filter(Boolean).join('\n');
+          const data = {
+            categoryId: category.id,
+            name: productName,
+            description: description || null,
+            imageUrl: incomingProduct.imageUrl.trim() || null,
+            price: new Prisma.Decimal(incomingProduct.price),
+            isAvailable: incomingProduct.available,
+            isActive: true,
+            sortOrder: incomingProduct.sortOrder,
+            isWeighted: incomingProduct.soldByWeight,
+            weightedMeasure: 'weight',
+            weightedPriceBase: incomingProduct.soldByWeight ? 100 : 1,
+          };
+          if (existingProduct) {
+            await tx.dish.update({ where: { id: existingProduct.id }, data });
+            productsUpdated += 1;
+          } else {
+            await tx.dish.create({ data: { id: incomingProduct.id, ...data } });
+            productsCreated += 1;
+          }
+          modifierGroupsReceived += incomingProduct.modifiers.length;
+        }
+      }
+    }, { maxWait: 10_000, timeout: 60_000 });
+
+    const result = {
+      ok: true,
+      source: dto.source,
+      regionSlug: dto.regionSlug,
+      exportedAt: dto.exportedAt,
+      categories: {
+        received: dto.categories.length,
+        created: categoriesCreated,
+        updated: categoriesUpdated,
+      },
+      products: {
+        received: dto.categories.reduce((total, category) => total + category.products.length, 0),
+        created: productsCreated,
+        updated: productsUpdated,
+      },
+      modifierGroupsReceived,
+      modifierStorage: 'order-item-comment',
+    };
+    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, result);
+    return result;
   }
 
   async getStopList() {
