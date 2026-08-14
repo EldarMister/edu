@@ -16,6 +16,9 @@ import {
   ValidateNested,
 } from 'class-validator';
 
+const MAX_MENU_TEXT_LENGTH = 100_000;
+const MAX_MENU_IMAGE_LENGTH = 5_000_000;
+
 class DeliveryMenuModifierItemDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
   id: string;
@@ -72,13 +75,13 @@ class DeliveryMenuProductDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
   name: string;
 
-  @IsString() @MaxLength(2_000)
+  @IsString() @MaxLength(MAX_MENU_TEXT_LENGTH)
   description: string;
 
-  @IsString() @MaxLength(2_000)
+  @IsString() @MaxLength(MAX_MENU_TEXT_LENGTH)
   composition: string;
 
-  @IsString() @MaxLength(2_000)
+  @IsString() @MaxLength(MAX_MENU_IMAGE_LENGTH)
   imageUrl: string;
 
   @IsNumber() @Min(0)
@@ -116,7 +119,7 @@ class DeliveryMenuCategoryDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
   name: string;
 
-  @IsString() @MaxLength(2_000)
+  @IsString() @MaxLength(MAX_MENU_IMAGE_LENGTH)
   imageUrl: string;
 
   @IsInt() @Min(0)
