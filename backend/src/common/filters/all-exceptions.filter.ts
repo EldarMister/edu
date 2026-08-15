@@ -20,12 +20,14 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Внутренняя ошибка сервера';
+    let prismaError: Prisma.PrismaClientKnownRequestError | null = null;
 
     if (exception instanceof HttpException) {
       status = exception.getStatus();
       const res = exception.getResponse();
       message = typeof res === 'string' ? res : (res as any).message ?? message;
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
+      prismaError = exception;
       // Уникальность / не найдено и т.п.
       if (exception.code === 'P2002') {
         status = HttpStatus.CONFLICT;
@@ -34,12 +36,20 @@ export class AllExceptionsFilter implements ExceptionFilter {
         status = HttpStatus.NOT_FOUND;
         message = 'Запись не найдена';
       } else {
-        status = HttpStatus.BAD_REQUEST;
+        // Остальные Prisma-коды означают проблему схемы/целостности на сервере,
+        // а не некорректный запрос клиента. 500 позволяет интеграциям повторить
+        // запрос и не превращает внутреннюю ошибку БД в постоянный client error.
+        status = HttpStatus.INTERNAL_SERVER_ERROR;
         message = 'Ошибка базы данных';
       }
     }
 
-    if (status >= 500) {
+    if (prismaError) {
+      this.logger.error(
+        `${request.method} ${request.url} Prisma ${prismaError.code}: ${prismaError.message}`,
+        prismaError.stack,
+      );
+    } else if (status >= 500) {
       this.logger.error(`${request.method} ${request.url}`, (exception as Error)?.stack);
     }
 
