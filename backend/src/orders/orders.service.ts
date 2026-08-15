@@ -2897,7 +2897,14 @@ export class OrdersService {
     // MAX + 1 должен выполняться последовательно. Без транзакционной блокировки
     // два параллельных заказа могут прочитать один MAX и получить одинаковый номер.
     const lockKey = `order-number:${cafeId ?? 'global'}:${businessDate.toISOString()}`;
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+    // pg_advisory_xact_lock() returns PostgreSQL `void`. Returning it directly
+    // makes Prisma fail with P2010 while deserializing the raw-query result.
+    // Keep the blocking lock call inside a subquery and expose only a supported
+    // integer column to Prisma.
+    await tx.$queryRaw<Array<{ locked: number }>>`
+      SELECT 1::integer AS locked
+      FROM (SELECT pg_advisory_xact_lock(hashtext(${lockKey}))) AS acquired_lock
+    `;
     const result: any[] = cafeId
       ? await tx.$queryRaw`
           SELECT COALESCE(MAX(CAST(REGEXP_REPLACE(order_number, '[^0-9]', '', 'g') AS INTEGER)), 0) as max_num
