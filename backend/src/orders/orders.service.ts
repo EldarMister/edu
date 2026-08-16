@@ -1495,19 +1495,38 @@ export class OrdersService {
     kitchenUserId: string,
     station: PrepStation = PrepStation.kitchen,
     setComponentIds: string[] = [],
+    partial: { itemId: string; quantity: number }[] = [],
   ) {
     const order = await this.getMutableOrder(orderId);
     this.ensureStationDecision(order, station);
 
-    const targetIds = order.items
-      .filter(
-        (it) =>
-          itemIds.includes(it.id) &&
-          ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.ready, OrderItemStatus.served].includes(
-            it.status as any,
-          ),
-      )
-      .map((it) => it.id);
+    const items = order.items.filter(
+      (it) =>
+        itemIds.includes(it.id) &&
+        ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.ready, OrderItemStatus.served].includes(
+          it.status as any,
+        ),
+    );
+    const partialMap = new Map(partial.map((p) => [p.itemId, p.quantity]));
+    const setParentIds = new Set(
+      (
+        await this.prisma.orderItemSetComponent.findMany({
+          where: { orderItemId: { in: items.map((it) => it.id) } },
+          select: { orderItemId: true },
+          distinct: ['orderItemId'],
+        })
+      ).map((component) => component.orderItemId),
+    );
+    // Для частичной готовности строку заказа разделяем: исходная строка остаётся
+    // в работе с остатком, а готовое количество становится отдельной ready-строкой.
+    // Сеты сюда не входят — их состав отмечается готовым отдельными компонентами.
+    const partialItems = items.filter((it) => {
+      const quantity = partialMap.get(it.id);
+      return !setParentIds.has(it.id) && quantity && quantity > 0 && quantity < it.quantity;
+    });
+    const partialIds = new Set(partialItems.map((it) => it.id));
+    const fullItems = items.filter((it) => !partialIds.has(it.id));
+    const targetIds = fullItems.map((it) => it.id);
 
     // Блюда внутри сетов — отдельные позиции для кухни.
     const targetComponents = await this.resolveSetComponents(orderId, setComponentIds, [
@@ -1517,7 +1536,7 @@ export class OrdersService {
       OrderItemStatus.served,
     ]);
 
-    const doneCount = targetIds.length + targetComponents.length;
+    const doneCount = targetIds.length + partialItems.length + targetComponents.length;
     if (doneCount === 0) {
       throw new BadRequestException('Нет блюд, которые можно отметить готовыми');
     }
@@ -1525,6 +1544,9 @@ export class OrdersService {
       ...order.items
         .filter((it) => targetIds.includes(it.id))
         .map((it) => this.waiterItemVoiceName(it)),
+      ...partialItems.map(
+        (it) => `${this.waiterItemVoiceName(it)} (${partialMap.get(it.id)} шт.)`,
+      ),
       ...targetComponents.map((c) =>
         c.action === 'replaced' && c.finalNameSnapshot
           ? [c.finalNameSnapshot, c.finalVariantNameSnapshot].filter(Boolean).join(' ')
@@ -1533,6 +1555,7 @@ export class OrdersService {
     ];
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      const partialReadyIds: string[] = [];
       if (targetIds.length > 0) {
         await tx.orderItem.updateMany({
           where: { id: { in: targetIds }, orderId },
@@ -1547,6 +1570,44 @@ export class OrdersService {
           data: { status: OrderItemStatus.ready },
         });
       }
+      for (const it of partialItems) {
+        const readyQuantity = partialMap.get(it.id)!;
+        const remainingQuantity = it.quantity - readyQuantity;
+        const readyDiscount = round2((Number(it.discountAmount) / it.quantity) * readyQuantity);
+        const readyFinal = round2((Number(it.finalPrice) / it.quantity) * readyQuantity);
+
+        await tx.orderItem.update({
+          where: { id: it.id },
+          data: {
+            quantity: remainingQuantity,
+            // Вычитание от исходной суммы сохраняет итог заказа без округлительной погрешности.
+            discountAmount: new Prisma.Decimal(round2(Number(it.discountAmount) - readyDiscount)),
+            finalPrice: new Prisma.Decimal(round2(Number(it.finalPrice) - readyFinal)),
+          },
+        });
+        const readyItem = await tx.orderItem.create({
+          data: {
+            orderId,
+            dishId: it.dishId,
+            dishVariantId: it.dishVariantId,
+            dishNameSnapshot: it.dishNameSnapshot,
+            dishVariantNameSnapshot: it.dishVariantNameSnapshot,
+            weightGrams: it.weightGrams,
+            dishVoiceSnapshot: it.dishVoiceSnapshot,
+            priceSnapshot: it.priceSnapshot,
+            quantity: readyQuantity,
+            discountAmount: new Prisma.Decimal(readyDiscount),
+            finalPrice: new Prisma.Decimal(readyFinal),
+            status: OrderItemStatus.ready,
+            prepStation: it.prepStation,
+            comment: it.comment,
+            takeaway: it.takeaway,
+            replacementForItemId: it.replacementForItemId,
+          },
+          select: { id: true },
+        });
+        partialReadyIds.push(readyItem.id);
+      }
       if (targetComponents.length > 0) {
         await tx.orderItemSetComponent.updateMany({
           where: { id: { in: targetComponents.map((c) => c.id) } },
@@ -1556,6 +1617,7 @@ export class OrdersService {
       await tx.kitchenEvent.createMany({
         data: [
           ...targetIds.map((id) => ({ orderId, orderItemId: id })),
+          ...partialReadyIds.map((id) => ({ orderId, orderItemId: id })),
           ...targetComponents.map((c) => ({ orderId, orderItemId: c.orderItemId })),
         ].map((e) => ({ ...e, type: KitchenEventType.ready_item, createdById: kitchenUserId })),
       });

@@ -93,6 +93,7 @@ export class KitchenController {
       user.id,
       this.parseStation(station),
       dto.setComponentIds ?? [],
+      dto.partial ?? [],
     );
   }
 

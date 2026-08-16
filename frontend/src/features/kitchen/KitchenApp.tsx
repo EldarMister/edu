@@ -29,7 +29,7 @@ type PendingAction = {
   type: 'reject' | 'ready';
   itemIds: string[];
   setComponentIds: string[];
-  /** Частичный отказ по количеству для обычных позиций. */
+  /** Частичное действие по количеству для обычных позиций. */
   partial?: { itemId: string; quantity: number }[];
   deadline: number;
 };
@@ -93,6 +93,7 @@ export function KitchenApp({
             orderId: p.orderId,
             itemIds: p.itemIds,
             setComponentIds: p.setComponentIds,
+            partial: p.partial,
           });
     run.catch((err) => push({ message: apiError(err), at: new Date().toISOString() }));
   }
@@ -254,6 +255,7 @@ export function KitchenApp({
                     pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []
                   }
                   pendingType={pending?.orderId === o.id ? pending.type : null}
+                  pendingPartial={pending?.orderId === o.id ? pending.partial ?? [] : []}
                   onAccept={() => acceptOrder(o.id)}
                   onBatch={(type, ids) => onBatch(o.id, type, ids)}
                 />
