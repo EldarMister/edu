@@ -48,6 +48,7 @@ export function KitchenOrderCard({
   submitting,
   pendingItemIds,
   pendingType,
+  pendingPartial,
   onAccept,
   onBatch,
 }: {
@@ -58,6 +59,8 @@ export function KitchenOrderCard({
   /** Блюда заказа с отложенным (ещё не подтверждённым) действием. */
   pendingItemIds: string[];
   pendingType: 'reject' | 'ready' | null;
+  /** Количество в частичных действиях, ещё находящихся в окне отмены. */
+  pendingPartial: { itemId: string; quantity: number }[];
   onAccept: () => void;
   onBatch: (
     type: 'reject' | 'ready',
@@ -81,10 +84,11 @@ export function KitchenOrderCard({
   const allTakeaway = liveItems.length > 0 && liveItems.every((it) => it.takeaway);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Сколько штук отказать у выбранной позиции (по умолчанию — всё количество).
-  const [rejectQtys, setRejectQtys] = useState<Record<string, number>>({});
+  // Сколько штук обработать у выбранной позиции (по умолчанию — всё количество).
+  const [actionQtys, setActionQtys] = useState<Record<string, number>>({});
   // Свёрнутые сеты (по id позиции-сета): по умолчанию состав раскрыт.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const pendingQuantityById = new Map(pendingPartial.map((item) => [item.itemId, item.quantity]));
 
   const toggleCollapsed = (id: string) =>
     setCollapsed((prev) => {
@@ -149,15 +153,13 @@ export function KitchenOrderCard({
     const itemIds: string[] = [];
     const setComponentIds: string[] = [];
     for (const id of selected) (componentIds.has(id) ? setComponentIds : itemIds).push(id);
-    // Частичный отказ по количеству — только для обычных позиций и только при отказе.
+    // Частичное действие по количеству — только для обычных позиций.
     const partial: { itemId: string; quantity: number }[] = [];
-    if (type === 'reject') {
-      for (const id of itemIds) {
-        const it = order.items.find((i) => i.id === id);
-        if (!it) continue;
-        const qty = rejectQtys[id] ?? it.quantity;
-        if (qty > 0 && qty < it.quantity) partial.push({ itemId: id, quantity: qty });
-      }
+    for (const id of itemIds) {
+      const it = order.items.find((i) => i.id === id);
+      if (!it) continue;
+      const qty = actionQtys[id] ?? it.quantity;
+      if (qty > 0 && qty < it.quantity) partial.push({ itemId: id, quantity: qty });
     }
     onBatch(type, { itemIds, setComponentIds, partial: partial.length > 0 ? partial : undefined });
     clearSelection();
@@ -165,7 +167,7 @@ export function KitchenOrderCard({
 
   function clearSelection() {
     setSelected(new Set());
-    setRejectQtys({});
+    setActionQtys({});
   }
 
   // Все ещё «живые» позиции станции (для действий по всему заказу).
@@ -225,9 +227,11 @@ export function KitchenOrderCard({
   ) {
     const selectable = !opts?.container && isSelectable(status, id);
     const pending = pendingItemIds.includes(id);
+    const pendingQuantity = pendingQuantityById.get(id);
+    const pendingPartially = pending && pendingQuantity !== undefined;
     const cancelled = status === 'cancelled';
-    const rejected = status === 'rejected' || cancelled || (pending && pendingType === 'reject');
-    const isReady = status === 'ready' || status === 'served' || (pending && pendingType === 'ready');
+    const rejected = status === 'rejected' || cancelled || (pending && !pendingPartially && pendingType === 'reject');
+    const isReady = status === 'ready' || status === 'served' || (pending && !pendingPartially && pendingType === 'ready');
     // Заказ уже в работе, а позиция всё ещё «new» — значит её добавили/заменили при
     // редактировании. Подсвечиваем, чтобы повар видел, какое блюдо изменилось.
     const isFresh = tab === 'in_work' && status === 'new' && !opts?.container && !pending;
@@ -280,6 +284,15 @@ export function KitchenOrderCard({
         )}
         {isReady && <span className="shrink-0 text-[13px] font-bold text-green-600">✓ {status === 'served' ? 'Подано гостям' : 'Готово'}</span>}
         {rejected && <span className="shrink-0 text-[13px] font-bold text-danger">{cancelled ? 'Отменено' : 'Отказ'}</span>}
+        {pendingPartially && (
+          <span
+            className={`shrink-0 text-[12px] font-semibold ${
+              pendingType === 'ready' ? 'text-green-600' : 'text-danger'
+            }`}
+          >
+            {pendingType === 'ready' ? 'Готово' : 'Отказать'}: {pendingQuantity} из {order.items.find((it) => it.id === id)?.quantity ?? ''}
+          </span>
+        )}
       </>
     );
 
@@ -382,21 +395,21 @@ export function KitchenOrderCard({
             </>
           );
           if (!isSet) {
-            // Степпер «сколько отказать» — у выбранной обычной позиции с количеством > 1.
+            // Степпер количества применяется и к «Отказать», и к «Готово».
             const showStepper =
               tab !== 'ready' && selected.has(it.id) && it.quantity > 1 && isSelectable(it.status, it.id);
-            const rejectQty = rejectQtys[it.id] ?? it.quantity;
+            const actionQty = actionQtys[it.id] ?? it.quantity;
             return (
               <li key={it.id} className="text-[15px]">
                 {renderLine(it.id, it.status, header)}
                 {showStepper && (
                   <div className="mt-1.5 flex items-center gap-2 pl-9 text-[13px] text-text-secondary">
-                    <span>Отказать:</span>
+                    <span>Количество:</span>
                     <QtyStepper
-                      value={rejectQty}
+                      value={actionQty}
                       min={1}
                       max={it.quantity}
-                      onChange={(v) => setRejectQtys((prev) => ({ ...prev, [it.id]: v }))}
+                      onChange={(v) => setActionQtys((prev) => ({ ...prev, [it.id]: v }))}
                     />
                     <span className="text-text-muted">из {it.quantity}</span>
                   </div>
@@ -563,7 +576,7 @@ export function KitchenOrderCard({
   );
 }
 
-/** Степпер выбора количества (например, сколько штук отказать). */
+/** Степпер выбора количества для действия над позицией. */
 function QtyStepper({
   value,
   min,
