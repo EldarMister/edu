@@ -4,6 +4,11 @@ import { Spinner } from '@/components/Spinner';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useWaiterOrdersReport, type StaffMember, type WaiterOrdersReportItem } from '../api';
 
+type DishTotal = { name: string; quantity: number; amount: number };
+type CategoryTotal = { name: string; quantity: number; amount: number; dishes: DishTotal[] };
+
+const EMPTY_REPORT_ROWS: WaiterOrdersReportItem[] = [];
+
 const todayYmd = () => {
   const date = new Date();
   const pad = (value: number) => String(value).padStart(2, '0');
@@ -35,7 +40,39 @@ export function WaiterOrdersReport({ staff, staffLoading }: { staff: StaffMember
     : waiterOptions[0]?.value ?? '';
   const report = useWaiterOrdersReport(selectedWaiterId, from, to);
   const data = report.data;
-  const rows = data?.items ?? [];
+  const rows = data?.items ?? EMPTY_REPORT_ROWS;
+  const categoryTotals = useMemo<CategoryTotal[]>(() => {
+    const categories = new Map<string, {
+      name: string;
+      quantity: number;
+      amount: number;
+      dishes: Map<string, DishTotal>;
+    }>();
+
+    for (const row of rows) {
+      let category = categories.get(row.categoryName);
+      if (!category) {
+        category = { name: row.categoryName, quantity: 0, amount: 0, dishes: new Map() };
+        categories.set(row.categoryName, category);
+      }
+      category.quantity += row.quantity;
+      category.amount += row.amount;
+
+      const dish = category.dishes.get(row.dishName) ?? { name: row.dishName, quantity: 0, amount: 0 };
+      dish.quantity += row.quantity;
+      dish.amount += row.amount;
+      category.dishes.set(row.dishName, dish);
+    }
+
+    return [...categories.values()]
+      .map((category) => ({
+        name: category.name,
+        quantity: category.quantity,
+        amount: category.amount,
+        dishes: [...category.dishes.values()].sort((left, right) => right.quantity - left.quantity || right.amount - left.amount),
+      }))
+      .sort((left, right) => right.quantity - left.quantity || right.amount - left.amount);
+  }, [rows]);
 
   function changeFrom(value: string) {
     setFrom(value);
@@ -170,6 +207,24 @@ export function WaiterOrdersReport({ staff, staffLoading }: { staff: StaffMember
           </div>
         )}
       </div>
+
+      {categoryTotals.length > 0 && (
+        <div className="rounded-xl border border-border bg-white p-4 sm:p-5">
+          <div className="mb-3">
+            <h3 className="text-base font-semibold text-text-primary">Итоги по блюдам</h3>
+            <p className="mt-0.5 text-sm text-text-muted">Товарная разбивка за выбранный период</p>
+          </div>
+          <div className="space-y-1">
+            {categoryTotals.map((category, index) => (
+              <CategoryTotalRow key={category.name} category={category} defaultOpen={index === 0} />
+            ))}
+          </div>
+          <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-sm font-semibold text-text-primary">
+            <span>Всего</span>
+            <span>{data?.summary.dishesCount ?? 0} шт. <span className="text-text-muted">({money(data?.summary.amount ?? 0)})</span></span>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -196,5 +251,42 @@ function ReportRow({ row }: { row: WaiterOrdersReportItem }) {
       <td className="border-b border-r border-border px-4 py-2.5 text-center">{money(row.unitPrice)}</td>
       <td className="border-b border-border px-4 py-2.5 text-center">{money(row.amount)}</td>
     </tr>
+  );
+}
+
+function CategoryTotalRow({ category, defaultOpen }: { category: CategoryTotal; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition-colors hover:bg-background"
+      >
+        <span
+          aria-hidden
+          className={`text-xl leading-none text-text-light transition-transform ${open ? 'rotate-90' : ''}`}
+        >
+          ›
+        </span>
+        <span className="font-medium text-text-primary">{category.name}</span>
+        <span className="ml-auto whitespace-nowrap text-text-secondary">
+          {category.quantity} шт. <span className="text-text-muted">({money(category.amount)})</span>
+        </span>
+      </button>
+      {open && (
+        <div className="space-y-1 pb-2 pl-9 pr-2">
+          {category.dishes.map((dish) => (
+            <div key={dish.name} className="flex items-center gap-3 text-sm text-text-secondary">
+              <span className="min-w-0 flex-1 truncate">{dish.name}</span>
+              <span className="shrink-0 whitespace-nowrap">
+                {dish.quantity} шт. <span className="text-text-muted">({money(dish.amount)})</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
