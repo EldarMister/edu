@@ -471,3 +471,43 @@
     animation: shift-ring-fill 980ms cubic-bezier(0.33, 1, 0.68, 1) forwards;
   }
 }
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 10mm;
+  }
+  body * {
+    visibility: hidden !important;
+  }
+  html,
+  body {
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+  .waiter-orders-report,
+  .waiter-orders-report * {
+    visibility: visible !important;
+  }
+  .waiter-orders-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    overflow: visible;
+    padding: 0 !important;
+    box-shadow: none !important;
+  }
+  .waiter-orders-report .no-print {
+    display: none !important;
+  }
+  .waiter-orders-report table {
+    min-width: 0 !important;
+    font-size: 10px !important;
+  }
+  .waiter-orders-report th,
+  .waiter-orders-report td {
+    padding: 5px 7px !important;
+  }
+}

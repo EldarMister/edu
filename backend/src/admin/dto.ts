@@ -376,6 +376,17 @@ export class ShiftHistoryQueryDto {
   role?: Role;
 }
 
+export class WaiterOrdersReportQueryDto {
+  @IsString() @IsNotEmpty()
+  waiterId: string;
+
+  @IsString() @IsNotEmpty()
+  from: string;
+
+  @IsString() @IsNotEmpty()
+  to: string;
+}
+
 export class UpdateShiftHistoryDto {
   @IsOptional() @IsString()
   startedAt?: string;

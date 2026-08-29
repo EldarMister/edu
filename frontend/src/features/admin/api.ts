@@ -91,6 +91,30 @@ export interface WaiterReportItem {
   closedOrders: number;
   cancelledOrders: number;
 }
+export interface WaiterOrdersReportItem {
+  id: string;
+  orderId: string;
+  orderedAt: string;
+  servedAt: string;
+  orderNumber: string;
+  tableNumber: number;
+  dishName: string;
+  categoryName: string;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+}
+export interface WaiterOrdersReportResponse {
+  waiter: { id: string; name: string };
+  range: { from: string; to: string };
+  items: WaiterOrdersReportItem[];
+  summary: {
+    ordersCount: number;
+    dishesCount: number;
+    amount: number;
+    averageServingSeconds: number;
+  };
+}
 export interface OrdersPage {
   items: Order[];
   total: number;
@@ -643,6 +667,15 @@ export function useWaiterReport(period: 'today' | 'week' | 'month', date?: strin
   return useQuery({
     queryKey: ['admin', 'staff', 'waiter-report', period, date],
     queryFn: () => get<WaiterReportItem[]>(`/admin/staff/waiter-report?${q.toString()}`),
+  });
+}
+
+export function useWaiterOrdersReport(waiterId: string, from: string, to: string) {
+  const q = new URLSearchParams({ waiterId, from, to });
+  return useQuery({
+    queryKey: ['admin', 'staff', 'waiter-orders-report', waiterId, from, to],
+    queryFn: () => get<WaiterOrdersReportResponse>(`/admin/staff/waiter-orders-report?${q.toString()}`),
+    enabled: Boolean(waiterId && from && to),
   });
 }
 // ---------- Отчёт по сменам ----------

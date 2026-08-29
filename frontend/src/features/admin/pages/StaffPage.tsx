@@ -11,6 +11,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { IconPlus, IconEdit, IconTrash } from '../components/icons';
 import { EmployeePermissionsModal } from '../components/EmployeePermissionsModal';
+import { WaiterOrdersReport } from './WaiterOrdersReport';
 import {
   useShiftReport,
   useSetCashHanded,
@@ -66,6 +67,8 @@ const todayYmd = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const WAITER_REPORT_BADGE_EXPIRES_AT = new Date('2026-09-05T19:16:46.239+06:00').getTime();
+
 function durationLabel(min: number) {
   const h = Math.floor(min / 60);
   const m = min % 60;
@@ -99,7 +102,10 @@ function fromDateTimeLocal(value: string) {
 }
 
 export function StaffPage() {
-  const [tab, setTab] = useState<'current' | 'history'>('current');
+  const [tab, setTab] = useState<'current' | 'history' | 'waiter-orders'>('current');
+  const [showWaiterReportBadge, setShowWaiterReportBadge] = useState(
+    () => Date.now() < WAITER_REPORT_BADGE_EXPIRES_AT,
+  );
   const [date, setDate] = useState(todayYmd());
   const [historyFilters, setHistoryFilters] = useState<ShiftHistoryFilters>({ period: 'today' });
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -121,6 +127,17 @@ export function StaffPage() {
   const { isOwner, canAction } = usePermissions();
   // Кнопку «Права доступа» видит владелец, либо админ с правом editPermissions/manageStaff.
   const canManagePermissions = isOwner || canAction('editPermissions') || canAction('manageStaff');
+
+  useEffect(() => {
+    if (!showWaiterReportBadge) return;
+    const remaining = WAITER_REPORT_BADGE_EXPIRES_AT - Date.now();
+    if (remaining <= 0) {
+      setShowWaiterReportBadge(false);
+      return;
+    }
+    const timer = window.setTimeout(() => setShowWaiterReportBadge(false), remaining);
+    return () => window.clearTimeout(timer);
+  }, [showWaiterReportBadge]);
 
   const rows = reportQ.data ?? [];
   const memberById = new Map((staffQ.data ?? []).map((m) => [m.id, m]));
@@ -205,7 +222,7 @@ export function StaffPage() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {tab !== 'waiter-orders' && <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-text-primary">{tr('Персонал и отчет по сменам')}</h2>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {tab === 'current' && (
@@ -240,14 +257,24 @@ export function StaffPage() {
             <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
           </button>
         </div>
-      </div>
+      </div>}
 
-      <div className="flex items-center gap-5 border-b border-border">
+      <div className="no-scrollbar flex items-center gap-5 overflow-x-auto border-b border-border">
         <TabButton active={tab === 'current'} onClick={() => setTab('current')}>
           Текущая смена
         </TabButton>
         <TabButton active={tab === 'history'} onClick={() => setTab('history')}>
           История смен
+        </TabButton>
+        <TabButton active={tab === 'waiter-orders'} onClick={() => setTab('waiter-orders')}>
+          <span className="flex items-center gap-2">
+            Отчет официанта
+            {showWaiterReportBadge && (
+              <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-wide text-primary">
+                Новый
+              </span>
+            )}
+          </span>
         </TabButton>
       </div>
 
@@ -263,7 +290,9 @@ export function StaffPage() {
         />
       )}
 
-      {tab === 'current' ? (
+      {tab === 'waiter-orders' ? (
+        <WaiterOrdersReport staff={staffQ.data ?? []} staffLoading={staffQ.isLoading} />
+      ) : tab === 'current' ? (
         <div className="overflow-hidden rounded-xl border border-border bg-white">
         {reportQ.isLoading ? (
           <div className="flex justify-center py-12 text-primary">
@@ -449,7 +478,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   return (
     <button
       onClick={onClick}
-      className={`relative -mb-px h-9 px-0.5 text-sm font-medium transition-colors ${
+      className={`relative -mb-px h-9 shrink-0 whitespace-nowrap px-0.5 text-sm font-medium transition-colors ${
         active ? 'text-primary' : 'text-text-secondary hover:text-text-primary'
       }`}
     >

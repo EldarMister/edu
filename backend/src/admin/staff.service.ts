@@ -5,7 +5,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { CreateStaffDto, ShiftHistoryQueryDto, UpdatePermissionsDto, UpdateShiftHistoryDto, UpdateStaffDto } from './dto';
+import {
+  CreateStaffDto,
+  ShiftHistoryQueryDto,
+  UpdatePermissionsDto,
+  UpdateShiftHistoryDto,
+  UpdateStaffDto,
+  WaiterOrdersReportQueryDto,
+} from './dto';
 import {
   EmployeePermissions,
   resolvePermissions,
@@ -746,6 +753,107 @@ export class StaffService {
         activeCount: rows.filter((r) => r.status === 'active').length,
       },
       range: { from: from.toISOString(), to: to.toISOString() },
+    };
+  }
+
+  /** Детальный отчет по блюдам в оплаченных заказах одного официанта. */
+  async waiterOrdersReport(params: WaiterOrdersReportQueryDto) {
+    const parseLocalDate = (value: string) => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+      if (!match) throw new BadRequestException('Некорректный период отчета');
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      if (
+        date.getFullYear() !== Number(match[1]) ||
+        date.getMonth() !== Number(match[2]) - 1 ||
+        date.getDate() !== Number(match[3])
+      ) {
+        throw new BadRequestException('Некорректный период отчета');
+      }
+      return date;
+    };
+
+    const from = parseLocalDate(params.from);
+    const toInclusive = parseLocalDate(params.to);
+    if (from > toInclusive) throw new BadRequestException('Дата начала не может быть позже даты окончания');
+    const to = new Date(toInclusive);
+    to.setDate(to.getDate() + 1);
+
+    const waiter = await this.prisma.user.findFirst({
+      where: {
+        id: params.waiterId,
+        role: Role.WAITER,
+      },
+      select: { id: true, name: true },
+    });
+    if (!waiter) throw new NotFoundException('Официант не найден');
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        waiterId: waiter.id,
+        status: OrderStatus.paid,
+        createdAt: { gte: from, lt: to },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        orderNumber: true,
+        createdAt: true,
+        table: { select: { number: true } },
+        items: {
+          where: { status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            dishNameSnapshot: true,
+            dishVariantNameSnapshot: true,
+            quantity: true,
+            finalPrice: true,
+            updatedAt: true,
+            dish: { select: { category: { select: { name: true } } } },
+          },
+        },
+      },
+    });
+
+    const servingSeconds: number[] = [];
+    const rows = orders.flatMap((order) => {
+      const servedAt = order.items.length
+        ? new Date(Math.max(...order.items.map((item) => item.updatedAt.getTime())))
+        : order.createdAt;
+      servingSeconds.push(Math.max(0, Math.round((servedAt.getTime() - order.createdAt.getTime()) / 1000)));
+
+      return order.items.map((item) => {
+        const amount = Number(item.finalPrice);
+        return {
+          id: item.id,
+          orderId: order.id,
+          orderedAt: order.createdAt.toISOString(),
+          servedAt: servedAt.toISOString(),
+          orderNumber: order.orderNumber,
+          tableNumber: order.table.number,
+          dishName: item.dishVariantNameSnapshot
+            ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
+            : item.dishNameSnapshot,
+          categoryName: item.dish?.category.name ?? 'Прочее',
+          quantity: item.quantity,
+          unitPrice: item.quantity > 0 ? amount / item.quantity : amount,
+          amount,
+        };
+      });
+    });
+
+    return {
+      waiter,
+      range: { from: from.toISOString(), to: toInclusive.toISOString() },
+      items: rows,
+      summary: {
+        ordersCount: orders.length,
+        dishesCount: rows.reduce((sum, row) => sum + row.quantity, 0),
+        amount: rows.reduce((sum, row) => sum + row.amount, 0),
+        averageServingSeconds: servingSeconds.length
+          ? Math.round(servingSeconds.reduce((sum, seconds) => sum + seconds, 0) / servingSeconds.length)
+          : 0,
+      },
     };
   }
 

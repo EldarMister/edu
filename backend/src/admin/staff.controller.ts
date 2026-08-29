@@ -8,6 +8,7 @@ import {
   CreateStaffDto,
   SetCashHandedDto,
   ShiftHistoryQueryDto,
+  WaiterOrdersReportQueryDto,
   UpdatePermissionsDto,
   UpdateShiftHistoryDto,
   UpdateStaffDto,
@@ -45,6 +46,11 @@ export class StaffController {
   @Get('shift-history')
   shiftHistory(@Query() query: ShiftHistoryQueryDto, @CurrentUser() actor: AuthUser) {
     return this.staff.shiftHistory(query, actor);
+  }
+
+  @Get('waiter-orders-report')
+  waiterOrdersReport(@Query() query: WaiterOrdersReportQueryDto) {
+    return this.staff.waiterOrdersReport(query);
   }
 
   @Patch('shift-history/:id')
