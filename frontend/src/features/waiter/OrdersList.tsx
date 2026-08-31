@@ -169,14 +169,11 @@ function OrderActionsMenu({
 
   // Редактирование: разрешено пока заказ не готов и не перешёл к оплате.
   const editableStatuses = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
-  // Для готовых и поданных заказов пункт остаётся доступным, но официант увидит
-  // предупреждение о необходимости позвать администратора.
+  // Отмена официантом разрешена только до перехода заказа в статус «Готов».
   const cancellableStatuses = [
     'sent_to_kitchen',
     'accepted_by_kitchen',
     'cooking',
-    'ready',
-    'served',
     'partially_rejected',
   ];
   const editable = editableStatuses.includes(order.status);

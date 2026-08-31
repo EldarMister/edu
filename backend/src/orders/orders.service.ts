@@ -686,16 +686,18 @@ export class OrdersService {
     if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ уже закрыт и не может быть отменён');
     }
-    // Готовый, поданный или уже переданный к оплате заказ может отменить
-    // только администратор/владелец.
-    const adminOnly: OrderStatus[] = [
-      OrderStatus.ready,
-      OrderStatus.served,
-      OrderStatus.waiting_payment,
+    // Официант может отменить заказ только до перехода в статус «Готов».
+    // Явный список также закрывает обход через API для более поздних статусов
+    // (например, picked_up), которые раньше не попадали в adminOnly.
+    const waiterCancellableStatuses: OrderStatus[] = [
+      OrderStatus.sent_to_kitchen,
+      OrderStatus.accepted_by_kitchen,
+      OrderStatus.cooking,
+      OrderStatus.partially_rejected,
     ];
-    if (actor.role === Role.WAITER && adminOnly.includes(order.status)) {
+    if (actor.role === Role.WAITER && !waiterCancellableStatuses.includes(order.status)) {
       throw new ForbiddenException(
-        'Отмена заказа на этом этапе доступна только администратору',
+        'Официант может отменить заказ только до статуса «Готов»',
       );
     }
 

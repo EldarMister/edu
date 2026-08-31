@@ -418,10 +418,6 @@ export function WaiterApp() {
   }
 
   function requestOrderCancellation(order: Order) {
-    if (order.status === 'ready' || order.status === 'served') {
-      setAdministratorCallTarget(order);
-      return;
-    }
     setCancelTarget(order);
   }
 
