@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
+import { playRadioAudio } from '@/lib/audio';
 import { PTT_EVENTS, type PttAudioPayload, type PttChannel } from './types';
 
 function base64ToBytes(value: string): Uint8Array {
@@ -8,26 +9,6 @@ function base64ToBytes(value: string): Uint8Array {
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes;
-}
-
-function playHtmlAudio(blob: Blob): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    const done = () => URL.revokeObjectURL(url);
-    audio.onended = () => {
-      done();
-      resolve();
-    };
-    audio.onerror = () => {
-      done();
-      reject(new Error('Не удалось воспроизвести аудио'));
-    };
-    audio.play().catch((error) => {
-      done();
-      reject(error);
-    });
-  });
 }
 
 export type PttPlayingSpeaker = { id: string; name?: string; role?: string };
@@ -38,31 +19,14 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
   const [speaker, setSpeaker] = useState<PttPlayingSpeaker | null>(null);
   const queueRef = useRef<PttAudioPayload[]>([]);
   const playingRef = useRef(false);
-  const ctxRef = useRef<AudioContext | null>(null);
 
-  // Telegram-модель: каждое сообщение — цельный аудиофайл. Проигрываем его
-  // разом (AudioContext, с фолбэком на <audio>), очередь играет по одному.
+  // Каждое сообщение — цельный файл. Выравниваем громкость и воспроизводим
+  // через тот же мультимедийный аудиовыход, что озвучку и уведомления.
   const playPayload = useCallback(async (payload: PttAudioPayload) => {
     const bytes = base64ToBytes(payload.chunk);
     const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
     const blob = new Blob([data], { type: payload.mimeType || 'application/octet-stream' });
-    try {
-      const AudioCtx = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioCtx) throw new Error('AudioContext недоступен');
-      const ctx = ctxRef.current ?? new AudioCtx();
-      ctxRef.current = ctx;
-      if (ctx.state === 'suspended') await ctx.resume();
-      const buffer = await ctx.decodeAudioData(await blob.arrayBuffer());
-      await new Promise<void>((resolve) => {
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
-        source.onended = () => resolve();
-        source.start();
-      });
-    } catch {
-      await playHtmlAudio(blob);
-    }
+    await playRadioAudio(blob);
   }, []);
 
   const pump = useCallback(() => {
@@ -79,7 +43,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     // блокируется на всё время воспроизведения, а не только пока держали).
     setSpeaker({ id: next.senderId, name: next.senderName, role: next.senderRole });
     void playPayload(next)
-      .catch(() => undefined)
+      .catch((error) => console.warn('[ptt] Не удалось воспроизвести сообщение:', error))
       .finally(() => {
         playingRef.current = false;
         pump();

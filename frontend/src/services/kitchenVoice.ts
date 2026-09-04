@@ -8,6 +8,7 @@
  * Очередь: озвучки проигрываются строго по очереди и не перебивают друг друга.
  */
 import { api } from '@/lib/api';
+import { AudioPlayer } from '@/lib/audio';
 import { getKitchenVoiceSettings, type KitchenVoiceSettings } from './kitchenVoiceSettings';
 import {
   KITCHEN_SAMPLES_BASE,
@@ -25,7 +26,7 @@ const MAX_VOICE_AGE_MS = 30_000;
 class KitchenVoice {
   private queue: { text: string; at: number }[] = [];
   private pumping = false;
-  private current: HTMLAudioElement | null = null;
+  private player = new AudioPlayer();
   // Манифест предзаписанных озвучек (какие голоса доступны без запроса на TTS).
   private manifestPromise: Promise<KitchenSamplesManifest | null> | null = null;
 
@@ -43,8 +44,7 @@ class KitchenVoice {
     const t = text.trim();
     if (!t) return;
     this.queue = [];
-    this.current?.pause();
-    this.current = null;
+    this.player.stop();
     await this.playText(t, settings, true);
   }
 
@@ -57,8 +57,7 @@ class KitchenVoice {
     settings: KitchenVoiceSettings = getKitchenVoiceSettings(),
   ) {
     this.queue = [];
-    this.current?.pause();
-    this.current = null;
+    this.player.stop();
 
     const manifest = await this.loadSamplesManifest();
     if (manifest && manifest.speakers.includes(settings.speaker) && manifest.scenarioIds.includes(scenario.id)) {
@@ -128,26 +127,7 @@ class KitchenVoice {
   }
 
   private playUrl(url: string, playbackRate: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const audio = new Audio(url);
-      audio.playbackRate = playbackRate;
-      this.current = audio;
-      const done = () => {
-        if (this.current === audio) this.current = null;
-      };
-      audio.onended = () => {
-        done();
-        resolve();
-      };
-      audio.onerror = () => {
-        done();
-        reject(new Error('Ошибка воспроизведения аудио'));
-      };
-      audio.play().catch((err) => {
-        done();
-        reject(err);
-      });
-    });
+    return this.player.play(url, playbackRate);
   }
 }
 

@@ -1,9 +1,11 @@
 import { api } from '@/lib/api';
+import { AudioPlayer } from '@/lib/audio';
 
 /** Устаревшие озвучки не проигрываем: очередь могла скопиться при тормозящем TTS. */
 const MAX_VOICE_AGE_MS = 30_000;
 
 class AdminVoice {
+  private player = new AudioPlayer();
   private queue: { text: string; at: number }[] = [];
   private pumping = false;
 
@@ -43,12 +45,7 @@ class AdminVoice {
   }
 
   private playUrl(url: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const audio = new Audio(url);
-      audio.onended = () => resolve();
-      audio.onerror = () => reject(new Error('Ошибка воспроизведения аудио'));
-      audio.play().catch(reject);
-    });
+    return this.player.play(url);
   }
 }
 

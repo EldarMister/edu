@@ -1,5 +1,7 @@
 // Короткий звуковой сигнал. Если есть файл в public/sounds, используем его.
-let ctx: AudioContext | null = null;
+import { AudioPlayer, resumeAudioContext } from './audio';
+
+const player = new AudioPlayer();
 
 type SoundKind = 'notify' | 'newOrder' | 'payment' | 'accept';
 
@@ -12,13 +14,12 @@ export function beep(kind: SoundKind = 'notify') {
         : kind === 'accept'
           ? '/sounds/accept.mp3'
           : '/sounds/notify.mp3';
-  const audio = new Audio(file);
-  audio.play().catch(() => playGeneratedBeep(kind));
+  void player.play(file).catch(() => playGeneratedBeep(kind));
 }
 
-function playGeneratedBeep(kind: SoundKind = 'notify') {
+async function playGeneratedBeep(kind: SoundKind = 'notify') {
   try {
-    ctx = ctx ?? new (window.AudioContext || (window as any).webkitAudioContext)();
+    const ctx = await resumeAudioContext();
     const o = ctx.createOscillator();
     const g = ctx.createGain();
     o.connect(g);

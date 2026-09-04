@@ -1,9 +1,7 @@
 import { api } from '@/lib/api';
+import { AudioPlayer, unlockAudio } from '@/lib/audio';
 
-/** Короткий «тихий» WAV — проигрываем в обработчике клика, чтобы разблокировать
- *  автоплей аудио на ТВ/в браузере (политика autoplay требует жеста). */
-const SILENT_WAV =
-  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=';
+const player = new AudioPlayer();
 
 type AnnounceRef = { code?: string | null; cafe?: string | null };
 
@@ -22,15 +20,13 @@ class QueueVoice {
   /** Разблокировать аудио (вызывать из обработчика клика). */
   unlock() {
     this.enabled = true;
-    const a = new Audio(SILENT_WAV);
-    a.play().catch(() => {
-      /* не критично — следующий жест разблокирует */
-    });
+    unlockAudio();
   }
 
   disable() {
     this.enabled = false;
     this.queue = [];
+    player.stop();
   }
 
   enqueue(ref: AnnounceRef, orderId: string) {
@@ -51,9 +47,10 @@ class QueueVoice {
           if (ref.code) params.code = ref.code;
           else if (ref.cafe) params.cafe = ref.cafe;
           const res = await api.get('/queue/announce', { params, responseType: 'blob' });
+          if (!this.enabled || Date.now() - at > MAX_VOICE_AGE_MS) continue;
           const url = URL.createObjectURL(res.data as Blob);
           try {
-            await playUrl(url);
+            await player.play(url);
           } finally {
             URL.revokeObjectURL(url);
           }
@@ -65,15 +62,6 @@ class QueueVoice {
       this.pumping = false;
     }
   }
-}
-
-function playUrl(url: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const audio = new Audio(url);
-    audio.onended = () => resolve();
-    audio.onerror = () => reject(new Error('Ошибка воспроизведения аудио'));
-    audio.play().catch(reject);
-  });
 }
 
 export const queueVoice = new QueueVoice();

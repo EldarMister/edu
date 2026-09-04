@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import type { AuthUser } from '@/types';
 import { ProtectedRoute, homeForRole } from '@/routes/ProtectedRoute';
 import { Toaster } from '@/components/Toaster';
+import { AudioUnlockButton } from '@/components/AudioUnlockButton';
 import { UpdateModal } from '@/components/UpdateModal';
 import { PttOverlay } from '@/features/ptt/PttOverlay';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
@@ -49,6 +50,7 @@ export function App() {
 
   return (
     <>
+      {showPtt && <AudioUnlockButton />}
       <Routes>
         {/* Публичное QR-меню стола (EDU MENU) — без авторизации. */}
         <Route path="/menu/:tableToken" element={<QrMenuApp />} />
