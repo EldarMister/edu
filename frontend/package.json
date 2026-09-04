@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:audio": "node --test tests/audio-regression.test.cjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.59.0",

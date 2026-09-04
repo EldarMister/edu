@@ -4,7 +4,10 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/queryClient';
 import { App } from './App';
+import { installAudioUnlock } from '@/lib/audio';
 import './index.css';
+
+installAudioUnlock();
 
 // Точная высота вьюпорта на мобильных. Обновляется при ресайзе и
 // показе клавиатуры, чтобы нижняя навигация не «уезжала» вниз.

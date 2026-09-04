@@ -6,6 +6,7 @@
  * Если TTS недоступен или браузер заблокировал автозвук — тихо логируем, без сбоев.
  */
 import { api } from '@/lib/api';
+import { AudioPlayer } from '@/lib/audio';
 
 /**
  * Голосовое уведомление актуально только «здесь и сейчас». Если TTS-сервис тормозит
@@ -16,6 +17,7 @@ import { api } from '@/lib/api';
 const MAX_VOICE_AGE_MS = 30_000;
 
 class WaiterVoice {
+  private player = new AudioPlayer();
   private queue: { text: string; at: number }[] = [];
   private pumping = false;
 
@@ -55,12 +57,7 @@ class WaiterVoice {
   }
 
   private playUrl(url: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const audio = new Audio(url);
-      audio.onended = () => resolve();
-      audio.onerror = () => reject(new Error('Ошибка воспроизведения аудио'));
-      audio.play().catch(reject);
-    });
+    return this.player.play(url);
   }
 }
 
