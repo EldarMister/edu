@@ -315,6 +315,18 @@ export function OrderPanel({
               {t('Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.')}
             </div>
           )}
+          {[
+            'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
+            'picked_up', 'partially_rejected', 'waiting_payment',
+          ].includes(order.status) && !order.requiresWaiterDecision && !unclaimedQr && (
+            <button
+              className="btn btn-lg mb-2 w-full border border-primary bg-white font-medium text-primary hover:bg-primary/5"
+              disabled={preliminaryPending}
+              onClick={onPreliminaryReceipt}
+            >
+              {preliminaryPending ? <Spinner /> : t('Счёт')}
+            </button>
+          )}
           <ActionButton
             order={order}
             submitting={submitting}

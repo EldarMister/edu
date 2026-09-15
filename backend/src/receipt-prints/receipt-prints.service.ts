@@ -24,6 +24,16 @@ type PrintableOrder = Prisma.OrderGetPayload<{
 }>;
 const REQUEST_TTL_MS = 2 * 60 * 60 * 1000;
 const PRINTABLE_ORDER_TTL_MS = 24 * 60 * 60 * 1000;
+const PRELIMINARY_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.sent_to_kitchen,
+  OrderStatus.accepted_by_kitchen,
+  OrderStatus.cooking,
+  OrderStatus.ready,
+  OrderStatus.picked_up,
+  OrderStatus.served,
+  OrderStatus.waiting_payment,
+  OrderStatus.partially_rejected,
+];
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -101,7 +111,7 @@ export class ReceiptPrintsService {
 
   private serializeOrder(order: PrintableOrder) {
     const type =
-      order.status === OrderStatus.waiting_payment ? ReceiptPrintType.preliminary : ReceiptPrintType.receipt;
+      order.status === OrderStatus.paid ? ReceiptPrintType.receipt : ReceiptPrintType.preliminary;
     return {
       id: `order:${type}:${order.id}`,
       source: 'order',
@@ -191,7 +201,7 @@ export class ReceiptPrintsService {
       this.prisma.order.findMany({
         where: {
           OR: [
-            { status: OrderStatus.waiting_payment, updatedAt: { gte: printableCutoff } },
+            { status: { in: PRELIMINARY_ORDER_STATUSES }, updatedAt: { gte: printableCutoff } },
             { status: OrderStatus.paid, closedAt: { gte: printableCutoff } },
             { status: OrderStatus.paid, closedAt: null, updatedAt: { gte: printableCutoff } },
           ],
@@ -208,7 +218,7 @@ export class ReceiptPrintsService {
     const activeRequestKeys = new Set(requests.map((r) => `${r.orderId}:${r.type}`));
     const printableOrders = orders.filter((order) => {
       const type =
-        order.status === OrderStatus.waiting_payment ? ReceiptPrintType.preliminary : ReceiptPrintType.receipt;
+        order.status === OrderStatus.paid ? ReceiptPrintType.receipt : ReceiptPrintType.preliminary;
       return !activeRequestKeys.has(`${order.id}:${type}`);
     });
 

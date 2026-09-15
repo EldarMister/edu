@@ -49,6 +49,10 @@ export function OrderDetailScreen() {
   }
 
   const busy = pickedUp.isPending || served.isPending || toPayment.isPending || resolve.isPending;
+  const canPrintBill = [
+    'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
+    'picked_up', 'served', 'partially_rejected', 'waiting_payment',
+  ].includes(order.status) && !order.requiresWaiterDecision;
 
   const mainAction = () => {
     if (order.requiresWaiterDecision) {
@@ -116,18 +120,20 @@ export function OrderDetailScreen() {
           <Text style={styles.totalValue}>{money(order.finalAmount)}</Text>
         </View>
         <View style={styles.actions}>
-          <Button
-            title="Счёт"
-            variant="secondary"
-            style={{ width: 110 }}
-            loading={print.isPending}
-            onPress={() =>
-              print.mutate(
-                { orderId: order.id, type: 'preliminary' },
-                { onSuccess: () => Alert.alert('Готово', 'Запрос на печать отправлен администратору'), onError },
-              )
-            }
-          />
+          {canPrintBill && (
+            <Button
+              title="Счёт"
+              variant="secondary"
+              style={{ width: 110 }}
+              loading={print.isPending}
+              onPress={() =>
+                print.mutate(
+                  { orderId: order.id, type: 'preliminary' },
+                  { onSuccess: () => Alert.alert('Готово', 'Запрос на печать отправлен администратору'), onError },
+                )
+              }
+            />
+          )}
           {mainAction()}
         </View>
       </View>
