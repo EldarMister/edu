@@ -30,3 +30,7 @@ coverage/
 # prisma
 backend/prisma/*.db
 designe/
+!/designe/
+designe/*
+!designe/orders-redesign/
+designe/orders-redesign/.edge-*/

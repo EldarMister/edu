@@ -1,36 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Order, OrderStatus } from '@/types';
-import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
-import { displayOrderNumber, hallSuffix, money, paymentCell, timeHM } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
-import { IconEdit, IconX } from '../components/icons';
+import { OrdersFilters, type OrderSort } from '../components/OrdersFilters';
+import { OrdersTable } from '../components/OrdersTable';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff, useUpdateOrderStatus } from '../api';
-
-/** Заказ можно отменить, пока он не оплачен/не отменён/не отклонён. */
-const CANCELLABLE = new Set([
-  'draft',
-  'sent_to_kitchen',
-  'accepted_by_kitchen',
-  'cooking',
-  'ready',
-  'picked_up',
-  'served',
-  'waiting_payment',
-  'partially_rejected',
-]);
-
-const STATUS_OPTIONS = [
-  { value: 'all', label: 'Все статусы' },
-  { value: 'paid', label: 'Оплачен' },
-  { value: 'active', label: 'Не оплачен' },
-  { value: 'cancelled', label: 'Отменён' },
-];
+import './orders-redesign.css';
 
 const MANUAL_STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
   { value: 'sent_to_kitchen', label: 'Активный' },
@@ -41,32 +22,6 @@ const MANUAL_STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
   { value: 'served', label: 'Подан гостям' },
   { value: 'waiting_payment', label: 'Ожидает оплаты' },
   { value: 'cancelled', label: 'Отменён' },
-];
-
-const PAYMENT_OPTIONS = [
-  { value: '', label: 'Все способы оплаты' },
-  { value: 'cash', label: 'Наличные' },
-  { value: 'qr', label: 'QR' },
-  { value: 'mixed', label: 'Смешанная' },
-  { value: 'card', label: 'Карта' },
-];
-
-const PERIOD_OPTIONS = [
-  { value: 'all', label: 'Всё время' },
-  { value: 'today', label: 'Сегодня' },
-  { value: 'week', label: 'За неделю' },
-  { value: 'month', label: 'За месяц' },
-  { value: 'custom', label: 'Выбрать дату' },
-];
-
-type OrderSort = 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
-
-const SORT_OPTIONS: { value: OrderSort; label: string }[] = [
-  { value: 'default', label: 'По умолчанию' },
-  { value: 'date_desc', label: 'Дата: новые → старые' },
-  { value: 'date_asc', label: 'Дата: старые → новые' },
-  { value: 'amount_desc', label: 'Сумма: больше → меньше' },
-  { value: 'amount_asc', label: 'Сумма: меньше → больше' },
 ];
 
 function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount'; sortDirection?: 'asc' | 'desc' } {
@@ -164,11 +119,6 @@ export function OrdersPage() {
     return () => io.disconnect();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage, items.length]);
 
-  // Смена фильтра — просто меняет queryKey, список перезагружается с начала.
-  function reset<T>(setter: (v: T) => void) {
-    return setter;
-  }
-
   async function confirmCancel(reason: string) {
     if (!cancelTarget) return;
     try {
@@ -201,12 +151,10 @@ export function OrdersPage() {
     }
   }
 
-  const ctrl = 'h-10 w-full text-sm';
-
   return (
-    <div className="space-y-3">
+    <div className="orders-redesign">
       {/* Inline-сводка под заголовком */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
+      <div className="orders-summary">
         <Sum label={tr('Всего заказов')} value={s ? s.total : '—'} />
         <Sep />
         <Sum label={tr('Оплачено')} value={s ? s.paid : '—'} />
@@ -218,176 +166,36 @@ export function OrdersPage() {
         <Sum label={tr('Выручка')} value={s ? money(s.revenue) : '—'} />
       </div>
 
-      {/* Панель фильтров в одну строку */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Select
-          className={`${ctrl} sm:w-40`}
-          value={tab}
-          onChange={reset(setTab)}
-          options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
-        />
-        <Select
-          className={`${ctrl} sm:w-52`}
-          value={paymentMethod}
-          onChange={reset(setPaymentMethod)}
-          options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
-        />
-        <Select
-          className={`${ctrl} sm:w-48`}
-          value={waiterId}
-          onChange={reset(setWaiterId)}
-          options={waiterOptions}
-        />
-        <Select
-          className={`${ctrl} sm:w-40`}
-          value={period}
-          onChange={reset(setPeriod)}
-          options={PERIOD_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
-        />
-        <Select
-          className={`${ctrl} sm:w-56`}
-          value={sort}
-          onChange={(value) => setSort(value as OrderSort)}
-          options={SORT_OPTIONS.map((option) => ({ ...option, label: tr(option.label) }))}
-        />
-        {period === 'custom' && (
-          <input
-            type="date"
-            className="h-10 rounded-xl border border-border bg-white px-3 text-sm text-text-primary outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
-            value={customDate}
-            onChange={(e) => reset(setCustomDate)(e.target.value)}
-          />
-        )}
-        <input
-          className="h-10 flex-1 rounded-xl border border-border bg-white px-3.5 text-sm placeholder:text-text-light outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15 sm:ml-auto sm:max-w-xs sm:flex-none"
-          placeholder={tr('Поиск по заказам')}
-          value={search}
-          onChange={(e) => reset(setSearch)(e.target.value)}
-        />
-      </div>
+      <OrdersFilters
+        tab={tab}
+        paymentMethod={paymentMethod}
+        waiterId={waiterId}
+        waiterOptions={waiterOptions}
+        period={period}
+        customDate={customDate}
+        sort={sort}
+        search={search}
+        onTabChange={setTab}
+        onPaymentMethodChange={setPaymentMethod}
+        onWaiterChange={setWaiterId}
+        onPeriodChange={setPeriod}
+        onCustomDateChange={setCustomDate}
+        onSortChange={setSort}
+        onSearchChange={setSearch}
+      />
 
-      {/* Таблица заказов */}
-      <div className="overflow-hidden rounded-xl border border-border bg-white">
-        {ordersQ.isLoading ? (
-          <div className="flex justify-center py-12 text-primary">
-            <Spinner className="h-6 w-6" />
-          </div>
-        ) : ordersError ? (
-          <div className="px-4 py-12 text-center">
-            <p className="font-medium text-danger">{tr('Не удалось загрузить заказы')}</p>
-            <p className="mt-1 text-sm text-text-muted">{ordersError}</p>
-          </div>
-        ) : items.length === 0 ? (
-          <p className="py-12 text-center text-text-muted">{tr('Заказы не найдены')}</p>
-        ) : (
-          <div ref={scrollRef} className="menu-scrollbar max-h-[calc(100vh-160px)] overflow-auto">
-            <table className="w-full min-w-[860px] table-fixed text-sm">
-              <colgroup>
-                <col className="w-[9%]" />
-                <col className="w-[16%]" />
-                <col className="w-[8%]" />
-                <col className="w-[14%]" />
-                <col className="w-[9%]" />
-                <col className="w-[22%]" />
-                <col className="w-[12%]" />
-                <col className="w-[76px]" />
-              </colgroup>
-              <thead className="sticky top-0 z-10">
-                <tr className="border-b border-border bg-background text-left text-xs text-text-muted">
-                  <Th>{tr('№ заказа')}</Th>
-                  <Th>{tr('Дата и время')}</Th>
-                  <Th>{tr('Стол')}</Th>
-                  <Th>{tr('Официант')}</Th>
-                  <Th className="text-right">{tr('Сумма')}</Th>
-                  <Th className="pl-4">{tr('Статус заказа')}</Th>
-                  <Th>{tr('Способ оплаты')}</Th>
-                  <Th className="px-1 text-center">{tr('Действия')}</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((ord) => (
-                  <tr
-                    key={ord.id}
-                    className="cursor-pointer border-b border-border last:border-0 hover:bg-background/60 focus-within:bg-background/60"
-                    tabIndex={0}
-                    role="button"
-                    onClick={() => setDetailsOrder(ord)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        setDetailsOrder(ord);
-                      }
-                    }}
-                  >
-                    <Td className="font-medium text-text-primary">{displayOrderNumber(ord.orderNumber)}</Td>
-                    <Td className="whitespace-nowrap text-text-secondary">
-                      {new Date(ord.createdAt).toLocaleDateString('ru-RU')} {timeHM(ord.createdAt)}
-                    </Td>
-                    <Td className="text-text-secondary">
-                      {ord.source === 'delivery' ? '—' : <>{tr('Стол')} {ord.table.number}{hallSuffix(ord.table)}</>}
-                    </Td>
-                    <Td className="text-text-secondary">
-                      {ord.source === 'delivery' ? (
-                        <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
-                          {tr('Доставка')}
-                        </span>
-                      ) : ord.waiter?.name ?? 'QR menu'}
-                    </Td>
-                    <Td className="text-right font-medium text-text-primary">{money(ord.finalAmount)}</Td>
-                    <Td className="pl-4">
-                      <OrderStatusBadges
-                        order={ord}
-                        size="sm"
-                        className="flex flex-nowrap items-center justify-start gap-1"
-                      />
-                    </Td>
-                    <Td className="whitespace-nowrap text-text-secondary">{paymentCell(ord)}</Td>
-                    <Td className="px-1">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-primary/10 hover:text-primary"
-                          title={tr('Изменить статус')}
-                          aria-label={tr('Изменить статус')}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openStatusEditor(ord);
-                          }}
-                        >
-                          <IconEdit className="h-4 w-4" />
-                        </button>
-                        {CANCELLABLE.has(ord.status) && (
-                          <button
-                            className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-danger/10 hover:text-danger"
-                            title={tr('Отменить')}
-                            aria-label={tr('Отменить')}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setCancelTarget(ord);
-                            }}
-                          >
-                            <IconX className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    </Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {/* Маяк бесконечной подгрузки + индикатор */}
-            <div ref={loadMoreRef} />
-            {isFetchingNextPage && (
-              <div className="flex justify-center py-3 text-primary">
-                <Spinner className="h-5 w-5" />
-              </div>
-            )}
-            {!hasNextPage && (
-              <p className="py-3 text-center text-xs text-text-light">{tr('Все заказы загружены')}</p>
-            )}
-          </div>
-        )}
-      </div>
-
+      <OrdersTable
+        items={items}
+        isLoading={ordersQ.isLoading}
+        error={ordersError}
+        scrollRef={scrollRef}
+        loadMoreRef={loadMoreRef}
+        isFetchingNextPage={isFetchingNextPage}
+        hasNextPage={hasNextPage}
+        onOpen={setDetailsOrder}
+        onEdit={openStatusEditor}
+        onCancel={setCancelTarget}
+      />
       <CancelOrderModal
         open={!!cancelTarget}
         orderLabel={
@@ -503,12 +311,5 @@ function Sum({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 function Sep() {
-  return <span className="text-text-light">|</span>;
-}
-
-function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <th className={`px-3 py-2.5 font-medium ${className}`}>{children}</th>;
-}
-function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <td className={`px-3 py-2 ${className}`}>{children}</td>;
+  return <span className="orders-summary-separator" aria-hidden="true" />;
 }
