@@ -45,6 +45,7 @@ export class CreateOrderItemDto {
   @IsString()
   variantId?: string;
 
+  /** Количество в базовых единицах: граммах либо миллилитрах. */
   @IsOptional()
   @IsInt()
   @Min(1)

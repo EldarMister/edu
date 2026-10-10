@@ -75,6 +75,9 @@ export class AdminOrdersService {
       where.OR = [
         { orderNumber: { contains: query.search, mode: 'insensitive' } },
         { waiter: { name: { contains: query.search, mode: 'insensitive' } } },
+        { externalOrderId: { contains: query.search, mode: 'insensitive' } },
+        { deliveryCustomerName: { contains: query.search, mode: 'insensitive' } },
+        { deliveryCustomerPhone: { contains: query.search, mode: 'insensitive' } },
       ];
     }
 
@@ -95,11 +98,19 @@ export class AdminOrdersService {
     const page = query.page ?? 1;
     const pageSize = Math.min(query.pageSize ?? 10, 50);
     const where = this.buildWhere(query);
+    const orderBy: Prisma.OrderOrderByWithRelationInput =
+      query.sort === 'amount_desc' || (query.sort === 'amount' && query.sortDirection !== 'asc')
+        ? { finalAmount: 'desc' }
+        : query.sort === 'amount_asc' || (query.sort === 'amount' && query.sortDirection === 'asc')
+          ? { finalAmount: 'asc' }
+          : query.sort === 'date_asc' || (query.sort === 'date' && query.sortDirection === 'asc')
+            ? { createdAt: 'asc' }
+            : { createdAt: 'desc' };
 
     const [items, total] = await Promise.all([
       this.prisma.order.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         skip: (page - 1) * pageSize,
         take: pageSize,
         include: listInclude,

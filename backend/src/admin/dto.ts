@@ -6,6 +6,7 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   Min,
@@ -164,8 +165,10 @@ export class CreateDishDto {
 
   @IsOptional() @IsBoolean()
   isWeighted?: boolean;
+
   @IsOptional() @IsIn(['weight', 'volume'])
   weightedMeasure?: 'weight' | 'volume';
+
   @IsOptional() @IsInt() @IsIn([1, 100, 1000])
   weightedPriceBase?: number;
 
@@ -222,8 +225,10 @@ export class UpdateDishDto {
 
   @IsOptional() @IsBoolean()
   isWeighted?: boolean;
+
   @IsOptional() @IsIn(['weight', 'volume'])
   weightedMeasure?: 'weight' | 'volume';
+
   @IsOptional() @IsInt() @IsIn([1, 100, 1000])
   weightedPriceBase?: number;
 
@@ -330,6 +335,17 @@ export class UpdateStaffDto {
   password?: string;
 }
 
+// ---------- Права доступа сотрудника ----------
+export class UpdatePermissionsDto {
+  // Доступ к разделам: { warehouse: true, ... }. Неизвестные ключи отбрасываются на сервере.
+  @IsOptional() @IsObject()
+  sections?: Record<string, boolean>;
+
+  // Дополнительные права (действия): { editMenu: true, ... }.
+  @IsOptional() @IsObject()
+  actions?: Record<string, boolean>;
+}
+
 // ---------- Отчёт по сменам: фиксация сдачи наличных ----------
 export class SetCashHandedDto {
   @IsString() @IsNotEmpty()
@@ -360,6 +376,17 @@ export class ShiftHistoryQueryDto {
   role?: Role;
 }
 
+export class WaiterOrdersReportQueryDto {
+  @IsString() @IsNotEmpty()
+  waiterId: string;
+
+  @IsString() @IsNotEmpty()
+  from: string;
+
+  @IsString() @IsNotEmpty()
+  to: string;
+}
+
 export class UpdateShiftHistoryDto {
   @IsOptional() @IsString()
   startedAt?: string;
@@ -375,6 +402,12 @@ export class OrderQueryDto {
 
   @IsOptional() @IsString()
   search?: string;
+
+  @IsOptional() @IsIn(['default', 'date', 'amount', 'date_desc', 'date_asc', 'amount_desc', 'amount_asc'])
+  sort?: 'default' | 'date' | 'amount' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
+
+  @IsOptional() @IsIn(['asc', 'desc'])
+  sortDirection?: 'asc' | 'desc';
 
   @IsOptional() @IsString()
   dateFrom?: string;

@@ -10,6 +10,7 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { FiscalService } from '../fiscal/fiscal.service';
 import type { AuditActor } from '../audit/audit.service';
+import { PushService } from '../push/push.service';
 
 const withWaiter = {
   waiter: { select: { id: true, name: true } },
@@ -24,6 +25,16 @@ type PrintableOrder = Prisma.OrderGetPayload<{
 }>;
 const REQUEST_TTL_MS = 2 * 60 * 60 * 1000;
 const PRINTABLE_ORDER_TTL_MS = 24 * 60 * 60 * 1000;
+const PRELIMINARY_ORDER_STATUSES: OrderStatus[] = [
+  OrderStatus.sent_to_kitchen,
+  OrderStatus.accepted_by_kitchen,
+  OrderStatus.cooking,
+  OrderStatus.ready,
+  OrderStatus.picked_up,
+  OrderStatus.served,
+  OrderStatus.waiting_payment,
+  OrderStatus.partially_rejected,
+];
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -69,6 +80,7 @@ export class ReceiptPrintsService {
     private prisma: PrismaService,
     private events: EventsGateway,
     private fiscal: FiscalService,
+    private push: PushService,
   ) {}
 
   private serialize(r: RequestWithWaiter) {
@@ -101,7 +113,7 @@ export class ReceiptPrintsService {
 
   private serializeOrder(order: PrintableOrder) {
     const type =
-      order.status === OrderStatus.waiting_payment ? ReceiptPrintType.preliminary : ReceiptPrintType.receipt;
+      order.status === OrderStatus.paid ? ReceiptPrintType.receipt : ReceiptPrintType.preliminary;
     return {
       id: `order:${type}:${order.id}`,
       source: 'order',
@@ -173,6 +185,11 @@ export class ReceiptPrintsService {
     const dto = this.withRequestVoice(this.serialize(request));
     // Заявка сразу появляется только у администраторов.
     this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, dto);
+    void this.push.notifyRole(Role.ADMIN, {
+      title: 'Печать чека', body: `Заявка от ${dto.waiterName} · Стол ${dto.tableNumber}`,
+      orderId: dto.orderId, orderNumber: dto.orderNumber, channel: 'payments',
+      notificationId: `receipt:${dto.id}:created`, url: '/admin/receipts',
+    }, order.cafeId);
     return dto;
   }
 
@@ -191,7 +208,7 @@ export class ReceiptPrintsService {
       this.prisma.order.findMany({
         where: {
           OR: [
-            { status: OrderStatus.waiting_payment, updatedAt: { gte: printableCutoff } },
+            { status: { in: PRELIMINARY_ORDER_STATUSES }, updatedAt: { gte: printableCutoff } },
             { status: OrderStatus.paid, closedAt: { gte: printableCutoff } },
             { status: OrderStatus.paid, closedAt: null, updatedAt: { gte: printableCutoff } },
           ],
@@ -208,7 +225,7 @@ export class ReceiptPrintsService {
     const activeRequestKeys = new Set(requests.map((r) => `${r.orderId}:${r.type}`));
     const printableOrders = orders.filter((order) => {
       const type =
-        order.status === OrderStatus.waiting_payment ? ReceiptPrintType.preliminary : ReceiptPrintType.receipt;
+        order.status === OrderStatus.paid ? ReceiptPrintType.receipt : ReceiptPrintType.preliminary;
       return !activeRequestKeys.has(`${order.id}:${type}`);
     });
 
@@ -272,6 +289,12 @@ export class ReceiptPrintsService {
 
     this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
     this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
+    const label = dto.type === ReceiptPrintType.preliminary ? 'Счёт' : 'Чек';
+    void this.push.notifyWaiter(request.waiterId, {
+      title: 'Печать завершена', body: `${label} ${dto.orderNumber} распечатан. Заберите ${label.toLowerCase()}.`,
+      orderId: dto.orderId, orderNumber: dto.orderNumber, type: 'success', channel: 'payments',
+      notificationId: `receipt:${dto.id}:printed`, url: '/waiter',
+    });
     return dto;
   }
 
@@ -293,6 +316,11 @@ export class ReceiptPrintsService {
 
     this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_REJECTED, dto);
     this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_REJECTED, dto);
+    void this.push.notifyWaiter(request.waiterId, {
+      title: 'Печать отклонена', body: 'Печать чека отклонена администратором',
+      orderId: dto.orderId, orderNumber: dto.orderNumber, type: 'error', channel: 'payments',
+      notificationId: `receipt:${dto.id}:rejected`, url: '/waiter',
+    });
     return dto;
   }
 

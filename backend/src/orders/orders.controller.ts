@@ -62,6 +62,12 @@ export class OrdersController {
     return this.orders.cancelOrder(id, user, dto.reason);
   }
 
+  @Post(':id/call-administrator')
+  @Roles(Role.WAITER)
+  callAdministrator(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.orders.callAdministrator(id, user);
+  }
+
   @Post(':id/picked-up')
   @Roles(Role.WAITER)
   pickedUp(@Param('id') id: string, @CurrentUser() user: AuthUser) {
@@ -92,14 +98,14 @@ export class OrdersController {
   }
 
   @Post(':id/items/:itemId/cancel')
-  @Roles(Role.WAITER)
+  @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
   cancelItem(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @CurrentUser() user: AuthUser,
     @Body() dto: CancelOrderItemDto,
   ) {
-    return this.orders.cancelReadyItem(id, itemId, user.id, dto.reason);
+    return this.orders.cancelReadyItem(id, itemId, user, dto.reason);
   }
 
   @Post(':id/served')
