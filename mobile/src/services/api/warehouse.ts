@@ -1,58 +1,35 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { AdminDish } from './admin';
 
-const KEY = ['admin', 'warehouse'] as const;
-
-const get = async <T,>(url: string) => (await api.get<T>(url)).data;
-
-function query(params: object) {
-  const parts = Object.entries(params)
-    .filter(([, value]) => typeof value === 'string' && value.length > 0)
-    .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
-  return parts.join('&');
-}
-
 export type WarehouseTab = 'overview' | 'dishes' | 'ingredients' | 'purchases' | 'movements';
-export type StockMovementType = 'purchase' | 'sale' | 'return' | 'correction' | 'cancel';
-export type StockMovementSource = 'purchase' | 'order' | 'manual';
-export type PurchaseStatus = 'draft' | 'completed' | 'cancelled';
-
-export interface WarehouseOverview {
-  stockValue: number;
-  lowStockCount: number;
-  purchasesTotal: number;
-  ingredientWriteOffTotal: number;
-  stockValueTrend: Array<{ date: string; value: number }>;
-  lowStockItems: Array<{ id: string; name: string; unit: string; stock: number; lowStockThreshold: number }>;
-  topConsumedIngredients: Array<{ ingredientId: string; name: string; unit: string; quantity: number; cost: number }>;
-  recentMovements: Array<{
-    id: string;
-    createdAt: string;
-    type: StockMovementType;
-    ingredientName: string;
-    unit: string;
-    change: number;
-    after: number;
-  }>;
-  suppliersTop: Array<{ supplier: string; total: number }>;
+export interface WarehouseItemsOverview { totalProducts: number; totalDrinks: number; lowStockCount: number; totalUnits: number }
+export function useWarehouseItemsOverview() {
+  return useQuery({ queryKey: ['admin', 'warehouse', 'items', 'overview'], queryFn: () => get<WarehouseItemsOverview>('/admin/warehouse/items/overview') });
+}
+export function useWarehouseItems(search: string, categoryId = '') {
+  return useQuery({ queryKey: ['admin', 'warehouse', 'items', search, categoryId], queryFn: () => get<AdminDish[]>(`/admin/warehouse/items?search=${encodeURIComponent(search)}&categoryId=${encodeURIComponent(categoryId)}`) });
 }
 
-export interface WarehouseItemsOverview {
-  totalProducts: number;
-  totalDrinks: number;
-  lowStockCount: number;
-  totalUnits: number;
-}
+const get = async <T>(url: string) => (await api.get<T>(url)).data;
+
+// ---------- Типы ----------
+
+import type { UnitCode, UnitType } from './warehouseUnits';
 
 export interface Ingredient {
   id: string;
   name: string;
-  unit: string;
-  displayUnit: string;
-  stock: number;
-  avgCost: number;
+  unitType: UnitType;
+  baseUnit: UnitCode;
+  displayUnit: UnitCode;
+  unit: string; // кириллица display-единицы
+  stock: number; // в display-единице
+  avgCost: number; // за display-единицу
   lowStockThreshold: number;
+  costUnitLabel: string; // «с/кг»
+  stockBase: number;
+  avgCostBase: number;
   isActive: boolean;
   isLow: boolean;
 }
@@ -63,6 +40,45 @@ export interface IngredientsOverview {
   avgCost: number;
 }
 
+export interface RecipeItem {
+  id: string;
+  ingredientId: string;
+  name: string;
+  unit: string; // кириллица amountUnit
+  amountUnit: UnitCode;
+  unitType: UnitType;
+  ingredientDisplayUnit: UnitCode;
+  amount: number; // в amountUnit
+  avgCost: number; // за amountUnit
+  costUnitLabel: string;
+  lineCost: number;
+  stock: number; // в amountUnit
+  isLow: boolean;
+  isActive: boolean;
+}
+
+export interface Recipe {
+  dishId: string;
+  dishName: string;
+  price: number;
+  foodCost: number;
+  marginPercent: number;
+  items: RecipeItem[];
+}
+
+export type PurchaseStatus = 'draft' | 'completed' | 'cancelled';
+
+export interface PurchaseItem {
+  id: string;
+  ingredientId: string;
+  ingredientName: string;
+  unit: string; // кириллица
+  unitCode: UnitCode;
+  quantity: number;
+  purchasePrice: number;
+  total: number;
+}
+
 export interface Purchase {
   id: string;
   number: number;
@@ -71,6 +87,7 @@ export interface Purchase {
   totalAmount: number;
   status: PurchaseStatus;
   itemsCount: number;
+  items?: PurchaseItem[];
   createdAt: string;
 }
 
@@ -80,13 +97,18 @@ export interface PurchasesOverview {
   sum: number;
 }
 
+export type StockMovementType = 'purchase' | 'sale' | 'return' | 'correction' | 'cancel';
+export type StockMovementSource = 'purchase' | 'order' | 'manual';
+
 export interface StockMovement {
   id: string;
   ingredientId: string;
+  orderItemId?: string | null;
   ingredientName: string;
   unit: string;
   type: StockMovementType;
   sourceType: StockMovementSource;
+  sourceId: string | null;
   documentLabel: string | null;
   beforeStock: number;
   change: number;
@@ -102,42 +124,59 @@ export interface MovementsSummary {
   returns: number;
 }
 
-export interface MovementsFilter {
-  from?: string;
-  to?: string;
-  type?: string;
-  sourceType?: string;
-  search?: string;
+export interface WarehouseOverview {
+  stockValue: number;
+  lowStockCount: number;
+  purchasesTotal: number;
+  ingredientWriteOffTotal: number;
+  stockValueTrend: Array<{ date: string; value: number }>;
+  lowStockItems: Array<{
+    id: string;
+    name: string;
+    unit: string;
+    stock: number;
+    lowStockThreshold: number;
+  }>;
+  topConsumedIngredients: Array<{
+    ingredientId: string;
+    name: string;
+    unit: string;
+    quantity: number;
+    cost: number;
+  }>;
+  recentMovements: Array<{
+    id: string;
+    createdAt: string;
+    type: StockMovementType;
+    ingredientName: string;
+    unit: string;
+    change: number;
+    after: number;
+  }>;
+  suppliersTop: Array<{ supplier: string; total: number }>;
 }
 
+const KEY = ['admin', 'warehouse'] as const;
+
 export function useWarehouseDashboard(params: { dateFrom: string; dateTo: string }) {
-  const qs = query(params);
+  const q = new URLSearchParams();
+  q.append('dateFrom', params.dateFrom);
+  q.append('dateTo', params.dateTo);
+  const qs = q.toString();
   return useQuery({
     queryKey: [...KEY, 'overview', qs],
     queryFn: () => get<WarehouseOverview>(`/admin/warehouse/overview?${qs}`),
   });
 }
 
-export function useWarehouseItemsOverview() {
-  return useQuery({
-    queryKey: [...KEY, 'items', 'overview'],
-    queryFn: () => get<WarehouseItemsOverview>('/admin/warehouse/items/overview'),
-  });
-}
-
-export function useWarehouseItems(search: string) {
-  const qs = query({ search });
-  return useQuery({
-    queryKey: [...KEY, 'items', search],
-    queryFn: () => get<AdminDish[]>(`/admin/warehouse/items?${qs}`),
-  });
-}
+// ---------- Сырьё ----------
 
 export function useIngredients(search: string) {
-  const qs = query({ search });
+  const q = new URLSearchParams();
+  if (search) q.append('search', search);
   return useQuery({
     queryKey: [...KEY, 'ingredients', search],
-    queryFn: () => get<Ingredient[]>(`/admin/warehouse/ingredients?${qs}`),
+    queryFn: () => get<Ingredient[]>(`/admin/warehouse/ingredients?${q.toString()}`),
   });
 }
 
@@ -148,11 +187,92 @@ export function useIngredientsOverview() {
   });
 }
 
+export interface IngredientInput {
+  name: string;
+  unit: string;
+  stock?: number;
+  avgCost?: number;
+  lowStockThreshold?: number;
+  isActive?: boolean;
+}
+
+export function useIngredientMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: KEY });
+  const create = useMutation({
+    mutationFn: (body: IngredientInput) =>
+      api.post<Ingredient>('/admin/warehouse/ingredients', body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: IngredientInput & { id: string }) =>
+      api.patch<Ingredient>(`/admin/warehouse/ingredients/${id}`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) =>
+      api.delete(`/admin/warehouse/ingredients/${id}`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const adjust = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; mode: 'add' | 'writeoff' | 'set'; quantity: number; unit: string }) =>
+      api.post<Ingredient>(`/admin/warehouse/ingredients/${id}/adjust`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, remove, adjust };
+}
+
+// ---------- Техкарта ----------
+
+export function useRecipe(dishId: string | null) {
+  return useQuery({
+    queryKey: [...KEY, 'recipe', dishId],
+    queryFn: () => get<Recipe>(`/admin/warehouse/dishes/${dishId}/recipe`),
+    enabled: !!dishId,
+  });
+}
+
+export function useRecipeMutations(dishId: string | null) {
+  const qc = useQueryClient();
+  const invalidate = () => {
+    qc.invalidateQueries({ queryKey: [...KEY, 'recipe', dishId] });
+    qc.invalidateQueries({ queryKey: KEY });
+  };
+  const addItem = useMutation({
+    mutationFn: (body: { ingredientId: string; amount: number; unit?: string }) =>
+      api.post<Recipe>(`/admin/warehouse/dishes/${dishId}/recipe`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const updateItem = useMutation({
+    mutationFn: ({ id, amount, unit }: { id: string; amount: number; unit?: string }) =>
+      api.patch<Recipe>(`/admin/warehouse/recipe/${id}`, { amount, unit }).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const removeItem = useMutation({
+    mutationFn: (id: string) =>
+      api.delete<Recipe>(`/admin/warehouse/recipe/${id}`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { addItem, updateItem, removeItem };
+}
+
+// ---------- Закупки ----------
+
 export function usePurchases(params: { status: string; search: string }) {
-  const qs = query(params);
+  const q = new URLSearchParams();
+  if (params.status) q.append('status', params.status);
+  if (params.search) q.append('search', params.search);
   return useQuery({
     queryKey: [...KEY, 'purchases', params.status, params.search],
-    queryFn: () => get<Purchase[]>(`/admin/warehouse/purchases?${qs}`),
+    queryFn: () => get<Purchase[]>(`/admin/warehouse/purchases?${q.toString()}`),
+  });
+}
+
+export function usePurchase(id: string | null) {
+  return useQuery({
+    queryKey: [...KEY, 'purchase', id],
+    queryFn: () => get<Purchase>(`/admin/warehouse/purchases/${id}`),
+    enabled: !!id,
   });
 }
 
@@ -163,8 +283,70 @@ export function usePurchasesOverview() {
   });
 }
 
+export interface CreatePurchaseInput {
+  date?: string;
+  supplier: string;
+  items: { ingredientId: string; quantity: number; unit?: string; purchasePrice?: number; total?: number }[];
+  complete?: boolean;
+}
+
+export interface UpdatePurchaseInput {
+  id: string;
+  date?: string;
+  supplier?: string;
+  items?: { ingredientId: string; quantity: number; unit?: string; purchasePrice?: number; total?: number }[];
+}
+
+export function usePurchaseMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: KEY });
+  const create = useMutation({
+    mutationFn: (body: CreatePurchaseInput) =>
+      api.post<Purchase>('/admin/warehouse/purchases', body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const update = useMutation({
+    mutationFn: ({ id, ...body }: UpdatePurchaseInput) =>
+      api.patch<Purchase>(`/admin/warehouse/purchases/${id}`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const complete = useMutation({
+    mutationFn: (id: string) =>
+      api.post<Purchase>(`/admin/warehouse/purchases/${id}/complete`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const cancel = useMutation({
+    mutationFn: (id: string) =>
+      api.post<Purchase>(`/admin/warehouse/purchases/${id}/cancel`).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, update, complete, cancel };
+}
+
+// ---------- Движения ----------
+
+export interface MovementsFilter {
+  from?: string;
+  to?: string;
+  ingredientId?: string;
+  type?: string;
+  sourceType?: string;
+  search?: string;
+}
+
+function movementsQuery(f: MovementsFilter) {
+  const q = new URLSearchParams();
+  if (f.from) q.append('from', f.from);
+  if (f.to) q.append('to', f.to);
+  if (f.ingredientId) q.append('ingredientId', f.ingredientId);
+  if (f.type) q.append('type', f.type);
+  if (f.sourceType) q.append('sourceType', f.sourceType);
+  if (f.search) q.append('search', f.search);
+  return q.toString();
+}
+
 export function useMovements(filter: MovementsFilter) {
-  const qs = query(filter);
+  const qs = movementsQuery(filter);
   return useQuery({
     queryKey: [...KEY, 'movements', qs],
     queryFn: () => get<StockMovement[]>(`/admin/warehouse/movements?${qs}`),
@@ -172,17 +354,21 @@ export function useMovements(filter: MovementsFilter) {
 }
 
 export function useMovementsSummary(filter: MovementsFilter) {
-  const qs = query(filter);
+  const qs = movementsQuery(filter);
   return useQuery({
     queryKey: [...KEY, 'movements', 'summary', qs],
     queryFn: () => get<MovementsSummary>(`/admin/warehouse/movements/summary?${qs}`),
   });
 }
 
-export function purchaseNumber(value: number): string {
-  return `ЗКП-${String(value).padStart(6, '0')}`;
+// ---------- Форматирование ----------
+
+/** «ЗКП-000142» из номера закупки. */
+export function purchaseNumber(n: number): string {
+  return `ЗКП-${String(n).padStart(6, '0')}`;
 }
 
+/** Количество с единицей измерения: 0.12 кг, 5 шт. */
 export function qty(value: number, unit: string): string {
   const rounded = Math.round(value * 1000) / 1000;
   const str = Number.isInteger(rounded) ? String(rounded) : String(rounded).replace('.', ',');

@@ -1,20 +1,15 @@
 import React, { useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  LayoutChangeEvent,
-  PanResponder,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, LayoutChangeEvent, PanResponder, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { money } from '@/utils/format';
 import { PwaIcon } from '@/components/PwaIcon';
 import { FastPressable } from '@/components/FastPressable';
 import { BottomSheet } from '@/components/BottomSheet';
+import { DateField } from '@/components/DateField';
+import { Button } from '@/components/ui';
+import { apiError } from '@/lib/api';
 import type { PaymentMethod } from '@/types';
 import { useStatistics, type StatsDashboard, type StatsPeriod } from '@/services/api/admin';
 import { usePublicSettings } from '@/services/api/settings';
@@ -92,32 +87,20 @@ export function StatisticsScreen() {
               onPress={() => setPeriod(p.value)}
               style={[styles.periodTab, active && styles.periodTabActive]}
             >
-              <Text style={[styles.periodTabText, active && styles.periodTabTextActive]}>{p.label}</Text>
+              <Text style={[styles.periodTabText, active && styles.periodTabTextActive]} translate>{p.label}</Text>
             </FastPressable>
           );
         })}
       </View>
       {period === 'custom' ? (
         <View style={styles.dateRange}>
-          <TextInput
-            style={styles.dateInput}
-            value={from}
-            onChangeText={setFrom}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.textLight}
-          />
+          <View style={{ flex: 1 }}><DateField label="С даты" value={from} onChangeText={setFrom} /></View>
           <Text style={styles.dateDash}>—</Text>
-          <TextInput
-            style={styles.dateInput}
-            value={to}
-            onChangeText={setTo}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.textLight}
-          />
+          <View style={{ flex: 1 }}><DateField label="По дату" value={to} onChangeText={setTo} /></View>
         </View>
       ) : null}
 
-      {statsQ.isLoading || !d ? (
+      {statsQ.isError ? <View style={styles.loading}><Text style={{ color: colors.danger }}>{apiError(statsQ.error)}</Text><Button title="Повторить" onPress={() => void statsQ.refetch()} /></View> : statsQ.isLoading || !d ? (
         <View style={styles.loading}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -133,8 +116,8 @@ export function StatisticsScreen() {
           {/* График выручки */}
           <View style={styles.panel}>
             <View style={styles.panelHeadRow}>
-              <Text style={styles.panelTitle}>Выручка за период</Text>
-              <Text style={styles.panelMeta}>{d.cards.ordersPeriod} заказов</Text>
+              <Text style={styles.panelTitle} translate>Выручка за период</Text>
+              <Text style={styles.panelMeta} translate>{d.cards.ordersPeriod} заказов</Text>
             </View>
             <RevenueChart data={d.revenueSeries} />
           </View>
@@ -235,7 +218,7 @@ function SplitMetric({
         <View style={styles.splitIcon}>
           <PwaIcon name={icon} size={16} color={colors.primary} strokeWidth={2} />
         </View>
-        <Text style={styles.splitLabel}>{label}</Text>
+        <Text style={styles.splitLabel} translate>{label}</Text>
       </View>
       <Text style={styles.splitValue}>{value}</Text>
       <TrendPill value={delta} />
@@ -264,7 +247,7 @@ function TrendPill({ value }: { value: number }) {
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.panel}>
-      <Text style={styles.panelTitle}>{title}</Text>
+      <Text style={styles.panelTitle} translate>{title}</Text>
       {children}
     </View>
   );
@@ -294,7 +277,7 @@ function ListCard({
       />
       {rows.length > LIST_LIMIT ? (
         <FastPressable onPress={() => onViewAll(title, rows)} style={styles.viewAllButton}>
-          <Text style={styles.viewAllText}>Смотреть все</Text>
+          <Text style={styles.viewAllText} translate>Смотреть все</Text>
         </FastPressable>
       ) : null}
     </Panel>
@@ -329,7 +312,7 @@ function MiniTable({
         <View style={[styles.row, styles.rowHead]}>
           {columns.map((c, i) => (
             <View key={`${c.label}-${i}`} style={colFlex(i)}>
-              <Text style={cellStyle(i, 'head')}>{c.label}</Text>
+              <Text style={cellStyle(i, 'head')} translate>{c.label}</Text>
             </View>
           ))}
         </View>
@@ -412,7 +395,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
     setHover(nearest);
   }
 
-  if (n === 0) return <Text style={styles.tableEmpty}>Нет данных за период</Text>;
+  if (n === 0) return <Text style={styles.tableEmpty} translate>Нет данных за период</Text>;
 
   const pts = data.map((p, i) => [xAt(i), yAt(p.amount)] as const);
   const line = smoothPath(pts);
@@ -483,7 +466,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
 
       {hi && hover != null ? (
         <View style={[styles.tooltip, { left: tipLeft, top: tipTop, width: tipW }]} pointerEvents="none">
-          <Text style={styles.tooltipLabel} numberOfLines={1}>
+          <Text style={styles.tooltipLabel} numberOfLines={1} translate>
             {formatTooltipLabel(hi.label)}
           </Text>
           <Text style={styles.tooltipValue} numberOfLines={1}>

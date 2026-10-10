@@ -1,14 +1,6 @@
 import React from 'react';
-import {
-  Keyboard,
-  Modal as RNModal,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-  type ViewStyle,
-} from 'react-native';
+import { Keyboard, Modal as RNModal, StyleSheet, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
@@ -252,12 +244,12 @@ export function BottomSheet({
               <GestureDetector gesture={panGesture}>
                 <View style={styles.handleWrap}>
                   <View style={styles.handle} />
-                  {content.title ? <Text style={styles.sheetTitle}>{content.title}</Text> : null}
+                  {content.title ? <Text style={styles.sheetTitle} translate>{content.title}</Text> : null}
                 </View>
               </GestureDetector>
             ) : content.title ? (
               <View style={styles.header}>
-                <Text style={styles.title}>{content.title}</Text>
+                <Text style={styles.title} translate>{content.title}</Text>
                 <FastPressable
                   onPress={handleClose}
                   hitSlop={12}

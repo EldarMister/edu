@@ -1,16 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AppState,
-  Image,
-  Platform,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  Vibration,
-  View,
-} from 'react-native';
+import { AppState, Image, Platform, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, Vibration, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { FastPressable } from '@/components/FastPressable';
@@ -35,7 +25,7 @@ import { SERVER_EVENTS } from '@/services/socket/events';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { disconnectSocket } from '@/services/socket';
-import { unregisterPushDevice } from '@/services/push';
+import { notificationDeduper, unregisterPushDevice } from '@/services/push';
 import { kitchenVoice } from '@/services/kitchenVoice';
 import { getKitchenVoiceSettings } from '@/services/kitchenVoiceSettings';
 import { stationVoice, type StationVoicedOrder } from '@/services/realtimeVoice';
@@ -43,7 +33,6 @@ import { isPttBackgroundRuntimeActive } from '@/features/ptt/backgroundFlag';
 import { beep } from '@/lib/sound';
 import {
   displayOrderNumber,
-  hallSuffix,
   timeHM,
   dateDM,
   elapsed,
@@ -53,6 +42,7 @@ import { apiError } from '@/lib/api';
 import { StopListSheet } from './StopListSheet';
 import { KitchenVoiceSettingsSheet } from './KitchenVoiceSettingsSheet';
 import { KitchenStatsSheet } from './KitchenStatsSheet';
+import { deliveryDetails, orderLocation } from '@/screens/waiter/orderRules';
 import type { Order, OrderItemStatus, OrderSetComponent, OrderStatus, PrepStation } from '@/types';
 
 const TABS: { key: KitchenTab; label: string }[] = [
@@ -75,7 +65,7 @@ type PendingAction = {
   type: 'reject' | 'ready';
   itemIds: string[];
   setComponentIds: string[];
-  /** Частичный отказ по количеству для обычных позиций. */
+  /** Частичная готовность или отказ по количеству обычной позиции. */
   partial?: { itemId: string; quantity: number }[];
   deadline: number;
 };
@@ -160,12 +150,20 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
       if (!text) return;
       if (backgroundRuntimeHandlesAudio()) return;
       const settings = getKitchenVoiceSettings();
-      if (settings.notificationsEnabled) {
+      const message = order.source === 'delivery'
+        ? `Новый заказ доставки ${order.orderNumber}`
+        : `Новый заказ ${order.orderNumber} · Стол ${order.table?.number}`;
+      const notification = {
+        notificationId: order.updatedAt ? `kitchen:${order.id}:${order.updatedAt}` : undefined,
+        type: 'info',
+        orderId: order.id,
+      };
+      if (settings.notificationsEnabled && notificationDeduper.claim(notification, message)) {
         void beep('newOrder');
         Vibration.vibrate(400);
         const orderNumber = displayOrderNumber(order.orderNumber);
         push({
-          message: `Новый заказ ${orderNumber} · Стол ${order.table?.number}`,
+          message,
           orderId: order.id,
           orderNumber,
           at: new Date().toISOString(),
@@ -183,7 +181,11 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
       const text = stationVoice(order, station);
       if (!text) return;
       if (backgroundRuntimeHandlesAudio()) return;
-      if (getKitchenVoiceSettings().notificationsEnabled) void beep('notify');
+      if (getKitchenVoiceSettings().notificationsEnabled && notificationDeduper.claim({
+        notificationId: order.updatedAt ? `kitchen-status:${order.id}:${order.updatedAt}:${station}` : undefined,
+        type: 'info',
+        orderId: order.id,
+      }, text)) void beep('notify');
       kitchenVoice.enqueue(text);
     },
     [station],
@@ -210,8 +212,9 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
               orderId: p.orderId,
               itemIds: p.itemIds,
               setComponentIds: p.setComponentIds,
+              partial: p.partial,
             });
-      run.catch((err) => push({ message: apiError(err), at: new Date().toISOString() }));
+      run.catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }));
     },
     [push, readyItems, rejectItems],
   );
@@ -251,6 +254,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   // Адаптивная сетка карточек, как в PWA (columns-1 sm:2 lg:3 xl:4). В альбомном
   // режиме карточки перестают занимать всю ширину и раскладываются в 2–4 колонки.
   const { width: winWidth } = useWindowDimensions();
+  const stackedToolbar = winWidth < 960;
   const columns = winWidth >= 1280 ? 4 : winWidth >= 1000 ? 3 : winWidth >= 680 ? 2 : 1;
   const colGap = spacing.lg;
   const cardWidth = columns > 1
@@ -270,22 +274,23 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
           <>
             <ConnectionStatus />
             <FastPressable onPress={onLogout} hitSlop={8}>
-              <Text style={styles.logout}>Выйти</Text>
+              <Text style={styles.logout} translate>Выйти</Text>
             </FastPressable>
           </>
         }
       />
 
-      <View style={styles.tabsBar}>
-        <View style={{ flex: 1, minWidth: 0 }}>
+      <View style={[styles.tabsBar, stackedToolbar && styles.tabsBarStacked]}>
+        <View style={stackedToolbar ? styles.tabsFullWidth : styles.tabsFlexible}>
           <SegmentTabs items={TABS} value={tab} onChange={setTab} count={list.length} />
         </View>
+        <ToolbarActions stacked={stackedToolbar}>
         <FastPressable
           onPress={() => setStatsOpen(true)}
           style={[styles.toolbarBtn, statsOpen && styles.toolbarBtnPrimary]}
           hitSlop={6}
         >
-          <Text style={[styles.toolbarBtnText, statsOpen && styles.toolbarBtnTextPrimary]}>Статистика</Text>
+          <Text style={[styles.toolbarBtnText, statsOpen && styles.toolbarBtnTextPrimary]} translate>Статистика</Text>
         </FastPressable>
         <FastPressable
           onPress={() => setVoiceOpen(true)}
@@ -293,14 +298,15 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
           hitSlop={6}
         >
           <PwaIcon name="speaker" size={18} color={colors.primary} />
-          <Text style={styles.toolbarBtnText}>Озвучка</Text>
+          <Text style={styles.toolbarBtnText} translate>Озвучка</Text>
           <View style={voiceOpen ? styles.chevronUp : undefined}>
             <PwaIcon name="chevronDown" size={14} color={colors.primary} strokeWidth={2.2} />
           </View>
         </FastPressable>
         <FastPressable onPress={() => setStopListOpen(true)} style={styles.toolbarBtn} hitSlop={6}>
-          <Text style={styles.toolbarBtnText}>Стоп-лист</Text>
+          <Text style={styles.toolbarBtnText} translate>Стоп-лист</Text>
         </FastPressable>
+        </ToolbarActions>
       </View>
 
       {orders.isLoading ? (
@@ -334,6 +340,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
                 submitting={accept.isPending}
                 pendingItemIds={pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []}
                 pendingType={pending?.orderId === o.id ? pending.type : null}
+                pendingPartial={pending?.orderId === o.id ? pending.partial ?? [] : []}
                 onAccept={() =>
                   accept.mutate(o.id, {
                     onError: (err: unknown) => push({ message: apiError(err), at: new Date().toISOString() }),
@@ -353,17 +360,17 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
             <Image source={UNDO_ACTION_ICON} style={styles.undoIcon} resizeMode="contain" />
 
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.undoTitle} numberOfLines={1}>
+              <Text style={styles.undoTitle} numberOfLines={1} translate>
                 {pendingCount} {pluralPositions(pendingCount)}{' '}
                 {pending.type === 'reject' ? 'помечены как отказ' : 'помечены как готовые'}
               </Text>
-              <Text style={styles.undoSub}>
+              <Text style={styles.undoSub} translate>
                 Отправка официанту через{' '}
-                <Text style={styles.undoSeconds}>{String(undoSecondsLeft).padStart(2, '0')} сек</Text>
+                <Text style={styles.undoSeconds} translate>{String(undoSecondsLeft).padStart(2, '0')} сек</Text>
               </Text>
             </View>
             <FastPressable onPress={() => setPending(null)} style={styles.undoBtn}>
-              <Text style={styles.undoBtnText}>Отменить</Text>
+              <Text style={styles.undoBtnText} translate>Отменить</Text>
             </FastPressable>
           </View>
         </View>
@@ -383,6 +390,7 @@ function KitchenCard({
   submitting,
   pendingItemIds,
   pendingType,
+  pendingPartial,
   onAccept,
   onBatch,
 }: {
@@ -393,6 +401,7 @@ function KitchenCard({
   /** Блюда заказа с отложенным (ещё не подтверждённым) действием. */
   pendingItemIds: string[];
   pendingType: 'reject' | 'ready' | null;
+  pendingPartial: { itemId: string; quantity: number }[];
   onAccept: () => void;
   onBatch: (
     type: 'reject' | 'ready',
@@ -414,8 +423,9 @@ function KitchenCard({
   const allTakeaway = liveItems.length > 0 && liveItems.every((it) => it.takeaway);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // Сколько штук отказать у выбранной позиции (по умолчанию — всё количество).
-  const [rejectQtys, setRejectQtys] = useState<Record<string, number>>({});
+  // Количество применяется одинаково к готовности и отказу, как в PWA.
+  const [actionQtys, setActionQtys] = useState<Record<string, number>>({});
+  const pendingQuantityById = new Map(pendingPartial.map((item) => [item.itemId, item.quantity]));
   // Свёрнутые сеты (по id позиции-сета): по умолчанию состав раскрыт.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -477,7 +487,7 @@ function KitchenCard({
 
   const clearSelection = () => {
     setSelected(new Set());
-    setRejectQtys({});
+    setActionQtys({});
   };
 
   const runBatch = (type: 'reject' | 'ready') => {
@@ -485,15 +495,13 @@ function KitchenCard({
     const itemIds: string[] = [];
     const setComponentIds: string[] = [];
     for (const id of selected) (componentIds.has(id) ? setComponentIds : itemIds).push(id);
-    // Частичный отказ по количеству — только для обычных позиций и только при отказе.
+    // Состав сета выбирается по компонентам; обычная позиция — по количеству.
     const partial: { itemId: string; quantity: number }[] = [];
-    if (type === 'reject') {
-      for (const id of itemIds) {
-        const it = order.items.find((i) => i.id === id);
-        if (!it) continue;
-        const qty = rejectQtys[id] ?? it.quantity;
-        if (qty > 0 && qty < it.quantity) partial.push({ itemId: id, quantity: qty });
-      }
+    for (const id of itemIds) {
+      const it = order.items.find((i) => i.id === id);
+      if (!it) continue;
+      const qty = Math.min(it.quantity, Math.max(1, actionQtys[id] ?? it.quantity));
+      if (qty < it.quantity) partial.push({ itemId: id, quantity: qty });
     }
     onBatch(type, { itemIds, setComponentIds, partial: partial.length > 0 ? partial : undefined });
     clearSelection();
@@ -554,9 +562,11 @@ function KitchenCard({
   ) => {
     const selectable = isSelectable(status, id);
     const pendingItem = pendingItemIds.includes(id);
+    const pendingQuantity = pendingQuantityById.get(id);
+    const pendingPartially = pendingItem && pendingQuantity !== undefined;
     const cancelled = status === 'cancelled';
-    const rejected = status === 'rejected' || cancelled || (pendingItem && pendingType === 'reject');
-    const isReady = status === 'ready' || status === 'served' || (pendingItem && pendingType === 'ready');
+    const rejected = status === 'rejected' || cancelled || (pendingItem && !pendingPartially && pendingType === 'reject');
+    const isReady = status === 'ready' || status === 'served' || (pendingItem && !pendingPartially && pendingType === 'ready');
     // Заказ уже в работе, а позиция всё ещё «new» — добавили/заменили при редактировании.
     const isFresh = tab === 'in_work' && status === 'new' && !pendingItem;
     const checked = selected.has(id);
@@ -589,11 +599,14 @@ function KitchenCard({
         </View>
         {isFresh ? (
           <View style={styles.freshBadge}>
-            <Text style={styles.freshBadgeText}>Новое</Text>
+            <Text style={styles.freshBadgeText} translate>Новое</Text>
           </View>
         ) : null}
-        {isReady ? <Text style={styles.itemFlagDone}>✓ {status === 'served' ? 'Подано гостям' : 'Готово'}</Text> : null}
-        {rejected ? <Text style={styles.itemFlagRej}>{cancelled ? 'Отменено' : 'Отказ'}</Text> : null}
+        {isReady ? <Text style={styles.itemFlagDone} translate>✓ {status === 'served' ? 'Подано гостям' : 'Готово'}</Text> : null}
+        {rejected ? <Text style={styles.itemFlagRej} translate>{cancelled ? 'Отменено' : 'Отказ'}</Text> : null}
+        {pendingPartially ? <Text style={pendingType === 'ready' ? styles.itemFlagDone : styles.itemFlagRej} translate>
+          {pendingType === 'ready' ? 'Готово' : 'Отказать'}: {pendingQuantity} из {order.items.find((item) => item.id === id)?.quantity}
+        </Text> : null}
       </FastPressable>
     );
   };
@@ -615,7 +628,7 @@ function KitchenCard({
     it.takeaway && !allTakeaway ? (
       <View style={styles.takeawayPill}>
         <PwaIcon name="bag" size={11} color={colors.primary} strokeWidth={2} />
-        <Text style={styles.takeawayPillText}>с собой</Text>
+        <Text style={styles.takeawayPillText} translate>с собой</Text>
       </View>
     ) : null;
 
@@ -626,8 +639,7 @@ function KitchenCard({
         <View style={{ minWidth: 0, flex: 1 }}>
           <Text style={styles.orderNumber}>{displayOrderNumber(order.orderNumber)}</Text>
           <Text style={styles.tableText}>
-            Стол {order.table.number}
-            {hallSuffix(order.table)}
+            {orderLocation(order)}
           </Text>
           {qrOrder ? (
             <View style={styles.qrBadge}>
@@ -651,13 +663,14 @@ function KitchenCard({
         </View>
       </View>
 
-      {order.waiter ? <Text style={styles.waiter}>Официант: {order.waiter.name}</Text> : null}
+      {order.waiter ? <Text style={styles.waiter} translate>Официант: {order.waiter.name}</Text> : null}
+      {deliveryDetails(order) ? <Text style={styles.waiter}>{deliveryDetails(order)}</Text> : null}
 
       {allTakeaway ? (
         <View style={styles.badgeRow}>
           <View style={styles.takeawayBadge}>
             <PwaIcon name="bag" size={12} color={colors.primary} strokeWidth={2} />
-            <Text style={styles.takeawayBadgeText}>Весь заказ с собой</Text>
+            <Text style={styles.takeawayBadgeText} translate>Весь заказ с собой</Text>
           </View>
         </View>
       ) : null}
@@ -665,11 +678,11 @@ function KitchenCard({
       {stationRejected ? (
         <View style={styles.badgeRow}>
           <View style={styles.partialBadge}>
-            <Text style={styles.partialBadgeText}>Частичный отказ</Text>
+            <Text style={styles.partialBadgeText} translate>Частичный отказ</Text>
           </View>
           {waitingDecision ? (
             <View style={styles.waitBadge}>
-              <Text style={styles.waitBadgeText}>Ожидает решения официанта</Text>
+              <Text style={styles.waitBadgeText} translate>Ожидает решения официанта</Text>
             </View>
           ) : null}
         </View>
@@ -682,23 +695,23 @@ function KitchenCard({
           const isSet = setParts.length > 0;
 
           if (!isSet) {
-            // Степпер «сколько отказать» — у выбранной обычной позиции с количеством > 1.
+            // Одна настройка количества для обоих пакетных действий.
             const showStepper =
               tab !== 'ready' && selected.has(it.id) && it.quantity > 1 && isSelectable(it.status, it.id);
-            const rejectQty = rejectQtys[it.id] ?? it.quantity;
+            const actionQty = Math.min(it.quantity, actionQtys[it.id] ?? it.quantity);
             return (
               <View key={it.id}>
                 {renderLine(it.id, it.status, itemHeader(it), false, takeawayPill(it))}
                 {showStepper ? (
                   <View style={styles.stepperRow}>
-                    <Text style={styles.stepperLabel}>Отказать:</Text>
+                    <Text style={styles.stepperLabel} translate>Количество:</Text>
                     <QtyStepper
-                      value={rejectQty}
+                      value={actionQty}
                       min={1}
                       max={it.quantity}
-                      onChange={(v) => setRejectQtys((prev) => ({ ...prev, [it.id]: v }))}
+                      onChange={(v) => setActionQtys((prev) => ({ ...prev, [it.id]: v }))}
                     />
-                    <Text style={styles.stepperMuted}>из {it.quantity}</Text>
+                    <Text style={styles.stepperMuted} translate>из {it.quantity}</Text>
                   </View>
                 ) : null}
               </View>
@@ -749,7 +762,7 @@ function KitchenCard({
                     sc.action === 'removed' ? (
                       <View key={sc.id} style={styles.removedRow}>
                         <Text style={styles.removedName}>{sc.originalNameSnapshot}</Text>
-                        <Text style={styles.removedNote}>— убрали</Text>
+                        <Text style={styles.removedNote} translate>— убрали</Text>
                       </View>
                     ) : (
                       renderLine(sc.id, sc.status, componentLabel(sc), true)
@@ -766,7 +779,7 @@ function KitchenCard({
 
       {waitingDecision ? (
         <View style={styles.waitBox}>
-          <Text style={styles.waitBoxText}>Ожидаем решение официанта по частичному отказу</Text>
+          <Text style={styles.waitBoxText} translate>Ожидаем решение официанта по частичному отказу</Text>
         </View>
       ) : null}
 
@@ -774,7 +787,7 @@ function KitchenCard({
       {canSelect && selectionMode ? (
         <>
           <View style={styles.actionsTop}>
-            <Text style={styles.selectedText}>Выбрано: {selected.size}</Text>
+            <Text style={styles.selectedText} translate>Выбрано: {selected.size}</Text>
             <View style={styles.actionsBtns}>
               <Button title="Отказать выбранные" variant="danger" size="md" onPress={() => runBatch('reject')} />
               {tab === 'in_work' ? (
@@ -783,7 +796,7 @@ function KitchenCard({
             </View>
           </View>
           <FastPressable onPress={clearSelection} style={styles.clearSelection} hitSlop={6}>
-            <Text style={styles.clearSelectionText}>Снять выбор</Text>
+            <Text style={styles.clearSelectionText} translate>Снять выбор</Text>
           </FastPressable>
         </>
       ) : canSelect ? (
@@ -853,6 +866,13 @@ function QtyStepper({
   );
 }
 
+function ToolbarActions({ stacked, children }: { stacked: boolean; children: React.ReactNode }) {
+  return stacked
+    ? <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.actionsFullWidth}
+        contentContainerStyle={styles.toolbarActions}>{children}</ScrollView>
+    : <View style={styles.toolbarActions}>{children}</View>;
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   clock: { fontSize: fontSize.xxl, fontWeight: '500', color: colors.textPrimary, letterSpacing: -0.5 },
@@ -867,6 +887,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: 10,
   },
+  tabsBarStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  tabsFullWidth: { width: '100%', minWidth: 0, minHeight: 44 },
+  tabsFlexible: { flex: 1, minWidth: 0, minHeight: 44 },
+  actionsFullWidth: { width: '100%', flexGrow: 0, flexShrink: 0, minHeight: 40 },
+  toolbarActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 0 },
   toolbarBtn: {
     height: 38,
     flexDirection: 'row',

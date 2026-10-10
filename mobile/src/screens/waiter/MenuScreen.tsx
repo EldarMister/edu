@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, InteractionManager, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { FlatList, InteractionManager, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import Animated, {
   cancelAnimation,
   runOnJS,
@@ -17,7 +18,7 @@ import { FullscreenSheet } from '@/components/FullscreenSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
-import { useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem } from '@/services/api/waiter';
+import { useActiveOrders, useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem } from '@/services/api/waiter';
 import { formatWeightedAmount, linePrice, useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
 import { useReplacement } from '@/store/replacement';
@@ -29,6 +30,7 @@ import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
 import { TablePickerSheet } from './TablePickerSheet';
 import { WeightPickerSheet } from './WeightPickerSheet';
+import { orderLocation } from './orderRules';
 import type { CartLine, CartSetComponent, Category, Dish, DishVariant } from '@/types';
 
 function currentDishQuantity(dishId: string): number {
@@ -62,6 +64,9 @@ export function MenuScreen() {
 
   const categories = useCategories();
   const dishes = useDishes();
+  const orders = useActiveOrders();
+  const selectedOrder = orders.data?.find((order) => order.id === activeOrderId);
+  const deliveryOrder = selectedOrder?.source === 'delivery';
   const createOrder = useCreateOrder();
   const addItems = useAddItems();
   const editOrder = useEditOrder();
@@ -206,6 +211,14 @@ export function MenuScreen() {
       return;
     }
     if (cartLines.length === 0) return;
+    if (activeOrderId && orders.isFetched && !selectedOrder) {
+      push({ message: 'Этот заказ уже закрыт. Выберите стол заново.', type: 'error', at: new Date().toISOString() });
+      return;
+    }
+    if (!activeOrderId && (tableNumber === 0 || tableId.startsWith('delivery-table:'))) {
+      push({ message: 'Служебный стол доставки недоступен для нового заказа. Выберите стол в зале.', type: 'error', at: new Date().toISOString() });
+      return;
+    }
     const idempotencyKey = makeIdempotencyKey();
     const done = (mode: 'create' | 'update', orderId?: string) => {
       clearCart();
@@ -292,18 +305,18 @@ export function MenuScreen() {
             style={styles.searchInput}
           />
         </View>
-        <FastPressable style={[styles.tableChip, tablePickerOpen && styles.tableChipActive]} onPress={() => setTablePickerOpen(true)}>
-          <Text style={styles.tableChipText}>
-            Стол {tableNumber}
-            {hallName ? ` · ${hallName}` : ''}
+        <FastPressable style={[styles.tableChip, tablePickerOpen && styles.tableChipActive]}
+          disabled={deliveryOrder} onPress={() => setTablePickerOpen(true)}>
+          <Text style={styles.tableChipText} translate>
+            {selectedOrder ? orderLocation(selectedOrder) : `Стол ${tableNumber}${hallName ? ` · ${hallName}` : ''}`}
           </Text>
-          <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} />
+          {!deliveryOrder ? <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} /> : null}
         </FastPressable>
       </View>
 
       {/* Категории */}
       <PillTabs
-        items={[{ key: 'all', label: 'Все' }, ...sortedCategories.map((c) => ({ key: c.id, label: c.name }))]}
+        items={[{ key: 'all', label: 'Все' }, ...sortedCategories.map((c) => ({ key: c.id, label: c.name , translate: false }))]}
         value={categoryId}
         onChange={(next) => {
           if (next !== 'all' && setsCategoryIds.has(next)) {
@@ -333,7 +346,7 @@ export function MenuScreen() {
           maxToRenderPerBatch={8}
           windowSize={5}
           updateCellsBatchingPeriod={32}
-          ListEmptyComponent={<Text style={styles.notFound}>Ничего не найдено</Text>}
+          ListEmptyComponent={<Text style={styles.notFound} translate>Ничего не найдено</Text>}
         />
       )}
 
@@ -341,13 +354,13 @@ export function MenuScreen() {
       {replacing ? (
         <View style={styles.replacementBar}>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.replacementLabel}>Выберите блюдо на замену</Text>
+            <Text style={styles.replacementLabel} translate>Выберите блюдо на замену</Text>
             <Text style={styles.replacementName} numberOfLines={1}>
               {replacementTarget ? orderItemName(replacementTarget.item) : ''}
             </Text>
           </View>
           <FastPressable onPress={clearReplacement} style={styles.replacementCancel}>
-            <Text style={styles.replacementCancelText}>Отмена</Text>
+            <Text style={styles.replacementCancelText} translate>Отмена</Text>
           </FastPressable>
         </View>
       ) : (
@@ -519,11 +532,11 @@ const DishCard = memo(function DishCard({
     >
       {!dish.isAvailable ? (
         <View style={styles.unavailable}>
-          <Text style={styles.unavailableText}>Недоступно</Text>
+          <Text style={styles.unavailableText} translate>Недоступно</Text>
         </View>
       ) : isOutOfStock ? (
         <View style={styles.unavailable}>
-          <Text style={styles.unavailableText}>Нет в наличии</Text>
+          <Text style={styles.unavailableText} translate>Нет в наличии</Text>
         </View>
       ) : null}
       <Text style={styles.dishName} numberOfLines={2}>
@@ -539,7 +552,7 @@ const DishCard = memo(function DishCard({
         </Text>
       ) : null}
       <View style={styles.dishBottom}>
-        <Text style={styles.dishPrice}>
+        <Text style={styles.dishPrice} translate>
           {hasVariants ? `от ${money(unit)}` : money(unit)}
           {hasDiscount ? <Text style={styles.oldPrice}> {money(originalUnit)}</Text> : null}
         </Text>
@@ -598,7 +611,7 @@ function VariantSheet({
         </View>
       }
     >
-      <Text style={styles.variantHint}>Выберите размер</Text>
+      <Text style={styles.variantHint} translate>Выберите размер</Text>
       <View style={{ gap: spacing.sm, paddingBottom: spacing.sm }}>
         {variants.map((v) => {
           const isSel = v.id === selectedId;
@@ -615,9 +628,9 @@ function VariantSheet({
               <View style={[styles.radio, isSel && { borderColor: colors.primary }]}>
                 {isSel ? <View style={styles.radioDot} /> : null}
               </View>
-              <Text style={styles.variantName}>
+              <Text style={styles.variantName} translate>
                 {v.name}
-                {isOutOfStock ? <Text style={styles.variantOutOfStock}>  Нет в наличии</Text> : null}
+                {isOutOfStock ? <Text style={styles.variantOutOfStock} translate>  Нет в наличии</Text> : null}
               </Text>
               <Text style={styles.variantPrice}>{money(price)}</Text>
             </FastPressable>
@@ -667,9 +680,9 @@ function SetPickerSheet({
         </View>
       }
     >
-      <Text style={styles.variantHint}>Выберите сет</Text>
+      <Text style={styles.variantHint} translate>Выберите сет</Text>
       {sets.length === 0 ? (
-        <Text style={styles.notFound}>Сетов пока нет</Text>
+        <Text style={styles.notFound} translate>Сетов пока нет</Text>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={styles.setList}>
           {sets.map((set) => {
@@ -686,7 +699,7 @@ function SetPickerSheet({
                 </View>
                 <View style={{ flex: 1, minWidth: 0 }}>
                   <Text style={styles.setName} numberOfLines={1}>{set.name}</Text>
-                  <Text style={styles.setSub}>{count} блюд</Text>
+                  <Text style={styles.setSub} translate>{count} блюд</Text>
                 </View>
                 <Text style={styles.setPrice}>{money(set.price)}</Text>
                 <FastPressable
@@ -834,7 +847,7 @@ function SetConfigSheet({
             </Text>
           </View>
         </View>
-        <Text style={styles.variantHint}>Состав сета ({components.length} позиций)</Text>
+        <Text style={styles.variantHint} translate>Состав сета ({components.length} позиций)</Text>
         <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1, minHeight: 0 }}>
           <View style={styles.componentList}>
             {components.map((component) => {
@@ -871,18 +884,18 @@ function SetConfigSheet({
                   </View>
                   {removed || replaced ? (
                     <FastPressable onPress={() => resetComponent(component.componentId)} style={styles.componentTextButton}>
-                      <Text style={styles.componentTextButtonPrimary}>{removed ? 'Вернуть' : 'Отменить'}</Text>
+                      <Text style={styles.componentTextButtonPrimary} translate>{removed ? 'Вернуть' : 'Отменить'}</Text>
                     </FastPressable>
                   ) : (
                     <View style={styles.componentActions}>
                       {component.removable ? (
                         <FastPressable onPress={() => toggleRemove(component)} style={styles.componentTextButton}>
-                          <Text style={styles.componentTextButtonDanger}>Убрать</Text>
+                          <Text style={styles.componentTextButtonDanger} translate>Убрать</Text>
                         </FastPressable>
                       ) : null}
                       {component.replaceable ? (
                         <FastPressable onPress={() => setReplacingId(component.componentId)} style={styles.componentTextButton}>
-                          <Text style={styles.componentTextButtonPrimary}>Заменить</Text>
+                          <Text style={styles.componentTextButtonPrimary} translate>Заменить</Text>
                         </FastPressable>
                       ) : null}
                     </View>
@@ -957,9 +970,9 @@ function ReplacementPickerModal({
             <PwaIcon name="chevronLeft" size={26} color={colors.textSecondary} strokeWidth={2.2} />
           </FastPressable>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.replacementTitle}>Выберите замену</Text>
+            <Text style={styles.replacementTitle} translate>Выберите замену</Text>
             {replacing ? (
-              <Text style={styles.replacementSubtitle} numberOfLines={1}>вместо: {replacing.originalName}</Text>
+              <Text style={styles.replacementSubtitle} numberOfLines={1} translate>вместо: {replacing.originalName}</Text>
             ) : null}
           </View>
         </View>
@@ -975,7 +988,7 @@ function ReplacementPickerModal({
             />
           </View>
           <PillTabs
-            items={[{ key: 'all', label: 'Все' }, ...categories.map((category) => ({ key: category.id, label: category.name }))]}
+            items={[{ key: 'all', label: 'Все' }, ...categories.map((category) => ({ key: category.id, label: category.name , translate: false }))]}
             value={categoryId}
             onChange={onCategory}
             style={{ marginTop: spacing.sm, marginBottom: spacing.sm }}
@@ -1000,7 +1013,7 @@ function ReplacementPickerModal({
                   >
                     {isOutOfStock ? (
                       <View style={styles.unavailable}>
-                        <Text style={styles.unavailableText}>Нет в наличии</Text>
+                        <Text style={styles.unavailableText} translate>Нет в наличии</Text>
                       </View>
                     ) : null}
                     <Text style={styles.replacementDishName} numberOfLines={2}>{dish.name}</Text>
@@ -1009,7 +1022,7 @@ function ReplacementPickerModal({
                     ) : dish.description ? (
                       <Text style={styles.replacementDishSub} numberOfLines={1}>{dish.description}</Text>
                     ) : null}
-                    <Text style={styles.replacementDishPrice}>
+                    <Text style={styles.replacementDishPrice} translate>
                       {hasVariants ? `от ${money(finalUnit)}` : money(finalUnit)}
                       {hasDiscount ? <Text style={styles.oldPrice}> {money(dish.price)}</Text> : null}
                     </Text>
@@ -1017,7 +1030,7 @@ function ReplacementPickerModal({
                 );
               })}
             </View>
-            {options.length === 0 ? <Text style={styles.notFound}>Ничего не найдено</Text> : null}
+            {options.length === 0 ? <Text style={styles.notFound} translate>Ничего не найдено</Text> : null}
           </ScrollView>
         </View>
       </SafeAreaView>
@@ -1090,7 +1103,7 @@ function InlineVariantSheet({
           <View style={styles.inlineHandleWrap}>
             <View style={styles.inlineHandle} />
             <Text style={styles.inlineTitle}>{activeDish?.name}</Text>
-            <Text style={styles.inlineHint}>Выберите размер</Text>
+            <Text style={styles.inlineHint} translate>Выберите размер</Text>
           </View>
           <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.inlineList}>
             {variants.map((v) => {
@@ -1109,9 +1122,9 @@ function InlineVariantSheet({
                   <View style={[styles.radio, isSel && { borderColor: colors.primary }]}>
                     {isSel ? <View style={styles.radioDot} /> : null}
                   </View>
-                  <Text style={styles.variantName}>
+                  <Text style={styles.variantName} translate>
                     {v.name}
-                    {isOutOfStock ? <Text style={styles.variantOutOfStock}>  Нет в наличии</Text> : null}
+                    {isOutOfStock ? <Text style={styles.variantOutOfStock} translate>  Нет в наличии</Text> : null}
                   </Text>
                   <Text style={styles.variantPrice}>{money(price)}</Text>
                 </FastPressable>

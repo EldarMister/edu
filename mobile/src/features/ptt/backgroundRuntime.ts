@@ -1,8 +1,6 @@
 import { AppState, Platform, Vibration } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import BackgroundService from 'react-native-background-actions';
-import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
 import { getSocket } from '@/services/socket';
 import { SERVER_EVENTS } from '@/services/socket/events';
 import { kitchenVoice } from '@/services/kitchenVoice';
@@ -15,9 +13,9 @@ import {
   type StationVoicedOrder,
   type WaiterVoicedOrder,
 } from '@/services/realtimeVoice';
-import { scheduleRealtimeLocalNotification } from '@/services/push';
+import { scheduleRealtimeLocalNotification, isRemotePushRegistered } from '@/services/push';
 import { useAuth } from '@/store/auth';
-import { beep, configureAudioPlayback } from '@/lib/sound';
+import { configureAudioPlayback } from '@/lib/sound';
 import { displayOrderNumber } from '@/utils/format';
 import type { PrepStation } from '@/types';
 import {
@@ -28,6 +26,7 @@ import {
   type PttChannel,
 } from './types';
 import { setPttBackgroundRuntimeActive } from './backgroundFlag';
+import { PttPlaybackQueue } from './audioPlayback';
 
 const DEFAULT_CHANNEL: PttChannel = 'general';
 const JOIN_INTERVAL_MS = 15_000;
@@ -36,8 +35,8 @@ const RECONNECT_INTERVAL_MS = 4_000;
 let currentChannel: PttChannel = DEFAULT_CHANNEL;
 let subscribedToAudio = false;
 let subscribedToRealtime = false;
-let playing = false;
-const audioQueue: PttAudioPayload[] = [];
+const playback = new PttPlaybackQueue();
+let runtimeEpoch = 0;
 const voicedOrders = new Map<string, string>();
 
 type RealtimeNotification = {
@@ -71,73 +70,16 @@ function emitJoin(channel: PttChannel) {
   sock.emit(PTT_EVENTS.JOIN, { channel });
 }
 
-function extensionForMime(mimeType: string) {
-  if (mimeType.includes('webm')) return 'webm';
-  if (mimeType.includes('mp4')) return 'm4a';
-  if (mimeType.includes('mpeg')) return 'mp3';
-  return 'm4a';
-}
-
-async function writeChunkToFile(payload: PttAudioPayload): Promise<string> {
-  const ext = extensionForMime(payload.mimeType);
-  const path = `${FileSystem.cacheDirectory}ptt-bg-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-  await FileSystem.writeAsStringAsync(path, payload.chunk, {
-    encoding: FileSystem.EncodingType.Base64,
-  });
-  return path;
-}
-
-async function playFile(uri: string) {
-  await configureBackgroundAudio().catch(() => undefined);
-  const { sound } = await Audio.Sound.createAsync(
-    { uri },
-    { shouldPlay: false, volume: 1, progressUpdateIntervalMillis: 100 },
-  );
-  await new Promise<void>((resolve, reject) => {
-    sound.setOnPlaybackStatusUpdate((status) => {
-      if (!status.isLoaded) {
-        if ('error' in status && status.error) reject(new Error(status.error));
-        return;
-      }
-      if (status.didJustFinish) resolve();
-    });
-    sound.playAsync().catch(reject);
-  }).finally(() => {
-    sound.setOnPlaybackStatusUpdate(null);
-    void sound.unloadAsync().catch(() => undefined);
-  });
-}
-
-function pumpBackgroundAudio() {
-  if (playing) return;
-  const next = audioQueue.shift();
-  if (!next) return;
-  playing = true;
-  void writeChunkToFile(next)
-    .then(async (path) => {
-      try {
-        await playFile(path);
-      } finally {
-        await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => undefined);
-      }
-    })
-    .catch(() => undefined)
-    .finally(() => {
-      playing = false;
-      pumpBackgroundAudio();
-    });
-}
-
 function onBackgroundAudio(payload: PttAudioPayload) {
   if (Platform.OS !== 'android' || AppState.currentState === 'active') return;
   const userId = useAuth.getState().user?.id;
+  if (!userId || !useAuth.getState().accessToken) return;
   if (payload.channel !== currentChannel || payload.senderId === userId) return;
-  audioQueue.push(payload);
-  pumpBackgroundAudio();
+  playback.enqueue(payload);
 }
 
 function shouldHandleBackgroundRealtime() {
-  return Platform.OS === 'android' && AppState.currentState !== 'active';
+  return Platform.OS === 'android' && AppState.currentState !== 'active' && !!useAuth.getState().accessToken;
 }
 
 function currentStation(): PrepStation | null {
@@ -162,6 +104,7 @@ function markVoiced(order: WaiterVoicedOrder, text: string | null) {
 
 function onBackgroundNotification(payload: RealtimeNotification) {
   if (!shouldHandleBackgroundRealtime()) return;
+  if (isRemotePushRegistered()) return;
   const orderNumber = payload.orderNumber ? displayOrderNumber(payload.orderNumber) : undefined;
   const body =
     payload.orderNumber && orderNumber
@@ -172,7 +115,6 @@ function onBackgroundNotification(payload: RealtimeNotification) {
     body,
     data: { kind: 'realtime', orderId: payload.orderId, type: payload.type },
   });
-  void beep('notify');
 }
 
 function onBackgroundKitchenNewOrder(order: StationVoicedOrder) {
@@ -182,8 +124,7 @@ function onBackgroundKitchenNewOrder(order: StationVoicedOrder) {
   const text = stationVoice(order, station);
   if (!text) return;
   const settings = getKitchenVoiceSettings();
-  if (settings.notificationsEnabled) {
-    void beep('newOrder');
+  if (settings.notificationsEnabled && !isRemotePushRegistered()) {
     Vibration.vibrate(400);
     void scheduleRealtimeLocalNotification({
       title: 'Новый заказ',
@@ -200,8 +141,7 @@ function onBackgroundKitchenStatusChanged(order: StationVoicedOrder) {
   if (!station) return;
   const text = stationVoice(order, station);
   if (!text) return;
-  if (getKitchenVoiceSettings().notificationsEnabled) {
-    void beep('notify');
+  if (getKitchenVoiceSettings().notificationsEnabled && !isRemotePushRegistered()) {
     void scheduleRealtimeLocalNotification({
       title: 'Обновление заказа',
       body: notificationBody(order),
@@ -217,7 +157,7 @@ function onBackgroundWaiterOrderChanged(order: WaiterVoicedOrder) {
   if (user?.role !== 'WAITER' || !order.waiter?.id || order.waiter.id !== user.id) return;
   const text = waiterVoiceText(order);
   if (!markVoiced(order, text)) return;
-  void scheduleRealtimeLocalNotification({
+  if (!isRemotePushRegistered()) void scheduleRealtimeLocalNotification({
     title: 'Заказ официанта',
     body: notificationBody(order),
     data: { kind: 'waiter-order', orderId: order.id, status: order.status },
@@ -244,10 +184,11 @@ function ensureBackgroundRealtimeSubscription() {
 }
 
 function removeBackgroundAudioSubscription() {
-  if (!subscribedToAudio) return;
-  getSocket().off(PTT_EVENTS.AUDIO_MESSAGE, onBackgroundAudio);
-  subscribedToAudio = false;
-  audioQueue.length = 0;
+  if (subscribedToAudio) {
+    getSocket().off(PTT_EVENTS.AUDIO_MESSAGE, onBackgroundAudio);
+    subscribedToAudio = false;
+  }
+  playback.clear();
 }
 
 function removeBackgroundRealtimeSubscription() {
@@ -263,14 +204,17 @@ function removeBackgroundRealtimeSubscription() {
 }
 
 async function pttBackgroundTask() {
-  setPttBackgroundRuntimeActive(true);
+  const epoch = runtimeEpoch;
+  const userId = useAuth.getState().user?.id;
   await configureBackgroundAudio().catch(() => undefined);
+  if (epoch !== runtimeEpoch || !userId || useAuth.getState().user?.id !== userId || !useAuth.getState().accessToken) return;
+  setPttBackgroundRuntimeActive(true);
   ensureBackgroundAudioSubscription();
   ensureBackgroundRealtimeSubscription();
   let lastJoinAt = 0;
 
   try {
-    while (BackgroundService.isRunning()) {
+    while (BackgroundService.isRunning() && useAuth.getState().accessToken) {
       currentChannel = await readStoredChannel();
       const sock = getSocket();
       if (!sock.connected) sock.connect();
@@ -291,6 +235,7 @@ async function pttBackgroundTask() {
 }
 
 export function updatePttBackgroundChannel(channel: PttChannel) {
+  if (channel !== currentChannel) playback.clear();
   currentChannel = channel;
   void AsyncStorage.setItem(PTT_CHANNEL_STORAGE_KEY, channel).catch(() => undefined);
   if (Platform.OS === 'android' && BackgroundService.isRunning()) {
@@ -300,12 +245,18 @@ export function updatePttBackgroundChannel(channel: PttChannel) {
 
 export async function startPttBackgroundRuntime(channel: PttChannel) {
   currentChannel = channel;
-  setPttBackgroundRuntimeActive(true);
+  if (Platform.OS !== 'android') return;
+  const userId = useAuth.getState().user?.id;
+  const epoch = runtimeEpoch;
+  if (AppState.currentState !== 'active' || !userId || !useAuth.getState().accessToken) return;
   await configureBackgroundAudio().catch(() => undefined);
+  // Logout or a new receiver lifetime can complete while native audio initializes.
+  if (epoch !== runtimeEpoch || useAuth.getState().user?.id !== userId || !useAuth.getState().accessToken || AppState.currentState !== 'active') return;
+  setPttBackgroundRuntimeActive(true);
   ensureBackgroundAudioSubscription();
   ensureBackgroundRealtimeSubscription();
 
-  if (Platform.OS !== 'android' || BackgroundService.isRunning()) return;
+  if (BackgroundService.isRunning()) return;
 
   try {
     await BackgroundService.start(pttBackgroundTask, {
@@ -333,6 +284,8 @@ export async function startPttBackgroundRuntime(channel: PttChannel) {
 }
 
 export async function stopPttBackgroundRuntime() {
+  runtimeEpoch += 1;
+  voicedOrders.clear();
   setPttBackgroundRuntimeActive(false);
   removeBackgroundAudioSubscription();
   removeBackgroundRealtimeSubscription();

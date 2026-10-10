@@ -1,91 +1,107 @@
-# EDU POS Mobile (React Native / Expo)
+# EDU POS Android
 
-Мобильный клиент EDU POS для ролей **WAITER / KITCHEN / BAR**. Это **новый клиент** к существующему
-backend (NestJS + PostgreSQL + Socket.IO) — отдельной базы/бекенда нет. PWA продолжает работать как раньше.
+Нативный клиент React Native / Expo SDK 52. Основа — ветка `mobile`; экраны, API и правила работы сверены с PWA в `main` (`4b24251`). Исходники backend включают `main` и исправления для Android. Production пока работает на `main` `4b24251`; новые изменения push, фоновых событий печати и tenant QR ещё не выпущены.
 
-## Стек
+## Экраны и функции
 
-- Expo (React Native) + TypeScript
-- React Navigation (native-stack + bottom-tabs)
-- TanStack Query (серверный кэш) + Zustand (auth/cart)
-- Axios (REST) + socket.io-client (realtime)
-- expo-secure-store (токены) + expo-notifications (native push)
+| Область | Реализовано |
+| --- | --- |
+| Официант | Столы, меню, варианты/вес, корзина, активные и завершённые заказы, редактирование, замена, отмена и вызов администратора, частичная готовность, перенос/передача стола, оплата, предчек и чек, смены, профиль |
+| Кухня / бар | Заказы по станциям, приём, готовность всей позиции или части количества, отказ и подтверждение отмены, стоп-лист, статистика с периодами, голосовые настройки |
+| Администратор / владелец | Статистика, заказы/доставка, заявки печати, столы/QR, меню, склад, ингредиенты, закупки, техкарты, движения, персонал/права, смены/отчёты/CSV, журнал, сверка оплат, настройки кафе/ККМ/очереди/геолокации/доставки |
+| Гость | QR-меню, общий заказ нескольких гостей, варианты/комментарии, геопроверка при необходимости, отправка и статус заказа, очередь с голосом |
+| Платформа | Отдельный вход, кафе, создание/приостановка/продление, сотрудники, очистка/удаление с подтверждением, состояние сервера |
 
-## Настройка окружения
+Интерфейс использует палитру и иконки PWA, Inter с настоящими начертаниями, анимированные панели и переходы, кыргызский словарь PWA. Имена кафе, блюд и введённые значения не переводятся. Системное уменьшение анимации учитывается в переходах. Доступность действий определяется правами пользователя и статусом заказа.
 
-Адрес backend задаётся в `.env`:
+## Окружение и запуск
 
+Создайте локальный `.env`:
+
+```dotenv
+EXPO_PUBLIC_API_URL=https://edu-production-2395.up.railway.app
+EXPO_PUBLIC_WEB_URL=https://edu-pos.up.railway.app
 ```
-EXPO_PUBLIC_API_URL=https://edu-production-056d.up.railway.app
-```
 
-- На реальном телефоне `localhost` недоступен — указывайте публичный URL (Railway/Render)
-  или LAN IP вашего ПК (например `http://192.168.0.10:3000`), если backend запущен локально
-  и телефон в той же Wi-Fi.
-- `/api` добавляется в коде, в URL его писать не нужно.
+`/api` добавляется клиентом. Для локального сервера на Android-эмуляторе используйте `10.0.2.2` или `adb reverse`; на телефоне — сетевой адрес компьютера. Изменение переменных требует новой сборки JavaScript.
 
-## Запуск (dev)
-
-```bash
+```powershell
 cd mobile
-npm install
-npx expo start            # затем 'a' (Android) / 'i' (iOS) / QR в Expo Go
+npm ci
+npx expo prebuild --platform android --no-install
+npx expo run:android
 ```
 
-> Если версии пакетов не совпадут с установленным SDK — выполните `npx expo install --fix`.
+Expo Go не заменяет нативную сборку для проверки рации и фонового push. `android/` генерируется конфигурацией Expo и не хранится в Git.
 
-Push-уведомления требуют **dev build** (Expo Go их не поддерживает в SDK 53+):
+## APK
 
-```bash
-npx expo prebuild         # создаст android/ и ios/
-npx expo run:android      # debug build на устройство/эмулятор
+```powershell
+cd mobile
+npx expo prebuild --platform android --no-install
+npm run build:apk
 ```
 
-## Сборка релиза
+Результат: `android/app/build/outputs/apk/release/app-release.apk`. Локальная конфигурация Expo использует тестовую подпись; для выпуска используйте постоянный release-keystore или EAS:
 
-```bash
-npm i -g eas-cli
-eas build -p android --profile preview   # APK для теста
-eas build -p android --profile production # AAB
-```
-Перед сборкой задайте `extra.eas.projectId` в `app.json` (создаётся `eas init`).
+Для повторной сборки и копирования APK в `mobile/releases/`
+запустите `npm run build:apk` из `mobile` после prebuild. Существующую release-подпись
+можно передать как `npm run build:apk -- --signing-file C:\secure\signing.json`.
+Этот локальный файл содержит `applicationIdentifier`, `keystorePath`, `keystorePassword`,
+`keyAlias`, `keyPassword`; хранить его и `.jks` в Git нельзя. Скрипт передаёт пароль
+Gradle через окружение и всегда заново собирает JavaScript. Относительный `keystorePath`
+разрешается от каталога файла подписи. Пароли не записываются в исходники и вывод.
 
-## Структура
+Скрипт по умолчанию использует production-адреса Railway. Другой публичный HTTPS API
+можно явно передать через переменные окружения; локальные `.env` при сборке скриптом
+не читаются. HTTP, loopback и частные сетевые адреса разрешены только в тестовом режиме
+`npm run build:apk -- --qa`, который использует тестовую подпись и отдельное имя
+`edu-pos-0.2.0-qa.apk`. Флаг `--qa` несовместим с release-подписью. Обычная сборка
+отключает cleartext в основном AndroidManifest и проверяет совпадение версии native
+проекта с `app.json` и `package.json`.
 
-```
-src/
-├── components/      UI-примитивы, индикатор соединения
-├── config/          env (API URL)
-├── hooks/           useRealtimeSync (инвалидация кэша по событиям)
-├── lib/             axios (api), queryClient
-├── navigation/      Root + Waiter/Kitchen/Bar навигаторы
-├── screens/         auth, waiter, kitchen, profile, staff
-├── services/
-│   ├── api/         auth, waiter, kitchen (мутации/запросы)
-│   ├── socket/      socket.io клиент + имена событий
-│   └── push/        регистрация native push
-├── store/           auth (secure), cart
-├── theme/           палитра/отступы (повторяет PWA)
-├── types/           DTO (зеркало backend)
-└── utils/           форматирование, idempotency, сеты
+```powershell
+eas build -p android --profile preview
+eas build -p android --profile production
 ```
 
-## Backend: что нужно применить для native push (Этап 8)
+При длинном пути Windows запускайте сборку из короткого пути `subst` и обновите старые `.cxx`/autolinking cache. Выберите свободную букву:
 
-Добавлена модель `UserDevice` и endpoints `/api/push/devices` (POST/DELETE).
-**Миграция ещё не применена** — выполнить с разрешения владельца БД:
-
-```bash
-cd backend
-npx prisma generate
-# применить к нужной базе (dev/прод — по отдельности):
-DATABASE_URL="<url>" npx prisma migrate deploy
+```powershell
+subst Q: "C:\path\to\edu-pos"
+cd Q:\mobile
+npm run build:apk -- --signing-file C:\secure\signing.json
 ```
-Миграция: `prisma/migrations/20260624140000_user_device_native_push`.
-Web Push (PWA) не затрагивается — каналы независимы.
 
-## Совместимость с PWA
+## Фоновые уведомления
 
-- Те же endpoints, JWT (access/refresh), Socket.IO события и комнаты.
-- Заказы/столы/смены/меню — общие; действия синхронизируются в обе стороны.
-- QR-меню гостей остаётся web-интерфейсом; mobile только видит QR-заказы (`source: 'qr'`).
+Android push использует Expo Push Service и Firebase FCM. Нужны соответствующие `com.edupos.mobile` файл `google-services.json` и FCM v1 credentials в текущем EAS проекте. Приложение сообщает об успешной подписке только после регистрации на сервере. Фоновые сообщения не зависят от открытого экрана или активной рации.
+
+Firebase EDU POS подключён. На нативной сборке Android-эмулятора Google Play проверены настоящие Expo/FCM уведомления в foreground, фоне и после закрытия процесса через `stop-app`. Совместная доставка с Socket.IO создаёт одну запись истории; холодное нажатие открывает заказ у WAITER и OWNER. Android Back у WAITER возвращает «Активные заказы». Android force-stop отключает push до следующего открытия приложения.
+
+Настройка описана в [mobile-notifications.md](../docs/mobile-notifications.md), результаты и пределы проверки — в [android-verification.md](../docs/android-verification.md).
+
+HTTPS-ссылки меню/очереди/платформы и `edupos://` открывают нативные экраны. Автоматическая привязка HTTPS требует настоящего `assetlinks.json` на PWA-сервере с отпечатком release-сертификата. Включать её следует после настройки домена.
+
+## Проверки и сервер
+
+```powershell
+cd mobile
+npm run verify
+npx expo export --platform android
+cd ../backend
+npm run build
+node --test tests/*.test.cjs
+```
+
+Тесты проверяют обновление/смену аккаунтов, guest API, правила заказов, регистрацию push, дедупликацию, открытие уведомлений, конкурентные изменения настроек и привязку QR оплаты к кафе. Бизнес UI QA использует только синтетическую loopback-фикстуру `3009`; production-транзакции не выполнялись. Native повторная проверка подачи, смешанной оплаты 300 наличными + 120 QR и экрана «Оплата принята» с позициями чека прошла. Физическая ККМ, принтер, звучание на телефоне и GPS не проверены.
+
+Последний прогон: mobile typecheck, 74 mobile тестов, backend build и 10 backend тестов прошли. Native smoke покрывает основные пути официанта, OWNER, ADMIN, кухни, бара, гостевого меню/очереди и платформы. Проверены заявка печати, подтверждение предчека и его системное превью (одна страница, кириллица, 420), отмена и повторная печать, BAR статистика и изменение стоп-листа. Полный отчёт не заявляет проверку каждой формы и всех размеров экранов.
+
+Production PWA доступна на `https://edu-pos.up.railway.app`, API — на `https://edu-production-2395.up.railway.app`. Публичный health и read-only Railway status подтверждают commit `4b24251`, исправную БД и миграции 49/49. Они не заменяют проверку бизнес-операций на сервере.
+
+Изменения backend подготовлены в [draft PR #2](https://github.com/EldarMister/edu/pull/2) к `main` и ещё не deployed.
+
+Миграции в этой работе не выполнялись. Перед обновлением конкретного сервера проверьте его историю Prisma и примените необходимые миграции к выбранной базе. Включённая в ветку версия backend требуется для новых правил и API приложения.
+
+iOS в текущий выпуск не входит.

@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Linking, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+import * as Location from 'expo-location';
 import { Button, Card, Toggle } from '@/components/ui';
 import { Select } from '@/components/Select';
 import { colors, fontSize, radius, spacing } from '@/theme';
-import { WEB_URL } from '@/config/env';
+import { API_BASE, WEB_URL } from '@/config/env';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
 import { useLocale, type Locale } from '@/store/locale';
@@ -11,8 +15,13 @@ import {
   useAdminSettings,
   useTestFiscalConnection,
   useUpdateSettings,
+  useGenerateDeliveryApiKey,
+  resolveQrSrc,
+  type Settings,
   type SettingsInput,
 } from '@/services/api/settings';
+import { useAuth } from '@/store/auth';
+import { changedSettingsFields, mergeSavedSettingsDraft } from '@/utils/settingsDraft';
 
 type FiscalProvider = '' | 'ekassa' | 'yakassa' | 'mock';
 type QueueMode = 'table' | 'number';
@@ -29,6 +38,8 @@ type Form = {
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
+  deliveryEnabled: boolean;
+  qrImageUrl: string | null;
   qrGeoEnabled: boolean;
   qrGeoLat: string;
   qrGeoLng: string;
@@ -66,47 +77,54 @@ const toNumberOrNull = (value: string) => {
   return Number.isFinite(number) ? number : null;
 };
 
+function settingsForm(data: Settings): Form {
+  return {
+    cafeName: data.cafeName, address: data.address, phone: data.phone, phone2: data.phone2,
+    instagram: data.instagram ?? '', website: data.website ?? '', receiptText: data.receiptText,
+    language: data.language, payQr: data.payQr, payCash: data.payCash, payCard: data.payCard,
+    deliveryEnabled: data.deliveryEnabled, qrImageUrl: data.qrImageUrl,
+    qrGeoEnabled: data.qrGeoEnabled, qrGeoLat: data.qrGeoLat != null ? String(data.qrGeoLat) : '',
+    qrGeoLng: data.qrGeoLng != null ? String(data.qrGeoLng) : '', qrGeoRadius: String(data.qrGeoRadius),
+    queueDisplayEnabled: data.queueDisplayEnabled, queueDisplayMode: data.queueDisplayMode,
+    fiscalProvider: (data.fiscalProvider ?? '') as FiscalProvider,
+    fiscalEkassaApiKey: data.fiscalEkassaApiKey ?? '', fiscalEkassaUrl: data.fiscalEkassaUrl ?? '',
+    fiscalEkassaInn: data.fiscalEkassaInn ?? '', fiscalYakassaApiKey: data.fiscalYakassaApiKey ?? '',
+    fiscalYakassaUrl: data.fiscalYakassaUrl ?? '',
+  };
+}
+
 /** Настройки владельца — порт PWA SettingsPage для mobile. */
 export function SettingsScreen() {
   const { data, isLoading, isError, error } = useAdminSettings();
   const update = useUpdateSettings();
   const testFiscal = useTestFiscalConnection();
+  const deliveryKey = useGenerateDeliveryApiKey();
+  const isOwner = useAuth((s) => s.user?.role === 'OWNER');
+  const userId = useAuth((s) => s.user?.id);
+  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
+  const [locating, setLocating] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const push = useNotifications((state) => state.push);
   const setLocale = useLocale((state) => state.setLocale);
   const [form, setForm] = useState<Form | null>(null);
   const [dirty, setDirty] = useState(false);
   const [fiscalCheck, setFiscalCheck] = useState<'ok' | 'fail' | null>(null);
+  const baseline = React.useRef<{ settingsId: string; userId?: string; form: Form } | null>(null);
+  const formRef = React.useRef(form);
+  formRef.current = form;
 
   useEffect(() => {
     if (!data) return;
-    setForm({
-      cafeName: data.cafeName,
-      address: data.address,
-      phone: data.phone,
-      phone2: data.phone2,
-      instagram: data.instagram ?? '',
-      website: data.website ?? '',
-      receiptText: data.receiptText,
-      language: data.language,
-      payQr: data.payQr,
-      payCash: data.payCash,
-      payCard: data.payCard,
-      qrGeoEnabled: data.qrGeoEnabled,
-      qrGeoLat: data.qrGeoLat != null ? String(data.qrGeoLat) : '',
-      qrGeoLng: data.qrGeoLng != null ? String(data.qrGeoLng) : '',
-      qrGeoRadius: String(data.qrGeoRadius),
-      queueDisplayEnabled: data.queueDisplayEnabled,
-      queueDisplayMode: data.queueDisplayMode,
-      fiscalProvider: (data.fiscalProvider ?? '') as FiscalProvider,
-      fiscalEkassaApiKey: data.fiscalEkassaApiKey ?? '',
-      fiscalEkassaUrl: data.fiscalEkassaUrl ?? '',
-      fiscalEkassaInn: data.fiscalEkassaInn ?? '',
-      fiscalYakassaApiKey: data.fiscalYakassaApiKey ?? '',
-      fiscalYakassaUrl: data.fiscalYakassaUrl ?? '',
-    });
+    const contextChanged = baseline.current?.settingsId !== data.id || baseline.current?.userId !== userId;
+    if (dirty && !contextChanged) return;
+    const next = settingsForm(data);
+    baseline.current = { settingsId: data.id, userId, form: next };
+    formRef.current = next;
+    setForm(next);
     setDirty(false);
     setFiscalCheck(null);
-  }, [data]);
+    if (contextChanged) setGeneratedKey(null);
+  }, [data, dirty, userId]);
 
   const set = <K extends keyof Form>(key: K, value: Form[K]) => {
     setForm((current) => {
@@ -138,6 +156,8 @@ export function SettingsScreen() {
     payQr: source.payQr,
     payCash: source.payCash,
     payCard: source.payCard,
+    deliveryEnabled: source.deliveryEnabled,
+    qrImageUrl: source.qrImageUrl ?? '',
     qrGeoEnabled: source.qrGeoEnabled,
     qrGeoLat: toNumberOrNull(source.qrGeoLat),
     qrGeoLng: toNumberOrNull(source.qrGeoLng),
@@ -152,12 +172,50 @@ export function SettingsScreen() {
     fiscalYakassaUrl: source.fiscalYakassaUrl,
   });
 
+  async function createDeliveryKey() {
+    try { const result = await deliveryKey.mutateAsync(); setGeneratedKey(result.apiKey); push({ message: 'Новый API-ключ создан. Сохраните его сейчас.', type: 'success', at: new Date().toISOString() }); }
+    catch (err) { push({ message: apiError(err), type: 'error', at: new Date().toISOString() }); }
+  }
+  async function pickQrImage() {
+    setUploading(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: ['image/png', 'image/jpeg', 'image/webp'], copyToCacheDirectory: true });
+      if (result.canceled) return;
+      const file = result.assets[0];
+      if (file.size && file.size > 2 * 1024 * 1024) throw new Error('Размер QR-кода не должен превышать 2 МБ');
+      const base64 = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.Base64 });
+      set('qrImageUrl', `data:${file.mimeType || 'image/png'};base64,${base64}`);
+    } catch (err) { push({ message: apiError(err), type: 'error', at: new Date().toISOString() }); }
+    finally { setUploading(false); }
+  }
+  async function locate() {
+    setLocating(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) throw new Error('Разрешите доступ к геолокации');
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      setForm((current) => current ? { ...current, qrGeoLat: String(position.coords.latitude), qrGeoLng: String(position.coords.longitude) } : current);
+      setDirty(true);
+    } catch (err) { push({ message: apiError(err), type: 'error', at: new Date().toISOString() }); }
+    finally { setLocating(false); }
+  }
+
   const saveSettings = async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!form) return false;
+    const submitted = form;
+    const settingsId = data?.id;
     try {
-      const saved = await update.mutateAsync(toSettingsInput(form));
+      const body = toSettingsInput(submitted);
+      const patch = baseline.current ? changedSettingsFields(body, toSettingsInput(baseline.current.form)) : body;
+      const saved = await update.mutateAsync(patch);
+      if (useAuth.getState().user?.id !== userId || baseline.current?.settingsId !== settingsId) return false;
+      const savedForm = settingsForm(saved);
+      const next = mergeSavedSettingsDraft(submitted, formRef.current ?? submitted, savedForm);
+      baseline.current = { settingsId: saved.id, userId, form: savedForm };
+      formRef.current = next.form;
+      setForm(next.form);
       setLocale(saved.language as Locale);
-      setDirty(false);
+      setDirty(next.dirty);
       if (!silent) {
         push({ message: 'Настройки сохранены', type: 'success', at: new Date().toISOString() });
       }
@@ -210,7 +268,7 @@ export function SettingsScreen() {
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <Card style={styles.card}>
-        <Text style={styles.cardTitle}>Информация о кафе</Text>
+        <Text style={styles.cardTitle} translate>Информация о кафе</Text>
         <Input label="Название кафе" value={form.cafeName} onChangeText={(v) => set('cafeName', v)} />
         <Input label="Адрес" value={form.address} onChangeText={(v) => set('address', v)} />
         <View style={styles.twoCols}>
@@ -222,7 +280,7 @@ export function SettingsScreen() {
           <Input label="Сайт" value={form.website} onChangeText={(v) => set('website', v)} style={styles.col} />
         </View>
         <View style={styles.inputBlock}>
-          <Text style={styles.label}>Текст в чеке</Text>
+          <Text style={styles.label} translate>Текст в чеке</Text>
           <TextInput
             value={form.receiptText}
             onChangeText={(v) => set('receiptText', v.slice(0, RECEIPT_LIMIT))}
@@ -235,40 +293,43 @@ export function SettingsScreen() {
           <Text style={styles.counter}>{form.receiptText.length}/{RECEIPT_LIMIT}</Text>
         </View>
         <View style={styles.noteBox}>
-          <Text style={styles.noteText}>EDU POS печатает предчек / внутренний товарный чек.</Text>
-          <Text style={styles.noteText}>Фискальный чек формируется только через подключенную ККМ или онлайн-кассу.</Text>
+          <Text style={styles.noteText} translate>EDU POS печатает предчек / внутренний товарный чек.</Text>
+          <Text style={styles.noteText} translate>Фискальный чек формируется только через подключенную ККМ или онлайн-кассу.</Text>
         </View>
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.cardTitle}>Язык системы</Text>
+        <Text style={styles.cardTitle} translate>Язык системы</Text>
         <Select value={form.language} options={LANG_OPTIONS} onChange={(v) => set('language', v)} title="Язык системы" />
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.cardTitle}>Способы оплаты</Text>
+        <Text style={styles.cardTitle} translate>Способы оплаты</Text>
         <ToggleRow title="QR-код" desc="Оплата через QR-код" checked={form.payQr} onChange={(v) => set('payQr', v)} />
         <ToggleRow title="Наличные" desc="Оплата наличными средствами" checked={form.payCash} onChange={(v) => set('payCash', v)} />
         <ToggleRow title="Карта" desc="Оплата банковской картой" checked={form.payCard} onChange={(v) => set('payCard', v)} />
-        <Text style={[styles.helper, noMethod && { color: colors.danger }]}>
+        <Text style={[styles.helper, noMethod && { color: colors.danger }]} translate>
           {noMethod
             ? 'Должен быть включён хотя бы один способ оплаты'
             : 'Отключённые способы оплаты будут недоступны на экране оплаты'}
         </Text>
-        {form.payQr && !data.qrImageUrl ? (
-          <Text style={styles.warning}>QR-оплата включена, но QR-код не загружен.</Text>
+        {form.payQr && !form.qrImageUrl ? (
+          <Text style={styles.warning} translate>QR-оплата включена, но QR-код не загружен.</Text>
         ) : null}
+        {form.payQr ? <View style={styles.nested}><Text style={styles.label} translate>QR-код для оплаты</Text>{form.qrImageUrl ? <Image source={{ uri: resolveQrSrc(form.qrImageUrl) ?? undefined }} style={{ width: 200, height: 200, alignSelf: 'center' }} resizeMode="contain" /> : null}<Button title={form.qrImageUrl ? 'Заменить QR-код' : 'Загрузить QR-код'} variant="secondary" loading={uploading} onPress={() => void pickQrImage()} />{form.qrImageUrl ? <Button title="Удалить QR-код" variant="danger" onPress={() => set('qrImageUrl', null)} /> : null}</View> : null}
       </Card>
 
+      <Card style={styles.card}><ToggleRow title="Интеграция доставки" desc="Заказы с сайта или приложения доставки" checked={form.deliveryEnabled} onChange={(v) => { setGeneratedKey(null); set('deliveryEnabled', v); }} />{form.deliveryEnabled ? <View style={styles.nested}><Text style={styles.label} translate>Адрес API</Text><Text selectable style={styles.queueUrl}>{API_BASE}/integration/v1</Text><Text style={styles.label} translate>API-ключ</Text><Text selectable style={styles.queueUrl} translate>{generatedKey ?? data.deliveryApiKeyPrefix ?? 'Ключ ещё не создан'}</Text>{generatedKey ? <><Text style={styles.warning} translate>Сохраните ключ сейчас: повторно полный ключ показан не будет.</Text><Button title="Сохранить ключ" variant="secondary" onPress={() => void Share.share({ message: generatedKey }).catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }))} /></> : null}{isOwner ? <Button title={data.deliveryApiKeyConfigured ? 'Перевыпустить ключ' : 'Создать API-ключ'} variant="secondary" loading={deliveryKey.isPending} disabled={dirty || !data.deliveryEnabled} onPress={() => void createDeliveryKey()} /> : <Text style={styles.helper} translate>Создавать и перевыпускать API-ключ может только владелец.</Text>}{isOwner && (dirty || !data.deliveryEnabled) ? <Text style={styles.helper} translate>Сначала сохраните включение доставки, затем создайте ключ.</Text> : null}</View> : null}</Card>
+
       <Card style={styles.card}>
-        <Text style={styles.cardTitle}>Статус принтера</Text>
+        <Text style={styles.cardTitle} translate>Статус принтера</Text>
         <View style={styles.statusRow}>
           <View style={[styles.statusDot, { backgroundColor: data.printerConnected ? colors.success : colors.textLight }]} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.statusTitle, { color: data.printerConnected ? colors.success : colors.textMuted }]}>
+            <Text style={[styles.statusTitle, { color: data.printerConnected ? colors.success : colors.textMuted }]} translate>
               {data.printerConnected ? 'Подключен' : 'Не подключен'}
             </Text>
-            <Text style={styles.helper}>
+            <Text style={styles.helper} translate>
               {data.printerConnected ? 'Принтер чеков подключен и готов к печати' : 'Принтер чеков не подключен'}
             </Text>
           </View>
@@ -289,6 +350,7 @@ export function SettingsScreen() {
               <Input label="Долгота" value={form.qrGeoLng} onChangeText={(v) => set('qrGeoLng', v)} keyboardType="decimal-pad" style={styles.col} />
             </View>
             <Input label="Радиус, м" value={form.qrGeoRadius} onChangeText={(v) => set('qrGeoRadius', v)} keyboardType="number-pad" />
+            <Button title="Использовать моё местоположение" variant="secondary" loading={locating} onPress={() => void locate()} />
           </View>
         ) : null}
       </Card>
@@ -302,25 +364,25 @@ export function SettingsScreen() {
         />
         {form.queueDisplayEnabled ? (
           <View style={styles.nested}>
-            <Text style={styles.label}>Что показывать</Text>
+            <Text style={styles.label} translate>Что показывать</Text>
             <Select value={form.queueDisplayMode} options={QUEUE_OPTIONS} onChange={(v) => set('queueDisplayMode', v)} title="Экран очереди" />
             {queueUrl ? (
               <View style={styles.noteBox}>
-                <Text style={styles.noteText}>Откройте эту ссылку на мониторе/ТВ:</Text>
-                <Text style={styles.queueUrl}>{queueUrl}</Text>
+                <Text style={styles.noteText} translate>Откройте эту ссылку на мониторе/ТВ:</Text>
+                <Text selectable style={styles.queueUrl} onPress={() => void Linking.openURL(queueUrl)}>{queueUrl}</Text>
               </View>
             ) : (
-              <Text style={styles.helper}>Сохраните изменения — появится ссылка для монитора.</Text>
+              <Text style={styles.helper} translate>Сохраните изменения — появится ссылка для монитора.</Text>
             )}
           </View>
         ) : null}
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.cardTitle}>ККМ / Фискализация</Text>
-        <Text style={styles.helper}>Без подключённой ККМ печатается товарный чек. С ККМ — фискальный чек с QR ГНС.</Text>
+        <Text style={styles.cardTitle} translate>ККМ / Фискализация</Text>
+        <Text style={styles.helper} translate>Без подключённой ККМ печатается товарный чек. С ККМ — фискальный чек с QR ГНС.</Text>
         <View style={styles.inputBlock}>
-          <Text style={styles.label}>Провайдер</Text>
+          <Text style={styles.label} translate>Провайдер</Text>
           <Select
             value={form.fiscalProvider}
             options={FISCAL_OPTIONS}
@@ -342,7 +404,7 @@ export function SettingsScreen() {
           </View>
         ) : null}
         {form.fiscalProvider === 'mock' ? (
-          <Text style={styles.warning}>Режим эмуляции: чек не уходит в ГНС, генерируется тестовый номер и QR.</Text>
+          <Text style={styles.warning} translate>Режим эмуляции: чек не уходит в ГНС, генерируется тестовый номер и QR.</Text>
         ) : null}
         {form.fiscalProvider ? (
           <View style={styles.fiscalActions}>
@@ -354,7 +416,7 @@ export function SettingsScreen() {
               onPress={() => void runFiscalCheck()}
             />
             {fiscalCheck ? (
-              <Text style={[styles.fiscalResult, { color: fiscalCheck === 'ok' ? colors.success : colors.danger }]}>
+              <Text style={[styles.fiscalResult, { color: fiscalCheck === 'ok' ? colors.success : colors.danger }]} translate>
                 {fiscalCheck === 'ok' ? 'Соединение установлено' : 'Нет соединения'}
               </Text>
             ) : null}
@@ -363,7 +425,7 @@ export function SettingsScreen() {
       </Card>
 
       <View style={styles.savePanel}>
-        <Text style={[styles.saveText, dirty && { color: colors.warning }]}>
+        <Text style={[styles.saveText, dirty && { color: colors.warning }]} translate>
           {dirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}
         </Text>
         <Button
@@ -386,7 +448,7 @@ function Input({
 }: React.ComponentProps<typeof TextInput> & { label: string; style?: object }) {
   return (
     <View style={[styles.inputBlock, style]}>
-      <Text style={styles.label}>{label}</Text>
+      <Text style={styles.label} translate>{label}</Text>
       <TextInput placeholderTextColor={colors.textLight} style={styles.input} {...props} />
     </View>
   );
@@ -406,7 +468,7 @@ function ToggleRow({
   return (
     <View style={styles.toggleRow}>
       <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.toggleTitle}>{title}</Text>
+        <Text style={styles.toggleTitle} translate>{title}</Text>
         <Text style={styles.helper}>{desc}</Text>
       </View>
       <Toggle checked={checked} onChange={onChange} />

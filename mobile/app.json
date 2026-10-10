@@ -2,7 +2,7 @@
   "expo": {
     "name": "EDU POS",
     "slug": "edu-pos-mobile",
-    "version": "0.1.1",
+    "version": "0.2.0",
     "orientation": "default",
     "icon": "./assets/launcher-icon.png",
     "scheme": "edupos",
@@ -29,7 +29,7 @@
     },
     "android": {
       "package": "com.edupos.mobile",
-      "versionCode": 5,
+      "versionCode": 6,
       "adaptiveIcon": {
         "foregroundImage": "./assets/launcher-icon.png",
         "backgroundColor": "#FFFFFF"
@@ -52,6 +52,12 @@
     },
     "plugins": [
       "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "EDU POS использует местоположение для подтверждения начала смены в кафе."
+        }
+      ],
       [
         "expo-notifications",
         {

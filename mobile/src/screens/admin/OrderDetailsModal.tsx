@@ -1,8 +1,10 @@
 import React from 'react';
-import { Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
-import { OrderBadge } from '@/components/StatusBadge';
+import { OrderStatusBadges } from '@/components/StatusBadge';
+import QRCode from 'react-native-qrcode-svg';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
@@ -16,7 +18,8 @@ import {
   paymentMethodLabel,
   timeHM,
 } from '@/utils/format';
-import { useRetryFiscal } from '@/services/api/admin';
+import { useCancelOrderItem, useRetryFiscal } from '@/services/api/admin';
+import { CancelOrderModal } from './CancelOrderModal';
 import type { Order, OrderItemStatus } from '@/types';
 
 const ITEM_STATUS: Record<OrderItemStatus, string> = {
@@ -34,35 +37,48 @@ function mixedSumBy(order: { payments?: { method: string; amount: string }[] }, 
 }
 
 /** Подробная карточка заказа (порт PWA OrderDetailsModal). */
-export function OrderDetailsModal({ order, onClose }: { order: Order | null; onClose: () => void }) {
+export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCancellation = false }: { order: Order | null; onClose: () => void; onOrderChange?: (order: Order) => void; allowItemCancellation?: boolean }) {
+  const [cancelItem, setCancelItem] = React.useState<Order['items'][number] | null>(null);
+  const cancel = useCancelOrderItem();
+  const push = useNotifications((s) => s.push);
+  React.useEffect(() => { setCancelItem(null); }, [order?.id]);
   if (!order) return null;
   const date = new Date(order.createdAt);
   const showMixedBreakdown =
     order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
 
   const infoRows: { label: string; value: React.ReactNode }[] = [
-    { label: 'Статус', value: <OrderBadge status={order.status} size="sm" /> },
-    { label: 'Официант', value: <Text style={styles.infoVal}>{order.waiter?.name ?? 'QR menu'}</Text> },
+    { label: 'Статус', value: <OrderStatusBadges order={order} /> },
+    { label: 'Официант', value: <Text style={styles.infoVal} translate>{order.source === 'delivery' ? 'Доставка' : order.waiter?.name ?? 'QR menu'}</Text> },
     { label: 'Дата', value: <Text style={styles.infoVal}>{`${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`}</Text> },
     { label: 'Сумма', value: <Text style={styles.infoVal}>{money(order.finalAmount)}</Text> },
-    { label: 'Стол', value: <Text style={styles.infoVal}>{`Стол ${order.table.number}${hallSuffix(order.table)}`}</Text> },
+    { label: 'Стол', value: <Text style={styles.infoVal} translate>{order.source === 'delivery' ? '—' : `Стол ${order.table.number}${hallSuffix(order.table)}`}</Text> },
     { label: 'Оплата', value: <Text style={styles.infoVal}>{order.paymentMethod ? paymentDisplayLabel(order) : '—'}</Text> },
   ];
   if (showMixedBreakdown) {
     infoRows.push({ label: 'Наличными', value: <Text style={styles.infoVal}>{money(mixedSumBy(order, 'cash'))}</Text> });
     infoRows.push({ label: 'QR', value: <Text style={styles.infoVal}>{money(mixedSumBy(order, 'qr'))}</Text> });
   }
+  if (order.source === 'delivery') {
+    infoRows.push(...[{ label: 'Внешний заказ', value: order.externalOrderId ?? '—' }, { label: 'Клиент', value: order.deliveryCustomerName ?? '—' }, { label: 'Телефон', value: order.deliveryCustomerPhone ?? '—' }, { label: 'Адрес доставки', value: order.deliveryAddress ?? '—' }].map((r) => ({ label: r.label, value: <Text style={styles.infoVal}>{r.value}</Text> })));
+  }
+  const itemCancellationAllowed = allowItemCancellation && !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
+  async function confirmItemCancellation(reason: string) {
+    if (!cancelItem || !order) return;
+    try { const updated = await cancel.mutateAsync({ orderId: order.id, itemId: cancelItem.id, reason }); onOrderChange?.(updated); setCancelItem(null); push({ message: 'Блюдо отменено', type: 'success', at: new Date().toISOString() }); }
+    catch (error) { push({ message: apiError(error), type: 'error', at: new Date().toISOString() }); }
+  }
 
-  return (
+  return (<>
     <BottomSheet visible={!!order} onClose={onClose} title={`Заказ ${displayOrderNumber(order.orderNumber)}`} maxHeight="90%">
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.lg, paddingBottom: spacing.md }}>
         {/* Информация */}
         <View>
-          <Text style={styles.sectionTitle}>Информация</Text>
+          <Text style={styles.sectionTitle} translate>Информация</Text>
           <View style={styles.infoBox}>
             {infoRows.map((r, i) => (
               <View key={i} style={[styles.infoRow, i < infoRows.length - 1 && styles.rowBorder]}>
-                <Text style={styles.infoLabel}>{r.label}</Text>
+                <Text style={styles.infoLabel} translate>{r.label}</Text>
                 <View style={styles.infoValueWrap}>{r.value}</View>
               </View>
             ))}
@@ -71,10 +87,10 @@ export function OrderDetailsModal({ order, onClose }: { order: Order | null; onC
 
         {isSplitPayment(order) && !!order.payments?.length ? (
           <View style={styles.softBox}>
-            <Text style={styles.softLabel}>ПЛАТЕЖИ</Text>
+            <Text style={styles.softLabel} translate>ПЛАТЕЖИ</Text>
             {order.payments.map((payment, index) => (
               <View key={index} style={styles.softRow}>
-                <Text style={styles.softRowLabel}>
+                <Text style={styles.softRowLabel} translate>
                   Платеж {index + 1} — {paymentMethodLabel(payment.method)}
                 </Text>
                 <Text style={styles.softRowValue}>{money(payment.amount)}</Text>
@@ -85,7 +101,7 @@ export function OrderDetailsModal({ order, onClose }: { order: Order | null; onC
 
         {order.comment ? (
           <View style={styles.softBox}>
-            <Text style={styles.softLabel}>КОММЕНТАРИЙ</Text>
+            <Text style={styles.softLabel} translate>КОММЕНТАРИЙ</Text>
             <Text style={styles.commentText}>{order.comment}</Text>
           </View>
         ) : null}
@@ -93,8 +109,8 @@ export function OrderDetailsModal({ order, onClose }: { order: Order | null; onC
         {/* Блюда */}
         <View>
           <View style={styles.dishesHead}>
-            <Text style={styles.sectionTitle}>Блюда</Text>
-            <Text style={styles.dishesCount}>{order.items.length} поз.</Text>
+            <Text style={styles.sectionTitle} translate>Блюда</Text>
+            <Text style={styles.dishesCount} translate>{order.items.length} поз.</Text>
           </View>
           <View style={styles.infoBox}>
             {order.items.map((item, i) => (
@@ -104,11 +120,12 @@ export function OrderDetailsModal({ order, onClose }: { order: Order | null; onC
                     {item.quantity}× {orderItemDisplayName(item)}
                   </Text>
                   {item.comment ? <Text style={styles.dishComment}>{item.comment}</Text> : null}
-                  {item.rejectReason ? <Text style={styles.dishReject}>Отказ: {item.rejectReason}</Text> : null}
+                  {item.rejectReason ? <Text style={styles.dishReject} translate>Отказ: {item.rejectReason}</Text> : null}
                 </View>
                 <View style={styles.dishRight}>
                   <Text style={styles.dishPrice}>{money(item.finalPrice)}</Text>
                   <Text style={styles.dishStatus}>{ITEM_STATUS[item.status]}</Text>
+                  {itemCancellationAllowed && !['rejected', 'cancelled'].includes(item.status) ? <FastPressable accessibilityLabel={`Отменить блюдо ${orderItemDisplayName(item)}`} onPress={() => setCancelItem(item)} style={{ paddingVertical: spacing.sm }}><Text style={{ color: colors.danger, fontSize: 12 }} translate>Отменить блюдо</Text></FastPressable> : null}
                 </View>
               </View>
             ))}
@@ -126,6 +143,8 @@ export function OrderDetailsModal({ order, onClose }: { order: Order | null; onC
         <FiscalBlock order={order} />
       </ScrollView>
     </BottomSheet>
+    <CancelOrderModal visible={!!cancelItem} title="Отменить блюдо?" confirmLabel="Отменить блюдо" orderLabel={cancelItem ? `${cancelItem.quantity}× ${orderItemDisplayName(cancelItem)} · ${money(cancelItem.finalPrice)}` : ''} submitting={cancel.isPending} onClose={() => setCancelItem(null)} onConfirm={(reason) => void confirmItemCancellation(reason)} />
+    </>
   );
 }
 
@@ -153,16 +172,17 @@ function FiscalBlock({ order }: { order: Order }) {
       <View style={styles.fiscalOk}>
         <View style={styles.fiscalHeadRow}>
           <View style={styles.fiscalOkBadge}>
-            <Text style={styles.fiscalOkBadgeText}>Фискальный чек</Text>
+            <Text style={styles.fiscalOkBadgeText} translate>Фискальный чек</Text>
           </View>
           <Text style={styles.fiscalNumber}>№ {order.fiscalReceiptNumber}</Text>
         </View>
-        {order.fiscalSign ? <Text style={styles.fiscalSign}>Фискальный признак: {order.fiscalSign}</Text> : null}
+        {order.fiscalSign ? <Text style={styles.fiscalSign} translate>Фискальный признак: {order.fiscalSign}</Text> : null}
         {qr ? (
           isImage ? (
             <Image source={{ uri: qr }} style={styles.fiscalQr} resizeMode="contain" />
           ) : (
-            <FastPressable onPress={() => void Linking.openURL(qr)}>
+            <FastPressable onPress={() => void Linking.openURL(qr).catch((error) => push({ message: apiError(error), type: 'error', at: new Date().toISOString() }))} style={{ marginTop: 8 }}>
+              <QRCode value={qr} size={112} quietZone={8} ecl="M" />
               <Text style={styles.fiscalLink}>{qr}</Text>
             </FastPressable>
           )
@@ -175,10 +195,10 @@ function FiscalBlock({ order }: { order: Order }) {
     <View style={styles.fiscalErr}>
       <View style={styles.fiscalHeadRow}>
         <View style={styles.fiscalErrBadge}>
-          <Text style={styles.fiscalErrBadgeText}>Ошибка ККМ</Text>
+          <Text style={styles.fiscalErrBadgeText} translate>Ошибка ККМ</Text>
         </View>
         <FastPressable onPress={() => void onRetry()} disabled={retry.isPending} style={styles.retryBtn}>
-          <Text style={styles.retryText}>{retry.isPending ? 'Повтор…' : 'Повторить'}</Text>
+          <Text style={styles.retryText} translate>{retry.isPending ? 'Повтор…' : 'Повторить'}</Text>
         </FastPressable>
       </View>
       <Text style={styles.fiscalErrText}>{order.fiscalError}</Text>
@@ -189,7 +209,7 @@ function FiscalBlock({ order }: { order: Order }) {
 function Total({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
     <View style={styles.totalRow}>
-      <Text style={[styles.totalLabel, strong && styles.totalStrong]}>{label}</Text>
+      <Text style={[styles.totalLabel, strong && styles.totalStrong]} translate>{label}</Text>
       <Text style={[styles.totalValue, strong && styles.totalStrong]}>{value}</Text>
     </View>
   );

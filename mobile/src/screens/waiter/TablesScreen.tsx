@@ -1,12 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import {
-  InteractionManager,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { InteractionManager, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import Animated, {
   interpolate,
   runOnJS,
@@ -68,7 +62,9 @@ export function TablesScreen() {
 
   const ordersByTable = useMemo(() => {
     const m = new Map<string, Order>();
-    for (const o of ordersQ.data ?? []) if (!m.has(o.table.id)) m.set(o.table.id, o);
+    for (const o of ordersQ.data ?? []) {
+      if (o.source !== 'delivery' && !m.has(o.table.id)) m.set(o.table.id, o);
+    }
     return m;
   }, [ordersQ.data]);
 
@@ -233,7 +229,7 @@ export function TablesScreen() {
     <SafeAreaView style={styles.safe} edges={[]}>
       <View style={styles.panel}>
         <View style={styles.titleRow}>
-          <Text style={styles.panelTitle}>Выбор стола</Text>
+          <Text style={styles.panelTitle} translate>Выбор стола</Text>
           <View style={styles.actionsAnchor}>
             <FastPressable
               disabled={!selectedTable}
@@ -241,14 +237,14 @@ export function TablesScreen() {
               style={[styles.editBtn, !selectedTable && styles.editBtnDisabled]}
             >
               <PwaIcon name="pencil" size={16} color={selectedTable ? colors.textSecondary : colors.textLight} />
-              <Text style={[styles.editBtnText, selectedTable && styles.editBtnTextActive]}>Редактировать</Text>
+              <Text style={[styles.editBtnText, selectedTable && styles.editBtnTextActive]} translate>Редактировать</Text>
             </FastPressable>
           </View>
         </View>
 
         {halls.data && halls.data.length > 0 ? (
           <PillTabs
-            items={halls.data.map((h) => ({ key: h.id, label: h.name }))}
+            items={halls.data.map((h) => ({ key: h.id, label: h.name , translate: false }))}
             value={currentHall?.id ?? ''}
             onChange={setHallId}
             style={{ marginBottom: spacing.lg }}
@@ -298,7 +294,7 @@ export function TablesScreen() {
           {LEGEND.map((s) => (
             <View key={s} style={styles.legendItem}>
               <View style={[styles.legendDot, { backgroundColor: TABLE_STATUS[s].dot }]} />
-              <Text style={styles.legendText}>{TABLE_STATUS[s].label}</Text>
+              <Text style={styles.legendText} translate>{TABLE_STATUS[s].label}</Text>
             </View>
           ))}
         </ScrollView>
@@ -315,15 +311,15 @@ export function TablesScreen() {
           >
             <FastPressable onPress={() => openTableAction('close')} style={styles.tableActionItem}>
               <PwaIcon name="close" size={16} color={colors.textLight} />
-              <Text style={styles.tableActionText}>Закрыть стол</Text>
+              <Text style={styles.tableActionText} translate>Закрыть стол</Text>
             </FastPressable>
             <FastPressable onPress={() => openTableAction('move')} style={styles.tableActionItem}>
               <PwaIcon name="move" size={16} color={colors.textLight} />
-              <Text style={styles.tableActionText}>Перенести стол</Text>
+              <Text style={styles.tableActionText} translate>Перенести стол</Text>
             </FastPressable>
             <FastPressable onPress={() => openTableAction('transfer')} style={styles.tableActionItem}>
               <PwaIcon name="transfer" size={16} color={colors.textLight} />
-              <Text style={styles.tableActionText}>Передать стол</Text>
+              <Text style={styles.tableActionText} translate>Передать стол</Text>
             </FastPressable>
           </Animated.View>
         </View>
@@ -389,7 +385,7 @@ function CloseTableSheet({
         )
       }
     >
-      <Text style={styles.sheetText}>
+      <Text style={styles.sheetText} translate>
         {hasActiveOrder
           ? 'У этого стола есть активный заказ. Завершите или оплатите заказ перед закрытием стола.'
           : `Вы действительно хотите закрыть стол №${table?.number ?? ''}?`}
@@ -441,9 +437,9 @@ function MoveTableSheet({
         </View>
       }
     >
-      <Text style={styles.sheetHint}>Выберите стол, на который нужно перенести заказ</Text>
+      <Text style={styles.sheetHint} translate>Выберите стол, на который нужно перенести заказ</Text>
       {groups.length === 0 ? (
-        <Text style={styles.emptySheetText}>Нет доступных столов для переноса</Text>
+        <Text style={styles.emptySheetText} translate>Нет доступных столов для переноса</Text>
       ) : (
         <View style={styles.sheetSections}>
           {groups.map((group) => (
@@ -508,11 +504,11 @@ function TransferTableSheet({
         </View>
       }
     >
-      <Text style={styles.sheetHint}>Выберите официанта, которому нужно передать стол</Text>
+      <Text style={styles.sheetHint} translate>Выберите официанта, которому нужно передать стол</Text>
       {loading ? (
         <Loading />
       ) : list.length === 0 ? (
-        <Text style={styles.emptySheetText}>Нет доступных официантов для передачи</Text>
+        <Text style={styles.emptySheetText} translate>Нет доступных официантов для передачи</Text>
       ) : (
         <View style={styles.waiterList}>
           {list.map((waiter) => (

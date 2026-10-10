@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Text, TextInput } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Select } from '@/components/Select';
+import { DateField } from '@/components/DateField';
 import { Button, Toggle } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
@@ -25,6 +27,12 @@ import {
   type StaffMember,
 } from '@/services/api/admin';
 import type { Role } from '@/types';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useAuth } from '@/store/auth';
+import { EmployeePermissionsSheet } from './EmployeePermissionsSheet';
+import { WaiterOrdersReport } from './WaiterOrdersReport';
+import { shareCsv } from './print';
+import { ShiftDateTimeField } from './ShiftDateTimeField';
 
 const ROLE_LABEL: Record<Role, string> = {
   WAITER: 'Официант',
@@ -98,12 +106,17 @@ function fromDateTimeLocal(value: string) {
 /** Персонал и текущая смена (порт PWA StaffPage — вкладка «Текущая смена» + CRUD). */
 export function StaffScreen() {
   const [date, setDate] = useState(todayYmd());
-  const [tab, setTab] = useState<'current' | 'history'>('current');
+  const [tab, setTab] = useState<'current' | 'history' | 'waiter'>('current');
   const [historyFilters, setHistoryFilters] = useState<ShiftHistoryFilters>({ period: 'today' });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
   const [editingShift, setEditingShift] = useState<ShiftHistoryRow | null>(null);
   const [editing, setEditing] = useState<StaffMember | null | 'new'>(null);
+  const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const { canAction } = usePermissions();
+  const currentUser = useAuth((s) => s.user);
+  const canManagePermissions = canAction('editPermissions') || canAction('manageStaff');
 
   const reportQ = useShiftReport(date);
   const historyQ = useShiftHistory(historyFilters);
@@ -112,6 +125,20 @@ export function StaffScreen() {
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const rows = reportQ.data ?? [];
+  const exportReport = async () => {
+    setExporting(true);
+    try {
+      if (tab === 'current') await shareCsv(`shift-report-${date}`, [
+        ['Сотрудник', 'Роль', 'Смена', 'Оборот', 'Касса (должен)', 'Касса (сдал)', 'Разница'],
+        ...rows.map((row) => [row.name, ROLE_LABEL[row.role], ...(row.isWaiter ? [shiftLabel(row), row.turnover, row.cashDue, row.cashHanded, row.difference] : ['—', '—', '—', '—', '—'])]),
+      ]);
+      else await shareCsv(`shift-history-${historyFilters.period}-${todayYmd()}`, [
+        ['Сотрудник', 'Роль', 'Дата', 'Пришел', 'Ушел', 'Отработал', 'Статус'],
+        ...(historyQ.data?.items ?? []).map((row) => [row.employeeName, ROLE_LABEL[row.role], dateDMY(row.startedAt), timeHM(row.startedAt), row.endedAt ? timeHM(row.endedAt) : '—', durationLabel(row.durationMin), row.status === 'active' ? 'В смене' : row.status === 'unclosed' ? 'Не закрыта' : 'Завершена']),
+      ]);
+    } catch (error) { push({ message: apiError(error), type: 'error', at: new Date().toISOString() }); }
+    finally { setExporting(false); }
+  };
   const memberById = useMemo(() => new Map((staffQ.data ?? []).map((m) => [m.id, m])), [staffQ.data]);
   const staffOptions = useMemo(
     () => [
@@ -153,10 +180,11 @@ export function StaffScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Button title="+ Добавить сотрудника" size="md" onPress={() => setEditing('new')} />
 
-        <View style={styles.tabsRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
           <TabBtn active={tab === 'current'} label="Текущая смена" onPress={() => setTab('current')} />
           <TabBtn active={tab === 'history'} label="История смен" onPress={() => setTab('history')} />
-        </View>
+          <TabBtn active={tab === 'waiter'} label="Отчёт официанта" onPress={() => setTab('waiter')} />
+        </ScrollView>
 
         {tab === 'current' ? (
           <>
@@ -166,7 +194,7 @@ export function StaffScreen() {
                   <PwaIcon name="chevronDown" size={16} color={colors.textSecondary} strokeWidth={2} />
                 </View>
               </FastPressable>
-              <Text style={styles.dateLabel}>{shiftDateLabel(date)}</Text>
+              <View style={{ flex: 1 }}><DateField value={date} onChangeText={setDate} maximumDate={new Date()} accessibilityLabel="Дата смены" /></View>
               <FastPressable
                 onPress={() => setDate((d) => (d < todayYmd() ? addDays(d, 1) : d))}
                 hitSlop={8}
@@ -177,13 +205,17 @@ export function StaffScreen() {
                 </View>
               </FastPressable>
             </View>
+            <Button title="Обновить отчёт" variant="secondary" loading={reportQ.isFetching} onPress={() => void reportQ.refetch()} />
+            {canAction('exportReports') ? <Button title="Экспорт CSV" variant="secondary" disabled={!rows.length} loading={exporting} onPress={() => void exportReport()} /> : null}
 
             {reportQ.isLoading ? (
               <View style={styles.center}>
                 <ActivityIndicator size="large" color={colors.primary} />
               </View>
+            ) : reportQ.isError ? (
+              <Text style={{ color: colors.danger }}>{apiError(reportQ.error)}</Text>
             ) : rows.length === 0 ? (
-              <Text style={styles.empty}>Нет данных за выбранную дату</Text>
+              <Text style={styles.empty} translate>Нет данных за выбранную дату</Text>
             ) : (
               rows.map((row) => (
                 <ShiftRow
@@ -210,7 +242,7 @@ export function StaffScreen() {
               ))
             )}
           </>
-        ) : (
+        ) : tab === 'waiter' ? <WaiterOrdersReport staff={staffQ.data ?? []} /> : (
           <>
             <HistoryFilters
               filters={historyFilters}
@@ -219,6 +251,8 @@ export function StaffScreen() {
               loading={historyQ.isFetching}
               onRefresh={() => historyQ.refetch()}
             />
+            {canAction('exportReports') ? <Button title="Экспорт CSV" variant="secondary" disabled={!historyQ.data?.items.length} loading={exporting} onPress={() => void exportReport()} /> : null}
+            {historyQ.isError ? <Text style={{ color: colors.danger }}>{apiError(historyQ.error)}</Text> : null}
             <ShiftHistoryList
               data={historyQ.data}
               isLoading={historyQ.isLoading}
@@ -232,9 +266,10 @@ export function StaffScreen() {
       </ScrollView>
 
       {editing !== null ? (
-        <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+        <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onManagePermissions={editing !== 'new' && canManagePermissions && editing.role === 'ADMIN' && editing.id !== currentUser?.id ? () => { setPermissionsFor(editing); setEditing(null); } : undefined} />
       ) : null}
       {editingShift ? <ShiftEditModal row={editingShift} onClose={() => setEditingShift(null)} /> : null}
+      {permissionsFor ? <EmployeePermissionsSheet member={permissionsFor} onClose={() => setPermissionsFor(null)} /> : null}
     </>
   );
 }
@@ -263,26 +298,10 @@ function HistoryFilters({
       {filters.period === 'custom' ? (
         <View style={styles.customDates}>
           <View style={styles.customDateField}>
-            <Field label="с">
-              <TextInput
-                style={styles.input}
-                value={filters.from ?? ''}
-                onChangeText={(from) => setFilters((current) => ({ ...current, from }))}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.textLight}
-              />
-            </Field>
+            <DateField label="С даты" value={filters.from ?? ''} onChangeText={(from) => setFilters((current) => ({ ...current, from }))} />
           </View>
           <View style={styles.customDateField}>
-            <Field label="по">
-              <TextInput
-                style={styles.input}
-                value={filters.to ?? ''}
-                onChangeText={(to) => setFilters((current) => ({ ...current, to }))}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.textLight}
-              />
-            </Field>
+            <DateField label="По дату" value={filters.to ?? ''} onChangeText={(to) => setFilters((current) => ({ ...current, to }))} />
           </View>
         </View>
       ) : null}
@@ -300,7 +319,7 @@ function HistoryFilters({
       />
       <FastPressable onPress={onRefresh} disabled={loading} style={[styles.refreshBtn, loading && styles.disabled]}>
         <PwaIcon name="rotateCcw" size={16} color={colors.textSecondary} strokeWidth={2} />
-        <Text style={styles.refreshText}>Обновить</Text>
+        <Text style={styles.refreshText} translate>Обновить</Text>
       </FastPressable>
     </View>
   );
@@ -330,7 +349,7 @@ function ShiftHistoryList({
     );
   }
   if (rows.length === 0) {
-    return <Text style={styles.empty}>Нет смен за выбранный период</Text>;
+    return <Text style={styles.empty} translate>Нет смен за выбранный период</Text>;
   }
   return (
     <View style={{ gap: spacing.md }}>
@@ -345,9 +364,9 @@ function ShiftHistoryList({
         />
       ))}
       <View style={styles.summaryBox}>
-        <Text style={styles.summaryText}>Всего смен: <Text style={styles.summaryValue}>{data?.summary.shiftsCount ?? 0}</Text></Text>
-        <Text style={styles.summaryText}>Общая выработка: <Text style={styles.summaryValue}>{durationLabel(data?.summary.totalDurationMin ?? 0)}</Text></Text>
-        <Text style={styles.summaryText}>В смене сейчас: <Text style={styles.summaryValue}>{data?.summary.activeCount ?? 0}</Text></Text>
+        <Text style={styles.summaryText} translate>Всего смен: <Text style={styles.summaryValue}>{data?.summary.shiftsCount ?? 0}</Text></Text>
+        <Text style={styles.summaryText} translate>Общая выработка: <Text style={styles.summaryValue}>{durationLabel(data?.summary.totalDurationMin ?? 0)}</Text></Text>
+        <Text style={styles.summaryText} translate>В смене сейчас: <Text style={styles.summaryValue}>{data?.summary.activeCount ?? 0}</Text></Text>
       </View>
     </View>
   );
@@ -388,11 +407,11 @@ function ShiftHistoryCard({
       <View style={styles.historyActions}>
         <FastPressable onPress={onEdit} style={styles.smallAction}>
           <PwaIcon name="pencil" size={15} color={colors.textSecondary} strokeWidth={2} />
-          <Text style={styles.smallActionText}>Редактировать время</Text>
+          <Text style={styles.smallActionText} translate>Редактировать время</Text>
         </FastPressable>
         {row.status !== 'closed' ? (
           <FastPressable onPress={onClose} style={[styles.smallAction, styles.warningAction]}>
-            <Text style={styles.warningActionText}>Закрыть</Text>
+            <Text style={styles.warningActionText} translate>Закрыть</Text>
           </FastPressable>
         ) : null}
       </View>
@@ -411,7 +430,7 @@ function ShiftStatusBadge({ status }: { status: ShiftHistoryRow['status'] }) {
         : { backgroundColor: colors.slate100, color: colors.textSecondary };
   return (
     <View style={[styles.statusBadge, { backgroundColor: tone.backgroundColor }]}>
-      <Text style={[styles.statusText, { color: tone.color }]}>{label}</Text>
+      <Text style={[styles.statusText, { color: tone.color }]} translate>{label}</Text>
     </View>
   );
 }
@@ -419,7 +438,7 @@ function ShiftStatusBadge({ status }: { status: ShiftHistoryRow['status'] }) {
 function ShiftHistoryDetails({ row }: { row: ShiftHistoryRow }) {
   return (
     <View style={styles.details}>
-      <Text style={styles.detailsTitle}>Детали смены:</Text>
+      <Text style={styles.detailsTitle} translate>Детали смены:</Text>
       <DetailLine label="Начало" value={`${dateDMY(row.startedAt)} ${timeHM(row.startedAt)}`} />
       <DetailLine label="Окончание" value={row.endedAt ? `${dateDMY(row.endedAt)} ${timeHM(row.endedAt)}` : '—'} />
       <DetailLine label="Кто закрыл" value={row.closedBy ?? '—'} />
@@ -442,7 +461,7 @@ function ShiftHistoryDetails({ row }: { row: ShiftHistoryRow }) {
 function DetailLine({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.detailLine}>
-      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailLabel} translate>{label}</Text>
       <Text style={styles.detailValue}>{value}</Text>
     </View>
   );
@@ -480,29 +499,13 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
     >
       <View style={{ gap: spacing.md }}>
         <Text style={styles.muted}>{row.employeeName} · {ROLE_LABEL[row.role]}</Text>
-        <Field label="Начало смены">
-          <TextInput
-            style={styles.input}
-            value={startedAt}
-            onChangeText={setStartedAt}
-            placeholder="YYYY-MM-DDTHH:mm"
-            placeholderTextColor={colors.textLight}
-          />
-        </Field>
+        <ShiftDateTimeField label="Начало смены" value={startedAt} onChange={setStartedAt} />
         <View style={styles.checkRow}>
-          <Text style={styles.checkLabel}>Смена ещё открыта</Text>
+          <Text style={styles.checkLabel} translate>Смена ещё открыта</Text>
           <Toggle checked={openShift} onChange={setOpenShift} />
         </View>
         {!openShift ? (
-          <Field label="Окончание смены">
-            <TextInput
-              style={styles.input}
-              value={endedAt}
-              onChangeText={setEndedAt}
-              placeholder="YYYY-MM-DDTHH:mm"
-              placeholderTextColor={colors.textLight}
-            />
-          </Field>
+          <ShiftDateTimeField label="Окончание смены" value={endedAt} onChange={setEndedAt} />
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
@@ -561,7 +564,7 @@ function ShiftRow({
           <Fin label="Оборот" value={money(row.turnover)} />
           <Fin label="Касса (должен)" value={money(row.cashDue)} />
           <View style={styles.finItem}>
-            <Text style={styles.finLabel}>Касса (сдал)</Text>
+            <Text style={styles.finLabel} translate>Касса (сдал)</Text>
             <CashHandedCell row={row} date={date} />
           </View>
           <Fin label="Разница" value={signedMoney(row.difference)} valueColor={diffColor} />
@@ -576,7 +579,7 @@ function ShiftRow({
 function Fin({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
     <View style={styles.finItem}>
-      <Text style={styles.finLabel}>{label}</Text>
+      <Text style={styles.finLabel} translate>{label}</Text>
       <Text style={[styles.finValue, valueColor ? { color: valueColor } : null]}>{value}</Text>
     </View>
   );
@@ -584,15 +587,17 @@ function Fin({ label, value, valueColor }: { label: string; value: string; value
 
 function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
   const setCash = useSetCashHanded();
+  const push = useNotifications((s) => s.push);
   const [val, setVal] = useState(row.cashHanded ? String(row.cashHanded) : '');
   useEffect(() => {
     setVal(row.cashHanded ? String(row.cashHanded) : '');
   }, [row.cashHanded]);
 
   const commit = () => {
-    const num = Number(val.replace(/\s/g, '').replace(',', '.')) || 0;
+    const num = Number(val.replace(/\s/g, '').replace(',', '.'));
+    if (!Number.isFinite(num) || num < 0) { push({ message: 'Сданная сумма должна быть неотрицательным числом', type: 'error', at: new Date().toISOString() }); return; }
     if (num === row.cashHanded) return;
-    setCash.mutate({ waiterId: row.waiterId, date, cashHanded: num });
+    setCash.mutate({ waiterId: row.waiterId, date, cashHanded: num }, { onError: (error) => push({ message: apiError(error), type: 'error', at: new Date().toISOString() }) });
   };
 
   return (
@@ -611,24 +616,24 @@ function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
 function ShiftDetails({ row }: { row: ShiftReportRow }) {
   return (
     <View style={styles.details}>
-      <Text style={styles.detailsTitle}>Товарная разбивка:</Text>
+      <Text style={styles.detailsTitle} translate>Товарная разбивка:</Text>
       {row.categories.length === 0 ? (
-        <Text style={styles.muted}>Продаж нет</Text>
+        <Text style={styles.muted} translate>Продаж нет</Text>
       ) : (
         row.categories.map((cat) => <CategoryRow key={cat.categoryId} cat={cat} />)
       )}
 
-      <Text style={[styles.detailsTitle, { marginTop: spacing.md }]}>
+      <Text style={[styles.detailsTitle, { marginTop: spacing.md }]} translate>
         Отменённые чеки ({row.cancellations.length}):
       </Text>
       {row.cancellations.length === 0 ? (
-        <Text style={styles.muted}>Отмен нет</Text>
+        <Text style={styles.muted} translate>Отмен нет</Text>
       ) : (
         row.cancellations.map((c, i) => (
-          <Text key={i} style={styles.cancelLine}>
+          <Text key={i} style={styles.cancelLine} translate>
             <Text style={styles.muted}>{timeHM(c.time)}</Text> — {c.name}{' '}
             <Text style={styles.detailPrimary}>({money(c.amount)})</Text>
-            <Text style={styles.muted}> — Причина: {c.reason}</Text>
+            <Text style={styles.muted} translate> — Причина: {c.reason}</Text>
           </Text>
         ))
       )}
@@ -647,7 +652,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
         <Text style={styles.catName} numberOfLines={1}>
           {cat.name}
         </Text>
-        <Text style={styles.catQty}>
+        <Text style={styles.catQty} translate>
           {cat.qty} шт. <Text style={styles.muted}>({money(cat.amount)})</Text>
         </Text>
       </FastPressable>
@@ -659,7 +664,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
                 <Text style={styles.catItemName} numberOfLines={1}>
                   {it.name}
                 </Text>
-                <Text style={styles.catItemQty}>
+                <Text style={styles.catItemQty} translate>
                   {it.qty} шт. <Text style={styles.muted}>({money(it.amount)})</Text>
                 </Text>
               </View>
@@ -670,7 +675,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
                       <Text style={styles.compName} numberOfLines={1}>
                         {c.name}
                       </Text>
-                      <Text style={styles.compQty}>{c.qty} шт.</Text>
+                      <Text style={styles.compQty} translate>{c.qty} шт.</Text>
                     </View>
                   ))}
                 </View>
@@ -683,7 +688,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
   );
 }
 
-function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: () => void }) {
+function StaffModal({ member, onClose, onManagePermissions }: { member: StaffMember | null; onClose: () => void; onManagePermissions?: () => void }) {
   const isEdit = !!member;
   const { create, update } = useStaffMutations();
   const push = useNotifications((s) => s.push);
@@ -744,10 +749,11 @@ function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: 
         </Field>
         {isEdit ? (
           <View style={styles.checkRow}>
-            <Text style={styles.checkLabel}>Активен (может входить)</Text>
+            <Text style={styles.checkLabel} translate>Активен (может входить)</Text>
             <Toggle checked={isActive} onChange={setIsActive} />
           </View>
         ) : null}
+        {onManagePermissions ? <Button title="Права доступа" variant="secondary" size="md" onPress={onManagePermissions} /> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
     </BottomSheet>
@@ -757,14 +763,14 @@ function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: 
 function TabBtn({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
   return (
     <FastPressable onPress={onPress} style={[styles.tabBtn, active && styles.tabBtnActive]}>
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+      <Text style={[styles.tabText, active && styles.tabTextActive]} translate>{label}</Text>
     </FastPressable>
   );
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <View>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel} translate>{label}</Text>
       {children}
     </View>
   );

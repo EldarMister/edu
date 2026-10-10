@@ -161,10 +161,16 @@ export function useRejectItem() {
 export function useReadyItems(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (p: { orderId: string; itemIds: string[]; setComponentIds: string[] }) =>
+    mutationFn: async (p: {
+      orderId: string;
+      itemIds: string[];
+      setComponentIds: string[];
+      partial?: { itemId: string; quantity: number }[];
+    }) =>
       (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/ready-batch?station=${station}`, {
         itemIds: p.itemIds,
         setComponentIds: p.setComponentIds,
+        partial: p.partial,
       })).data,
     retry: networkRetry,
     onSettled: () => invalidateKitchen(qc),

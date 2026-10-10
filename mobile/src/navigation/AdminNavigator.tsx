@@ -1,5 +1,8 @@
 import React from 'react';
-import { Animated, Easing, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, AppState, Easing, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
+import { useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
+import { useQueryClient } from '@tanstack/react-query';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon, type PwaIconName } from '@/components/PwaIcon';
@@ -8,8 +11,12 @@ import { BrandLogo } from '@/components/BrandLogo';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { useAuth } from '@/store/auth';
 import { usePermissions } from '@/hooks/usePermissions';
-import { disconnectSocket } from '@/services/socket';
-import { unregisterPushDevice } from '@/services/push';
+import { disconnectSocket, useSocketEvent } from '@/services/socket';
+import { isRemotePushRegistered, notificationDeduper, unregisterPushDevice } from '@/services/push';
+import { beep } from '@/lib/sound';
+import { waiterVoice } from '@/services/waiterVoice';
+import { useNotifications } from '@/store/notifications';
+import { ScreenTransition } from '@/components/ScreenTransition';
 import { StatisticsScreen } from '@/screens/admin/StatisticsScreen';
 import { OrdersScreen } from '@/screens/admin/OrdersScreen';
 import { TablesScreen } from '@/screens/admin/TablesScreen';
@@ -19,7 +26,9 @@ import { AuditScreen } from '@/screens/admin/AuditScreen';
 import { SettingsScreen } from '@/screens/admin/SettingsScreen';
 import { WarehouseScreen } from '@/screens/admin/WarehouseScreen';
 import { ReconciliationScreen } from '@/screens/admin/ReconciliationScreen';
-import type { SectionKey } from '@/types';
+import { ReceiptPrintsScreen } from '@/screens/admin/ReceiptPrintsScreen';
+import type { ReceiptPrintRequest, SectionKey } from '@/types';
+import type { RootStackParamList } from './types';
 
 type Section =
   | 'stats'
@@ -54,6 +63,10 @@ const SECTIONS: {
 
 /** Админ/владелец — порт PWA AdminApp (сайдбар → выезжающий drawer на мобиле). */
 export function AdminNavigator() {
+  const route = useRoute<RouteProp<RootStackParamList, 'Admin'>>();
+  const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const qc = useQueryClient();
+  const push = useNotifications((s) => s.push);
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const { canSection } = usePermissions();
@@ -68,6 +81,32 @@ export function AdminNavigator() {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
 
   const current = sections.find((s) => s.key === section) ?? sections[0];
+  React.useEffect(() => {
+    const requested = route.params?.section;
+    if (requested && sections.some((s) => s.key === requested)) setSection(requested);
+  }, [route.params?.section, route.params?.orderId, sections]);
+
+  const invalidateReceipts = () => { void qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] }); };
+  useSocketEvent<ReceiptPrintRequest>('receipt_print_request_created', (request) => {
+    invalidateReceipts();
+    if (AppState.currentState !== 'active' && isRemotePushRegistered()) return;
+    const label = request.type === 'preliminary' ? 'счёта' : 'чека';
+    const message = `Официант ${request.waiterName} отправил заявку на печать ${label}. Стол ${request.tableNumber}.`;
+    if (!notificationDeduper.claim({ notificationId: `receipt:${request.id}:created`, type: 'info', orderId: request.orderId }, message)) return;
+    push({ message, type: 'info', orderId: request.orderId, at: request.createdAt });
+    void beep('notify');
+    waiterVoice.enqueue(request.voice?.text ?? message);
+  }, [qc, push]);
+  useSocketEvent('receipt_print_request_approved', invalidateReceipts, [qc]);
+  useSocketEvent('receipt_print_request_printed', invalidateReceipts, [qc]);
+  useSocketEvent('receipt_print_request_rejected', invalidateReceipts, [qc]);
+  useSocketEvent<{ message: string; orderId?: string; orderNumber?: string; createdAt: string; voice?: { text?: string } }>('administrator:called', (call) => {
+    if (AppState.currentState !== 'active' && isRemotePushRegistered()) return;
+    if (!notificationDeduper.claim({ type: 'info', orderId: call.orderId }, call.message)) return;
+    push({ message: call.message, type: 'info', orderId: call.orderId, orderNumber: call.orderNumber, at: call.createdAt, durationMs: 12_000 });
+    void beep('notify');
+    waiterVoice.enqueue(call.voice?.text);
+  }, [push]);
 
   React.useEffect(() => {
     if (sections.length > 0 && !sections.some((s) => s.key === section)) {
@@ -82,6 +121,7 @@ export function AdminNavigator() {
   };
 
   const go = (s: Section) => {
+    navigation.setParams({ section: undefined, orderId: undefined });
     setSection(s);
     setDrawerOpen(false);
   };
@@ -94,16 +134,18 @@ export function AdminNavigator() {
           <FastPressable onPress={() => setDrawerOpen(true)} hitSlop={8} style={styles.burger}>
             <PwaIcon name="menu" size={22} color={colors.textSecondary} />
           </FastPressable>
-          <Text style={styles.headerTitle}>{current?.label ?? ''}</Text>
+          <Text style={styles.headerTitle} translate>{current?.label ?? ''}</Text>
         </View>
         <ConnectionStatus />
       </View>
 
-      <View style={styles.body}>
-        {section === 'stats' && isOwner ? (
+      <ScreenTransition style={styles.body} transitionKey={section}>
+        {!current ? <Text style={{ padding: spacing.lg, color: colors.textMuted }} translate>Нет доступных разделов. Обратитесь к владельцу.</Text> : section === 'stats' ? (
           <StatisticsScreen />
         ) : section === 'orders' ? (
-          <OrdersScreen />
+          <OrdersScreen initialOrderId={route.params?.orderId} />
+        ) : section === 'receipts' ? (
+          <ReceiptPrintsScreen initialOrderId={route.params?.orderId} />
         ) : section === 'tables' ? (
           <TablesScreen />
         ) : section === 'menu' ? (
@@ -112,14 +154,14 @@ export function AdminNavigator() {
           <WarehouseScreen />
         ) : section === 'staff' ? (
           <StaffScreen />
-        ) : section === 'audit' && isOwner ? (
+        ) : section === 'audit' ? (
           <AuditScreen />
-        ) : section === 'reconcile' && isOwner ? (
+        ) : section === 'reconcile' ? (
           <ReconciliationScreen />
         ) : section === 'settings' ? (
           <SettingsScreen />
         ) : null}
-      </View>
+      </ScreenTransition>
 
       <AdminDrawer
         visible={drawerOpen}
@@ -128,6 +170,7 @@ export function AdminNavigator() {
         onSelect={go}
         onClose={() => setDrawerOpen(false)}
         onLogout={onLogout}
+        onOpenWorkspace={(target) => { setDrawerOpen(false); navigation.navigate(target); }}
       />
     </SafeAreaView>
   );
@@ -140,6 +183,7 @@ function AdminDrawer({
   onSelect,
   onClose,
   onLogout,
+  onOpenWorkspace,
 }: {
   visible: boolean;
   sections: { key: Section; label: string; icon: PwaIconName }[];
@@ -147,6 +191,7 @@ function AdminDrawer({
   onSelect: (s: Section) => void;
   onClose: () => void;
   onLogout: () => void;
+  onOpenWorkspace: (target: 'Kitchen' | 'Bar' | 'PublicHome') => void;
 }) {
   const [render, setRender] = React.useState(visible);
   const progress = React.useRef(new Animated.Value(0)).current;
@@ -196,15 +241,20 @@ function AdminDrawer({
                   style={[styles.navItem, active && styles.navItemActive]}
                 >
                   <PwaIcon name={s.icon} size={18} color={active ? colors.white : colors.textSecondary} />
-                  <Text style={[styles.navLabel, active && styles.navLabelActive]}>{s.label}</Text>
+                  <Text style={[styles.navLabel, active && styles.navLabelActive]} translate>{s.label}</Text>
                 </FastPressable>
               );
             })}
+            <View style={{ borderTopWidth: 1, borderTopColor: colors.border, marginTop: spacing.sm, paddingTop: spacing.sm }}>
+              <FastPressable onPress={() => onOpenWorkspace('Kitchen')} style={styles.navItem}><PwaIcon name="list" size={18} color={colors.textSecondary} /><Text style={styles.navLabel} translate>Кухня</Text></FastPressable>
+              <FastPressable onPress={() => onOpenWorkspace('Bar')} style={styles.navItem}><PwaIcon name="bag" size={18} color={colors.textSecondary} /><Text style={styles.navLabel} translate>Бар</Text></FastPressable>
+              <FastPressable onPress={() => onOpenWorkspace('PublicHome')} style={styles.navItem}><PwaIcon name="qr" size={18} color={colors.textSecondary} /><Text style={styles.navLabel} translate>Публичные экраны</Text></FastPressable>
+            </View>
           </ScrollView>
           <View style={styles.drawerFooter}>
             <FastPressable onPress={onLogout} style={styles.navItem}>
               <PwaIcon name="logout" size={18} color={colors.textSecondary} />
-              <Text style={styles.navLabel}>Выйти</Text>
+              <Text style={styles.navLabel} translate>Выйти</Text>
             </FastPressable>
           </View>
         </SafeAreaView>

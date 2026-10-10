@@ -1,16 +1,6 @@
 import React from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  Easing,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  type TextInputProps,
-  type ViewStyle,
-} from 'react-native';
+import { ActivityIndicator, Animated, Easing, ScrollView, StyleSheet, View, type TextInputProps, type ViewStyle } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import { colors, radius, spacing, fontSize, cardShadow, waiterLayout } from '@/theme';
 import { PwaIcon } from './PwaIcon';
 import { FastPressable } from './FastPressable';
@@ -65,7 +55,7 @@ export function Button({
             styles.btnText,
             { color: fg, fontSize: size === 'lg' ? fontSize.base : fontSize.sm },
           ]}
-        >
+         translate>
           {title}
         </Text>
       )}
@@ -110,6 +100,9 @@ export function Field({
   error,
   rightSlot,
   containerStyle,
+  style,
+  onFocus,
+  onBlur,
   ...props
 }: TextInputProps & {
   label?: string;
@@ -120,19 +113,20 @@ export function Field({
   const [focused, setFocused] = React.useState(false);
   return (
     <View style={[{ gap: 6 }, containerStyle]}>
-      {label ? <Text style={styles.label}>{label}</Text> : null}
+      {label ? <Text style={styles.label} translate>{label}</Text> : null}
       <View>
         <TextInput
+          {...props}
           placeholderTextColor={colors.textLight}
           style={[
             styles.input,
             focused && { borderColor: colors.primary },
             error ? { borderColor: colors.danger } : null,
             rightSlot ? { paddingRight: 44 } : null,
+            style,
           ]}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          {...props}
+          onFocus={(event) => { setFocused(true); onFocus?.(event); }}
+          onBlur={(event) => { setFocused(false); onBlur?.(event); }}
         />
         {rightSlot ? <View style={styles.inputRight}>{rightSlot}</View> : null}
       </View>
@@ -145,7 +139,7 @@ export function Loading({ text }: { text?: string }) {
   return (
     <View style={styles.center}>
       <ActivityIndicator size="large" color={colors.primary} />
-      {text ? <Text style={styles.muted}>{text}</Text> : null}
+      {text ? <Text style={styles.muted} translate>{text}</Text> : null}
     </View>
   );
 }
@@ -153,7 +147,7 @@ export function Loading({ text }: { text?: string }) {
 export function EmptyState({ text }: { text: string }) {
   return (
     <View style={styles.center}>
-      <Text style={styles.muted}>{text}</Text>
+      <Text style={styles.muted} translate>{text}</Text>
     </View>
   );
 }
@@ -165,7 +159,7 @@ export function PillTabs<T extends string>({
   onChange,
   style,
 }: {
-  items: { key: T; label: string }[];
+  items: { key: T; label: string; translate?: boolean }[];
   value: T;
   onChange: (key: T) => void;
   style?: ViewStyle;
@@ -181,7 +175,7 @@ export function PillTabs<T extends string>({
               onPress={() => onChange(it.key)}
               style={[styles.pill, active && styles.pillActive]}
             >
-              <Text style={[styles.pillText, active && styles.pillTextActive]}>{it.label}</Text>
+              <Text style={[styles.pillText, active && styles.pillTextActive]} translate={it.translate !== false}>{it.label}</Text>
             </FastPressable>
           );
         })}
@@ -216,7 +210,7 @@ export function SegmentTabs<T extends string>({
             onPress={() => onChange(it.key)}
             style={[styles.segment, active && styles.segmentActive]}
           >
-            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{it.label}</Text>
+            <Text style={[styles.segmentText, active && styles.segmentTextActive]} translate>{it.label}</Text>
             {active && count != null && count > 0 ? (
               <View style={styles.segmentCount}>
                 <Text style={styles.segmentCountText}>{count}</Text>

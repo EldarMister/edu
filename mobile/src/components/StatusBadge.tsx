@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import type { Order, OrderStatus, TableStatus } from '@/types';
 import { ORDER_STATUS, TABLE_STATUS, orderStationStatuses } from '@/theme/status';
 import { fontSize, radius, spacing } from '@/theme';
@@ -15,7 +16,7 @@ export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?
         { backgroundColor: meta.bg },
       ]}
     >
-      <Text style={[styles.text, size === 'sm' ? styles.textSm : styles.textMd, { color: meta.fg }]}>
+      <Text style={[styles.text, size === 'sm' ? styles.textSm : styles.textMd, { color: meta.fg }]} translate>
         {meta.label}
       </Text>
     </View>
@@ -46,7 +47,7 @@ export function OrderStatusBadges({
             { backgroundColor: chip.bg },
           ]}
         >
-          <Text style={[styles.text, size === 'sm' ? styles.textSm : styles.textMd, { color: chip.fg }]}>
+          <Text style={[styles.text, size === 'sm' ? styles.textSm : styles.textMd, { color: chip.fg }]} translate>
             {chip.stationLabel}: {chip.label}
           </Text>
         </View>
@@ -60,7 +61,7 @@ export function TableBadge({ status }: { status: TableStatus }) {
   const meta = TABLE_STATUS[status];
   return (
     <View style={[styles.badge, styles.md, { backgroundColor: meta.bg }]}>
-      <Text style={[styles.text, styles.textMd, { color: meta.fg }]}>{meta.label}</Text>
+      <Text style={[styles.text, styles.textMd, { color: meta.fg }]} translate>{meta.label}</Text>
     </View>
   );
 }

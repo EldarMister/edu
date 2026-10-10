@@ -1,5 +1,6 @@
 import React from 'react';
-import { Animated, Easing, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Animated, Easing, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, RoundBtn } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
@@ -46,7 +47,7 @@ export function CartSheet({
   const footer = (
     <View style={{ gap: spacing.sm, paddingBottom: spacing.sm }}>
       <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>Итого</Text>
+        <Text style={styles.totalLabel} translate>Итого</Text>
         <NumberTicker value={total()} style={styles.totalValue} digitHeight={22} />
       </View>
       <Button
@@ -59,10 +60,10 @@ export function CartSheet({
       {hasLines ? (
         <View style={styles.actionsRow}>
           <FastPressable onPress={() => clear()} style={styles.clearBtn}>
-            <Text style={styles.clearText}>Очистить</Text>
+            <Text style={styles.clearText} translate>Очистить</Text>
           </FastPressable>
           <FastPressable onPress={() => setCommentOpen(!commentOpen)} style={styles.clearBtn}>
-            <Text style={[styles.clearText, commentOpen && styles.commentToggleActive]}>
+            <Text style={[styles.clearText, commentOpen && styles.commentToggleActive]} translate>
               {commentOpen ? 'Скрыть комментарий' : 'Комментарий'}
             </Text>
           </FastPressable>
@@ -83,14 +84,14 @@ export function CartSheet({
     >
       <View style={styles.headRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.title} numberOfLines={1}>
+          <Text style={styles.title} numberOfLines={1} translate>
             Корзина
           </Text>
         </View>
         <View style={styles.headActions}>
           {hasLines ? (
             <View style={styles.takeawayRow}>
-              <Text style={styles.takeawayLabel}>С собой</Text>
+              <Text style={styles.takeawayLabel} translate>С собой</Text>
               <TakeawaySwitch
                 on={allTakeaway}
                 onChange={setAllTakeaway}
@@ -103,7 +104,7 @@ export function CartSheet({
       <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
         {!hasLines ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.empty}>Корзина пуста</Text>
+            <Text style={styles.empty} translate>Корзина пуста</Text>
           </View>
         ) : (
           lines.map((l, i) => {
@@ -120,14 +121,14 @@ export function CartSheet({
                   <Text style={styles.lineName} numberOfLines={1}>{cartLineName(l)}</Text>
                 </FastPressable>
                 {l.set ? (
-                  <Text style={styles.lineSub}>
+                  <Text style={styles.lineSub} translate>
                     {setChanged(l) ? 'Состав изменён' : `${l.set.components.length} блюд`} · {open ? 'скрыть' : 'состав'}
                   </Text>
                 ) : null}
                 {l.takeaway ? (
                   <FastPressable onPress={() => setTakeaway(i, false)} style={styles.takeawayChip} hitSlop={6}>
                     <PwaIcon name="bag" size={12} color={colors.textSecondary} strokeWidth={2} />
-                    <Text style={styles.takeawayChipText}>С собой</Text>
+                    <Text style={styles.takeawayChipText} translate>С собой</Text>
                   </FastPressable>
                 ) : null}
               </View>

@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
-import { PanResponder, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { Text } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Toggle } from '@/components/ui';
@@ -50,7 +51,7 @@ export function KitchenVoiceSettingsSheet({
   return (
     <BottomSheet visible={visible} onClose={onClose} title="Настройки озвучки кухни" maxHeight="88%">
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Голос</Text>
+        <Text style={styles.sectionTitle} translate>Голос</Text>
         <View style={styles.speakerList}>
           {KITCHEN_SPEAKERS.map((speaker) => {
             const active = settings.speaker === speaker.value;
@@ -63,7 +64,7 @@ export function KitchenVoiceSettingsSheet({
                 <View style={[styles.radio, active && { borderColor: colors.primary }]}>
                   {active ? <View style={styles.radioDot} /> : null}
                 </View>
-                <Text style={[styles.speakerName, active && { color: colors.primary }]}>{speaker.label}</Text>
+                <Text style={[styles.speakerName, active && { color: colors.primary }]} translate>{speaker.label}</Text>
               </FastPressable>
             );
           })}
@@ -72,20 +73,20 @@ export function KitchenVoiceSettingsSheet({
 
       <View style={styles.section}>
         <View style={styles.settingRow}>
-          <Text style={styles.settingLabel}>Уведомления</Text>
+          <Text style={styles.settingLabel} translate>Уведомления</Text>
           <Toggle
             checked={settings.notificationsEnabled}
             onChange={(value) => patch({ notificationsEnabled: value })}
           />
         </View>
         <View style={styles.settingRow}>
-          <Text style={styles.settingLabel}>Голосовая озвучка</Text>
+          <Text style={styles.settingLabel} translate>Голосовая озвучка</Text>
           <Toggle checked={settings.voiceEnabled} onChange={(value) => patch({ voiceEnabled: value })} />
         </View>
       </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Скорость озвучки</Text>
+        <Text style={styles.sectionTitle} translate>Скорость озвучки</Text>
         <SpeedSlider
           rates={KITCHEN_SPEECH_RATES}
           value={settings.speechRate}

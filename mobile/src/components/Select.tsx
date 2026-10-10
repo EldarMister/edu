@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ScrollView, StyleSheet, Text, View, type ViewStyle } from 'react-native';
+import { ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
+import { Text } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -8,6 +9,7 @@ import { colors, fontSize, radius, spacing } from '@/theme';
 export interface SelectOption<T extends string> {
   value: T;
   label: string;
+  translate?: boolean;
 }
 
 /** Выпадающий выбор — контрол открывает нижний лист с опциями (порт PWA Select). */
@@ -32,7 +34,7 @@ export function Select<T extends string>({
   return (
     <>
       <FastPressable style={[styles.control, style]} onPress={() => setOpen(true)}>
-        <Text style={[styles.value, !selected && styles.placeholder]} numberOfLines={1}>
+        <Text style={[styles.value, !selected && styles.placeholder]} numberOfLines={1} translate={selected?.translate !== false}>
           {selected?.label ?? placeholder ?? ''}
         </Text>
         <PwaIcon name="chevronDown" size={16} color={colors.textMuted} />
@@ -51,7 +53,7 @@ export function Select<T extends string>({
                 }}
                 style={[styles.option, active && styles.optionActive]}
               >
-                <Text style={[styles.optionText, active && styles.optionTextActive]}>{o.label}</Text>
+                <Text style={[styles.optionText, active && styles.optionTextActive]} translate={o.translate !== false}>{o.label}</Text>
                 {active ? <PwaIcon name="check" size={18} color={colors.primary} /> : null}
               </FastPressable>
             );

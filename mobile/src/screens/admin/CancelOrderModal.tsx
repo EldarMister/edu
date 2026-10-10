@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
@@ -14,12 +15,16 @@ export function CancelOrderModal({
   submitting,
   onClose,
   onConfirm,
+  title = 'Отменить заказ?',
+  confirmLabel = 'Отменить заказ',
 }: {
   visible: boolean;
   orderLabel: string;
   submitting: boolean;
   onClose: () => void;
   onConfirm: (reason: string) => void;
+  title?: string;
+  confirmLabel?: string;
 }) {
   const [reason, setReason] = useState(REASONS[0]);
   const [comment, setComment] = useState('');
@@ -31,12 +36,12 @@ export function CancelOrderModal({
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      title="Отменить заказ?"
+      title={title}
       footer={
         <View style={styles.footer}>
           <Button title="Отмена" variant="secondary" size="lg" style={{ flex: 1 }} onPress={onClose} />
           <Button
-            title="Отменить заказ"
+            title={confirmLabel}
             variant="danger"
             size="lg"
             style={{ flex: 1 }}
@@ -48,7 +53,7 @@ export function CancelOrderModal({
       }
     >
       <Text style={styles.orderLabel}>{orderLabel}</Text>
-      <Text style={styles.reasonLabel}>Причина отмены</Text>
+      <Text style={styles.reasonLabel} translate>Причина отмены</Text>
       <View style={{ gap: spacing.sm }}>
         {REASONS.map((r) => {
           const active = reason === r;

@@ -1,20 +1,13 @@
 import React, { useState } from 'react';
-import {
-  ActivityIndicator,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Select } from '@/components/Select';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Button } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
+import { DateField } from '@/components/DateField';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
@@ -25,6 +18,7 @@ import {
   useOrdersSummary,
   useStaff,
   useUpdateOrderStatus,
+  useAdminOrderDetails,
 } from '@/services/api/admin';
 import type { Order, OrderStatus } from '@/types';
 import { OrderDetailsModal } from './OrderDetailsModal';
@@ -68,13 +62,14 @@ const PAYMENT_OPTIONS = [
   { value: 'card', label: 'Карта' },
 ];
 
-// Кастомная дата опущена (нужен нативный date-picker) — как в статистике.
 const PERIOD_OPTIONS = [
   { value: 'all', label: 'Всё время' },
   { value: 'today', label: 'Сегодня' },
   { value: 'week', label: 'За неделю' },
   { value: 'month', label: 'За месяц' },
+  { value: 'custom', label: 'Выбрать дату' },
 ];
+const SORT_OPTIONS = [{ value: 'default', label: 'По умолчанию' }, { value: 'date_desc', label: 'Дата: новые → старые' }, { value: 'date_asc', label: 'Дата: старые → новые' }, { value: 'amount_desc', label: 'Сумма: больше → меньше' }, { value: 'amount_asc', label: 'Сумма: меньше → больше' }];
 
 const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -99,15 +94,20 @@ function periodRange(period: string): { dateFrom?: string; dateTo?: string } {
 }
 
 /** Заказы (владелец/админ) — порт PWA OrdersPage. */
-export function OrdersScreen() {
+export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {}) {
   const [tab, setTab] = useState('all');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [waiterId, setWaiterId] = useState('');
   const [period, setPeriod] = useState('all');
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState('default');
+  const [customDate, setCustomDate] = useState(() => ymd(new Date()));
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(initialOrderId ?? null);
+  React.useEffect(() => { if (initialOrderId) setDetailId(initialOrderId); }, [initialOrderId]);
+  const details = useAdminOrderDetails(detailId ?? detailsOrder?.id ?? null);
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
   const [manualStatus, setManualStatus] = useState<OrderStatus>('served');
   const [manualReason, setManualReason] = useState('');
@@ -122,8 +122,8 @@ export function OrdersScreen() {
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
 
-  const filters = { search, paymentMethod, waiterId, ...periodRange(period) };
-  const ordersQ = useAdminOrdersInfinite({ tab, ...filters });
+  const filters = { search, paymentMethod, waiterId, ...(period === 'custom' ? { dateFrom: customDate, dateTo: customDate } : periodRange(period)) };
+  const ordersQ = useAdminOrdersInfinite({ tab, ...filters, sort: sort.startsWith('date') ? 'date' : sort.startsWith('amount') ? 'amount' : 'default', sortDirection: sort.endsWith('_asc') ? 'asc' : 'desc' });
   const summaryQ = useOrdersSummary(filters);
   const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
   const ordersError = ordersQ.isError ? apiError(ordersQ.error) : null;
@@ -197,6 +197,8 @@ export function OrdersScreen() {
           <Select value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
           <Select value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
           <Select value={period} onChange={setPeriod} options={PERIOD_OPTIONS} title="Период" />
+          {period === 'custom' ? <DateField label="Дата заказов" value={customDate} onChangeText={setCustomDate} /> : null}
+          <Select value={sort} onChange={setSort} options={SORT_OPTIONS} title="Сортировка" />
           <TextInput
             style={styles.search}
             placeholder="Поиск по заказам"
@@ -214,11 +216,11 @@ export function OrdersScreen() {
             </View>
           ) : ordersError ? (
             <View style={styles.center}>
-              <Text style={styles.errTitle}>Не удалось загрузить заказы</Text>
+              <Text style={styles.errTitle} translate>Не удалось загрузить заказы</Text>
               <Text style={styles.errSub}>{ordersError}</Text>
             </View>
           ) : items.length === 0 ? (
-            <Text style={styles.empty}>Заказы не найдены</Text>
+            <Text style={styles.empty} translate>Заказы не найдены</Text>
           ) : (
             <ScrollView
               horizontal
@@ -227,20 +229,20 @@ export function OrdersScreen() {
             >
               <View style={{ width: TABLE_WIDTH }}>
                 <View style={styles.thead}>
-                  <Text style={[styles.th, { width: COL.num }]}>№ заказа</Text>
-                  <Text style={[styles.th, { width: COL.date }]}>Дата и время</Text>
-                  <Text style={[styles.th, { width: COL.table }]}>Стол</Text>
-                  <Text style={[styles.th, { width: COL.waiter }]}>Официант</Text>
-                  <Text style={[styles.th, styles.thRight, { width: COL.amount }]}>Сумма</Text>
-                  <Text style={[styles.th, { width: COL.status }]}>Статус заказа</Text>
-                  <Text style={[styles.th, { width: COL.pay }]}>Способ оплаты</Text>
-                  <Text style={[styles.th, styles.thCenter, { width: COL.act }]}>Действия</Text>
+                  <Text style={[styles.th, { width: COL.num }]} translate>№ заказа</Text>
+                  <Text style={[styles.th, { width: COL.date }]} translate>Дата и время</Text>
+                  <Text style={[styles.th, { width: COL.table }]} translate>Стол</Text>
+                  <Text style={[styles.th, { width: COL.waiter }]} translate>Официант</Text>
+                  <Text style={[styles.th, styles.thRight, { width: COL.amount }]} translate>Сумма</Text>
+                  <Text style={[styles.th, { width: COL.status }]} translate>Статус заказа</Text>
+                  <Text style={[styles.th, { width: COL.pay }]} translate>Способ оплаты</Text>
+                  <Text style={[styles.th, styles.thCenter, { width: COL.act }]} translate>Действия</Text>
                 </View>
                 {items.map((ord) => (
                   <OrderTableRow
                     key={ord.id}
                     order={ord}
-                    onOpen={() => setDetailsOrder(ord)}
+                    onOpen={() => { setDetailsOrder(ord); setDetailId(ord.id); }}
                     onEdit={() => openStatusEditor(ord)}
                     onCancel={CANCELLABLE.has(ord.status) ? () => setCancelTarget(ord) : undefined}
                   />
@@ -253,7 +255,7 @@ export function OrdersScreen() {
               <ActivityIndicator color={colors.primary} />
             </View>
           ) : items.length > 0 && !hasNextPage ? (
-            <Text style={styles.footerDone}>Все заказы загружены</Text>
+            <Text style={styles.footerDone} translate>Все заказы загружены</Text>
           ) : null}
         </View>
       </ScrollView>
@@ -281,7 +283,7 @@ export function OrdersScreen() {
         onClose={() => setStatusTarget(null)}
         onConfirm={confirmStatusChange}
       />
-      <OrderDetailsModal order={detailsOrder} onClose={() => setDetailsOrder(null)} />
+      <OrderDetailsModal order={details.data ?? detailsOrder} onOrderChange={setDetailsOrder} allowItemCancellation onClose={() => { setDetailsOrder(null); setDetailId(null); }} />
     </>
   );
 }
@@ -308,12 +310,11 @@ function OrderTableRow({
       <Text style={[styles.td, styles.tdSecondary, { width: COL.date }]} numberOfLines={1}>
         {new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)}
       </Text>
-      <Text style={[styles.td, styles.tdSecondary, { width: COL.table }]} numberOfLines={1}>
-        Стол {order.table.number}
-        {hallSuffix(order.table)}
+      <Text style={[styles.td, styles.tdSecondary, { width: COL.table }]} numberOfLines={1} translate>
+        {order.source === 'delivery' ? '—' : `Стол ${order.table.number}${hallSuffix(order.table)}`}
       </Text>
-      <Text style={[styles.td, styles.tdSecondary, { width: COL.waiter }]} numberOfLines={1}>
-        {order.waiter?.name ?? 'QR menu'}
+      <Text style={[styles.td, styles.tdSecondary, { width: COL.waiter }]} numberOfLines={1} translate>
+        {order.source === 'delivery' ? 'Доставка' : order.waiter?.name ?? 'QR menu'}
       </Text>
       <Text style={[styles.td, styles.tdStrong, styles.tdRight, { width: COL.amount }]} numberOfLines={1}>
         {money(order.finalAmount)}
@@ -377,7 +378,7 @@ function StatusEditorModal({
         </View>
       }
     >
-      <Text style={styles.editorSub}>
+      <Text style={styles.editorSub} translate>
         {displayOrderNumber(order.orderNumber)} · Стол {order.table.number}
         {hallSuffix(order.table)}
       </Text>
@@ -393,7 +394,7 @@ function StatusEditorModal({
           multiline
         />
         {order.status === 'cancelled' && value !== 'cancelled' ? (
-          <Text style={styles.restoreNote}>Отменённые позиции будут восстановлены в выбранный статус.</Text>
+          <Text style={styles.restoreNote} translate>Отменённые позиции будут восстановлены в выбранный статус.</Text>
         ) : null}
       </View>
     </BottomSheet>
@@ -402,7 +403,7 @@ function StatusEditorModal({
 
 function Sum({ label, value }: { label: string; value: string }) {
   return (
-    <Text style={styles.sumText}>
+    <Text style={styles.sumText} translate>
       {label}: <Text style={styles.sumValue}>{value}</Text>
     </Text>
   );

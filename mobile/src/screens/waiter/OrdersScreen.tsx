@@ -1,16 +1,6 @@
 import React, { memo } from 'react';
-import {
-  FlatList,
-  Image,
-  InteractionManager,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-  useWindowDimensions,
-  type View as RNView,
-} from 'react-native';
+import { FlatList, Image, InteractionManager, RefreshControl, StyleSheet, View, useWindowDimensions, type View as RNView } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import Animated, {
   interpolate,
   runOnJS,
@@ -28,19 +18,20 @@ import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, spacing } from '@/theme';
-import { useActiveOrders, useCancelOrder, useClaimQrOrder, useDishes } from '@/services/api/waiter';
+import { useActiveOrders, useCallAdministrator, useCancelOrder, useClaimQrOrder, useDishes } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
-import { displayOrderNumber, hallSuffix, timeHM } from '@/utils/format';
+import { displayOrderNumber, timeHM } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
 import { apiError } from '@/lib/api';
 import type { Order } from '@/types';
+import { InsufficientPermissionsSheet } from './InsufficientPermissionsSheet';
+import { canWaiterCancelOrder, deliveryDetails, orderLocation } from './orderRules';
 
 /** Кастомная PNG-иконка отмены действия (красный круг) — как на PWA. */
 const UNDO_ACTION_ICON = require('../../../assets/undo-action-icon.png');
 
 const EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
-const CANCELLABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready', 'partially_rejected'];
 const CANCEL_UNDO_SECONDS = 6;
 const CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
 const DEFAULT_CANCEL_REASON = CANCEL_REASONS[0];
@@ -58,11 +49,13 @@ export function OrdersScreen() {
   const push = useNotifications((s) => s.push);
   const cancel = useCancelOrder();
   const claimQr = useClaimQrOrder();
+  const administratorCall = useCallAdministrator();
   const [menuFor, setMenuFor] = React.useState<{ order: Order; top: number; left: number } | null>(null);
   const [menuRender, setMenuRender] = React.useState<{ order: Order; top: number; left: number } | null>(null);
   const menuProgress = useSharedValue(0);
   const clearMenuRender = React.useCallback(() => setMenuRender(null), []);
   const [cancelTarget, setCancelTarget] = React.useState<Order | null>(null);
+  const [administratorTarget, setAdministratorTarget] = React.useState<Order | null>(null);
   const [cancelReason, setCancelReason] = React.useState<string>(DEFAULT_CANCEL_REASON);
   const [cancelOther, setCancelOther] = React.useState('');
   const [pendingCancel, setPendingCancel] = React.useState<PendingCancel | null>(null);
@@ -139,14 +132,24 @@ export function OrdersScreen() {
     setPendingCancel((current) => (
       current?.order.id === pending.order.id && current.deadline === pending.deadline ? null : current
     ));
+    const current = orders.data?.find((order) => order.id === pending.order.id);
+    if (current && !canWaiterCancelOrder(current)) {
+      setAdministratorTarget(current);
+      return;
+    }
     cancel.mutate(
       { orderId: pending.order.id, reason: pending.reason || undefined },
       {
         onSuccess: () => push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() }),
-        onError: (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() }),
+        onError: (e: unknown) => {
+          const message = apiError(e);
+          if (message.includes('только до статуса') || message.includes('Недостаточно прав')) {
+            setAdministratorTarget(pending.order);
+          } else push({ message, type: 'error', at: new Date().toISOString() });
+        },
       },
     );
-  }, [cancel, push]);
+  }, [cancel, orders.data, push]);
 
   React.useEffect(() => {
     if (!pendingCancel) return undefined;
@@ -161,6 +164,10 @@ export function OrdersScreen() {
 
   const requestCancelOrder = React.useCallback((order: Order) => {
     closeMenu();
+    if (!canWaiterCancelOrder(order)) {
+      setAdministratorTarget(order);
+      return;
+    }
     setCancelReason(DEFAULT_CANCEL_REASON);
     setCancelOther('');
     setCancelTarget(order);
@@ -228,7 +235,7 @@ export function OrdersScreen() {
   return (
     <SafeAreaView ref={rootRef} style={styles.safe} edges={[]}>
       <View style={styles.panel}>
-        <Text style={styles.panelTitle}>Активные заказы</Text>
+        <Text style={styles.panelTitle} translate>Активные заказы</Text>
         {orders.isLoading ? (
           <Loading />
         ) : sorted.length === 0 ? (
@@ -268,16 +275,22 @@ export function OrdersScreen() {
                 onPress={() => editOrder(menuRender.order)}
                 style={styles.menuItem}
               >
-                <Text style={styles.menuItemText}>Редактировать заказ</Text>
+                <Text style={styles.menuItemText} translate>Редактировать заказ</Text>
               </FastPressable>
             ) : null}
             <FastPressable
-              disabled={!CANCELLABLE.includes(menuRender.order.status)}
+              disabled={!canWaiterCancelOrder(menuRender.order)}
               onPress={() => requestCancelOrder(menuRender.order)}
-              style={[styles.menuItem, !CANCELLABLE.includes(menuRender.order.status) && { opacity: 0.4 }]}
+              style={[styles.menuItem, !canWaiterCancelOrder(menuRender.order) && { opacity: 0.4 }]}
             >
-              <Text style={[styles.menuItemText, styles.menuDanger]}>Отменить заказ</Text>
+              <Text style={[styles.menuItemText, styles.menuDanger]} translate>Отменить заказ</Text>
             </FastPressable>
+            {!canWaiterCancelOrder(menuRender.order) && !['paid', 'cancelled'].includes(menuRender.order.status) ? (
+              <FastPressable style={styles.menuItem} onPress={() => {
+                setAdministratorTarget(menuRender.order);
+                closeMenu();
+              }}><Text style={styles.menuItemText} translate>Позвать администратора</Text></FastPressable>
+            ) : null}
           </Animated.View>
         </View>
       ) : null}
@@ -287,19 +300,18 @@ export function OrdersScreen() {
             <Image source={UNDO_ACTION_ICON} style={styles.undoIcon} resizeMode="contain" />
 
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.undoTitle} numberOfLines={1}>
-                {displayOrderNumber(pendingCancel.order.orderNumber)} · Стол {pendingCancel.order.table.number}
-                {hallSuffix(pendingCancel.order.table)} — отмена заказа
+              <Text style={styles.undoTitle} numberOfLines={1} translate>
+                {displayOrderNumber(pendingCancel.order.orderNumber)} · {orderLocation(pendingCancel.order)} — отмена заказа
               </Text>
-              <Text style={styles.undoSub}>
+              <Text style={styles.undoSub} translate>
                 Отменится через{' '}
-                <Text style={styles.undoSeconds}>
+                <Text style={styles.undoSeconds} translate>
                   {String(Math.max(0, Math.ceil((pendingCancel.deadline - now) / 1000))).padStart(2, '0')} сек
                 </Text>
               </Text>
             </View>
             <FastPressable onPress={undoCancel} style={styles.undoBtn}>
-              <Text style={styles.undoBtnText}>Вернуть</Text>
+              <Text style={styles.undoBtnText} translate>Вернуть</Text>
             </FastPressable>
           </View>
         </View>
@@ -314,6 +326,17 @@ export function OrdersScreen() {
         onClose={() => setCancelTarget(null)}
         onConfirm={confirmCancelOrder}
       />
+      <InsufficientPermissionsSheet visible={!!administratorTarget} pending={administratorCall.isPending}
+        onClose={() => setAdministratorTarget(null)} onCall={() => {
+          if (!administratorTarget) return;
+          administratorCall.mutate(administratorTarget.id, {
+            onSuccess: () => {
+              setAdministratorTarget(null);
+              push({ message: 'Администратор вызван', type: 'success', at: new Date().toISOString() });
+            },
+            onError: (e) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() }),
+          });
+        }} />
     </SafeAreaView>
   );
 }
@@ -352,13 +375,12 @@ function CancelOrderSheet({
       {order ? (
         <>
           <Text style={styles.cancelText}>
-            {displayOrderNumber(order.orderNumber)} · Стол {order.table.number}
-            {hallSuffix(order.table)}
+            {displayOrderNumber(order.orderNumber)} · {orderLocation(order)}
           </Text>
-          <Text style={styles.cancelHint}>Заказ ещё не принят кухней, поэтому он будет отменён сразу.</Text>
+          <Text style={styles.cancelHint} translate>После подтверждения у вас будет 6 секунд, чтобы вернуть заказ.</Text>
         </>
       ) : null}
-      <Text style={styles.cancelReasonTitle}>Причина</Text>
+      <Text style={styles.cancelReasonTitle} translate>Причина</Text>
       <View style={styles.cancelReasonList}>
         {CANCEL_REASONS.map((item) => {
           const active = reason === item;
@@ -420,16 +442,16 @@ const OrderCard = memo(function OrderCard({
               </View>
             ) : null}
             <Text style={styles.tableText} numberOfLines={1}>
-              Стол {order.table.number}
-              {hallSuffix(order.table)}
+              {orderLocation(order)}
             </Text>
           </View>
           <View style={styles.metaRow}>
             <PwaIcon name="clock" size={13} color={colors.textLight} strokeWidth={2} />
-            <Text style={styles.metaText}>
+            <Text style={styles.metaText} translate>
               {timeHM(order.createdAt)} · {order.items.length} поз.
             </Text>
           </View>
+          {deliveryDetails(order) ? <Text style={styles.metaText} numberOfLines={2}>{deliveryDetails(order)}</Text> : null}
         </View>
 
         <View style={styles.headRight}>
@@ -443,7 +465,7 @@ const OrderCard = memo(function OrderCard({
               }}
               style={[styles.claimBtn, claimPending && { opacity: 0.6 }]}
             >
-              <Text style={styles.claimText}>{claimPending ? 'Берём...' : 'Взять'}</Text>
+              <Text style={styles.claimText} translate>{claimPending ? 'Берём...' : 'Взять'}</Text>
             </FastPressable>
           ) : null}
           <NumberTicker value={Number(order.finalAmount)} style={styles.money} digitHeight={20} />

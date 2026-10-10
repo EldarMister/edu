@@ -1,5 +1,6 @@
 import React from 'react';
-import { Animated, Easing, StyleSheet, Text, View, type TextStyle } from 'react-native';
+import { Animated, Easing, Platform, StyleSheet, View, type TextStyle } from 'react-native';
+import { Text } from '@/components/typography';
 import { money } from '@/utils/format';
 
 export function NumberTicker({
@@ -15,16 +16,25 @@ export function NumberTicker({
 }) {
   const text = format(value);
   return (
-    <View style={styles.wrap}>
-      {text.split('').map((ch, index) =>
-        /\d/.test(ch) ? (
-          <Digit key={`digit-${index}`} digit={Number(ch)} height={digitHeight} textStyle={style} />
-        ) : (
-          <Text key={`char-${index}`} style={style}>
-            {ch}
-          </Text>
-        ),
-      )}
+    <View
+      style={styles.wrap}
+      // Android order cards include labels from non-focusable children in their own announcement.
+      accessible={Platform.OS !== 'android'}
+      accessibilityRole="text"
+      accessibilityLabel={text}
+      importantForAccessibility="yes"
+    >
+      <View style={styles.wrap} accessible={false} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+        {text.split('').map((ch, index) =>
+          /\d/.test(ch) ? (
+            <Digit key={`digit-${index}`} digit={Number(ch)} height={digitHeight} textStyle={style} />
+          ) : (
+            <Text key={`char-${index}`} style={style}>
+              {ch}
+            </Text>
+          ),
+        )}
+      </View>
     </View>
   );
 }

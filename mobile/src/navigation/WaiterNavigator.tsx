@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -169,7 +170,7 @@ function WaiterTabBar({
                   </View>
                 ) : null}
               </View>
-              <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+              <Text style={[styles.tabLabel, { color }]} numberOfLines={1} translate>
                 {label}
               </Text>
             </FastPressable>

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
@@ -155,7 +156,7 @@ export function WeightPickerSheet({
         <View style={styles.header}>
           <View style={styles.headerCopy}>
             <Text style={styles.title}>{dish.name}</Text>
-            <Text style={styles.subtitle}>{measure === 'volume' ? 'Выберите объём' : 'Выберите вес'}</Text>
+            <Text style={styles.subtitle} translate>{measure === 'volume' ? 'Выберите объём' : 'Выберите вес'}</Text>
           </View>
           <FastPressable onPress={onClose} hitSlop={8} style={styles.closeButton}>
             <PwaIcon name="close" size={23} color="#334155" strokeWidth={2} />
@@ -244,7 +245,7 @@ export function WeightPickerSheet({
         </View>
 
         <View style={styles.priceRow}>
-          <Text style={styles.priceLabel}>Стоимость</Text>
+          <Text style={styles.priceLabel} translate>Стоимость</Text>
           <Text style={styles.price}>{money(price)}</Text>
         </View>
         <Button
@@ -267,7 +268,7 @@ function DialMark({ x, y, value, measure }: { x: number; y: number; value: numbe
 function Step({ label, onPress, disabled = false }: { label: string; onPress: () => void; disabled?: boolean }) {
   return (
     <FastPressable disabled={disabled} onPress={onPress} style={[styles.step, disabled && styles.disabled]}>
-      <Text style={styles.stepText}>{label}</Text>
+      <Text style={styles.stepText} translate>{label}</Text>
     </FastPressable>
   );
 }

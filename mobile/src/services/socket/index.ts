@@ -47,7 +47,7 @@ export function getSocket(): Socket {
 
 export function disconnectSocket() {
   socket?.disconnect();
-  socket = null;
+  if (socket) socket.auth = { token: null };
 }
 
 /** Переустанавливает соединение с актуальным токеном (после refresh/логина). */
@@ -65,21 +65,30 @@ export function reconnectSocket() {
 
 /** Один lifecycle-хук на всё приложение: без дублей из разных индикаторов. */
 export function useSocketLifecycle() {
+  const token = useAuth((state) => state.accessToken);
+  const userId = useAuth((state) => state.user?.id);
+  const role = useAuth((state) => state.user?.role);
   useEffect(() => {
     const sock = getSocket();
-    connectIfNeeded(sock);
+    reconnectSocket();
+    let foregroundTimer: ReturnType<typeof setTimeout> | undefined;
 
     const onAppState = (next: AppStateStatus) => {
-      if (next !== 'active') return;
-      const id = setTimeout(() => connectIfNeeded(sock), 350);
-      return () => clearTimeout(id);
+      clearTimeout(foregroundTimer);
+      if (next !== 'active') {
+        if (!isPttBackgroundRuntimeActive()) sock.disconnect();
+        return;
+      }
+      foregroundTimer = setTimeout(() => connectIfNeeded(sock), 350);
     };
     const sub = AppState.addEventListener('change', onAppState);
 
     return () => {
+      clearTimeout(foregroundTimer);
       sub.remove();
+      if (!isPttBackgroundRuntimeActive()) sock.disconnect();
     };
-  }, []);
+  }, [token, userId, role]);
 }
 
 /** Хук: статус соединения. Используется индикатором «Онлайн / Нет соединения». */
@@ -90,6 +99,7 @@ export function useConnectionStatus(): boolean {
   useEffect(() => {
     const sock = getSocket();
     let offlineTimer: ReturnType<typeof setTimeout> | null = null;
+    let foregroundTimer: ReturnType<typeof setTimeout> | undefined;
     const clearOfflineTimer = () => {
       if (!offlineTimer) return;
       clearTimeout(offlineTimer);
@@ -121,7 +131,8 @@ export function useConnectionStatus(): boolean {
         return;
       }
       setConnected(sock.connected || true);
-      setTimeout(() => {
+      clearTimeout(foregroundTimer);
+      foregroundTimer = setTimeout(() => {
         if (!sock.connected) markOfflineSoon();
       }, 600);
     };
@@ -129,6 +140,7 @@ export function useConnectionStatus(): boolean {
 
     return () => {
       clearOfflineTimer();
+      clearTimeout(foregroundTimer);
       sock.off('connect', onConnect);
       sock.off('disconnect', onDisconnect);
       sock.off('connect_error', onConnectError);

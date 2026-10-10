@@ -1,5 +1,6 @@
 import React from 'react';
-import { Image, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Constants from 'expo-constants';
@@ -149,7 +150,7 @@ export function ProfileScreen() {
     <>
       <SafeAreaView style={styles.safe} edges={[]}>
         <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
-          <Text style={styles.panelTitle}>Профиль</Text>
+          <Text style={styles.panelTitle} translate>Профиль</Text>
 
           {/* Карточка пользователя */}
           <Card style={styles.userCard} onPress={isWaiter ? () => setCabinetOpen(true) : undefined}>
@@ -171,21 +172,21 @@ export function ProfileScreen() {
           {isWaiter ? (
           <Card style={styles.shiftCard}>
               <View style={styles.cardHead}>
-                <Text style={styles.cardTitle}>Смена</Text>
+                <Text style={styles.cardTitle} translate>Смена</Text>
                 <View
                   style={[
                     styles.pill,
                     { backgroundColor: shiftActive ? colors.successSoft : colors.background },
                   ]}
                 >
-                  <Text style={[styles.pillText, { color: shiftActive ? colors.success : colors.textMuted }]}>
+                  <Text style={[styles.pillText, { color: shiftActive ? colors.success : colors.textMuted }]} translate>
                     {shiftActive ? 'Смена активна' : 'Не начата'}
                   </Text>
                 </View>
               </View>
               {shiftActive ? (
                 <View style={styles.shiftRow}>
-                  <Text style={styles.shiftLabel}>Начало</Text>
+                  <Text style={styles.shiftLabel} translate>Начало</Text>
                   <Text style={styles.shiftValue}>{timeHM(shift!.startedAt)}</Text>
                 </View>
               ) : null}
@@ -202,9 +203,9 @@ export function ProfileScreen() {
           {/* Уведомления */}
           <Card style={styles.notificationCard}>
             <View style={styles.cardHead}>
-              <Text style={styles.cardTitle}>Уведомления</Text>
+              <Text style={styles.cardTitle} translate>Уведомления</Text>
               <FastPressable style={styles.notifToggle} onPress={() => setNotifOpen((v) => !v)}>
-                <Text style={styles.viewAll}>{notifOpen ? 'Скрыть' : 'Показать'}</Text>
+                <Text style={styles.viewAll} translate>{notifOpen ? 'Скрыть' : 'Показать'}</Text>
                 <View style={notifOpen ? styles.chevronUp : undefined}>
                   <PwaIcon name="chevronDown" size={14} color={colors.primary} strokeWidth={2.2} />
                 </View>
@@ -216,7 +217,7 @@ export function ProfileScreen() {
                 <View style={styles.notifBox}>
                   <View style={styles.notifTopRow}>
                     <View style={{ flex: 1, minWidth: 0 }}>
-                      <Text style={styles.notifTitle}>Системные уведомления</Text>
+                      <Text style={styles.notifTitle} translate>Системные уведомления</Text>
                       <Text style={styles.notifSub}>{pushStatusText(pushNotifications.status)}</Text>
                     </View>
                     {showEnablePush ? (
@@ -240,7 +241,7 @@ export function ProfileScreen() {
                 </View>
 
                 {history.length === 0 ? (
-                  <Text style={styles.cabinetMuted}>Уведомлений пока нет</Text>
+                  <Text style={styles.cabinetMuted} translate>Уведомлений пока нет</Text>
                 ) : (
                   <View style={styles.notifHistory}>
                     {visibleNotifs.map((notification) => (
@@ -257,7 +258,7 @@ export function ProfileScreen() {
                         style={styles.showAllNotifs}
                         onPress={() => setShowAllNotif((value) => !value)}
                       >
-                        <Text style={styles.viewAll}>
+                        <Text style={styles.viewAll} translate>
                           {showAllNotif ? 'Скрыть лишние уведомления' : 'Показать все уведомления'}
                         </Text>
                         <View style={showAllNotif ? styles.chevronUp : undefined}>
@@ -316,13 +317,13 @@ function ShiftSummarySheet({
         <View style={styles.shiftSummaryIcon}>
           <PwaIcon name="check" size={34} color={colors.success} strokeWidth={2.6} />
         </View>
-        <Text style={styles.shiftSummaryText}>Спасибо за работу!</Text>
+        <Text style={styles.shiftSummaryText} translate>Спасибо за работу!</Text>
       </View>
 
       <View style={styles.shiftSummaryRows}>
         {rows.map((row) => (
           <View key={row.label} style={styles.shiftSummaryRow}>
-            <Text style={styles.shiftSummaryLabel}>{row.label}</Text>
+            <Text style={styles.shiftSummaryLabel} translate>{row.label}</Text>
             <Text style={styles.shiftSummaryValue} numberOfLines={1}>
               {row.value}
             </Text>
@@ -363,27 +364,27 @@ function WaiterCabinetScreen({
             <FastPressable onPress={onBack} hitSlop={12} style={styles.backButton}>
               <PwaIcon name="chevronLeft" size={24} color={colors.textSecondary} strokeWidth={2.2} />
             </FastPressable>
-            <Text style={styles.cabinetTitle}>Личный кабинет</Text>
+            <Text style={styles.cabinetTitle} translate>Личный кабинет</Text>
           </View>
 
           <Card style={styles.languageCard}>
-            <Text style={styles.languageLabel}>Язык</Text>
+            <Text style={styles.languageLabel} translate>Язык</Text>
             <LanguageSwitch locale={locale} onChange={setLocale} />
           </Card>
 
           <Card style={styles.cabinetSection}>
             <View style={styles.cabinetSectionHead}>
-              <Text style={styles.cabinetSectionTitle}>{periodMeta.title}</Text>
+              <Text style={styles.cabinetSectionTitle} translate>{periodMeta.title}</Text>
               <FastPressable style={styles.periodSelect} onPress={() => setPeriodOpen(true)}>
-                <Text style={styles.periodSelectText}>{periodMeta.label}</Text>
+                <Text style={styles.periodSelectText} translate>{periodMeta.label}</Text>
                 <PwaIcon name="chevronDown" size={16} color={colors.textLight} strokeWidth={2.2} />
               </FastPressable>
             </View>
 
             {cabinet.isLoading ? (
-              <Text style={styles.cabinetMuted}>Загрузка статистики...</Text>
+              <Text style={styles.cabinetMuted} translate>Загрузка статистики...</Text>
             ) : cabinet.isError ? (
-              <Text style={styles.cabinetError}>Не удалось загрузить кабинет официанта</Text>
+              <Text style={styles.cabinetError} translate>Не удалось загрузить кабинет официанта</Text>
             ) : (
               <View style={styles.statRows}>
                 <StatRow icon="check" tint="success" label="Завершено" value={String(cabinet.data?.stats.completed ?? 0)} />
@@ -395,21 +396,21 @@ function WaiterCabinetScreen({
 
           <Card style={styles.cabinetSection}>
             <View style={styles.recentHead}>
-              <Text style={styles.cabinetSectionTitle}>Последние заказы</Text>
+              <Text style={styles.cabinetSectionTitle} translate>Последние заказы</Text>
               <FastPressable onPress={openOrders}>
-                <Text style={styles.viewAll}>Смотреть все</Text>
+                <Text style={styles.viewAll} translate>Смотреть все</Text>
               </FastPressable>
             </View>
 
             {cabinet.isLoading ? (
-              <Text style={styles.cabinetMuted}>Загрузка заказов...</Text>
+              <Text style={styles.cabinetMuted} translate>Загрузка заказов...</Text>
             ) : groups.length === 0 ? (
-              <Text style={styles.cabinetMuted}>Заказов пока нет</Text>
+              <Text style={styles.cabinetMuted} translate>Заказов пока нет</Text>
             ) : (
               <View style={styles.orderGroups}>
                 {groups.map((group) => (
                   <View key={group.key} style={styles.orderGroup}>
-                    <Text style={styles.orderGroupLabel}>{group.label}</Text>
+                    <Text style={styles.orderGroupLabel} translate>{group.label}</Text>
                     <View style={styles.cabinetOrdersList}>
                       {group.orders.map((order) => (
                         <CabinetOrderRow key={order.id} order={order} onPress={() => setDetailId(order.id)} />
@@ -460,7 +461,7 @@ function LanguageSwitch({ locale, onChange }: { locale: Locale; onChange: (local
             onPress={() => onChange(item.key)}
             style={[styles.languageButton, active && styles.languageButtonActive]}
           >
-            <Text style={[styles.languageButtonText, active && styles.languageButtonTextActive]}>
+            <Text style={[styles.languageButtonText, active && styles.languageButtonTextActive]} translate>
               {item.label}
             </Text>
           </FastPressable>
@@ -488,7 +489,7 @@ function StatRow({
         <View style={styles.statIcon}>
           <PwaIcon name={icon} size={15} color={color} strokeWidth={2.3} />
         </View>
-        <Text style={styles.statRowLabel}>{label}</Text>
+        <Text style={styles.statRowLabel} translate>{label}</Text>
       </View>
       <Text style={[styles.statRowValue, { color: tint === 'primary' ? colors.primary : colors.textPrimary }]}>
         {value}
@@ -503,7 +504,7 @@ function CabinetOrderRow({ order, onPress }: { order: CabinetRecentOrder; onPres
       <Text style={styles.cabinetOrderNo} numberOfLines={1}>
         {displayOrderNumber(order.orderNumber)}
       </Text>
-      <Text style={styles.cabinetOrderTable} numberOfLines={1}>
+      <Text style={styles.cabinetOrderTable} numberOfLines={1} translate>
         Стол {order.tableNumber}
       </Text>
       <Text style={styles.cabinetOrderTime}>{timeHM(order.createdAt)}</Text>
@@ -520,7 +521,7 @@ function CabinetStatusBadge({ status }: { status: OrderStatus }) {
   const meta = cabinetStatusMeta(status);
   return (
     <View style={[styles.cabinetStatusBadge, { backgroundColor: meta.bg }]}>
-      <Text style={[styles.cabinetStatusText, { color: meta.fg }]}>{meta.label}</Text>
+      <Text style={[styles.cabinetStatusText, { color: meta.fg }]} translate>{meta.label}</Text>
     </View>
   );
 }
@@ -547,13 +548,13 @@ function OrderDetailsSheet({
       maxHeight="88%"
     >
       {loading && !order ? (
-        <Text style={styles.cabinetMuted}>Загрузка заказа...</Text>
+        <Text style={styles.cabinetMuted} translate>Загрузка заказа...</Text>
       ) : !order ? (
-        <Text style={styles.cabinetError}>Не удалось загрузить заказ</Text>
+        <Text style={styles.cabinetError} translate>Не удалось загрузить заказ</Text>
       ) : (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.orderDetailsBody}>
           <View>
-            <Text style={styles.detailSectionTitle}>Информация</Text>
+            <Text style={styles.detailSectionTitle} translate>Информация</Text>
             <View style={styles.detailInfoBox}>
               <DetailRow label="Статус" value={ORDER_STATUS[order.status]?.label ?? order.status} />
               <DetailRow label="Официант" value={order.waiter?.name ?? 'QR menu'} />
@@ -572,10 +573,10 @@ function OrderDetailsSheet({
 
           {isSplitPayment(order) && order.payments?.length ? (
             <View style={styles.detailNoteBox}>
-              <Text style={styles.detailNoteTitle}>Платежи</Text>
+              <Text style={styles.detailNoteTitle} translate>Платежи</Text>
               {order.payments.map((payment, index) => (
                 <View key={`${payment.method}-${index}`} style={styles.detailPaymentRow}>
-                  <Text style={styles.detailPaymentLabel}>Платеж {index + 1} — {paymentMethodLabel(payment.method)}</Text>
+                  <Text style={styles.detailPaymentLabel} translate>Платеж {index + 1} — {paymentMethodLabel(payment.method)}</Text>
                   <Text style={styles.detailPaymentAmount}>{money(payment.amount)}</Text>
                 </View>
               ))}
@@ -584,15 +585,15 @@ function OrderDetailsSheet({
 
           {order.comment ? (
             <View style={styles.detailNoteBox}>
-              <Text style={styles.detailNoteTitle}>Комментарий</Text>
+              <Text style={styles.detailNoteTitle} translate>Комментарий</Text>
               <Text style={styles.detailComment}>{order.comment}</Text>
             </View>
           ) : null}
 
           <View>
             <View style={styles.detailSectionHead}>
-              <Text style={styles.detailSectionTitle}>Блюда</Text>
-              <Text style={styles.detailItemsCount}>{order.items.length} поз.</Text>
+              <Text style={styles.detailSectionTitle} translate>Блюда</Text>
+              <Text style={styles.detailItemsCount} translate>{order.items.length} поз.</Text>
             </View>
             <View style={styles.detailItemsBox}>
               {order.items.map((item) => (
@@ -602,7 +603,7 @@ function OrderDetailsSheet({
                       {item.quantity}× {orderItemDisplayName(item)}
                     </Text>
                     {item.comment ? <Text style={styles.detailItemComment}>{item.comment}</Text> : null}
-                    {item.rejectReason ? <Text style={styles.detailItemReject}>Отказ: {item.rejectReason}</Text> : null}
+                    {item.rejectReason ? <Text style={styles.detailItemReject} translate>Отказ: {item.rejectReason}</Text> : null}
                   </View>
                   <View style={styles.detailItemRight}>
                     <Text style={styles.detailItemPrice}>{money(item.finalPrice)}</Text>
@@ -660,12 +661,12 @@ function FiscalBlock({ order, onRetried }: { order: Order; onRetried: () => void
       <View style={styles.fiscalBoxSuccess}>
         <View style={styles.fiscalTopRow}>
           <View style={styles.fiscalSuccessBadge}>
-            <Text style={styles.fiscalSuccessBadgeText}>Фискальный чек</Text>
+            <Text style={styles.fiscalSuccessBadgeText} translate>Фискальный чек</Text>
           </View>
           <Text style={styles.fiscalReceiptNumber}>№ {order.fiscalReceiptNumber}</Text>
         </View>
         {order.fiscalSign ? (
-          <Text style={styles.fiscalMeta}>Фискальный признак: {order.fiscalSign}</Text>
+          <Text style={styles.fiscalMeta} translate>Фискальный признак: {order.fiscalSign}</Text>
         ) : null}
         {qr ? (
           isImage ? (
@@ -688,14 +689,14 @@ function FiscalBlock({ order, onRetried }: { order: Order; onRetried: () => void
     <View style={styles.fiscalBoxError}>
       <View style={styles.fiscalErrorTopRow}>
         <View style={styles.fiscalErrorBadge}>
-          <Text style={styles.fiscalErrorBadgeText}>Ошибка ККМ</Text>
+          <Text style={styles.fiscalErrorBadgeText} translate>Ошибка ККМ</Text>
         </View>
         <FastPressable
           disabled={retry.isPending}
           onPress={() => void onRetry()}
           style={[styles.fiscalRetryButton, retry.isPending && styles.fiscalRetryButtonDisabled]}
         >
-          <Text style={styles.fiscalRetryText}>{retry.isPending ? 'Повтор…' : 'Повторить'}</Text>
+          <Text style={styles.fiscalRetryText} translate>{retry.isPending ? 'Повтор…' : 'Повторить'}</Text>
         </FastPressable>
       </View>
       <Text style={styles.fiscalErrorText}>{order.fiscalError}</Text>
@@ -706,7 +707,7 @@ function FiscalBlock({ order, onRetried }: { order: Order; onRetried: () => void
 function DetailRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
     <View style={styles.detailInfoRow}>
-      <Text style={styles.detailInfoLabel}>{label}</Text>
+      <Text style={styles.detailInfoLabel} translate>{label}</Text>
       <Text style={[styles.detailInfoValue, strong && styles.detailInfoValueStrong]} numberOfLines={2}>
         {value}
       </Text>
@@ -717,7 +718,7 @@ function DetailRow({ label, value, strong = false }: { label: string; value: str
 function DetailTotal({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
   return (
     <View style={styles.detailTotalRow}>
-      <Text style={[styles.detailTotalLabel, strong && styles.detailTotalStrong]}>{label}</Text>
+      <Text style={[styles.detailTotalLabel, strong && styles.detailTotalStrong]} translate>{label}</Text>
       <Text style={[styles.detailTotalValue, strong && styles.detailTotalStrong]}>{value}</Text>
     </View>
   );
@@ -763,7 +764,7 @@ function PeriodPickerSheet({
             onPress={() => onChange(item.key)}
             style={[styles.periodOption, active && styles.periodOptionActive]}
           >
-            <Text style={[styles.periodOptionText, active && styles.periodOptionTextActive]}>
+            <Text style={[styles.periodOptionText, active && styles.periodOptionTextActive]} translate>
               {item.label}
             </Text>
             {active ? <PwaIcon name="check" size={18} color={colors.primary} strokeWidth={2.5} /> : null}

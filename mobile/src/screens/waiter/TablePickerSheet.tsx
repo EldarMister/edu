@@ -1,5 +1,6 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
@@ -26,7 +27,7 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
   const ordersByTable = React.useMemo(() => {
     const m = new Map<string, string>();
     for (const order of orders.data ?? []) {
-      if (!m.has(order.table.id)) m.set(order.table.id, order.id);
+      if (order.source !== 'delivery' && !m.has(order.table.id)) m.set(order.table.id, order.id);
     }
     return m;
   }, [orders.data]);
@@ -72,8 +73,8 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
       footer={
         pending ? (
           <View style={styles.confirmFooter}>
-            <Text style={styles.confirmTitle}>Сменить стол?</Text>
-            <Text style={styles.confirmText}>
+            <Text style={styles.confirmTitle} translate>Сменить стол?</Text>
+            <Text style={styles.confirmText} translate>
               В корзине уже есть блюда. Они будут перенесены на стол {pending.table.number}.
             </Text>
             <View style={styles.confirmActions}>
