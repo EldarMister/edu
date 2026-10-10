@@ -15,6 +15,10 @@
 SHA-256 APK:
 `b7d862ec6a86af249e77fb2e7f7f4f2698e2f3c2a08313be1289bf4c3fe9d649`.
 
+Этот подписанный APK установлен на эмулятор и запускает экран входа версии 0.2.0.
+Ошибок `AndroidRuntime` / `ReactNativeJS` при запуске не обнаружено. Вход и
+бизнес-операции на production из него не выполнялись.
+
 ## Production
 
 - PWA: [edu-pos.up.railway.app](https://edu-pos.up.railway.app), HTTP 200.
