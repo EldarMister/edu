@@ -312,7 +312,7 @@ export function AdminApp() {
 
   return (
     <div
-      className={`flex h-full bg-background ${section === 'orders' ? 'orders-shell' : ''}`}
+      className="flex h-full bg-background"
       onTouchStart={handleAppTouchStart}
       onTouchMove={handleAppTouchMove}
       onTouchEnd={handleAppTouchEnd}
