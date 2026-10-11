@@ -1,11 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Linking, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, Linking, ScrollView, Share, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Location from 'expo-location';
 import { Button, Card, Toggle } from '@/components/ui';
 import { Select } from '@/components/Select';
+import { FastPressable } from '@/components/FastPressable';
+import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { API_BASE, WEB_URL } from '@/config/env';
 import { apiError } from '@/lib/api';
@@ -95,6 +97,10 @@ function settingsForm(data: Settings): Form {
 
 /** Настройки владельца — порт PWA SettingsPage для mobile. */
 export function SettingsScreen() {
+  const { width } = useWindowDimensions();
+  const narrow = width < 640;
+  const desktop = width >= 1024;
+  const [gridWidth, setGridWidth] = useState(0);
   const { data, isLoading, isError, error } = useAdminSettings();
   const update = useUpdateSettings();
   const testFiscal = useTestFiscalConnection();
@@ -266,18 +272,19 @@ export function SettingsScreen() {
   const queueUrl = data.queueDisplayCode ? `${WEB_URL}/q/${data.queueDisplayCode}` : '';
 
   return (
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <Card style={styles.card}>
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <View style={[styles.settingsGrid, desktop && { flexDirection: 'row' }]} onLayout={event => setGridWidth(event.nativeEvent.layout.width)}>
+      <Card style={{ ...styles.card, ...(desktop ? { width: gridWidth > 0 ? (gridWidth - 32) / 3 * 2 + 16 : undefined, flex: gridWidth > 0 ? undefined : 2, minWidth: 0 } : {}) }}>
         <Text style={styles.cardTitle} translate>Информация о кафе</Text>
         <Input label="Название кафе" value={form.cafeName} onChangeText={(v) => set('cafeName', v)} />
         <Input label="Адрес" value={form.address} onChangeText={(v) => set('address', v)} />
-        <View style={styles.twoCols}>
-          <Input label="Номер телефона" value={form.phone} onChangeText={(v) => set('phone', v)} style={styles.col} />
-          <Input label="Доп. номер" value={form.phone2} onChangeText={(v) => set('phone2', v)} style={styles.col} />
+        <View style={[styles.twoCols, narrow && styles.singleCol]}>
+          <Input label="Номер телефона" value={form.phone} onChangeText={(v) => set('phone', v)} style={narrow ? undefined : styles.col} />
+          <Input label="Доп. номер" value={form.phone2} onChangeText={(v) => set('phone2', v)} style={narrow ? undefined : styles.col} />
         </View>
-        <View style={styles.twoCols}>
-          <Input label="Instagram" value={form.instagram} onChangeText={(v) => set('instagram', v)} style={styles.col} />
-          <Input label="Сайт" value={form.website} onChangeText={(v) => set('website', v)} style={styles.col} />
+        <View style={[styles.twoCols, narrow && styles.singleCol]}>
+          <Input label="Instagram" value={form.instagram} onChangeText={(v) => set('instagram', v)} style={narrow ? undefined : styles.col} />
+          <Input label="Сайт" value={form.website} onChangeText={(v) => set('website', v)} style={narrow ? undefined : styles.col} />
         </View>
         <View style={styles.inputBlock}>
           <Text style={styles.label} translate>Текст в чеке</Text>
@@ -296,15 +303,26 @@ export function SettingsScreen() {
           <Text style={styles.noteText} translate>EDU POS печатает предчек / внутренний товарный чек.</Text>
           <Text style={styles.noteText} translate>Фискальный чек формируется только через подключенную ККМ или онлайн-кассу.</Text>
         </View>
+        <View style={[styles.twoCols, narrow && styles.singleCol]}>
+        <View style={[styles.settingBlock, !narrow && styles.col]}>
+          <View style={styles.inlineTitle}><PwaIcon name="adminPrinter" size={20} color={colors.textSecondary} /><Text style={styles.sectionTitle} translate>Статус принтера</Text></View>
+          <View style={styles.statusRow}><View style={[styles.printerIcon, { backgroundColor: data.printerConnected ? colors.successSoft : colors.slate100 }]}><PwaIcon name="adminPrinter" size={20} color={data.printerConnected ? colors.success : colors.textMuted} /></View><View style={{ flex: 1 }}><Text style={[styles.statusTitle, { color: data.printerConnected ? colors.success : colors.textMuted }]} translate>{data.printerConnected ? 'Подключен' : 'Не подключен'}</Text><Text style={styles.helper} translate>{data.printerConnected ? 'Принтер чеков подключен и готов к печати' : 'Принтер чеков не подключен'}</Text></View></View>
+        </View>
+        <View style={[styles.settingBlock, !narrow && styles.col]}>
+          <View style={styles.inlineTitle}><Text style={[styles.sectionTitle, { flex: 1 }]} translate>Гео-проверка QR-заказа</Text><Toggle checked={form.qrGeoEnabled} onChange={(value) => set('qrGeoEnabled', value)} /></View>
+          {form.qrGeoEnabled ? <View style={styles.geoBox}><View style={styles.geoRow}><View style={{ flex: 1 }}><Text style={styles.helper} translate>Координаты кафе</Text><Text style={styles.coordinates} numberOfLines={1} translate={!(form.qrGeoLat && form.qrGeoLng)}>{form.qrGeoLat && form.qrGeoLng ? `${form.qrGeoLat}, ${form.qrGeoLng}` : 'не заданы'}</Text></View><Button size="md" title={form.qrGeoLat && form.qrGeoLng ? 'Обновить' : 'Задать'} variant="secondary" loading={locating} style={styles.compactAction} onPress={() => void locate()} /></View><View style={styles.radiusRow}><Text style={styles.label} translate>Радиус</Text><TextInput style={[styles.input, styles.radiusInput]} value={form.qrGeoRadius} onChangeText={(value) => set('qrGeoRadius', value)} keyboardType="number-pad" /><Text style={styles.helper} translate>м</Text></View></View> : null}
+        </View>
+        </View>
+      </Card>
+
+      <View style={[styles.settingsSide, desktop && { width: gridWidth > 0 ? (gridWidth - 32) / 3 : undefined, flex: gridWidth > 0 ? undefined : 1 }]}>
+      <Card style={styles.card}>
+        <Text style={styles.sectionTitle} translate>Язык системы</Text>
+        <View style={styles.segmented}>{LANG_OPTIONS.map(option => <FastPressable key={option.value} onPress={() => set('language', option.value)} style={[styles.segment, form.language === option.value && styles.segmentActive]}><Text style={[styles.segmentLabel, form.language === option.value && { color: colors.primary }]} translate>{option.label}</Text></FastPressable>)}</View>
       </Card>
 
       <Card style={styles.card}>
-        <Text style={styles.cardTitle} translate>Язык системы</Text>
-        <Select value={form.language} options={LANG_OPTIONS} onChange={(v) => set('language', v)} title="Язык системы" />
-      </Card>
-
-      <Card style={styles.card}>
-        <Text style={styles.cardTitle} translate>Способы оплаты</Text>
+        <Text style={styles.sectionTitle} translate>Способы оплаты</Text>
         <ToggleRow title="QR-код" desc="Оплата через QR-код" checked={form.payQr} onChange={(v) => set('payQr', v)} />
         <ToggleRow title="Наличные" desc="Оплата наличными средствами" checked={form.payCash} onChange={(v) => set('payCash', v)} />
         <ToggleRow title="Карта" desc="Оплата банковской картой" checked={form.payCard} onChange={(v) => set('payCard', v)} />
@@ -316,44 +334,14 @@ export function SettingsScreen() {
         {form.payQr && !form.qrImageUrl ? (
           <Text style={styles.warning} translate>QR-оплата включена, но QR-код не загружен.</Text>
         ) : null}
-        {form.payQr ? <View style={styles.nested}><Text style={styles.label} translate>QR-код для оплаты</Text>{form.qrImageUrl ? <Image source={{ uri: resolveQrSrc(form.qrImageUrl) ?? undefined }} style={{ width: 200, height: 200, alignSelf: 'center' }} resizeMode="contain" /> : null}<Button title={form.qrImageUrl ? 'Заменить QR-код' : 'Загрузить QR-код'} variant="secondary" loading={uploading} onPress={() => void pickQrImage()} />{form.qrImageUrl ? <Button title="Удалить QR-код" variant="danger" onPress={() => set('qrImageUrl', null)} /> : null}</View> : null}
-      </Card>
-
-      <Card style={styles.card}><ToggleRow title="Интеграция доставки" desc="Заказы с сайта или приложения доставки" checked={form.deliveryEnabled} onChange={(v) => { setGeneratedKey(null); set('deliveryEnabled', v); }} />{form.deliveryEnabled ? <View style={styles.nested}><Text style={styles.label} translate>Адрес API</Text><Text selectable style={styles.queueUrl}>{API_BASE}/integration/v1</Text><Text style={styles.label} translate>API-ключ</Text><Text selectable style={styles.queueUrl} translate>{generatedKey ?? data.deliveryApiKeyPrefix ?? 'Ключ ещё не создан'}</Text>{generatedKey ? <><Text style={styles.warning} translate>Сохраните ключ сейчас: повторно полный ключ показан не будет.</Text><Button title="Сохранить ключ" variant="secondary" onPress={() => void Share.share({ message: generatedKey }).catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }))} /></> : null}{isOwner ? <Button title={data.deliveryApiKeyConfigured ? 'Перевыпустить ключ' : 'Создать API-ключ'} variant="secondary" loading={deliveryKey.isPending} disabled={dirty || !data.deliveryEnabled} onPress={() => void createDeliveryKey()} /> : <Text style={styles.helper} translate>Создавать и перевыпускать API-ключ может только владелец.</Text>}{isOwner && (dirty || !data.deliveryEnabled) ? <Text style={styles.helper} translate>Сначала сохраните включение доставки, затем создайте ключ.</Text> : null}</View> : null}</Card>
-
-      <Card style={styles.card}>
-        <Text style={styles.cardTitle} translate>Статус принтера</Text>
-        <View style={styles.statusRow}>
-          <View style={[styles.statusDot, { backgroundColor: data.printerConnected ? colors.success : colors.textLight }]} />
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.statusTitle, { color: data.printerConnected ? colors.success : colors.textMuted }]} translate>
-              {data.printerConnected ? 'Подключен' : 'Не подключен'}
-            </Text>
-            <Text style={styles.helper} translate>
-              {data.printerConnected ? 'Принтер чеков подключен и готов к печати' : 'Принтер чеков не подключен'}
-            </Text>
-          </View>
-        </View>
       </Card>
 
       <Card style={styles.card}>
-        <ToggleRow
-          title="Гео-проверка QR-заказа"
-          desc="Разрешает QR-заказ только рядом с кафе"
-          checked={form.qrGeoEnabled}
-          onChange={(v) => set('qrGeoEnabled', v)}
-        />
-        {form.qrGeoEnabled ? (
-          <View style={styles.nested}>
-            <View style={styles.twoCols}>
-              <Input label="Широта" value={form.qrGeoLat} onChangeText={(v) => set('qrGeoLat', v)} keyboardType="decimal-pad" style={styles.col} />
-              <Input label="Долгота" value={form.qrGeoLng} onChangeText={(v) => set('qrGeoLng', v)} keyboardType="decimal-pad" style={styles.col} />
-            </View>
-            <Input label="Радиус, м" value={form.qrGeoRadius} onChangeText={(v) => set('qrGeoRadius', v)} keyboardType="number-pad" />
-            <Button title="Использовать моё местоположение" variant="secondary" loading={locating} onPress={() => void locate()} />
-          </View>
-        ) : null}
+        <View style={styles.inlineTitle}><PwaIcon name="qr" size={20} color={colors.textSecondary} /><Text style={[styles.sectionTitle, { flex: 1 }]} translate>QR-оплата</Text><View style={[styles.qrBadge, { backgroundColor: form.qrImageUrl ? colors.successSoft : colors.background }]}><Text style={[styles.qrBadgeText, { color: form.qrImageUrl ? colors.success : colors.textMuted }]} translate>{form.qrImageUrl ? 'QR-код загружен' : 'Не загружен'}</Text></View></View>
+        {form.qrImageUrl ? <View style={styles.qrPreviewRow}><View style={styles.qrPreview}><Image source={{ uri: resolveQrSrc(form.qrImageUrl) ?? undefined }} style={{ width: '100%', height: '100%' }} resizeMode="contain" /></View><View style={{ flex: 1, gap: 8 }}><Text style={styles.helper} translate>Этот QR-код увидят официанты на экране оплаты.</Text><View style={styles.qrActions}><Button size="md" title="Заменить" variant="secondary" style={styles.compactAction} loading={uploading} onPress={() => void pickQrImage()} /><FastPressable style={styles.qrDelete} accessibilityLabel="Удалить QR-код" onPress={() => set('qrImageUrl', null)}><PwaIcon name="trash" size={16} color={colors.danger} /></FastPressable></View></View></View> : <View style={styles.qrEmpty}><Text style={[styles.helper, { textAlign: 'center' }]} translate>Загрузите QR-код для оплаты. PNG, JPG или WEBP до 2 МБ.</Text><Button size="md" title="Загрузить QR-код" loading={uploading} onPress={() => void pickQrImage()} style={{ alignSelf: 'center' }} /></View>}
       </Card>
+
+
 
       <Card style={styles.card}>
         <ToggleRow
@@ -365,7 +353,7 @@ export function SettingsScreen() {
         {form.queueDisplayEnabled ? (
           <View style={styles.nested}>
             <Text style={styles.label} translate>Что показывать</Text>
-            <Select value={form.queueDisplayMode} options={QUEUE_OPTIONS} onChange={(v) => set('queueDisplayMode', v)} title="Экран очереди" />
+            <View style={styles.segmented}>{QUEUE_OPTIONS.map(option => <FastPressable key={option.value} onPress={() => set('queueDisplayMode', option.value)} style={[styles.segment, form.queueDisplayMode === option.value && styles.segmentActive]}><Text style={[styles.segmentLabel, form.queueDisplayMode === option.value && { color: colors.primary }]} translate>{option.label}</Text></FastPressable>)}</View>
             {queueUrl ? (
               <View style={styles.noteBox}>
                 <Text style={styles.noteText} translate>Откройте эту ссылку на мониторе/ТВ:</Text>
@@ -378,17 +366,14 @@ export function SettingsScreen() {
         ) : null}
       </Card>
 
+      <Card style={styles.card}><ToggleRow title="Онлайн-заказы / Доставка" desc="Заказы с сайта или приложения доставки" checked={form.deliveryEnabled} onChange={(v) => { setGeneratedKey(null); set('deliveryEnabled', v); }} />{form.deliveryEnabled ? <View style={styles.nested}><Text style={styles.label} translate>Адрес API</Text><Text selectable style={styles.queueUrl}>{API_BASE}/integration/v1</Text><Text style={styles.label} translate>API-ключ</Text><Text selectable style={styles.queueUrl} translate>{generatedKey ?? data.deliveryApiKeyPrefix ?? 'Ключ ещё не создан'}</Text>{generatedKey ? <><Text style={styles.warning} translate>Сохраните ключ сейчас: повторно полный ключ показан не будет.</Text><Button title="Сохранить ключ" variant="secondary" onPress={() => void Share.share({ message: generatedKey }).catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }))} /></> : null}{isOwner ? <Button title={data.deliveryApiKeyConfigured ? 'Перевыпустить ключ' : 'Создать API-ключ'} variant="secondary" loading={deliveryKey.isPending} disabled={dirty || !data.deliveryEnabled} onPress={() => void createDeliveryKey()} /> : <Text style={styles.helper} translate>Создавать и перевыпускать API-ключ может только владелец.</Text>}{isOwner && (dirty || !data.deliveryEnabled) ? <Text style={styles.helper} translate>Сначала сохраните включение доставки, затем создайте ключ.</Text> : null}</View> : null}</Card>
+
       <Card style={styles.card}>
-        <Text style={styles.cardTitle} translate>ККМ / Фискализация</Text>
+        <Text style={styles.sectionTitle} translate>ККМ / Фискализация</Text>
         <Text style={styles.helper} translate>Без подключённой ККМ печатается товарный чек. С ККМ — фискальный чек с QR ГНС.</Text>
         <View style={styles.inputBlock}>
           <Text style={styles.label} translate>Провайдер</Text>
-          <Select
-            value={form.fiscalProvider}
-            options={FISCAL_OPTIONS}
-            onChange={(v) => set('fiscalProvider', v)}
-            title="Провайдер"
-          />
+          {FISCAL_OPTIONS.map(option => <FastPressable key={option.value} onPress={() => set('fiscalProvider', option.value)} style={styles.fiscalRadioRow}><View style={[styles.fiscalRadio, form.fiscalProvider === option.value && { borderColor: colors.primary }]}>{form.fiscalProvider === option.value ? <View style={styles.fiscalRadioDot} /> : null}</View><Text style={styles.label} translate>{option.label}</Text></FastPressable>)}
         </View>
         {form.fiscalProvider === 'ekassa' ? (
           <View style={styles.nested}>
@@ -424,6 +409,8 @@ export function SettingsScreen() {
         ) : null}
       </Card>
 
+      </View>
+      </View>
       <View style={styles.savePanel}>
         <Text style={[styles.saveText, dirty && { color: colors.warning }]} translate>
           {dirty ? 'Есть несохранённые изменения' : 'Все изменения сохранены'}
@@ -477,13 +464,40 @@ function ToggleRow({
 }
 
 const styles = StyleSheet.create({
-  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xl },
+  content: { padding: spacing.lg, gap: 16, paddingBottom: spacing.xl },
+  settingsGrid: { gap: 16, alignItems: 'stretch' },
+  settingsSide: { gap: 16, minWidth: 0 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
   errorBox: { margin: spacing.lg, borderRadius: radius.md, backgroundColor: colors.dangerSoft, padding: spacing.md },
   errorText: { fontSize: fontSize.sm, color: colors.danger },
-  card: { gap: spacing.md },
-  cardTitle: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
-  twoCols: { flexDirection: 'row', gap: spacing.sm },
+  card: { gap: 16, padding: 20 },
+  cardTitle: { fontSize: 17, fontWeight: '600', color: colors.textPrimary },
+  sectionTitle: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+  inlineTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  settingBlock: { gap: 12, paddingTop: 8 },
+  printerIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  geoBox: { gap: 10, padding: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
+  geoRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  coordinates: { color: colors.textPrimary, fontSize: 14, fontWeight: '500' },
+  radiusRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 10, borderTopWidth: 1, borderColor: colors.border },
+  radiusInput: { width: 80, minHeight: 36, height: 36, paddingHorizontal: 10, paddingVertical: 0, textAlign: 'center' },
+  compactAction: { height: 36, borderRadius: 8, paddingHorizontal: 12 },
+  segmented: { flexDirection: 'row', borderRadius: 12, padding: 4, backgroundColor: colors.background },
+  segment: { flex: 1, paddingVertical: 8, alignItems: 'center', justifyContent: 'center', borderRadius: 8 },
+  segmentActive: { backgroundColor: colors.white, elevation: 1 },
+  segmentLabel: { fontSize: 14, fontWeight: '500', color: colors.textMuted },
+  qrBadge: { paddingHorizontal: 10, paddingVertical: 2, borderRadius: 999 },
+  qrBadgeText: { fontSize: 12, fontWeight: '500' },
+  qrPreviewRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  qrPreview: { width: 96, height: 96, padding: 6, borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
+  qrActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  qrDelete: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: colors.border },
+  qrEmpty: { alignItems: 'center', padding: 20, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border, borderRadius: 12, gap: 12 },
+  fiscalRadioRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: colors.border, borderRadius: 8 },
+  fiscalRadio: { width: 16, height: 16, borderRadius: 8, borderWidth: 1, borderColor: colors.textLight, alignItems: 'center', justifyContent: 'center' },
+  fiscalRadioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
+  twoCols: { flexDirection: 'row', gap: 16 },
+  singleCol: { flexDirection: 'column' },
   col: { flex: 1 },
   inputBlock: { gap: 6 },
   label: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },
@@ -506,7 +520,7 @@ const styles = StyleSheet.create({
   warning: { fontSize: fontSize.xs, color: colors.warning, lineHeight: 17 },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md },
   statusDot: { width: 12, height: 12, borderRadius: 6 },
-  statusTitle: { fontSize: fontSize.base, fontWeight: '700' },
+  statusTitle: { fontSize: 15, fontWeight: '500' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: 4 },
   toggleTitle: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   nested: { gap: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md },
@@ -515,6 +529,7 @@ const styles = StyleSheet.create({
   fiscalResult: { fontSize: fontSize.sm, fontWeight: '600' },
   savePanel: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: spacing.md,
@@ -524,6 +539,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     padding: spacing.md,
   },
-  saveText: { flex: 1, fontSize: fontSize.sm, color: colors.textMuted },
-  saveBtn: { minWidth: 150 },
+  saveText: { flexGrow: 1, fontSize: 14, color: colors.textMuted },
+  saveBtn: { height: 40, borderRadius: 8, paddingHorizontal: 20 },
 });

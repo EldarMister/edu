@@ -101,7 +101,8 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
   const [period, setPeriod] = useState('all');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('default');
-  const [customDate, setCustomDate] = useState(() => ymd(new Date()));
+  const [customDate, setCustomDate] = useState('');
+  const [calendarRequest, setCalendarRequest] = useState(0);
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
@@ -122,7 +123,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
 
-  const filters = { search, paymentMethod, waiterId, ...(period === 'custom' ? { dateFrom: customDate, dateTo: customDate } : periodRange(period)) };
+  const filters = { search, paymentMethod, waiterId, ...(period === 'custom' ? customDate ? { dateFrom: customDate, dateTo: customDate } : {} : periodRange(period)) };
   const ordersQ = useAdminOrdersInfinite({ tab, ...filters, sort: sort.startsWith('date') ? 'date' : sort.startsWith('amount') ? 'amount' : 'default', sortDirection: sort.endsWith('_asc') ? 'asc' : 'desc' });
   const summaryQ = useOrdersSummary(filters);
   const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
@@ -193,19 +194,19 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
 
         {/* Фильтры */}
         <View style={styles.filters}>
-          <Select value={tab} onChange={setTab} options={STATUS_OPTIONS} title="Статус" />
-          <Select value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
-          <Select value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
-          <Select value={period} onChange={setPeriod} options={PERIOD_OPTIONS} title="Период" />
-          {period === 'custom' ? <DateField label="Дата заказов" value={customDate} onChangeText={setCustomDate} /> : null}
-          <Select value={sort} onChange={setSort} options={SORT_OPTIONS} title="Сортировка" />
-          <TextInput
+          <Select style={styles.filterControl} value={tab} onChange={setTab} options={STATUS_OPTIONS} title="Статус" />
+          <Select style={styles.filterControl} value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
+          <Select style={styles.filterControl} value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
+          <Select style={styles.filterControl} value={period} onChange={(next) => { setPeriod(next); if (next === 'custom') setCalendarRequest(request => request + 1); }} options={PERIOD_OPTIONS} title="Период" />
+          {period === 'custom' ? <DateField key={calendarRequest} accessibilityLabel="Дата заказов" value={customDate} onChangeText={setCustomDate} openOnMount /> : null}
+          <Select style={styles.filterControl} value={sort} onChange={setSort} options={SORT_OPTIONS} title="Сортировка" />
+          <View style={styles.searchWrap}><PwaIcon name="search" size={21} color="#64799E" /><TextInput
             style={styles.search}
             placeholder="Поиск по заказам"
             placeholderTextColor={colors.textLight}
             value={search}
             onChangeText={setSearch}
-          />
+          /></View>
         </View>
 
         {/* Таблица заказов */}
@@ -288,7 +289,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
   );
 }
 
-const COL = { num: 70, date: 140, table: 92, waiter: 120, amount: 92, status: 186, pay: 130, act: 84 } as const;
+const COL = { num: 90, date: 157, table: 112, waiter: 123, amount: 101, status: 213, pay: 235, act: 89 } as const;
 const TABLE_WIDTH = COL.num + COL.date + COL.table + COL.waiter + COL.amount + COL.status + COL.pay + COL.act;
 
 function OrderTableRow({
@@ -409,26 +410,25 @@ function Sum({ label, value }: { label: string; value: string }) {
   );
 }
 function Sep() {
-  return <Text style={styles.sumSep}>|</Text>;
+  return null;
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1 },
+  page: { flex: 1, backgroundColor: '#F5F8FD' },
   pageContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
-  summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
-  sumText: { fontSize: fontSize.sm, color: colors.textSecondary },
-  sumValue: { fontWeight: '500', color: colors.textPrimary },
+  summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, minHeight: 56, paddingVertical: 12, paddingHorizontal: 19, borderWidth: 1, borderColor: '#E8EEF7', borderRadius: 15, backgroundColor: colors.white },
+  sumText: { fontSize: 15, color: '#536686' },
+  sumValue: { fontWeight: '600', color: '#162445' },
   sumSep: { fontSize: fontSize.sm, color: colors.textLight },
-  filters: { gap: spacing.sm },
+  filters: { gap: 10, marginBottom: 5 },
+  filterControl: { height: 46, borderColor: '#DCE5F2', borderRadius: 11 },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 13, height: 46, borderWidth: 1, borderColor: '#DCE5F2', borderRadius: 11, backgroundColor: colors.white },
   search: {
+    flex: 1,
     height: 44,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: colors.white,
-    paddingHorizontal: spacing.md,
-    fontSize: fontSize.sm,
-    color: colors.textPrimary,
+    padding: 0,
+    fontSize: 14,
+    color: '#1F3156',
   },
 
   center: { paddingVertical: 60, alignItems: 'center', gap: 4 },
@@ -441,8 +441,8 @@ const styles = StyleSheet.create({
   // Таблица заказов (как в PWA: карточка со скроллом по горизонтали).
   tableCard: {
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
+    borderColor: '#E4EBF5',
+    borderRadius: 16,
     backgroundColor: colors.white,
     overflow: 'hidden',
   },
@@ -451,30 +451,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    backgroundColor: colors.background,
+    backgroundColor: '#F8FAFD',
+    minHeight: 46,
   },
   th: {
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: fontSize.xs,
-    fontWeight: '500',
-    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#657691',
   },
   thRight: { textAlign: 'right' },
   thCenter: { textAlign: 'center' },
   tr: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 56,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  td: { paddingHorizontal: 12, paddingVertical: 12, fontSize: fontSize.sm },
-  tdStrong: { fontWeight: '500', color: colors.textPrimary },
-  tdSecondary: { color: colors.textSecondary },
+  td: { paddingHorizontal: 12, paddingVertical: 12, fontSize: 14, lineHeight: 19 },
+  tdStrong: { fontWeight: '600', color: '#1A294A' },
+  tdSecondary: { color: '#506383' },
   tdRight: { textAlign: 'right' },
   tdCell: { paddingHorizontal: 12, paddingVertical: 8, justifyContent: 'center' },
   tdActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 4 },
-  actionBtn: { width: 30, height: 30, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  actionBtn: { width: 29, height: 29, borderRadius: 8, borderWidth: 1, borderColor: '#E4EAF4', backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
 
   footer: { flexDirection: 'row', gap: spacing.sm },
   editorSub: { fontSize: fontSize.sm, color: colors.textMuted },

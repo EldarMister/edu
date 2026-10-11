@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, InteractionManager, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { FlatList, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
   runOnJS,
@@ -13,7 +14,7 @@ import { sheetTiming } from '@/components/motion';
 import { useNavigation } from '@react-navigation/native';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FullscreenSheet } from '@/components/FullscreenSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
@@ -82,6 +83,7 @@ export function MenuScreen() {
   const [weightDish, setWeightDish] = useState<Dish | null>(null);
   const [setPickerOpen, setSetPickerOpen] = useState(false);
   const [configSet, setConfigSet] = useState<Dish | null>(null);
+  const [pendingConfigSet, setPendingConfigSet] = useState<Dish | null>(null);
 
   const sortedCategories = useMemo(
     () => (categories.data ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder),
@@ -384,7 +386,7 @@ export function MenuScreen() {
           onPress={onSubmit}
           loading={submitting}
           disabled={count === 0}
-          style={{ flex: 1 }}
+          style={{ flex: 1, borderRadius: radius.sm }}
         />
       </View>
       </>
@@ -456,13 +458,14 @@ export function MenuScreen() {
           setSetPickerOpen(false);
         }}
         onConfigure={(set) => {
-          // Сначала закрываем лист «Сеты» (RN Modal), и только после его
-          // размонтирования открываем «Настроить сет» — иначе два одновременных
-          // модальных окна на Android подвешивают экран.
+          // Native Modal windows must finish closing before the next one opens.
+          setPendingConfigSet(set);
           setSetPickerOpen(false);
-          setTimeout(() => {
-            InteractionManager.runAfterInteractions(() => setConfigSet(set));
-          }, sheetTiming.exitMs + 180);
+        }}
+        onDismiss={() => {
+          if (!pendingConfigSet) return;
+          setConfigSet(pendingConfigSet);
+          setPendingConfigSet(null);
         }}
       />
 
@@ -535,17 +538,19 @@ const DishCard = memo(function DishCard({
           <Text style={styles.unavailableText} translate>Недоступно</Text>
         </View>
       ) : isOutOfStock ? (
-        <View style={styles.unavailable}>
-          <Text style={styles.unavailableText} translate>Нет в наличии</Text>
+        <View style={[styles.unavailable, styles.stockUnavailable]}>
+          <Text style={[styles.unavailableText, styles.stockUnavailableText]} translate>Нет в наличии</Text>
         </View>
       ) : null}
-      <Text style={styles.dishName} numberOfLines={2}>
+      <Text style={[styles.dishName, isDisabled && { paddingRight: 80 }]} numberOfLines={2}>
         {dish.name}
       </Text>
       {hasVariants ? (
         <Text style={styles.dishSub} numberOfLines={1}>
           {variantNamesLine(dish.variants)}
         </Text>
+      ) : dish.isWeighted ? (
+        <Text style={[styles.dishSub, styles.weightedSub]} numberOfLines={1} translate>Весовое</Text>
       ) : dish.description ? (
         <Text style={styles.dishSub} numberOfLines={1}>
           {dish.description}
@@ -594,9 +599,12 @@ function VariantSheet({
   onAdd: (variant: DishVariant) => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const lastDishRef = React.useRef(dish);
+  if (dish) lastDishRef.current = dish;
+  const renderedDish = dish ?? lastDishRef.current;
   React.useEffect(() => setSelectedId(null), [dish]);
-  if (!dish) return null;
-  const variants = dish.variants.slice().sort((a, b) => a.sortOrder - b.sortOrder);
+  if (!renderedDish) return null;
+  const variants = renderedDish.variants.slice().sort((a, b) => a.sortOrder - b.sortOrder);
   const selected = variants.find((v) => v.id === selectedId) ?? null;
 
   return (
@@ -604,20 +612,26 @@ function VariantSheet({
       visible={!!dish}
       onClose={onClose}
       sheet
-      title={dish.name}
+      animationPreset="variant"
+      maxHeight="82%"
+      panelStyle={styles.customSheetPanel}
+      headerContent={<View style={styles.variantHeader}>
+        <View style={styles.variantHandle} />
+        <Text style={styles.variantTitle}>{renderedDish.name}</Text>
+        <Text style={styles.variantHint} translate>Выберите размер</Text>
+      </View>}
+      bodyStyle={{ paddingVertical: 0 }}
+      footerStyle={styles.variantFooter}
       footer={
-        <View style={{ paddingBottom: spacing.sm }}>
-          <Button title="Добавить" onPress={() => selected && onAdd(selected)} disabled={!selected} />
-        </View>
+        <Button title="Добавить" onPress={() => selected && onAdd(selected)} disabled={!selected} style={{ borderRadius: radius.sm }} />
       }
     >
-      <Text style={styles.variantHint} translate>Выберите размер</Text>
-      <View style={{ gap: spacing.sm, paddingBottom: spacing.sm }}>
+      <SheetScrollView style={{ flexShrink: 1, minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.variantList}>
         {variants.map((v) => {
           const isSel = v.id === selectedId;
           // Цена варианта с учётом скидки блюда (как в PWA VariantPickerSheet).
-          const price = dishUnitPrice(v.price, dish.discountType, dish.discountValue);
-          const isOutOfStock = dish.trackInventory && typeof v.stock === 'number' && v.stock <= 0;
+          const price = dishUnitPrice(v.price, renderedDish.discountType, renderedDish.discountValue);
+          const isOutOfStock = renderedDish.trackInventory && typeof v.stock === 'number' && v.stock <= 0;
           return (
             <FastPressable
               key={v.id}
@@ -628,7 +642,7 @@ function VariantSheet({
               <View style={[styles.radio, isSel && { borderColor: colors.primary }]}>
                 {isSel ? <View style={styles.radioDot} /> : null}
               </View>
-              <Text style={styles.variantName} translate>
+              <Text style={styles.variantName}>
                 {v.name}
                 {isOutOfStock ? <Text style={styles.variantOutOfStock} translate>  Нет в наличии</Text> : null}
               </Text>
@@ -636,7 +650,7 @@ function VariantSheet({
             </FastPressable>
           );
         })}
-      </View>
+      </SheetScrollView>
     </BottomSheet>
   );
 }
@@ -647,12 +661,14 @@ function SetPickerSheet({
   onClose,
   onPick,
   onConfigure,
+  onDismiss,
 }: {
   visible: boolean;
   sets: Dish[];
   onClose: () => void;
   onPick: (set: Dish) => void;
   onConfigure: (set: Dish) => void;
+  onDismiss: () => void;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -666,9 +682,18 @@ function SetPickerSheet({
     <BottomSheet
       visible={visible}
       onClose={onClose}
-      title="Сеты"
+      onDismiss={onDismiss}
       sheet
-      maxHeight="86%"
+      animationPreset="set"
+      maxHeight="82%"
+      panelStyle={styles.customSheetPanel}
+      headerContent={<View style={styles.setHeader}>
+        <View style={styles.setHandle} />
+        <Text style={styles.setTitle} translate>Сеты</Text>
+        <Text style={styles.setHint} translate>Выберите сет</Text>
+      </View>}
+      bodyStyle={{ paddingVertical: 0 }}
+      footerStyle={styles.variantFooter}
       footer={
         <View style={styles.setPickerFooter}>
           <Button
@@ -680,11 +705,10 @@ function SetPickerSheet({
         </View>
       }
     >
-      <Text style={styles.variantHint} translate>Выберите сет</Text>
       {sets.length === 0 ? (
         <Text style={styles.notFound} translate>Сетов пока нет</Text>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={styles.setList}>
+        <SheetScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={styles.setList}>
           {sets.map((set) => {
             const selectedSet = set.id === selectedId;
             const count = (set.setComponents ?? []).reduce((sum, component) => sum + component.quantity, 0);
@@ -710,12 +734,12 @@ function SetPickerSheet({
                   }}
                   style={styles.setEyeBtn}
                 >
-                  <PwaIcon name="eye" size={24} color={colors.textLight} strokeWidth={2} />
+                  <PwaIcon name="eye" size={20} color={colors.textLight} strokeWidth={2} />
                 </FastPressable>
               </FastPressable>
             );
           })}
-        </ScrollView>
+        </SheetScrollView>
       )}
     </BottomSheet>
   );
@@ -737,6 +761,9 @@ function SetConfigSheet({
   onAdd: (set: Dish, components: CartSetComponent[]) => void;
 }) {
   const [components, setComponents] = useState<CartSetComponent[]>([]);
+  const lastSetRef = React.useRef(set);
+  if (set) lastSetRef.current = set;
+  const renderedSet = set ?? lastSetRef.current;
   const [replacingId, setReplacingId] = useState<string | null>(null);
   const [variantDish, setVariantDish] = useState<Dish | null>(null);
   const [search, setSearch] = useState('');
@@ -751,7 +778,7 @@ function SetConfigSheet({
     setCategoryId('all');
   }, [set, visible]);
 
-  const currentPrice = set ? calcSetPrice(set.price, components) : 0;
+  const currentPrice = renderedSet ? calcSetPrice(renderedSet.price, components) : 0;
   const replacing = components.find((component) => component.componentId === replacingId) ?? null;
   const availableDishes = useMemo(() => menuDishes.filter((dish) => dish.isAvailable && !dish.isSet), [menuDishes]);
   const replacementCategories = useMemo(() => {
@@ -816,7 +843,7 @@ function SetConfigSheet({
     applyReplacement(dish);
   };
 
-  if (!set) return null;
+  if (!renderedSet) return null;
   const hasChanges = components.some((component) => component.action !== 'default');
 
   return (
@@ -824,31 +851,37 @@ function SetConfigSheet({
       <BottomSheet
         visible={visible}
         onClose={onClose}
-        title="Настроить сет"
         sheet
-        maxHeight="86%"
+        animationPreset="set"
+        maxHeight="82%"
+        panelStyle={styles.customSheetPanel}
+        headerContent={<View style={styles.setHeader}>
+          <View style={styles.setHandle} />
+          <Text style={styles.setTitle} translate>Настроить сет</Text>
+        </View>}
+        footerStyle={styles.variantFooter}
+        bodyStyle={{ paddingTop: 0, paddingBottom: 0 }}
         footer={
-          <View style={{ paddingBottom: spacing.sm }}>
             <Button
               title={hasChanges ? `Добавить · ${money(currentPrice)}` : 'Добавить в заказ'}
-              onPress={() => onAdd(set, components)}
+              onPress={() => onAdd(renderedSet, components)}
+              style={{ borderRadius: radius.sm }}
             />
-          </View>
         }
       >
         <View style={styles.setSummary}>
-          <Text style={styles.setSummaryName} numberOfLines={1}>{set.name}</Text>
+          <Text style={styles.setSummaryName} numberOfLines={1}>{renderedSet.name}</Text>
           <View style={styles.setSummaryPrices}>
-            {Math.abs(Number(set.price) - currentPrice) > 0.01 ? (
-              <Text style={styles.setSummaryOldPrice}>{money(set.price)}</Text>
+            {Math.abs(Number(renderedSet.price) - currentPrice) > 0.01 ? (
+              <Text style={styles.setSummaryOldPrice}>{money(renderedSet.price)}</Text>
             ) : null}
             <Text style={[styles.setSummaryPrice, !hasChanges && styles.setSummaryPricePlain]}>
               {money(currentPrice)}
             </Text>
           </View>
         </View>
-        <Text style={styles.variantHint} translate>Состав сета ({components.length} позиций)</Text>
-        <ScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1, minHeight: 0 }}>
+        <Text style={styles.componentHint} translate>Состав сета ({components.length} позиций)</Text>
+        <SheetScrollView showsVerticalScrollIndicator={false} style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={{ paddingTop: spacing.sm }}>
           <View style={styles.componentList}>
             {components.map((component) => {
               const removed = component.action === 'removed';
@@ -904,7 +937,7 @@ function SetConfigSheet({
               );
             })}
           </View>
-        </ScrollView>
+        </SheetScrollView>
       </BottomSheet>
       <ReplacementPickerModal
         visible={!!replacingId}
@@ -1064,29 +1097,53 @@ function InlineVariantSheet({
   const [render, setRender] = useState(!!dish);
   const [renderDish, setRenderDish] = useState<Dish | null>(dish);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { height: windowHeight } = useWindowDimensions();
   const translateY = useSharedValue(600);
+  const panelHeight = useSharedValue(600);
+  const dragY = useSharedValue(0);
   const backdrop = useSharedValue(0);
+  const animationSequence = React.useRef(0);
+  const finishClose = React.useCallback((sequence: number) => {
+    if (animationSequence.current === sequence) setRender(false);
+  }, []);
+  const panGesture = React.useMemo(() => Gesture.Pan()
+    .activeOffsetY(8)
+    .failOffsetX([-16, 16])
+    .onUpdate((event) => { dragY.value = Math.max(0, event.translationY); })
+    .onEnd((event) => {
+      if (event.translationY > 110 || event.velocityY > 900) runOnJS(onClose)();
+      else dragY.value = withTiming(0, { duration: 520, easing: sheetTiming.easing });
+    })
+    .onFinalize((_event, success) => {
+      if (!success) dragY.value = withTiming(0, { duration: 520, easing: sheetTiming.easing });
+    }), [dragY, onClose]);
 
   React.useEffect(() => {
+    const sequence = ++animationSequence.current;
     cancelAnimation(translateY);
     cancelAnimation(backdrop);
+    cancelAnimation(dragY);
     if (dish) {
       setRender(true);
       setRenderDish(dish);
       setSelectedId(null);
-      translateY.value = 600;
-      translateY.value = withTiming(0, { duration: sheetTiming.enterMs, easing: sheetTiming.easing });
-      backdrop.value = withTiming(1, { duration: sheetTiming.enterMs, easing: sheetTiming.easing });
+      dragY.value = 0;
+      translateY.value = panelHeight.value;
+      translateY.value = withTiming(0, { duration: 520, easing: sheetTiming.easing });
+      backdrop.value = withTiming(1, { duration: 520, easing: sheetTiming.easing });
       return;
     }
-    backdrop.value = withTiming(0, { duration: sheetTiming.exitMs, easing: sheetTiming.easing });
-    translateY.value = withTiming(600, { duration: sheetTiming.exitMs, easing: sheetTiming.easing }, (finished) => {
-      if (finished) runOnJS(setRender)(false);
+    // Keep the current drag position during dismissal, so the sheet cannot jump up.
+    translateY.value += dragY.value;
+    dragY.value = 0;
+    backdrop.value = withTiming(0, { duration: 520, easing: sheetTiming.easing });
+    translateY.value = withTiming(panelHeight.value, { duration: 520, easing: sheetTiming.easing }, (finished) => {
+      if (finished) runOnJS(finishClose)(sequence);
     });
-  }, [dish, backdrop, translateY]);
+  }, [dish, backdrop, dragY, finishClose, panelHeight, translateY]);
 
   const backdropStyle = useAnimatedStyle(() => ({ opacity: backdrop.value }));
-  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value }] }));
+  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value + dragY.value }] }));
 
   const activeDish = renderDish;
   if (!render || !activeDish) return null;
@@ -1098,14 +1155,16 @@ function InlineVariantSheet({
       <Animated.View style={[StyleSheet.absoluteFill, styles.inlineBackdrop, backdropStyle]}>
         <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} />
       </Animated.View>
-      <Animated.View style={[styles.inlineSheet, sheetStyle]}>
-        <SafeAreaView edges={['bottom']}>
+      <Animated.View style={[styles.inlineSheet, { maxHeight: windowHeight * 0.82 }, sheetStyle]} onLayout={(event) => { panelHeight.value = event.nativeEvent.layout.height; }}>
+        <SafeAreaView edges={['bottom']} style={{ flexShrink: 1, minHeight: 0 }}>
+          <GestureDetector gesture={panGesture}>
           <View style={styles.inlineHandleWrap}>
             <View style={styles.inlineHandle} />
             <Text style={styles.inlineTitle}>{activeDish?.name}</Text>
             <Text style={styles.inlineHint} translate>Выберите размер</Text>
           </View>
-          <ScrollView style={{ maxHeight: 320 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.inlineList}>
+          </GestureDetector>
+          <ScrollView style={{ flexShrink: 1, minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.inlineList}>
             {variants.map((v) => {
               const isSel = v.id === selectedId;
               const price = activeDish
@@ -1122,7 +1181,7 @@ function InlineVariantSheet({
                   <View style={[styles.radio, isSel && { borderColor: colors.primary }]}>
                     {isSel ? <View style={styles.radioDot} /> : null}
                   </View>
-                  <Text style={styles.variantName} translate>
+                  <Text style={styles.variantName}>
                     {v.name}
                     {isOutOfStock ? <Text style={styles.variantOutOfStock} translate>  Нет в наличии</Text> : null}
                   </Text>
@@ -1132,7 +1191,7 @@ function InlineVariantSheet({
             })}
           </ScrollView>
           <View style={styles.inlineFooter}>
-            <Button title={actionLabel} onPress={() => selected && onAdd(selected)} disabled={!selected} />
+            <Button title={actionLabel} onPress={() => selected && onAdd(selected)} disabled={!selected} style={{ borderRadius: radius.sm }} />
           </View>
         </SafeAreaView>
       </Animated.View>
@@ -1187,6 +1246,7 @@ const styles = StyleSheet.create({
   dishDisabled: { opacity: 0.5 },
   dishName: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary, lineHeight: 20 },
   dishSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  weightedSub: { color: colors.primary, fontWeight: '500' },
   dishBottom: { marginTop: 'auto', flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between' },
   dishPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
   oldPrice: { fontSize: 12, fontWeight: '400', color: colors.textLight, textDecorationLine: 'line-through' },
@@ -1211,7 +1271,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 6,
   },
-  qtyCounterText: { color: colors.primary, fontWeight: '600', fontSize: fontSize.sm },
+  qtyCounterText: { color: colors.primary, fontWeight: '600', fontSize: 13 },
   unavailable: {
     position: 'absolute',
     right: 8,
@@ -1222,7 +1282,9 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     zIndex: 1,
   },
-  unavailableText: { fontSize: fontSize.xs, color: colors.textMuted, fontWeight: '500' },
+  unavailableText: { fontSize: 11, color: colors.textMuted, fontWeight: '500' },
+  stockUnavailable: { backgroundColor: colors.red100 },
+  stockUnavailableText: { color: colors.red600 },
   notFound: { width: '100%', textAlign: 'center', color: colors.textMuted, fontSize: fontSize.sm, paddingVertical: spacing.xl },
 
   cartBar: {
@@ -1232,7 +1294,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.white,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: spacing.sm,
     paddingTop: spacing.sm,
     paddingBottom: spacing.sm,
     minHeight: waiterLayout.cartBarHeight,
@@ -1247,10 +1309,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingHorizontal: spacing.md,
     height: 48,
-    minWidth: 132,
   },
-  cartCount: { fontSize: fontSize.xs, color: colors.textMuted },
-  cartTotal: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
+  cartCount: { fontSize: 11, color: colors.textMuted, lineHeight: 14 },
+  cartTotal: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
   replacementBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1272,7 +1333,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
   },
   replacementCancelText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
-  variantHint: { fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary, marginBottom: spacing.sm, marginTop: 4 },
+  variantTitle: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
+  customSheetPanel: { width: '100%', maxWidth: 448, alignSelf: 'center' },
+  variantHeader: { paddingHorizontal: spacing.lg, paddingTop: 10, paddingBottom: spacing.sm },
+  variantHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300, marginBottom: spacing.lg },
+  setHeader: { paddingHorizontal: spacing.lg, paddingTop: 10, paddingBottom: spacing.xs },
+  setHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300, marginBottom: spacing.md },
+  setTitle: { fontSize: 18, fontWeight: '600', color: colors.textPrimary },
+  setHint: { fontSize: 14, color: colors.textMuted, marginTop: 2 },
+  variantHint: { fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary, marginTop: spacing.md },
+  variantList: { gap: spacing.sm, paddingTop: 4, paddingBottom: spacing.lg },
+  variantFooter: { borderTopWidth: 0, paddingTop: spacing.sm, paddingBottom: spacing.lg },
   variant: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1291,17 +1362,17 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: colors.slate300,
+    borderColor: colors.textLight,
     alignItems: 'center',
     justifyContent: 'center',
   },
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
   variantName: { flex: 1, fontSize: fontSize.md, fontWeight: '500', color: colors.textPrimary },
   variantPrice: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
-  setPickerFooter: { marginTop: spacing.sm },
-  setPickerAddButton: { width: '100%' },
+  setPickerFooter: {},
+  setPickerAddButton: { width: '100%', borderRadius: radius.sm },
   setScroll: { maxHeight: 440 },
-  setList: { gap: spacing.sm },
+  setList: { gap: 6, paddingTop: 4, paddingBottom: spacing.md },
   setRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1310,13 +1381,13 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   setRowSelected: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
-  setName: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  setName: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
   setSub: { marginTop: 2, fontSize: fontSize.xs, color: colors.textMuted },
-  setPrice: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
-  setEyeBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  setPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  setEyeBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
   setSummary: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1326,19 +1397,19 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingHorizontal: spacing.md,
     paddingVertical: 10,
-    marginBottom: spacing.md,
   },
-  setSummaryName: { flex: 1, fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary },
-  setSummaryPrices: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  setSummaryName: { flex: 1, fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  setSummaryPrices: { flexDirection: 'row', alignItems: 'baseline', gap: 6 },
   setSummaryOldPrice: {
-    fontSize: fontSize.base,
-    fontWeight: '500',
+    fontSize: 13,
+    fontWeight: '400',
     color: colors.textLight,
     textDecorationLine: 'line-through',
   },
-  setSummaryPrice: { fontSize: fontSize.base, fontWeight: '700', color: colors.primary },
+  setSummaryPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.primary },
   setSummaryPricePlain: { color: colors.textPrimary },
-  componentList: { gap: spacing.sm, paddingBottom: spacing.md },
+  componentHint: { fontSize: 14, fontWeight: '500', color: colors.textSecondary, marginTop: spacing.md },
+  componentList: { gap: spacing.xs, paddingBottom: spacing.md },
   componentRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1346,28 +1417,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
+    paddingVertical: spacing.sm,
   },
-  componentRowRemoved: { backgroundColor: colors.background, opacity: 0.72 },
+  componentRowRemoved: { backgroundColor: colors.background, opacity: 0.6 },
   componentRowReplaced: { borderColor: 'rgba(0,91,255,0.28)', backgroundColor: colors.primaryFaint },
-  componentName: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: '500' },
+  componentName: { fontSize: 14.5, color: colors.textPrimary, fontWeight: '400' },
   componentRemovedText: { color: colors.textLight, textDecorationLine: 'line-through' },
   componentReplacement: { marginTop: 2, fontSize: fontSize.xs, color: colors.primary, fontWeight: '600' },
-  componentReplacementLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 8, flexWrap: 'wrap' },
+  componentReplacementLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: 2, flexWrap: 'wrap' },
   componentReplacementChip: {
     maxWidth: 170,
     borderRadius: radius.sm,
     backgroundColor: colors.primarySoft,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
-  componentReplacementChipText: { fontSize: fontSize.sm, color: colors.primary, fontWeight: '700' },
-  componentDelta: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '700' },
+  componentReplacementChipText: { fontSize: 12, color: colors.primary, fontWeight: '500' },
+  componentDelta: { fontSize: 12, color: colors.danger, fontWeight: '500' },
   componentActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  componentTextButton: { minHeight: 30, justifyContent: 'center', paddingHorizontal: 2 },
-  componentTextButtonPrimary: { fontSize: fontSize.sm, color: colors.primary, fontWeight: '700' },
-  componentTextButtonDanger: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '700' },
+  componentTextButton: { minHeight: 26, justifyContent: 'center', paddingHorizontal: spacing.sm, borderRadius: radius.sm },
+  componentTextButtonPrimary: { fontSize: 13, color: colors.primary, fontWeight: '500' },
+  componentTextButtonDanger: { fontSize: 13, color: colors.danger, fontWeight: '500' },
   sheetHint: { fontSize: fontSize.sm, color: colors.textMuted, marginBottom: spacing.sm },
   searchWrapInSheet: {
     flexDirection: 'row',
@@ -1391,9 +1462,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   replacementBack: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  replacementTitle: { fontSize: fontSize.lg, color: colors.textPrimary, fontWeight: '700' },
-  replacementSubtitle: { marginTop: 2, fontSize: fontSize.base, color: colors.textMuted },
-  replacementContent: { paddingHorizontal: spacing.md, paddingTop: spacing.sm },
+  replacementTitle: { fontSize: 15, color: colors.textPrimary, fontWeight: '600' },
+  replacementSubtitle: { marginTop: 2, fontSize: 12, color: colors.textMuted },
+  replacementContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
   replacementSearch: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1433,9 +1504,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   inlineHandleWrap: { paddingTop: 10, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  inlineHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300, marginBottom: spacing.md },
+  inlineHandle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300, marginBottom: spacing.lg },
   inlineTitle: { fontSize: fontSize.xl, fontWeight: '600', color: colors.textPrimary },
   inlineHint: { marginTop: spacing.md, fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary },
-  inlineList: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingTop: 4, paddingBottom: spacing.sm },
-  inlineFooter: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.sm },
+  inlineList: { gap: spacing.sm, paddingHorizontal: spacing.lg, paddingTop: 4, paddingBottom: spacing.lg },
+  inlineFooter: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.lg },
 });

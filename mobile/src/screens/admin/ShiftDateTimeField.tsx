@@ -22,7 +22,7 @@ export function ShiftDateTimeField({ label, value, onChange }: { label: string; 
   return <View style={{ gap: spacing.sm }}>
     <Text style={{ color: colors.textSecondary, fontWeight: '500' }} translate>{label}</Text>
     <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-      <DateField containerStyle={{ flex: 2 }} value={date} onChangeText={(next) => onChange(`${next}T${time || '00:00'}`)} accessibilityLabel={`${label}: дата`} />
+      <DateField containerStyle={{ flex: 2 }} value={date} onChangeText={(next) => onChange(next ? `${next}T${time || '00:00'}` : '')} accessibilityLabel={`${label}: дата`} />
       <Field containerStyle={{ flex: 1 }} value={time} onChangeText={(next) => onChange(`${date || fallbackDate}T${next}`)} placeholder="HH:mm" keyboardType="numbers-and-punctuation" maxLength={5} accessibilityLabel={`${label}: время`} rightSlot={<FastPressable onPress={showTime} accessibilityRole="button" accessibilityLabel="Выбрать время" hitSlop={10}><Text style={{ color: colors.primary, fontSize: 22 }}>◷</Text></FastPressable>} />
     </View>
     {Platform.OS !== 'android' ? <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}><View style={{ flex: 1, justifyContent: 'center', padding: spacing.xl, backgroundColor: 'rgba(0,0,0,0.4)' }}><View style={{ backgroundColor: colors.white, borderRadius: 16, padding: spacing.lg }}><DateTimePicker value={selectedDate} mode="time" display="spinner" is24Hour onChange={(_event, selected) => { if (selected) chooseTime(selected); }} /><Button title="Готово" onPress={() => setOpen(false)} /></View></View></Modal> : null}

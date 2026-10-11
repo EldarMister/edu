@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, FlatList, Image, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, View } from 'react-native';
 import { Alert, Text, TextInput } from '@/components/typography';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Select } from '@/components/Select';
@@ -90,8 +90,9 @@ export function MenuScreen() {
     setDishModal(d);
   };
 
-  const header = (
-    <View style={styles.headerWrap}>
+  return (
+    <>
+    <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <View style={styles.summary}>
         <Sum label="Блюд" value={o ? String(o.dishesCount) : '—'} />
         <Sep />
@@ -99,7 +100,8 @@ export function MenuScreen() {
         <Sep />
         <Sum label="Активных" value={o ? String(o.activeDishesCount) : '—'} />
       </View>
-
+      <View style={styles.menuCard}>
+      <View style={styles.headerWrap}>
       <TextInput
         style={styles.search}
         placeholder="Поиск блюда"
@@ -108,17 +110,11 @@ export function MenuScreen() {
         onChangeText={setSearch}
       />
 
-      <View style={styles.headerBtns}>
-        <Button title="+ Категория" variant="secondary" size="md" style={{ flex: 1 }} onPress={() => setCatModal(true)} />
-        <Button
-          title="+ Сет"
-          variant="secondary"
-          size="md"
-          style={{ flex: 1 }}
-          onPress={() => setSetModal('new')}
-        />
-      </View>
-      <Button title="+ Добавить блюдо" size="md" onPress={() => setDishModal('new')} />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.headerBtns}>
+        <MenuAction label="Категория" onPress={() => setCatModal(true)} />
+        <MenuAction label="Сет" onPress={() => setSetModal('new')} />
+        <MenuAction primary label="Добавить блюдо" onPress={() => setDishModal('new')} />
+      </ScrollView>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
         <CatTab active={categoryId === ''} onPress={() => setCategoryId('')} label="Все блюда" />
@@ -126,30 +122,24 @@ export function MenuScreen() {
           <CatTab key={c.id} active={categoryId === c.id} onPress={() => setCategoryId(c.id)} label={c.name} />
         ))}
       </ScrollView>
-    </View>
-  );
-
-  return (
-    <>
-      <FlatList
-        data={dishesQ.data ?? []}
-        keyExtractor={(d) => d.id}
-        ListHeaderComponent={header}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item: d }) => (
-          <DishRow dish={d} station={dishStation(d)} onEdit={() => openEdit(d)} onDelete={() => onDelete(d)} />
-        )}
-        ListEmptyComponent={
-          dishesQ.isLoading ? (
+      </View>
+      {dishesQ.isLoading ? (
             <View style={styles.center}>
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
-          ) : (
+          ) : !dishesQ.data?.length ? (
             <Text style={styles.empty} translate>Блюда не найдены</Text>
+          ) : (
+            <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ width: MENU_TABLE_WIDTH }}>
+              <View style={{ width: MENU_TABLE_WIDTH }}>
+                <View style={styles.tableHead}>{MENU_COLUMNS.map(column => <Text key={column.label} style={[styles.tableHeading, { width: column.width, textAlign: column.right ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
+                {dishesQ.data.map(dish => <DishRow key={dish.id} dish={dish} station={dishStation(dish)} onEdit={() => openEdit(dish)} onDelete={() => onDelete(dish)} />)}
+              </View>
+            </ScrollView>
           )
-        }
-      />
+      }
+      </View>
+    </ScrollView>
 
       {dishModal !== null ? (
         <DishModal
@@ -165,6 +155,13 @@ export function MenuScreen() {
       {recipeDish ? <RecipeEditor dish={recipeDish} onClose={() => setRecipeDish(null)} /> : null}
     </>
   );
+}
+
+const MENU_COLUMNS = [{ label: 'Название', width: 250 }, { label: 'Категория', width: 130 }, { label: 'Цена', width: 120, right: true }, { label: 'Остаток', width: 110, right: true }, { label: 'Статус', width: 150 }, { label: 'Действия', width: 100, right: true }];
+const MENU_TABLE_WIDTH = MENU_COLUMNS.reduce((total, column) => total + column.width, 0);
+
+function MenuAction({ label, primary, onPress }: { label: string; primary?: boolean; onPress: () => void }) {
+  return <FastPressable onPress={onPress} style={[styles.menuAction, primary && styles.menuActionPrimary]}><PwaIcon name="plus" size={16} color={primary ? colors.white : colors.textPrimary} /><Text style={[styles.menuActionText, primary && { color: colors.white }]} translate>{label}</Text></FastPressable>;
 }
 
 function DishRow({
@@ -189,7 +186,7 @@ function DishRow({
 
   return (
     <View style={styles.dishRow}>
-      <View style={{ flex: 1, minWidth: 0 }}>
+      <View style={[styles.menuCell, { width: 250 }]}>
         <View style={styles.dishNameRow}>
           <Text style={styles.dishName} numberOfLines={1}>
             {d.name}
@@ -205,17 +202,16 @@ function DishRow({
             {d.description}
           </Text>
         ) : null}
-        <Text style={styles.dishMeta} translate>
-          {d.category.name} · {hasVar ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}
-          {d.isWeighted ? ` за ${weightedBaseLabel(d)}` : ''}
-          {d.trackInventory ? ` · ${stock} ${hasVar ? '' : normalizeUnitLabel(d.unit)}` : ''}
-        </Text>
       </View>
-      <View style={styles.dishRight}>
+      <Text style={[styles.menuCellText, { width: 130 }]}>{d.category.name}</Text>
+      <Text style={[styles.menuCellText, styles.priceCell, { width: 120 }]}>{hasVar ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}</Text>
+      <Text style={[styles.menuCellText, { width: 110, textAlign: 'right' }]}>{d.trackInventory ? `${stock} ${hasVar ? (new Set(d.variants.map(variant => normalizeUnitLabel(variant.unit))).size === 1 ? normalizeUnitLabel(d.variants[0].unit) : 'по вариантам') : normalizeUnitLabel(d.unit)}` : '—'}</Text>
+      <View style={[styles.menuCell, { width: 150 }]}>
         <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
           <Text style={[styles.statusText, { color: status.fg }]} translate>{status.label}</Text>
         </View>
-        <View style={styles.dishActions}>
+      </View>
+        <View style={[styles.dishActions, { width: 100 }]}>
           <FastPressable onPress={onEdit} hitSlop={6} style={styles.iconBtn}>
             <PwaIcon name="pencil" size={16} color={colors.textMuted} strokeWidth={2} />
           </FastPressable>
@@ -223,7 +219,6 @@ function DishRow({
             <PwaIcon name="trash" size={16} color={colors.danger} strokeWidth={2} />
           </FastPressable>
         </View>
-      </View>
     </View>
   );
 }
@@ -406,7 +401,7 @@ export function DishModal({
       footer={<Button title={isEdit ? 'Сохранить' : 'Добавить'} size="lg" loading={pending} onPress={onSubmit} />}
     >
       {onRecipe ? <Button title="Техкарта" variant="secondary" onPress={onRecipe} style={{ marginBottom: spacing.md }} /> : null}
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
+      <SheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
         <Field label="Название">
           <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Название блюда" placeholderTextColor={colors.textLight} />
         </Field>
@@ -520,7 +515,7 @@ export function DishModal({
           <Toggle checked={isAvailable} onChange={setIsAvailable} />
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
-      </ScrollView>
+      </SheetScrollView>
     </BottomSheet>
   );
 }
@@ -638,7 +633,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
       maxHeight="92%"
       footer={<Button title={isEdit ? 'Сохранить' : 'Создать сет'} size="lg" loading={pending} onPress={submit} />}
     >
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
+      <SheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
         <View style={styles.grid2}>
           <Field label="Название" style={{ flex: 1 }}>
             <TextInput
@@ -754,7 +749,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
         </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
-      </ScrollView>
+      </SheetScrollView>
     </BottomSheet>
   );
 }
@@ -825,7 +820,7 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <ScrollView style={{ marginTop: spacing.md, maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+      <SheetScrollView style={{ marginTop: spacing.md, maxHeight: 380 }} showsVerticalScrollIndicator={false}>
         {sorted.map((c, index) => (
           <View key={c.id} style={styles.catRow}>
             <View style={styles.varMove}>
@@ -881,7 +876,7 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
             </FastPressable>
           </View>
         ))}
-      </ScrollView>
+      </SheetScrollView>
 
       {deleteTarget ? (
         <DeleteCategorySheet category={deleteTarget} categories={sorted} onDone={() => setDeleteTarget(null)} />
@@ -983,14 +978,15 @@ function Sep() {
 }
 
 const styles = StyleSheet.create({
-  listContent: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  headerWrap: { gap: spacing.sm, marginBottom: spacing.sm },
+  listContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: 12 },
+  menuCard: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: 16, overflow: 'hidden' },
+  headerWrap: { gap: 12, padding: 16, borderBottomWidth: 1, borderColor: colors.border },
   summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   sumText: { fontSize: fontSize.sm, color: colors.textSecondary },
   sumValue: { fontWeight: '500', color: colors.textPrimary },
   sumSep: { fontSize: fontSize.sm, color: colors.textLight },
   search: {
-    height: 44,
+    height: 40,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
@@ -1000,8 +996,11 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   headerBtns: { flexDirection: 'row', gap: spacing.sm },
+  menuAction: { height: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.white },
+  menuActionPrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
+  menuActionText: { fontSize: 14, fontWeight: '500', color: colors.textPrimary },
   tabs: { gap: 6, paddingVertical: 4 },
-  catTab: { borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 8 },
+  catTab: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
   catTabActive: { borderColor: colors.primary, backgroundColor: colors.primary },
   catTabText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },
   catTabTextActive: { color: colors.white },
@@ -1012,24 +1011,24 @@ const styles = StyleSheet.create({
   dishRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    borderWidth: 1,
+    borderBottomWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    marginTop: spacing.sm,
   },
+  tableHead: { flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border },
+  tableHeading: { paddingHorizontal: 16, paddingVertical: 12, fontSize: 12, fontWeight: '500', color: colors.textMuted },
+  menuCell: { paddingHorizontal: 16, paddingVertical: 12 },
+  menuCellText: { paddingHorizontal: 16, paddingVertical: 12, fontSize: 14, color: colors.textSecondary },
+  priceCell: { fontWeight: '500', color: colors.textPrimary, textAlign: 'right' },
   dishNameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
-  dishName: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary, flexShrink: 1 },
+  dishName: { fontSize: 14, fontWeight: '500', color: colors.textPrimary, flexShrink: 1 },
   variantsLine: { marginTop: 2, fontSize: fontSize.xs, fontWeight: '500', color: colors.primary },
   dishDesc: { marginTop: 2, fontSize: fontSize.xs, color: colors.textMuted },
   dishMeta: { marginTop: 4, fontSize: fontSize.xs, color: colors.textSecondary },
   dishRight: { alignItems: 'flex-end', gap: 6 },
   statusBadge: { borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 2 },
   statusText: { fontSize: fontSize.xs, fontWeight: '500' },
-  dishActions: { flexDirection: 'row', gap: 2 },
+  dishActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 4, paddingHorizontal: 16 },
   iconBtn: { width: 30, height: 30, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   miniBadge: { borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 1 },
   miniBadgeText: { fontSize: 11, fontWeight: '500' },

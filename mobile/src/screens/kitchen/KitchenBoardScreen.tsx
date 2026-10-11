@@ -251,15 +251,12 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   const undoSecondsLeft = pending ? Math.max(0, Math.ceil((pending.deadline - now) / 1000)) : 0;
   const pendingCount = pending ? pending.itemIds.length + pending.setComponentIds.length : 0;
 
-  // Адаптивная сетка карточек, как в PWA (columns-1 sm:2 lg:3 xl:4). В альбомном
-  // режиме карточки перестают занимать всю ширину и раскладываются в 2–4 колонки.
+  // PWA column-fill: balance keeps consecutive orders together in each column.
   const { width: winWidth } = useWindowDimensions();
   const stackedToolbar = winWidth < 960;
-  const columns = winWidth >= 1280 ? 4 : winWidth >= 1000 ? 3 : winWidth >= 680 ? 2 : 1;
+  const columns = winWidth >= 1280 ? 4 : winWidth >= 1024 ? 3 : winWidth >= 640 ? 2 : 1;
   const colGap = spacing.lg;
-  const cardWidth = columns > 1
-    ? Math.floor((winWidth - spacing.lg * 2 - colGap * (columns - 1)) / columns)
-    : undefined;
+  const contentPadding = winWidth >= 640 ? 20 : spacing.lg;
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -282,11 +279,11 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
 
       <View style={[styles.tabsBar, stackedToolbar && styles.tabsBarStacked]}>
         <View style={stackedToolbar ? styles.tabsFullWidth : styles.tabsFlexible}>
-          <SegmentTabs items={TABS} value={tab} onChange={setTab} count={list.length} />
+          <SegmentTabs items={TABS} value={statsOpen ? '' : tab} onChange={(value) => { if (value) setTab(value); setStatsOpen(false); }} count={statsOpen ? 0 : list.length} />
         </View>
         <ToolbarActions stacked={stackedToolbar}>
         <FastPressable
-          onPress={() => setStatsOpen(true)}
+          onPress={() => setStatsOpen((value) => !value)}
           style={[styles.toolbarBtn, statsOpen && styles.toolbarBtnPrimary]}
           hitSlop={6}
         >
@@ -309,7 +306,9 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         </ToolbarActions>
       </View>
 
-      {orders.isLoading ? (
+      {statsOpen ? (
+        <KitchenStatsSheet inline visible station={station} onClose={() => setStatsOpen(false)} />
+      ) : orders.isLoading ? (
         <Loading />
       ) : list.length === 0 ? (
         <EmptyState
@@ -325,15 +324,16 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         />
       ) : (
         <ScrollView
-          contentContainerStyle={[styles.list, columns > 1 && styles.listGrid]}
+          contentContainerStyle={[styles.list, { paddingHorizontal: contentPadding, paddingTop: contentPadding }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={orders.isFetching} onRefresh={() => orders.refetch()} />
           }
         >
-          {list.map((o) => (
-            <View key={o.id} style={cardWidth != null ? { width: cardWidth } : undefined}>
+          <BalancedKitchenOrders columns={columns} gap={colGap} initialWidth={winWidth - contentPadding * 2}>
+            {list.map((o) => (
               <KitchenCard
+                key={o.id}
                 order={o}
                 tab={tab}
                 now={now}
@@ -341,15 +341,14 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
                 pendingItemIds={pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []}
                 pendingType={pending?.orderId === o.id ? pending.type : null}
                 pendingPartial={pending?.orderId === o.id ? pending.partial ?? [] : []}
-                onAccept={() =>
-                  accept.mutate(o.id, {
-                    onError: (err: unknown) => push({ message: apiError(err), at: new Date().toISOString() }),
-                  })
-                }
+                onAccept={() => accept.mutate(o.id, {
+                  onSuccess: () => { if (tab === 'new' && list.length === 1) setTab('in_work'); },
+                  onError: (err: unknown) => push({ message: apiError(err), at: new Date().toISOString() }),
+                })}
                 onBatch={(type, ids) => onBatch(o.id, type, ids)}
               />
-            </View>
-          ))}
+            ))}
+          </BalancedKitchenOrders>
         </ScrollView>
       )}
 
@@ -378,9 +377,76 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
 
       <StopListSheet visible={stopListOpen} station={station} onClose={() => setStopListOpen(false)} />
       <KitchenVoiceSettingsSheet visible={voiceOpen} onClose={() => setVoiceOpen(false)} />
-      <KitchenStatsSheet visible={statsOpen} station={station} onClose={() => setStatsOpen(false)} />
     </SafeAreaView>
   );
+}
+
+/** Minimax partition of consecutive, indivisible cards, as CSS balanced columns. */
+export function balanceKitchenColumns(heights: readonly number[], columnCount: number, gap: number): { placements: { column: number; top: number }[]; height: number } {
+  const count = heights.length;
+  if (!count) return { placements: [], height: 0 };
+  const columns = Math.min(count, Math.max(1, Math.floor(columnCount) || 1));
+  const spacing = Math.max(0, Number.isFinite(gap) ? gap : 0);
+  const prefix = [0];
+  for (const height of heights) prefix.push(prefix[prefix.length - 1] + Math.max(0, Number.isFinite(height) ? height : 0) + spacing);
+  const groupHeight = (start: number, end: number) => prefix[end] - prefix[start] - spacing;
+  const costs = Array.from({ length: columns + 1 }, () => Array<number>(count + 1).fill(Infinity));
+  const cuts = Array.from({ length: columns + 1 }, () => Array<number>(count + 1).fill(0));
+  costs[0][0] = 0;
+  for (let column = 1; column <= columns; column++) {
+    for (let end = column; end <= count; end++) {
+      for (let start = column - 1; start < end; start++) {
+        const cost = Math.max(costs[column - 1][start], groupHeight(start, end));
+        // Fill the earlier column first when equally balanced partitions exist.
+        if (cost <= costs[column][end]) {
+          costs[column][end] = cost;
+          cuts[column][end] = start;
+        }
+      }
+    }
+  }
+  const placements = Array.from({ length: count }, () => ({ column: 0, top: 0 }));
+  let end = count;
+  for (let column = columns; column > 0; column--) {
+    const start = cuts[column][end];
+    for (let index = start; index < end; index++) placements[index] = { column: column - 1, top: prefix[index] - prefix[start] };
+    end = start;
+  }
+  return { placements, height: costs[columns][count] };
+}
+
+function BalancedKitchenOrders({ columns, gap, initialWidth, children }: { columns: number; gap: number; initialWidth: number; children: React.ReactNode }) {
+  const [width, setWidth] = useState(initialWidth);
+  const [measurements, setMeasurements] = useState<Record<string, { width: number; height: number }>>({});
+  const cards = React.Children.toArray(children);
+  const keys = cards.map((card, index) => React.isValidElement(card) ? String(card.key ?? index) : String(index));
+  const keySignature = keys.join('\u0000');
+  const cardWidth = Math.max(1, (width - gap * (columns - 1)) / columns);
+  const layout = useMemo(() => balanceKitchenColumns(keys.map(key => measurements[key]?.height ?? 240), columns, gap), [keySignature, measurements, columns, gap]);
+  useEffect(() => {
+    const live = new Set(keys);
+    setMeasurements(current => {
+      if (Object.keys(current).every(key => live.has(key))) return current;
+      return Object.fromEntries(Object.entries(current).filter(([key]) => live.has(key)));
+    });
+  }, [keySignature]);
+  const recordHeight = useCallback((key: string, measuredWidth: number, height: number) => {
+    if (height <= 0 || measuredWidth <= 0) return;
+    setMeasurements(current => {
+      const previous = current[key];
+      if (previous && Math.abs(previous.width - measuredWidth) < 0.1 && Math.abs(previous.height - height) < 0.1) return current;
+      return { ...current, [key]: { width: measuredWidth, height } };
+    });
+  }, []);
+  return <View onLayout={event => { const next = event.nativeEvent.layout.width; if (next > 0) setWidth(next); }} style={columns === 1 ? { gap, paddingBottom: cards.length ? gap : 0 } : { height: layout.height + (cards.length ? gap : 0) }}>
+    {cards.map((card, index) => {
+      const key = keys[index];
+      const placement = layout.placements[index];
+      const measured = measurements[key];
+      const ready = columns === 1 || (measured && Math.abs(measured.width - cardWidth) < 0.5);
+      return <View key={key} onLayout={event => recordHeight(key, event.nativeEvent.layout.width, event.nativeEvent.layout.height)} pointerEvents={ready ? 'auto' : 'none'} accessibilityElementsHidden={!ready} importantForAccessibility={ready ? 'auto' : 'no-hide-descendants'} style={columns === 1 ? { width: '100%' } : { position: 'absolute', left: placement.column * (cardWidth + gap), top: placement.top, width: cardWidth, opacity: ready ? 1 : 0 }}>{card}</View>;
+    })}
+  </View>;
 }
 
 function KitchenCard({
@@ -789,9 +855,9 @@ function KitchenCard({
           <View style={styles.actionsTop}>
             <Text style={styles.selectedText} translate>Выбрано: {selected.size}</Text>
             <View style={styles.actionsBtns}>
-              <Button title="Отказать выбранные" variant="danger" size="md" onPress={() => runBatch('reject')} />
+              <FastPressable style={[styles.selectionButton, { backgroundColor: colors.danger }]} onPress={() => runBatch('reject')}><Text style={styles.selectionButtonText} translate>Отказать выбранные</Text></FastPressable>
               {tab === 'in_work' ? (
-                <Button title="Готово выбранные" size="md" onPress={() => runBatch('ready')} />
+                <FastPressable style={[styles.selectionButton, { backgroundColor: colors.primary }]} onPress={() => runBatch('ready')}><Text style={styles.selectionButtonText} translate>Готово выбранные</Text></FastPressable>
               ) : null}
             </View>
           </View>
@@ -909,11 +975,10 @@ const styles = StyleSheet.create({
   toolbarBtnText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.primary },
   toolbarBtnTextPrimary: { color: colors.white },
   list: { padding: spacing.lg, gap: spacing.lg, paddingBottom: 96 },
-  listGrid: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start' },
 
   cardHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing.sm },
   orderNumber: { fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
-  tableText: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
+  tableText: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 4 },
   waiter: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 2 },
   time: { fontSize: fontSize.sm, color: colors.textMuted },
   elapsed: { fontSize: fontSize.base, fontWeight: '600', color: colors.textSecondary },
@@ -962,7 +1027,7 @@ const styles = StyleSheet.create({
   itemRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   itemContent: { flex: 1, minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6 },
   itemText: { flexShrink: 1, fontSize: fontSize.base, color: colors.textPrimary },
-  itemQty: { fontWeight: '700' },
+  itemQty: { fontWeight: '600' },
   itemCommentInline: { color: colors.warning, fontWeight: '500' },
   takeawayPill: {
     flexDirection: 'row',
@@ -974,7 +1039,7 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   takeawayPillText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primary },
-  itemComponent: { fontSize: fontSize.sm, color: colors.textSecondary },
+  itemComponent: { fontSize: 14, color: colors.textSecondary },
   itemRejected: { color: colors.danger, textDecorationLine: 'line-through' },
   itemDone: { color: colors.textMuted },
   itemFresh: { color: colors.primary, fontWeight: '600' },
@@ -999,8 +1064,8 @@ const styles = StyleSheet.create({
   replacedArrow: { fontWeight: '700', color: colors.textMuted },
   replacedNew: { fontWeight: '700', color: colors.primary },
   checkbox: {
-    width: 22,
-    height: 22,
+    width: 24,
+    height: 24,
     borderRadius: 7,
     borderWidth: 1,
     borderColor: colors.slate300,
@@ -1014,7 +1079,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
     marginTop: 6,
-    paddingLeft: 32,
+    paddingLeft: 36,
   },
   stepperLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
   stepperMuted: { fontSize: fontSize.sm, color: colors.textMuted },
@@ -1032,7 +1097,7 @@ const styles = StyleSheet.create({
   stepperValue: { minWidth: 24, textAlign: 'center', fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
 
   comment: {
-    marginTop: spacing.md,
+    marginTop: 10,
     backgroundColor: colors.warningSoft,
     color: colors.warning,
     borderRadius: radius.sm,
@@ -1053,7 +1118,7 @@ const styles = StyleSheet.create({
   actions: {
     flexDirection: 'row',
     gap: spacing.sm,
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: spacing.md,
@@ -1062,14 +1127,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     alignItems: 'center',
-    marginTop: spacing.lg,
+    marginTop: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     paddingTop: spacing.md,
     gap: spacing.sm,
   },
   selectedText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },
-  actionsBtns: { flexDirection: 'row', gap: spacing.sm, marginLeft: 'auto' },
+  actionsBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginLeft: 'auto', maxWidth: '100%' },
+  selectionButton: { height: 32, paddingHorizontal: 10, borderRadius: 8, justifyContent: 'center', alignItems: 'center' },
+  selectionButtonText: { fontSize: 13, fontWeight: '600', color: colors.white },
   clearSelection: { alignSelf: 'flex-start', marginTop: spacing.sm },
   clearSelectionText: { fontSize: fontSize.xs, fontWeight: '600', color: colors.primary },
 

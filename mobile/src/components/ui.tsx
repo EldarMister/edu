@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActivityIndicator, Animated, Easing, ScrollView, StyleSheet, View, type TextInputProps, type ViewStyle } from 'react-native';
+import { ActivityIndicator, Animated, Easing, ScrollView, StyleSheet, View, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import { colors, radius, spacing, fontSize, cardShadow, waiterLayout } from '@/theme';
 import { PwaIcon } from './PwaIcon';
@@ -14,6 +14,7 @@ export function Button({
   onPress,
   variant = 'primary',
   size = 'lg',
+  fontWeight = '500',
   loading,
   disabled,
   danger,
@@ -23,6 +24,7 @@ export function Button({
   onPress: () => void;
   variant?: ButtonVariant;
   size?: ButtonSize;
+  fontWeight?: TextStyle['fontWeight'];
   loading?: boolean;
   disabled?: boolean;
   /** Вторичная кнопка с красным текстом (как «Выйти»). */
@@ -38,11 +40,14 @@ export function Button({
 
   return (
     <FastPressable
+      accessibilityRole="button"
+      accessibilityLabel={title}
+      accessibilityState={{ disabled: !!isDisabled, busy: !!loading }}
       onPress={onPress}
       disabled={isDisabled}
       style={[
         styles.btn,
-        { height, backgroundColor: bg, opacity: isDisabled ? 0.5 : 1 },
+        { height, paddingHorizontal: size === 'lg' ? 20 : 16, backgroundColor: bg, opacity: isDisabled ? 0.5 : 1 },
         variant === 'secondary' && styles.btnSecondary,
         style,
       ]}
@@ -53,7 +58,7 @@ export function Button({
         <Text
           style={[
             styles.btnText,
-            { color: fg, fontSize: size === 'lg' ? fontSize.base : fontSize.sm },
+            { color: fg, fontSize: size === 'lg' ? fontSize.base : fontSize.sm, fontWeight },
           ]}
          translate>
           {title}
@@ -278,7 +283,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   btnSecondary: { borderWidth: 1, borderColor: colors.border },
-  btnText: { fontWeight: '600' },
+  btnText: { fontWeight: '500' },
   card: {
     backgroundColor: colors.card,
     borderRadius: radius.lg,

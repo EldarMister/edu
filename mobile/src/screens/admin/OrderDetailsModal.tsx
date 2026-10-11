@@ -1,7 +1,7 @@
 import React from 'react';
-import { Image, Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Linking, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/typography';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import QRCode from 'react-native-qrcode-svg';
@@ -71,7 +71,7 @@ export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCanc
 
   return (<>
     <BottomSheet visible={!!order} onClose={onClose} title={`Заказ ${displayOrderNumber(order.orderNumber)}`} maxHeight="90%">
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.lg, paddingBottom: spacing.md }}>
+      <SheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.lg, paddingBottom: spacing.md }}>
         {/* Информация */}
         <View>
           <Text style={styles.sectionTitle} translate>Информация</Text>
@@ -141,7 +141,7 @@ export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCanc
         </View>
 
         <FiscalBlock order={order} />
-      </ScrollView>
+      </SheetScrollView>
     </BottomSheet>
     <CancelOrderModal visible={!!cancelItem} title="Отменить блюдо?" confirmLabel="Отменить блюдо" orderLabel={cancelItem ? `${cancelItem.quantity}× ${orderItemDisplayName(cancelItem)} · ${money(cancelItem.finalPrice)}` : ''} submitting={cancel.isPending} onClose={() => setCancelItem(null)} onConfirm={(reason) => void confirmItemCancellation(reason)} />
     </>

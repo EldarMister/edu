@@ -1,9 +1,9 @@
 import React from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text } from '@/components/typography';
-import { BottomSheet } from '@/components/BottomSheet';
-import { Button } from '@/components/ui';
-import { colors, fontSize, spacing } from '@/theme';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
+import { FastPressable } from '@/components/FastPressable';
+import { colors, spacing } from '@/theme';
 
 export function InsufficientPermissionsSheet({
   visible, pending, onClose, onCall,
@@ -13,23 +13,40 @@ export function InsufficientPermissionsSheet({
   onClose: () => void;
   onCall: () => void;
 }) {
+  const { width } = useWindowDimensions();
+  const illustrationWidth = Math.min(300, width - 48);
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Недостаточно прав"
-      footer={<View style={styles.actions}>
-        <Button title="Позвать администратора" loading={pending} onPress={onCall} />
-        <Button title="Понятно" variant="secondary" disabled={pending} onPress={onClose} />
-      </View>}
-    >
-      <Image source={require('../../../assets/insufficient-permissions.png')} style={styles.illustration} resizeMode="contain" />
-      <Text style={styles.text} translate>
-        У вас недостаточно прав для отмены готового блюда или заказа. Пожалуйста, позовите администратора.
-      </Text>
+    <BottomSheet visible={visible} onClose={onClose} hideHeader>
+      <SheetScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Image source={require('../../../assets/insufficient-permissions.png')} style={[styles.illustration, { width: illustrationWidth, height: illustrationWidth * 517 / 738 }]} resizeMode="contain" />
+        <Text style={styles.title} translate>Недостаточно прав</Text>
+        <Text style={styles.text} translate>
+          У вас недостаточно прав для отмены заказа. Пожалуйста, позовите администратора.
+        </Text>
+        <View style={styles.actions}>
+          <FastPressable disabled={pending} onPress={onCall} style={[styles.button, styles.primaryButton, pending && styles.disabled]}>
+            <Text style={[styles.buttonText, styles.primaryButtonText]} translate>{pending ? 'Отправляем вызов…' : 'Позвать администратора'}</Text>
+          </FastPressable>
+          <FastPressable disabled={pending} onPress={onClose} style={[styles.button, styles.secondaryButton, pending && styles.disabled]}>
+            <Text style={[styles.buttonText, styles.secondaryButtonText]} translate>Понятно</Text>
+          </FastPressable>
+        </View>
+      </SheetScrollView>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  actions: { gap: spacing.sm },
-  illustration: { alignSelf: 'center', width: 280, height: 196, marginBottom: spacing.md },
-  text: { textAlign: 'center', fontSize: fontSize.md, lineHeight: 24, color: colors.textSecondary, paddingBottom: spacing.lg },
+  content: { alignItems: 'center', paddingHorizontal: spacing.sm, paddingTop: spacing.md, paddingBottom: spacing.sm },
+  actions: { gap: spacing.md, marginTop: 28, width: '100%' },
+  illustration: { alignSelf: 'center' },
+  title: { textAlign: 'center', fontSize: 28, fontWeight: '700', letterSpacing: -0.7, color: colors.textPrimary, marginTop: spacing.sm },
+  text: { textAlign: 'center', fontSize: 17, lineHeight: 28, color: colors.textSecondary, marginTop: spacing.md },
+  button: { minHeight: 48, borderRadius: 12, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.md },
+  buttonText: { fontSize: 16, fontWeight: '600' },
+  primaryButton: { backgroundColor: colors.primary },
+  primaryButtonText: { color: colors.white },
+  secondaryButton: { borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.white },
+  secondaryButtonText: { color: colors.primary },
+  disabled: { opacity: 0.5 },
 });

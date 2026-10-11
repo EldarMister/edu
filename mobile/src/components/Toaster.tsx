@@ -1,15 +1,16 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text } from '@/components/typography';
 import Animated, {
   interpolate,
+  Easing,
   useAnimatedStyle,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
-import { colors, fontSize, radius, spacing } from '@/theme';
+import { colors, fontSize, radius, spacing, softShadow } from '@/theme';
 import { popTiming } from '@/components/motion';
 import { type AppNotification, useNotifications } from '@/store/notifications';
 
@@ -19,6 +20,8 @@ type RenderedToast = AppNotification & { exiting?: boolean };
 
 export function Toaster() {
   const insets = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const maxWidth = width >= 640 ? 384 : width - 24;
   const toasts = useNotifications((s) => s.toasts);
   const [rendered, setRendered] = React.useState<RenderedToast[]>([]);
 
@@ -53,24 +56,31 @@ export function Toaster() {
   if (rendered.length === 0) return null;
 
   return (
-    <View pointerEvents="box-none" style={[styles.host, { top: insets.top + 12 }]}>
+    <View pointerEvents="box-none" style={[styles.host, { top: insets.top + 12, maxWidth }]}>
       {rendered.map((t) => (
-        <Toast key={t.id} toast={t} />
+        <Toast key={t.id} toast={t} maxWidth={maxWidth} />
       ))}
     </View>
   );
 }
 
-function Toast({ toast }: { toast: RenderedToast }) {
+function Toast({ toast, maxWidth }: { toast: RenderedToast; maxWidth: number }) {
   const dismiss = useNotifications((s) => s.dismiss);
   const progress = useSharedValue(0);
+  const collapse = useSharedValue(1);
+  const exitOpacity = useSharedValue(1);
 
   React.useEffect(() => {
-    progress.value = withTiming(toast.exiting ? 0 : 1, {
-      duration: toast.exiting ? TOAST_EXIT_MS : 180,
+    progress.value = withTiming(1, {
+      duration: 180,
       easing: popTiming.easing,
     });
-  }, [progress, toast.exiting]);
+  }, [progress]);
+
+  React.useEffect(() => {
+    collapse.value = withTiming(toast.exiting ? 0 : 1, { duration: TOAST_EXIT_MS, easing: popTiming.easing });
+    exitOpacity.value = withTiming(toast.exiting ? 0 : 1, { duration: 200, easing: Easing.bezier(0.25, 0.1, 0.25, 1) });
+  }, [collapse, exitOpacity, toast.exiting]);
 
   React.useEffect(() => {
     if (toast.exiting) return;
@@ -80,10 +90,12 @@ function Toast({ toast }: { toast: RenderedToast }) {
   }, [dismiss, toast.durationMs, toast.exiting, toast.id, toast.type]);
 
   const animatedStyle = useAnimatedStyle(() => ({
-    opacity: progress.value,
+    opacity: progress.value * exitOpacity.value,
+    maxHeight: 72 * collapse.value,
+    marginBottom: spacing.sm * collapse.value,
     transform: [
-      { translateX: interpolate(progress.value, [0, 1], [toast.exiting ? 0 : 18, 0]) },
-      { translateY: interpolate(progress.value, [0, 1], [toast.exiting ? -18 : 8, 0]) },
+      { translateX: interpolate(progress.value, [0, 1], [18, 0]) },
+      { translateY: (1 - progress.value) * 8 - (1 - collapse.value) * 18 },
       { scale: interpolate(progress.value, [0, 1], [0.98, 1]) },
     ],
   }));
@@ -94,8 +106,11 @@ function Toast({ toast }: { toast: RenderedToast }) {
         styles.toastShell,
         animatedStyle,
       ]}
+      pointerEvents={toast.exiting ? 'none' : 'auto'}
+      accessibilityElementsHidden={toast.exiting}
+      importantForAccessibility={toast.exiting ? 'no-hide-descendants' : 'auto'}
     >
-      <FastPressable onPress={() => dismiss(toast.id)} style={styles.toast}>
+      <FastPressable onPress={() => dismiss(toast.id)} style={[styles.toast, { maxWidth }]} accessibilityRole="alert" accessibilityLiveRegion="polite">
         <Text numberOfLines={1} style={styles.toastText}>
           {toast.message}
         </Text>
@@ -109,20 +124,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     right: spacing.md,
     zIndex: 1000,
-    maxWidth: '92%',
     alignItems: 'flex-end',
   },
   toastShell: {
-    marginBottom: spacing.sm,
+    maxHeight: 72,
   },
   toast: {
-    maxWidth: 360,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
     backgroundColor: colors.white,
     paddingHorizontal: spacing.lg,
     paddingVertical: 10,
+    ...softShadow,
   },
   toastText: {
     fontSize: fontSize.sm,

@@ -1,5 +1,8 @@
 import React from 'react';
-import { Animated, AppState, Easing, ScrollView, StyleSheet, View } from 'react-native';
+import { Animated, AppState, BackHandler, Easing, ScrollView, StyleSheet, View } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { runOnJS } from 'react-native-reanimated';
+import Constants from 'expo-constants';
 import { Text } from '@/components/typography';
 import { useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
 import { useQueryClient } from '@tanstack/react-query';
@@ -125,13 +128,26 @@ export function AdminNavigator() {
     setSection(s);
     setDrawerOpen(false);
   };
+  const preview = React.useCallback((s: Section) => {
+    navigation.setParams({ section: undefined, orderId: undefined });
+    setSection(s);
+  }, [navigation]);
+  const openDrawer = React.useCallback(() => setDrawerOpen(true), []);
+  const closeDrawer = React.useCallback(() => setDrawerOpen(false), []);
+  const edgeSwipe = React.useMemo(() => Gesture.Pan().enabled(!drawerOpen).maxPointers(1)
+    .activeOffsetX(72).failOffsetY([-48, 48])
+    .onTouchesDown((event, manager) => {
+      if ((event.allTouches[0]?.absoluteX ?? 999) > 68) manager.fail();
+    })
+    .onStart(() => { runOnJS(openDrawer)(); }), [drawerOpen, openDrawer]);
 
   return (
+    <GestureDetector gesture={edgeSwipe}>
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <OfflineBanner />
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <FastPressable onPress={() => setDrawerOpen(true)} hitSlop={8} style={styles.burger}>
+          <FastPressable onPress={() => setDrawerOpen(true)} hitSlop={8} style={styles.burger} accessibilityLabel="Открыть меню">
             <PwaIcon name="menu" size={22} color={colors.textSecondary} />
           </FastPressable>
           <Text style={styles.headerTitle} translate>{current?.label ?? ''}</Text>
@@ -168,11 +184,13 @@ export function AdminNavigator() {
         sections={sections}
         current={section}
         onSelect={go}
-        onClose={() => setDrawerOpen(false)}
+        onPreview={preview}
+        onClose={closeDrawer}
         onLogout={onLogout}
         onOpenWorkspace={(target) => { setDrawerOpen(false); navigation.navigate(target); }}
       />
     </SafeAreaView>
+    </GestureDetector>
   );
 }
 
@@ -181,6 +199,7 @@ function AdminDrawer({
   sections,
   current,
   onSelect,
+  onPreview,
   onClose,
   onLogout,
   onOpenWorkspace,
@@ -189,12 +208,33 @@ function AdminDrawer({
   sections: { key: Section; label: string; icon: PwaIconName }[];
   current: Section;
   onSelect: (s: Section) => void;
+  onPreview: (s: Section) => void;
   onClose: () => void;
   onLogout: () => void;
   onOpenWorkspace: (target: 'Kitchen' | 'Bar' | 'PublicHome') => void;
 }) {
   const [render, setRender] = React.useState(visible);
   const progress = React.useRef(new Animated.Value(0)).current;
+  const initialIndex = React.useRef(0);
+  const drawerState = React.useRef({ sections, current, onPreview });
+  drawerState.current = { sections, current, onPreview };
+  const closeGesture = React.useMemo(() => Gesture.Pan().activeOffsetX(-70).failOffsetY([-48, 48])
+    .onStart(() => runOnJS(onClose)()), [onClose]);
+  const selectGesture = React.useMemo(() => Gesture.Pan().activeOffsetY([-44, 44]).failOffsetX([-48, 48]).runOnJS(true)
+    .onBegin(() => { initialIndex.current = Math.max(0, drawerState.current.sections.findIndex(s => s.key === drawerState.current.current)); })
+    .onUpdate(event => {
+      const state = drawerState.current;
+      const index = Math.max(0, Math.min(state.sections.length - 1, initialIndex.current + Math.trunc(event.translationY / 44)));
+      const next = state.sections[index];
+      if (next && next.key !== state.current) state.onPreview(next.key);
+    }), []);
+  const drawerGesture = React.useMemo(() => Gesture.Race(closeGesture, selectGesture), [closeGesture, selectGesture]);
+
+  React.useEffect(() => {
+    if (!visible) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => { onClose(); return true; });
+    return () => subscription.remove();
+  }, [visible, onClose]);
 
   React.useEffect(() => {
     progress.stopAnimation();
@@ -218,7 +258,7 @@ function AdminDrawer({
 
   if (!render) return null;
 
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [-288, 0] });
+  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [-208, 0] });
   const opacity = progress;
 
   return (
@@ -226,12 +266,13 @@ function AdminDrawer({
       <Animated.View style={[styles.backdrop, { opacity }]}>
         <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} />
       </Animated.View>
+      <GestureDetector gesture={drawerGesture}>
       <Animated.View style={[styles.drawer, { transform: [{ translateX }] }]}>
         <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom', 'left']}>
           <View style={styles.drawerLogo}>
             <BrandLogo />
           </View>
-          <ScrollView style={styles.drawerNav} contentContainerStyle={styles.drawerNavContent} showsVerticalScrollIndicator={false}>
+          <View style={[styles.drawerNav, styles.drawerNavContent]}>
             {sections.map((s) => {
               const active = s.key === current;
               return (
@@ -245,20 +286,17 @@ function AdminDrawer({
                 </FastPressable>
               );
             })}
-            <View style={{ borderTopWidth: 1, borderTopColor: colors.border, marginTop: spacing.sm, paddingTop: spacing.sm }}>
-              <FastPressable onPress={() => onOpenWorkspace('Kitchen')} style={styles.navItem}><PwaIcon name="list" size={18} color={colors.textSecondary} /><Text style={styles.navLabel} translate>Кухня</Text></FastPressable>
-              <FastPressable onPress={() => onOpenWorkspace('Bar')} style={styles.navItem}><PwaIcon name="bag" size={18} color={colors.textSecondary} /><Text style={styles.navLabel} translate>Бар</Text></FastPressable>
-              <FastPressable onPress={() => onOpenWorkspace('PublicHome')} style={styles.navItem}><PwaIcon name="qr" size={18} color={colors.textSecondary} /><Text style={styles.navLabel} translate>Публичные экраны</Text></FastPressable>
-            </View>
-          </ScrollView>
+          </View>
           <View style={styles.drawerFooter}>
             <FastPressable onPress={onLogout} style={styles.navItem}>
               <PwaIcon name="logout" size={18} color={colors.textSecondary} />
               <Text style={styles.navLabel} translate>Выйти</Text>
             </FastPressable>
+            <Text style={{ fontSize: 11, lineHeight: 16, textAlign: 'center', color: colors.textLight, marginTop: 8 }}>v{Constants.expoConfig?.version ?? '0.2.1'}</Text>
           </View>
         </SafeAreaView>
       </Animated.View>
+      </GestureDetector>
     </View>
   );
 }
@@ -269,7 +307,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 56,
+    height: 64,
     backgroundColor: colors.white,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
@@ -286,14 +324,14 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     left: 0,
-    width: 272,
+    width: 208,
     backgroundColor: colors.white,
     borderRightWidth: 1,
     borderRightColor: colors.border,
   },
-  drawerLogo: { height: 64, justifyContent: 'center', paddingHorizontal: spacing.lg },
+  drawerLogo: { height: 64, justifyContent: 'center', paddingHorizontal: 20 },
   drawerNav: { flex: 1 },
-  drawerNavContent: { paddingHorizontal: spacing.md, gap: 4, paddingBottom: spacing.sm },
+  drawerNavContent: { paddingHorizontal: spacing.md, gap: 4, paddingVertical: spacing.sm },
   navItem: {
     flexDirection: 'row',
     alignItems: 'center',

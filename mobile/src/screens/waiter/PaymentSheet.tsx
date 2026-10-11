@@ -8,10 +8,12 @@ import Animated, {
   useSharedValue,
   withDelay,
   withTiming,
+  withSequence,
+  useReducedMotion,
 } from 'react-native-reanimated';
 import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { cardPopTiming, popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, softShadow, spacing } from '@/theme';
@@ -330,16 +332,19 @@ export function PaymentSheet({
       <BottomSheet
         visible={visible}
         onClose={close}
+        presentation={showSuccess ? 'center' : 'bottom'}
+        hideHeader={showSuccess}
+        bodyStyle={showSuccess ? { paddingHorizontal: 0, paddingVertical: 0 } : undefined}
         title={isPaymentComplete ? 'Оплата принята' : 'Оплата заказа'}
         footer={
-          showReceipt ? (
+          showSuccess ? undefined : showReceipt ? (
             <View style={styles.receiptActions}>
               <Button title="Готово" variant="secondary" onPress={close} style={{ flex: 1 }} />
               {activeOrder.waiter ? <Button title="Печать чека" loading={print.isPending} onPress={() => void requestPrint()} style={{ flex: 1 }} /> : null}
             </View>
           ) : isPaymentComplete ? (
             <Button title="Готово" variant="secondary" onPress={close} />
-          ) : showSuccess ? undefined : (
+          ) : (
             <View style={styles.payActions}>
               <FastPressable
                 onPress={() => setSplitOpen(true)}
@@ -356,6 +361,7 @@ export function PaymentSheet({
               <Button
                 title={`${selected === 'cash' || selected === 'card' ? 'Принять оплату' : 'Оплачено'} · ${money(total)}`}
                 onPress={submit}
+                fontWeight="600"
                 loading={pay.isPending}
                 disabled={confirmDisabled}
                 style={{ flex: 1 }}
@@ -364,7 +370,7 @@ export function PaymentSheet({
           )
         }
       >
-        {showSuccess ? <PaymentSuccessContent total={total} /> : showReceipt && currentReceipt ? <ReceiptContent receipt={currentReceipt} error={error} location={orderLocation(activeOrder)} directPrint={!activeOrder.waiter} /> : showReceiptError ? <PaymentReceiptErrorContent error={error} /> : <>
+        {showSuccess ? <PaymentSuccessContent total={total} /> : <SheetScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{showReceipt && currentReceipt ? <ReceiptContent receipt={currentReceipt} error={error} location={orderLocation(activeOrder)} directPrint={!activeOrder.waiter} /> : showReceiptError ? <PaymentReceiptErrorContent error={error} /> : <>
         <Text style={styles.subtitle}>
           {orderLocation(activeOrder)} · {displayOrderNumber(activeOrder.orderNumber)}
         </Text>
@@ -388,7 +394,7 @@ export function PaymentSheet({
               <FastPressable
                 key={item.key}
                 onPress={() => setTab(item.key)}
-                style={[styles.tab, active && styles.tabActive]}
+                style={[styles.tab, { width: tabs.length >= 3 ? '31.5%' : '48.5%' }, active && styles.tabActive]}
               >
                 <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1} translate>
                   {item.label}
@@ -412,6 +418,7 @@ export function PaymentSheet({
             </View>
           ) : selected === 'cash' || selected === 'card' ? null : (
             <View style={{ gap: spacing.md }}>
+              <View style={styles.mixedFields}>
               <View style={styles.mixedRow}>
                 <Text style={styles.mixedLabel} translate>Наличные</Text>
                 <TextInput
@@ -424,7 +431,7 @@ export function PaymentSheet({
                 />
               </View>
               <View style={styles.mixedRow}>
-                <Text style={styles.mixedLabel}>QR</Text>
+                <Text style={styles.mixedLabel} translate>QR-код</Text>
                 <TextInput
                   value={qrInput}
                   onChangeText={onQrChange}
@@ -433,6 +440,7 @@ export function PaymentSheet({
                   placeholderTextColor={colors.textLight}
                   style={styles.mixedInput}
                 />
+              </View>
               </View>
               <View style={styles.mixedSummary}>
                 <View style={styles.mixedSummaryRow}>
@@ -455,11 +463,12 @@ export function PaymentSheet({
           )}
         </View>
         {error ? <Text style={styles.inlineError}>{error}</Text> : null}
-        </>}
+        </>}</SheetScrollView>}
       </BottomSheet>
 
       <SplitBillSheet
         visible={splitOpen}
+        instantDismiss={showSuccess || isPaymentComplete}
         orderId={activeOrder.id}
         total={total}
         submitting={pay.isPending}
@@ -541,24 +550,29 @@ function ReceiptContent({
 }
 
 function PaymentSuccessContent({ total }: { total: number }) {
+  const reduceMotion = useReducedMotion();
   const card = useSharedValue(0);
-  const check = useSharedValue(0);
+  const check = useSharedValue(0.4);
+  const checkOpacity = useSharedValue(0);
 
   React.useEffect(() => {
+    if (reduceMotion) { card.value = 1; check.value = 1; checkOpacity.value = 1; return; }
     card.value = 0;
-    check.value = 0;
+    check.value = 0.4;
+    checkOpacity.value = 0;
     card.value = withTiming(1, {
       duration: cardPopTiming.enterMs,
       easing: cardPopTiming.easing,
     });
     check.value = withDelay(
       120,
-      withTiming(1, {
-        duration: cardPopTiming.checkMs,
-        easing: cardPopTiming.easing,
-      }),
+      withSequence(
+        withTiming(1.12, { duration: 270, easing: cardPopTiming.easing }),
+        withTiming(1, { duration: 180, easing: cardPopTiming.easing }),
+      ),
     );
-  }, [card, check]);
+    checkOpacity.value = withDelay(120, withTiming(1, { duration: 270, easing: cardPopTiming.easing }));
+  }, [card, check, checkOpacity, reduceMotion]);
 
   const cardStyle = useAnimatedStyle(() => ({
     opacity: card.value,
@@ -568,10 +582,8 @@ function PaymentSuccessContent({ total }: { total: number }) {
     ],
   }));
   const checkStyle = useAnimatedStyle(() => ({
-    opacity: check.value,
-    transform: [
-      { scale: interpolate(check.value, [0, 0.6, 1], [0.4, 1.12, 1]) },
-    ],
+    opacity: checkOpacity.value,
+    transform: [{ scale: check.value }],
   }));
 
   return (
@@ -606,6 +618,7 @@ function PaymentReceiptErrorContent({ error }: { error: string }) {
 
 function SplitBillSheet({
   visible,
+  instantDismiss,
   orderId,
   total,
   submitting,
@@ -613,6 +626,7 @@ function SplitBillSheet({
   onComplete,
 }: {
   visible: boolean;
+  instantDismiss: boolean;
   orderId: string;
   total: number;
   submitting: boolean;
@@ -730,7 +744,7 @@ function SplitBillSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Разделение счёта" maxHeight="88%">
+    <BottomSheet visible={visible} onClose={onClose} title="Разделение счёта" animationPreset={instantDismiss ? 'default' : 'split'} maxHeight="88%">
       <View style={styles.splitHeader}>
         <View>
           <Text style={styles.splitHint} translate>Сумма к оплате</Text>
@@ -743,9 +757,9 @@ function SplitBillSheet({
         </View>
       </View>
 
-      <ScrollView
+      <SheetScrollView
         showsVerticalScrollIndicator={false}
-        style={{ maxHeight: 460 }}
+        style={{ flexShrink: 1, minHeight: 0 }}
         onScrollBeginDrag={() => setMethodMenuIndex(null)}
         keyboardShouldPersistTaps="handled"
       >
@@ -839,7 +853,7 @@ function SplitBillSheet({
               <Text style={styles.splitError} translate>Сумма платежей должна быть равна {money(total)}</Text>
             ) : null}
           </View>
-      </ScrollView>
+      </SheetScrollView>
 
       <View style={styles.splitFooter}>
         <Text style={styles.splitHint} translate>Осталось к оплате</Text>
@@ -959,9 +973,9 @@ function SplitMethodSelect({
 
 const styles = StyleSheet.create({
   subtitle: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 4 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.md },
-  totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
-  totalValue: { fontSize: fontSize.xxl, fontWeight: '700', color: colors.textPrimary },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, marginBottom: 16 },
+  totalLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
+  totalValue: { fontSize: fontSize.xxl, fontWeight: '600', color: colors.textPrimary },
   warningBox: {
     marginTop: spacing.md,
     borderRadius: radius.md,
@@ -970,11 +984,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   warningText: { fontSize: fontSize.sm, color: colors.warning, lineHeight: 18 },
-  sectionLabel: { fontSize: fontSize.base, color: colors.textSecondary, marginTop: spacing.lg, marginBottom: spacing.sm },
+  sectionLabel: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary, marginBottom: spacing.sm },
   tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   tab: {
-    minWidth: '30%',
-    flexGrow: 1,
     height: 46,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -985,26 +997,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   tabActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
-  tabText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
+  tabText: { fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary },
   tabTextActive: { color: colors.primary },
-  content: { marginTop: spacing.md },
+  content: { marginTop: spacing.lg },
   qrBox: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    padding: spacing.lg,
+    padding: 20,
     alignItems: 'center',
     gap: spacing.md,
     minHeight: 160,
     justifyContent: 'center',
   },
-  qrHint: { fontSize: fontSize.base, color: colors.textSecondary, textAlign: 'center' },
-  qrImage: { width: 200, height: 200 },
-  qrMissing: { fontSize: fontSize.sm, color: colors.textLight, textAlign: 'center', paddingVertical: spacing.lg },
+  qrHint: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },
+  qrImage: { width: 288, maxWidth: '100%', height: 288 },
+  qrMissing: { fontSize: fontSize.sm, color: colors.warning, textAlign: 'center' },
+  mixedFields: { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, gap: 12 },
   mixedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   mixedLabel: { fontSize: fontSize.base, color: colors.textSecondary },
   mixedInput: {
-    width: 140,
+    width: 160,
     height: 44,
     borderWidth: 1,
     borderColor: colors.border,
@@ -1020,30 +1033,29 @@ const styles = StyleSheet.create({
   mixedSummaryValue: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
   mixedSuccess: { color: colors.success },
   mixedDanger: { color: colors.danger },
-  mixedHint: { fontSize: fontSize.xs, color: colors.textLight },
+  mixedHint: { fontSize: fontSize.xs, color: colors.textMuted },
   mixedError: { fontSize: fontSize.sm, color: colors.danger },
   inlineError: { marginTop: spacing.md, fontSize: fontSize.sm, color: colors.danger },
-  payActions: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
+  payActions: { flexDirection: 'row', gap: spacing.sm },
   splitButton: {
-    width: 148,
+    width: 136,
     height: 48,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.border,
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.sm,
   },
   splitButtonDisabled: { opacity: 0.5 },
-  splitButtonText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.primary },
+  splitButtonText: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
   successContent: {
-    minHeight: 280,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.xl,
   },
   successCard: {
+    ...softShadow,
     width: '100%',
     maxWidth: 300,
     borderRadius: 16,
@@ -1060,15 +1072,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  successTitle: { marginTop: spacing.lg, fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  successTitle: { marginTop: spacing.lg, fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   successText: { marginTop: 4, fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center' },
-  successAmount: { marginTop: spacing.md, fontSize: 24, fontWeight: '700', color: colors.textPrimary },
-  successProgress: { marginTop: spacing.lg, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  successAmount: { marginTop: spacing.md, fontSize: 24, fontWeight: '600', color: colors.textPrimary },
+  successProgress: { marginTop: 20, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   successProgressText: { fontSize: fontSize.xs, color: colors.textLight },
   paymentCompleteError: { minHeight: 220, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl },
   paymentCompleteTitle: { marginTop: spacing.md, fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
   paymentCompleteText: { marginTop: spacing.sm, fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center' },
-  receiptActions: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
+  receiptActions: { flexDirection: 'row', gap: spacing.sm },
   receiptBox: {
     borderWidth: 1,
     borderColor: colors.border,

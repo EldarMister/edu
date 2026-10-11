@@ -9,7 +9,7 @@ const Stack = createNativeStackNavigator<OrdersStackParamList>();
 /** Вкладка «Заказы»: список → подробная страница заказа. */
 export function OrdersNavigator() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
       <Stack.Screen name="OrdersList" component={OrdersScreen} />
       <Stack.Screen name="OrderDetail" component={OrderDetailScreen} />
     </Stack.Navigator>

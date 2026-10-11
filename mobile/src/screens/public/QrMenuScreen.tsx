@@ -1,11 +1,11 @@
 import React from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Alert, Text } from '@/components/typography';
 import { useRoute, type RouteProp } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useQueryClient } from '@tanstack/react-query';
 import { io } from 'socket.io-client';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Field, Loading } from '@/components/ui';
 import { API_URL } from '@/config/env';
@@ -168,7 +168,7 @@ function ProductSheet({ token, dish, geoRequired, onClose }: { token: string; di
   const busy = preparing || add.isPending;
   const fromPrice = dish?.variants.length ? Math.min(...dish.variants.map(item => Number(item.price))) : Number(dish?.price ?? 0);
   return <BottomSheet visible={!!dish} onClose={onClose} sheet maxHeight="88%" panelStyle={{ width: '100%', maxWidth: 448, alignSelf: 'center', borderTopLeftRadius: 24, borderTopRightRadius: 24 }} bodyStyle={{ paddingHorizontal: 0, paddingVertical: 0 }}>
-    <ScrollView style={{ flexShrink: 1 }} contentContainerStyle={styles.productContent} keyboardShouldPersistTaps="handled">
+    <SheetScrollView style={{ flexShrink: 1 }} contentContainerStyle={styles.productContent} keyboardShouldPersistTaps="handled">
       <View style={styles.productHeader}><QrPhoto url={dish?.imageUrl} name={dish?.name ?? ''} style={styles.productImage} /><View style={{ flex: 1, paddingTop: 4 }}><Text style={styles.productName}>{dish?.name}</Text>{dish?.description ? <Text style={styles.productDescription} numberOfLines={3}>{dish.description}</Text> : null}<Text style={styles.productPrice} translate>от {money(fromPrice)}</Text></View></View>
       {dish?.variants.length ? <View style={{ gap: 8 }}><Text style={styles.productLabel} translate>Размер</Text>{dish.variants.map(item => {
         const selected = variantId === item.id;
@@ -177,7 +177,7 @@ function ProductSheet({ token, dish, geoRequired, onClose }: { token: string; di
       <View style={styles.quantityRow}><Text style={styles.productLabel} translate>Количество</Text><QrQuantity value={quantity} disabled={busy} onChange={value => setQuantity(Math.max(1, Math.min(99, value)))} /></View>
       <Field label="Комментарий" value={comment} onChangeText={setComment} placeholder="Пожелания к блюду" multiline editable={!busy} />
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-    </ScrollView>
+    </SheetScrollView>
     <View style={styles.productFooter}><Button title={`Добавить · ${money(Number(variant?.price ?? dish?.price ?? 0) * quantity)}`} loading={busy} onPress={() => void onAdd()} style={{ borderRadius: 8 }} /></View>
   </BottomSheet>;
 }

@@ -87,7 +87,7 @@ export function LoginScreen() {
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
-            <Button title="Войти" onPress={onSubmit} loading={login.isPending} />
+            <Button title="Войти" onPress={onSubmit} loading={login.isPending} fontWeight="600" />
           </Card>
 
           <FastPressable accessibilityRole="button" onPress={() => navigation.navigate('PublicHome')}><Text style={{ color: colors.primary, textAlign: 'center', fontSize: fontSize.sm }} translate>Меню гостей · Табло очереди · Платформа</Text></FastPressable>

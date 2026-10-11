@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { InteractionManager, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { InteractionManager, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text } from '@/components/typography';
 import Animated, {
   interpolate,
@@ -10,7 +10,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Loading, PillTabs } from '@/components/ui';
 import { popTiming } from '@/components/motion';
@@ -410,6 +410,10 @@ function MoveTableSheet({
   onClose: () => void;
 }) {
   const [target, setTarget] = React.useState<string | null>(null);
+  const { width: windowWidth } = useWindowDimensions();
+  const columns = windowWidth >= 640 ? 5 : 4;
+  const [gridWidth, setGridWidth] = React.useState(0);
+  const tableWidth = Math.max(0, ((gridWidth || Math.min(windowWidth, 448) - 32) - spacing.sm * (columns - 1)) / columns);
   React.useEffect(() => setTarget(null), [visible]);
   const groups = halls
     .map((hall) => ({
@@ -423,7 +427,6 @@ function MoveTableSheet({
       visible={visible}
       onClose={onClose}
       title="Перенести стол"
-      maxHeight="78%"
       footer={
         <View style={styles.sheetActions}>
           <Button title="Отмена" variant="secondary" onPress={onClose} style={{ flex: 1 }} />
@@ -441,16 +444,16 @@ function MoveTableSheet({
       {groups.length === 0 ? (
         <Text style={styles.emptySheetText} translate>Нет доступных столов для переноса</Text>
       ) : (
-        <View style={styles.sheetSections}>
+        <SheetScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={styles.sheetSections} showsVerticalScrollIndicator={false}>
           {groups.map((group) => (
             <View key={group.name}>
               <Text style={styles.sheetSectionTitle}>{group.name}</Text>
-              <View style={styles.pickGrid}>
+              <View style={styles.pickGrid} onLayout={(event) => setGridWidth(event.nativeEvent.layout.width)}>
                 {group.tables.map((tbl) => (
                   <FastPressable
                     key={tbl.id}
                     onPress={() => setTarget(tbl.id)}
-                    style={[styles.pickTable, target === tbl.id && styles.pickTableSelected]}
+                    style={[styles.pickTable, { width: tableWidth }, target === tbl.id && styles.pickTableSelected]}
                   >
                     <Text style={[styles.pickTableText, target === tbl.id && styles.pickTableTextSelected]}>{tbl.number}</Text>
                   </FastPressable>
@@ -458,7 +461,7 @@ function MoveTableSheet({
               </View>
             </View>
           ))}
-        </View>
+        </SheetScrollView>
       )}
     </BottomSheet>
   );
@@ -510,7 +513,7 @@ function TransferTableSheet({
       ) : list.length === 0 ? (
         <Text style={styles.emptySheetText} translate>Нет доступных официантов для передачи</Text>
       ) : (
-        <View style={styles.waiterList}>
+        <SheetScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={styles.waiterList} showsVerticalScrollIndicator={false}>
           {list.map((waiter) => (
             <FastPressable
               key={waiter.id}
@@ -523,7 +526,7 @@ function TransferTableSheet({
               <Text style={styles.waiterName}>{waiter.name}</Text>
             </FastPressable>
           ))}
-        </View>
+        </SheetScrollView>
       )}
     </BottomSheet>
   );
@@ -563,7 +566,7 @@ function getTableLayout(count: number, width: number, height: number) {
   if (splitVertical) {
     return {
       cardWidth,
-      cardHeight: Math.max(fillCardHeight, 156),
+      cardHeight: Math.max(fillCardHeight, 0),
       minHeight: 0,
       fontSize: 44,
       fill: true,
@@ -574,7 +577,7 @@ function getTableLayout(count: number, width: number, height: number) {
   if (roomyTwoColumn) {
     return {
       cardWidth,
-      cardHeight: Math.max(fillCardHeight, 118),
+      cardHeight: Math.max(fillCardHeight, 0),
       minHeight: 0,
       fontSize: 38,
       fill: true,
@@ -594,7 +597,7 @@ function getTableLayout(count: number, width: number, height: number) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
-  panel: { flex: 1, paddingHorizontal: spacing.xs, paddingTop: spacing.sm },
+  panel: { flex: 1, paddingHorizontal: spacing.sm, paddingTop: 10 },
   titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
   panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   actionsAnchor: { position: 'relative', zIndex: 30 },
@@ -610,12 +613,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   editBtnDisabled: { opacity: 0.4 },
-  editBtnText: { fontSize: fontSize.sm, color: colors.textLight, fontWeight: '500' },
+  editBtnText: { fontSize: 12, color: colors.textLight, fontWeight: '500' },
   editBtnTextActive: { color: colors.textSecondary },
   tableActionsMenu: {
     position: 'absolute',
-    right: spacing.xs,
-    top: spacing.sm + 38,
+    right: spacing.sm,
+    top: 10 + 38,
     width: 192,
     borderWidth: 1,
     borderColor: colors.border,
@@ -630,7 +633,7 @@ const styles = StyleSheet.create({
   tableActionText: { fontSize: fontSize.sm, color: colors.textSecondary },
 
   tableList: { flex: 1, minHeight: 0 },
-  grid: { paddingBottom: spacing.md, flexGrow: 1 },
+  grid: { flexGrow: 1 },
   gridFill: { minHeight: '100%' },
   tableGrid: {
     minHeight: '100%',
@@ -640,7 +643,6 @@ const styles = StyleSheet.create({
     gap: spacing.md,
   },
   table: {
-    minHeight: 104,
     borderRadius: waiterLayout.tableCardRadius,
     borderWidth: 1,
     borderColor: colors.border,
@@ -654,6 +656,7 @@ const styles = StyleSheet.create({
   tableNumber: { fontWeight: '500', color: colors.textPrimary },
 
   legend: {
+    marginTop: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     flexGrow: 0,
@@ -661,15 +664,14 @@ const styles = StyleSheet.create({
   legendContent: { gap: spacing.md, paddingTop: spacing.sm, paddingBottom: spacing.xs },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { fontSize: fontSize.xs, color: colors.textMuted },
-  sheetText: { fontSize: fontSize.base, color: colors.textSecondary, lineHeight: 22 },
-  sheetHint: { fontSize: fontSize.base, color: colors.textMuted, marginBottom: spacing.md, lineHeight: 22 },
+  legendText: { fontSize: 11, color: colors.textMuted },
+  sheetText: { fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
+  sheetHint: { fontSize: 14, color: colors.textMuted, marginBottom: spacing.md, lineHeight: 20 },
   sheetActions: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
   sheetSections: { gap: spacing.md },
-  sheetSectionTitle: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted, marginBottom: spacing.sm },
+  sheetSectionTitle: { fontSize: 12, fontWeight: '500', color: colors.textMuted, marginBottom: 6 },
   pickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   pickTable: {
-    width: '22.6%',
     height: 60,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -690,7 +692,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
+    paddingHorizontal: 14,
     paddingVertical: spacing.md,
   },
   waiterPickSelected: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
@@ -703,5 +705,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   waiterAvatarText: { fontSize: fontSize.base, fontWeight: '700', color: colors.primary },
-  waiterName: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  waiterName: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
 });

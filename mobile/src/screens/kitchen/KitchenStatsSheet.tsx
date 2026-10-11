@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
@@ -65,15 +65,15 @@ function DateRangeFields({ from, to, onFrom, onTo }: {
   return <View style={{ gap: spacing.sm }}>
     <View style={{ flexDirection: 'row', gap: spacing.sm }}>
       <View style={{ flex: 1 }}>
-        <DateField label="С" accessibilityLabel="Начало периода" placeholder="ГГГГ-ММ-ДД" maxLength={10}
+        <DateField label="С" accessibilityLabel="Начало периода" placeholder="ДД.ММ.ГГГГ" maxLength={10}
           value={from} onChangeText={onFrom} style={styles.searchInput} />
       </View>
       <View style={{ flex: 1 }}>
-        <DateField label="По" accessibilityLabel="Конец периода" placeholder="ГГГГ-ММ-ДД" maxLength={10}
+        <DateField label="По" accessibilityLabel="Конец периода" placeholder="ДД.ММ.ГГГГ" maxLength={10}
           value={to} onChangeText={onTo} style={styles.searchInput} />
       </View>
     </View>
-    {!validDateRange(from, to) ? <Text style={{ color: colors.danger }} translate>Введите корректный период в формате ГГГГ-ММ-ДД.</Text> : null}
+    {!validDateRange(from, to) ? <Text style={{ color: colors.danger }} translate>Введите корректный период в формате ДД.ММ.ГГГГ.</Text> : null}
   </View>;
 }
 
@@ -82,10 +82,13 @@ export function KitchenStatsSheet({
   visible,
   station,
   onClose,
+  inline = false,
 }: {
   visible: boolean;
   station: PrepStation;
   onClose: () => void;
+  /** The PWA statistics tab keeps the station header and toolbar visible. */
+  inline?: boolean;
 }) {
   const [period, setPeriod] = useState<KitchenStatsPeriod>('today');
   const [longOpen, setLongOpen] = useState<'longest' | 'fastest' | null>(null);
@@ -109,14 +112,14 @@ export function KitchenStatsSheet({
   const preparedDishes = useMemo(() => (d ? [...d.dishes].sort((a, b) => b.count - a.count) : []), [d]);
 
   return (
-    <FullscreenSheet visible={visible} onClose={onClose} style={styles.screen}>
-      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-        <View style={styles.header}>
+    <StatsSurface inline={inline} visible={visible} onClose={onClose}>
+      <SafeAreaView style={styles.screen} edges={inline ? [] : ['top', 'bottom']}>
+        {!inline ? <View style={styles.header}>
           <Text style={styles.headerTitle} translate>Статистика</Text>
           <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
             <PwaIcon name="close" size={22} color={colors.textLight} />
           </FastPressable>
-        </View>
+        </View> : null}
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <PeriodTabs period={period} onChange={setPeriod} />
@@ -210,8 +213,16 @@ export function KitchenStatsSheet({
         <HourlyModal station={station} initialPeriod={period} initialFrom={from} initialTo={to}
           onClose={() => setHourlyOpen(false)} />
       ) : null}
-    </FullscreenSheet>
+    </StatsSurface>
   );
+}
+
+function StatsSurface({ inline, visible, onClose, children }: {
+  inline: boolean; visible: boolean; onClose: () => void; children: React.ReactNode;
+}) {
+  return inline
+    ? <View style={styles.screen}>{children}</View>
+    : <FullscreenSheet visible={visible} onClose={onClose} style={styles.screen}>{children}</FullscreenSheet>;
 }
 
 /* ---------- Период ---------- */
@@ -223,6 +234,9 @@ function PeriodTabs({
   period: KitchenStatsPeriod;
   onChange: (p: KitchenStatsPeriod) => void;
 }) {
+  const { width } = useWindowDimensions();
+  const narrow = width < 640;
+  const tabWidth = (width - spacing.lg * 2 - 8 - 8) / 3;
   return (
     <View style={styles.periodTabs}>
       {PERIODS.map((p) => {
@@ -231,7 +245,7 @@ function PeriodTabs({
           <FastPressable
             key={p.value}
             onPress={() => onChange(p.value)}
-            style={[styles.periodTab, active && styles.periodTabActive]}
+            style={[styles.periodTab, narrow && { width: tabWidth }, active && styles.periodTabActive]}
           >
             <Text style={[styles.periodTabText, active && styles.periodTabTextActive]} translate>{p.label}</Text>
           </FastPressable>
@@ -631,14 +645,13 @@ const styles = StyleSheet.create({
 
   periodTabs: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 4,
     backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
     borderRadius: radius.md,
     padding: 4,
   },
-  periodTab: { flex: 1, borderRadius: radius.sm, paddingVertical: spacing.sm, alignItems: 'center' },
+  periodTab: { borderRadius: radius.sm, paddingVertical: spacing.sm, paddingHorizontal: 16, alignItems: 'center' },
   periodTabActive: {
     backgroundColor: colors.white,
     shadowColor: '#0F172A',
@@ -647,7 +660,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  periodTabText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted },
+  periodTabText: { fontSize: 14, fontWeight: '500', color: colors.textMuted },
   periodTabTextActive: { color: colors.primary },
 
   summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },

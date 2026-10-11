@@ -94,7 +94,7 @@ export function RootNavigator() {
       <View style={{ flex: 1 }}>
       <StatusBar animated barStyle={activeRoot === 'Waiter' ? 'light-content' : 'dark-content'} backgroundColor={activeRoot === 'Waiter' ? colors.primary : colors.white} />
       {isAuthed ? <AuthRuntime key={user.id} /> : null}
-      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', animationDuration: 220 }}>
+      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
         <Stack.Group navigationKey={isAuthed ? user.id : 'guest'}>
         {!isAuthed ? (
           <Stack.Screen name="Login" component={LoginScreen} />

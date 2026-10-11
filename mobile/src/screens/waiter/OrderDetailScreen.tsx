@@ -474,7 +474,7 @@ export function OrderDetailScreen() {
         ) : null}
         <View style={styles.totalRow}>
           <Text style={styles.totalLabel} translate>Итого</Text>
-          <NumberTicker value={Number(order.finalAmount)} style={styles.totalValue} digitHeight={32} />
+          <NumberTicker value={Number(order.finalAmount)} style={styles.totalValue} digitHeight={26} />
         </View>
         {canPrintPreliminary && order.status !== 'served' ? (
           <Button title="Счёт" variant="secondary" loading={print.isPending}
@@ -556,7 +556,7 @@ function ItemCard({
   return (
     <FastPressable disabled={!clickable} onPress={onCancel} style={[styles.itemCard, rejected && styles.itemCardRejected]}>
       <View style={styles.itemMainRow}>
-        <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={2} translate>
+        <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={1}>
           {name}
           {item.takeaway ? '  · с собой' : ''}
         </Text>
@@ -782,7 +782,7 @@ function PartialRejectionScreen({
 
         <View style={styles.partialTotalBlock}>
           <Text style={styles.totalLabel} translate>Итого</Text>
-          <NumberTicker value={activeTotal} style={styles.totalValue} digitHeight={32} />
+          <NumberTicker value={activeTotal} style={styles.totalValue} digitHeight={26} />
         </View>
 
         <Text style={styles.sectionTitle} translate>3. Решение</Text>
@@ -819,7 +819,7 @@ const styles = StyleSheet.create({
   titleBlock: {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.sm,
     paddingTop: 4,
     paddingBottom: 5,
     gap: 4,
@@ -836,7 +836,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.sm,
     paddingTop: 4,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
@@ -852,37 +852,37 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    height: 30,
+    height: 28,
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border,
     justifyContent: 'center',
     paddingHorizontal: spacing.sm,
   },
-  editOrderText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
-  list: { paddingHorizontal: spacing.lg, paddingTop: 6, gap: 6, paddingBottom: spacing.md },
+  editOrderText: { fontSize: 12, fontWeight: '500', color: colors.textSecondary },
+  list: { paddingHorizontal: spacing.sm, paddingTop: spacing.sm, gap: 6, paddingBottom: spacing.sm },
   itemCard: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.md,
-    paddingVertical: 10,
+    paddingVertical: spacing.sm,
     gap: 3,
   },
   itemCardRejected: {
     borderColor: 'rgba(239,68,68,0.30)',
-    backgroundColor: colors.dangerSoft,
+    backgroundColor: 'rgba(239,68,68,0.05)',
   },
   itemMainRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   itemName: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary },
   itemRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
-  itemQty: { fontSize: fontSize.base, color: colors.textMuted },
-  itemRight: { alignItems: 'flex-end', gap: 2, minWidth: 72 },
-  itemPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
-  itemDone: { fontSize: fontSize.sm, color: colors.success, fontWeight: '600' },
-  itemCooking: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: '500' },
-  itemRejected: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '600' },
-  itemExtra: { gap: 6, marginTop: 2 },
+  itemQty: { fontSize: 14, color: colors.textSecondary },
+  itemRight: { alignItems: 'flex-end', gap: 2, minWidth: 80 },
+  itemPrice: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
+  itemDone: { fontSize: 12, color: colors.success, fontWeight: '600' },
+  itemCooking: { fontSize: 12, color: colors.textMuted, fontWeight: '500' },
+  itemRejected: { fontSize: 12, color: colors.danger, fontWeight: '500' },
+  itemExtra: { gap: 6, marginTop: 6 },
   setParts: {
     gap: 4,
     borderWidth: 1,
@@ -893,7 +893,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   setPartRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  setPartName: { flex: 1, minWidth: 0, fontSize: fontSize.xs, color: colors.textSecondary },
+  setPartName: { flex: 1, minWidth: 0, fontSize: 12, color: colors.textSecondary },
   setPartRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
   setPartOld: { color: colors.textMuted, textDecorationLine: 'line-through' },
   setPartArrow: { color: colors.textMuted, fontWeight: '700' },
@@ -913,19 +913,19 @@ const styles = StyleSheet.create({
   setPartStatusTextDone: { color: colors.green600 },
   setPartStatusTextDanger: { color: colors.danger },
   setPartStatusTextCooking: { color: colors.textSecondary },
-  itemComment: { fontSize: fontSize.xs, color: colors.textMuted },
-  itemRejectReason: { fontSize: fontSize.xs, color: colors.danger },
+  itemComment: { fontSize: 12, color: colors.textMuted },
+  itemRejectReason: { fontSize: 12, color: colors.danger },
   footer: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
   },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
-  totalValue: { fontSize: 22, fontWeight: '600', color: colors.textPrimary },
+  totalLabel: { fontSize: 15, fontWeight: '500', color: colors.textSecondary },
+  totalValue: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
   actions: { flexDirection: 'row', gap: spacing.sm },
   preReceiptBtn: {
     width: 110,
@@ -1032,7 +1032,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     textAlignVertical: 'top',
   },
-  partialList: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: spacing.sm },
+  partialList: { paddingHorizontal: spacing.sm, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: spacing.sm },
   partialTitle: { flexShrink: 1, fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
   partialTitleMuted: { fontSize: fontSize.sm, fontWeight: '400', color: colors.textMuted },
   sectionTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary, marginTop: 2 },

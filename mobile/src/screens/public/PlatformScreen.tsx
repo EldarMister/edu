@@ -1,17 +1,22 @@
 import React from 'react';
 import { RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { Alert, Text } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { Button, Field, Loading, PillTabs } from '@/components/ui';
 import { FastPressable } from '@/components/FastPressable';
+import { PwaIcon } from '@/components/PwaIcon';
+import { ScreenTransition } from '@/components/ScreenTransition';
 import { DateField } from '@/components/DateField';
 import { apiError } from '@/lib/api';
 import { usePlatformAuth } from '@/store/platformAuth';
 import { useCafeStaff, useCafes, useCleanupCafe, useCreateCafe, useDeleteCafe, useDeleteStaff, useHealth, useMemory, usePlatformLogin, useResumeCafe, useSetStaffActive, useSuspendCafe, useUpdateSubscription, type CleanupScope, type PlatformCafe } from '@/services/api/platform';
 import { colors, fontSize, radius, spacing } from '@/theme';
-import { PublicError, PublicLayout } from './PublicLayout';
+import { PublicError } from './PublicLayout';
 
 export function PlatformScreen() {
+  const navigation = useNavigation();
   const token = usePlatformAuth(state => state.token);
   const hydrated = usePlatformAuth(state => state.hydrated);
   const [login, setLogin] = React.useState('');
@@ -23,13 +28,26 @@ export function PlatformScreen() {
     try { setError(''); const data = await mutation.mutateAsync({ login: login.trim(), password }); usePlatformAuth.getState().setSession(data.accessToken, data.admin); setPassword(''); }
     catch (e) { setError(apiError(e)); }
   };
-  return <PublicLayout title="EDU POS · Платформа" right={token ? <Button size="md" variant="secondary" title="Выйти" onPress={() => usePlatformAuth.getState().logout()} /> : undefined}>
-    {!hydrated ? <Loading /> : token ? <PlatformDashboard /> : <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled"><Text style={styles.heading} translate>Вход супер-администратора</Text><Field label="Логин" value={login} onChangeText={setLogin} autoCapitalize="none" /><Field label="Пароль" value={password} onChangeText={setPassword} secureTextEntry onSubmitEditing={() => void authenticate()} />{error ? <Text style={styles.error}>{error}</Text> : null}<Button title="Войти" onPress={() => void authenticate()} loading={mutation.isPending} /></ScrollView>}
-  </PublicLayout>;
+  return <SafeAreaView style={styles.screen}>
+    {!hydrated ? <Loading /> : token ? <PlatformDashboard /> : <>
+      <FastPressable style={styles.loginBack} accessibilityLabel="Назад" hitSlop={12} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('PublicHome' as never)}><PwaIcon name="chevronLeft" size={22} color={colors.textMuted} /></FastPressable>
+      <ScrollView contentContainerStyle={styles.loginContent} keyboardShouldPersistTaps="handled"><View style={styles.loginCard}>
+        <Text style={styles.loginTitle}>EDU POS · Платформа</Text><Text style={styles.loginSubtitle} translate>Панель управления кафе</Text>
+        <Field label="Логин" value={login} onChangeText={setLogin} autoCapitalize="none" autoComplete="username" placeholder="superadmin" />
+        <Field label="Пароль" value={password} onChangeText={setPassword} secureTextEntry autoComplete="current-password" placeholder="••••••••" onSubmitEditing={() => void authenticate()} />
+        {error ? <Text style={styles.error}>{error}</Text> : null}<Button size="md" title="Войти" onPress={() => void authenticate()} loading={mutation.isPending} />
+      </View></ScrollView>
+    </>}
+  </SafeAreaView>;
 }
 function PlatformDashboard() {
   const [page, setPage] = React.useState<'cafes' | 'monitoring'>('cafes');
-  return <View style={{ flex: 1 }}><PillTabs value={page} items={[{ key: 'cafes', label: 'Заведения' }, { key: 'monitoring', label: 'Мониторинг' }]} onChange={setPage} />{page === 'cafes' ? <Cafes /> : <Monitoring />}</View>;
+  return <View style={styles.screen}>
+    <View style={styles.platformHeader}><View style={styles.row}><Text style={styles.platformTitle}>EDU POS · Платформа</Text><FastPressable hitSlop={10} onPress={() => usePlatformAuth.getState().logout()}><Text style={styles.logout} translate>Выйти</Text></FastPressable></View>
+      <View style={styles.platformTabs}>{([{ key: 'cafes', label: 'Кафе' }, { key: 'monitoring', label: 'Мониторинг' }] as const).map(item => <FastPressable key={item.key} onPress={() => setPage(item.key)} style={[styles.platformTab, page === item.key && styles.platformTabActive]}><Text style={[styles.platformTabText, page === item.key && { color: colors.primary }]} translate>{item.label}</Text></FastPressable>)}</View>
+    </View>
+    <ScreenTransition style={styles.screen} transitionKey={page}>{page === 'cafes' ? <Cafes /> : <Monitoring />}</ScreenTransition>
+  </View>;
 }
 function Cafes() {
   const query = useCafes();
@@ -85,4 +103,4 @@ function Monitoring() {
     {memory.isError ? <Text style={styles.error}>{apiError(memory.error)}</Text> : memory.data ? <View style={styles.card}><Text style={styles.name} translate>Память и время работы</Text><Text style={styles.muted} translate>RSS: {memory.data.rssMb} МБ</Text><Text style={styles.muted} translate>Heap: {memory.data.heapUsedMb} / {memory.data.heapTotalMb} МБ</Text><Text style={styles.muted} translate>Время работы: {Math.floor(memory.data.uptimeSec / 60)} мин</Text></View> : null}
   </ScrollView>;
 }
-const styles = StyleSheet.create({ content: { padding: spacing.lg, gap: spacing.md }, heading: { fontSize: fontSize.xxl, color: colors.textPrimary, fontWeight: '700', flexShrink: 1 }, name: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary, flexShrink: 1 }, muted: { fontSize: fontSize.sm, color: colors.textMuted, lineHeight: 20 }, card: { padding: spacing.lg, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, gap: spacing.md }, row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md }, error: { color: colors.danger, fontSize: fontSize.sm }, link: { color: colors.primary, fontWeight: '600' }, staff: { gap: spacing.sm, paddingVertical: spacing.sm, borderBottomWidth: 1, borderColor: colors.border } });
+const styles = StyleSheet.create({ screen: { flex: 1, backgroundColor: colors.background }, loginBack: { position: 'absolute', top: 12, left: 16, zIndex: 1 }, loginContent: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', padding: 16 }, loginCard: { width: '100%', maxWidth: 384, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white, padding: 24, gap: 12 }, loginTitle: { fontSize: 18, fontWeight: '700', color: colors.textPrimary }, loginSubtitle: { fontSize: 14, color: colors.textMuted, marginTop: -8, marginBottom: 8 }, platformHeader: { paddingHorizontal: 16, paddingVertical: 12, gap: 12, backgroundColor: colors.white, borderBottomWidth: 1, borderColor: colors.border }, platformTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary }, logout: { fontSize: 14, fontWeight: '500', color: colors.textSecondary }, platformTabs: { flexDirection: 'row', alignSelf: 'flex-start', borderRadius: 8, backgroundColor: colors.background, padding: 4 }, platformTab: { borderRadius: 6, paddingHorizontal: 16, paddingVertical: 6 }, platformTabActive: { backgroundColor: colors.white, elevation: 1 }, platformTabText: { fontSize: 14, fontWeight: '500', color: colors.textMuted }, content: { padding: spacing.lg, gap: spacing.md, width: '100%', maxWidth: 1024, alignSelf: 'center' }, heading: { fontSize: 24, color: colors.textPrimary, fontWeight: '700', flexShrink: 1 }, name: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary, flexShrink: 1 }, muted: { fontSize: fontSize.sm, color: colors.textMuted, lineHeight: 20 }, card: { padding: spacing.lg, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: radius.lg, gap: spacing.md }, row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md }, error: { color: colors.danger, fontSize: fontSize.sm }, link: { color: colors.primary, fontWeight: '600' }, staff: { gap: spacing.sm, paddingVertical: spacing.sm, borderBottomWidth: 1, borderColor: colors.border } });

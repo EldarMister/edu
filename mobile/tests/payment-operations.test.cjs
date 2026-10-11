@@ -68,7 +68,7 @@ function paymentHarness() {
     'react-native-reanimated': {},
     '@/components/typography': { Text: 'Text', TextInput: 'TextInput' },
     '@/components/FastPressable': { FastPressable: 'FastPressable' },
-    '@/components/ui': { Button: 'Button' }, '@/components/BottomSheet': { BottomSheet: 'BottomSheet' },
+    '@/components/ui': { Button: 'Button' }, '@/components/BottomSheet': { BottomSheet: 'BottomSheet', SheetScrollView: 'SheetScrollView' },
     '@/components/motion': {}, '@/components/PwaIcon': { PwaIcon: 'PwaIcon' },
     '@/theme': loadSource('src/theme/index.ts', {}),
     '@/services/api/waiter': {
@@ -117,10 +117,13 @@ test('normal payment preserves success animation, receipt and print owner', asyn
   assert.equal(env.paymentCalls.length, 1);
   env.payments.get('a').resolve(order('a')); await settle(); env.render();
   assert.ok(env.find('PaymentSuccessContent'));
+  assert.equal(env.find('BottomSheet').props.presentation, 'center', 'Success appears centered while retaining the payment owner');
+  assert.equal(env.find('BottomSheet').props.footer, undefined, 'Success animation has no payment or receipt buttons');
   env.receipts.get('a').resolve({ orderNumber: 'receipt-a' }); await settle(); env.render();
   assert.ok(env.find('PaymentSuccessContent'));
   env.finishAnimation(); await settle(); env.render();
   assert.equal(env.find('ReceiptContent').props.receipt.orderNumber, 'receipt-a');
+  assert.equal(env.find('BottomSheet').props.presentation, 'bottom');
   env.print(); env.printing.resolve({ id: 'request-a', orderId: 'a' }); await settle();
   assert.equal(env.begins.length, 1);
   assert.equal(env.printCalls[0].orderId, 'a');
@@ -216,16 +219,17 @@ test('printed realtime updates and the visible receipt sheet play exactly one ac
     '@/utils/format': { displayOrderNumber: String }, '@/utils/orderCache': {},
   });
   useRealtimeSync(); listeners.get(events.RECEIPT_PRINT_REQUEST_PRINTED)(request);
-  const accepted = { current: null };
+  const refs = [];
+  let refCursor = 0;
   const { ReceiptPrintSheet } = loadSource('src/components/ReceiptPrintSheet.tsx', {
-    react: { ...React, useRef: () => accepted, useEffect: effect => effect() },
+    react: { ...React, useRef: initial => refs[refCursor++] ?? (refs[refCursor - 1] = { current: initial }), useEffect: effect => effect() },
     'react-native': { StyleSheet: { create: value => value }, View: 'View' },
-    '@/components/typography': { Text: 'Text' }, '@/components/BottomSheet': { BottomSheet: 'BottomSheet' },
+    '@/components/typography': { Text: 'Text' }, '@/components/BottomSheet': { BottomSheet: 'BottomSheet', SheetScrollView: 'SheetScrollView' },
     '@/components/FastPressable': { FastPressable: 'FastPressable' }, '@/components/ui': { Button: 'Button' },
     '@/components/PwaIcon': { PwaIcon: 'PwaIcon' }, '@/theme': loadSource('src/theme/index.ts', {}),
     '@/store/receiptPrint': { useReceiptPrint: () => state }, '@/utils/format': {},
     '@/lib/sound': { beep: value => sounds.push(value) },
   });
-  ReceiptPrintSheet(); ReceiptPrintSheet();
+  ReceiptPrintSheet(); refCursor = 0; ReceiptPrintSheet();
   assert.deepEqual(sounds, ['accept']);
 });
