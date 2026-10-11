@@ -1,3 +1,4 @@
+import { DatePicker } from '@/components/DatePicker';
 import { useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
@@ -91,11 +92,10 @@ function CafeCard({ cafe }: { cafe: PlatformCafe }) {
       <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
         <div>
           <label className="mb-1 block text-xs text-text-muted">Оплачено до</label>
-          <input
-            type="date"
+          <DatePicker
             className="input h-9 w-40 px-2.5"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(value) => setDate(value)}
           />
         </div>
         <button

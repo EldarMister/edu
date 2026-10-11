@@ -1,3 +1,4 @@
+import { DatePicker } from '@/components/DatePicker';
 import { useMemo, useState } from 'react';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -118,19 +119,17 @@ export function WaiterOrdersReport({ staff, staffLoading }: { staff: StaffMember
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
           <div className="flex h-[50px] min-w-0 items-center rounded-xl border border-border bg-white sm:min-w-[390px]">
             <span className="shrink-0 border-r border-border px-3 text-sm text-text-muted">Период:</span>
-            <input
+            <DatePicker
               aria-label="Начало периода"
-              type="date"
               value={from}
-              onChange={(event) => changeFrom(event.target.value)}
+              onChange={(value) => changeFrom(value)}
               className="min-w-0 flex-1 bg-transparent px-3 text-sm text-text-primary outline-none"
             />
             <span className="text-text-light">—</span>
-            <input
+            <DatePicker
               aria-label="Конец периода"
-              type="date"
               value={to}
-              onChange={(event) => changeTo(event.target.value)}
+              onChange={(value) => changeTo(value)}
               className="min-w-0 flex-1 bg-transparent px-3 text-sm text-text-primary outline-none"
             />
           </div>

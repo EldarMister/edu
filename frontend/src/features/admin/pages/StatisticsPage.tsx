@@ -1,3 +1,4 @@
+import { DatePicker } from '@/components/DatePicker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
@@ -90,9 +91,9 @@ export function StatisticsPage() {
 
         {period === 'custom' && (
           <div className="flex flex-wrap items-center gap-2">
-            <input className="input h-10 w-[150px]" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+            <DatePicker className="input h-10 w-[150px]" value={from} max={to} onChange={(value) => setFrom(value)} />
             <span className="text-sm text-text-muted">—</span>
-            <input className="input h-10 w-[150px]" type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
+            <DatePicker className="input h-10 w-[150px]" value={to} max={today} onChange={(value) => setTo(value)} />
           </div>
         )}
       </div>
