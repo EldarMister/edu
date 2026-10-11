@@ -79,7 +79,6 @@
 }
 
 .orders-period-wrap,
-.orders-date-input-wrap,
 .orders-search-wrap {
   position: relative;
 }
@@ -107,8 +106,7 @@
 
 .orders-period-trigger .orders-chevron { width: 15px; height: 15px; }
 
-.orders-period-menu,
-.orders-calendar {
+.orders-period-menu {
   position: absolute;
   z-index: 35;
   top: calc(100% + 7px);
@@ -163,100 +161,6 @@
 
 .orders-date-input::placeholder,
 .orders-search-input::placeholder { color: #93a3be; font-weight: 400; }
-
-.orders-date-input-icon {
-  position: absolute;
-  top: 0;
-  right: 0;
-  display: grid;
-  width: 37px;
-  height: 46px;
-  place-items: center;
-  color: #324a76;
-}
-
-.orders-date-input-icon svg { width: 17px; height: 17px; }
-
-.orders-calendar {
-  right: 0;
-  width: 316px;
-  padding: 15px 16px 11px;
-}
-
-.orders-calendar-header,
-.orders-calendar-nav,
-.orders-calendar-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.orders-calendar-header { margin-bottom: 14px; }
-.orders-calendar-header strong { font-size: 14px; font-weight: 700; color: #172440; }
-.orders-calendar-nav { gap: 3px; }
-.orders-calendar-nav button {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 7px;
-  color: #466087;
-}
-.orders-calendar-nav button:hover { background: #f0f5fc; }
-.orders-calendar-nav svg { width: 17px; height: 17px; }
-.orders-calendar-nav svg.is-next { transform: rotate(180deg); }
-
-.orders-calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 2px;
-  text-align: center;
-}
-
-.orders-calendar-weekday {
-  display: grid;
-  height: 27px;
-  place-items: center;
-  color: #6e7e9a;
-  font-size: 11px;
-}
-
-.orders-calendar-grid button {
-  display: grid;
-  height: 34px;
-  place-items: center;
-  border-radius: 7px;
-  color: #1c2a48;
-  font-size: 14px;
-}
-
-.orders-calendar-grid button:hover,
-.orders-calendar-grid button:focus-visible {
-  background: #edf4ff;
-  outline: none;
-}
-
-.orders-calendar-grid button.is-outside { color: #a4b0c2; }
-.orders-calendar-grid button.is-today { box-shadow: inset 0 0 0 1px #a7c6ff; }
-.orders-calendar-grid button.is-selected,
-.orders-calendar-grid button.is-selected:hover {
-  background: #005bff;
-  box-shadow: 0 3px 8px rgba(0, 91, 255, .2);
-  color: #fff;
-}
-
-.orders-calendar-footer {
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid #edf1f7;
-}
-.orders-calendar-footer button {
-  padding: 5px 2px;
-  color: #005bff;
-  font-size: 13px;
-  font-weight: 600;
-}
-.orders-calendar-footer button:hover { color: #0049cc; text-decoration: underline; }
 
 .orders-search-wrap {
   flex: 1 1 205px;
@@ -389,6 +293,5 @@
   .orders-date-filter.is-custom { display: grid; grid-template-columns: 1fr 1fr; }
   .orders-date-filter.is-custom .orders-period-trigger,
   .orders-date-input { width: 100%; }
-  .orders-calendar { right: 0; width: min(316px, calc(100vw - 34px)); }
   .orders-table-scroll { max-height: calc(100vh - 380px); }
 }

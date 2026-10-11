@@ -1,3 +1,4 @@
+import { DatePicker } from '@/components/DatePicker';
 import { useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { timeHM } from '@/lib/format';
@@ -85,19 +86,17 @@ export function AuditPage() {
       {/* Фильтры */}
       <div className="card flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">
         <Field label={tr('С даты')}>
-          <input
-            type="date"
+          <DatePicker
             className="input h-10"
             value={from}
-            onChange={(e) => resetTo1(setFrom)(e.target.value)}
+            onChange={(value) => resetTo1(setFrom)(value)}
           />
         </Field>
         <Field label={tr('По дату')}>
-          <input
-            type="date"
+          <DatePicker
             className="input h-10"
             value={to}
-            onChange={(e) => resetTo1(setTo)(e.target.value)}
+            onChange={(value) => resetTo1(setTo)(value)}
           />
         </Field>
         <Field label={tr('Сотрудник')}>

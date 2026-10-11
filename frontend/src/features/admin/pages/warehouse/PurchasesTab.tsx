@@ -1,3 +1,4 @@
+import { DatePicker } from '@/components/DatePicker';
 import { useEffect, useMemo, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
@@ -294,7 +295,7 @@ function PurchaseEditModal({ id, onClose }: { id: string; onClose: () => void })
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Дата">
-              <input className="input h-10" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <DatePicker className="input h-10" value={date} onChange={(value) => setDate(value)} />
             </Field>
             <Field label="Поставщик">
               <input className="input h-10" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
@@ -539,7 +540,7 @@ function NewPurchaseForm() {
       <h3 className="mb-3 text-[15px] font-semibold text-text-primary">Новая закупка</h3>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Дата">
-          <input className="input h-9" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          <DatePicker className="input h-9" value={date} onChange={(value) => setDate(value)} />
         </Field>
         <Field label="Поставщик">
           <input

@@ -1,3 +1,4 @@
+import { DatePicker, DateTimePicker } from '@/components/DatePicker';
 import { useEffect, useMemo, useState } from 'react';
 import type { Role } from '@/types';
 import { Modal } from '@/components/Modal';
@@ -228,11 +229,10 @@ export function StaffPage() {
           {tab === 'current' && (
             <>
               <span className="text-sm text-text-secondary">{tr('Дата смены:')}</span>
-              <input
-                type="date"
+              <DatePicker
                 className="h-9 rounded-lg border border-border bg-white px-2.5 text-sm text-text-primary outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
                 value={date}
-                onChange={(e) => setDate(e.target.value)}
+                onChange={(value) => setDate(value)}
               />
               <button
                 onClick={() => reportQ.refetch()}
@@ -525,20 +525,18 @@ function HistoryFilters({
         <>
           <div className="flex items-center gap-2">
             <span className="text-sm text-text-muted">с</span>
-            <input
-              type="date"
+            <DatePicker
               className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
               value={filters.from ?? ''}
-              onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))}
+              onChange={(value) => setFilters((f) => ({ ...f, from: value }))}
             />
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-text-muted">по</span>
-            <input
-              type="date"
+            <DatePicker
               className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
               value={filters.to ?? ''}
-              onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))}
+              onChange={(value) => setFilters((f) => ({ ...f, to: value }))}
             />
           </div>
         </>
@@ -778,11 +776,10 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
       <div className="space-y-3">
         <p className="text-sm text-text-secondary">{row.employeeName} · {ROLE_LABEL[row.role]}</p>
         <Field label="Начало смены">
-          <input
-            type="datetime-local"
+          <DateTimePicker
             className="input"
             value={startedAt}
-            onChange={(e) => setStartedAt(e.target.value)}
+            onChange={(value) => setStartedAt(value)}
           />
         </Field>
         <label className="flex items-center gap-2.5 text-sm text-text-secondary">
@@ -791,11 +788,10 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
         </label>
         {!openShift && (
           <Field label="Окончание смены">
-            <input
-              type="datetime-local"
+            <DateTimePicker
               className="input"
               value={endedAt}
-              onChange={(e) => setEndedAt(e.target.value)}
+              onChange={(value) => setEndedAt(value)}
             />
           </Field>
         )}

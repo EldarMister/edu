@@ -1,3 +1,4 @@
+import { DatePicker } from '@/components/DatePicker';
 import { useMemo, useRef, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
@@ -49,10 +50,10 @@ export function ReconciliationPage() {
       <div className="card p-4 sm:p-5">
         <div className="flex flex-wrap items-end gap-3">
           <Field label="С даты">
-            <input className="input h-10 w-[150px]" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+            <DatePicker className="input h-10 w-[150px]" value={from} max={to} onChange={(value) => setFrom(value)} />
           </Field>
           <Field label="По дату">
-            <input className="input h-10 w-[150px]" type="date" value={to} max={today} onChange={(e) => setTo(e.target.value)} />
+            <DatePicker className="input h-10 w-[150px]" value={to} max={today} onChange={(value) => setTo(value)} />
           </Field>
           <div className="ml-auto flex items-end gap-2">
             <input

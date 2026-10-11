@@ -1,3 +1,4 @@
+import { DatePicker } from '@/components/DatePicker';
 import { useMemo, useState } from 'react';
 import type { PrepStation } from '@/types';
 import { Spinner } from '@/components/Spinner';
@@ -81,9 +82,9 @@ function CustomRange({
 }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <input className="input h-10 w-[150px]" type="date" value={from} max={to} onChange={(e) => onFrom(e.target.value)} />
+      <DatePicker className="input h-10 w-[150px]" value={from} max={to} onChange={(value) => onFrom(value)} />
       <span className="text-sm text-text-muted">—</span>
-      <input className="input h-10 w-[150px]" type="date" value={to} max={today} onChange={(e) => onTo(e.target.value)} />
+      <DatePicker className="input h-10 w-[150px]" value={to} max={today} onChange={(value) => onTo(value)} />
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { DatePicker } from '@/components/DatePicker';
 import { useMemo, useState } from 'react';
 import { WarehousePage } from '../WarehousePage';
 import { IngredientsTab } from './IngredientsTab';
@@ -125,9 +126,9 @@ function PeriodFilter({
       </div>
       {preset === 'custom' && (
         <div className="flex items-center gap-2">
-          <input className="input h-10 w-[145px] text-sm" type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+          <DatePicker className="input h-10 w-[145px] text-sm" value={customFrom} onChange={(value) => setCustomFrom(value)} />
           <span className="text-text-muted">-</span>
-          <input className="input h-10 w-[145px] text-sm" type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+          <DatePicker className="input h-10 w-[145px] text-sm" value={customTo} onChange={(value) => setCustomTo(value)} />
         </div>
       )}
     </div>

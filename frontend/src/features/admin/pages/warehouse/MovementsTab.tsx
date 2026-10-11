@@ -1,3 +1,4 @@
+import { DatePicker } from '@/components/DatePicker';
 import { useState } from 'react';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -49,17 +50,15 @@ export function MovementsTab() {
   return (
     <div className="space-y-4">
       <div className="card flex flex-wrap items-center gap-2 p-3">
-        <input
+        <DatePicker
           className="input h-9 w-[150px]"
-          type="date"
-          value={filter.from}
-          onChange={(e) => patch({ from: e.target.value })}
+          value={filter.from ?? ''}
+          onChange={(value) => patch({ from: value })}
         />
-        <input
+        <DatePicker
           className="input h-9 w-[150px]"
-          type="date"
-          value={filter.to}
-          onChange={(e) => patch({ to: e.target.value })}
+          value={filter.to ?? ''}
+          onChange={(value) => patch({ to: value })}
         />
         <input
           className="input h-9 flex-1 sm:max-w-[200px]"
