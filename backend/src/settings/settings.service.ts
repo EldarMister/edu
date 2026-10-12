@@ -126,7 +126,7 @@ export class SettingsService {
       language: s.language,
       paymentMethods: this.enabledMethodsOf(s),
       // Лёгкая версионированная ссылка вместо тяжёлого base64 — кэшируется браузером.
-      qrImageUrl: s.qrImageUrl ? `/settings/qr?v=${s.updatedAt.getTime()}` : null,
+      qrImageUrl: s.qrImageUrl ? `/settings/qr?ref=${encodeURIComponent(s.id)}&v=${s.updatedAt.getTime()}` : null,
       printerConnected: s.printerConnected,
       // Включена ли ККМ — без раскрытия ключей (нужно фронтенду для подсказок/гейтинга).
       fiscalEnabled: !!s.fiscalProvider,
@@ -146,10 +146,16 @@ export class SettingsService {
     };
   }
 
-  /** Декодирует сохранённый data URL QR-кода в бинарь для отдачи как картинка. */
-  async getQrImage(): Promise<{ buffer: Buffer; mime: string } | null> {
-    const s = await this.ensure();
-    if (!s.qrImageUrl) return null;
+  /** Публичное изображение по непрозрачному ID настроек конкретного кафе.
+   *  Image не отправляет JWT, поэтому tenant-контекст здесь отсутствует.
+   *  Без ref нельзя выбирать первую строку настроек или создавать новую. */
+  async getQrImage(ref?: string): Promise<{ buffer: Buffer; mime: string } | null> {
+    if (typeof ref !== 'string' || !ref.trim()) return null;
+    const s = await this.prisma.settings.findUnique({
+      where: { id: ref },
+      select: { qrImageUrl: true },
+    });
+    if (!s?.qrImageUrl) return null;
     const m = s.qrImageUrl.match(/^data:(image\/[a-z+]+);base64,(.+)$/i);
     if (!m) return null;
     return { mime: m[1], buffer: Buffer.from(m[2], 'base64') };

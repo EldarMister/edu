@@ -5,10 +5,16 @@ import { PushProvider, Role } from '@prisma/client';
 import { PushSubscriptionDto, RegisterDeviceDto } from './dto';
 import { cert, getApps, initializeApp, ServiceAccount } from 'firebase-admin/app';
 import { getMessaging, Messaging } from 'firebase-admin/messaging';
+import { Interval } from '@nestjs/schedule';
+import { getCafeId } from '../tenant/tenant-context';
+import { randomUUID } from 'node:crypto';
 
 const EXPO_PUSH_ENDPOINT = 'https://exp.host/--/api/v2/push/send';
+const EXPO_RECEIPTS_ENDPOINT = 'https://exp.host/--/api/v2/push/getReceipts';
 
 export interface PushPayload {
+  notificationId?: string;
+  at?: string;
   title: string;
   body: string;
   type?: 'info' | 'success' | 'error';
@@ -18,13 +24,15 @@ export interface PushPayload {
   channel?: 'orders' | 'kitchen' | 'payments';
 }
 
-type NativeDevice = { pushToken: string | null; pushProvider: PushProvider };
+type NativeDevice = { pushToken: string | null; pushProvider: PushProvider; userId: string };
 
 @Injectable()
 export class PushService {
   private readonly logger = new Logger(PushService.name);
   private configured = false;
   private fcm: Messaging | null = null;
+  private expoReceipts = new Map<string, { token: string; at: number }>();
+  private checkingReceipts = false;
 
   constructor(private prisma: PrismaService) {
     const publicKey = process.env.VAPID_PUBLIC_KEY;
@@ -76,6 +84,7 @@ export class PushService {
   }
 
   async notifyUser(userId: string, payload: PushPayload) {
+    payload = { notificationId: randomUUID(), at: new Date().toISOString(), ...payload };
     // Native push (мобильное приложение) работает независимо от Web Push (VAPID).
     await this.sendNativeToUsers([userId], payload);
 
@@ -91,11 +100,13 @@ export class PushService {
   }
 
   async notifyRole(role: Role, payload: PushPayload, cafeId?: string | null) {
-    const userWhere = { role, isActive: true, ...(cafeId ? { cafeId } : {}) };
+    payload = { notificationId: randomUUID(), at: new Date().toISOString(), ...payload };
+    const tenantId = cafeId ?? getCafeId();
+    const userWhere = { role, isActive: true, ...(tenantId ? { cafeId: tenantId } : {}) };
     // Native push для роли (мобильные устройства).
     const devices = await this.prisma.userDevice.findMany({
       where: { isActive: true, pushToken: { not: null }, user: userWhere },
-      select: { pushToken: true, pushProvider: true },
+      select: { pushToken: true, pushProvider: true, userId: true },
     });
     await this.sendNativeToDevices(devices, {
       ...payload,
@@ -113,24 +124,37 @@ export class PushService {
 
   /** Регистрирует/обновляет мобильное устройство для native push. */
   async registerDevice(userId: string, dto: RegisterDeviceDto) {
-    await this.prisma.userDevice.upsert({
-      where: { pushToken: dto.pushToken },
-      update: {
-        userId,
-        platform: dto.platform,
-        pushProvider: dto.provider ?? PushProvider.EXPO,
-        deviceId: dto.deviceId,
-        appVersion: dto.appVersion,
-        isActive: true,
-      },
-      create: {
-        userId,
-        pushToken: dto.pushToken,
-        platform: dto.platform,
-        pushProvider: dto.provider ?? PushProvider.EXPO,
-        deviceId: dto.deviceId,
-        appVersion: dto.appVersion,
-      },
+    const provider = dto.provider ?? PushProvider.EXPO;
+    if (provider === PushProvider.EXPO && !/^(ExponentPushToken|ExpoPushToken)\[[\w-]+\]$/.test(dto.pushToken)) {
+      throw new BadRequestException('Некорректный Expo push token');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { cafeId: true } });
+    await this.prisma.$transaction(async (tx) => {
+      // One installation has one active token, even after rotation or account switching.
+      if (dto.deviceId) {
+        await tx.userDevice.deleteMany({ where: { deviceId: dto.deviceId, pushProvider: provider, pushToken: { not: dto.pushToken } } });
+      }
+      await tx.userDevice.upsert({
+        where: { pushToken: dto.pushToken },
+        update: {
+          userId,
+          cafeId: user?.cafeId,
+          platform: dto.platform,
+          pushProvider: dto.provider ?? PushProvider.EXPO,
+          deviceId: dto.deviceId,
+          appVersion: dto.appVersion,
+          isActive: true,
+        },
+        create: {
+          userId,
+          cafeId: user?.cafeId,
+          pushToken: dto.pushToken,
+          platform: dto.platform,
+          pushProvider: dto.provider ?? PushProvider.EXPO,
+          deviceId: dto.deviceId,
+          appVersion: dto.appVersion,
+        },
+      });
     });
     return { ok: true };
   }
@@ -143,73 +167,79 @@ export class PushService {
 
   private async sendNativeToUsers(userIds: string[], payload: PushPayload) {
     const devices = await this.prisma.userDevice.findMany({
-      where: { userId: { in: userIds }, isActive: true, pushToken: { not: null } },
-      select: { pushToken: true, pushProvider: true },
+      where: { userId: { in: userIds }, isActive: true, pushToken: { not: null }, user: { isActive: true } },
+      select: { pushToken: true, pushProvider: true, userId: true },
     });
     await this.sendNativeToDevices(devices, payload);
   }
 
   private async sendNativeToDevices(devices: NativeDevice[], payload: PushPayload) {
-    const expoTokens = devices
-      .filter((device) => device.pushProvider === PushProvider.EXPO)
-      .map((device) => device.pushToken)
-      .filter((token): token is string => !!token);
-    const fcmTokens = devices
-      .filter((device) => device.pushProvider === PushProvider.FCM)
-      .map((device) => device.pushToken)
-      .filter((token): token is string => !!token);
+    const expoDevices = devices.filter((device) => device.pushProvider === PushProvider.EXPO && device.pushToken);
+    const fcmDevices = devices
+      .filter((device) => device.pushProvider === PushProvider.FCM);
 
     await Promise.all([
-      this.sendExpo(expoTokens, payload),
-      this.sendFcm(fcmTokens, payload),
+      this.sendExpo(expoDevices, payload),
+      // A per-user data payload prevents taps for an old account opening the new account.
+      ...[...new Set(fcmDevices.map((device) => device.userId))].map((userId) =>
+        this.sendFcm(fcmDevices.filter((device) => device.userId === userId).map((device) => device.pushToken!).filter(Boolean), payload, userId)),
     ]);
   }
 
   /** Отправка через Expo Push API для существующих RN-устройств. */
-  private async sendExpo(tokens: string[], payload: PushPayload) {
-    if (tokens.length === 0) return;
+  private async sendExpo(devices: NativeDevice[], payload: PushPayload) {
+    if (devices.length === 0) return;
+    for (let offset = 0; offset < devices.length; offset += 100) {
+      const batch = devices.slice(offset, offset + 100);
+      const tokens = batch.map((device) => device.pushToken!);
 
-    const messages = tokens.map((to) => ({
-      to,
-      title: payload.title,
-      body: payload.body,
-      sound: 'default',
-      priority: 'high',
-      data: {
-        type: payload.type,
-        orderId: payload.orderId,
-        orderNumber: payload.orderNumber,
-        url: payload.url,
-        channel: payload.channel,
-      },
-    }));
+      const messages = batch.map((device) => ({
+        to: device.pushToken,
+        title: payload.title,
+        body: payload.body,
+        sound: payload.channel === 'kitchen' ? 'new_order.mp3' : payload.channel === 'payments' ? 'payment_sound.mp3' : 'notify.mp3',
+        channelId: `${payload.channel ?? 'orders'}_v3`,
+        priority: 'high',
+        ttl: 3600,
+        data: {
+          notificationId: payload.notificationId,
+          at: payload.at,
+          recipientUserId: device.userId,
+          type: payload.type,
+          orderId: payload.orderId,
+          orderNumber: payload.orderNumber,
+          url: payload.url,
+          channel: payload.channel,
+        },
+      }));
 
-    try {
-      const res = await fetch(EXPO_PUSH_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(messages),
-      });
-      if (!res.ok) {
-        this.logger.warn(`Expo push failed: HTTP ${res.status}`);
-        return;
+      try {
+        const res = await this.requestExpo(EXPO_PUSH_ENDPOINT, messages);
+        if (!res.ok) {
+          this.logger.warn(`Expo push failed: HTTP ${res.status}`);
+          continue;
+        }
+        // Деактивируем устройства с невалидными токенами (DeviceNotRegistered).
+        const json = (await res.json()) as { data?: { status: string; id?: string; details?: { error?: string } }[] };
+        const tickets = json.data ?? [];
+        tickets.forEach((ticket, index) => {
+          if (ticket.status === 'ok' && ticket.id) this.expoReceipts.set(ticket.id, { token: tokens[index], at: Date.now() });
+          else if (ticket.status === 'error' && ticket.details?.error !== 'DeviceNotRegistered') this.logger.warn(`Expo push ticket: ${ticket.details?.error ?? 'unknown error'}`);
+        });
+        const deadTokens = tokens.filter((_, i) => tickets[i]?.details?.error === 'DeviceNotRegistered');
+        if (deadTokens.length > 0) {
+          await this.prisma.userDevice
+            .deleteMany({ where: { pushToken: { in: deadTokens } } })
+            .catch(() => undefined);
+        }
+      } catch (err) {
+        this.logger.warn(`Expo push error: ${(err as Error).message}`);
       }
-      // Деактивируем устройства с невалидными токенами (DeviceNotRegistered).
-      const json = (await res.json()) as { data?: { status: string; details?: { error?: string } }[] };
-      const tickets = json.data ?? [];
-      const deadTokens = tokens.filter((_, i) => tickets[i]?.details?.error === 'DeviceNotRegistered');
-      if (deadTokens.length > 0) {
-        await this.prisma.userDevice
-          .deleteMany({ where: { pushToken: { in: deadTokens } } })
-          .catch(() => undefined);
-      }
-    } catch (err) {
-      this.logger.warn(`Expo push error: ${(err as Error).message}`);
     }
   }
 
   /** FCM HTTP v1 через Firebase Admin SDK. Multicast ограничен 500 токенами. */
-  private async sendFcm(tokens: string[], payload: PushPayload) {
+  private async sendFcm(tokens: string[], payload: PushPayload, recipientUserId: string) {
     if (tokens.length === 0) return;
     if (!this.fcm) {
       this.logger.warn('FCM push skipped: Firebase service account is not configured.');
@@ -218,6 +248,9 @@ export class PushService {
 
     const data = Object.fromEntries(
       Object.entries({
+        recipientUserId,
+        notificationId: payload.notificationId,
+        at: payload.at,
         type: payload.type,
         orderId: payload.orderId,
         orderNumber: payload.orderNumber,
@@ -255,6 +288,48 @@ export class PushService {
         this.logger.warn(`FCM push error: ${(err as Error).message}`);
       }
     }
+  }
+
+  private expoHeaders(): Record<string, string> {
+    return { 'Content-Type': 'application/json', Accept: 'application/json',
+      ...(process.env.EXPO_ACCESS_TOKEN ? { Authorization: `Bearer ${process.env.EXPO_ACCESS_TOKEN}` } : {}) };
+  }
+
+  private async requestExpo(url: string, body: unknown): Promise<Response> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST', headers: this.expoHeaders(), body: JSON.stringify(body), signal: AbortSignal.timeout(15_000),
+        });
+        if (response.ok || attempt >= 2 || (response.status !== 429 && response.status < 500)) return response;
+      } catch (error) { if (attempt >= 2) throw error; }
+      await new Promise((resolve) => setTimeout(resolve, 1_000 * 2 ** attempt));
+    }
+  }
+
+  /** Tickets mean accepted, receipts report actual handoff to FCM/APNs. */
+  @Interval(60_000)
+  async checkExpoReceipts() {
+    if (this.checkingReceipts || this.expoReceipts.size === 0) return;
+    this.checkingReceipts = true;
+    try {
+      const now = Date.now();
+      for (const [id, receipt] of this.expoReceipts) if (now - receipt.at > 24 * 60 * 60_000) this.expoReceipts.delete(id);
+      const ids = [...this.expoReceipts].filter(([, receipt]) => now - receipt.at >= 60_000).slice(0, 1000).map(([id]) => id);
+      if (!ids.length) return;
+      const res = await this.requestExpo(EXPO_RECEIPTS_ENDPOINT, { ids });
+      if (!res.ok) { this.logger.warn(`Expo receipts failed: HTTP ${res.status}`); return; }
+      const json = await res.json() as { data?: Record<string, { status: string; details?: { error?: string } }> };
+      for (const [id, receipt] of Object.entries(json.data ?? {})) {
+        const token = this.expoReceipts.get(id)?.token;
+        this.expoReceipts.delete(id);
+        if (receipt.status === 'error') {
+          if (receipt.details?.error === 'DeviceNotRegistered' && token) await this.prisma.userDevice.deleteMany({ where: { pushToken: token } });
+          else this.logger.warn(`Expo push receipt: ${receipt.details?.error ?? 'unknown error'}`);
+        }
+      }
+    } catch (error) { this.logger.warn(`Expo receipts error: ${(error as Error).message}`); }
+    finally { this.checkingReceipts = false; }
   }
 
   private configureFcm() {

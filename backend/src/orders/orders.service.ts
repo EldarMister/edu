@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import {
   OrderItemStatus,
   OrderStatus,
@@ -3234,6 +3235,22 @@ export class OrdersService {
     }
     this.events.emitToKitchen(SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
     this.events.emitToAdmin(SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
+    // Station announcements (including item/order cancellation) must also arrive
+    // while native JS is suspended. Match the same station suppression as PWA voice.
+    const stationVoice = payload.voice as {
+      text?: string; byStation?: { kitchen?: string | null; bar?: string | null };
+      suppressStations?: { kitchen?: boolean; bar?: boolean };
+    } | undefined;
+    const changedAt = order.updatedAt instanceof Date ? order.updatedAt.toISOString() : String(order.updatedAt ?? '');
+    for (const [station, role] of [[PrepStation.kitchen, Role.KITCHEN], [PrepStation.bar, Role.BAR]] as const) {
+      const text = stationVoice?.byStation?.[station] ?? stationVoice?.text;
+      if (!text || stationVoice?.suppressStations?.[station]) continue;
+      void this.push.notifyRole(role, {
+        title: 'Обновление заказа', body: text, type: 'info', channel: 'kitchen',
+        notificationId: `kitchen-status:${String(order.id)}:${changedAt}:${station}`,
+        orderId: String(order.id), orderNumber: String(order.orderNumber), url: `/${station}`,
+      }, typeof order.cafeId === 'string' ? order.cafeId : undefined);
+    }
     // Гости QR-меню стола видят смену статуса своего заказа.
     if (order.source === 'qr' && typeof order.tableId === 'string') {
       this.events.emitToQrTable(order.tableId as string, SERVER_EVENTS.QR_ORDER_STATUS_CHANGED, {
@@ -3258,6 +3275,7 @@ export class OrdersService {
     // QR-заказ может быть без официанта — уведомлять некого.
     if (!waiterId) return;
     const payload = {
+      notificationId: randomUUID(),
       message,
       type,
       orderId: order.id,
@@ -3274,11 +3292,14 @@ export class OrdersService {
       orderId: order.id,
       orderNumber: order.orderNumber,
       url: '/waiter',
+      notificationId: payload.notificationId,
+      at: payload.at,
     });
   }
 
   private notifyKitchenNewOrder(order: {
     id: string;
+    updatedAt?: Date;
     orderNumber: string;
     source?: string;
     cafeId?: string | null;
@@ -3289,6 +3310,7 @@ export class OrdersService {
     if (stations.size === 0) stations.add(PrepStation.kitchen);
     const payload = {
       title: 'EDU POS',
+      notificationId: `kitchen:${order.id}:${order.updatedAt?.toISOString() ?? randomUUID()}`,
       body:
         order.source === 'delivery'
           ? `Новый заказ доставки ${order.orderNumber}`

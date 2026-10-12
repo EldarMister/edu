@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, Res } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { Role } from '@prisma/client';
 import { SettingsService } from './settings.service';
@@ -21,8 +21,8 @@ export class SettingsController {
   /** QR-код как картинка с долгим кэшем (URL версионируется по updatedAt). */
   @Public()
   @Get('settings/qr')
-  async qrImage(@Res() res: Response) {
-    const img = await this.settings.getQrImage();
+  async qrImage(@Res() res: Response, @Query('ref') ref?: string) {
+    const img = await this.settings.getQrImage(ref);
     if (!img) {
       res.status(404).end();
       return;
