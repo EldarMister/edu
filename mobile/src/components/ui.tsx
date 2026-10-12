@@ -83,7 +83,8 @@ export function Card({
 }) {
   const content = [
     styles.card,
-    highlighted && { borderColor: 'rgba(0,91,255,0.4)', backgroundColor: colors.primaryFaint },
+    // Opaque primary/5 over white prevents Android elevation showing through the padding.
+    highlighted && { borderColor: 'rgba(0,91,255,0.4)', backgroundColor: '#F2F7FF' },
     style,
   ];
   if (onPress) {

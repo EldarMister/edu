@@ -364,7 +364,7 @@ export function PaymentSheet({
                 fontWeight="600"
                 loading={pay.isPending}
                 disabled={confirmDisabled}
-                style={{ flex: 1 }}
+                style={{ flex: 1, paddingHorizontal: 4 }}
               />
             </View>
           )
@@ -406,7 +406,7 @@ export function PaymentSheet({
 
         <View style={styles.content}>
           {selected === 'qr' ? (
-            <View style={styles.qrBox}>
+            <View style={[styles.qrBox, !qrSrc && styles.qrMissingBox]}>
               {qrSrc ? (
                 <>
                   <Text style={styles.qrHint} translate>Покажите QR-код клиенту для оплаты</Text>
@@ -994,7 +994,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: 4,
   },
   tabActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
   tabText: { fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary },
@@ -1012,7 +1012,8 @@ const styles = StyleSheet.create({
   },
   qrHint: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },
   qrImage: { width: 288, maxWidth: '100%', height: 288 },
-  qrMissing: { fontSize: fontSize.sm, color: colors.warning, textAlign: 'center' },
+  qrMissingBox: { minHeight: 0, padding: 16, borderColor: 'rgba(255,155,0,0.3)', backgroundColor: 'rgba(255,155,0,0.05)' },
+  qrMissing: { fontSize: fontSize.sm, lineHeight: 20, color: colors.warning, textAlign: 'center' },
   mixedFields: { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, gap: 12 },
   mixedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   mixedLabel: { fontSize: fontSize.base, color: colors.textSecondary },
@@ -1036,20 +1037,23 @@ const styles = StyleSheet.create({
   mixedHint: { fontSize: fontSize.xs, color: colors.textMuted },
   mixedError: { fontSize: fontSize.sm, color: colors.danger },
   inlineError: { marginTop: spacing.md, fontSize: fontSize.sm, color: colors.danger },
-  payActions: { flexDirection: 'row', gap: spacing.sm },
+  payActions: { flexDirection: 'row', gap: 10 },
   splitButton: {
-    width: 136,
+    minWidth: 126,
+    maxWidth: 158,
+    flexBasis: '34%',
+    flexShrink: 0,
     height: 48,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.primary,
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.sm,
   },
   splitButtonDisabled: { opacity: 0.5 },
-  splitButtonText: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
+  splitButtonText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.primary },
   successContent: {
     alignItems: 'center',
     justifyContent: 'center',
