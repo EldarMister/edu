@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { ConnectionStatus } from './ConnectionStatus';
 import { colors, fontSize, spacing } from '@/theme';
 import { useCurrentShift } from '@/services/api/waiter';
@@ -14,7 +15,7 @@ export function ShiftStatusBadge() {
   return (
     <View style={styles.row}>
       <ConnectionStatus />
-      <Text style={[styles.shift, { color: active ? colors.success : colors.textMuted }]}>
+      <Text style={[styles.shift, { color: active ? colors.success : colors.textMuted }]} translate>
         {active ? 'Смена активна' : 'Нет смены'}
       </Text>
     </View>

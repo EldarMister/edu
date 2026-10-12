@@ -7,6 +7,7 @@ export const ROOMS = {
   WAITERS: 'role:waiters',
   ADMIN: 'role:admin',
   ADMIN_ONLY: 'role:admin-only',
+  cafeAdmins: (cafeId: string) => `cafe:${cafeId}:admins`,
   waiter: (waiterId: string) => `waiter:${waiterId}`,
   // Комната QR-меню конкретного стола: все гости стола получают обновления общего заказа.
   qrTable: (tableId: string) => `qr-table:${tableId}`,
@@ -25,6 +26,7 @@ export const SERVER_EVENTS = {
   MENU_UPDATED: 'menu:updated',
   SETTINGS_UPDATED: 'settings:updated',
   NOTIFICATION_NEW: 'notification:new',
+  ADMINISTRATOR_CALLED: 'administrator:called',
   // Печать чека: официант ⇄ администратор.
   RECEIPT_PRINT_REQUEST_CREATED: 'receipt_print_request_created',
   RECEIPT_PRINT_REQUEST_APPROVED: 'receipt_print_request_approved',

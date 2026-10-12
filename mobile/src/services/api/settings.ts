@@ -17,6 +17,7 @@ export interface PublicSettings {
   printerConnected: boolean;
   fiscalEnabled: boolean;
   serviceChargeAmount: string;
+  deliveryEnabled: boolean;
 }
 
 export interface Settings {
@@ -34,6 +35,9 @@ export interface Settings {
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
+  deliveryEnabled: boolean;
+  deliveryApiKeyConfigured: boolean;
+  deliveryApiKeyPrefix: string | null;
   qrImageUrl: string | null;
   printerConnected: boolean;
   queueDisplayEnabled: boolean;
@@ -53,7 +57,7 @@ export interface Settings {
 }
 
 export type SettingsInput = Partial<
-  Omit<Settings, 'id' | 'cafeId' | 'queueDisplayCode' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount'>
+  Omit<Settings, 'id' | 'cafeId' | 'queueDisplayCode' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount' | 'deliveryApiKeyConfigured' | 'deliveryApiKeyPrefix'>
 > & {
   serviceChargeAmount?: number;
 };
@@ -87,6 +91,14 @@ export function useAdminSettings() {
 export function useTestFiscalConnection() {
   return useMutation({
     mutationFn: async () => (await api.post<{ ok: boolean }>('/fiscal/test-connection')).data,
+  });
+}
+
+export function useGenerateDeliveryApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => (await api.post<{ apiKey: string; prefix: string }>('/admin/settings/delivery-api-key')).data,
+    onSuccess: ({ prefix }) => qc.setQueryData<Settings>(['settings', 'admin'], (current) => current ? { ...current, deliveryApiKeyConfigured: true, deliveryApiKeyPrefix: prefix } : current),
   });
 }
 

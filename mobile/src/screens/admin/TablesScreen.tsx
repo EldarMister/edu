@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Text, TextInput } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -108,18 +109,18 @@ export function TablesScreen() {
                       <Text style={styles.hallName} numberOfLines={1}>
                         {hall.name}
                       </Text>
-                      <Text style={styles.hallSub}>{hall.tables.length} столов</Text>
+                      <Text style={styles.hallSub} translate>{hall.tables.length} столов</Text>
                     </View>
                   </FastPressable>
                   {!hall.isActive ? (
                     <View style={styles.offBadge}>
-                      <Text style={styles.offBadgeText}>отключён</Text>
+                      <Text style={styles.offBadgeText} translate>отключён</Text>
                     </View>
                   ) : null}
                   <View style={styles.hallActions}>
                     <FastPressable onPress={() => setTableModal({ hall, table: null })} style={styles.addTableBtn}>
                       <PwaIcon name="plus" size={14} color={colors.textPrimary} />
-                      <Text style={styles.addTableText}>Стол</Text>
+                      <Text style={styles.addTableText} translate>Стол</Text>
                     </FastPressable>
                     <IconBtn icon="pencil" onPress={() => setHallModal(hall)} />
                     <IconBtn icon="trash" danger onPress={() => delHall(hall)} />
@@ -128,7 +129,7 @@ export function TablesScreen() {
 
                 {!isCollapsed ? (
                   hall.tables.length === 0 ? (
-                    <Text style={styles.emptyTables}>В зале пока нет столов</Text>
+                    <Text style={styles.emptyTables} translate>В зале пока нет столов</Text>
                   ) : (
                     hall.tables.map((t, i) => (
                       <View key={t.id} style={[styles.tableRow, i > 0 && styles.tableRowBorder]}>
@@ -137,8 +138,8 @@ export function TablesScreen() {
                             <Text style={styles.numBadgeText}>{t.number}</Text>
                           </View>
                           <View style={{ minWidth: 0 }}>
-                            <Text style={styles.tableName}>Стол {t.number}</Text>
-                            <Text style={styles.tableSeats}>{t.seats} мест</Text>
+                            <Text style={styles.tableName} translate>Стол {t.number}</Text>
+                            <Text style={styles.tableSeats} translate>{t.seats} мест</Text>
                           </View>
                         </View>
                         <View style={styles.tableActions}>
@@ -177,7 +178,7 @@ function TableBadge({ status }: { status: TableStatus }) {
         : { label: 'Готовится', bg: colors.orange100, fg: colors.orange600 };
   return (
     <View style={[styles.tableBadge, { backgroundColor: meta.bg }]}>
-      <Text style={[styles.tableBadgeText, { color: meta.fg }]}>{meta.label}</Text>
+      <Text style={[styles.tableBadgeText, { color: meta.fg }]} translate>{meta.label}</Text>
     </View>
   );
 }
@@ -219,7 +220,7 @@ function HallModal({ hall, onClose }: { hall: AdminHall | null; onClose: () => v
       </Field>
       {isEdit ? (
         <View style={styles.checkRow}>
-          <Text style={styles.checkLabel}>Зал активен</Text>
+          <Text style={styles.checkLabel} translate>Зал активен</Text>
           <Toggle checked={isActive} onChange={setIsActive} />
         </View>
       ) : null}
@@ -275,7 +276,7 @@ function TableModal({ hall, table, onClose }: { hall: AdminHall; table: AdminTab
       </View>
       {isEdit ? (
         <View style={styles.checkRow}>
-          <Text style={styles.checkLabel}>Стол активен</Text>
+          <Text style={styles.checkLabel} translate>Стол активен</Text>
           <Toggle checked={isActive} onChange={setIsActive} />
         </View>
       ) : null}
@@ -287,7 +288,7 @@ function TableModal({ hall, table, onClose }: { hall: AdminHall; table: AdminTab
 function Field({ label, children, style }: { label: string; children: React.ReactNode; style?: object }) {
   return (
     <View style={style}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel} translate>{label}</Text>
       {children}
     </View>
   );
@@ -303,7 +304,7 @@ function IconBtn({ icon, onPress, danger }: { icon: 'pencil' | 'trash' | 'qr'; o
 
 function Sum({ label, value }: { label: string; value: string }) {
   return (
-    <Text style={styles.sumText}>
+    <Text style={styles.sumText} translate>
       {label}: <Text style={styles.sumValue}>{value}</Text>
     </Text>
   );

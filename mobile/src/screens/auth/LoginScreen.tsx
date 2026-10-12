@@ -1,14 +1,11 @@
 import React, { useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '@/navigation/types';
 import { Ionicons } from '@expo/vector-icons';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, Field } from '@/components/ui';
@@ -20,6 +17,7 @@ import { apiError } from '@/lib/api';
 import { reconnectSocket } from '@/services/socket';
 
 export function LoginScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -51,13 +49,13 @@ export function LoginScreen() {
         <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
           <View style={styles.brand}>
             <BrandLogo size="login" />
-            <Text style={styles.subtitle}>Система управления рестораном</Text>
+            <Text style={styles.subtitle} translate>Система управления рестораном</Text>
           </View>
 
           <Card style={styles.cardForm}>
             <View style={styles.cardHead}>
-              <Text style={styles.title}>Вход в систему</Text>
-              <Text style={styles.cardSub}>Введите номер телефона и пароль для входа в систему</Text>
+              <Text style={styles.title} translate>Вход в систему</Text>
+              <Text style={styles.cardSub} translate>Введите номер телефона и пароль для входа в систему</Text>
             </View>
 
             <Field
@@ -89,8 +87,10 @@ export function LoginScreen() {
 
             {error ? <Text style={styles.error}>{error}</Text> : null}
 
-            <Button title="Войти" onPress={onSubmit} loading={login.isPending} />
+            <Button title="Войти" onPress={onSubmit} loading={login.isPending} fontWeight="600" />
           </Card>
+
+          <FastPressable accessibilityRole="button" onPress={() => navigation.navigate('PublicHome')}><Text style={{ color: colors.primary, textAlign: 'center', fontSize: fontSize.sm }} translate>Меню гостей · Табло очереди · Платформа</Text></FastPressable>
 
           <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.1'}</Text>
         </ScrollView>

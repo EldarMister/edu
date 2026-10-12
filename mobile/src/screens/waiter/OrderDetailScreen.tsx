@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, InteractionManager, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, InteractionManager, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import Svg, { Path } from 'react-native-svg';
@@ -14,6 +15,8 @@ import { ORDER_STATUS } from '@/theme/status';
 import { useNotifications } from '@/store/notifications';
 import {
   useActiveOrders,
+  useOrderDetails,
+  useCallAdministrator,
   useCancelOrder,
   useCancelReadyItem,
   useClaimQrOrder,
@@ -30,9 +33,11 @@ import { useCart } from '@/store/cart';
 import { useReceiptPrint } from '@/store/receiptPrint';
 import { useReplacement } from '@/store/replacement';
 import { apiError } from '@/lib/api';
-import { displayOrderNumber, hallSuffix, money } from '@/utils/format';
+import { displayOrderNumber, money } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
 import { PaymentSheet } from './PaymentSheet';
+import { InsufficientPermissionsSheet } from './InsufficientPermissionsSheet';
+import { canRequestPreliminaryBill, deliveryDetails, orderLocation } from './orderRules';
 import type { Order, OrderItem, OrderItemStatus, OrderSetComponent } from '@/types';
 
 type R = RouteProp<{ OrderDetail: { orderId: string } }, 'OrderDetail'>;
@@ -46,7 +51,9 @@ export function OrderDetailScreen() {
   const { orderId } = route.params;
   const orders = useActiveOrders();
   const dishes = useDishes();
-  const order = orders.data?.find((o) => o.id === orderId) ?? null;
+  const activeOrder = orders.data?.find((o) => o.id === orderId) ?? null;
+  const details = useOrderDetails(orderId, orders.isFetched && !activeOrder);
+  const order = activeOrder ?? details.data ?? null;
 
   const pickedUp = usePickedUp();
   const served = useServed();
@@ -57,6 +64,7 @@ export function OrderDetailScreen() {
   const cancelOrder = useCancelOrder();
   const claimQr = useClaimQrOrder();
   const print = useCreateReceiptPrintRequest();
+  const administratorCall = useCallAdministrator();
   const selectTable = useCart((s) => s.selectTable);
   const clearCart = useCart((s) => s.clear);
   const startEditing = useCart((s) => s.startEditing);
@@ -68,6 +76,7 @@ export function OrderDetailScreen() {
   const [cancelReason, setCancelReason] = useState<string>(DEFAULT_ITEM_CANCEL_REASON);
   const [cancelOther, setCancelOther] = useState('');
   const [actionCooldown, setActionCooldown] = useState(0);
+  const [administratorOpen, setAdministratorOpen] = useState(false);
   const push = useNotifications((s) => s.push);
   const latestOrderRef = React.useRef<Order | null>(null);
 
@@ -109,6 +118,8 @@ export function OrderDetailScreen() {
 
   React.useEffect(() => {
     setActionCooldown(0);
+    setAdministratorOpen(false);
+    setBillItem(null);
   }, [order?.id]);
 
   // После оплаты заказ сразу исчезает из active-запроса. Sheet должен
@@ -127,12 +138,15 @@ export function OrderDetailScreen() {
     />
   );
 
-  if (orders.isLoading && !order) return <Loading />;
   if (!order) {
     return (
       <SafeAreaView style={styles.safe} edges={[]}>
         {paymentSheet}
-        {!payOpen ? <EmptyState text="Заказ не найден" /> : null}
+        {!payOpen ? (
+          orders.isLoading || details.isLoading
+            ? <Loading />
+            : <EmptyState text="Заказ не найден" />
+        ) : null}
       </SafeAreaView>
     );
   }
@@ -145,6 +159,8 @@ export function OrderDetailScreen() {
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
   const billCorrection = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
+  const canPrintPreliminary = canRequestPreliminaryBill(order);
+  const deliveryInfo = deliveryDetails(order);
 
   const runProtectedAction = (action: () => void) => {
     setActionCooldown(5);
@@ -152,6 +168,7 @@ export function OrderDetailScreen() {
   };
 
   const requestPreliminaryReceipt = () => {
+    if (!canPrintPreliminary || print.isPending) return;
     Promise.all([
       print.mutateAsync({ orderId: order.id, type: 'preliminary' }),
       fetchReceipt(order.id),
@@ -162,6 +179,16 @@ export function OrderDetailScreen() {
 
   const confirmCancelReadyItem = () => {
     if (!billItem) return;
+    const currentItem = order.items.find((item) => item.id === billItem.id);
+    if (!currentItem || currentItem.status === 'cancelled' || currentItem.status === 'rejected') {
+      setBillItem(null);
+      return;
+    }
+    if (currentItem.status === 'ready' || currentItem.status === 'served') {
+      setBillItem(null);
+      setAdministratorOpen(true);
+      return;
+    }
     const reason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
     cancelReadyItem.mutate(
       { orderId: order.id, itemId: billItem.id, reason },
@@ -172,10 +199,25 @@ export function OrderDetailScreen() {
           setCancelReason(DEFAULT_ITEM_CANCEL_REASON);
           setCancelOther('');
         },
-        onError,
+        onError: (error) => {
+          // Статус может смениться между нажатием и ответом сервера.
+          const message = apiError(error);
+          if (message.includes('Недостаточно прав')) {
+            setBillItem(null);
+            setAdministratorOpen(true);
+          } else onError(error);
+        },
       },
     );
   };
+
+  const callAdministrator = () => administratorCall.mutate(order.id, {
+    onSuccess: () => {
+      setAdministratorOpen(false);
+      push({ message: 'Администратор вызван', type: 'success', at: new Date().toISOString() });
+    },
+    onError,
+  });
 
   if (order.status === 'partially_rejected' && order.requiresWaiterDecision) {
     return (
@@ -297,11 +339,11 @@ export function OrderDetailScreen() {
           <View style={{ gap: spacing.sm }}>
             {!allActiveItemsServed ? (
               <View style={styles.warningBox}>
-                <Text style={styles.warningText}>Нельзя перейти к оплате: есть неподанные блюда.</Text>
+                <Text style={styles.warningText} translate>Нельзя перейти к оплате: есть неподанные блюда.</Text>
               </View>
             ) : null}
             <View style={styles.actions}>
-              <FastPressable
+              {canPrintPreliminary ? <FastPressable
                 disabled={print.isPending}
                 onPress={requestPreliminaryReceipt}
                 style={[styles.preReceiptBtn, print.isPending && styles.preReceiptBtnDisabled]}
@@ -309,9 +351,9 @@ export function OrderDetailScreen() {
                 {print.isPending ? (
                   <ActivityIndicator color={colors.primary} />
                 ) : (
-                  <Text style={styles.preReceiptText}>Счёт</Text>
+                  <Text style={styles.preReceiptText} translate>Счёт</Text>
                 )}
-              </FastPressable>
+              </FastPressable> : null}
               <Button
                 title={cooldownActive ? String(actionCooldown) : 'Перейти к оплате'}
                 style={{ flex: 1 }}
@@ -321,8 +363,8 @@ export function OrderDetailScreen() {
                   runProtectedAction(() =>
                     toPayment.mutate(order.id, {
                       onError,
-                      onSuccess: () => {
-                        setPaymentOrder(order);
+                      onSuccess: (updated) => {
+                        setPaymentOrder(updated);
                         setPayOpen(true);
                       },
                     })
@@ -335,7 +377,7 @@ export function OrderDetailScreen() {
       case 'waiting_payment':
         return (
           <View style={styles.waitingPaymentBox}>
-            <Text style={styles.waitingPaymentText}>Ожидает оплаты</Text>
+            <Text style={styles.waitingPaymentText} translate>Ожидает оплаты</Text>
           </View>
         );
       case 'sent_to_kitchen':
@@ -345,13 +387,13 @@ export function OrderDetailScreen() {
         return (
           <View style={styles.statusInfoBox}>
             <PwaIcon name="info" size={16} color={colors.primary} strokeWidth={2} />
-            <Text style={styles.statusInfoText}>{ORDER_STATUS[order.status].label} - ожидаем кухню</Text>
+            <Text style={styles.statusInfoText} translate>{ORDER_STATUS[order.status].label} - ожидаем кухню</Text>
           </View>
         );
       case 'rejected':
         return (
           <View style={styles.rejectedInfoBox}>
-            <Text style={styles.rejectedInfoText}>Кухня отказала в заказе</Text>
+            <Text style={styles.rejectedInfoText} translate>Кухня отказала в заказе</Text>
           </View>
         );
       default:
@@ -364,11 +406,10 @@ export function OrderDetailScreen() {
       {paymentSheet}
       <View style={styles.titleBlock}>
         <View style={styles.titleMainRow}>
-          <Text style={styles.title} numberOfLines={1}>
+          <Text style={styles.title} numberOfLines={1} translate>
             Заказ {displayOrderNumber(order.orderNumber)}{' '}
             <Text style={styles.titleMuted}>
-              Стол {order.table.number}
-              {hallSuffix(order.table)}
+              {orderLocation(order)}
             </Text>
           </Text>
           <View style={styles.titleActions}>
@@ -395,7 +436,7 @@ export function OrderDetailScreen() {
                 style={styles.editOrderBtn}
               >
                 <PwaIcon name="pencil" size={14} color={colors.textSecondary} />
-                <Text style={styles.editOrderText}>Изменить</Text>
+                <Text style={styles.editOrderText} translate>Изменить</Text>
               </FastPressable>
             ) : null}
           </View>
@@ -403,6 +444,7 @@ export function OrderDetailScreen() {
         <View style={styles.statusRow}>
           <OrderStatusBadges order={order} size="sm" align="start" />
         </View>
+        {deliveryInfo ? <Text style={styles.orderComment}>{deliveryInfo}</Text> : null}
       </View>
 
       <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
@@ -424,16 +466,20 @@ export function OrderDetailScreen() {
       <View style={styles.footer}>
         {unclaimedQr ? (
           <View style={styles.qrInfoBox}>
-            <Text style={styles.qrInfoText}>Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.</Text>
+            <Text style={styles.qrInfoText} translate>Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.</Text>
           </View>
         ) : null}
         {order.comment ? (
           <Text style={styles.orderComment}>{order.comment}</Text>
         ) : null}
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Итого</Text>
-          <NumberTicker value={Number(order.finalAmount)} style={styles.totalValue} digitHeight={32} />
+          <Text style={styles.totalLabel} translate>Итого</Text>
+          <NumberTicker value={Number(order.finalAmount)} style={styles.totalValue} digitHeight={26} />
         </View>
+        {canPrintPreliminary && order.status !== 'served' ? (
+          <Button title="Счёт" variant="secondary" loading={print.isPending}
+            onPress={requestPreliminaryReceipt} />
+        ) : null}
         {mainAction()}
       </View>
 
@@ -451,6 +497,8 @@ export function OrderDetailScreen() {
         }}
         onConfirm={confirmCancelReadyItem}
       />
+      <InsufficientPermissionsSheet visible={administratorOpen} pending={administratorCall.isPending}
+        onClose={() => setAdministratorOpen(false)} onCall={callAdministrator} />
     </SafeAreaView>
   );
 }
@@ -508,7 +556,7 @@ function ItemCard({
   return (
     <FastPressable disabled={!clickable} onPress={onCancel} style={[styles.itemCard, rejected && styles.itemCardRejected]}>
       <View style={styles.itemMainRow}>
-        <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={2}>
+        <Text style={[styles.itemName, rejected && styles.itemRejectedName]} numberOfLines={1}>
           {name}
           {item.takeaway ? '  · с собой' : ''}
         </Text>
@@ -516,11 +564,11 @@ function ItemCard({
         <View style={styles.itemRight}>
           <Text style={styles.itemPrice}>{money(item.finalPrice)}</Text>
           {done ? (
-            <Text style={styles.itemDone}>✓ Готово</Text>
+            <Text style={styles.itemDone} translate>✓ Готово</Text>
           ) : cooking ? (
-            <Text style={styles.itemCooking}>Готовится</Text>
+            <Text style={styles.itemCooking} translate>Готовится</Text>
           ) : rejected ? (
-            <Text style={styles.itemRejected}>{item.status === 'cancelled' ? 'Отменено' : 'Отказано'}</Text>
+            <Text style={styles.itemRejected} translate>{item.status === 'cancelled' ? 'Отменено' : 'Отказано'}</Text>
           ) : null}
         </View>
       </View>
@@ -540,12 +588,12 @@ function ItemCard({
                         (removed || componentRejected) && styles.setPartRejectedName,
                       ]}
                       numberOfLines={1}
-                    >
+                     translate>
                       {label.final ? (
                         <>
-                          <Text style={styles.setPartOld}>{label.original}</Text>
+                          <Text style={styles.setPartOld} translate>{label.original}</Text>
                           <Text style={styles.setPartArrow}> &gt; </Text>
-                          <Text style={styles.setPartNew}>{label.final}</Text>
+                          <Text style={styles.setPartNew} translate>{label.final}</Text>
                         </>
                       ) : (
                         label.original
@@ -580,7 +628,7 @@ function ItemCard({
           ) : null}
           {comment ? <Text style={styles.itemComment}>{comment}</Text> : null}
           {rejected && item.rejectReason ? (
-            <Text style={styles.itemRejectReason}>
+            <Text style={styles.itemRejectReason} translate>
               {item.status === 'cancelled' ? 'Причина' : 'Отказ'}: {item.rejectReason}
             </Text>
           ) : null}
@@ -631,7 +679,7 @@ function CancelReadyItemSheet({
           <Text style={styles.cancelReadyMeta}>×{item.quantity} · {money(item.finalPrice)}</Text>
         </View>
       ) : null}
-      <Text style={styles.cancelReadyLabel}>Причина отмены</Text>
+      <Text style={styles.cancelReadyLabel} translate>Причина отмены</Text>
       <View style={styles.cancelReasonList}>
         {ITEM_CANCEL_REASONS.map((itemReason) => {
           const active = reason === itemReason;
@@ -687,20 +735,19 @@ function PartialRejectionScreen({
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
       <View style={styles.titleRow}>
-        <Text style={styles.partialTitle}>
+        <Text style={styles.partialTitle} translate>
           Заказ {displayOrderNumber(order.orderNumber)}{' '}
           <Text style={styles.partialTitleMuted}>
-            Стол {order.table.number}
-            {hallSuffix(order.table)}
+            {orderLocation(order)}
           </Text>
         </Text>
         <View style={styles.rejectBadge}>
-          <Text style={styles.rejectBadgeText}>Отказ кухни</Text>
+          <Text style={styles.rejectBadgeText} translate>Отказ кухни</Text>
         </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.partialList} showsVerticalScrollIndicator={false}>
-        <Text style={styles.sectionTitle}>1. Активные блюда</Text>
+        <Text style={styles.sectionTitle} translate>1. Активные блюда</Text>
         <View style={styles.partialStack}>
           {activeItems.map((item) => (
             <View key={item.id} style={styles.activeItemCard}>
@@ -711,7 +758,7 @@ function PartialRejectionScreen({
           ))}
         </View>
 
-        <Text style={styles.sectionTitle}>2. Требуют решения</Text>
+        <Text style={styles.sectionTitle} translate>2. Требуют решения</Text>
         <View style={styles.partialStack}>
           {rejectedItems.map((item) => (
             <View key={item.id} style={styles.rejectedDecisionCard}>
@@ -719,14 +766,14 @@ function PartialRejectionScreen({
                 <Text style={styles.rejectedDecisionName} numberOfLines={1}>{orderItemName(item)}</Text>
                 <Text style={styles.partialQtyStrong}>×{item.quantity}</Text>
                 <Text style={styles.rejectedDecisionPrice}>{money(item.finalPrice)}</Text>
-                <Text style={styles.rejectedStatus}>Отказано</Text>
+                <Text style={styles.rejectedStatus} translate>Отказано</Text>
               </View>
               <View style={styles.rejectActions}>
                 <FastPressable disabled={busy} onPress={() => onReplacePress(item)} style={styles.replaceBtn}>
-                  <Text style={styles.replaceBtnText}>Заменить</Text>
+                  <Text style={styles.replaceBtnText} translate>Заменить</Text>
                 </FastPressable>
                 <FastPressable disabled={busy} onPress={() => onRemove(item)} style={styles.removeBtn}>
-                  <Text style={styles.removeBtnText}>Убрать</Text>
+                  <Text style={styles.removeBtnText} translate>Убрать</Text>
                 </FastPressable>
               </View>
             </View>
@@ -734,18 +781,18 @@ function PartialRejectionScreen({
         </View>
 
         <View style={styles.partialTotalBlock}>
-          <Text style={styles.totalLabel}>Итого</Text>
-          <NumberTicker value={activeTotal} style={styles.totalValue} digitHeight={32} />
+          <Text style={styles.totalLabel} translate>Итого</Text>
+          <NumberTicker value={activeTotal} style={styles.totalValue} digitHeight={26} />
         </View>
 
-        <Text style={styles.sectionTitle}>3. Решение</Text>
+        <Text style={styles.sectionTitle} translate>3. Решение</Text>
         <View style={styles.warningBox}>
           <WarningTriangleIcon />
-          <Text style={styles.warningText}>Кухня отказала часть заказа. Решите по каждой отказанной позиции.</Text>
+          <Text style={styles.warningText} translate>Кухня отказала часть заказа. Решите по каждой отказанной позиции.</Text>
         </View>
         <Button title="Продолжить без отказанных блюд" onPress={onContinue} loading={busy} style={styles.partialContinueBtn} />
         <FastPressable disabled={busy} onPress={onCancel} style={styles.cancelWholeBtn}>
-          <Text style={styles.cancelWholeText}>Отменить весь заказ</Text>
+          <Text style={styles.cancelWholeText} translate>Отменить весь заказ</Text>
         </FastPressable>
       </ScrollView>
     </SafeAreaView>
@@ -772,7 +819,7 @@ const styles = StyleSheet.create({
   titleBlock: {
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.sm,
     paddingTop: 4,
     paddingBottom: 5,
     gap: 4,
@@ -789,7 +836,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.sm,
     paddingTop: 4,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
@@ -805,37 +852,37 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    height: 30,
+    height: 28,
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.border,
     justifyContent: 'center',
     paddingHorizontal: spacing.sm,
   },
-  editOrderText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
-  list: { paddingHorizontal: spacing.lg, paddingTop: 6, gap: 6, paddingBottom: spacing.md },
+  editOrderText: { fontSize: 12, fontWeight: '500', color: colors.textSecondary },
+  list: { paddingHorizontal: spacing.sm, paddingTop: spacing.sm, gap: 6, paddingBottom: spacing.sm },
   itemCard: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.md,
-    paddingVertical: 10,
+    paddingVertical: spacing.sm,
     gap: 3,
   },
   itemCardRejected: {
     borderColor: 'rgba(239,68,68,0.30)',
-    backgroundColor: colors.dangerSoft,
+    backgroundColor: 'rgba(239,68,68,0.05)',
   },
   itemMainRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   itemName: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary },
   itemRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
-  itemQty: { fontSize: fontSize.base, color: colors.textMuted },
-  itemRight: { alignItems: 'flex-end', gap: 2, minWidth: 72 },
-  itemPrice: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
-  itemDone: { fontSize: fontSize.sm, color: colors.success, fontWeight: '600' },
-  itemCooking: { fontSize: fontSize.sm, color: colors.textMuted, fontWeight: '500' },
-  itemRejected: { fontSize: fontSize.sm, color: colors.danger, fontWeight: '600' },
-  itemExtra: { gap: 6, marginTop: 2 },
+  itemQty: { fontSize: 14, color: colors.textSecondary },
+  itemRight: { alignItems: 'flex-end', gap: 2, minWidth: 80 },
+  itemPrice: { fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
+  itemDone: { fontSize: 12, color: colors.success, fontWeight: '600' },
+  itemCooking: { fontSize: 12, color: colors.textMuted, fontWeight: '500' },
+  itemRejected: { fontSize: 12, color: colors.danger, fontWeight: '500' },
+  itemExtra: { gap: 6, marginTop: 6 },
   setParts: {
     gap: 4,
     borderWidth: 1,
@@ -846,7 +893,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   setPartRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  setPartName: { flex: 1, minWidth: 0, fontSize: fontSize.xs, color: colors.textSecondary },
+  setPartName: { flex: 1, minWidth: 0, fontSize: 12, color: colors.textSecondary },
   setPartRejectedName: { color: colors.danger, textDecorationLine: 'line-through' },
   setPartOld: { color: colors.textMuted, textDecorationLine: 'line-through' },
   setPartArrow: { color: colors.textMuted, fontWeight: '700' },
@@ -866,19 +913,19 @@ const styles = StyleSheet.create({
   setPartStatusTextDone: { color: colors.green600 },
   setPartStatusTextDanger: { color: colors.danger },
   setPartStatusTextCooking: { color: colors.textSecondary },
-  itemComment: { fontSize: fontSize.xs, color: colors.textMuted },
-  itemRejectReason: { fontSize: fontSize.xs, color: colors.danger },
+  itemComment: { fontSize: 12, color: colors.textMuted },
+  itemRejectReason: { fontSize: 12, color: colors.danger },
   footer: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     gap: spacing.sm,
   },
   totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
-  totalValue: { fontSize: 22, fontWeight: '600', color: colors.textPrimary },
+  totalLabel: { fontSize: 15, fontWeight: '500', color: colors.textSecondary },
+  totalValue: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
   actions: { flexDirection: 'row', gap: spacing.sm },
   preReceiptBtn: {
     width: 110,
@@ -985,7 +1032,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     textAlignVertical: 'top',
   },
-  partialList: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: spacing.sm },
+  partialList: { paddingHorizontal: spacing.sm, paddingTop: spacing.md, paddingBottom: spacing.lg, gap: spacing.sm },
   partialTitle: { flexShrink: 1, fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary },
   partialTitleMuted: { fontSize: fontSize.sm, fontWeight: '400', color: colors.textMuted },
   sectionTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary, marginTop: 2 },

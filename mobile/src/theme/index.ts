@@ -64,34 +64,35 @@ export const radius = {
   pill: 999,
 } as const;
 
-// Размеры шрифта (PWA base 15px, line-height 1.4).
+// Tailwind text-xs/text-sm are 12/14px; the PWA body uses a custom 15px.
 export const fontSize = {
-  xs: 11,
+  xs: 12,
+  nav: 11,
   tab: 14,
-  sm: 13,
+  sm: 14,
   base: 15,
   md: 16,
   lg: 18,
   xl: 20,
-  xxl: 26,
+  xxl: 24,
 } as const;
 
-/** Базовые карточки в мобильном эталоне читаются как чистый border без подъёма. */
+/** PWA shadow-card, approximated with one native shadow. */
 export const cardShadow = {
   shadowColor: '#0F172A',
-  shadowOffset: { width: 0, height: 0 },
-  shadowOpacity: 0,
-  shadowRadius: 0,
-  elevation: 0,
+  shadowOffset: { width: 0, height: 1 },
+  shadowOpacity: 0.1,
+  shadowRadius: 1.5,
+  elevation: 1,
 } as const;
 
 /** Тень для всплывающих элементов — PWA shadow-soft. */
 export const softShadow = {
   shadowColor: '#0F172A',
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.06,
+  shadowOffset: { width: 0, height: 4 },
+  shadowOpacity: 0.08,
   shadowRadius: 8,
-  elevation: 3,
+  elevation: 4,
 } as const;
 
 /** Fixed mobile layout tokens copied from the PWA waiter UI. */

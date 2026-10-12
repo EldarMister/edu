@@ -3,6 +3,27 @@ import { persist, createJSONStorage, type StateStorage } from 'zustand/middlewar
 import * as SecureStore from 'expo-secure-store';
 import type { AuthUser } from '@/types';
 import { queryClient } from '@/lib/queryClient';
+import { useCart } from './cart';
+import { useReplacement } from './replacement';
+import { useReceiptPrint } from './receiptPrint';
+import { useNotifications } from './notifications';
+
+const sessionCleanups = new Set<() => void>();
+
+/** Services register here so auth never imports their API/audio dependencies. */
+export function registerSessionCleanup(cleanup: () => void) {
+  sessionCleanups.add(cleanup);
+  return () => sessionCleanups.delete(cleanup);
+}
+
+function clearSessionData() {
+  for (const cleanup of sessionCleanups) cleanup();
+  queryClient.clear();
+  useCart.getState().resetAll();
+  useReplacement.getState().clear();
+  useReceiptPrint.getState().dismiss();
+  useNotifications.setState({ toasts: [], history: [] });
+}
 
 /**
  * Защищённое хранилище токенов (Keychain/Keystore через expo-secure-store).
@@ -23,6 +44,7 @@ interface AuthState {
   setHydrated: () => void;
   setSession: (data: { user: AuthUser; accessToken: string; refreshToken: string }) => void;
   setTokens: (accessToken: string, refreshToken: string) => void;
+  updateUser: (patch: Partial<AuthUser>) => void;
   logout: () => void;
 }
 
@@ -34,16 +56,19 @@ export const useAuth = create<AuthState>()(
       refreshToken: null,
       hydrated: false,
       setHydrated: () => set({ hydrated: true }),
-      setSession: (data) =>
+      setSession: (data) => {
+        clearSessionData();
         set({
           user: data.user,
           accessToken: data.accessToken,
           refreshToken: data.refreshToken,
-        }),
+        });
+      },
       setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
+      updateUser: (patch) => set(state => ({ user: state.user ? { ...state.user, ...patch } : null })),
       logout: () => {
         // Чистим кэш, чтобы при входе другого пользователя не «мигали» чужие данные.
-        queryClient.clear();
+        clearSessionData();
         set({ user: null, accessToken: null, refreshToken: null });
       },
     }),
@@ -56,7 +81,8 @@ export const useAuth = create<AuthState>()(
         refreshToken: state.refreshToken,
       }),
       onRehydrateStorage: () => (state) => {
-        state?.setHydrated();
+        if (state) state.setHydrated();
+        else useAuth.setState({ hydrated: true });
       },
     },
   ),

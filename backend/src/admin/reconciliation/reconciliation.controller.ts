@@ -2,6 +2,7 @@ import { Body, Controller, Post, UploadedFile, UseInterceptors } from '@nestjs/c
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Role } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator';
 import { ReconciliationService } from './reconciliation.service';
 
 interface UploadedFileLike {
@@ -11,9 +12,10 @@ interface UploadedFileLike {
   size: number;
 }
 
-/** Ручная сверка оплат — только владелец. Файл выписки не сохраняется. */
+/** Ручная сверка оплат — владелец всегда; админ — по праву sections.paymentReconciliation. */
 @Controller('admin/reconciliation')
-@Roles(Role.OWNER)
+@Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.paymentReconciliation')
 export class ReconciliationController {
   constructor(private readonly service: ReconciliationService) {}
 

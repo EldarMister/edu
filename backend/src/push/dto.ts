@@ -1,5 +1,6 @@
-import { IsNotEmpty, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsObject, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
+import { PushProvider } from '@prisma/client';
 
 class PushKeysDto {
   @IsString()
@@ -36,6 +37,11 @@ export class RegisterDeviceDto {
   @IsNotEmpty()
   platform: string; // 'android' | 'ios'
 
+  /** Отсутствует у старого Expo-клиента и тогда сохраняется как EXPO. */
+  @IsEnum(PushProvider)
+  @IsOptional()
+  provider?: PushProvider;
+
   @IsString()
   @IsOptional()
   deviceId?: string;
@@ -49,4 +55,8 @@ export class UnregisterDeviceDto {
   @IsString()
   @IsNotEmpty()
   pushToken: string;
+
+  @IsEnum(PushProvider)
+  @IsOptional()
+  provider?: PushProvider;
 }

@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Text, TextInput } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Select } from '@/components/Select';
+import { DateField } from '@/components/DateField';
 import { Button, Toggle } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
@@ -25,6 +27,12 @@ import {
   type StaffMember,
 } from '@/services/api/admin';
 import type { Role } from '@/types';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useAuth } from '@/store/auth';
+import { EmployeePermissionsSheet } from './EmployeePermissionsSheet';
+import { WaiterOrdersReport } from './WaiterOrdersReport';
+import { shareCsv } from './print';
+import { ShiftDateTimeField } from './ShiftDateTimeField';
 
 const ROLE_LABEL: Record<Role, string> = {
   WAITER: 'Официант',
@@ -98,12 +106,17 @@ function fromDateTimeLocal(value: string) {
 /** Персонал и текущая смена (порт PWA StaffPage — вкладка «Текущая смена» + CRUD). */
 export function StaffScreen() {
   const [date, setDate] = useState(todayYmd());
-  const [tab, setTab] = useState<'current' | 'history'>('current');
+  const [tab, setTab] = useState<'current' | 'history' | 'waiter'>('current');
   const [historyFilters, setHistoryFilters] = useState<ShiftHistoryFilters>({ period: 'today' });
   const [expanded, setExpanded] = useState<string | null>(null);
   const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
   const [editingShift, setEditingShift] = useState<ShiftHistoryRow | null>(null);
   const [editing, setEditing] = useState<StaffMember | null | 'new'>(null);
+  const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const { canAction } = usePermissions();
+  const currentUser = useAuth((s) => s.user);
+  const canManagePermissions = canAction('editPermissions') || canAction('manageStaff');
 
   const reportQ = useShiftReport(date);
   const historyQ = useShiftHistory(historyFilters);
@@ -112,6 +125,20 @@ export function StaffScreen() {
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const rows = reportQ.data ?? [];
+  const exportReport = async () => {
+    setExporting(true);
+    try {
+      if (tab === 'current') await shareCsv(`shift-report-${date}`, [
+        ['Сотрудник', 'Роль', 'Смена', 'Оборот', 'Касса (должен)', 'Касса (сдал)', 'Разница'],
+        ...rows.map((row) => [row.name, ROLE_LABEL[row.role], ...(row.isWaiter ? [shiftLabel(row), row.turnover, row.cashDue, row.cashHanded, row.difference] : ['—', '—', '—', '—', '—'])]),
+      ]);
+      else await shareCsv(`shift-history-${historyFilters.period}-${todayYmd()}`, [
+        ['Сотрудник', 'Роль', 'Дата', 'Пришел', 'Ушел', 'Отработал', 'Статус'],
+        ...(historyQ.data?.items ?? []).map((row) => [row.employeeName, ROLE_LABEL[row.role], dateDMY(row.startedAt), timeHM(row.startedAt), row.endedAt ? timeHM(row.endedAt) : '—', durationLabel(row.durationMin), row.status === 'active' ? 'В смене' : row.status === 'unclosed' ? 'Не закрыта' : 'Завершена']),
+      ]);
+    } catch (error) { push({ message: apiError(error), type: 'error', at: new Date().toISOString() }); }
+    finally { setExporting(false); }
+  };
   const memberById = useMemo(() => new Map((staffQ.data ?? []).map((m) => [m.id, m])), [staffQ.data]);
   const staffOptions = useMemo(
     () => [
@@ -151,41 +178,39 @@ export function StaffScreen() {
   return (
     <>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Button title="+ Добавить сотрудника" size="md" onPress={() => setEditing('new')} />
+        {tab !== 'waiter' ? <View style={styles.staffToolbar}>
+          <Text style={styles.staffTitle} translate>Персонал и отчет по сменам</Text>
+          <View style={styles.staffToolbarActions}>
+            {tab === 'current' ? <>
+              <Text style={styles.toolbarLabel} translate>Дата смены:</Text>
+              <View style={{ width: 152 }}><DateField style={{ height: 36 }} value={date} onChangeText={setDate} maximumDate={new Date()} accessibilityLabel="Дата смены" /></View>
+              <Button title="Обновить" size="md" style={styles.toolbarButton} variant="secondary" loading={reportQ.isFetching} onPress={() => void reportQ.refetch()} />
+              {canAction('exportReports') ? <Button title="Экспорт" size="md" style={styles.toolbarButton} variant="secondary" disabled={!rows.length} loading={exporting} onPress={() => void exportReport()} /> : null}
+            </> : null}
+            <FastPressable style={styles.addStaff} onPress={() => setEditing('new')}><PwaIcon name="plus" size={16} color={colors.white} /><Text style={styles.addStaffText} translate>Добавить сотрудника</Text></FastPressable>
+          </View>
+        </View> : null}
 
-        <View style={styles.tabsRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
           <TabBtn active={tab === 'current'} label="Текущая смена" onPress={() => setTab('current')} />
           <TabBtn active={tab === 'history'} label="История смен" onPress={() => setTab('history')} />
-        </View>
+          <TabBtn active={tab === 'waiter'} label="Отчёт официанта" onPress={() => setTab('waiter')} />
+        </ScrollView>
 
         {tab === 'current' ? (
           <>
-            <View style={styles.dateRow}>
-              <FastPressable onPress={() => setDate((d) => addDays(d, -1))} hitSlop={8} style={styles.dateArrow}>
-                <View style={{ transform: [{ rotate: '90deg' }] }}>
-                  <PwaIcon name="chevronDown" size={16} color={colors.textSecondary} strokeWidth={2} />
-                </View>
-              </FastPressable>
-              <Text style={styles.dateLabel}>{shiftDateLabel(date)}</Text>
-              <FastPressable
-                onPress={() => setDate((d) => (d < todayYmd() ? addDays(d, 1) : d))}
-                hitSlop={8}
-                style={styles.dateArrow}
-              >
-                <View style={{ transform: [{ rotate: '-90deg' }] }}>
-                  <PwaIcon name="chevronDown" size={16} color={colors.textSecondary} strokeWidth={2} />
-                </View>
-              </FastPressable>
-            </View>
-
             {reportQ.isLoading ? (
               <View style={styles.center}>
                 <ActivityIndicator size="large" color={colors.primary} />
               </View>
+            ) : reportQ.isError ? (
+              <Text style={{ color: colors.danger }}>{apiError(reportQ.error)}</Text>
             ) : rows.length === 0 ? (
-              <Text style={styles.empty}>Нет данных за выбранную дату</Text>
+              <Text style={styles.empty} translate>Нет данных за выбранную дату</Text>
             ) : (
-              rows.map((row) => (
+              <View style={styles.staffTableCard}><ScrollView horizontal showsHorizontalScrollIndicator><View style={{ width: STAFF_TABLE_WIDTH }}>
+              <View style={styles.staffTableHead}>{STAFF_COLUMNS.map((column, index) => <Text key={index} style={[styles.staffTableHeading, { width: column.width, textAlign: column.right ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
+              {rows.map((row) => (
                 <ShiftRow
                   key={row.waiterId}
                   row={row}
@@ -207,10 +232,10 @@ export function StaffScreen() {
                   }}
                   onDelete={() => delMember(row.waiterId, row.name)}
                 />
-              ))
+              ))}</View></ScrollView></View>
             )}
           </>
-        ) : (
+        ) : tab === 'waiter' ? <WaiterOrdersReport staff={staffQ.data ?? []} /> : (
           <>
             <HistoryFilters
               filters={historyFilters}
@@ -219,6 +244,8 @@ export function StaffScreen() {
               loading={historyQ.isFetching}
               onRefresh={() => historyQ.refetch()}
             />
+            {canAction('exportReports') ? <Button title="Экспорт CSV" variant="secondary" disabled={!historyQ.data?.items.length} loading={exporting} onPress={() => void exportReport()} /> : null}
+            {historyQ.isError ? <Text style={{ color: colors.danger }}>{apiError(historyQ.error)}</Text> : null}
             <ShiftHistoryList
               data={historyQ.data}
               isLoading={historyQ.isLoading}
@@ -232,12 +259,16 @@ export function StaffScreen() {
       </ScrollView>
 
       {editing !== null ? (
-        <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+        <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onManagePermissions={editing !== 'new' && canManagePermissions && editing.role === 'ADMIN' && editing.id !== currentUser?.id ? () => { setPermissionsFor(editing); setEditing(null); } : undefined} />
       ) : null}
       {editingShift ? <ShiftEditModal row={editingShift} onClose={() => setEditingShift(null)} /> : null}
+      {permissionsFor ? <EmployeePermissionsSheet member={permissionsFor} onClose={() => setPermissionsFor(null)} /> : null}
     </>
   );
 }
+
+const STAFF_COLUMNS = [{ label: '', width: 36 }, { label: 'Сотрудник / Роль', width: 180 }, { label: 'Смена', width: 130 }, { label: 'Оборот', width: 110, right: true }, { label: 'Касса (должен)', width: 130, right: true }, { label: 'Касса (сдал)', width: 130, right: true }, { label: 'Разница', width: 110, right: true }, { label: 'Действия', width: 90, right: true }];
+const STAFF_TABLE_WIDTH = STAFF_COLUMNS.reduce((total, column) => total + column.width, 0);
 
 function HistoryFilters({
   filters,
@@ -263,26 +294,10 @@ function HistoryFilters({
       {filters.period === 'custom' ? (
         <View style={styles.customDates}>
           <View style={styles.customDateField}>
-            <Field label="с">
-              <TextInput
-                style={styles.input}
-                value={filters.from ?? ''}
-                onChangeText={(from) => setFilters((current) => ({ ...current, from }))}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.textLight}
-              />
-            </Field>
+            <DateField label="С даты" value={filters.from ?? ''} onChangeText={(from) => setFilters((current) => ({ ...current, from }))} />
           </View>
           <View style={styles.customDateField}>
-            <Field label="по">
-              <TextInput
-                style={styles.input}
-                value={filters.to ?? ''}
-                onChangeText={(to) => setFilters((current) => ({ ...current, to }))}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={colors.textLight}
-              />
-            </Field>
+            <DateField label="По дату" value={filters.to ?? ''} onChangeText={(to) => setFilters((current) => ({ ...current, to }))} />
           </View>
         </View>
       ) : null}
@@ -300,7 +315,7 @@ function HistoryFilters({
       />
       <FastPressable onPress={onRefresh} disabled={loading} style={[styles.refreshBtn, loading && styles.disabled]}>
         <PwaIcon name="rotateCcw" size={16} color={colors.textSecondary} strokeWidth={2} />
-        <Text style={styles.refreshText}>Обновить</Text>
+        <Text style={styles.refreshText} translate>Обновить</Text>
       </FastPressable>
     </View>
   );
@@ -330,10 +345,12 @@ function ShiftHistoryList({
     );
   }
   if (rows.length === 0) {
-    return <Text style={styles.empty}>Нет смен за выбранный период</Text>;
+    return <Text style={styles.empty} translate>Нет смен за выбранный период</Text>;
   }
   return (
-    <View style={{ gap: spacing.md }}>
+    <View style={styles.staffTableCard}>
+      <ScrollView horizontal showsHorizontalScrollIndicator><View style={{ width: HISTORY_TABLE_WIDTH }}>
+      <View style={styles.staffTableHead}>{HISTORY_COLUMNS.map((column, index) => <Text key={index} style={[styles.staffTableHeading, { width: column.width, textAlign: index === HISTORY_COLUMNS.length - 1 ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
       {rows.map((row) => (
         <ShiftHistoryCard
           key={row.id}
@@ -344,14 +361,17 @@ function ShiftHistoryList({
           onClose={() => onClose(row)}
         />
       ))}
-      <View style={styles.summaryBox}>
-        <Text style={styles.summaryText}>Всего смен: <Text style={styles.summaryValue}>{data?.summary.shiftsCount ?? 0}</Text></Text>
-        <Text style={styles.summaryText}>Общая выработка: <Text style={styles.summaryValue}>{durationLabel(data?.summary.totalDurationMin ?? 0)}</Text></Text>
-        <Text style={styles.summaryText}>В смене сейчас: <Text style={styles.summaryValue}>{data?.summary.activeCount ?? 0}</Text></Text>
+      </View></ScrollView><View style={styles.historySummary}>
+        <Text style={styles.summaryText} translate>Всего смен: <Text style={styles.summaryValue}>{data?.summary.shiftsCount ?? 0}</Text></Text>
+        <Text style={styles.summaryText} translate>Общая выработка: <Text style={styles.summaryValue}>{durationLabel(data?.summary.totalDurationMin ?? 0)}</Text></Text>
+        <Text style={styles.summaryText} translate>В смене сейчас: <Text style={styles.summaryValue}>{data?.summary.activeCount ?? 0}</Text></Text>
       </View>
     </View>
   );
 }
+
+const HISTORY_COLUMNS = [{ label: '', width: 36 }, { label: 'Сотрудник / роль', width: 200 }, { label: 'Дата', width: 120 }, { label: 'Пришел', width: 90 }, { label: 'Ушел', width: 90 }, { label: 'Отработал', width: 120 }, { label: 'Статус', width: 130 }, { label: 'Действия', width: 130 }];
+const HISTORY_TABLE_WIDTH = HISTORY_COLUMNS.reduce((total, column) => total + column.width, 0);
 
 function ShiftHistoryCard({
   row,
@@ -367,36 +387,32 @@ function ShiftHistoryCard({
   onClose: () => void;
 }) {
   return (
-    <View style={styles.card}>
-      <FastPressable onPress={onToggle} style={styles.cardTop}>
+    <View>
+      <FastPressable onPress={onToggle} style={styles.staffTableRow}>
+        <View style={[styles.staffCell, { width: 36, paddingHorizontal: 8 }]}>
         <View style={open ? styles.chevronUp : undefined}>
           <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} />
         </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
+        </View><View style={[styles.staffCell, { width: 200 }]}>
           <Text style={styles.staffName} numberOfLines={1}>{row.employeeName}</Text>
           <Text style={styles.staffRole}>{ROLE_LABEL[row.role]}</Text>
         </View>
-        <ShiftStatusBadge status={row.status} />
-      </FastPressable>
-      <View style={styles.finRow}>
-        <Fin label="Дата" value={dateDMY(row.startedAt)} />
-        <Fin label="Пришёл" value={timeHM(row.startedAt)} />
-        <Fin label="Ушёл" value={row.endedAt ? timeHM(row.endedAt) : '—'} />
-        <Fin label="Отработал" value={durationLabel(row.durationMin)} />
-        <Fin label="Оборот" value={money(row.turnover)} />
-      </View>
-      <View style={styles.historyActions}>
-        <FastPressable onPress={onEdit} style={styles.smallAction}>
+        <Text style={[styles.staffCellText, { width: 120 }]}>{dateDMY(row.startedAt)}</Text>
+        <Text style={[styles.staffCellText, { width: 90 }]}>{timeHM(row.startedAt)}</Text>
+        <Text style={[styles.staffCellText, { width: 90 }]}>{row.endedAt ? timeHM(row.endedAt) : '—'}</Text>
+        <Text style={[styles.staffCellText, styles.staffCellStrong, { width: 120 }]}>{durationLabel(row.durationMin)}</Text>
+        <View style={[styles.staffCell, { width: 130 }]}><ShiftStatusBadge status={row.status} /></View>
+      <View style={[styles.actions, { width: 130, justifyContent: 'flex-end', paddingHorizontal: 12 }]}>
+        <FastPressable onPress={onEdit} style={styles.iconBtn} accessibilityLabel="Редактировать время смены">
           <PwaIcon name="pencil" size={15} color={colors.textSecondary} strokeWidth={2} />
-          <Text style={styles.smallActionText}>Редактировать время</Text>
         </FastPressable>
         {row.status !== 'closed' ? (
           <FastPressable onPress={onClose} style={[styles.smallAction, styles.warningAction]}>
-            <Text style={styles.warningActionText}>Закрыть</Text>
+            <Text style={styles.warningActionText} translate>Закрыть</Text>
           </FastPressable>
         ) : null}
-      </View>
-      {open ? <ShiftHistoryDetails row={row} /> : null}
+      </View></FastPressable>
+      {open ? <View style={styles.staffExpanded}><ShiftHistoryDetails row={row} /></View> : null}
     </View>
   );
 }
@@ -411,7 +427,7 @@ function ShiftStatusBadge({ status }: { status: ShiftHistoryRow['status'] }) {
         : { backgroundColor: colors.slate100, color: colors.textSecondary };
   return (
     <View style={[styles.statusBadge, { backgroundColor: tone.backgroundColor }]}>
-      <Text style={[styles.statusText, { color: tone.color }]}>{label}</Text>
+      <Text style={[styles.statusText, { color: tone.color }]} translate>{label}</Text>
     </View>
   );
 }
@@ -419,7 +435,7 @@ function ShiftStatusBadge({ status }: { status: ShiftHistoryRow['status'] }) {
 function ShiftHistoryDetails({ row }: { row: ShiftHistoryRow }) {
   return (
     <View style={styles.details}>
-      <Text style={styles.detailsTitle}>Детали смены:</Text>
+      <Text style={styles.detailsTitle} translate>Детали смены:</Text>
       <DetailLine label="Начало" value={`${dateDMY(row.startedAt)} ${timeHM(row.startedAt)}`} />
       <DetailLine label="Окончание" value={row.endedAt ? `${dateDMY(row.endedAt)} ${timeHM(row.endedAt)}` : '—'} />
       <DetailLine label="Кто закрыл" value={row.closedBy ?? '—'} />
@@ -442,7 +458,7 @@ function ShiftHistoryDetails({ row }: { row: ShiftHistoryRow }) {
 function DetailLine({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.detailLine}>
-      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={styles.detailLabel} translate>{label}</Text>
       <Text style={styles.detailValue}>{value}</Text>
     </View>
   );
@@ -480,29 +496,13 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
     >
       <View style={{ gap: spacing.md }}>
         <Text style={styles.muted}>{row.employeeName} · {ROLE_LABEL[row.role]}</Text>
-        <Field label="Начало смены">
-          <TextInput
-            style={styles.input}
-            value={startedAt}
-            onChangeText={setStartedAt}
-            placeholder="YYYY-MM-DDTHH:mm"
-            placeholderTextColor={colors.textLight}
-          />
-        </Field>
+        <ShiftDateTimeField label="Начало смены" value={startedAt} onChange={setStartedAt} />
         <View style={styles.checkRow}>
-          <Text style={styles.checkLabel}>Смена ещё открыта</Text>
+          <Text style={styles.checkLabel} translate>Смена ещё открыта</Text>
           <Toggle checked={openShift} onChange={setOpenShift} />
         </View>
         {!openShift ? (
-          <Field label="Окончание смены">
-            <TextInput
-              style={styles.input}
-              value={endedAt}
-              onChangeText={setEndedAt}
-              placeholder="YYYY-MM-DDTHH:mm"
-              placeholderTextColor={colors.textLight}
-            />
-          </Field>
+          <ShiftDateTimeField label="Окончание смены" value={endedAt} onChange={setEndedAt} />
         ) : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
@@ -530,22 +530,29 @@ function ShiftRow({
     Math.round(row.difference) === 0 ? colors.textSecondary : row.difference > 0 ? colors.success : colors.danger;
 
   return (
-    <View style={styles.card}>
-      <FastPressable onPress={isWaiter ? onToggle : undefined} style={styles.cardTop}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <View style={styles.nameRow}>
-            {isWaiter ? (
+    <View>
+      <FastPressable onPress={isWaiter ? onToggle : undefined} style={styles.staffTableRow}>
+        <View style={[styles.staffCell, { width: 36, paddingHorizontal: 8 }]}>
+          {isWaiter ? (
               <View style={open ? styles.chevronUp : undefined}>
                 <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} />
               </View>
             ) : null}
+        </View>
+        <View style={[styles.staffCell, { width: 180 }]}>
             <Text style={styles.staffName} numberOfLines={1}>
               {row.name}
             </Text>
-          </View>
           <Text style={styles.staffRole}>{ROLE_LABEL[row.role]}</Text>
         </View>
-        <View style={styles.actions}>
+        {isWaiter ? <>
+          <Text style={[styles.staffCellText, { width: 130 }]}>{shiftLabel(row)}</Text>
+          <Text style={[styles.staffCellText, styles.staffCellStrong, { width: 110, textAlign: 'right' }]}>{money(row.turnover)}</Text>
+          <Text style={[styles.staffCellText, { width: 130, textAlign: 'right' }]}>{money(row.cashDue)}</Text>
+          <View style={[styles.staffCell, { width: 130, alignItems: 'flex-end' }]}><CashHandedCell row={row} date={date} /></View>
+          <Text style={[styles.staffCellText, { width: 110, textAlign: 'right', color: diffColor }]}>{signedMoney(row.difference)}</Text>
+        </> : <Text style={[styles.staffCellText, { width: 610, textAlign: 'center', color: colors.textLight }]}>—</Text>}
+        <View style={[styles.actions, { width: 90, justifyContent: 'flex-end', paddingHorizontal: 12 }]}>
           <FastPressable onPress={onEdit} hitSlop={6} style={styles.iconBtn}>
             <PwaIcon name="pencil" size={16} color={colors.textMuted} strokeWidth={2} />
           </FastPressable>
@@ -554,21 +561,7 @@ function ShiftRow({
           </FastPressable>
         </View>
       </FastPressable>
-
-      {isWaiter ? (
-        <View style={styles.finRow}>
-          <Fin label="Смена" value={shiftLabel(row)} />
-          <Fin label="Оборот" value={money(row.turnover)} />
-          <Fin label="Касса (должен)" value={money(row.cashDue)} />
-          <View style={styles.finItem}>
-            <Text style={styles.finLabel}>Касса (сдал)</Text>
-            <CashHandedCell row={row} date={date} />
-          </View>
-          <Fin label="Разница" value={signedMoney(row.difference)} valueColor={diffColor} />
-        </View>
-      ) : null}
-
-      {isWaiter && open ? <ShiftDetails row={row} /> : null}
+      {isWaiter && open ? <View style={styles.staffExpanded}><ShiftDetails row={row} /></View> : null}
     </View>
   );
 }
@@ -576,7 +569,7 @@ function ShiftRow({
 function Fin({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
     <View style={styles.finItem}>
-      <Text style={styles.finLabel}>{label}</Text>
+      <Text style={styles.finLabel} translate>{label}</Text>
       <Text style={[styles.finValue, valueColor ? { color: valueColor } : null]}>{value}</Text>
     </View>
   );
@@ -584,15 +577,17 @@ function Fin({ label, value, valueColor }: { label: string; value: string; value
 
 function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
   const setCash = useSetCashHanded();
+  const push = useNotifications((s) => s.push);
   const [val, setVal] = useState(row.cashHanded ? String(row.cashHanded) : '');
   useEffect(() => {
     setVal(row.cashHanded ? String(row.cashHanded) : '');
   }, [row.cashHanded]);
 
   const commit = () => {
-    const num = Number(val.replace(/\s/g, '').replace(',', '.')) || 0;
+    const num = Number(val.replace(/\s/g, '').replace(',', '.'));
+    if (!Number.isFinite(num) || num < 0) { push({ message: 'Сданная сумма должна быть неотрицательным числом', type: 'error', at: new Date().toISOString() }); return; }
     if (num === row.cashHanded) return;
-    setCash.mutate({ waiterId: row.waiterId, date, cashHanded: num });
+    setCash.mutate({ waiterId: row.waiterId, date, cashHanded: num }, { onError: (error) => push({ message: apiError(error), type: 'error', at: new Date().toISOString() }) });
   };
 
   return (
@@ -611,24 +606,24 @@ function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
 function ShiftDetails({ row }: { row: ShiftReportRow }) {
   return (
     <View style={styles.details}>
-      <Text style={styles.detailsTitle}>Товарная разбивка:</Text>
+      <Text style={styles.detailsTitle} translate>Товарная разбивка:</Text>
       {row.categories.length === 0 ? (
-        <Text style={styles.muted}>Продаж нет</Text>
+        <Text style={styles.muted} translate>Продаж нет</Text>
       ) : (
         row.categories.map((cat) => <CategoryRow key={cat.categoryId} cat={cat} />)
       )}
 
-      <Text style={[styles.detailsTitle, { marginTop: spacing.md }]}>
+      <Text style={[styles.detailsTitle, { marginTop: spacing.md }]} translate>
         Отменённые чеки ({row.cancellations.length}):
       </Text>
       {row.cancellations.length === 0 ? (
-        <Text style={styles.muted}>Отмен нет</Text>
+        <Text style={styles.muted} translate>Отмен нет</Text>
       ) : (
         row.cancellations.map((c, i) => (
-          <Text key={i} style={styles.cancelLine}>
+          <Text key={i} style={styles.cancelLine} translate>
             <Text style={styles.muted}>{timeHM(c.time)}</Text> — {c.name}{' '}
             <Text style={styles.detailPrimary}>({money(c.amount)})</Text>
-            <Text style={styles.muted}> — Причина: {c.reason}</Text>
+            <Text style={styles.muted} translate> — Причина: {c.reason}</Text>
           </Text>
         ))
       )}
@@ -647,7 +642,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
         <Text style={styles.catName} numberOfLines={1}>
           {cat.name}
         </Text>
-        <Text style={styles.catQty}>
+        <Text style={styles.catQty} translate>
           {cat.qty} шт. <Text style={styles.muted}>({money(cat.amount)})</Text>
         </Text>
       </FastPressable>
@@ -659,7 +654,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
                 <Text style={styles.catItemName} numberOfLines={1}>
                   {it.name}
                 </Text>
-                <Text style={styles.catItemQty}>
+                <Text style={styles.catItemQty} translate>
                   {it.qty} шт. <Text style={styles.muted}>({money(it.amount)})</Text>
                 </Text>
               </View>
@@ -670,7 +665,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
                       <Text style={styles.compName} numberOfLines={1}>
                         {c.name}
                       </Text>
-                      <Text style={styles.compQty}>{c.qty} шт.</Text>
+                      <Text style={styles.compQty} translate>{c.qty} шт.</Text>
                     </View>
                   ))}
                 </View>
@@ -683,7 +678,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
   );
 }
 
-function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: () => void }) {
+function StaffModal({ member, onClose, onManagePermissions }: { member: StaffMember | null; onClose: () => void; onManagePermissions?: () => void }) {
   const isEdit = !!member;
   const { create, update } = useStaffMutations();
   const push = useNotifications((s) => s.push);
@@ -744,10 +739,11 @@ function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: 
         </Field>
         {isEdit ? (
           <View style={styles.checkRow}>
-            <Text style={styles.checkLabel}>Активен (может входить)</Text>
+            <Text style={styles.checkLabel} translate>Активен (может входить)</Text>
             <Toggle checked={isActive} onChange={setIsActive} />
           </View>
         ) : null}
+        {onManagePermissions ? <Button title="Права доступа" variant="secondary" size="md" onPress={onManagePermissions} /> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
       </View>
     </BottomSheet>
@@ -757,14 +753,14 @@ function StaffModal({ member, onClose }: { member: StaffMember | null; onClose: 
 function TabBtn({ active, label, onPress }: { active: boolean; label: string; onPress: () => void }) {
   return (
     <FastPressable onPress={onPress} style={[styles.tabBtn, active && styles.tabBtnActive]}>
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+      <Text style={[styles.tabText, active && styles.tabTextActive]} translate>{label}</Text>
     </FastPressable>
   );
 }
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <View>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel} translate>{label}</Text>
       {children}
     </View>
   );
@@ -772,6 +768,22 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
+  staffToolbar: { gap: 12 },
+  staffTitle: { fontSize: 18, fontWeight: '600', color: colors.textPrimary },
+  staffToolbarActions: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', alignItems: 'center', gap: 8 },
+  toolbarLabel: { fontSize: 14, color: colors.textSecondary },
+  toolbarButton: { height: 36, borderRadius: 8, paddingHorizontal: 12 },
+  addStaff: { height: 36, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: colors.primary },
+  addStaffText: { fontSize: 14, fontWeight: '500', color: colors.white },
+  staffTableCard: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.white, overflow: 'hidden' },
+  staffTableHead: { flexDirection: 'row', backgroundColor: colors.background, borderBottomWidth: 1, borderColor: colors.border },
+  staffTableHeading: { paddingHorizontal: 12, paddingVertical: 10, fontSize: 12, fontWeight: '500', color: colors.textMuted },
+  staffTableRow: { flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderColor: colors.border },
+  staffCell: { paddingHorizontal: 12, paddingVertical: 10 },
+  staffCellText: { paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, color: colors.textSecondary },
+  staffCellStrong: { fontWeight: '500', color: colors.textPrimary },
+  staffExpanded: { paddingHorizontal: 12, paddingBottom: 12, backgroundColor: colors.background },
+  historySummary: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: colors.background },
   tabsRow: { flexDirection: 'row', gap: spacing.lg, borderBottomWidth: 1, borderBottomColor: colors.border },
   tabBtn: { paddingVertical: spacing.sm, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabBtnActive: { borderBottomColor: colors.primary },
@@ -805,7 +817,7 @@ const styles = StyleSheet.create({
   cardTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   chevronUp: { transform: [{ rotate: '180deg' }] },
-  staffName: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary, flexShrink: 1 },
+  staffName: { fontSize: 14, fontWeight: '500', color: colors.textPrimary, flexShrink: 1 },
   staffRole: { marginTop: 2, fontSize: fontSize.xs, color: colors.textMuted },
   actions: { flexDirection: 'row', gap: 2 },
   iconBtn: { width: 30, height: 30, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },

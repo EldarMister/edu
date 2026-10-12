@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/utils/orderCache';
-import type { Order, OrderStatus, PaymentMethod, PrepStation, Role, TableStatus } from '@/types';
+import type { EmployeePermissions, Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
 
 const get = async <T,>(url: string) => (await api.get<T>(url)).data;
 
@@ -74,12 +74,12 @@ export interface ReconResult {
 }
 export function useReconcilePayments() {
   return useMutation({
-    mutationFn: async ({ uri, name, mimeType, from, to }: { uri: string; name: string; mimeType?: string | null; from: string; to: string }) => {
+    mutationFn: async ({ uri, name, mimeType, from, to, toleranceMin = 3 }: { uri: string; name: string; mimeType?: string | null; from: string; to: string; toleranceMin?: number }) => {
       const form = new FormData();
       form.append('file', { uri, name, type: mimeType || 'application/octet-stream' } as any);
       form.append('from', from);
       form.append('to', to);
-      form.append('toleranceMin', '3');
+      form.append('toleranceMin', String(toleranceMin));
       return (await api.post<ReconResult>('/admin/reconciliation', form, { headers: { 'Content-Type': 'multipart/form-data' } })).data;
     },
   });
@@ -100,6 +100,8 @@ export interface OrdersFilter {
   dateTo?: string;
   paymentMethod?: string;
   waiterId?: string;
+  sort?: 'default' | 'date' | 'amount';
+  sortDirection?: 'asc' | 'desc';
 }
 export interface OrdersSummary {
   total: number;
@@ -116,6 +118,7 @@ export interface StaffMember {
   isActive: boolean;
   createdAt: string;
   onShift: boolean;
+  permissions?: EmployeePermissions;
 }
 export interface FiscalResult {
   success: boolean;
@@ -133,6 +136,8 @@ function ordersQuery(params: Partial<OrdersFilter>): string {
   if (params.dateTo) parts.push(`dateTo=${params.dateTo}`);
   if (params.paymentMethod) parts.push(`paymentMethod=${params.paymentMethod}`);
   if (params.waiterId) parts.push(`waiterId=${params.waiterId}`);
+  if (params.sort) parts.push(`sort=${params.sort}`);
+  if (params.sortDirection) parts.push(`sortDirection=${params.sortDirection}`);
   return parts.join('&');
 }
 
@@ -420,6 +425,57 @@ export function useRetryFiscal() {
   });
 }
 
+export function useFiscalizeForPrint() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (orderId: string) => api.post<FiscalResult | null>(`/fiscal/orders/${orderId}/print`).then((r) => r.data),
+    onSuccess: (_data, id) => qc.invalidateQueries({ queryKey: ['admin', 'orders', 'detail', id] }),
+  });
+}
+
+export function useCancelOrderItem() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ orderId, itemId, reason }: { orderId: string; itemId: string; reason: string }) =>
+      api.post<Order>(`/orders/${orderId}/items/${itemId}/cancel`, { reason }).then((r) => r.data),
+    onSuccess: (order) => {
+      applyOrderStatusToCache(qc, order);
+      qc.setQueryData(['admin', 'orders', 'detail', order.id], order);
+      qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
+    },
+  });
+}
+
+export function useReceiptPrintRequests() {
+  return useQuery({ queryKey: ['admin', 'receipt-prints'], queryFn: () => get<ReceiptPrintRequest[]>('/receipt-prints'), refetchInterval: 60_000 });
+}
+
+export function useReceiptPrintActions() {
+  const invalidate = useInvalidate([['admin', 'receipt-prints']]);
+  const approve = useMutation({ mutationFn: (id: string) => api.post<ReceiptPrintRequest>(`/receipt-prints/${id}/approve`).then((r) => r.data), onSuccess: invalidate });
+  const printed = useMutation({ mutationFn: (id: string) => api.post<ReceiptPrintRequest>(`/receipt-prints/${id}/printed`).then((r) => r.data), onSuccess: invalidate });
+  const reject = useMutation({ mutationFn: (id: string) => api.post<ReceiptPrintRequest>(`/receipt-prints/${id}/reject`).then((r) => r.data), onSuccess: invalidate });
+  return { approve, printed, reject };
+}
+
+export function useUpdatePermissions() {
+  const invalidate = useInvalidate([['admin', 'staff']]);
+  return useMutation({ mutationFn: ({ id, ...body }: { id: string } & EmployeePermissions) => api.patch<StaffMember>(`/admin/staff/${id}/permissions`, body).then((r) => r.data), onSuccess: invalidate });
+}
+
+export interface WaiterOrdersReportItem {
+  id: string; orderId: string; orderedAt: string; servedAt: string; orderNumber: string; tableNumber: number;
+  dishName: string; categoryName: string; quantity: number; unitPrice: number; amount: number;
+}
+export interface WaiterOrdersReportResponse {
+  waiter: { id: string; name: string }; range: { from: string; to: string }; items: WaiterOrdersReportItem[];
+  summary: { ordersCount: number; dishesCount: number; amount: number; averageServingSeconds: number };
+}
+export function useWaiterOrdersReport(waiterId: string, from: string, to: string) {
+  return useQuery({ queryKey: ['admin', 'staff', 'waiter-orders-report', waiterId, from, to], queryFn: () => get<WaiterOrdersReportResponse>(`/admin/staff/waiter-orders-report?waiterId=${encodeURIComponent(waiterId)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`), enabled: Boolean(waiterId && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) });
+}
+
 // ---------- Столы и залы (порт PWA) ----------
 export interface AdminTableItem {
   id: string;
@@ -585,8 +641,8 @@ export function useMenuOverview() {
       ),
   });
 }
-export function useAdminCategories() {
-  return useQuery({ queryKey: ['admin', 'categories'], queryFn: () => get<AdminCategory[]>('/admin/categories') });
+export function useAdminCategories(enabled = true) {
+  return useQuery({ queryKey: ['admin', 'categories'], queryFn: () => get<AdminCategory[]>('/admin/categories'), enabled });
 }
 export function useAdminDishes(categoryId: string, search: string) {
   const parts: string[] = [];

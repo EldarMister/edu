@@ -1,5 +1,6 @@
 import React from 'react';
-import { Image, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Animated, {
   Easing,
@@ -11,7 +12,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigationState } from '@react-navigation/native';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -80,7 +80,7 @@ const STATE_STYLES: Record<RadioState, { circle: string; ring: string; pulse: bo
 function RadioHeader({ onClose }: { onClose: () => void }) {
   return (
     <View style={styles.header}>
-      <Text style={styles.title}>Рация</Text>
+      <Text style={styles.title} translate>Рация</Text>
       <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
         <PwaIcon name="close" size={24} color={colors.textMuted} strokeWidth={2} />
       </FastPressable>
@@ -105,7 +105,7 @@ function RadioChannelTabs({
             onPress={() => onChange(item.key)}
             style={[styles.channelChip, active && styles.channelChipActive]}
           >
-            <Text style={[styles.channelText, active && styles.channelTextActive]}>{item.label}</Text>
+            <Text style={[styles.channelText, active && styles.channelTextActive]} translate>{item.label}</Text>
           </FastPressable>
         );
       })}
@@ -119,7 +119,7 @@ function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onl
       <Text style={styles.metaChannel} numberOfLines={1}>{channelLabel}</Text>
       <View style={styles.metaOnline}>
         <View style={styles.greenDot} />
-        <Text style={styles.metaOnlineText}>{onlineCount} онлайн</Text>
+        <Text style={styles.metaOnlineText} translate>{onlineCount} онлайн</Text>
       </View>
     </View>
   );
@@ -240,14 +240,14 @@ function RadioStatusText({
   return (
     <View style={styles.statusWrap}>
       <View style={[styles.statusLabel, { borderColor: `${color}55` }]}>
-        <Text style={[styles.statusLabelText, { color }]} numberOfLines={1}>{title}</Text>
+        <Text style={[styles.statusLabelText, { color }]} numberOfLines={1} translate>{title}</Text>
       </View>
       <Text style={[styles.statusHint, hintDanger && styles.statusHintDanger]}>{hint}</Text>
     </View>
   );
 }
 
-export function PttOverlay() {
+export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   const insets = useSafeAreaInsets();
   const user = useAuth((s) => s.user);
   const connected = useConnectionStatus();
@@ -268,7 +268,7 @@ export function PttOverlay() {
   // ограничений. Оверлей остаётся смонтированным, приём аудио не прерывается.
   const cabinetOpen = useRadioVisibility((s) => s.cabinetOpen);
   const shiftGateOpen = useRadioVisibility((s) => s.shiftGateOpen);
-  const waiterNav = useNavigationState((state) => (isWaiter ? readWaiterNav(state) : null));
+  const waiterNav = React.useMemo(() => isWaiter ? readWaiterNav(navigationState) : null, [isWaiter, navigationState]);
   const buttonVisible = React.useMemo(() => {
     if (!isWaiter || !waiterNav) return true;
     if (shiftGateOpen) return false;

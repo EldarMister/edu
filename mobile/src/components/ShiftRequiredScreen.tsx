@@ -1,5 +1,6 @@
 import React from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
 import { ShiftStartAnimation, type ShiftAnimState } from './ShiftStartAnimation';
@@ -103,7 +104,7 @@ export function ShiftRequiredScreen({
         {/* Верхний блок: логотип со свечением + текст, как в PWA ShiftRequiredScreen. */}
         <View style={styles.content}>
           <ShiftStartAnimation state={phase} />
-          <Text style={styles.title}>{title}</Text>
+          <Text style={styles.title} translate>{title}</Text>
           {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
         </View>
 
@@ -112,7 +113,7 @@ export function ShiftRequiredScreen({
           {phase === 'idle' ? (
             <Animated.View style={{ transform: [{ scale: btnScale }] }}>
               <FastPressable style={styles.button} onPress={onStart}>
-                <Text style={styles.buttonText}>Начать смену</Text>
+                <Text style={styles.buttonText} translate>Начать смену</Text>
               </FastPressable>
             </Animated.View>
           ) : null}

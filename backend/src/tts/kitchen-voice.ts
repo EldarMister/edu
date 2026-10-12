@@ -34,9 +34,11 @@ type VoiceOrder = {
   items: VoiceItem[];
 };
 
+type VoiceStation = 'kitchen' | 'bar';
+
 const QR_ORDER_COMMENT = 'Заказ из QR-меню';
 
-/** Осмысленный комментарий для озвучки: без QR-метки и префикса «Гость N ·». */
+/** Не читаем служебную QR-метку и идентификатор гостя, только смысловой текст. */
 function voiceComment(raw?: string | null): string | null {
   if (!raw) return null;
   let value = raw.trim();
@@ -45,8 +47,6 @@ function voiceComment(raw?: string | null): string | null {
   if (/^Гость\s+\d+$/iu.test(value)) return null;
   return value || null;
 }
-
-type VoiceStation = 'kitchen' | 'bar';
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -180,7 +180,7 @@ function variantVoice(variant?: string | null): string {
   return raw;
 }
 
-function withVariantVoice(name: string, variant?: string | null): string {
+export function withVariantVoice(name: string, variant?: string | null): string {
   const v = variantVoice(variant);
   return v ? `${name}. ${v}` : name;
 }

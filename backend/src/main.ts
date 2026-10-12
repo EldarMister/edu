@@ -50,6 +50,7 @@ async function bootstrap() {
   app.use(securityHeaders);
   app.use('/api/auth/login', createRateLimiter(60_000, 10));
   app.use('/api/auth/refresh', createRateLimiter(60_000, 20));
+  app.use('/api/integration/v1', createRateLimiter(60_000, 300));
 
   const corsOrigin = (process.env.CORS_ORIGIN ?? 'http://localhost:5173')
     .split(',')

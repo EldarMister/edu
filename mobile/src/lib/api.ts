@@ -7,9 +7,11 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
   timeout: 20_000,
 });
+type SessionRequest = InternalAxiosRequestConfig & { _retry?: boolean; _sessionUserId?: string };
 
 // Подставляем access token в каждый запрос.
 api.interceptors.request.use((config) => {
+  (config as SessionRequest)._sessionUserId = useAuth.getState().user?.id;
   const token = useAuth.getState().accessToken;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
@@ -22,16 +24,18 @@ let refreshing: Promise<string | null> | null = null;
 
 async function refreshTokens(): Promise<string | null> {
   const { refreshToken, setTokens, logout } = useAuth.getState();
+  const userId = useAuth.getState().user?.id;
   if (!refreshToken) {
     logout();
     return null;
   }
   try {
-    const res = await axios.post(`${API_URL}/api/auth/refresh`, { refreshToken });
+    const res = await axios.post(`${API_URL}/api/auth/refresh`, { refreshToken }, { timeout: 20_000 });
+    if (useAuth.getState().refreshToken !== refreshToken || useAuth.getState().user?.id !== userId) return null;
     setTokens(res.data.accessToken, res.data.refreshToken);
     return res.data.accessToken as string;
   } catch {
-    logout();
+    if (useAuth.getState().refreshToken === refreshToken && useAuth.getState().user?.id === userId) logout();
     return null;
   }
 }
@@ -39,9 +43,16 @@ async function refreshTokens(): Promise<string | null> {
 api.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
-    const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+    const original = error.config as SessionRequest;
     if (error.response?.status === 401 && original && !original._retry) {
+      const current = useAuth.getState();
+      if (original._sessionUserId !== current.user?.id) return Promise.reject(error);
       original._retry = true;
+      // A concurrent request may already have completed refresh for this session.
+      if (current.accessToken && original.headers.Authorization !== `Bearer ${current.accessToken}`) {
+        original.headers.Authorization = `Bearer ${current.accessToken}`;
+        return api(original);
+      }
       refreshing = refreshing ?? refreshTokens();
       const newToken = await refreshing;
       refreshing = null;

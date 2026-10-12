@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, networkRetry } from '@/lib/api';
 import type {
   Category,
+  AdministratorCall,
   CartLine,
   Dish,
   Hall,
@@ -66,11 +67,11 @@ export function useActiveOrders() {
   });
 }
 
-export function useOrderDetails(id: string | null) {
+export function useOrderDetails(id: string | null, enabled = true) {
   return useQuery({
     queryKey: ['orders', 'detail', id],
     queryFn: async () => (await api.get<Order>(`/orders/${id}`)).data,
-    enabled: !!id,
+    enabled: enabled && !!id,
   });
 }
 
@@ -264,6 +265,7 @@ export function useRemoveRejectedItem() {
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
+      qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
   });
 }
@@ -327,6 +329,14 @@ export function usePay() {
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
     },
+  });
+}
+
+export function useCallAdministrator() {
+  return useMutation({
+    mutationFn: async (orderId: string) =>
+      (await api.post<AdministratorCall>(`/orders/${orderId}/call-administrator`)).data,
+    retry: networkRetry,
   });
 }
 

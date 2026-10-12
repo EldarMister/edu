@@ -1,6 +1,10 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import { Select } from '@/components/Select';
+import { DateField } from '@/components/DateField';
+import { apiError } from '@/lib/api';
+import { Button } from '@/components/ui';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
@@ -50,14 +54,16 @@ function actionTone(action: string): { bg: string; fg: string } {
   return { bg: colors.background, fg: colors.textSecondary };
 }
 
-/** Журнал действий (владелец) — порт PWA AuditPage (фильтры дат опущены — нужен date-picker). */
+/** Журнал действий с периодом, сотрудником и типом действия. */
 export function AuditScreen() {
   const [userId, setUserId] = useState('');
   const [actionType, setActionType] = useState('');
   const [page, setPage] = useState(1);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
 
   const filtersQ = useAuditFilters();
-  const logsQ = useAuditLogs({ userId, actionType, page });
+  const logsQ = useAuditLogs({ userId, actionType, page, from, to });
   const data = logsQ.data;
 
   const userOptions = [
@@ -77,6 +83,8 @@ export function AuditScreen() {
       <Field label="Тип действия">
         <Select value={actionType} onChange={(v) => { setActionType(v); setPage(1); }} options={actionOptions} title="Тип действия" />
       </Field>
+      <DateField label="С даты" value={from} onChangeText={(value) => { setFrom(value); setPage(1); }} />
+      <DateField label="По дату" value={to} onChangeText={(value) => { setTo(value); setPage(1); }} />
     </View>
   );
 
@@ -93,14 +101,14 @@ export function AuditScreen() {
           <View style={styles.center}>
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
-        ) : (
-          <Text style={styles.empty}>Записей не найдено</Text>
+        ) : logsQ.isError ? <View style={styles.center}><Text style={{ color: colors.danger }}>{apiError(logsQ.error)}</Text><Button title="Повторить" onPress={() => void logsQ.refetch()} /></View> : (
+          <Text style={styles.empty} translate>Записей не найдено</Text>
         )
       }
       ListFooterComponent={
         data && data.items.length > 0 ? (
           <View style={styles.pager}>
-            <Text style={styles.pagerInfo}>
+            <Text style={styles.pagerInfo} translate>
               Всего: {data.total} · {data.page} / {data.pages}
             </Text>
             <View style={styles.pagerBtns}>
@@ -147,7 +155,7 @@ function AuditRow({ log }: { log: AuditLogEntry }) {
         </View>
         <Text style={styles.desc}>{log.description ?? '—'}</Text>
       </View>
-      {amount !== null ? <Text style={styles.amount}>{amount} с</Text> : null}
+      {amount !== null ? <Text style={styles.amount} translate>{amount} с</Text> : null}
     </View>
   );
 }
@@ -155,7 +163,7 @@ function AuditRow({ log }: { log: AuditLogEntry }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <View style={{ flex: 1, minWidth: 150 }}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel} translate>{label}</Text>
       {children}
     </View>
   );
@@ -163,6 +171,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, paddingBottom: spacing.xxl },
+  input: { height: 44, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.sm, backgroundColor: colors.white, color: colors.textPrimary },
   filters: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.sm },
   fieldLabel: { marginBottom: 4, fontSize: fontSize.xs, color: colors.textMuted },
   center: { paddingVertical: 60, alignItems: 'center' },

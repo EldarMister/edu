@@ -1,20 +1,13 @@
 import React, { useState } from 'react';
-import {
-  ActivityIndicator,
-  NativeScrollEvent,
-  NativeSyntheticEvent,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Select } from '@/components/Select';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Button } from '@/components/ui';
 import { BottomSheet } from '@/components/BottomSheet';
+import { DateField } from '@/components/DateField';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
@@ -25,6 +18,7 @@ import {
   useOrdersSummary,
   useStaff,
   useUpdateOrderStatus,
+  useAdminOrderDetails,
 } from '@/services/api/admin';
 import type { Order, OrderStatus } from '@/types';
 import { OrderDetailsModal } from './OrderDetailsModal';
@@ -68,13 +62,14 @@ const PAYMENT_OPTIONS = [
   { value: 'card', label: 'Карта' },
 ];
 
-// Кастомная дата опущена (нужен нативный date-picker) — как в статистике.
 const PERIOD_OPTIONS = [
   { value: 'all', label: 'Всё время' },
   { value: 'today', label: 'Сегодня' },
   { value: 'week', label: 'За неделю' },
   { value: 'month', label: 'За месяц' },
+  { value: 'custom', label: 'Выбрать дату' },
 ];
+const SORT_OPTIONS = [{ value: 'default', label: 'По умолчанию' }, { value: 'date_desc', label: 'Дата: новые → старые' }, { value: 'date_asc', label: 'Дата: старые → новые' }, { value: 'amount_desc', label: 'Сумма: больше → меньше' }, { value: 'amount_asc', label: 'Сумма: меньше → больше' }];
 
 const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -99,15 +94,21 @@ function periodRange(period: string): { dateFrom?: string; dateTo?: string } {
 }
 
 /** Заказы (владелец/админ) — порт PWA OrdersPage. */
-export function OrdersScreen() {
+export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {}) {
   const [tab, setTab] = useState('all');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [waiterId, setWaiterId] = useState('');
   const [period, setPeriod] = useState('all');
   const [search, setSearch] = useState('');
+  const [sort, setSort] = useState('default');
+  const [customDate, setCustomDate] = useState('');
+  const [calendarRequest, setCalendarRequest] = useState(0);
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(initialOrderId ?? null);
+  React.useEffect(() => { if (initialOrderId) setDetailId(initialOrderId); }, [initialOrderId]);
+  const details = useAdminOrderDetails(detailId ?? detailsOrder?.id ?? null);
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
   const [manualStatus, setManualStatus] = useState<OrderStatus>('served');
   const [manualReason, setManualReason] = useState('');
@@ -122,8 +123,8 @@ export function OrdersScreen() {
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
 
-  const filters = { search, paymentMethod, waiterId, ...periodRange(period) };
-  const ordersQ = useAdminOrdersInfinite({ tab, ...filters });
+  const filters = { search, paymentMethod, waiterId, ...(period === 'custom' ? customDate ? { dateFrom: customDate, dateTo: customDate } : {} : periodRange(period)) };
+  const ordersQ = useAdminOrdersInfinite({ tab, ...filters, sort: sort.startsWith('date') ? 'date' : sort.startsWith('amount') ? 'amount' : 'default', sortDirection: sort.endsWith('_asc') ? 'asc' : 'desc' });
   const summaryQ = useOrdersSummary(filters);
   const items = ordersQ.data?.pages.flatMap((p) => p.items) ?? [];
   const ordersError = ordersQ.isError ? apiError(ordersQ.error) : null;
@@ -193,17 +194,19 @@ export function OrdersScreen() {
 
         {/* Фильтры */}
         <View style={styles.filters}>
-          <Select value={tab} onChange={setTab} options={STATUS_OPTIONS} title="Статус" />
-          <Select value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
-          <Select value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
-          <Select value={period} onChange={setPeriod} options={PERIOD_OPTIONS} title="Период" />
-          <TextInput
+          <Select style={styles.filterControl} value={tab} onChange={setTab} options={STATUS_OPTIONS} title="Статус" />
+          <Select style={styles.filterControl} value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
+          <Select style={styles.filterControl} value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
+          <Select style={styles.filterControl} value={period} onChange={(next) => { setPeriod(next); if (next === 'custom') setCalendarRequest(request => request + 1); }} options={PERIOD_OPTIONS} title="Период" />
+          {period === 'custom' ? <DateField key={calendarRequest} accessibilityLabel="Дата заказов" value={customDate} onChangeText={setCustomDate} openOnMount /> : null}
+          <Select style={styles.filterControl} value={sort} onChange={setSort} options={SORT_OPTIONS} title="Сортировка" />
+          <View style={styles.searchWrap}><PwaIcon name="search" size={21} color="#64799E" /><TextInput
             style={styles.search}
             placeholder="Поиск по заказам"
             placeholderTextColor={colors.textLight}
             value={search}
             onChangeText={setSearch}
-          />
+          /></View>
         </View>
 
         {/* Таблица заказов */}
@@ -214,11 +217,11 @@ export function OrdersScreen() {
             </View>
           ) : ordersError ? (
             <View style={styles.center}>
-              <Text style={styles.errTitle}>Не удалось загрузить заказы</Text>
+              <Text style={styles.errTitle} translate>Не удалось загрузить заказы</Text>
               <Text style={styles.errSub}>{ordersError}</Text>
             </View>
           ) : items.length === 0 ? (
-            <Text style={styles.empty}>Заказы не найдены</Text>
+            <Text style={styles.empty} translate>Заказы не найдены</Text>
           ) : (
             <ScrollView
               horizontal
@@ -227,20 +230,20 @@ export function OrdersScreen() {
             >
               <View style={{ width: TABLE_WIDTH }}>
                 <View style={styles.thead}>
-                  <Text style={[styles.th, { width: COL.num }]}>№ заказа</Text>
-                  <Text style={[styles.th, { width: COL.date }]}>Дата и время</Text>
-                  <Text style={[styles.th, { width: COL.table }]}>Стол</Text>
-                  <Text style={[styles.th, { width: COL.waiter }]}>Официант</Text>
-                  <Text style={[styles.th, styles.thRight, { width: COL.amount }]}>Сумма</Text>
-                  <Text style={[styles.th, { width: COL.status }]}>Статус заказа</Text>
-                  <Text style={[styles.th, { width: COL.pay }]}>Способ оплаты</Text>
-                  <Text style={[styles.th, styles.thCenter, { width: COL.act }]}>Действия</Text>
+                  <Text style={[styles.th, { width: COL.num }]} translate>№ заказа</Text>
+                  <Text style={[styles.th, { width: COL.date }]} translate>Дата и время</Text>
+                  <Text style={[styles.th, { width: COL.table }]} translate>Стол</Text>
+                  <Text style={[styles.th, { width: COL.waiter }]} translate>Официант</Text>
+                  <Text style={[styles.th, styles.thRight, { width: COL.amount }]} translate>Сумма</Text>
+                  <Text style={[styles.th, { width: COL.status }]} translate>Статус заказа</Text>
+                  <Text style={[styles.th, { width: COL.pay }]} translate>Способ оплаты</Text>
+                  <Text style={[styles.th, styles.thCenter, { width: COL.act }]} translate>Действия</Text>
                 </View>
                 {items.map((ord) => (
                   <OrderTableRow
                     key={ord.id}
                     order={ord}
-                    onOpen={() => setDetailsOrder(ord)}
+                    onOpen={() => { setDetailsOrder(ord); setDetailId(ord.id); }}
                     onEdit={() => openStatusEditor(ord)}
                     onCancel={CANCELLABLE.has(ord.status) ? () => setCancelTarget(ord) : undefined}
                   />
@@ -253,7 +256,7 @@ export function OrdersScreen() {
               <ActivityIndicator color={colors.primary} />
             </View>
           ) : items.length > 0 && !hasNextPage ? (
-            <Text style={styles.footerDone}>Все заказы загружены</Text>
+            <Text style={styles.footerDone} translate>Все заказы загружены</Text>
           ) : null}
         </View>
       </ScrollView>
@@ -281,12 +284,12 @@ export function OrdersScreen() {
         onClose={() => setStatusTarget(null)}
         onConfirm={confirmStatusChange}
       />
-      <OrderDetailsModal order={detailsOrder} onClose={() => setDetailsOrder(null)} />
+      <OrderDetailsModal order={details.data ?? detailsOrder} onOrderChange={setDetailsOrder} allowItemCancellation onClose={() => { setDetailsOrder(null); setDetailId(null); }} />
     </>
   );
 }
 
-const COL = { num: 70, date: 140, table: 92, waiter: 120, amount: 92, status: 186, pay: 130, act: 84 } as const;
+const COL = { num: 90, date: 157, table: 112, waiter: 123, amount: 101, status: 213, pay: 235, act: 89 } as const;
 const TABLE_WIDTH = COL.num + COL.date + COL.table + COL.waiter + COL.amount + COL.status + COL.pay + COL.act;
 
 function OrderTableRow({
@@ -308,12 +311,11 @@ function OrderTableRow({
       <Text style={[styles.td, styles.tdSecondary, { width: COL.date }]} numberOfLines={1}>
         {new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)}
       </Text>
-      <Text style={[styles.td, styles.tdSecondary, { width: COL.table }]} numberOfLines={1}>
-        Стол {order.table.number}
-        {hallSuffix(order.table)}
+      <Text style={[styles.td, styles.tdSecondary, { width: COL.table }]} numberOfLines={1} translate>
+        {order.source === 'delivery' ? '—' : `Стол ${order.table.number}${hallSuffix(order.table)}`}
       </Text>
-      <Text style={[styles.td, styles.tdSecondary, { width: COL.waiter }]} numberOfLines={1}>
-        {order.waiter?.name ?? 'QR menu'}
+      <Text style={[styles.td, styles.tdSecondary, { width: COL.waiter }]} numberOfLines={1} translate>
+        {order.source === 'delivery' ? 'Доставка' : order.waiter?.name ?? 'QR menu'}
       </Text>
       <Text style={[styles.td, styles.tdStrong, styles.tdRight, { width: COL.amount }]} numberOfLines={1}>
         {money(order.finalAmount)}
@@ -377,7 +379,7 @@ function StatusEditorModal({
         </View>
       }
     >
-      <Text style={styles.editorSub}>
+      <Text style={styles.editorSub} translate>
         {displayOrderNumber(order.orderNumber)} · Стол {order.table.number}
         {hallSuffix(order.table)}
       </Text>
@@ -393,7 +395,7 @@ function StatusEditorModal({
           multiline
         />
         {order.status === 'cancelled' && value !== 'cancelled' ? (
-          <Text style={styles.restoreNote}>Отменённые позиции будут восстановлены в выбранный статус.</Text>
+          <Text style={styles.restoreNote} translate>Отменённые позиции будут восстановлены в выбранный статус.</Text>
         ) : null}
       </View>
     </BottomSheet>
@@ -402,32 +404,31 @@ function StatusEditorModal({
 
 function Sum({ label, value }: { label: string; value: string }) {
   return (
-    <Text style={styles.sumText}>
+    <Text style={styles.sumText} translate>
       {label}: <Text style={styles.sumValue}>{value}</Text>
     </Text>
   );
 }
 function Sep() {
-  return <Text style={styles.sumSep}>|</Text>;
+  return null;
 }
 
 const styles = StyleSheet.create({
-  page: { flex: 1 },
+  page: { flex: 1, backgroundColor: '#F5F8FD' },
   pageContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
-  summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
-  sumText: { fontSize: fontSize.sm, color: colors.textSecondary },
-  sumValue: { fontWeight: '500', color: colors.textPrimary },
+  summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, minHeight: 56, paddingVertical: 12, paddingHorizontal: 19, borderWidth: 1, borderColor: '#E8EEF7', borderRadius: 15, backgroundColor: colors.white },
+  sumText: { fontSize: 15, color: '#536686' },
+  sumValue: { fontWeight: '600', color: '#162445' },
   sumSep: { fontSize: fontSize.sm, color: colors.textLight },
-  filters: { gap: spacing.sm },
+  filters: { gap: 10, marginBottom: 5 },
+  filterControl: { height: 46, borderColor: '#DCE5F2', borderRadius: 11 },
+  searchWrap: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 13, height: 46, borderWidth: 1, borderColor: '#DCE5F2', borderRadius: 11, backgroundColor: colors.white },
   search: {
+    flex: 1,
     height: 44,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: colors.white,
-    paddingHorizontal: spacing.md,
-    fontSize: fontSize.sm,
-    color: colors.textPrimary,
+    padding: 0,
+    fontSize: 14,
+    color: '#1F3156',
   },
 
   center: { paddingVertical: 60, alignItems: 'center', gap: 4 },
@@ -440,8 +441,8 @@ const styles = StyleSheet.create({
   // Таблица заказов (как в PWA: карточка со скроллом по горизонтали).
   tableCard: {
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
+    borderColor: '#E4EBF5',
+    borderRadius: 16,
     backgroundColor: colors.white,
     overflow: 'hidden',
   },
@@ -450,30 +451,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
-    backgroundColor: colors.background,
+    backgroundColor: '#F8FAFD',
+    minHeight: 46,
   },
   th: {
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: fontSize.xs,
-    fontWeight: '500',
-    color: colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#657691',
   },
   thRight: { textAlign: 'right' },
   thCenter: { textAlign: 'center' },
   tr: {
     flexDirection: 'row',
     alignItems: 'center',
+    minHeight: 56,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  td: { paddingHorizontal: 12, paddingVertical: 12, fontSize: fontSize.sm },
-  tdStrong: { fontWeight: '500', color: colors.textPrimary },
-  tdSecondary: { color: colors.textSecondary },
+  td: { paddingHorizontal: 12, paddingVertical: 12, fontSize: 14, lineHeight: 19 },
+  tdStrong: { fontWeight: '600', color: '#1A294A' },
+  tdSecondary: { color: '#506383' },
   tdRight: { textAlign: 'right' },
   tdCell: { paddingHorizontal: 12, paddingVertical: 8, justifyContent: 'center' },
   tdActions: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 2, paddingHorizontal: 4 },
-  actionBtn: { width: 30, height: 30, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
+  actionBtn: { width: 29, height: 29, borderRadius: 8, borderWidth: 1, borderColor: '#E4EAF4', backgroundColor: colors.white, alignItems: 'center', justifyContent: 'center' },
 
   footer: { flexDirection: 'row', gap: spacing.sm },
   editorSub: { fontSize: fontSize.sm, color: colors.textMuted },

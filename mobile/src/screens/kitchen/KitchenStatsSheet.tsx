@@ -1,16 +1,11 @@
 import React, { useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
 import { FullscreenSheet } from '@/components/FullscreenSheet';
 import { PwaIcon } from '@/components/PwaIcon';
+import { DateField } from '@/components/DateField';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { money } from '@/utils/format';
 import {
@@ -21,12 +16,12 @@ import {
 } from '@/services/api/kitchen';
 import type { PrepStation } from '@/types';
 
-// Кастомный период (выбор дат) на mobile пока не портирован — пресеты покрывают основное.
 const PERIODS: { value: KitchenStatsPeriod; label: string }[] = [
   { value: 'today', label: 'Сегодня' },
   { value: 'week', label: 'Неделя' },
   { value: 'month', label: 'Месяц' },
   { value: 'all', label: 'Всё время' },
+  { value: 'custom', label: 'Период' },
 ];
 
 const PERIOD_LABEL: Record<KitchenStatsPeriod, string> = {
@@ -48,22 +43,62 @@ const PREPARED_LABEL: Record<KitchenStatsPeriod, string> = {
 const minutes = (n: number) => `${n} мин`;
 const PAGE_SIZE = 8;
 
+function localDate(daysAgo = 0): string {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function validDateRange(from: string, to: string): boolean {
+  const valid = (value: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T12:00:00`);
+    return Number.isFinite(date.getTime()) && date.getFullYear() === Number(value.slice(0, 4))
+      && date.getMonth() + 1 === Number(value.slice(5, 7)) && date.getDate() === Number(value.slice(8, 10));
+  };
+  return valid(from) && valid(to) && from <= to;
+}
+
+function DateRangeFields({ from, to, onFrom, onTo }: {
+  from: string; to: string; onFrom: (value: string) => void; onTo: (value: string) => void;
+}) {
+  return <View style={{ gap: spacing.sm }}>
+    <View style={{ flexDirection: 'row', gap: spacing.sm }}>
+      <View style={{ flex: 1 }}>
+        <DateField label="С" accessibilityLabel="Начало периода" placeholder="ДД.ММ.ГГГГ" maxLength={10}
+          value={from} onChangeText={onFrom} style={styles.searchInput} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <DateField label="По" accessibilityLabel="Конец периода" placeholder="ДД.ММ.ГГГГ" maxLength={10}
+          value={to} onChangeText={onTo} style={styles.searchInput} />
+      </View>
+    </View>
+    {!validDateRange(from, to) ? <Text style={{ color: colors.danger }} translate>Введите корректный период в формате ДД.ММ.ГГГГ.</Text> : null}
+  </View>;
+}
+
 /** Полноэкранная статистика кухни — паритет с PWA KitchenStats. */
 export function KitchenStatsSheet({
   visible,
   station,
   onClose,
+  inline = false,
 }: {
   visible: boolean;
   station: PrepStation;
   onClose: () => void;
+  /** The PWA statistics tab keeps the station header and toolbar visible. */
+  inline?: boolean;
 }) {
   const [period, setPeriod] = useState<KitchenStatsPeriod>('today');
-  const [longOpen, setLongOpen] = useState(false);
+  const [longOpen, setLongOpen] = useState<'longest' | 'fastest' | null>(null);
+  const [from, setFrom] = useState(() => localDate(6));
+  const [to, setTo] = useState(() => localDate());
   const [preparedOpen, setPreparedOpen] = useState(false);
   const [hourlyOpen, setHourlyOpen] = useState(false);
 
-  const statsQ = useKitchenStats({ period }, station, visible);
+  const rangeValid = period !== 'custom' || validDateRange(from, to);
+  const statsQ = useKitchenStats({ period, ...(period === 'custom' ? { from, to } : {}) }, station, visible && rangeValid);
   const d = statsQ.data;
 
   const longest = useMemo(
@@ -77,20 +112,21 @@ export function KitchenStatsSheet({
   const preparedDishes = useMemo(() => (d ? [...d.dishes].sort((a, b) => b.count - a.count) : []), [d]);
 
   return (
-    <FullscreenSheet visible={visible} onClose={onClose} style={styles.screen}>
-      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
-        <View style={styles.header}>
-          <Text style={styles.headerTitle}>Статистика</Text>
+    <StatsSurface inline={inline} visible={visible} onClose={onClose}>
+      <SafeAreaView style={styles.screen} edges={inline ? [] : ['top', 'bottom']}>
+        {!inline ? <View style={styles.header}>
+          <Text style={styles.headerTitle} translate>Статистика</Text>
           <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
             <PwaIcon name="close" size={22} color={colors.textLight} />
           </FastPressable>
-        </View>
+        </View> : null}
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <PeriodTabs period={period} onChange={setPeriod} />
+          {period === 'custom' ? <DateRangeFields from={from} to={to} onFrom={setFrom} onTo={setTo} /> : null}
 
-          {statsQ.isError ? (
-            <Text style={styles.tableEmpty}>Не удалось загрузить статистику</Text>
+          {!rangeValid ? null : statsQ.isError ? (
+            <Text style={styles.tableEmpty} translate>Не удалось загрузить статистику</Text>
           ) : statsQ.isLoading || !d ? (
             <View style={styles.loading}>
               <ActivityIndicator size="large" color={colors.primary} />
@@ -110,7 +146,7 @@ export function KitchenStatsSheet({
                 <Sum label="Среднее время" value={d.cards.avgPrepMin > 0 ? minutes(d.cards.avgPrepMin) : '—'} />
               </View>
 
-              <Panel title="Самые долгие блюда" onViewAll={longest.length ? () => setLongOpen(true) : undefined}>
+              <Panel title="Самые долгие блюда" onViewAll={longest.length ? () => setLongOpen('longest') : undefined}>
                 <MiniTable
                   columns={[{ label: 'Блюдо' }, { label: 'Среднее время', align: 'right' }]}
                   rows={longest.slice(0, 6).map((x) => [x.name, minutes(x.avgMin)])}
@@ -118,7 +154,7 @@ export function KitchenStatsSheet({
                 />
               </Panel>
 
-              <Panel title="Самые быстрые блюда" onViewAll={fastest.length ? () => setLongOpen(true) : undefined}>
+              <Panel title="Самые быстрые блюда" onViewAll={fastest.length ? () => setLongOpen('fastest') : undefined}>
                 <MiniTable
                   columns={[{ label: 'Блюдо' }, { label: 'Среднее время', align: 'right' }]}
                   rows={fastest.slice(0, 6).map((x) => [x.name, minutes(x.avgMin)])}
@@ -147,9 +183,9 @@ export function KitchenStatsSheet({
 
               <View style={styles.panel}>
                 <View style={styles.panelHeadRow}>
-                  <Text style={styles.panelTitle}>Приготовлено по часам</Text>
+                  <Text style={styles.panelTitle} translate>Приготовлено по часам</Text>
                   <FastPressable onPress={() => setHourlyOpen(true)} hitSlop={6}>
-                    <Text style={styles.linkText}>Смотреть детали</Text>
+                    <Text style={styles.linkText} translate>Смотреть детали</Text>
                   </FastPressable>
                 </View>
                 <HourlyChart data={d.hourly} height={200} />
@@ -160,21 +196,33 @@ export function KitchenStatsSheet({
       </SafeAreaView>
 
       {longOpen && d ? (
-        <LongestDishesModal dishes={longest} periodLabel={PERIOD_LABEL[period]} onClose={() => setLongOpen(false)} />
+        <LongestDishesModal dishes={longOpen === 'fastest' ? fastest : longest}
+          title={longOpen === 'fastest' ? 'Самые быстрые блюда' : 'Самые долгие блюда'}
+          periodLabel={period === 'custom' ? `${from} — ${to}` : PERIOD_LABEL[period]}
+          onClose={() => setLongOpen(null)} />
       ) : null}
       {preparedOpen && d ? (
         <PreparedDishesModal
           dishes={preparedDishes}
           title={PREPARED_LABEL[period]}
-          periodLabel={PERIOD_LABEL[period]}
+          periodLabel={period === 'custom' ? `${from} — ${to}` : PERIOD_LABEL[period]}
           onClose={() => setPreparedOpen(false)}
         />
       ) : null}
       {hourlyOpen ? (
-        <HourlyModal station={station} initialPeriod={period} onClose={() => setHourlyOpen(false)} />
+        <HourlyModal station={station} initialPeriod={period} initialFrom={from} initialTo={to}
+          onClose={() => setHourlyOpen(false)} />
       ) : null}
-    </FullscreenSheet>
+    </StatsSurface>
   );
+}
+
+function StatsSurface({ inline, visible, onClose, children }: {
+  inline: boolean; visible: boolean; onClose: () => void; children: React.ReactNode;
+}) {
+  return inline
+    ? <View style={styles.screen}>{children}</View>
+    : <FullscreenSheet visible={visible} onClose={onClose} style={styles.screen}>{children}</FullscreenSheet>;
 }
 
 /* ---------- Период ---------- */
@@ -186,6 +234,9 @@ function PeriodTabs({
   period: KitchenStatsPeriod;
   onChange: (p: KitchenStatsPeriod) => void;
 }) {
+  const { width } = useWindowDimensions();
+  const narrow = width < 640;
+  const tabWidth = (width - spacing.lg * 2 - 8 - 8) / 3;
   return (
     <View style={styles.periodTabs}>
       {PERIODS.map((p) => {
@@ -194,9 +245,9 @@ function PeriodTabs({
           <FastPressable
             key={p.value}
             onPress={() => onChange(p.value)}
-            style={[styles.periodTab, active && styles.periodTabActive]}
+            style={[styles.periodTab, narrow && { width: tabWidth }, active && styles.periodTabActive]}
           >
-            <Text style={[styles.periodTabText, active && styles.periodTabTextActive]}>{p.label}</Text>
+            <Text style={[styles.periodTabText, active && styles.periodTabTextActive]} translate>{p.label}</Text>
           </FastPressable>
         );
       })}
@@ -208,7 +259,7 @@ function PeriodTabs({
 
 function Sum({ label, value }: { label: string; value: string }) {
   return (
-    <Text style={styles.sumText}>
+    <Text style={styles.sumText} translate>
       {label}: <Text style={styles.sumValue}>{value}</Text>
     </Text>
   );
@@ -230,11 +281,11 @@ function Panel({
 }) {
   return (
     <View style={styles.panel}>
-      <Text style={styles.panelTitle}>{title}</Text>
+      <Text style={styles.panelTitle} translate>{title}</Text>
       {children}
       {onViewAll ? (
         <FastPressable onPress={onViewAll} hitSlop={6} style={{ marginTop: spacing.md }}>
-          <Text style={styles.linkText}>Смотреть все</Text>
+          <Text style={styles.linkText} translate>Смотреть все</Text>
         </FastPressable>
       ) : null}
     </View>
@@ -270,7 +321,7 @@ function MiniTable({
       <View style={[styles.row, styles.rowHead]}>
         {columns.map((c, i) => (
           <View key={c.label} style={colFlex(i)}>
-            <Text style={cellStyle(i, true, i === 0)}>{c.label}</Text>
+            <Text style={cellStyle(i, true, i === 0)} translate>{c.label}</Text>
           </View>
         ))}
       </View>
@@ -301,7 +352,7 @@ function MiniTable({
 function HourlyChart({ data, height }: { data: KitchenStatsData['hourly']; height: number }) {
   const max = Math.max(1, ...data.map((h) => h.count));
   if (!data.some((h) => h.count > 0)) {
-    return <Text style={styles.tableEmpty}>Нет данных за период</Text>;
+    return <Text style={styles.tableEmpty} translate>Нет данных за период</Text>;
   }
   return (
     <View>
@@ -353,7 +404,7 @@ function DetailModalShell({
       <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
         <View style={styles.header}>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={styles.headerTitle}>{title}</Text>
+            <Text style={styles.headerTitle} translate>{title}</Text>
             {subtitle ? <Text style={styles.headerSub}>{subtitle}</Text> : null}
           </View>
           <FastPressable onPress={close} hitSlop={12} style={styles.closeBtn}>
@@ -392,16 +443,18 @@ function usePagedSearch(dishes: KitchenStatsDish[]) {
 
 function LongestDishesModal({
   dishes,
+  title,
   periodLabel,
   onClose,
 }: {
   dishes: KitchenStatsDish[];
+  title: string;
   periodLabel: string;
   onClose: () => void;
 }) {
   const s = usePagedSearch(dishes);
   return (
-    <DetailModalShell title="Самые долгие блюда" subtitle={periodLabel} onClose={onClose}>
+    <DetailModalShell title={title} subtitle={periodLabel} onClose={onClose}>
       <View style={styles.searchWrap}>
         <TextInput
           style={styles.searchInput}
@@ -425,7 +478,7 @@ function LongestDishesModal({
         />
       </ScrollView>
       <View style={styles.modalFooter}>
-        <Text style={styles.footerMuted}>Всего блюд: {s.filtered.length}</Text>
+        <Text style={styles.footerMuted} translate>Всего блюд: {s.filtered.length}</Text>
         <Pagination page={s.current} pages={s.pages} onChange={s.setPage} />
       </View>
     </DetailModalShell>
@@ -465,7 +518,7 @@ function PreparedDishesModal({
         />
       </ScrollView>
       <View style={styles.modalFooter}>
-        <Text style={styles.footerMuted}>Всего блюд: {s.filtered.length}</Text>
+        <Text style={styles.footerMuted} translate>Всего блюд: {s.filtered.length}</Text>
         <Pagination page={s.current} pages={s.pages} onChange={s.setPage} />
       </View>
     </DetailModalShell>
@@ -475,14 +528,21 @@ function PreparedDishesModal({
 function HourlyModal({
   station,
   initialPeriod,
+  initialFrom,
+  initialTo,
   onClose,
 }: {
   station: PrepStation;
   initialPeriod: KitchenStatsPeriod;
+  initialFrom: string;
+  initialTo: string;
   onClose: () => void;
 }) {
   const [period, setPeriod] = useState<KitchenStatsPeriod>(initialPeriod);
-  const statsQ = useKitchenStats({ period }, station);
+  const [from, setFrom] = useState(initialFrom);
+  const [to, setTo] = useState(initialTo);
+  const rangeValid = period !== 'custom' || validDateRange(from, to);
+  const statsQ = useKitchenStats({ period, ...(period === 'custom' ? { from, to } : {}) }, station, rangeValid);
   const hourly = statsQ.data?.hourly ?? [];
   const active = hourly.filter((h) => h.count > 0);
   const totalCount = active.reduce((s, h) => s + h.count, 0);
@@ -497,7 +557,8 @@ function HourlyModal({
     <DetailModalShell title="Приготовлено по часам" onClose={onClose}>
       <ScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
         <PeriodTabs period={period} onChange={setPeriod} />
-        {statsQ.isLoading ? (
+        {period === 'custom' ? <DateRangeFields from={from} to={to} onFrom={setFrom} onTo={setTo} /> : null}
+        {!rangeValid ? null : statsQ.isError ? <Text style={styles.tableEmpty} translate>Не удалось загрузить статистику</Text> : statsQ.isLoading ? (
           <View style={styles.loading}>
             <ActivityIndicator size="large" color={colors.primary} />
           </View>
@@ -532,7 +593,7 @@ function HourlyModal({
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.summaryCard}>
-      <Text style={styles.summaryCardLabel}>{label}</Text>
+      <Text style={styles.summaryCardLabel} translate>{label}</Text>
       <Text style={styles.summaryCardValue}>{value}</Text>
     </View>
   );
@@ -584,14 +645,13 @@ const styles = StyleSheet.create({
 
   periodTabs: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 4,
     backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
     borderRadius: radius.md,
     padding: 4,
   },
-  periodTab: { flex: 1, borderRadius: radius.sm, paddingVertical: spacing.sm, alignItems: 'center' },
+  periodTab: { borderRadius: radius.sm, paddingVertical: spacing.sm, paddingHorizontal: 16, alignItems: 'center' },
   periodTabActive: {
     backgroundColor: colors.white,
     shadowColor: '#0F172A',
@@ -600,7 +660,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  periodTabText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted },
+  periodTabText: { fontSize: 14, fontWeight: '500', color: colors.textMuted },
   periodTabTextActive: { color: colors.primary },
 
   summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },

@@ -22,9 +22,12 @@ yarn-error.*
 # macOS
 .DS_Store
 *.pem
+google-services.json
+GoogleService-Info.plist
 
 # local env
 .env*.local
 
 # typescript
 *.tsbuildinfo
+releases/

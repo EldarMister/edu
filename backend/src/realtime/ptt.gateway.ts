@@ -7,7 +7,11 @@ import {
   WebSocketServer,
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { getJwtAccessSecret } from '../auth/jwt.config';
+import { PrismaService } from '../prisma/prisma.service';
+import { assertCafeActive } from '../platform/cafe-status';
 
 const PTT_CHANNELS = ['general', 'waiters', 'kitchen', 'admin'] as const;
 type PttChannel = (typeof PTT_CHANNELS)[number];
@@ -41,6 +45,7 @@ interface TalkLock {
   socketId: string;
   userId: string;
   role: string;
+  name?: string;
 }
 
 interface JoinBody {
@@ -69,6 +74,11 @@ export class PttGateway implements OnGatewayDisconnect {
   private readonly logger = new Logger('PttGateway');
   private readonly locks = new Map<string, TalkLock>();
 
+  constructor(
+    private readonly jwt: JwtService,
+    private readonly prisma: PrismaService,
+  ) {}
+
   handleDisconnect(client: Socket) {
     const channel = client.data.pttChannel as PttChannel | undefined;
     this.releaseTalker(client);
@@ -79,7 +89,7 @@ export class PttGateway implements OnGatewayDisconnect {
 
   @SubscribeMessage(PTT_EVENTS.JOIN)
   async handleJoin(@ConnectedSocket() client: Socket, @MessageBody() body: JoinBody) {
-    const user = this.getUser(client);
+    const user = await this.getUser(client);
     if (!user) return this.deny(client, undefined, 'unauthorized');
 
     const nextChannel = body?.channel ?? null;
@@ -90,38 +100,27 @@ export class PttGateway implements OnGatewayDisconnect {
     }
     if (!this.isChannel(nextChannel)) return this.deny(client, undefined, 'invalid_channel');
 
-    const previous = client.data.pttChannel as PttChannel | undefined;
-    if (previous && previous !== nextChannel) {
-      this.releaseTalker(client);
-      client.leave(this.room(user.cafeId, previous));
-      client.data.pttChannel = undefined;
-      await this.emitPresence(client, previous);
-    }
-
-    const room = this.room(user.cafeId, nextChannel);
-    client.join(room);
-    client.data.pttChannel = nextChannel;
-    const onlineCount = await this.emitPresence(client, nextChannel);
+    const onlineCount = await this.joinChannel(client, user, nextChannel);
     return { ok: true, channel: nextChannel, onlineCount };
   }
 
   @SubscribeMessage(PTT_EVENTS.START_TALK)
-  handleStartTalk(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody) {
-    const user = this.getUser(client);
+  async handleStartTalk(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody) {
+    const user = await this.getUser(client);
     if (!user) return this.deny(client, body?.channel, 'unauthorized');
 
-    const channel = this.resolveChannel(client, body);
+    const channel = await this.resolveChannel(client, user, body, true);
     if (!channel) return this.deny(client, undefined, 'not_in_channel');
 
     const key = this.lockKey(user.cafeId, channel);
-    const current = this.locks.get(key);
+    const current = this.findBlockingLock(user.cafeId, channel);
     if (current && current.socketId !== client.id) {
       return this.deny(client, channel, 'busy', current.userId);
     }
 
-    const lock: TalkLock = { socketId: client.id, userId: user.id, role: user.role };
+    const lock: TalkLock = { socketId: client.id, userId: user.id, role: user.role, name: user.name };
     this.locks.set(key, lock);
-    this.server.to(this.room(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_BUSY, {
+    this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_BUSY, {
       channel,
       speaker: { id: user.id, role: user.role, name: user.name },
       startedAt: new Date().toISOString(),
@@ -130,11 +129,11 @@ export class PttGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage(PTT_EVENTS.AUDIO_MESSAGE)
-  handleAudioMessage(@ConnectedSocket() client: Socket, @MessageBody() body: AudioMessageBody) {
-    const user = this.getUser(client);
+  async handleAudioMessage(@ConnectedSocket() client: Socket, @MessageBody() body: AudioMessageBody) {
+    const user = await this.getUser(client);
     if (!user) return this.deny(client, body?.channel, 'unauthorized');
 
-    const channel = this.resolveChannel(client, body);
+    const channel = await this.resolveChannel(client, user, body, false);
     if (!channel) return this.deny(client, undefined, 'not_in_channel');
 
     const lock = this.locks.get(this.lockKey(user.cafeId, channel));
@@ -145,12 +144,13 @@ export class PttGateway implements OnGatewayDisconnect {
     const chunk = body?.chunk;
     if (!this.isValidAudio(chunk)) return { ok: false, reason: 'invalid_audio' };
 
-    // Telegram-модель: получили цельный base64-файл — моментально
-    // проксируем его всем остальным участникам комнаты.
-    client.to(this.room(user.cafeId, channel)).emit(PTT_EVENTS.AUDIO_MESSAGE, {
+    // Telegram-модель: получили цельный base64-файл. Обычные каналы слышит
+    // только своя комната, а канал «Все» транслируется во все PTT-комнаты кафе.
+    client.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.AUDIO_MESSAGE, {
       channel,
       senderId: user.id,
       senderRole: user.role,
+      senderName: user.name,
       mimeType: typeof body.mimeType === 'string' ? body.mimeType.slice(0, 80) : 'application/octet-stream',
       chunk,
       sentAt: new Date().toISOString(),
@@ -159,28 +159,57 @@ export class PttGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage(PTT_EVENTS.STOP_TALK)
-  handleStopTalk(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody) {
-    const channel = this.resolveChannel(client, body);
+  async handleStopTalk(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody) {
+    const user = await this.getUser(client);
+    const channel = user ? await this.resolveChannel(client, user, body, false) : null;
     this.releaseTalker(client, channel);
     return { ok: true };
   }
 
-  private getUser(client: Socket): AuthenticatedSocketUser | null {
+  private getCachedUser(client: Socket): AuthenticatedSocketUser | null {
     const user = client.data.user as SocketUser | undefined;
     if (!user?.id || !user.role || !user.cafeId) return null;
     return user as AuthenticatedSocketUser;
   }
 
-  private resolveChannel(client: Socket, body: TalkBody | undefined): PttChannel | null {
+  private async resolveChannel(
+    client: Socket,
+    user: AuthenticatedSocketUser,
+    body: TalkBody | undefined,
+    autoJoin: boolean,
+  ): Promise<PttChannel | null> {
     const bodyChannel = body?.channel;
     const joinedChannel = client.data.pttChannel as PttChannel | undefined;
     if (bodyChannel && this.isChannel(bodyChannel) && bodyChannel === joinedChannel) return bodyChannel;
     if (!bodyChannel && joinedChannel && this.isChannel(joinedChannel)) return joinedChannel;
+    if (autoJoin && bodyChannel && this.isChannel(bodyChannel)) {
+      await this.joinChannel(client, user, bodyChannel);
+      return bodyChannel;
+    }
     return null;
   }
 
+  private async joinChannel(
+    client: Socket,
+    user: AuthenticatedSocketUser,
+    nextChannel: PttChannel,
+  ): Promise<number> {
+    const previous = client.data.pttChannel as PttChannel | undefined;
+    if (previous && previous !== nextChannel) {
+      this.releaseTalker(client);
+      client.leave(this.room(user.cafeId, previous));
+      client.data.pttChannel = undefined;
+      await this.emitPresenceFor(user.cafeId, previous);
+    }
+
+    const room = this.room(user.cafeId, nextChannel);
+    client.join(room);
+    client.data.pttChannel = nextChannel;
+    return this.emitPresenceFor(user.cafeId, nextChannel);
+  }
+
   private leaveCurrentChannel(client: Socket) {
-    const user = this.getUser(client);
+    const user = this.getCachedUser(client);
     const channel = client.data.pttChannel as PttChannel | undefined;
     if (!user || !channel) return;
     client.leave(this.room(user.cafeId, channel));
@@ -189,7 +218,7 @@ export class PttGateway implements OnGatewayDisconnect {
   }
 
   private releaseTalker(client: Socket, preferredChannel?: PttChannel | null) {
-    const user = this.getUser(client);
+    const user = this.getCachedUser(client);
     if (!user) return;
     const channels = preferredChannel ? [preferredChannel] : PTT_CHANNELS;
     for (const channel of channels) {
@@ -197,7 +226,7 @@ export class PttGateway implements OnGatewayDisconnect {
       const lock = this.locks.get(key);
       if (!lock || lock.socketId !== client.id) continue;
       this.locks.delete(key);
-      this.server.to(this.room(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_FREE, {
+      this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_FREE, {
         channel,
         speakerId: user.id,
         freedAt: new Date().toISOString(),
@@ -206,12 +235,56 @@ export class PttGateway implements OnGatewayDisconnect {
   }
 
   private async emitPresence(client: Socket, channel: PttChannel): Promise<number> {
-    const user = this.getUser(client);
+    const user = this.getCachedUser(client);
     if (!user) return 0;
-    const room = this.room(user.cafeId, channel);
-    const onlineCount = (await this.server.in(room).allSockets()).size;
+    return this.emitPresenceFor(user.cafeId, channel);
+  }
+
+  private async emitPresenceFor(cafeId: string, channel: PttChannel): Promise<number> {
+    const room = this.room(cafeId, channel);
+    const sockets = await this.server.in(room).fetchSockets();
+    const uniqueUsers = new Set<string>();
+    for (const socket of sockets) {
+      const socketUser = socket.data.user as SocketUser | undefined;
+      if (socketUser?.id && socketUser.cafeId === cafeId) uniqueUsers.add(socketUser.id);
+    }
+    const onlineCount = uniqueUsers.size;
     this.server.to(room).emit(PTT_EVENTS.PRESENCE, { channel, onlineCount });
     return onlineCount;
+  }
+
+  private async hydrateUserFromToken(client: Socket): Promise<AuthenticatedSocketUser | null> {
+    const token =
+      (client.handshake.auth?.token as string) ||
+      (client.handshake.headers?.authorization as string | undefined)?.replace('Bearer ', '');
+    if (!token) return null;
+    try {
+      const payload = await this.jwt.verifyAsync<{ sub: string; role: string }>(token, {
+        secret: getJwtAccessSecret(),
+      });
+      const dbUser = await this.prisma.user.findUnique({
+        where: { id: payload.sub },
+        select: { id: true, role: true, name: true, cafeId: true, isActive: true },
+      });
+      if (!dbUser?.isActive || !dbUser.cafeId) return null;
+      await assertCafeActive(this.prisma, dbUser.cafeId);
+      const user: AuthenticatedSocketUser = {
+        id: dbUser.id,
+        role: dbUser.role,
+        name: dbUser.name,
+        cafeId: dbUser.cafeId,
+      };
+      client.data.user = user;
+      return user;
+    } catch {
+      return null;
+    }
+  }
+
+  private async getUser(client: Socket): Promise<AuthenticatedSocketUser | null> {
+    const cached = this.getCachedUser(client);
+    if (cached) return cached;
+    return this.hydrateUserFromToken(client);
   }
 
   private deny(client: Socket, channel: PttChannel | undefined, reason: string, speakerId?: string) {
@@ -233,6 +306,23 @@ export class PttGateway implements OnGatewayDisconnect {
       chunk.length <= MAX_AUDIO_CHARS &&
       BASE64_RE.test(chunk)
     );
+  }
+
+  private findBlockingLock(cafeId: string, channel: PttChannel): TalkLock | undefined {
+    if (channel === 'general') {
+      for (const candidate of PTT_CHANNELS) {
+        const lock = this.locks.get(this.lockKey(cafeId, candidate));
+        if (lock) return lock;
+      }
+      return undefined;
+    }
+    return this.locks.get(this.lockKey(cafeId, 'general')) ?? this.locks.get(this.lockKey(cafeId, channel));
+  }
+
+  private broadcastRooms(cafeId: string, channel: PttChannel) {
+    return channel === 'general'
+      ? PTT_CHANNELS.map((candidate) => this.room(cafeId, candidate))
+      : this.room(cafeId, channel);
   }
 
   private room(cafeId: string, channel: PttChannel) {

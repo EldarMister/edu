@@ -9,6 +9,7 @@ import { useAuth } from '@/store/auth';
 import { waiterVoice } from '@/services/waiterVoice';
 import { waiterVoiceKey, waiterVoiceText, type WaiterVoicedOrder } from '@/services/realtimeVoice';
 import { isPttBackgroundRuntimeActive } from '@/features/ptt/backgroundFlag';
+import { notificationDeduper, isRemotePushRegistered } from '@/services/push';
 import { useReceiptPrint } from '@/store/receiptPrint';
 import { displayOrderNumber } from '@/utils/format';
 import { applyOrderStatusToCache } from '@/utils/orderCache';
@@ -16,6 +17,7 @@ import type { NotificationType } from '@/store/notifications';
 import type { Order, ReceiptPrintRequest } from '@/types';
 
 type RealtimeNotification = {
+  notificationId?: string;
   message: string;
   type?: NotificationType;
   orderId?: string;
@@ -37,7 +39,6 @@ export function useRealtimeSync() {
   const push = useNotifications((s) => s.push);
   const userId = useAuth((s) => s.user?.id);
   const voicedRef = useRef<Map<string, string>>(new Map());
-  const printedReceiptSoundRef = useRef<string | null>(null);
   const lastSyncAtRef = useRef(0);
 
   useEffect(() => {
@@ -84,10 +85,12 @@ export function useRealtimeSync() {
       void qc.refetchQueries({ queryKey: ['admin'], type: 'active' });
     };
     const onNotificationNew = (n: RealtimeNotification) => {
+      if (AppState.currentState !== 'active' && isRemotePushRegistered()) return;
+      if (backgroundRuntimeHandlesAudio()) return;
+      if (!notificationDeduper.claim(n, n.message)) return;
       const orderNumber = n.orderNumber ? displayOrderNumber(n.orderNumber) : undefined;
       const message = n.orderNumber && orderNumber ? n.message.replace(n.orderNumber, orderNumber) : n.message;
       push({ message, type: n.type ?? 'info', orderId: n.orderId, orderNumber, at: n.at });
-      if (backgroundRuntimeHandlesAudio()) return;
       void beep('notify');
     };
     const onReceiptApproved = (req: ReceiptPrintRequest) => {
@@ -100,38 +103,41 @@ export function useRealtimeSync() {
       invalidateOrders();
       const st = useReceiptPrint.getState();
       if (st.request?.id !== req.id) return;
+      const label = req.type === 'preliminary' ? 'Счёт' : 'Чек';
+      const shouldNotify = !(AppState.currentState !== 'active' && isRemotePushRegistered()) && notificationDeduper.claim({
+        notificationId: `receipt:${req.id}:printed`, orderId: req.orderId, type: 'success',
+      }, `${label} ${req.orderNumber} распечатан. Заберите ${label.toLowerCase()}.`);
       if (st.sheetOpen) {
         st.resolve('printed');
-        if (printedReceiptSoundRef.current !== req.id) {
-          printedReceiptSoundRef.current = req.id;
-          void beep('accept');
-        }
+        // The visible receipt sheet owns its confirmation sound.
         return;
       }
-      const label = req.type === 'preliminary' ? 'Счёт' : 'Чек';
-      push({
+      if (shouldNotify) push({
         message: `${label} ${displayOrderNumber(req.orderNumber)} распечатан. Заберите ${label.toLowerCase()}.`,
         type: 'success',
         at: new Date().toISOString(),
       });
       st.dismiss();
-      void beep('notify');
+      if (shouldNotify) void beep('notify');
     };
     const onReceiptRejected = (req: ReceiptPrintRequest) => {
       invalidateOrders();
       const st = useReceiptPrint.getState();
       if (st.request?.id !== req.id) return;
+      const shouldNotify = !(AppState.currentState !== 'active' && isRemotePushRegistered()) && notificationDeduper.claim({
+        notificationId: `receipt:${req.id}:rejected`, orderId: req.orderId, type: 'error',
+      }, 'Печать чека отклонена администратором');
       if (st.sheetOpen) {
         st.resolve('rejected');
       } else {
-        push({
+        if (shouldNotify) push({
           message: 'Печать чека отклонена администратором',
           type: 'error',
           at: new Date().toISOString(),
         });
         st.dismiss();
       }
-      void beep('notify');
+      if (shouldNotify) void beep('notify');
     };
     const speakWaiterOrder = (order: WaiterVoicedOrder) => {
       if (!order.waiter?.id || order.waiter.id !== userId) return;

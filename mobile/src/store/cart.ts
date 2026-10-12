@@ -80,6 +80,7 @@ interface CartState {
   setAllTakeaway: (takeaway: boolean) => void;
   remove: (index: number) => void;
   clear: () => void;
+  resetAll: () => void;
   total: () => number;
   count: () => number;
 }
@@ -254,6 +255,7 @@ export const useCart = create<CartState>((set, get) => ({
       if (s.tableId) delete carts[s.tableId];
       return { lines: [], comment: '', commentOpen: false, carts, editingOrderId: null, editingOrderNumber: null };
     }),
+  resetAll: () => set({ lines: [], comment: '', commentOpen: false, carts: {}, tableId: null, tableNumber: null, hallName: null, activeOrderId: null, editingOrderId: null, editingOrderNumber: null }),
   total: () => cartTotal(get().lines),
   count: () => get().lines.reduce((sum, l) => sum + l.quantity, 0),
 }));

@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
-import { Button } from '@/components/ui';
 import { colors, radius, softShadow, spacing } from '@/theme';
 import { dishUnitPrice, money } from '@/utils/format';
 import type { Dish } from '@/types';
@@ -54,11 +55,14 @@ export function WeightPickerSheet({
   onAdd: (amount: number) => void;
 }) {
   const { width, height } = useWindowDimensions();
-  const dialSize = Math.min(292, Math.max(214, width - 140));
+  const dialSize = Math.max(0, Math.min(width, 448) - 140);
   const [amount, setAmount] = useState(DEFAULT_AMOUNT);
   const [editing, setEditing] = useState(false);
   const [input, setInput] = useState(String(DEFAULT_AMOUNT));
   const dragRef = useRef<{ lastAngle: number; scale: number } | null>(null);
+  const lastDishRef = useRef(dish);
+  if (dish) lastDishRef.current = dish;
+  const renderedDish = dish ?? lastDishRef.current;
 
   useEffect(() => {
     if (!dish) return;
@@ -71,7 +75,7 @@ export function WeightPickerSheet({
   const dialMax = dialMaxForAmount(amount);
   const angle = START_ANGLE + (amount / dialMax) * (END_ANGLE - START_ANGLE);
   const knob = polar(180, 180, 116, angle);
-  const measure = dish?.weightedMeasure ?? 'weight';
+  const measure = renderedDish?.weightedMeasure ?? 'weight';
   const display = amountLabel(amount, measure);
   const amountNumberWidth = [...display.value].reduce((sum, character) => sum + (character === '.' ? 12 : 27), 0);
   const amountUnitGap = 13;
@@ -91,12 +95,12 @@ export function WeightPickerSheet({
     [],
   );
 
-  if (!dish) return null;
+  if (!renderedDish) return null;
 
   const price = dishUnitPrice(
-    String((Number(dish.price) * amount) / (dish.weightedPriceBase ?? 100)),
-    dish.discountType,
-    dish.discountValue,
+    String((Number(renderedDish.price) * amount) / (renderedDish.weightedPriceBase ?? 100)),
+    renderedDish.discountType,
+    renderedDish.discountValue,
   );
 
   const pointerAngle = (x: number, y: number) => {
@@ -137,31 +141,32 @@ export function WeightPickerSheet({
 
   return (
     <BottomSheet
-      visible
+      visible={!!dish}
       onClose={onClose}
       sheet
       maxHeight="94%"
-      fillBody
       animationPreset="weight"
-      panelStyle={styles.panel}
+      panelStyle={{ ...styles.panel, minHeight: height * 0.55 }}
       bodyStyle={styles.sheetBody}
-    >
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={[styles.content, { minHeight: Math.min(height * 0.55, 560) }]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-      >
+      headerContent={<View style={styles.sheetHeader}>
+        <View style={styles.handle} />
         <View style={styles.header}>
           <View style={styles.headerCopy}>
-            <Text style={styles.title}>{dish.name}</Text>
-            <Text style={styles.subtitle}>{measure === 'volume' ? 'Выберите объём' : 'Выберите вес'}</Text>
+            <Text style={styles.title} translate>Весовой</Text>
+            <Text style={styles.subtitle} translate>{measure === 'volume' ? 'Выберите объём' : 'Выберите вес'}</Text>
           </View>
           <FastPressable onPress={onClose} hitSlop={8} style={styles.closeButton}>
             <PwaIcon name="close" size={23} color="#334155" strokeWidth={2} />
           </FastPressable>
         </View>
-
+        </View>}
+    >
+      <SheetScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.dialRow}>
           <View style={[styles.steps, styles.leftSteps]}>
             <Step label="−50" disabled={amount === 0} onPress={() => setAmount((value) => clampAmount(value - 50))} />
@@ -204,14 +209,14 @@ export function WeightPickerSheet({
               <Circle cx={knob.x} cy={knob.y} r="11" fill={colors.white} stroke="#1268ee" strokeWidth="7" />
               {!editing ? (
                 <>
-                  <SvgText x={amountTextStart} y="197" fill="#07152d" fontSize="50" fontWeight="700">{display.value}</SvgText>
-                  <SvgText x={amountTextStart + amountNumberWidth + amountUnitGap} y="197" fill="#07152d" fontSize="22" fontWeight="600">{display.unit}</SvgText>
+                  <SvgText x={amountTextStart} y="197" fill="#07152d" fontFamily="Inter_700Bold" fontSize="50">{display.value}</SvgText>
+                  <SvgText x={amountTextStart + amountNumberWidth + amountUnitGap} y="197" fill="#07152d" fontFamily="Inter_600SemiBold" fontSize="22">{display.unit}</SvgText>
                 </>
               ) : null}
               <DialMark x={180} y={27} value={dialMax / 2} measure={measure} />
               <DialMark x={40} y={130} value={dialMax / 4} measure={measure} />
               <DialMark x={320} y={130} value={(dialMax * 3) / 4} measure={measure} />
-              <SvgText x="71" y="322" textAnchor="middle" fill="#60708d" fontSize="15">0</SvgText>
+              <SvgText x="71" y="322" textAnchor="middle" fill="#60708d" fontFamily="Inter_400Regular" fontSize="15">0</SvgText>
               <DialMark x={289} y={322} value={dialMax} measure={measure} />
             </Svg>
             {editing ? (
@@ -244,40 +249,47 @@ export function WeightPickerSheet({
         </View>
 
         <View style={styles.priceRow}>
-          <Text style={styles.priceLabel}>Стоимость</Text>
+          <Text style={styles.priceLabel} translate>Стоимость</Text>
           <Text style={styles.price}>{money(price)}</Text>
         </View>
-        <Button
-          title="Добавить"
-          size="lg"
+        <FastPressable
           onPress={() => onAdd(amount)}
           disabled={amount <= 0}
-          style={styles.addButton}
-        />
-      </ScrollView>
+          style={[styles.addButton, amount <= 0 && styles.addDisabled]}
+        ><Text style={styles.addText} translate>Добавить</Text></FastPressable>
+      </SheetScrollView>
     </BottomSheet>
   );
 }
 
 function DialMark({ x, y, value, measure }: { x: number; y: number; value: number; measure: Dish['weightedMeasure'] }) {
   const label = amountLabel(value, measure);
-  return <SvgText x={x} y={y} textAnchor="middle" fill="#60708d" fontSize="15">{`${label.value} ${label.unit}`}</SvgText>;
+  return <SvgText x={x} y={y} textAnchor="middle" fill="#60708d" fontFamily="Inter_400Regular" fontSize="15">{`${label.value} ${label.unit}`}</SvgText>;
 }
 
 function Step({ label, onPress, disabled = false }: { label: string; onPress: () => void; disabled?: boolean }) {
+  const scale = useSharedValue(1);
+  const animationStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
   return (
-    <FastPressable disabled={disabled} onPress={onPress} style={[styles.step, disabled && styles.disabled]}>
-      <Text style={styles.stepText}>{label}</Text>
-    </FastPressable>
+    <Animated.View style={animationStyle}>
+      <FastPressable disabled={disabled} onPress={onPress}
+        onPressIn={() => { scale.value = withTiming(0.95, { duration: 120 }); }}
+        onPressOut={() => { scale.value = withTiming(1, { duration: 120 }); }}
+        style={[styles.step, disabled && styles.disabled]}>
+        <Text style={styles.stepText}>{label}</Text>
+      </FastPressable>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: { borderTopLeftRadius: 28, borderTopRightRadius: 28 },
-  sheetBody: { flex: 1, paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 },
-  scroll: { flex: 1, minHeight: 0 },
+  panel: { width: '100%', maxWidth: 448, alignSelf: 'center', borderTopLeftRadius: 28, borderTopRightRadius: 28 },
+  sheetHeader: { paddingHorizontal: spacing.lg, paddingTop: 10 },
+  handle: { alignSelf: 'center', width: 40, height: 6, borderRadius: 3, backgroundColor: colors.slate300, marginBottom: spacing.lg },
+  sheetBody: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 0 },
+  scroll: { flexShrink: 1, minHeight: 0 },
   content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.lg },
-  header: { marginTop: spacing.sm, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.lg },
+  header: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: spacing.lg },
   headerCopy: { flex: 1, minWidth: 0 },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '700', color: colors.textPrimary },
   subtitle: { marginTop: spacing.sm, fontSize: 16, lineHeight: 22, color: colors.textMuted },
@@ -292,8 +304,10 @@ const styles = StyleSheet.create({
   dialShadow: { position: 'absolute', left: '19.5%', top: '19.5%', width: '61%', height: '61%', borderRadius: 999, backgroundColor: colors.white, shadowColor: colors.textPrimary, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 4 },
   editHitbox: { position: 'absolute', left: '29%', top: '34%', width: '42%', height: '34%', borderRadius: radius.pill },
   amountInput: { position: 'absolute', left: '31%', top: '42%', width: '38%', height: 48, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.sm, backgroundColor: 'rgba(255,255,255,0.96)', textAlign: 'center', fontSize: 28, fontWeight: '700', color: colors.textPrimary },
-  priceRow: { minHeight: 62, marginTop: spacing.md, paddingHorizontal: spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.white, ...softShadow },
+  priceRow: { minHeight: 62, marginTop: spacing.md, paddingHorizontal: spacing.lg, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, backgroundColor: colors.white },
   priceLabel: { fontSize: 13, color: colors.textMuted },
   price: { fontSize: 20, lineHeight: 24, fontWeight: '600', color: colors.textPrimary },
-  addButton: { height: 56, marginTop: spacing.lg, borderRadius: radius.md },
+  addButton: { height: 56, marginTop: spacing.lg, borderRadius: radius.md, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  addText: { fontSize: 18, fontWeight: '600', color: colors.white },
+  addDisabled: { opacity: 0.5 },
 });

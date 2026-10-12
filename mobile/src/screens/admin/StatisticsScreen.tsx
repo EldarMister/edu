@@ -1,20 +1,15 @@
 import React, { useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  LayoutChangeEvent,
-  PanResponder,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, LayoutChangeEvent, PanResponder, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Text } from '@/components/typography';
 import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { money } from '@/utils/format';
 import { PwaIcon } from '@/components/PwaIcon';
 import { FastPressable } from '@/components/FastPressable';
 import { BottomSheet } from '@/components/BottomSheet';
+import { DateField } from '@/components/DateField';
+import { Button } from '@/components/ui';
+import { apiError } from '@/lib/api';
 import type { PaymentMethod } from '@/types';
 import { useStatistics, type StatsDashboard, type StatsPeriod } from '@/services/api/admin';
 import { usePublicSettings } from '@/services/api/settings';
@@ -52,6 +47,10 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
 
 /** Статистика владельца — порт PWA StatisticsPage. */
 export function StatisticsScreen() {
+  const { width } = useWindowDimensions();
+  const narrow = width < 640;
+  const desktop = width >= 1024;
+  const periodWidth = (width - spacing.lg * 2 - 16) / 3;
   const today = useMemo(() => localYmd(new Date()), []);
   const weekAgo = useMemo(() => {
     const d = new Date();
@@ -83,62 +82,56 @@ export function StatisticsScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <View style={styles.periodTabs}>
+      <View style={[styles.periodToolbar, !narrow && styles.periodToolbarWide]}>
+      <View style={[styles.periodTabs, !narrow && { alignSelf: 'flex-start' }]}>
         {PERIODS.map((p) => {
           const active = period === p.value;
           return (
             <FastPressable
               key={p.value}
               onPress={() => setPeriod(p.value)}
-              style={[styles.periodTab, active && styles.periodTabActive]}
+              style={[styles.periodTab, narrow && { width: periodWidth }, active && styles.periodTabActive]}
             >
-              <Text style={[styles.periodTabText, active && styles.periodTabTextActive]}>{p.label}</Text>
+              <Text style={[styles.periodTabText, active && styles.periodTabTextActive]} translate>{p.label}</Text>
             </FastPressable>
           );
         })}
       </View>
       {period === 'custom' ? (
         <View style={styles.dateRange}>
-          <TextInput
-            style={styles.dateInput}
-            value={from}
-            onChangeText={setFrom}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.textLight}
-          />
+          <View style={narrow ? { flex: 1 } : { width: 150 }}><DateField style={{ height: 40 }} value={from} onChangeText={setFrom} accessibilityLabel="С даты" /></View>
           <Text style={styles.dateDash}>—</Text>
-          <TextInput
-            style={styles.dateInput}
-            value={to}
-            onChangeText={setTo}
-            placeholder="YYYY-MM-DD"
-            placeholderTextColor={colors.textLight}
-          />
+          <View style={narrow ? { flex: 1 } : { width: 150 }}><DateField style={{ height: 40 }} value={to} onChangeText={setTo} maximumDate={new Date()} accessibilityLabel="По дату" /></View>
         </View>
       ) : null}
+      </View>
 
-      {statsQ.isLoading || !d ? (
+      {statsQ.isError ? <View style={styles.loading}><Text style={{ color: colors.danger }}>{apiError(statsQ.error)}</Text><Button title="Повторить" onPress={() => void statsQ.refetch()} /></View> : statsQ.isLoading || !d ? (
         <View style={styles.loading}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
       ) : (
         <>
           {/* KPI — сплит-блок из двух показателей */}
-          <View style={styles.splitCard}>
+          {desktop ? <DashboardGrid columns={2} gap={16}>
+            <DesktopMetric icon="list" label={ORDERS_LABEL[period]} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
+            <DesktopMetric icon="check" label="Средний чек" value={money(d.cards.avgCheck)} delta={d.trends.avgCheck} />
+          </DashboardGrid> : <View style={styles.splitCard}>
             <SplitMetric icon="list" label={ORDERS_LABEL[period]} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
             <View style={styles.splitDivider} />
             <SplitMetric icon="check" label="Средний чек" value={money(d.cards.avgCheck)} delta={d.trends.avgCheck} />
-          </View>
+          </View>}
 
           {/* График выручки */}
-          <View style={styles.panel}>
+          <View style={[styles.panel, !narrow && { padding: 20 }]}>
             <View style={styles.panelHeadRow}>
-              <Text style={styles.panelTitle}>Выручка за период</Text>
-              <Text style={styles.panelMeta}>{d.cards.ordersPeriod} заказов</Text>
+              <Text style={[styles.panelTitle, { marginBottom: 0 }]} translate>Выручка за период</Text>
+              <View style={styles.revenueMeta}><Text style={[styles.panelMeta, { marginBottom: 0 }]} translate>{d.cards.ordersPeriod} заказов</Text><Text style={styles.revenueTotal}>{money(d.cards.revenuePeriod)}</Text></View>
             </View>
             <RevenueChart data={d.revenueSeries} />
           </View>
 
+          <DashboardGrid columns={width >= 1280 ? 4 : !narrow ? 2 : 1}>
           <Panel title="Способы оплаты">
             <MiniTable
               columns={[{ label: 'Способ' }, { label: 'Сумма', align: 'right' }]}
@@ -172,6 +165,8 @@ export function StatisticsScreen() {
             />
           </Panel>
 
+          </DashboardGrid>
+          <DashboardGrid columns={desktop ? 3 : 1}>
           <Panel title="Приготовлено блюд">
             <MiniTable
               columns={[{ label: '' }, { label: '', align: 'right' }]}
@@ -193,7 +188,6 @@ export function StatisticsScreen() {
             empty="Нет приготовленных блюд за период"
             onViewAll={(title, rows) => setViewAll({ title, rows })}
           />
-
           <ListCard
             title="Продано напитков"
             columnLabel="Напиток"
@@ -201,6 +195,7 @@ export function StatisticsScreen() {
             empty="Нет продаж напитков за период"
             onViewAll={(title, rows) => setViewAll({ title, rows })}
           />
+          </DashboardGrid>
         </>
       )}
       <BottomSheet visible={!!viewAll} onClose={() => setViewAll(null)} title={viewAll?.title} maxHeight="85%">
@@ -217,6 +212,22 @@ export function StatisticsScreen() {
 }
 
 /* ---------- KPI ---------- */
+
+export function DashboardGrid({ columns, gap = 12, children }: { columns: number; gap?: number; children: React.ReactNode }) {
+  const [width, setWidth] = useState(0);
+  const itemWidth = width > 0 ? Math.max(0, (width - gap * (columns - 1)) / columns) : undefined;
+  return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
+    {React.Children.toArray(children).map((child, index) => <View key={index} style={{ width: itemWidth ?? '100%', minWidth: 0 }}>{child}</View>)}
+  </View>;
+}
+
+function DesktopMetric({ icon, label, value, delta }: { icon: 'list' | 'check'; label: string; value: string; delta: number }) {
+  return <View style={styles.desktopMetric}>
+    <View style={styles.desktopMetricIcon}><PwaIcon name={icon} size={24} color={colors.primary} strokeWidth={2} /></View>
+    <View style={{ flex: 1, minWidth: 0 }}><Text style={styles.desktopMetricLabel} translate>{label}</Text><Text style={styles.desktopMetricValue}>{value}</Text></View>
+    <TrendPill value={delta} inline />
+  </View>;
+}
 
 function SplitMetric({
   icon,
@@ -235,7 +246,7 @@ function SplitMetric({
         <View style={styles.splitIcon}>
           <PwaIcon name={icon} size={16} color={colors.primary} strokeWidth={2} />
         </View>
-        <Text style={styles.splitLabel}>{label}</Text>
+        <Text style={styles.splitLabel} translate>{label}</Text>
       </View>
       <Text style={styles.splitValue}>{value}</Text>
       <TrendPill value={delta} />
@@ -243,13 +254,13 @@ function SplitMetric({
   );
 }
 
-function TrendPill({ value }: { value: number }) {
+function TrendPill({ value, inline = false }: { value: number; inline?: boolean }) {
   const flat = value === 0;
   const positive = value > 0;
   const bg = flat ? colors.background : positive ? colors.successSoft : colors.dangerSoft;
   const fg = flat ? colors.textMuted : positive ? colors.success : colors.danger;
   return (
-    <View style={[styles.trendPill, { backgroundColor: bg }]}>
+    <View style={[styles.trendPill, { backgroundColor: bg }, inline && { marginTop: 0, alignSelf: 'center' }]}>
       {!flat ? <Text style={[styles.trendArrow, { color: fg }]}>{positive ? '↑' : '↓'}</Text> : null}
       <Text style={[styles.trendText, { color: fg }]}>
         {positive ? '+' : ''}
@@ -264,7 +275,7 @@ function TrendPill({ value }: { value: number }) {
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.panel}>
-      <Text style={styles.panelTitle}>{title}</Text>
+      <Text style={styles.panelTitle} translate>{title}</Text>
       {children}
     </View>
   );
@@ -294,7 +305,7 @@ function ListCard({
       />
       {rows.length > LIST_LIMIT ? (
         <FastPressable onPress={() => onViewAll(title, rows)} style={styles.viewAllButton}>
-          <Text style={styles.viewAllText}>Смотреть все</Text>
+          <Text style={styles.viewAllText} translate>Смотреть все</Text>
         </FastPressable>
       ) : null}
     </Panel>
@@ -329,7 +340,7 @@ function MiniTable({
         <View style={[styles.row, styles.rowHead]}>
           {columns.map((c, i) => (
             <View key={`${c.label}-${i}`} style={colFlex(i)}>
-              <Text style={cellStyle(i, 'head')}>{c.label}</Text>
+              <Text style={cellStyle(i, 'head')} translate>{c.label}</Text>
             </View>
           ))}
         </View>
@@ -358,10 +369,12 @@ function MiniTable({
 
 /* ---------- График выручки (SVG) ---------- */
 
-function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
+export function RevenueChart({ data, stock = false }: { data: StatsDashboard['revenueSeries']; stock?: boolean }) {
   const [width, setWidth] = useState(320);
   const [hover, setHover] = useState<number | null>(null);
   const widthRef = useRef(320);
+  const dataRef = useRef(data);
+  dataRef.current = data;
 
   const onLayout = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
@@ -373,7 +386,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
 
   const n = data.length;
   const W = Math.max(280, Math.round(width));
-  const H = 246;
+  const H = stock ? (W < 480 ? 230 : 270) : (W < 480 ? 246 : 292);
   const padL = 50;
   const padR = 18;
   const padT = 20;
@@ -397,7 +410,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
 
   function updateHover(locationX: number) {
     const w = widthRef.current;
-    const count = data.length;
+    const count = dataRef.current.length;
     if (count === 0 || w <= 0) return;
     const vbX = (locationX / w) * Math.max(280, Math.round(w));
     let nearest = 0;
@@ -412,7 +425,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
     setHover(nearest);
   }
 
-  if (n === 0) return <Text style={styles.tableEmpty}>Нет данных за период</Text>;
+  if (n === 0) return <Text style={[styles.tableEmpty, { paddingVertical: 80 }]} translate>{stock ? 'Нет данных для графика' : 'Нет данных за период'}</Text>;
 
   const pts = data.map((p, i) => [xAt(i), yAt(p.amount)] as const);
   const line = smoothPath(pts);
@@ -421,7 +434,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
   // Убираем повторы, чтобы SVG не получал одинаковые ключи и не дёргался при ререндере.
   const ticks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(niceMax * t)))];
 
-  const maxLabels = 5;
+  const maxLabels = W < 480 ? 5 : 7;
   const step = Math.max(1, Math.ceil(n / maxLabels));
   const xLabelIdx = data.map((_, i) => i).filter((i) => i % step === 0);
   const lastIdx = n - 1;
@@ -448,7 +461,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
           return (
             <G key={`tick-${tk}`}>
               <Line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="#F1F5F9" strokeWidth={0.8} />
-              <SvgText x={padL - 12} y={yy + 4} textAnchor="end" fontSize={11} fill={colors.textLight}>
+              <SvgText x={padL - 12} y={yy + 4} textAnchor="end" fontSize={11} fontFamily="Inter_500Medium" fill={colors.textLight}>
                 {shortMoney(tk)}
               </SvgText>
             </G>
@@ -459,7 +472,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
         <Path d={line} fill="none" stroke="#005BFF" strokeWidth={2.8} strokeLinejoin="round" strokeLinecap="round" />
 
         {xLabelIdx.map((i) => (
-          <SvgText key={i} x={xAt(i)} y={H - 10} textAnchor="middle" fontSize={11} fill={colors.textLight}>
+          <SvgText key={i} x={xAt(i)} y={H - 10} textAnchor="middle" fontSize={11} fontFamily="Inter_500Medium" fill={colors.textLight}>
             {formatAxisLabel(data[i].label)}
           </SvgText>
         ))}
@@ -483,7 +496,7 @@ function RevenueChart({ data }: { data: StatsDashboard['revenueSeries'] }) {
 
       {hi && hover != null ? (
         <View style={[styles.tooltip, { left: tipLeft, top: tipTop, width: tipW }]} pointerEvents="none">
-          <Text style={styles.tooltipLabel} numberOfLines={1}>
+          <Text style={styles.tooltipLabel} numberOfLines={1} translate>
             {formatTooltipLabel(hi.label)}
           </Text>
           <Text style={styles.tooltipValue} numberOfLines={1}>
@@ -562,7 +575,13 @@ function localYmd(date: Date) {
 }
 
 const styles = StyleSheet.create({
-  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
+  content: { padding: spacing.lg, gap: 16, paddingBottom: spacing.xxl },
+  periodToolbar: { gap: 12 },
+  periodToolbarWide: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' },
+  desktopMetric: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 16, padding: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white, borderRadius: 16 },
+  desktopMetricIcon: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.primarySoft },
+  desktopMetricLabel: { fontSize: 13, color: colors.textMuted },
+  desktopMetricValue: { marginTop: 4, fontSize: 26, fontWeight: '600', color: colors.textPrimary },
   loading: { paddingVertical: 60, alignItems: 'center' },
 
   periodTabs: {
@@ -570,12 +589,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 4,
     backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.border,
     borderRadius: radius.md,
     padding: 4,
   },
-  periodTab: { flexGrow: 1, borderRadius: radius.sm, paddingVertical: spacing.sm, alignItems: 'center' },
+  periodTab: { borderRadius: radius.sm, paddingVertical: spacing.sm, paddingHorizontal: 16, alignItems: 'center' },
   periodTabActive: {
     backgroundColor: colors.white,
     shadowColor: '#0F172A',
@@ -584,7 +601,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  periodTabText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted },
+  periodTabText: { fontSize: 14, fontWeight: '500', color: colors.textMuted },
   periodTabTextActive: { color: colors.primary },
   dateRange: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   dateInput: {
@@ -608,7 +625,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
   },
   splitDivider: { width: 1, backgroundColor: colors.border },
-  splitHalf: { flex: 1, padding: spacing.md },
+  splitHalf: { flex: 1, padding: 16 },
   splitTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   splitIcon: {
     width: 28,
@@ -626,21 +643,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    height: 24,
+    height: 28,
     borderRadius: radius.pill,
     paddingHorizontal: 10,
   },
   trendArrow: { fontSize: 12, fontWeight: '700' },
-  trendText: { fontSize: 12, fontWeight: '700' },
+  trendText: { fontSize: 12, fontWeight: '600' },
 
   panel: {
+    flexGrow: 1,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
     borderRadius: radius.md,
     padding: spacing.lg,
   },
-  panelHeadRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  panelHeadRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 16 },
+  revenueMeta: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
+  revenueTotal: { fontSize: 16, fontWeight: '600', color: colors.textPrimary },
   panelTitle: { fontSize: fontSize.md, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.md },
   panelMeta: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted, marginBottom: spacing.md },
 

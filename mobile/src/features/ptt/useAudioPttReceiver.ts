@@ -1,47 +1,9 @@
 import React from 'react';
 import { AppState, Platform } from 'react-native';
-import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
-import { configureAudioPlayback } from '@/lib/sound';
 import { getSocket } from '@/services/socket';
 import { useAuth } from '@/store/auth';
 import { PTT_EVENTS, type PttAudioPayload, type PttChannel } from './types';
-
-function extensionForMime(mimeType: string) {
-  if (mimeType.includes('webm')) return 'webm';
-  if (mimeType.includes('mp4')) return 'm4a';
-  if (mimeType.includes('mpeg')) return 'mp3';
-  return 'm4a';
-}
-
-function writeChunkToFile(payload: PttAudioPayload): Promise<string> {
-  const ext = extensionForMime(payload.mimeType);
-  const path = `${FileSystem.cacheDirectory}ptt-${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-  return FileSystem.writeAsStringAsync(path, payload.chunk, {
-    encoding: FileSystem.EncodingType.Base64,
-  }).then(() => path);
-}
-
-async function playFile(uri: string) {
-  await configureAudioPlayback();
-  const { sound } = await Audio.Sound.createAsync(
-    { uri },
-    { shouldPlay: false, volume: 1, progressUpdateIntervalMillis: 100 },
-  );
-  await new Promise<void>((resolve, reject) => {
-    sound.setOnPlaybackStatusUpdate((status) => {
-      if (!status.isLoaded) {
-        if ('error' in status && status.error) reject(new Error(status.error));
-        return;
-      }
-      if (status.didJustFinish) resolve();
-    });
-    sound.playAsync().catch(reject);
-  }).finally(() => {
-    sound.setOnPlaybackStatusUpdate(null);
-    void sound.unloadAsync().catch(() => undefined);
-  });
-}
+import { PttPlaybackQueue } from './audioPlayback';
 
 export type PttPlayingSpeaker = { id: string; name?: string; role?: string };
 
@@ -49,42 +11,15 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
   const userId = useAuth((s) => s.user?.id);
   const [receiving, setReceiving] = React.useState(false);
   const [speaker, setSpeaker] = React.useState<PttPlayingSpeaker | null>(null);
-  const queueRef = React.useRef<PttAudioPayload[]>([]);
-  const playingRef = React.useRef(false);
-
-  const pump = React.useCallback(() => {
-    if (playingRef.current) return;
-    const next = queueRef.current.shift();
-    if (!next) {
-      setReceiving(false);
-      setSpeaker(null);
-      return;
-    }
-    playingRef.current = true;
-    setReceiving(true);
-    // Пока играет файл — канал занят этим говорящим (half-duplex: кнопка
-    // блокируется на всё воспроизведение, а не только пока держали).
-    setSpeaker({ id: next.senderId, name: next.senderName, role: next.senderRole });
-    void writeChunkToFile(next)
-      .then(async (path) => {
-        try {
-          await playFile(path);
-        } finally {
-          await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => undefined);
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        playingRef.current = false;
-        pump();
-      });
-  }, []);
+  const playbackRef = React.useRef<PttPlaybackQueue | null>(null);
+  if (!playbackRef.current) playbackRef.current = new PttPlaybackQueue(payload => {
+    setReceiving(!!payload);
+    setSpeaker(payload ? { id: payload.senderId, name: payload.senderName, role: payload.senderRole } : null);
+  });
 
   React.useEffect(() => {
     if (!enabled) {
-      queueRef.current = [];
-      setReceiving(false);
-      setSpeaker(null);
+      playbackRef.current?.clear();
       return undefined;
     }
 
@@ -92,14 +27,14 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     const onAudio = (payload: PttAudioPayload) => {
       if (Platform.OS === 'android' && AppState.currentState !== 'active') return;
       if (payload.channel !== channel || payload.senderId === userId) return;
-      queueRef.current.push(payload);
-      pump();
+      playbackRef.current?.enqueue(payload);
     };
     sock.on(PTT_EVENTS.AUDIO_MESSAGE, onAudio);
     return () => {
       sock.off(PTT_EVENTS.AUDIO_MESSAGE, onAudio);
+      playbackRef.current?.clear();
     };
-  }, [channel, enabled, pump, userId]);
+  }, [channel, enabled, userId]);
 
   return { receiving, speaker };
 }

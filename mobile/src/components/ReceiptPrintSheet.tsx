@@ -1,6 +1,7 @@
 import React from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
-import { BottomSheet } from '@/components/BottomSheet';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
 import { PwaIcon } from '@/components/PwaIcon';
@@ -12,7 +13,10 @@ import { beep } from '@/lib/sound';
 export function ReceiptPrintSheet() {
   const { request, receipt, status, sheetOpen, closeSheet, dismiss } = useReceiptPrint();
   const open = !!request && sheetOpen;
-  const isPrelim = request?.type === 'preliminary';
+  const lastRequest = React.useRef(request);
+  if (request) lastRequest.current = request;
+  const renderedRequest = request ?? lastRequest.current;
+  const isPrelim = renderedRequest?.type === 'preliminary';
   const title = isPrelim ? 'Печать счёта' : 'Печать чека';
   const lastAcceptedSoundRequestId = React.useRef<string | null>(null);
 
@@ -28,32 +32,31 @@ export function ReceiptPrintSheet() {
     void beep('accept');
   }, [open, request, status]);
 
-  if (!request) return null;
+  if (!renderedRequest) return null;
 
   return (
     <BottomSheet
       visible={open}
       onClose={primaryClose}
       sheet
+      animationPreset="receipt"
+      bodyStyle={{ paddingTop: 0, paddingBottom: 16 }}
+      footerStyle={{ borderTopWidth: 0, paddingTop: 4, paddingBottom: 16 }}
+      headerContent={<View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }}><View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300, marginBottom: 8 }} /><View style={styles.printHeader}><Text style={styles.printTitle} translate>{title}</Text><FastPressable onPress={primaryClose} hitSlop={12} style={styles.printClose} accessibilityLabel="Закрыть"><PwaIcon name="close" size={22} color={colors.textLight} strokeWidth={2} /></FastPressable></View></View>}
       maxHeight="80%"
       footer={
-        <View style={{ paddingBottom: spacing.sm }}>
+        <View>
           {status === 'pending' ? (
-            <Button title="Продолжить работу" variant="secondary" onPress={closeSheet} />
+            <Button title="Продолжить работу" variant="secondary" onPress={closeSheet} fontWeight="600" />
           ) : status === 'printed' ? (
-            <Button title="Готово" onPress={dismiss} />
+            <Button title="Готово" onPress={dismiss} fontWeight="600" />
           ) : (
-            <Button title="Продолжить работу" variant="secondary" onPress={dismiss} />
+            <Button title="Продолжить работу" variant="secondary" onPress={dismiss} fontWeight="600" />
           )}
         </View>
       }
     >
-      <View style={styles.printHeader}>
-        <Text style={styles.printTitle}>{title}</Text>
-        <FastPressable onPress={primaryClose} hitSlop={12} style={styles.printClose}>
-          <PwaIcon name="close" size={22} color={colors.textLight} strokeWidth={2} />
-        </FastPressable>
-      </View>
+      <SheetScrollView showsVerticalScrollIndicator={false}>
       {status === 'pending' ? (
         <WaitingState isPrelim={isPrelim} />
       ) : status === 'printed' ? (
@@ -62,6 +65,7 @@ export function ReceiptPrintSheet() {
         <RejectedState isPrelim={isPrelim} />
       )}
       {status === 'pending' && receipt ? <ReceiptCard /> : null}
+      </SheetScrollView>
     </BottomSheet>
   );
 }
@@ -70,7 +74,7 @@ function WaitingState({ isPrelim }: { isPrelim: boolean }) {
   return (
     <View style={styles.centerState}>
       <PrinterAnimation />
-      <Text style={styles.waitText}>
+      <Text style={styles.waitText} translate>
         {isPrelim
           ? 'Ожидаем подтверждение печати счёта администратором'
           : 'Ожидаем подтверждение печати чека администратором'}
@@ -83,8 +87,8 @@ function PrintedState({ isPrelim }: { isPrelim: boolean }) {
   return (
     <View style={styles.finalState}>
       <AnimatedCheck color={colors.success} backgroundColor={colors.successSoft} icon="check" />
-      <Text style={styles.finalTitle}>{isPrelim ? 'Ваш счёт распечатан' : 'Ваш чек распечатан'}</Text>
-      <Text style={styles.finalText}>{isPrelim ? 'Заберите счёт' : 'Заберите чек'}</Text>
+      <Text style={styles.finalTitle} translate>{isPrelim ? 'Ваш счёт распечатан' : 'Ваш чек распечатан'}</Text>
+      <Text style={styles.finalText} translate>{isPrelim ? 'Заберите счёт' : 'Заберите чек'}</Text>
     </View>
   );
 }
@@ -93,8 +97,8 @@ function RejectedState({ isPrelim }: { isPrelim: boolean }) {
   return (
     <View style={styles.finalState}>
       <AnimatedCheck color={colors.danger} backgroundColor={colors.dangerSoft} icon="close" />
-      <Text style={styles.finalTitle}>{isPrelim ? 'Печать счёта отклонена' : 'Печать чека отклонена'}</Text>
-      <Text style={styles.finalText}>Администратором</Text>
+      <Text style={styles.finalTitle} translate>{isPrelim ? 'Печать счёта отклонена' : 'Печать чека отклонена'}</Text>
+      <Text style={styles.finalText} translate>Администратором</Text>
     </View>
   );
 }
@@ -183,7 +187,7 @@ function ReceiptCard() {
     <View style={styles.receiptCard}>
       <View style={styles.receiptHead}>
         <Text style={styles.receiptOrder}>{displayOrderNumber(receipt.orderNumber)}</Text>
-        <Text style={styles.receiptTable}>Стол {receipt.tableNumber}</Text>
+        <Text style={styles.receiptTable} translate>Стол {receipt.tableNumber}</Text>
       </View>
       <View style={styles.receiptItems}>
         {receipt.items.map((item, index) => (
@@ -197,12 +201,12 @@ function ReceiptCard() {
       </View>
       {Number(receipt.serviceChargeAmount) > 0 ? (
         <View style={styles.receiptRow}>
-          <Text style={styles.receiptRowLabel}>Обслуживание</Text>
+          <Text style={styles.receiptRowLabel} translate>Обслуживание</Text>
           <Text style={styles.receiptRowValue}>{money(receipt.serviceChargeAmount)}</Text>
         </View>
       ) : null}
       <View style={styles.receiptTotal}>
-        <Text style={styles.receiptTotalLabel}>Итого</Text>
+        <Text style={styles.receiptTotalLabel} translate>Итого</Text>
         <Text style={styles.receiptTotalValue}>{money(receipt.finalAmount)}</Text>
       </View>
     </View>

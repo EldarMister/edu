@@ -33,6 +33,10 @@ export function IntroSplash({
     },
     [finish],
   );
+  React.useEffect(() => {
+    const timeout = setTimeout(finish, 12_000);
+    return () => clearTimeout(timeout);
+  }, [finish]);
 
   return (
     <View style={styles.root}>

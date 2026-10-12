@@ -1,6 +1,7 @@
 import React from 'react';
 import { Animated, Easing, Image, StyleSheet, View } from 'react-native';
 import Svg, { Circle, Defs, Path, RadialGradient, Stop } from 'react-native-svg';
+import { useReducedMotion } from 'react-native-reanimated';
 import { colors } from '@/theme';
 
 export type ShiftAnimState = 'idle' | 'loading' | 'success';
@@ -14,6 +15,10 @@ const STROKE = 4;
 const R = (RING - STROKE) / 2;
 const C = 2 * Math.PI * R;
 const SUCCESS = 96; // диаметр синего круга успеха
+const POP_EASING = Easing.bezier(0.16, 1, 0.3, 1);
+const CHROME_EASING = Easing.bezier(0.4, 0, 0.2, 1);
+const EASE_IN_OUT = Easing.bezier(0.42, 0, 0.58, 1);
+const EASE_OUT = Easing.bezier(0, 0, 0.58, 1);
 
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
@@ -27,101 +32,122 @@ const EP_MARK = require('../../assets/ep-mark.png');
  * success — белая галочка в синем круге.
  */
 export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
+  const reduceMotion = useReducedMotion();
   const enter = React.useRef(new Animated.Value(0)).current;
   const breathe = React.useRef(new Animated.Value(0)).current;
   const waveOne = React.useRef(new Animated.Value(0)).current;
   const waveTwo = React.useRef(new Animated.Value(0)).current;
+  const waveOneOpacity = React.useRef(new Animated.Value(0)).current;
+  const waveTwoOpacity = React.useRef(new Animated.Value(0)).current;
   const progress = React.useRef(new Animated.Value(0)).current;
   const ringOpacity = React.useRef(new Animated.Value(0)).current;
-  const logoOpacity = React.useRef(new Animated.Value(1)).current;
-  const success = React.useRef(new Animated.Value(0)).current;
+  const success = React.useRef(new Animated.Value(0.4)).current;
+  const successOpacity = React.useRef(new Animated.Value(0)).current;
 
   // Появление логотипа + мягкое «дыхание» свечения.
   React.useEffect(() => {
-    Animated.timing(enter, {
+    const entrance = Animated.timing(enter, {
       toValue: 1,
-      duration: 420,
-      easing: Easing.out(Easing.cubic),
+      duration: reduceMotion ? 0 : 280,
+      easing: POP_EASING,
       useNativeDriver: true,
-    }).start();
+    });
+    entrance.start();
+    if (reduceMotion) return () => entrance.stop();
 
     const glowLoop = Animated.loop(
       Animated.sequence([
         Animated.timing(breathe, {
           toValue: 1,
           duration: 1500,
-          easing: Easing.inOut(Easing.ease),
+          easing: EASE_IN_OUT,
           useNativeDriver: true,
         }),
         Animated.timing(breathe, {
           toValue: 0,
           duration: 1500,
-          easing: Easing.inOut(Easing.ease),
+          easing: EASE_IN_OUT,
           useNativeDriver: true,
         }),
       ]),
     );
-    const startWave = (value: Animated.Value) => {
+    const startWave = (value: Animated.Value, opacity: Animated.Value) => {
       value.setValue(0);
+      opacity.setValue(0);
       const loop = Animated.loop(
-        Animated.timing(value, {
-          toValue: 1,
-          duration: 3200,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: true,
-        }),
+        Animated.parallel([
+          Animated.timing(value, { toValue: 1, duration: 3200, easing: EASE_OUT, useNativeDriver: true }),
+          Animated.sequence([
+            Animated.timing(opacity, { toValue: 0.55, duration: 704, easing: EASE_OUT, useNativeDriver: true }),
+            Animated.timing(opacity, { toValue: 0, duration: 2496, easing: EASE_OUT, useNativeDriver: true }),
+          ]),
+        ]),
       );
       loop.start();
       return loop;
     };
     glowLoop.start();
-    const firstWave = startWave(waveOne);
+    const firstWave = startWave(waveOne, waveOneOpacity);
     let secondWave: Animated.CompositeAnimation | undefined;
     const secondTimer = setTimeout(() => {
-      secondWave = startWave(waveTwo);
+      secondWave = startWave(waveTwo, waveTwoOpacity);
     }, 1600);
     return () => {
       clearTimeout(secondTimer);
+      entrance.stop();
       glowLoop.stop();
       firstWave.stop();
       secondWave?.stop();
     };
-  }, [enter, breathe, waveOne, waveTwo]);
+  }, [enter, breathe, waveOne, waveTwo, waveOneOpacity, waveTwoOpacity, reduceMotion]);
 
   React.useEffect(() => {
     if (state === 'loading') {
       progress.setValue(0);
-      logoOpacity.setValue(1);
-      success.setValue(0);
-      Animated.timing(ringOpacity, { toValue: 1, duration: 240, useNativeDriver: true }).start();
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: 980,
-        easing: Easing.out(Easing.cubic),
-        useNativeDriver: false,
-      }).start();
+      success.setValue(0.4);
+      successOpacity.setValue(0);
+      const loading = Animated.parallel([
+        Animated.timing(ringOpacity, { toValue: 1, duration: reduceMotion ? 0 : 200, easing: CHROME_EASING, useNativeDriver: true }),
+        Animated.timing(progress, {
+          toValue: 1,
+          duration: reduceMotion ? 0 : 980,
+          easing: Easing.bezier(0.33, 1, 0.68, 1),
+          useNativeDriver: false,
+        }),
+      ]);
+      loading.start();
+      return () => loading.stop();
     } else if (state === 'success') {
-      Animated.parallel([
-        Animated.timing(ringOpacity, { toValue: 0, duration: 220, useNativeDriver: true }),
-        Animated.timing(logoOpacity, { toValue: 0, duration: 200, useNativeDriver: true }),
-        Animated.spring(success, { toValue: 1, friction: 6, tension: 120, useNativeDriver: true }),
-      ]).start();
+      success.setValue(0.4);
+      successOpacity.setValue(0);
+      const check = Animated.parallel([
+        Animated.timing(ringOpacity, { toValue: 0, duration: reduceMotion ? 0 : 200, easing: CHROME_EASING, useNativeDriver: true }),
+        Animated.sequence([
+          Animated.delay(reduceMotion ? 0 : 120),
+          Animated.timing(success, { toValue: 1.12, duration: reduceMotion ? 0 : 270, easing: POP_EASING, useNativeDriver: true }),
+          Animated.timing(success, { toValue: 1, duration: reduceMotion ? 0 : 180, easing: POP_EASING, useNativeDriver: true }),
+        ]),
+        Animated.sequence([
+          Animated.delay(reduceMotion ? 0 : 120),
+          Animated.timing(successOpacity, { toValue: 1, duration: reduceMotion ? 0 : 270, easing: POP_EASING, useNativeDriver: true }),
+        ]),
+      ]);
+      check.start();
+      return () => check.stop();
     } else {
       progress.setValue(0);
       ringOpacity.setValue(0);
-      logoOpacity.setValue(1);
-      success.setValue(0);
+      success.setValue(0.4);
+      successOpacity.setValue(0);
     }
-  }, [state, ringOpacity, progress, logoOpacity, success]);
+  }, [state, ringOpacity, progress, success, successOpacity, reduceMotion]);
 
-  const enterScale = enter.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1] });
+  const enterScale = enter.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] });
+  const enterTranslate = enter.interpolate({ inputRange: [0, 1], outputRange: [8, 0] });
   const glowScale = breathe.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1.08] });
   const glowOpacity = breathe.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1] });
   const waveScale = (value: Animated.Value) => value.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.18] });
-  const waveOpacity = (value: Animated.Value) =>
-    value.interpolate({ inputRange: [0, 0.22, 0.7, 1], outputRange: [0, 0.55, 0.18, 0] });
   const dashOffset = progress.interpolate({ inputRange: [0, 1], outputRange: [C, 0] });
-  const successScale = success.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] });
 
   return (
     <View style={styles.wrap}>
@@ -132,7 +158,7 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
             <Animated.View
               key={index}
               pointerEvents="none"
-              style={[styles.wave, { opacity: waveOpacity(wave), transform: [{ scale: waveScale(wave) }] }]}
+              style={[styles.wave, { opacity: index === 0 ? waveOneOpacity : waveTwoOpacity, transform: [{ scale: waveScale(wave) }] }]}
             >
               <Svg width={GLOW} height={GLOW}>
                 <Defs>
@@ -168,7 +194,7 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
       {/* Круговой индикатор загрузки (старт сверху, по часовой стрелке) */}
       <Animated.View style={[styles.ring, { opacity: ringOpacity }]}>
         <Svg width={RING} height={RING}>
-          <Circle cx={RING / 2} cy={RING / 2} r={R} stroke={colors.primarySoft} strokeWidth={STROKE} fill="none" />
+          <Circle cx={RING / 2} cy={RING / 2} r={R} stroke="rgba(0,91,255,0.12)" strokeWidth={STROKE} fill="none" />
           <AnimatedCircle
             cx={RING / 2}
             cy={RING / 2}
@@ -184,13 +210,13 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
       </Animated.View>
 
       {/* Полупрозрачный круг с логотипом EP — как в PWA. */}
-      <Animated.View style={[styles.logo, { opacity: logoOpacity, transform: [{ scale: enterScale }] }]}>
+      {state !== 'success' ? <Animated.View style={[styles.logo, { opacity: enter, transform: [{ scale: enterScale }, { translateY: enterTranslate }] }]}>
         <Image source={EP_MARK} style={styles.mark} resizeMode="contain" />
-      </Animated.View>
+      </Animated.View> : null}
 
       {/* Успех: белая галочка в синем круге */}
       <Animated.View
-        style={[styles.success, { opacity: success, transform: [{ scale: successScale }] }]}
+        style={[styles.success, { opacity: successOpacity, transform: [{ scale: success }] }]}
         pointerEvents="none"
       >
         <Svg width={34} height={34} viewBox="0 0 24 24" fill="none">
