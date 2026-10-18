@@ -5,6 +5,7 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
+import { requireNativeModule } from 'expo-modules-core';
 import { API_BASE } from '@/config/env';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
@@ -12,6 +13,7 @@ import { queryClient } from '@/lib/queryClient';
 import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/utils/format';
 import { PushRegistrationManager, type PushRegistrationState, type PushStatus } from './registration';
+import { PushTokenAcquisition, type NativePushToken } from './token';
 import { notificationData, notificationDeduper, notificationTarget, type NotificationTarget } from './events';
 
 export type { PushStatus, NotificationTarget };
@@ -46,15 +48,22 @@ function session() {
   return auth.user && auth.accessToken ? { userId: auth.user.id, accessToken: auth.accessToken } : null;
 }
 
-async function acquireExpoToken() {
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  try {
-    return await Promise.race([
-      Notifications.getExpoPushTokenAsync({ projectId }).then((response) => response.data),
-      new Promise<string>((_, reject) => { timeout = setTimeout(() => reject(new Error('Push token request timed out')), 15_000); }),
-    ]);
-  } finally { clearTimeout(timeout); }
-}
+const tokenAcquisition = new PushTokenAcquisition({
+  nativeToken: async (): Promise<NativePushToken> => {
+    if (Platform.OS === 'android') {
+      // The installed SDK 52 uses this bridge internally. Its public wrapper retains
+      // a rejected promise forever, preventing offline/first-start recovery.
+      const bridge = requireNativeModule<{ getDevicePushTokenAsync(): Promise<string> }>('ExpoPushTokenManager');
+      return { type: 'android', data: await bridge.getDevicePushTokenAsync() };
+    }
+    const token = await Notifications.getDevicePushTokenAsync();
+    if ((token.type !== 'android' && token.type !== 'ios') || typeof token.data !== 'string') throw new Error('Unsupported native push token');
+    return { type: token.type, data: token.data };
+  },
+  expoToken: async (devicePushToken) => (await Notifications.getExpoPushTokenAsync({ projectId, devicePushToken })).data,
+  // Whitelisted codes/stages only; SDK messages can contain tokens or server response bodies.
+  onFailure: (diagnostic) => console.warn('[push-token]', diagnostic),
+});
 
 const registration = new PushRegistrationManager({
   session,
@@ -73,7 +82,7 @@ const registration = new PushRegistrationManager({
     const granted = permission.granted || permission.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
     return granted ? 'granted' : permission.status === 'denied' ? 'denied' : 'default';
   },
-  token: acquireExpoToken,
+  token: () => tokenAcquisition.acquire(),
   load: async () => {
     const saved = await SecureStore.getItemAsync(STORAGE_KEY);
     if (!saved) return null;
@@ -188,7 +197,10 @@ export function usePushNotificationLifecycle() {
         sync(!!next.user);
       } else if (next.accessToken !== previous.accessToken) { sync(); }
     });
-    const tokenSub = Notifications.addPushTokenListener(() => sync());
+    const tokenSub = Notifications.addPushTokenListener((token) => {
+      if ((token.type === 'android' || token.type === 'ios') && typeof token.data === 'string' &&
+        tokenAcquisition.onNativeToken({ type: token.type, data: token.data })) sync();
+    });
     const stateSub = AppState.addEventListener('change', (state) => { if (state === 'active') sync(); });
     const droppedSub = Notifications.addNotificationsDroppedListener(() => { void queryClient.invalidateQueries(); });
     return () => { disposed = true; clearTimeout(retry); authSub(); tokenSub.remove(); stateSub.remove(); droppedSub.remove(); };

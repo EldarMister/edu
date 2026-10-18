@@ -1093,7 +1093,7 @@ const styles = StyleSheet.create({
   notifTitle: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textPrimary },
   notifSub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 4 },
   notifToggle: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 2 },
-  enablePushButton: { width: 96 },
+  enablePushButton: { flexShrink: 0 },
   chevronUp: { transform: [{ rotate: '180deg' }] },
   notifHistory: { gap: 10 },
   notifItem: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
