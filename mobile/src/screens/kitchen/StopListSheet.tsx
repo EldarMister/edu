@@ -1,13 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import {
-  Modal as RNModal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  useWindowDimensions,
-  View,
-} from 'react-native';
+import { Modal as RNModal, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import Animated, {
   cancelAnimation,
   runOnJS,
@@ -44,7 +37,7 @@ export function StopListSheet({
   const save = useSaveStopList();
   const push = useNotifications((s) => s.push);
   const { width } = useWindowDimensions();
-  const panelWidth = Math.min(420, Math.round(width * 0.9));
+  const panelWidth = Math.min(420, width);
 
   const [render, setRender] = useState(visible);
   const [search, setSearch] = useState('');
@@ -126,8 +119,8 @@ export function StopListSheet({
           <SafeAreaView style={styles.panelSafe} edges={['top', 'bottom']}>
             <View style={styles.header}>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.title}>Стоп-лист</Text>
-                <Text style={styles.subtitle}>Выберите блюда, которые временно недоступны</Text>
+                <Text style={styles.title} translate>Стоп-лист</Text>
+                <Text style={styles.subtitle} translate>Выберите блюда, которые временно недоступны</Text>
               </View>
               <FastPressable onPress={onClose} hitSlop={12} style={styles.closeBtn}>
                 <PwaIcon name="close" size={22} color={colors.textLight} strokeWidth={2} />
@@ -151,7 +144,7 @@ export function StopListSheet({
               {stopListQ.isLoading ? (
                 <Loading />
               ) : categories.length === 0 ? (
-                <Text style={styles.empty}>Ничего не найдено</Text>
+                <Text style={styles.empty} translate>Ничего не найдено</Text>
               ) : (
                 categories.map((cat) => (
                   <View key={cat.id} style={styles.category}>
@@ -165,7 +158,7 @@ export function StopListSheet({
                               {dish.name}
                             </Text>
                             <View style={[styles.stateBadge, !available && styles.stateBadgeStopped]}>
-                              <Text style={[styles.stateBadgeText, !available && styles.stateBadgeTextStopped]}>
+                              <Text style={[styles.stateBadgeText, !available && styles.stateBadgeTextStopped]} translate>
                                 {available ? 'Доступно' : 'Недоступно'}
                               </Text>
                             </View>

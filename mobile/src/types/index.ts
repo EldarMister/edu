@@ -222,6 +222,7 @@ export interface Order {
   comment: string | null;
   requiresWaiterDecision: boolean;
   createdAt: string;
+  updatedAt?: string;
   table: {
     id: string;
     number: number;
@@ -231,7 +232,11 @@ export interface Order {
     hall?: { name: string };
   };
   waiter: { id: string; name: string } | null;
-  source?: 'waiter' | 'qr';
+  source?: 'pos' | 'qr' | 'delivery';
+  externalOrderId?: string | null;
+  deliveryCustomerName?: string | null;
+  deliveryCustomerPhone?: string | null;
+  deliveryAddress?: string | null;
   items: OrderItem[];
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
   fiscalReceiptNumber?: string | null;
@@ -284,6 +289,19 @@ export interface ReceiptPrintRequest {
   status: ReceiptPrintStatus | null;
   createdAt: string;
   decidedAt?: string | null;
+  voice?: { text?: string | null } | null;
+}
+
+/** Вызов администратора при действии, недоступном официанту. */
+export interface AdministratorCall {
+  orderId: string;
+  orderNumber: string;
+  hallName: string;
+  tableNumber: number;
+  waiterId: string;
+  waiterName: string;
+  createdAt: string;
+  message: string;
   voice?: { text?: string | null } | null;
 }
 

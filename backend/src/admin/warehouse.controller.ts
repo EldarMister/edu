@@ -1,10 +1,12 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { AdminWarehouseService } from './warehouse.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Role } from '@prisma/client';
 
 @Controller('admin/warehouse')
 @Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.warehouse')
 export class AdminWarehouseController {
   constructor(private readonly warehouse: AdminWarehouseService) {}
 

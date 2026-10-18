@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { colors, fontSize, spacing } from '@/theme';
 import { useConnectionStatus } from '@/services/socket';
 
@@ -10,7 +11,7 @@ export function ConnectionStatus({ compact = false }: { compact?: boolean }) {
     <View style={styles.row}>
       <View style={[styles.dot, { backgroundColor: online ? colors.success : colors.danger }]} />
       {!compact ? (
-        <Text style={[styles.text, { color: online ? colors.textSecondary : colors.danger }]}>
+        <Text style={[styles.text, { color: online ? colors.textSecondary : colors.danger }]} translate>
           {online ? 'Онлайн' : 'Нет соединения'}
         </Text>
       ) : null}
@@ -24,7 +25,7 @@ export function OfflineBanner() {
   if (online) return null;
   return (
     <View style={styles.banner}>
-      <Text style={styles.bannerText}>Нет соединения с сервером. Переподключаемся…</Text>
+      <Text style={styles.bannerText} translate>Нет соединения с сервером. Переподключаемся…</Text>
     </View>
   );
 }

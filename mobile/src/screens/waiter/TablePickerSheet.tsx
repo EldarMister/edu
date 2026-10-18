@@ -1,5 +1,6 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
@@ -22,11 +23,15 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
   const currentTableId = useCart((s) => s.tableId);
   const lines = useCart((s) => s.lines);
   const [pending, setPending] = React.useState<{ table: TableItem; hallName: string } | null>(null);
+  const { width: windowWidth } = useWindowDimensions();
+  const columns = windowWidth >= 640 ? 5 : 4;
+  const [gridWidth, setGridWidth] = React.useState(0);
+  const tableWidth = Math.max(0, ((gridWidth || Math.min(windowWidth, 448) - 32) - spacing.sm * (columns - 1)) / columns);
 
   const ordersByTable = React.useMemo(() => {
     const m = new Map<string, string>();
     for (const order of orders.data ?? []) {
-      if (!m.has(order.table.id)) m.set(order.table.id, order.id);
+      if (order.source !== 'delivery' && !m.has(order.table.id)) m.set(order.table.id, order.id);
     }
     return m;
   }, [orders.data]);
@@ -72,8 +77,8 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
       footer={
         pending ? (
           <View style={styles.confirmFooter}>
-            <Text style={styles.confirmTitle}>Сменить стол?</Text>
-            <Text style={styles.confirmText}>
+            <Text style={styles.confirmTitle} translate>Сменить стол?</Text>
+            <Text style={styles.confirmText} translate>
               В корзине уже есть блюда. Они будут перенесены на стол {pending.table.number}.
             </Text>
             <View style={styles.confirmActions}>
@@ -85,10 +90,10 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
       }
     >
       <ScrollView showsVerticalScrollIndicator={false}>
-        {(halls.data ?? []).map((hall) => (
+        {(halls.data ?? []).filter((hall) => hall.tables.length > 0).map((hall) => (
           <View key={hall.id} style={styles.section}>
             <Text style={styles.hallName}>{hall.name}</Text>
-            <View style={styles.grid}>
+            <View style={styles.grid} onLayout={(event) => setGridWidth(event.nativeEvent.layout.width)}>
               {hall.tables.map((tbl) => {
                 const selected = tbl.id === currentTableId;
                 const meta = TABLE_STATUS[tbl.status];
@@ -96,7 +101,7 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
                   <FastPressable
                     key={tbl.id}
                     onPress={() => pick(tbl, hall.name)}
-                    style={[styles.table, selected && styles.tableSelected]}
+                    style={[styles.table, { width: tableWidth }, selected && styles.tableSelected]}
                   >
                     {!selected ? <View style={[styles.dot, { backgroundColor: meta.dot }]} /> : null}
                     <Text style={[styles.tableNumber, selected && { color: colors.white }]}>
@@ -119,10 +124,9 @@ const styles = StyleSheet.create({
   confirmTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.textPrimary },
   confirmText: { fontSize: fontSize.sm, color: colors.textMuted, lineHeight: 18 },
   confirmActions: { flexDirection: 'row', gap: spacing.sm, paddingTop: 2 },
-  hallName: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textMuted, marginBottom: 6 },
+  hallName: { fontSize: 12, fontWeight: '500', color: colors.textMuted, marginBottom: 6 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   table: {
-    width: '22.6%',
     height: waiterLayout.tablePickerCardHeight,
     borderRadius: radius.md,
     borderWidth: 1,

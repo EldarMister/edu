@@ -1,13 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
 import Animated, {
   interpolate,
   runOnJS,
@@ -15,10 +8,12 @@ import Animated, {
   useSharedValue,
   withDelay,
   withTiming,
+  withSequence,
+  useReducedMotion,
 } from 'react-native-reanimated';
 import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { cardPopTiming, popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, softShadow, spacing } from '@/theme';
@@ -28,18 +23,20 @@ import { apiError } from '@/lib/api';
 import { beep } from '@/lib/sound';
 import { useNotifications } from '@/store/notifications';
 import { useReceiptPrint } from '@/store/receiptPrint';
+import { useAuth } from '@/store/auth';
 import {
   displayOrderNumber,
-  hallSuffix,
   isSplitPayment,
   money,
   orderItemDisplayName,
   paymentMethodLabel,
 } from '@/utils/format';
 import type { Order, PaymentMethod, Receipt } from '@/types';
+import { orderLocation } from './orderRules';
 
 type SplitMethod = 'qr' | 'cash' | 'mixed';
 type SplitPart = { method: Exclude<PaymentMethod, 'mixed'>; amount: number };
+type OperationOwner = { epoch: number; orderId: string; userId?: string };
 type PaymentPayload =
   | { orderId: string; method: PaymentMethod }
   | { orderId: string; method: 'mixed'; cashAmount: number; qrAmount: number }
@@ -112,6 +109,41 @@ export function PaymentSheet({
   const [paymentComplete, setPaymentComplete] = useState(false);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [renderOrder, setRenderOrder] = useState<Order | null>(order);
+  const [stateOrderId, setStateOrderId] = useState<string | null>(order?.id ?? null);
+  const operationEpoch = React.useRef(0);
+  const mountedRef = React.useRef(true);
+  const visibleRef = React.useRef(visible);
+  const ownerOrderRef = React.useRef<string | null>(order?.id ?? null);
+  const receiptOrderRef = React.useRef<string | null>(null);
+  const paymentPendingRef = React.useRef<OperationOwner | null>(null);
+  const printPendingRef = React.useRef<OperationOwner | null>(null);
+  const activeOrder = order ?? renderOrder;
+  const activeOrderId = activeOrder?.id ?? null;
+  visibleRef.current = visible;
+  if (ownerOrderRef.current !== activeOrderId) {
+    ownerOrderRef.current = activeOrderId;
+    operationEpoch.current += 1;
+  }
+
+  const resetPayment = () => {
+    paymentPendingRef.current = null;
+    printPendingRef.current = null;
+    receiptOrderRef.current = null;
+    setReceipt(null);
+    setSplitOpen(false);
+    setSuccessVisible(false);
+    setPaymentComplete(false);
+    setCashInput('');
+    setQrInput('');
+    setError('');
+    setTab('qr');
+  };
+  const operationOwner = (orderId: string): OperationOwner => ({
+    epoch: operationEpoch.current, orderId, userId: useAuth.getState().user?.id,
+  });
+  const ownsOperation = (owner: OperationOwner) => mountedRef.current
+    && visibleRef.current && owner.epoch === operationEpoch.current
+    && owner.orderId === ownerOrderRef.current && owner.userId === useAuth.getState().user?.id;
 
   const enabled = settings.data?.paymentMethods ?? DEFAULT_PAYMENT_METHODS;
   const qrSrc = resolveQrSrc(settings.data?.qrImageUrl);
@@ -125,15 +157,11 @@ export function PaymentSheet({
   }, [enabled, mixedAvailable]);
 
   const close = () => {
-    const paid = paymentComplete;
-    setReceipt(null);
-    setSplitOpen(false);
-    setSuccessVisible(false);
-    setPaymentComplete(false);
-    setCashInput('');
-    setQrInput('');
-    setError('');
-    setTab('qr');
+    if (ownerOrderRef.current !== activeOrderId) return;
+    const paid = paymentComplete && stateOrderId === activeOrderId;
+    operationEpoch.current += 1;
+    visibleRef.current = false;
+    resetPayment();
     onClose();
     if (paid) onPaid();
   };
@@ -146,8 +174,29 @@ export function PaymentSheet({
     if (!visible && !successVisible && !receipt) setRenderOrder(null);
   }, [receipt, successVisible, visible]);
 
-  const activeOrder = order ?? renderOrder;
+  React.useEffect(() => {
+    resetPayment();
+    setStateOrderId(activeOrderId);
+  }, [activeOrderId]);
+
+  React.useEffect(() => {
+    if (!visible) {
+      operationEpoch.current += 1;
+      resetPayment();
+    }
+  }, [visible]);
+
+  React.useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; operationEpoch.current += 1; };
+  }, []);
+
   if (!activeOrder) return null;
+
+  const currentState = stateOrderId === activeOrder.id;
+  const isPaymentComplete = currentState && paymentComplete;
+  const showSuccess = currentState && successVisible;
+  const currentReceipt = currentState && receiptOrderRef.current === activeOrder.id ? receipt : null;
 
   const total = Number(activeOrder.finalAmount);
   const selected = tabs.some((item) => item.key === tab) ? tab : tabs[0]?.key ?? 'qr';
@@ -178,49 +227,70 @@ export function PaymentSheet({
   };
 
   const completePayment = async (payload: PaymentPayload) => {
+    if (paymentPendingRef.current) return;
+    const owner = operationOwner(payload.orderId);
+    if (!ownsOperation(owner)) return;
+    paymentPendingRef.current = owner;
     setError('');
     try {
-      await pay.mutateAsync(payload);
-    } catch (e) {
-      const message = apiError(e);
-      setError(message);
-      push({ message, type: 'error', at: new Date().toISOString() });
-      throw e;
-    }
-    void beep('payment');
-    push({ message: 'Оплата принята', type: 'success', at: new Date().toISOString() });
-    setSplitOpen(false);
-    setReceipt(null);
-    setPaymentComplete(true);
-    setSuccessVisible(true);
-    const receiptPromise = fetchReceipt(activeOrder.id);
-
-    // Успешная анимация не зависит от скорости API чека: она всегда остаётся
-    // на экране достаточно долго, чтобы пользователь успел её увидеть.
-    await new Promise<void>((resolve) => setTimeout(resolve, PAYMENT_SUCCESS_MS));
-    try {
-      setReceipt(await receiptPromise);
-    } catch (e) {
-      const message = apiError(e);
-      setError(message);
-      push({ message, type: 'error', at: new Date().toISOString() });
-    } finally {
+      try {
+        await pay.mutateAsync(payload);
+      } catch (e) {
+        if (ownsOperation(owner)) {
+          const message = apiError(e);
+          setError(message);
+          push({ message, type: 'error', at: new Date().toISOString() });
+        }
+        throw e;
+      }
+      if (!ownsOperation(owner)) return;
+      void beep('payment');
+      push({ message: 'Оплата принята', type: 'success', at: new Date().toISOString() });
+      setSplitOpen(false);
+      setReceipt(null);
+      receiptOrderRef.current = null;
+      setPaymentComplete(true);
+      setSuccessVisible(true);
+      // Attach rejection handling immediately, while preserving the full success animation.
+      const [result] = await Promise.all([
+        fetchReceipt(owner.orderId).then(value => ({ value }), failure => ({ failure })),
+        new Promise<void>(resolve => setTimeout(resolve, PAYMENT_SUCCESS_MS)),
+      ]);
+      if (!ownsOperation(owner)) return;
+      if ('value' in result) {
+        receiptOrderRef.current = owner.orderId;
+        setReceipt(result.value);
+      } else {
+        const message = apiError(result.failure);
+        setError(message);
+        push({ message, type: 'error', at: new Date().toISOString() });
+      }
       setSuccessVisible(false);
+    } finally {
+      if (paymentPendingRef.current === owner) paymentPendingRef.current = null;
     }
   };
 
   const requestPrint = async () => {
-    if (!receipt) return;
+    if (!currentReceipt || !activeOrder.waiter || printPendingRef.current) return;
+    const owner = operationOwner(activeOrder.id);
+    if (!ownsOperation(owner)) return;
+    printPendingRef.current = owner;
     setError('');
     try {
-      const request = await print.mutateAsync({ orderId: activeOrder.id, type: 'receipt' });
-      beginPrint(request, receipt);
+      const request = await print.mutateAsync({ orderId: owner.orderId, type: 'receipt' });
+      if (!ownsOperation(owner)) return;
+      beginPrint(request, currentReceipt);
       push({ message: 'Запрос на печать отправлен администратору', type: 'success', at: new Date().toISOString() });
       close();
     } catch (e) {
-      const message = apiError(e);
-      setError(message);
-      push({ message, type: 'error', at: new Date().toISOString() });
+      if (ownsOperation(owner)) {
+        const message = apiError(e);
+        setError(message);
+        push({ message, type: 'error', at: new Date().toISOString() });
+      }
+    } finally {
+      if (printPendingRef.current === owner) printPendingRef.current = null;
     }
   };
 
@@ -254,24 +324,27 @@ export function PaymentSheet({
   // Один BottomSheet остаётся смонтированным на всём пути оплаты. Раньше лист
   // оплаты закрывался на показе успеха, а лист чека создавался заново — из-за
   // этого пользователь видел второй «въезд» снизу после оплаты.
-  const showReceipt = !!receipt && !successVisible;
-  const showReceiptError = paymentComplete && !successVisible && !receipt;
+  const showReceipt = !!currentReceipt && !showSuccess;
+  const showReceiptError = isPaymentComplete && !showSuccess && !currentReceipt;
 
   return (
     <>
       <BottomSheet
         visible={visible}
         onClose={close}
-        title={paymentComplete ? 'Оплата принята' : 'Оплата заказа'}
+        presentation={showSuccess ? 'center' : 'bottom'}
+        hideHeader={showSuccess}
+        bodyStyle={showSuccess ? { paddingHorizontal: 0, paddingVertical: 0 } : undefined}
+        title={isPaymentComplete ? 'Оплата принята' : 'Оплата заказа'}
         footer={
-          showReceipt ? (
+          showSuccess ? undefined : showReceipt ? (
             <View style={styles.receiptActions}>
               <Button title="Готово" variant="secondary" onPress={close} style={{ flex: 1 }} />
-              <Button title="Печать чека" loading={print.isPending} onPress={() => void requestPrint()} style={{ flex: 1 }} />
+              {activeOrder.waiter ? <Button title="Печать чека" loading={print.isPending} onPress={() => void requestPrint()} style={{ flex: 1 }} /> : null}
             </View>
-          ) : paymentComplete ? (
+          ) : isPaymentComplete ? (
             <Button title="Готово" variant="secondary" onPress={close} />
-          ) : successVisible ? undefined : (
+          ) : (
             <View style={styles.payActions}>
               <FastPressable
                 onPress={() => setSplitOpen(true)}
@@ -281,39 +354,39 @@ export function PaymentSheet({
                   (pay.isPending || !allActiveItemsServed) && styles.splitButtonDisabled,
                 ]}
               >
-                <Text style={styles.splitButtonText} numberOfLines={1}>
+                <Text style={styles.splitButtonText} numberOfLines={1} translate>
                   Разделить счёт
                 </Text>
               </FastPressable>
               <Button
                 title={`${selected === 'cash' || selected === 'card' ? 'Принять оплату' : 'Оплачено'} · ${money(total)}`}
                 onPress={submit}
+                fontWeight="600"
                 loading={pay.isPending}
                 disabled={confirmDisabled}
-                style={{ flex: 1 }}
+                style={{ flex: 1, paddingHorizontal: 4 }}
               />
             </View>
           )
         }
       >
-        {successVisible ? <PaymentSuccessContent total={total} /> : showReceipt && receipt ? <ReceiptContent receipt={receipt} error={error} /> : showReceiptError ? <PaymentReceiptErrorContent error={error} /> : <>
+        {showSuccess ? <PaymentSuccessContent total={total} /> : <SheetScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{showReceipt && currentReceipt ? <ReceiptContent receipt={currentReceipt} error={error} location={orderLocation(activeOrder)} directPrint={!activeOrder.waiter} /> : showReceiptError ? <PaymentReceiptErrorContent error={error} /> : <>
         <Text style={styles.subtitle}>
-          Стол {activeOrder.table.number}
-          {hallSuffix(activeOrder.table)} · {displayOrderNumber(activeOrder.orderNumber)}
+          {orderLocation(activeOrder)} · {displayOrderNumber(activeOrder.orderNumber)}
         </Text>
 
         <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>К оплате</Text>
+          <Text style={styles.totalLabel} translate>К оплате</Text>
           <Text style={styles.totalValue}>{money(total)}</Text>
         </View>
 
         {!allActiveItemsServed ? (
           <View style={styles.warningBox}>
-            <Text style={styles.warningText}>Нельзя принять оплату: есть неподанные блюда.</Text>
+            <Text style={styles.warningText} translate>Нельзя принять оплату: есть неподанные блюда.</Text>
           </View>
         ) : null}
 
-        <Text style={styles.sectionLabel}>Способ оплаты</Text>
+        <Text style={styles.sectionLabel} translate>Способ оплаты</Text>
         <View style={styles.tabs}>
           {tabs.map((item) => {
             const active = selected === item.key;
@@ -321,9 +394,9 @@ export function PaymentSheet({
               <FastPressable
                 key={item.key}
                 onPress={() => setTab(item.key)}
-                style={[styles.tab, active && styles.tabActive]}
+                style={[styles.tab, { width: tabs.length >= 3 ? '31.5%' : '48.5%' }, active && styles.tabActive]}
               >
-                <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1}>
+                <Text style={[styles.tabText, active && styles.tabTextActive]} numberOfLines={1} translate>
                   {item.label}
                 </Text>
               </FastPressable>
@@ -333,20 +406,21 @@ export function PaymentSheet({
 
         <View style={styles.content}>
           {selected === 'qr' ? (
-            <View style={styles.qrBox}>
+            <View style={[styles.qrBox, !qrSrc && styles.qrMissingBox]}>
               {qrSrc ? (
                 <>
-                  <Text style={styles.qrHint}>Покажите QR-код клиенту для оплаты</Text>
+                  <Text style={styles.qrHint} translate>Покажите QR-код клиенту для оплаты</Text>
                   <Image source={{ uri: qrSrc }} style={styles.qrImage} resizeMode="contain" />
                 </>
               ) : (
-                <Text style={styles.qrMissing}>QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.</Text>
+                <Text style={styles.qrMissing} translate>QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.</Text>
               )}
             </View>
           ) : selected === 'cash' || selected === 'card' ? null : (
             <View style={{ gap: spacing.md }}>
+              <View style={styles.mixedFields}>
               <View style={styles.mixedRow}>
-                <Text style={styles.mixedLabel}>Наличные</Text>
+                <Text style={styles.mixedLabel} translate>Наличные</Text>
                 <TextInput
                   value={cashInput}
                   onChangeText={onCashChange}
@@ -357,7 +431,7 @@ export function PaymentSheet({
                 />
               </View>
               <View style={styles.mixedRow}>
-                <Text style={styles.mixedLabel}>QR</Text>
+                <Text style={styles.mixedLabel} translate>QR-код</Text>
                 <TextInput
                   value={qrInput}
                   onChangeText={onQrChange}
@@ -367,32 +441,34 @@ export function PaymentSheet({
                   style={styles.mixedInput}
                 />
               </View>
+              </View>
               <View style={styles.mixedSummary}>
                 <View style={styles.mixedSummaryRow}>
-                  <Text style={styles.mixedSummaryLabel}>Итого внесено</Text>
+                  <Text style={styles.mixedSummaryLabel} translate>Итого внесено</Text>
                   <Text style={styles.mixedSummaryValue}>{money(entered)}</Text>
                 </View>
                 <View style={styles.mixedSummaryRow}>
-                  <Text style={styles.mixedSummaryLabel}>Осталось</Text>
+                  <Text style={styles.mixedSummaryLabel} translate>Осталось</Text>
                   <Text style={[styles.mixedSummaryValue, remaining === 0 && styles.mixedSuccess, over && styles.mixedDanger]}>
                     {money(Math.max(0, remaining))}
                   </Text>
                 </View>
               </View>
               {over ? (
-                <Text style={styles.mixedError}>Сумма превышает итог заказа</Text>
+                <Text style={styles.mixedError} translate>Сумма превышает итог заказа</Text>
               ) : (
-                <Text style={styles.mixedHint}>Сумма должна совпадать с итогом заказа</Text>
+                <Text style={styles.mixedHint} translate>Сумма должна совпадать с итогом заказа</Text>
               )}
             </View>
           )}
         </View>
         {error ? <Text style={styles.inlineError}>{error}</Text> : null}
-        </>}
+        </>}</SheetScrollView>}
       </BottomSheet>
 
       <SplitBillSheet
         visible={splitOpen}
+        instantDismiss={showSuccess || isPaymentComplete}
         orderId={activeOrder.id}
         total={total}
         submitting={pay.isPending}
@@ -406,17 +482,22 @@ export function PaymentSheet({
 function ReceiptContent({
   receipt,
   error,
+  location,
+  directPrint,
 }: {
   receipt: Receipt;
   error?: string;
+  location: string;
+  directPrint: boolean;
 }) {
   return (
     <>
       <View style={styles.receiptBox}>
         <Text style={styles.receiptCafe} numberOfLines={2}>{receipt.cafeName}</Text>
         <Text style={styles.receiptMeta}>
-          {displayOrderNumber(receipt.orderNumber)} · Стол {receipt.tableNumber}
+          {displayOrderNumber(receipt.orderNumber)} · {location}
         </Text>
+        {directPrint ? <Text style={styles.receiptMeta} translate>Чек доступен для печати в разделе администратора.</Text> : null}
         <View style={styles.receiptItems}>
           {receipt.items.map((item, index) => (
             <View key={`${item.dishNameSnapshot}-${index}`} style={styles.receiptItemRow}>
@@ -429,23 +510,23 @@ function ReceiptContent({
         </View>
         {Number(receipt.serviceChargeAmount) > 0 ? (
           <View style={styles.receiptLine}>
-            <Text style={styles.receiptLineLabel}>Обслуживание</Text>
+            <Text style={styles.receiptLineLabel} translate>Обслуживание</Text>
             <Text style={styles.receiptLineValue}>{money(receipt.serviceChargeAmount)}</Text>
           </View>
         ) : null}
         <View style={styles.receiptTotal}>
-          <Text style={styles.receiptTotalLabel}>Итого</Text>
+          <Text style={styles.receiptTotalLabel} translate>Итого</Text>
           <Text style={styles.receiptTotalValue}>{money(receipt.finalAmount)}</Text>
         </View>
         {isSplitPayment(receipt) && receipt.payments?.length ? (
           <View style={styles.receiptPayments}>
             <View style={styles.receiptPaymentRow}>
-              <Text style={styles.receiptPaymentTitle}>Раздельная оплата</Text>
+              <Text style={styles.receiptPaymentTitle} translate>Раздельная оплата</Text>
               <Text style={styles.receiptPaymentTitle}>{money(receipt.finalAmount)}</Text>
             </View>
             {receipt.payments.map((payment, index) => (
               <View key={`${payment.method}-${index}`} style={styles.receiptPaymentRow}>
-                <Text style={styles.receiptPaymentLabel}>
+                <Text style={styles.receiptPaymentLabel} translate>
                   Платёж {index + 1} — {paymentMethodLabel(payment.method)}
                 </Text>
                 <Text style={styles.receiptPaymentAmount}>{money(payment.amount)}</Text>
@@ -469,24 +550,29 @@ function ReceiptContent({
 }
 
 function PaymentSuccessContent({ total }: { total: number }) {
+  const reduceMotion = useReducedMotion();
   const card = useSharedValue(0);
-  const check = useSharedValue(0);
+  const check = useSharedValue(0.4);
+  const checkOpacity = useSharedValue(0);
 
   React.useEffect(() => {
+    if (reduceMotion) { card.value = 1; check.value = 1; checkOpacity.value = 1; return; }
     card.value = 0;
-    check.value = 0;
+    check.value = 0.4;
+    checkOpacity.value = 0;
     card.value = withTiming(1, {
       duration: cardPopTiming.enterMs,
       easing: cardPopTiming.easing,
     });
     check.value = withDelay(
       120,
-      withTiming(1, {
-        duration: cardPopTiming.checkMs,
-        easing: cardPopTiming.easing,
-      }),
+      withSequence(
+        withTiming(1.12, { duration: 270, easing: cardPopTiming.easing }),
+        withTiming(1, { duration: 180, easing: cardPopTiming.easing }),
+      ),
     );
-  }, [card, check]);
+    checkOpacity.value = withDelay(120, withTiming(1, { duration: 270, easing: cardPopTiming.easing }));
+  }, [card, check, checkOpacity, reduceMotion]);
 
   const cardStyle = useAnimatedStyle(() => ({
     opacity: card.value,
@@ -496,10 +582,8 @@ function PaymentSuccessContent({ total }: { total: number }) {
     ],
   }));
   const checkStyle = useAnimatedStyle(() => ({
-    opacity: check.value,
-    transform: [
-      { scale: interpolate(check.value, [0, 0.6, 1], [0.4, 1.12, 1]) },
-    ],
+    opacity: checkOpacity.value,
+    transform: [{ scale: check.value }],
   }));
 
   return (
@@ -508,12 +592,12 @@ function PaymentSuccessContent({ total }: { total: number }) {
         <Animated.View style={[styles.successIcon, checkStyle]}>
           <PwaIcon name="check" size={34} color={colors.success} strokeWidth={2.5} />
         </Animated.View>
-        <Text style={styles.successTitle}>Оплата принята</Text>
-        <Text style={styles.successText}>Платёж успешно подтверждён</Text>
+        <Text style={styles.successTitle} translate>Оплата принята</Text>
+        <Text style={styles.successText} translate>Платёж успешно подтверждён</Text>
         <Text style={styles.successAmount}>{money(total)}</Text>
         <View style={styles.successProgress}>
           <ActivityIndicator size="small" color={colors.textLight} />
-          <Text style={styles.successProgressText}>Переходим к чеку…</Text>
+          <Text style={styles.successProgressText} translate>Переходим к чеку…</Text>
         </View>
       </Animated.View>
     </View>
@@ -524,8 +608,8 @@ function PaymentReceiptErrorContent({ error }: { error: string }) {
   return (
     <View style={styles.paymentCompleteError}>
       <PwaIcon name="check" size={30} color={colors.success} strokeWidth={2.5} />
-      <Text style={styles.paymentCompleteTitle}>Оплата принята</Text>
-      <Text style={styles.paymentCompleteText}>
+      <Text style={styles.paymentCompleteTitle} translate>Оплата принята</Text>
+      <Text style={styles.paymentCompleteText} translate>
         {error || 'Чек пока не удалось загрузить. Оплата уже сохранена.'}
       </Text>
     </View>
@@ -534,6 +618,7 @@ function PaymentReceiptErrorContent({ error }: { error: string }) {
 
 function SplitBillSheet({
   visible,
+  instantDismiss,
   orderId,
   total,
   submitting,
@@ -541,6 +626,7 @@ function SplitBillSheet({
   onComplete,
 }: {
   visible: boolean;
+  instantDismiss: boolean;
   orderId: string;
   total: number;
   submitting: boolean;
@@ -658,10 +744,10 @@ function SplitBillSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Разделение счёта" maxHeight="88%">
+    <BottomSheet visible={visible} onClose={onClose} title="Разделение счёта" animationPreset={instantDismiss ? 'default' : 'split'} maxHeight="88%">
       <View style={styles.splitHeader}>
         <View>
-          <Text style={styles.splitHint}>Сумма к оплате</Text>
+          <Text style={styles.splitHint} translate>Сумма к оплате</Text>
           <Text style={styles.splitTotal}>{money(total)}</Text>
         </View>
         <View style={styles.counter}>
@@ -671,9 +757,9 @@ function SplitBillSheet({
         </View>
       </View>
 
-      <ScrollView
+      <SheetScrollView
         showsVerticalScrollIndicator={false}
-        style={{ maxHeight: 460 }}
+        style={{ flexShrink: 1, minHeight: 0 }}
         onScrollBeginDrag={() => setMethodMenuIndex(null)}
         keyboardShouldPersistTaps="handled"
       >
@@ -688,7 +774,7 @@ function SplitBillSheet({
                 ]}
               >
                 <View style={styles.splitTopRow}>
-                  <Text style={styles.splitTitle}>Платёж {index + 1}</Text>
+                  <Text style={styles.splitTitle} translate>Платёж {index + 1}</Text>
                   {payment.paid ? (
                     <Text style={styles.splitAmountText}>{money(amounts[index])}</Text>
                   ) : (
@@ -700,7 +786,7 @@ function SplitBillSheet({
                         editable={!busy}
                         style={styles.splitAmountInput}
                       />
-                      <Text style={styles.splitAmountCurrency}>с</Text>
+                      <Text style={styles.splitAmountCurrency} translate>с</Text>
                     </View>
                   )}
                 </View>
@@ -708,7 +794,7 @@ function SplitBillSheet({
                 {payment.paid ? (
                   <View style={styles.paidRow}>
                     <PwaIcon name="check" size={16} color={colors.success} strokeWidth={2.5} />
-                    <Text style={styles.paidText}>Оплачен · {SPLIT_METHOD_LABELS[payment.method]}</Text>
+                    <Text style={styles.paidText} translate>Оплачен · {SPLIT_METHOD_LABELS[payment.method]}</Text>
                   </View>
                 ) : (
                   <>
@@ -735,7 +821,7 @@ function SplitBillSheet({
                     {payment.method === 'mixed' ? (
                       <View style={styles.splitMixedGrid}>
                         <View style={{ flex: 1 }}>
-                          <Text style={styles.splitInputLabel}>Наличные</Text>
+                          <Text style={styles.splitInputLabel} translate>Наличные</Text>
                           <TextInput
                             value={payment.cash}
                             onChangeText={(value) => onMixedCash(index, value)}
@@ -764,13 +850,13 @@ function SplitBillSheet({
               </View>
             ))}
             {!assignedValid ? (
-              <Text style={styles.splitError}>Сумма платежей должна быть равна {money(total)}</Text>
+              <Text style={styles.splitError} translate>Сумма платежей должна быть равна {money(total)}</Text>
             ) : null}
           </View>
-      </ScrollView>
+      </SheetScrollView>
 
       <View style={styles.splitFooter}>
-        <Text style={styles.splitHint}>Осталось к оплате</Text>
+        <Text style={styles.splitHint} translate>Осталось к оплате</Text>
         <Text style={[styles.splitRemaining, remaining <= 0 && { color: colors.success }]}>
           {money(Math.max(0, remaining))}
         </Text>
@@ -794,7 +880,7 @@ function CounterButton({
       onPress={onPress}
       style={[styles.counterButton, disabled && { opacity: 0.4 }]}
     >
-      <Text style={styles.counterButtonText}>{label}</Text>
+      <Text style={styles.counterButtonText} translate>{label}</Text>
     </FastPressable>
   );
 }
@@ -872,7 +958,7 @@ function SplitMethodSelect({
                 onPress={() => onChange(method.key)}
                 style={[styles.methodOption, active && styles.methodOptionActive]}
               >
-                <Text style={[styles.methodOptionText, active && styles.methodOptionTextActive]} numberOfLines={1}>
+                <Text style={[styles.methodOptionText, active && styles.methodOptionTextActive]} numberOfLines={1} translate>
                   {method.label}
                 </Text>
                 {active ? <PwaIcon name="check" size={16} color={colors.primary} strokeWidth={2.2} /> : null}
@@ -887,9 +973,9 @@ function SplitMethodSelect({
 
 const styles = StyleSheet.create({
   subtitle: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: 4 },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.md },
-  totalLabel: { fontSize: fontSize.md, color: colors.textSecondary },
-  totalValue: { fontSize: fontSize.xxl, fontWeight: '700', color: colors.textPrimary },
+  totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, marginBottom: 16 },
+  totalLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
+  totalValue: { fontSize: fontSize.xxl, fontWeight: '600', color: colors.textPrimary },
   warningBox: {
     marginTop: spacing.md,
     borderRadius: radius.md,
@@ -898,11 +984,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
   },
   warningText: { fontSize: fontSize.sm, color: colors.warning, lineHeight: 18 },
-  sectionLabel: { fontSize: fontSize.base, color: colors.textSecondary, marginTop: spacing.lg, marginBottom: spacing.sm },
+  sectionLabel: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary, marginBottom: spacing.sm },
   tabs: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   tab: {
-    minWidth: '30%',
-    flexGrow: 1,
     height: 46,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -910,29 +994,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: 4,
   },
   tabActive: { borderColor: colors.primary, backgroundColor: colors.primaryFaint },
-  tabText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textSecondary },
+  tabText: { fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary },
   tabTextActive: { color: colors.primary },
-  content: { marginTop: spacing.md },
+  content: { marginTop: spacing.lg },
   qrBox: {
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
-    padding: spacing.lg,
+    padding: 20,
     alignItems: 'center',
     gap: spacing.md,
     minHeight: 160,
     justifyContent: 'center',
   },
-  qrHint: { fontSize: fontSize.base, color: colors.textSecondary, textAlign: 'center' },
-  qrImage: { width: 200, height: 200 },
-  qrMissing: { fontSize: fontSize.sm, color: colors.textLight, textAlign: 'center', paddingVertical: spacing.lg },
+  qrHint: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },
+  qrImage: { width: 288, maxWidth: '100%', height: 288 },
+  qrMissingBox: { minHeight: 0, padding: 16, borderColor: 'rgba(255,155,0,0.3)', backgroundColor: 'rgba(255,155,0,0.05)' },
+  qrMissing: { fontSize: fontSize.sm, lineHeight: 20, color: colors.warning, textAlign: 'center' },
+  mixedFields: { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, gap: 12 },
   mixedRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md },
   mixedLabel: { fontSize: fontSize.base, color: colors.textSecondary },
   mixedInput: {
-    width: 140,
+    width: 160,
     height: 44,
     borderWidth: 1,
     borderColor: colors.border,
@@ -948,12 +1034,15 @@ const styles = StyleSheet.create({
   mixedSummaryValue: { fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
   mixedSuccess: { color: colors.success },
   mixedDanger: { color: colors.danger },
-  mixedHint: { fontSize: fontSize.xs, color: colors.textLight },
+  mixedHint: { fontSize: fontSize.xs, color: colors.textMuted },
   mixedError: { fontSize: fontSize.sm, color: colors.danger },
   inlineError: { marginTop: spacing.md, fontSize: fontSize.sm, color: colors.danger },
-  payActions: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
+  payActions: { flexDirection: 'row', gap: 10 },
   splitButton: {
-    width: 148,
+    minWidth: 126,
+    maxWidth: 158,
+    flexBasis: '34%',
+    flexShrink: 0,
     height: 48,
     borderRadius: radius.md,
     borderWidth: 1,
@@ -964,14 +1053,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   splitButtonDisabled: { opacity: 0.5 },
-  splitButtonText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.primary },
+  splitButtonText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.primary },
   successContent: {
-    minHeight: 280,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing.xl,
   },
   successCard: {
+    ...softShadow,
     width: '100%',
     maxWidth: 300,
     borderRadius: 16,
@@ -988,15 +1076,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  successTitle: { marginTop: spacing.lg, fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
+  successTitle: { marginTop: spacing.lg, fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   successText: { marginTop: 4, fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center' },
-  successAmount: { marginTop: spacing.md, fontSize: 24, fontWeight: '700', color: colors.textPrimary },
-  successProgress: { marginTop: spacing.lg, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  successAmount: { marginTop: spacing.md, fontSize: 24, fontWeight: '600', color: colors.textPrimary },
+  successProgress: { marginTop: 20, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   successProgressText: { fontSize: fontSize.xs, color: colors.textLight },
   paymentCompleteError: { minHeight: 220, alignItems: 'center', justifyContent: 'center', paddingVertical: spacing.xl },
   paymentCompleteTitle: { marginTop: spacing.md, fontSize: fontSize.lg, fontWeight: '700', color: colors.textPrimary },
   paymentCompleteText: { marginTop: spacing.sm, fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center' },
-  receiptActions: { flexDirection: 'row', gap: spacing.sm, paddingBottom: spacing.sm },
+  receiptActions: { flexDirection: 'row', gap: spacing.sm },
   receiptBox: {
     borderWidth: 1,
     borderColor: colors.border,

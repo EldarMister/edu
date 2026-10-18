@@ -1,15 +1,15 @@
 import React from 'react';
-import { Animated, Easing, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from '@/components/typography';
+import { useIsFocused } from '@react-navigation/native';
 import { Button, RoundBtn } from '@/components/ui';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
-import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
+import { colors, fontSize, radius, spacing } from '@/theme';
 import { cartLineName, linePrice, useCart } from '@/store/cart';
 import { setChanged } from '@/utils/set';
-import { money } from '@/utils/format';
 
 /** Корзина как нижний лист поверх меню — повторяет PWA CartSheet. */
 export function CartSheet({
@@ -25,7 +25,7 @@ export function CartSheet({
   submitting: boolean;
   submitLabel: string;
 }) {
-  const insets = useSafeAreaInsets();
+  const focused = useIsFocused();
   const {
     lines,
     comment,
@@ -44,9 +44,19 @@ export function CartSheet({
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
 
   const footer = (
-    <View style={{ gap: spacing.sm, paddingBottom: spacing.sm }}>
+    <View style={styles.footerContent}>
+      {hasLines && commentOpen ? (
+        <TextInput
+          value={comment}
+          onChangeText={setOrderComment}
+          placeholder="Комментарий к заказу"
+          placeholderTextColor={colors.textLight}
+          style={styles.commentInput}
+          autoFocus
+        />
+      ) : null}
       <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>Итого</Text>
+        <Text style={styles.totalLabel} translate>Итого</Text>
         <NumberTicker value={total()} style={styles.totalValue} digitHeight={22} />
       </View>
       <Button
@@ -58,11 +68,11 @@ export function CartSheet({
       />
       {hasLines ? (
         <View style={styles.actionsRow}>
-          <FastPressable onPress={() => clear()} style={styles.clearBtn}>
-            <Text style={styles.clearText}>Очистить</Text>
+          <FastPressable onPress={() => { clear(); onClose(); }} style={styles.clearBtn}>
+            <Text style={styles.clearText} translate>Очистить</Text>
           </FastPressable>
           <FastPressable onPress={() => setCommentOpen(!commentOpen)} style={styles.clearBtn}>
-            <Text style={[styles.clearText, commentOpen && styles.commentToggleActive]}>
+            <Text style={[styles.clearText, commentOpen && styles.commentToggleActive]} translate>
               {commentOpen ? 'Скрыть комментарий' : 'Комментарий'}
             </Text>
           </FastPressable>
@@ -73,24 +83,27 @@ export function CartSheet({
 
   return (
     <BottomSheet
-      visible={visible}
+      visible={visible && focused}
       onClose={onClose}
+      inline
       sheet
+      animationPreset="cart"
       footer={footer}
+      footerStyle={styles.footer}
       bodyStyle={{ paddingVertical: 0 }}
       maxHeight="78%"
-      bottomInset={waiterLayout.navBarHeight + insets.bottom}
-    >
+      headerContent={<View style={styles.header}>
+      <View style={styles.handle} />
       <View style={styles.headRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.title} numberOfLines={1}>
+          <Text style={styles.title} numberOfLines={1} translate>
             Корзина
           </Text>
         </View>
         <View style={styles.headActions}>
           {hasLines ? (
             <View style={styles.takeawayRow}>
-              <Text style={styles.takeawayLabel}>С собой</Text>
+              <Text style={styles.takeawayLabel} translate>С собой</Text>
               <TakeawaySwitch
                 on={allTakeaway}
                 onChange={setAllTakeaway}
@@ -99,11 +112,12 @@ export function CartSheet({
           ) : null}
         </View>
       </View>
-
-      <ScrollView style={{ maxHeight: 380 }} keyboardShouldPersistTaps="handled">
+      </View>}
+    >
+      <SheetScrollView style={styles.lines} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {!hasLines ? (
           <View style={styles.emptyBox}>
-            <Text style={styles.empty}>Корзина пуста</Text>
+            <Text style={styles.empty} translate>Корзина пуста</Text>
           </View>
         ) : (
           lines.map((l, i) => {
@@ -115,19 +129,21 @@ export function CartSheet({
               key={key}
               style={[styles.line, i > 0 && styles.lineBorder]}
             >
+              <View style={styles.lineMain}>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <FastPressable disabled={!isSet} onPress={() => setExpanded((current) => ({ ...current, [key]: !open }))}>
                   <Text style={styles.lineName} numberOfLines={1}>{cartLineName(l)}</Text>
                 </FastPressable>
                 {l.set ? (
-                  <Text style={styles.lineSub}>
-                    {setChanged(l) ? 'Состав изменён' : `${l.set.components.length} блюд`} · {open ? 'скрыть' : 'состав'}
+                  <Text style={styles.lineSub} translate>
+                    {setChanged(l) ? 'Состав изменён' : `${l.set.components.length} блюд`}
+                    <Text style={styles.setToggle}>{open ? ' ▴' : ' ▾'}</Text>
                   </Text>
                 ) : null}
                 {l.takeaway ? (
                   <FastPressable onPress={() => setTakeaway(i, false)} style={styles.takeawayChip} hitSlop={6}>
                     <PwaIcon name="bag" size={12} color={colors.textSecondary} strokeWidth={2} />
-                    <Text style={styles.takeawayChipText}>С собой</Text>
+                    <Text style={styles.takeawayChipText} translate>С собой</Text>
                   </FastPressable>
                 ) : null}
               </View>
@@ -136,16 +152,19 @@ export function CartSheet({
                 <Text style={styles.qty}>{l.quantity}</Text>
                 <RoundBtn kind="inc" onPress={() => setQuantity(i, l.quantity + 1)} />
               </View>
-              <Text style={styles.linePrice}>{money(linePrice(l))}</Text>
+              <View style={styles.linePrice}>
+                <NumberTicker value={linePrice(l)} style={styles.linePriceText} digitHeight={21} />
+              </View>
+              </View>
               {isSet && open ? (
                 <View style={styles.setComponents}>
                   {l.set!.components.map((component) => (
                     <Text key={component.componentId} style={styles.setComponentText} numberOfLines={1}>
-                      {component.action === 'removed'
-                        ? `− ${component.originalName}`
-                        : component.action === 'replaced'
-                          ? `${component.originalName} → ${component.finalName}`
-                          : component.originalName}
+                      {component.action === 'removed' ? (
+                        <Text style={styles.removedComponent}>{component.originalName}</Text>
+                      ) : component.action === 'replaced' ? (
+                        <><Text style={styles.removedComponent}>{component.originalName}</Text><Text style={styles.setToggle}> → {component.finalName}</Text></>
+                      ) : component.originalName}
                     </Text>
                   ))}
                 </View>
@@ -154,17 +173,7 @@ export function CartSheet({
             );
           })
         )}
-      </ScrollView>
-      {hasLines && commentOpen ? (
-        <TextInput
-          value={comment}
-          onChangeText={setOrderComment}
-          placeholder="Комментарий к заказу"
-          placeholderTextColor={colors.textLight}
-          style={styles.commentInput}
-          autoFocus
-        />
-      ) : null}
+      </SheetScrollView>
     </BottomSheet>
   );
 }
@@ -198,27 +207,32 @@ function TakeawaySwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) 
 }
 
 const styles = StyleSheet.create({
+  header: { paddingHorizontal: spacing.lg, paddingTop: 10, paddingBottom: spacing.sm },
+  handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300, marginBottom: 10 },
   headRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingBottom: spacing.sm,
+    gap: spacing.sm,
   },
   title: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   headActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   takeawayRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  takeawayLabel: { fontSize: fontSize.base, color: colors.textSecondary },
+  takeawayLabel: { fontSize: 14, color: colors.textSecondary },
   emptyBox: {
-    marginTop: spacing.sm,
-    borderRadius: radius.md,
-    backgroundColor: colors.background,
-    paddingVertical: spacing.xxl,
+    paddingVertical: 48,
   },
   empty: { textAlign: 'center', color: colors.textMuted, fontSize: fontSize.sm },
-  line: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.md, paddingVertical: spacing.sm },
+  line: { paddingVertical: spacing.sm },
+  lineMain: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   lineBorder: { borderTopWidth: 1, borderTopColor: colors.border },
   lineName: { fontSize: fontSize.base, color: colors.textPrimary },
-  lineSub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: 2 },
+  lineSub: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  setToggle: { color: colors.primary },
+  removedComponent: { color: colors.textLight, textDecorationLine: 'line-through' },
+  lines: { flexShrink: 1, minHeight: 0 },
+  footer: { borderTopWidth: 0, paddingTop: spacing.md },
+  footerContent: { gap: 0 },
   takeawayChip: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -232,22 +246,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 2,
   },
-  takeawayChipText: { fontSize: fontSize.xs, color: colors.textSecondary, lineHeight: 14 },
+  takeawayChipText: { fontSize: 11, color: colors.textSecondary, lineHeight: 14 },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   qty: { width: 20, textAlign: 'center', fontSize: fontSize.base, fontWeight: '500', color: colors.textPrimary },
-  linePrice: { width: 70, textAlign: 'right', fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
-  setComponents: { width: '100%', gap: 2, paddingLeft: 2, marginTop: -2 },
-  setComponentText: { fontSize: fontSize.xs, color: colors.textMuted },
-  submitButton: { borderRadius: radius.sm },
+  linePrice: { width: 68, alignItems: 'flex-end' },
+  linePriceText: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary },
+  setComponents: { width: '100%', gap: 2, paddingLeft: 4, marginTop: 6 },
+  setComponentText: { fontSize: 13, color: colors.textSecondary },
+  submitButton: { borderRadius: radius.sm, marginTop: spacing.md },
   commentInput: {
-    height: 42,
+    height: 40,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
     paddingHorizontal: spacing.md,
-    marginTop: spacing.sm,
-    marginBottom: spacing.sm,
-    fontSize: fontSize.sm,
+    marginBottom: spacing.md,
+    fontSize: 14,
     color: colors.textPrimary,
   },
   totalRow: {
@@ -260,9 +274,9 @@ const styles = StyleSheet.create({
   },
   totalLabel: { fontSize: fontSize.base, color: colors.textSecondary, fontWeight: '500' },
   totalValue: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
-  actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  clearBtn: { height: 36, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.sm },
-  clearText: { color: colors.primary, fontSize: fontSize.sm, fontWeight: '500' },
+  actionsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm },
+  clearBtn: { height: 36, alignItems: 'center', justifyContent: 'center' },
+  clearText: { color: colors.primary, fontSize: 14, fontWeight: '500' },
   commentToggleActive: { color: colors.textSecondary },
   switchPress: {
     width: 36,

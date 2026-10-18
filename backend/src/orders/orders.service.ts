@@ -6,6 +6,7 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import {
   OrderItemStatus,
   OrderStatus,
@@ -33,7 +34,7 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { IngredientStockService } from '../warehouse/ingredient-stock.service';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
-import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu, orderNumberWords } from '../tts/kitchen-voice';
+import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu, orderNumberWords, withVariantVoice } from '../tts/kitchen-voice';
 
 /** Статусы «живого» заказа, который занимает стол. */
 const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
@@ -54,15 +55,46 @@ const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   [PaymentMethod.mixed]: 'Смешанная',
 };
 
-function weightSnapshot(amount: number, measure: string): string {
-  const [smallUnit, largeUnit] = measure === 'volume' ? ['мл', 'л'] : ['г', 'кг'];
-  if (amount < 1000) return `${amount} ${smallUnit}`;
-  const value = amount / 1000;
-  return `${Number.isInteger(value) ? value : value.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')} ${largeUnit}`;
+const STATION_FINAL_ITEM_STATUSES = new Set<OrderItemStatus>([
+  OrderItemStatus.rejected,
+  OrderItemStatus.cancelled,
+  OrderItemStatus.ready,
+  OrderItemStatus.served,
+]);
+
+type StationOrder = {
+  items: { prepStation: PrepStation; status: OrderItemStatus }[];
+};
+
+function stationHasWork(order: StationOrder, station: PrepStation) {
+  return station !== PrepStation.none && order.items.some(
+    (item) => item.prepStation === station && !STATION_FINAL_ITEM_STATUSES.has(item.status),
+  );
+}
+
+function completedStationSuppressions(order: StationOrder) {
+  const suppressions: { kitchen?: boolean; bar?: boolean } = {};
+  for (const station of [PrepStation.kitchen, PrepStation.bar]) {
+    const items = order.items.filter((item) => item.prepStation === station);
+    if (items.length > 0 && items.every((item) => STATION_FINAL_ITEM_STATUSES.has(item.status))) {
+      suppressions[station] = true;
+    }
+  }
+  return suppressions;
 }
 
 function tableNumberVoice(value: number): string {
   return Number.isInteger(value) ? numberToWordsRu(value) : String(value);
+}
+
+function weightSnapshot(amount: number, measure: string): string {
+  const [smallUnit, largeUnit] = measure === 'volume' ? ['мл', 'л'] : ['г', 'кг'];
+  if (amount < 1000) return `${amount} ${smallUnit}`;
+  const scaled = amount / 1000;
+  const value = Number.isInteger(scaled)
+    ? String(scaled)
+    : scaled.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+  return `${value} ${largeUnit}`;
 }
 
 const PARTIAL_REJECTION_PENDING_MESSAGE =
@@ -427,6 +459,153 @@ export class OrdersService {
     return order;
   }
 
+  /**
+   * Создаёт обычный заказ Order из внешнего приложения доставки. Вся дальнейшая
+   * обработка идёт через существующий workflow кухни; отдельной сущности заказа нет.
+   */
+  async createFromDelivery(params: {
+    externalOrderId: string;
+    customerName?: string;
+    customerPhone?: string;
+    deliveryAddress?: string;
+    comment?: string;
+    items: CreateOrderItemDto[];
+  }) {
+    const cafeId = getCafeId();
+    if (!cafeId) throw new BadRequestException('Не удалось определить кафе');
+
+    const settings = await this.settings.ensure();
+    if (!settings.deliveryEnabled) {
+      throw new ForbiddenException('Интеграция доставки выключена');
+    }
+
+    const existing = await this.prisma.order.findFirst({
+      where: { source: 'delivery', externalOrderId: params.externalOrderId },
+      include: orderInclude,
+    });
+    if (existing) return existing;
+
+    const table = await this.ensureDeliveryTable(settings.id, settings.deliveryTableId, cafeId);
+    const deliveryItems = params.items.map((item) => ({ ...item, takeaway: true }));
+    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(deliveryItems);
+    const hasPrep = itemsData.some((item) => item.prepStation !== PrepStation.none);
+    const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
+
+    let order: Awaited<ReturnType<typeof this.findById>> | null = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        order = await this.prisma.$transaction(async (tx) => {
+          // Доставка не получает ресторанный сервисный сбор: внешний клиент
+          // ориентируется на цены меню, которые возвращает integration API.
+          const totals = this.calcTotals(itemsData, 0);
+          const businessDate = this.businessDateOf();
+          const orderNumber = await this.nextOrderNumber(tx, businessDate);
+          await this.deductInventory(tx, dishDeductions, variantDeductions);
+          const createdOrder = await tx.order.create({
+            data: {
+              orderNumber,
+              businessDate,
+              tableId: table.id,
+              waiterId: null,
+              waiterShiftId: null,
+              source: 'delivery',
+              externalOrderId: params.externalOrderId,
+              deliveryCustomerName: params.customerName,
+              deliveryCustomerPhone: params.customerPhone,
+              deliveryAddress: params.deliveryAddress,
+              status: initialStatus,
+              comment: params.comment,
+              totalAmount: totals.total,
+              discountAmount: totals.discount,
+              serviceChargeAmount: totals.serviceCharge,
+              finalAmount: totals.final,
+              items: { create: itemsData },
+            },
+            include: orderInclude,
+          });
+          const ingredientStockWarnings = await this.ingredientStock.applyDishSale(
+            tx,
+            createdOrder.id,
+            createdOrder.items,
+          );
+          return Object.assign(createdOrder, { ingredientStockWarnings });
+        });
+        break;
+      } catch (err) {
+        if (!this.isUniqueConstraintError(err)) throw err;
+        const duplicate = await this.prisma.order.findFirst({
+          where: { source: 'delivery', externalOrderId: params.externalOrderId },
+          include: orderInclude,
+        });
+        if (duplicate) return duplicate;
+        if (attempt === 2) throw err;
+      }
+    }
+    if (!order) throw new BadRequestException('Не удалось создать заказ доставки');
+
+    if (hasPrep) {
+      this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
+        ...order,
+        voice: {
+          byStation: {
+            kitchen: buildNewOrderText(order, PrepStation.kitchen),
+            bar: buildNewOrderText(order, PrepStation.bar),
+          },
+        },
+      });
+      this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
+      void this.notifyKitchenNewOrder(order);
+    }
+    this.events.emitToAdmin(SERVER_EVENTS.ORDER_NEW, order);
+
+    await this.audit.log({
+      actor: null,
+      actionType: AuditAction.ORDER_CREATED,
+      entityType: AuditEntity.ORDER,
+      entityId: order.id,
+      orderId: order.id,
+      tableId: order.tableId,
+      description: `API доставки: создан заказ ${order.orderNumber}, сумма ${this.money(order.finalAmount)}`,
+      newValue: {
+        orderNumber: order.orderNumber,
+        externalOrderId: params.externalOrderId,
+        finalAmount: Number(order.finalAmount),
+        source: 'delivery',
+      },
+      metadata: { itemsCount: order.items.length, source: 'delivery' },
+    });
+
+    return order;
+  }
+
+  /** Создаёт невидимый служебный стол один раз для совместимости старого Order.tableId. */
+  private async ensureDeliveryTable(settingsId: string, configuredTableId: string | null, cafeId: string) {
+    if (configuredTableId) {
+      const configured = await this.prisma.table.findUnique({ where: { id: configuredTableId } });
+      if (configured?.cafeId === cafeId) return configured;
+    }
+
+    // Детерминированные id делают первый параллельный запрос безопасным: оба
+    // запроса выполнят upsert одной и той же служебной пары зал/стол.
+    const hallId = `delivery-hall:${cafeId}`;
+    const tableId = `delivery-table:${cafeId}`;
+    const hall = await this.prisma.hall.upsert({
+      where: { id: hallId },
+      update: { isActive: false },
+      create: { id: hallId, name: '__DELIVERY__', isActive: false, sortOrder: -1 },
+    });
+    const table = await this.prisma.table.upsert({
+      where: { id: tableId },
+      update: { isActive: false },
+      create: { id: tableId, hallId: hall.id, number: 0, seats: 1, isActive: false, sortOrder: -1 },
+    });
+    await this.prisma.settings.update({
+      where: { id: settingsId },
+      data: { deliveryTableId: table.id },
+    });
+    return table;
+  }
+
   /** Официант берёт свободный QR-заказ. Все официанты видят его до первого успешного claim. */
   async claimQrOrder(orderId: string, actor: AuditActor) {
     const before = await this.prisma.order.findUnique({
@@ -508,13 +687,18 @@ export class OrdersService {
     if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ уже закрыт и не может быть отменён');
     }
-    // Официант может отменить заказ в любом активном статусе (включая принятый кухней).
-    // Единственное ограничение — заказ уже оплачен или отменён (проверено выше).
-    // Статус waiting_payment и served — только администратор/владелец.
-    const adminOnly: OrderStatus[] = [OrderStatus.waiting_payment, OrderStatus.served];
-    if (actor.role === Role.WAITER && adminOnly.includes(order.status)) {
-      throw new BadRequestException(
-        'Отмена заказа на этом этапе доступна только администратору',
+    // Официант может отменить заказ только до перехода в статус «Готов».
+    // Явный список также закрывает обход через API для более поздних статусов
+    // (например, picked_up), которые раньше не попадали в adminOnly.
+    const waiterCancellableStatuses: OrderStatus[] = [
+      OrderStatus.sent_to_kitchen,
+      OrderStatus.accepted_by_kitchen,
+      OrderStatus.cooking,
+      OrderStatus.partially_rejected,
+    ];
+    if (actor.role === Role.WAITER && !waiterCancellableStatuses.includes(order.status)) {
+      throw new ForbiddenException(
+        'Официант может отменить заказ только до статуса «Готов»',
       );
     }
 
@@ -538,7 +722,8 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    // Станция, где всё уже готово, не должна получать позднюю озвучку отмены.
+    this.emitStatusChanged(updated, { suppressStations: completedStationSuppressions(order) });
     this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.free, updated.table.hallId);
 
     await this.audit.log({
@@ -562,6 +747,46 @@ export class OrdersService {
     });
 
     return updated;
+  }
+
+  async callAdministrator(orderId: string, actor: AuditActor) {
+    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
+    if (!order) throw new NotFoundException('Заказ не найден');
+    if (!this.canWaiterAccessOrder(order, actor.id)) {
+      throw new ForbiddenException('Это не ваш заказ');
+    }
+
+    const waiterName = actor.name?.trim() || order.waiter?.name || 'Официант';
+    const hallName = order.table.hall?.name?.trim() || 'Без зала';
+    const message = `${hallName} · Стол ${order.table.number}: официант ${waiterName} зовёт администратора`;
+    const dto = {
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      hallName,
+      tableNumber: order.table.number,
+      waiterId: actor.id,
+      waiterName,
+      createdAt: new Date().toISOString(),
+      message,
+      voice: {
+        text: `Зал ${hallName}. Стол номер ${tableNumberVoice(order.table.number)}. Официант ${waiterName} вызывает администратора.`,
+      },
+    };
+
+    this.events.emitToCafeAdmins(order.cafeId, SERVER_EVENTS.ADMINISTRATOR_CALLED, dto);
+    void this.push.notifyRole(
+      Role.ADMIN,
+      {
+        title: 'Вызов администратора',
+        body: message,
+        type: 'info',
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        url: '/admin',
+      },
+      order.cafeId,
+    );
+    return dto;
   }
 
   /** Подпись позиции для сопоставления старого и нового состава при редактировании. */
@@ -787,6 +1012,26 @@ export class OrdersService {
       : item.dishNameSnapshot;
   }
 
+  /**
+   * Озвучиваемое название блюда для уведомления официанту:
+   * использует voiceName, если задан, и добавляет размер порции прописью
+   * («1 кг» → «один килограмм») — аналогично тому, как кухня озвучивает.
+   */
+  private waiterItemVoiceName(item: {
+    dishNameSnapshot: string;
+    dishVariantNameSnapshot?: string | null;
+    dishVoiceSnapshot?: string | null;
+    weightGrams?: number | null;
+  }) {
+    const voiceName = item.dishVoiceSnapshot?.trim() || item.dishNameSnapshot;
+    // У старых строк могла сохраниться масса без снимка варианта. Не теряем
+    // порцию в озвучке: «500 г» должно звучать как «пол килограмма».
+    const portion =
+      item.dishVariantNameSnapshot?.trim() ||
+      (item.weightGrams ? weightSnapshot(item.weightGrams, 'weight') : null);
+    return withVariantVoice(voiceName, portion);
+  }
+
   private waiterLocationVoice(order: { table: { number: number; hall?: { name?: string | null } | null } }) {
     const hallName = order.table.hall?.name?.trim();
     return [hallName ? `Зал ${hallName}` : null, `Стол номер ${tableNumberVoice(order.table.number)}`]
@@ -816,7 +1061,7 @@ export class OrdersService {
   }) {
     const num = orderNumberWords(String(order.orderNumber));
     const location = this.waiterLocationVoice(order);
-    return `Заказ номер ${num} готов. ${location}. Заберите.`;
+    return `Заказ номер ${num} готово. ${location}. Заберите.`;
   }
 
   /** Человеко-читаемая сводка различий составов: «добавил X ×1, убрал Y ×2». */
@@ -887,11 +1132,12 @@ export class OrdersService {
       await this.deductInventory(tx, dishDeductions, variantDeductions);
       const ingredientStockWarnings = await this.ingredientStock.applyDishSale(tx, orderId, createdItems);
       await this.recalcOrder(tx, orderId);
-      // Новые блюда снова уходят на кухню; если добавили только «Без отправки» —
-      // статус заказа пересчитываем по составу, кухню не трогаем.
-      const nextStatus = hasPrepAdded
-        ? OrderStatus.sent_to_kitchen
-        : await this.statusFromActiveItems(tx, orderId);
+      // Статус заказа всегда считаем по составу активных позиций, а не
+      // принудительно откатываем в «отправлен на кухню». Иначе заказ, где часть
+      // блюд уже «готовится»/«готов», после добавления новых позиций терял свой
+      // прогресс. Новые блюда всё равно уезжают на станцию — отдельно по
+      // hasPrepAdded (эмит/озвучка кухни ниже).
+      const nextStatus = await this.statusFromActiveItems(tx, orderId);
       await tx.order.update({
         where: { id: orderId },
         data: {
@@ -920,7 +1166,9 @@ export class OrdersService {
         });
         void this.notifyKitchenNewOrder(updated);
       }
-      this.emitStatusChanged(updated);
+      // Кухня уже озвучила добавленные позиции через kitchen:new_order.
+      // Официанту не нужно заново проговаривать историю отмен в заказе.
+      this.emitStatusChanged(updated, { suppressWaiter: true });
       const addedCount = items.reduce((sum, i) => sum + i.quantity, 0);
       await this.audit.log({
         actor,
@@ -1128,7 +1376,7 @@ export class OrdersService {
         where: { id: orderId },
         data: {
           status: remaining === 0 ? OrderStatus.rejected : OrderStatus.partially_rejected,
-          requiresWaiterDecision: remaining > 0,
+          requiresWaiterDecision: remaining > 0 && order.source !== 'delivery',
         },
         include: orderInclude,
       });
@@ -1170,6 +1418,10 @@ export class OrdersService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      if (item.status !== OrderItemStatus.served) {
+        await this.restoreInventory(tx, [item]);
+        await this.ingredientStock.restoreDishSale(tx, orderId, [item]);
+      }
       await tx.orderItem.update({
         where: { id: itemId },
         data: { status: OrderItemStatus.ready },
@@ -1203,7 +1455,7 @@ export class OrdersService {
       updated,
       fullyReadyVoice
         ? { waiterText: fullyReadyVoice }
-        : { waiterText: this.readyItemsWaiterText([this.orderItemName(item)], updated) },
+        : { waiterText: this.readyItemsWaiterText([this.waiterItemVoiceName(item)], updated) },
     );
     if (updated.status !== order.status) {
       const tableStatus = this.tableStatusForOrderStatus(updated.status);
@@ -1246,19 +1498,38 @@ export class OrdersService {
     kitchenUserId: string,
     station: PrepStation = PrepStation.kitchen,
     setComponentIds: string[] = [],
+    partial: { itemId: string; quantity: number }[] = [],
   ) {
     const order = await this.getMutableOrder(orderId);
     this.ensureStationDecision(order, station);
 
-    const targetIds = order.items
-      .filter(
-        (it) =>
-          itemIds.includes(it.id) &&
-          ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.ready, OrderItemStatus.served].includes(
-            it.status as any,
-          ),
-      )
-      .map((it) => it.id);
+    const items = order.items.filter(
+      (it) =>
+        itemIds.includes(it.id) &&
+        ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.ready, OrderItemStatus.served].includes(
+          it.status as any,
+        ),
+    );
+    const partialMap = new Map(partial.map((p) => [p.itemId, p.quantity]));
+    const setParentIds = new Set(
+      (
+        await this.prisma.orderItemSetComponent.findMany({
+          where: { orderItemId: { in: items.map((it) => it.id) } },
+          select: { orderItemId: true },
+          distinct: ['orderItemId'],
+        })
+      ).map((component) => component.orderItemId),
+    );
+    // Для частичной готовности строку заказа разделяем: исходная строка остаётся
+    // в работе с остатком, а готовое количество становится отдельной ready-строкой.
+    // Сеты сюда не входят — их состав отмечается готовым отдельными компонентами.
+    const partialItems = items.filter((it) => {
+      const quantity = partialMap.get(it.id);
+      return !setParentIds.has(it.id) && quantity && quantity > 0 && quantity < it.quantity;
+    });
+    const partialIds = new Set(partialItems.map((it) => it.id));
+    const fullItems = items.filter((it) => !partialIds.has(it.id));
+    const targetIds = fullItems.map((it) => it.id);
 
     // Блюда внутри сетов — отдельные позиции для кухни.
     const targetComponents = await this.resolveSetComponents(orderId, setComponentIds, [
@@ -1268,14 +1539,17 @@ export class OrdersService {
       OrderItemStatus.served,
     ]);
 
-    const doneCount = targetIds.length + targetComponents.length;
+    const doneCount = targetIds.length + partialItems.length + targetComponents.length;
     if (doneCount === 0) {
       throw new BadRequestException('Нет блюд, которые можно отметить готовыми');
     }
     const readyNames = [
       ...order.items
         .filter((it) => targetIds.includes(it.id))
-        .map((it) => this.orderItemName(it)),
+        .map((it) => this.waiterItemVoiceName(it)),
+      ...partialItems.map(
+        (it) => `${this.waiterItemVoiceName(it)} (${partialMap.get(it.id)} шт.)`,
+      ),
       ...targetComponents.map((c) =>
         c.action === 'replaced' && c.finalNameSnapshot
           ? [c.finalNameSnapshot, c.finalVariantNameSnapshot].filter(Boolean).join(' ')
@@ -1284,6 +1558,7 @@ export class OrdersService {
     ];
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      const partialReadyIds: string[] = [];
       if (targetIds.length > 0) {
         await tx.orderItem.updateMany({
           where: { id: { in: targetIds }, orderId },
@@ -1298,6 +1573,44 @@ export class OrdersService {
           data: { status: OrderItemStatus.ready },
         });
       }
+      for (const it of partialItems) {
+        const readyQuantity = partialMap.get(it.id)!;
+        const remainingQuantity = it.quantity - readyQuantity;
+        const readyDiscount = round2((Number(it.discountAmount) / it.quantity) * readyQuantity);
+        const readyFinal = round2((Number(it.finalPrice) / it.quantity) * readyQuantity);
+
+        await tx.orderItem.update({
+          where: { id: it.id },
+          data: {
+            quantity: remainingQuantity,
+            // Вычитание от исходной суммы сохраняет итог заказа без округлительной погрешности.
+            discountAmount: new Prisma.Decimal(round2(Number(it.discountAmount) - readyDiscount)),
+            finalPrice: new Prisma.Decimal(round2(Number(it.finalPrice) - readyFinal)),
+          },
+        });
+        const readyItem = await tx.orderItem.create({
+          data: {
+            orderId,
+            dishId: it.dishId,
+            dishVariantId: it.dishVariantId,
+            dishNameSnapshot: it.dishNameSnapshot,
+            dishVariantNameSnapshot: it.dishVariantNameSnapshot,
+            weightGrams: it.weightGrams,
+            dishVoiceSnapshot: it.dishVoiceSnapshot,
+            priceSnapshot: it.priceSnapshot,
+            quantity: readyQuantity,
+            discountAmount: new Prisma.Decimal(readyDiscount),
+            finalPrice: new Prisma.Decimal(readyFinal),
+            status: OrderItemStatus.ready,
+            prepStation: it.prepStation,
+            comment: it.comment,
+            takeaway: it.takeaway,
+            replacementForItemId: it.replacementForItemId,
+          },
+          select: { id: true },
+        });
+        partialReadyIds.push(readyItem.id);
+      }
       if (targetComponents.length > 0) {
         await tx.orderItemSetComponent.updateMany({
           where: { id: { in: targetComponents.map((c) => c.id) } },
@@ -1307,6 +1620,7 @@ export class OrdersService {
       await tx.kitchenEvent.createMany({
         data: [
           ...targetIds.map((id) => ({ orderId, orderItemId: id })),
+          ...partialReadyIds.map((id) => ({ orderId, orderItemId: id })),
           ...targetComponents.map((c) => ({ orderId, orderItemId: c.orderItemId })),
         ].map((e) => ({ ...e, type: KitchenEventType.ready_item, createdById: kitchenUserId })),
       });
@@ -1531,7 +1845,7 @@ export class OrdersService {
         where: { id: orderId },
         data: {
           status: remaining === 0 ? OrderStatus.rejected : OrderStatus.partially_rejected,
-          requiresWaiterDecision: remaining > 0,
+          requiresWaiterDecision: remaining > 0 && order.source !== 'delivery',
         },
         include: orderInclude,
       });
@@ -1595,7 +1909,9 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    // Решение по уже озвученному частичному отказу — это техническое
+    // обновление, а не новый отказ для официанта.
+    this.emitStatusChanged(updated, { suppressWaiter: true });
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
@@ -1632,7 +1948,8 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    // Не повторяем голос старого отказа, когда официант убирает другую позицию.
+    this.emitStatusChanged(updated, { suppressWaiter: true });
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
@@ -1698,7 +2015,8 @@ export class OrdersService {
       });
       void this.notifyKitchenNewOrder(updated);
     }
-    this.emitStatusChanged(updated);
+    // Новую замену озвучивает только её станция через kitchen:new_order.
+    this.emitStatusChanged(updated, { suppressWaiter: true });
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
@@ -1706,22 +2024,30 @@ export class OrdersService {
     return updated;
   }
 
-  async cancelReadyItem(orderId: string, itemId: string, waiterId: string, reason: string) {
+  async cancelReadyItem(orderId: string, itemId: string, actor: AuditActor, reason: string) {
     const cleanReason = reason.trim();
     if (!cleanReason) {
       throw new BadRequestException('Укажите причину отмены блюда');
     }
     const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: orderInclude });
     if (!order) throw new NotFoundException('Заказ не найден');
-    if (!this.canWaiterAccessOrder(order, waiterId)) {
+    if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
-    if (!([OrderStatus.ready, OrderStatus.picked_up, OrderStatus.served] as OrderStatus[]).includes(order.status)) {
-      throw new BadRequestException('Отменить блюдо можно только после готовности и до оплаты');
+    if (
+      ([OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected, OrderStatus.waiting_payment] as OrderStatus[]).includes(order.status)
+    ) {
+      throw new BadRequestException('Отменить блюдо нельзя после перехода к оплате');
     }
     const item = order.items.find((it) => it.id === itemId);
     if (!item) throw new NotFoundException('Блюдо не найдено');
-    if (!([OrderItemStatus.ready, OrderItemStatus.served] as OrderItemStatus[]).includes(item.status)) {
+    if (
+      actor.role === Role.WAITER &&
+      ([OrderItemStatus.ready, OrderItemStatus.served] as OrderItemStatus[]).includes(item.status)
+    ) {
+      throw new ForbiddenException('Недостаточно прав для отмены готового блюда');
+    }
+    if (([OrderItemStatus.rejected, OrderItemStatus.cancelled] as OrderItemStatus[]).includes(item.status)) {
       throw new BadRequestException('Это блюдо нельзя отменить на текущем этапе');
     }
 
@@ -1754,19 +2080,38 @@ export class OrdersService {
       });
     });
 
-    this.emitStatusChanged(updated);
+    const stationHasOpenWork = stationHasWork(order, item.prepStation);
+    const actorLabel = actor.role === Role.WAITER ? 'Официант' : 'Администратор';
+    const cancellationVoice =
+      stationHasOpenWork && item.prepStation === PrepStation.kitchen
+        ? { kitchen: `Стол номер ${tableNumberVoice(updated.table.number)}. ${actorLabel} отменил блюдо: ${this.orderItemName(item)}.` }
+        : stationHasOpenWork && item.prepStation === PrepStation.bar
+          ? { bar: `Стол номер ${tableNumberVoice(updated.table.number)}. ${actorLabel} отменил блюдо: ${this.orderItemName(item)}.` }
+          : undefined;
+
+    // При отмене одного готового блюда заказ может остаться ready. Это не
+    // новая готовность для официанта. Кухня слышит отмену только пока у её
+    // станции есть активная работа (например, отменили только что добавленную позицию).
+    this.emitStatusChanged(
+      updated,
+      {
+        suppressWaiter: updated.status !== OrderStatus.cancelled,
+        suppressStations: completedStationSuppressions(order),
+        ...(cancellationVoice ? { byStation: cancellationVoice } : {}),
+      },
+    );
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) {
       this.emitTableStatus(updated.table.id, updated.table.number, tableStatus, updated.table.hallId);
     }
     await this.audit.log({
-      actor: { id: waiterId, role: Role.WAITER, name: order.waiter?.name },
+      actor,
       actionType: AuditAction.ORDER_UPDATED,
       entityType: AuditEntity.ORDER,
       entityId: order.id,
       orderId,
       tableId: order.tableId,
-      description: `${order.waiter?.name ?? 'Официант'} отменил блюдо «${this.orderItemName(item)}» в заказе ${order.orderNumber}: ${cleanReason}`,
+      description: `${actor.name ?? actorLabel} отменил блюдо «${this.orderItemName(item)}» в заказе ${order.orderNumber}: ${cleanReason}`,
       oldValue: { itemId, status: item.status, finalAmount: Number(order.finalAmount) },
       newValue: { itemId, status: OrderItemStatus.cancelled, finalAmount: Number(updated.finalAmount), reason: cleanReason },
       metadata: { tableNumber: order.table.number, itemName: this.orderItemName(item) },
@@ -2099,14 +2444,7 @@ export class OrdersService {
     const componentDishes = componentDishIds.length
       ? await this.prisma.dish.findMany({
           where: { id: { in: componentDishIds } },
-          select: {
-            id: true,
-            name: true,
-            price: true,
-            isSet: true,
-            isActive: true,
-            _count: { select: { variants: true } },
-          },
+          select: { id: true, name: true, price: true, isSet: true, isActive: true, _count: { select: { variants: true } } },
         })
       : [];
     const compById = new Map(componentDishes.map((d) => [d.id, d]));
@@ -2621,6 +2959,17 @@ export class OrdersService {
   private async nextOrderNumber(tx: Prisma.TransactionClient, businessDate: Date): Promise<string> {
     // Нумерация в пределах кафе (raw-запрос middleware не скоупит — фильтруем явно).
     const cafeId = getCafeId();
+    // MAX + 1 должен выполняться последовательно. Без транзакционной блокировки
+    // два параллельных заказа могут прочитать один MAX и получить одинаковый номер.
+    const lockKey = `order-number:${cafeId ?? 'global'}:${businessDate.toISOString()}`;
+    // pg_advisory_xact_lock() returns PostgreSQL `void`. Returning it directly
+    // makes Prisma fail with P2010 while deserializing the raw-query result.
+    // Keep the blocking lock call inside a subquery and expose only a supported
+    // integer column to Prisma.
+    await tx.$queryRaw<Array<{ locked: number }>>`
+      SELECT 1::integer AS locked
+      FROM (SELECT pg_advisory_xact_lock(hashtext(${lockKey}))) AS acquired_lock
+    `;
     const result: any[] = cafeId
       ? await tx.$queryRaw`
           SELECT COALESCE(MAX(CAST(REGEXP_REPLACE(order_number, '[^0-9]', '', 'g') AS INTEGER)), 0) as max_num
@@ -2859,15 +3208,26 @@ export class OrdersService {
 
   private emitStatusChanged(
     order: { waiterId: string | null } & Record<string, unknown>,
-    voice?: { waiterText?: string },
+    voice?: {
+      waiterText?: string;
+      suppressWaiter?: boolean;
+      byStation?: { kitchen?: string | null; bar?: string | null };
+      suppressStations?: { kitchen?: boolean; bar?: boolean };
+    },
   ) {
     // Полная отмена/отказ — добавляем озвучку «Заказ номер … отменён» (ТЗ §4).
     const status = order.status as OrderStatus | undefined;
     let payload = order;
     if (status === OrderStatus.cancelled || status === OrderStatus.rejected) {
-      payload = { ...order, voice: { text: buildCancelText({ orderNumber: String(order.orderNumber) }) } };
-    } else if (voice?.waiterText) {
-      payload = { ...order, voice: { ...(order.voice as Record<string, unknown> | undefined), waiterText: voice.waiterText } };
+      payload = {
+        ...order,
+        voice: {
+          text: buildCancelText({ orderNumber: String(order.orderNumber) }),
+          ...voice,
+        },
+      };
+    } else if (voice) {
+      payload = { ...order, voice: { ...(order.voice as Record<string, unknown> | undefined), ...voice } };
     }
     // QR-заказ создаётся без официанта — персональной комнаты официанта нет.
     if (order.waiterId) {
@@ -2875,6 +3235,22 @@ export class OrdersService {
     }
     this.events.emitToKitchen(SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
     this.events.emitToAdmin(SERVER_EVENTS.ORDER_STATUS_CHANGED, payload);
+    // Station announcements (including item/order cancellation) must also arrive
+    // while native JS is suspended. Match the same station suppression as PWA voice.
+    const stationVoice = payload.voice as {
+      text?: string; byStation?: { kitchen?: string | null; bar?: string | null };
+      suppressStations?: { kitchen?: boolean; bar?: boolean };
+    } | undefined;
+    const changedAt = order.updatedAt instanceof Date ? order.updatedAt.toISOString() : String(order.updatedAt ?? '');
+    for (const [station, role] of [[PrepStation.kitchen, Role.KITCHEN], [PrepStation.bar, Role.BAR]] as const) {
+      const text = stationVoice?.byStation?.[station] ?? stationVoice?.text;
+      if (!text || stationVoice?.suppressStations?.[station]) continue;
+      void this.push.notifyRole(role, {
+        title: 'Обновление заказа', body: text, type: 'info', channel: 'kitchen',
+        notificationId: `kitchen-status:${String(order.id)}:${changedAt}:${station}`,
+        orderId: String(order.id), orderNumber: String(order.orderNumber), url: `/${station}`,
+      }, typeof order.cafeId === 'string' ? order.cafeId : undefined);
+    }
     // Гости QR-меню стола видят смену статуса своего заказа.
     if (order.source === 'qr' && typeof order.tableId === 'string') {
       this.events.emitToQrTable(order.tableId as string, SERVER_EVENTS.QR_ORDER_STATUS_CHANGED, {
@@ -2899,6 +3275,7 @@ export class OrdersService {
     // QR-заказ может быть без официанта — уведомлять некого.
     if (!waiterId) return;
     const payload = {
+      notificationId: randomUUID(),
       message,
       type,
       orderId: order.id,
@@ -2915,17 +3292,41 @@ export class OrdersService {
       orderId: order.id,
       orderNumber: order.orderNumber,
       url: '/waiter',
+      notificationId: payload.notificationId,
+      at: payload.at,
     });
   }
 
-  private notifyKitchenNewOrder(order: { id: string; orderNumber: string; table: { number: number } }) {
-    return this.push.notifyRole(Role.KITCHEN, {
+  private notifyKitchenNewOrder(order: {
+    id: string;
+    updatedAt?: Date;
+    orderNumber: string;
+    source?: string;
+    cafeId?: string | null;
+    table: { number: number };
+    items?: { prepStation: PrepStation }[];
+  }) {
+    const stations = new Set(order.items?.map((item) => item.prepStation) ?? []);
+    if (stations.size === 0) stations.add(PrepStation.kitchen);
+    const payload = {
       title: 'EDU POS',
-      body: `Новый заказ ${order.orderNumber} · Стол ${order.table.number}`,
-      type: 'info',
+      notificationId: `kitchen:${order.id}:${order.updatedAt?.toISOString() ?? randomUUID()}`,
+      body:
+        order.source === 'delivery'
+          ? `Новый заказ доставки ${order.orderNumber}`
+          : `Новый заказ ${order.orderNumber} · Стол ${order.table.number}`,
+      type: 'info' as const,
       orderId: order.id,
       orderNumber: order.orderNumber,
-      url: '/kitchen',
-    });
+      channel: 'kitchen' as const,
+    };
+    return Promise.all([
+      stations.has(PrepStation.kitchen)
+        ? this.push.notifyRole(Role.KITCHEN, { ...payload, url: '/kitchen' }, order.cafeId)
+        : Promise.resolve(),
+      stations.has(PrepStation.bar)
+        ? this.push.notifyRole(Role.BAR, { ...payload, url: '/bar' }, order.cafeId)
+        : Promise.resolve(),
+    ]);
   }
 }

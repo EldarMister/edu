@@ -125,9 +125,21 @@ export class StatisticsService {
         },
         status: { notIn: ['rejected', 'cancelled'] },
       },
-      select: { dishNameSnapshot: true, dishVariantNameSnapshot: true, finalPrice: true, quantity: true },
+      select: {
+        dishNameSnapshot: true,
+        dishVariantNameSnapshot: true,
+        finalPrice: true,
+        quantity: true,
+        order: { select: { closedAt: true } },
+        dish: { select: { category: { select: { name: true } } } },
+      },
     });
     const dishMap = new Map<string, { name: string; amount: number; count: number }>();
+    // Приготовленные блюда: количество по дням — для «в среднем» и «максимум за день».
+    const preparedPerDay = new Map<string, number>();
+    let preparedTotal = 0;
+    // Проданные напитки: позиции из категории «Напитки» (по названию категории блюда).
+    const drinksMap = new Map<string, number>();
     for (const it of items) {
       const name = it.dishVariantNameSnapshot
         ? `${it.dishNameSnapshot} · ${it.dishVariantNameSnapshot}`
@@ -136,8 +148,38 @@ export class StatisticsService {
       cur.amount += Number(it.finalPrice);
       cur.count += it.quantity;
       dishMap.set(name, cur);
+
+      preparedTotal += it.quantity;
+      if (it.order?.closedAt) {
+        const day = it.order.closedAt.toISOString().slice(0, 10);
+        preparedPerDay.set(day, (preparedPerDay.get(day) ?? 0) + it.quantity);
+      }
+
+      if ((it.dish?.category?.name ?? '').toLowerCase().includes('напит')) {
+        drinksMap.set(name, (drinksMap.get(name) ?? 0) + it.quantity);
+      }
     }
     const topDishes = [...dishMap.values()].sort((a, b) => b.amount - a.amount).slice(0, 5);
+
+    // Сводка по приготовленным блюдам и список блюд за период (по количеству).
+    const preparedDishes = [...dishMap.values()]
+      .map((d) => ({ name: d.name, count: d.count }))
+      .sort((a, b) => b.count - a.count);
+    const activeDays = preparedPerDay.size;
+    const prepared = {
+      total: preparedTotal,
+      avgPerDay: activeDays > 0 ? Math.round(preparedTotal / activeDays) : 0,
+      uniqueDishes: dishMap.size,
+      maxPerDay: preparedPerDay.size > 0 ? Math.max(...preparedPerDay.values()) : 0,
+      dishes: preparedDishes,
+    };
+
+    const drinks = {
+      total: [...drinksMap.values()].reduce((s, n) => s + n, 0),
+      dishes: [...drinksMap.entries()]
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count),
+    };
 
     return {
       cards: {
@@ -157,6 +199,8 @@ export class StatisticsService {
       paymentMethods,
       topDishes,
       topWaiters,
+      prepared,
+      drinks,
       period,
       range: {
         from: range.from?.toISOString() ?? null,

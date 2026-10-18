@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { setCafeId } from '../../tenant/tenant-context';
 import { assertCafeActive } from '../../platform/cafe-status';
+import { resolvePermissions } from '../../common/permissions';
 import { getJwtAccessSecret } from '../jwt.config';
 
 export interface JwtPayload {
@@ -31,6 +32,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     await assertCafeActive(this.prisma, user.cafeId);
     // Кафе пользователя — в контекст тенанта на весь остаток запроса (авто-скоуп Prisma).
     setCafeId(user.cafeId);
-    return { id: user.id, role: user.role, name: user.name, phone: user.phone, cafeId: user.cafeId };
+    return {
+      id: user.id,
+      role: user.role,
+      name: user.name,
+      phone: user.phone,
+      cafeId: user.cafeId,
+      permissions: resolvePermissions(user.role, user.permissions),
+    };
   }
 }

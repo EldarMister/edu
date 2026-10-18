@@ -4,7 +4,20 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
-import { CreateStaffDto, ShiftHistoryQueryDto, UpdateShiftHistoryDto, UpdateStaffDto } from './dto';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
+import {
+  CreateStaffDto,
+  ShiftHistoryQueryDto,
+  UpdatePermissionsDto,
+  UpdateShiftHistoryDto,
+  UpdateStaffDto,
+  WaiterOrdersReportQueryDto,
+} from './dto';
+import {
+  EmployeePermissions,
+  resolvePermissions,
+  sanitizePermissionsInput,
+} from '../common/permissions';
 
 const STAFF_SELECT = {
   id: true,
@@ -12,6 +25,7 @@ const STAFF_SELECT = {
   phone: true,
   role: true,
   isActive: true,
+  permissions: true,
   createdAt: true,
 } satisfies Prisma.UserSelect;
 
@@ -24,6 +38,18 @@ export class StaffService {
 
   private isOwner(actor: AuditActor) {
     return actor.role === Role.OWNER;
+  }
+
+  /** Подставить итоговые (resolved) права вместо «сырого» json из БД. */
+  private withPermissions<T extends { role: Role; permissions: Prisma.JsonValue }>(user: T) {
+    return { ...user, permissions: resolvePermissions(user.role, user.permissions) };
+  }
+
+  /** Кто может редактировать права: владелец, либо право editPermissions/manageStaff. */
+  private canEditPermissions(actor: AuthUser): boolean {
+    if (actor.role === Role.OWNER) return true;
+    const perms = actor.permissions ?? resolvePermissions(actor.role as Role, null);
+    return perms.actions.editPermissions === true || perms.actions.manageStaff === true;
   }
 
   private assertCanManageRole(actor: AuditActor, role: Role) {
@@ -82,7 +108,56 @@ export class StaffService {
     });
     const onShift = new Set(activeShifts.map((s) => s.waiterId));
 
-    return users.map((u) => ({ ...u, onShift: onShift.has(u.id) }));
+    return users.map((u) => ({ ...this.withPermissions(u), onShift: onShift.has(u.id) }));
+  }
+
+  /** Один сотрудник с итоговыми правами доступа. */
+  async getOne(id: string, actor: AuditActor) {
+    const user = await this.prisma.user.findUnique({ where: { id }, select: STAFF_SELECT });
+    if (!user) throw new NotFoundException('Сотрудник не найден');
+    if (user.role === Role.OWNER && !this.isOwner(actor)) {
+      throw new ForbiddenException('Только владелец может просматривать владельцев');
+    }
+    return this.withPermissions(user);
+  }
+
+  /** Обновить права доступа сотрудника. */
+  async updatePermissions(id: string, dto: UpdatePermissionsDto, actor: AuthUser) {
+    if (!this.canEditPermissions(actor)) {
+      throw new ForbiddenException('Недостаточно прав для изменения прав доступа');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id }, select: STAFF_SELECT });
+    if (!user) throw new NotFoundException('Сотрудник не найден');
+    // Права доступа настраиваются только для администраторов. Для официантов,
+    // кухни, бара и владельца используются фиксированные права по роли.
+    if (user.role !== Role.ADMIN) {
+      throw new ForbiddenException('Права доступа можно менять только у администратора');
+    }
+    // Нельзя редактировать собственные права (защита от само-эскалации).
+    if (id === actor.id) {
+      throw new ForbiddenException('Нельзя менять собственные права доступа');
+    }
+
+    const permissions: EmployeePermissions = sanitizePermissionsInput(user.role, {
+      sections: dto.sections,
+      actions: dto.actions,
+    });
+
+    const updated = await this.prisma.user.update({
+      where: { id },
+      data: { permissions: permissions as unknown as Prisma.InputJsonValue },
+      select: STAFF_SELECT,
+    });
+    await this.audit.log({
+      actor,
+      actionType: AuditAction.STAFF_UPDATED,
+      entityType: AuditEntity.STAFF,
+      entityId: id,
+      description: `${actor.name ?? 'Сотрудник'} изменил права доступа сотрудника ${user.name}`,
+      oldValue: { permissions: user.permissions } as unknown as Prisma.InputJsonValue,
+      newValue: { permissions } as unknown as Prisma.InputJsonValue,
+    });
+    return this.withPermissions(updated);
   }
 
   private normalizePhone(phone: string) {
@@ -109,7 +184,7 @@ export class StaffService {
       description: `${actor.name ?? 'Сотрудник'} добавил сотрудника ${created.name} (${created.role})`,
       newValue: { name: created.name, phone: created.phone, role: created.role },
     });
-    return created;
+    return this.withPermissions(created);
   }
 
   async update(id: string, dto: UpdateStaffDto, actor: AuditActor) {
@@ -159,7 +234,7 @@ export class StaffService {
       newValue: { name: updated.name, role: updated.role, phone: updated.phone, isActive: updated.isActive },
       metadata: { passwordChanged: !!dto.password },
     });
-    return updated;
+    return this.withPermissions(updated);
   }
 
   async remove(id: string, actor: AuditActor) {
@@ -678,6 +753,107 @@ export class StaffService {
         activeCount: rows.filter((r) => r.status === 'active').length,
       },
       range: { from: from.toISOString(), to: to.toISOString() },
+    };
+  }
+
+  /** Детальный отчет по блюдам в оплаченных заказах одного официанта. */
+  async waiterOrdersReport(params: WaiterOrdersReportQueryDto) {
+    const parseLocalDate = (value: string) => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+      if (!match) throw new BadRequestException('Некорректный период отчета');
+      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+      if (
+        date.getFullYear() !== Number(match[1]) ||
+        date.getMonth() !== Number(match[2]) - 1 ||
+        date.getDate() !== Number(match[3])
+      ) {
+        throw new BadRequestException('Некорректный период отчета');
+      }
+      return date;
+    };
+
+    const from = parseLocalDate(params.from);
+    const toInclusive = parseLocalDate(params.to);
+    if (from > toInclusive) throw new BadRequestException('Дата начала не может быть позже даты окончания');
+    const to = new Date(toInclusive);
+    to.setDate(to.getDate() + 1);
+
+    const waiter = await this.prisma.user.findFirst({
+      where: {
+        id: params.waiterId,
+        role: Role.WAITER,
+      },
+      select: { id: true, name: true },
+    });
+    if (!waiter) throw new NotFoundException('Официант не найден');
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        waiterId: waiter.id,
+        status: OrderStatus.paid,
+        createdAt: { gte: from, lt: to },
+      },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        orderNumber: true,
+        createdAt: true,
+        table: { select: { number: true } },
+        items: {
+          where: { status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            id: true,
+            dishNameSnapshot: true,
+            dishVariantNameSnapshot: true,
+            quantity: true,
+            finalPrice: true,
+            updatedAt: true,
+            dish: { select: { category: { select: { name: true } } } },
+          },
+        },
+      },
+    });
+
+    const servingSeconds: number[] = [];
+    const rows = orders.flatMap((order) => {
+      const servedAt = order.items.length
+        ? new Date(Math.max(...order.items.map((item) => item.updatedAt.getTime())))
+        : order.createdAt;
+      servingSeconds.push(Math.max(0, Math.round((servedAt.getTime() - order.createdAt.getTime()) / 1000)));
+
+      return order.items.map((item) => {
+        const amount = Number(item.finalPrice);
+        return {
+          id: item.id,
+          orderId: order.id,
+          orderedAt: order.createdAt.toISOString(),
+          servedAt: servedAt.toISOString(),
+          orderNumber: order.orderNumber,
+          tableNumber: order.table.number,
+          dishName: item.dishVariantNameSnapshot
+            ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
+            : item.dishNameSnapshot,
+          categoryName: item.dish?.category.name ?? 'Прочее',
+          quantity: item.quantity,
+          unitPrice: item.quantity > 0 ? amount / item.quantity : amount,
+          amount,
+        };
+      });
+    });
+
+    return {
+      waiter,
+      range: { from: from.toISOString(), to: toInclusive.toISOString() },
+      items: rows,
+      summary: {
+        ordersCount: orders.length,
+        dishesCount: rows.reduce((sum, row) => sum + row.quantity, 0),
+        amount: rows.reduce((sum, row) => sum + row.amount, 0),
+        averageServingSeconds: servingSeconds.length
+          ? Math.round(servingSeconds.reduce((sum, seconds) => sum + seconds, 0) / servingSeconds.length)
+          : 0,
+      },
     };
   }
 

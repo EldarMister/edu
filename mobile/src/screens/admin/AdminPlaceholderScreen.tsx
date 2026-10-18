@@ -1,13 +1,14 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { colors, fontSize, spacing } from '@/theme';
 
 /** Временная заглушка раздела админки/владельца — портируется по фазам. */
 export function AdminPlaceholderScreen({ title }: { title: string }) {
   return (
     <View style={styles.wrap}>
-      <Text style={styles.title}>{title}</Text>
-      <Text style={styles.sub}>Раздел портируется с PWA</Text>
+      <Text style={styles.title} translate>{title}</Text>
+      <Text style={styles.sub} translate>Раздел портируется с PWA</Text>
     </View>
   );
 }

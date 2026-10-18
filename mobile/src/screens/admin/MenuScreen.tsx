@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { BottomSheet } from '@/components/BottomSheet';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Text, TextInput } from '@/components/typography';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Select } from '@/components/Select';
@@ -23,6 +24,9 @@ import {
   type AdminDishVariant,
 } from '@/services/api/admin';
 import type { PrepStation } from '@/types';
+import { RecipeEditor } from './WarehouseEditors';
+import * as DocumentPicker from 'expo-document-picker';
+import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
 function resolveApiImage(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -51,6 +55,7 @@ export function MenuScreen() {
   const [dishModal, setDishModal] = useState<AdminDish | null | 'new'>(null);
   const [setModal, setSetModal] = useState<AdminDish | null | 'new'>(null);
   const [catModal, setCatModal] = useState(false);
+  const [recipeDish, setRecipeDish] = useState<AdminDish | null>(null);
 
   const overview = useMenuOverview();
   const categoriesQ = useAdminCategories();
@@ -85,8 +90,9 @@ export function MenuScreen() {
     setDishModal(d);
   };
 
-  const header = (
-    <View style={styles.headerWrap}>
+  return (
+    <>
+    <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <View style={styles.summary}>
         <Sum label="Блюд" value={o ? String(o.dishesCount) : '—'} />
         <Sep />
@@ -94,7 +100,8 @@ export function MenuScreen() {
         <Sep />
         <Sum label="Активных" value={o ? String(o.activeDishesCount) : '—'} />
       </View>
-
+      <View style={styles.menuCard}>
+      <View style={styles.headerWrap}>
       <TextInput
         style={styles.search}
         placeholder="Поиск блюда"
@@ -103,17 +110,11 @@ export function MenuScreen() {
         onChangeText={setSearch}
       />
 
-      <View style={styles.headerBtns}>
-        <Button title="+ Категория" variant="secondary" size="md" style={{ flex: 1 }} onPress={() => setCatModal(true)} />
-        <Button
-          title="+ Сет"
-          variant="secondary"
-          size="md"
-          style={{ flex: 1 }}
-          onPress={() => setSetModal('new')}
-        />
-      </View>
-      <Button title="+ Добавить блюдо" size="md" onPress={() => setDishModal('new')} />
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.headerBtns}>
+        <MenuAction label="Категория" onPress={() => setCatModal(true)} />
+        <MenuAction label="Сет" onPress={() => setSetModal('new')} />
+        <MenuAction primary label="Добавить блюдо" onPress={() => setDishModal('new')} />
+      </ScrollView>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
         <CatTab active={categoryId === ''} onPress={() => setCategoryId('')} label="Все блюда" />
@@ -121,30 +122,24 @@ export function MenuScreen() {
           <CatTab key={c.id} active={categoryId === c.id} onPress={() => setCategoryId(c.id)} label={c.name} />
         ))}
       </ScrollView>
-    </View>
-  );
-
-  return (
-    <>
-      <FlatList
-        data={dishesQ.data ?? []}
-        keyExtractor={(d) => d.id}
-        ListHeaderComponent={header}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item: d }) => (
-          <DishRow dish={d} station={dishStation(d)} onEdit={() => openEdit(d)} onDelete={() => onDelete(d)} />
-        )}
-        ListEmptyComponent={
-          dishesQ.isLoading ? (
+      </View>
+      {dishesQ.isLoading ? (
             <View style={styles.center}>
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
+          ) : !dishesQ.data?.length ? (
+            <Text style={styles.empty} translate>Блюда не найдены</Text>
           ) : (
-            <Text style={styles.empty}>Блюда не найдены</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ width: MENU_TABLE_WIDTH }}>
+              <View style={{ width: MENU_TABLE_WIDTH }}>
+                <View style={styles.tableHead}>{MENU_COLUMNS.map(column => <Text key={column.label} style={[styles.tableHeading, { width: column.width, textAlign: column.right ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
+                {dishesQ.data.map(dish => <DishRow key={dish.id} dish={dish} station={dishStation(dish)} onEdit={() => openEdit(dish)} onDelete={() => onDelete(dish)} />)}
+              </View>
+            </ScrollView>
           )
-        }
-      />
+      }
+      </View>
+    </ScrollView>
 
       {dishModal !== null ? (
         <DishModal
@@ -152,12 +147,21 @@ export function MenuScreen() {
           categories={categories}
           defaultCategoryId={categoryId}
           onClose={() => setDishModal(null)}
+          onRecipe={dishModal !== 'new' ? () => { setRecipeDish(dishModal); setDishModal(null); } : undefined}
         />
       ) : null}
       {setModal !== null ? <SetModal set={setModal === 'new' ? null : setModal} onClose={() => setSetModal(null)} /> : null}
       {catModal ? <CategoryModal categories={categories} onClose={() => setCatModal(false)} /> : null}
+      {recipeDish ? <RecipeEditor dish={recipeDish} onClose={() => setRecipeDish(null)} /> : null}
     </>
   );
+}
+
+const MENU_COLUMNS = [{ label: 'Название', width: 250 }, { label: 'Категория', width: 130 }, { label: 'Цена', width: 120, right: true }, { label: 'Остаток', width: 110, right: true }, { label: 'Статус', width: 150 }, { label: 'Действия', width: 100, right: true }];
+const MENU_TABLE_WIDTH = MENU_COLUMNS.reduce((total, column) => total + column.width, 0);
+
+function MenuAction({ label, primary, onPress }: { label: string; primary?: boolean; onPress: () => void }) {
+  return <FastPressable onPress={onPress} style={[styles.menuAction, primary && styles.menuActionPrimary]}><PwaIcon name="plus" size={16} color={primary ? colors.white : colors.textPrimary} /><Text style={[styles.menuActionText, primary && { color: colors.white }]} translate>{label}</Text></FastPressable>;
 }
 
 function DishRow({
@@ -182,7 +186,7 @@ function DishRow({
 
   return (
     <View style={styles.dishRow}>
-      <View style={{ flex: 1, minWidth: 0 }}>
+      <View style={[styles.menuCell, { width: 250 }]}>
         <View style={styles.dishNameRow}>
           <Text style={styles.dishName} numberOfLines={1}>
             {d.name}
@@ -198,17 +202,16 @@ function DishRow({
             {d.description}
           </Text>
         ) : null}
-        <Text style={styles.dishMeta}>
-          {d.category.name} · {hasVar ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}
-          {d.isWeighted ? ` за ${weightedBaseLabel(d)}` : ''}
-          {d.trackInventory ? ` · ${stock} ${hasVar ? '' : normalizeUnitLabel(d.unit)}` : ''}
-        </Text>
       </View>
-      <View style={styles.dishRight}>
+      <Text style={[styles.menuCellText, { width: 130 }]}>{d.category.name}</Text>
+      <Text style={[styles.menuCellText, styles.priceCell, { width: 120 }]}>{hasVar ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}</Text>
+      <Text style={[styles.menuCellText, { width: 110, textAlign: 'right' }]}>{d.trackInventory ? `${stock} ${hasVar ? (new Set(d.variants.map(variant => normalizeUnitLabel(variant.unit))).size === 1 ? normalizeUnitLabel(d.variants[0].unit) : 'по вариантам') : normalizeUnitLabel(d.unit)}` : '—'}</Text>
+      <View style={[styles.menuCell, { width: 150 }]}>
         <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
-          <Text style={[styles.statusText, { color: status.fg }]}>{status.label}</Text>
+          <Text style={[styles.statusText, { color: status.fg }]} translate>{status.label}</Text>
         </View>
-        <View style={styles.dishActions}>
+      </View>
+        <View style={[styles.dishActions, { width: 100 }]}>
           <FastPressable onPress={onEdit} hitSlop={6} style={styles.iconBtn}>
             <PwaIcon name="pencil" size={16} color={colors.textMuted} strokeWidth={2} />
           </FastPressable>
@@ -216,7 +219,6 @@ function DishRow({
             <PwaIcon name="trash" size={16} color={colors.danger} strokeWidth={2} />
           </FastPressable>
         </View>
-      </View>
     </View>
   );
 }
@@ -251,16 +253,20 @@ function variantDraft(v?: AdminDishVariant): VariantDraft {
   };
 }
 
-function DishModal({
+export function DishModal({
   dish,
   categories,
   defaultCategoryId,
   onClose,
+  onRecipe,
+  presetInventory = false,
 }: {
   dish: AdminDish | null;
   categories: AdminCategory[];
   defaultCategoryId: string;
   onClose: () => void;
+  onRecipe?: () => void;
+  presetInventory?: boolean;
 }) {
   const isEdit = !!dish;
   const { create, update } = useDishMutations();
@@ -268,7 +274,7 @@ function DishModal({
   const [name, setName] = useState(dish?.name ?? '');
   const [categoryId, setCategoryId] = useState(dish?.categoryId ?? (defaultCategoryId || categories[0]?.id || ''));
   const [price, setPrice] = useState(dish ? (dish.variants.length > 0 ? '' : String(Number(dish.price))) : '');
-  const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : '');
+  const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : presetInventory ? '0' : '');
   const [unit, setUnit] = useState(normalizeUnitLabel(dish?.unit));
   const [description, setDescription] = useState(dish?.description ?? '');
   const [voiceName, setVoiceName] = useState(dish?.voiceName ?? '');
@@ -279,11 +285,27 @@ function DishModal({
   const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar' | 'none'>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<VariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [photoUrl, setPhotoUrl] = useState(dish?.imageUrl?.startsWith('http') ? dish.imageUrl : '');
+  const [photoPayload, setPhotoPayload] = useState<string | undefined>(undefined);
+  const [photoLoading, setPhotoLoading] = useState(false);
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
   const initialPreview = resolveApiImage(dish?.imageUrl ?? null);
-  const preview = photoUrl.trim() ? photoUrl.trim() : initialPreview;
+  const preview = photoPayload !== undefined ? photoPayload || null : photoUrl.trim() ? photoUrl.trim() : initialPreview;
+  async function pickPhoto() {
+    setPhotoLoading(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: ['image/png', 'image/jpeg', 'image/webp'], copyToCacheDirectory: true });
+      if (result.canceled) return;
+      const file = result.assets[0];
+      const dimensions = await new Promise<{ width: number; height: number }>((resolve, reject) => Image.getSize(file.uri, (width, height) => resolve({ width, height }), reject));
+      const scale = Math.min(1, 900 / Math.max(dimensions.width, dimensions.height));
+      const photo = await manipulateAsync(file.uri, [{ resize: { width: Math.max(1, Math.round(dimensions.width * scale)), height: Math.max(1, Math.round(dimensions.height * scale)) } }], { compress: 0.82, format: SaveFormat.JPEG, base64: true });
+      if (!photo.base64) throw new Error('Не удалось обработать фото');
+      setPhotoPayload(`data:image/jpeg;base64,${photo.base64}`); setPhotoUrl('');
+    } catch (error) { setError(apiError(error)); }
+    finally { setPhotoLoading(false); }
+  }
 
   const updateVariant = (uid: string, patch: Partial<VariantDraft>) =>
     setVariants((cur) => cur.map((v) => (v.uid === uid ? { ...v, ...patch } : v)));
@@ -323,15 +345,13 @@ function DishModal({
       return;
     }
     const trimmedUrl = photoUrl.trim();
-    let imageUrl: string | undefined;
+    let imageUrl: string | undefined = photoPayload;
     if (trimmedUrl) {
       if (!/^https?:\/\/.+/i.test(trimmedUrl)) {
         setError('Ссылка на фото должна начинаться с https://');
         return;
       }
       if (trimmedUrl !== (dish?.imageUrl ?? '')) imageUrl = trimmedUrl;
-    } else if (dish?.imageUrl) {
-      imageUrl = '';
     }
     try {
       const body = {
@@ -380,12 +400,13 @@ function DishModal({
       maxHeight="92%"
       footer={<Button title={isEdit ? 'Сохранить' : 'Добавить'} size="lg" loading={pending} onPress={onSubmit} />}
     >
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
+      {onRecipe ? <Button title="Техкарта" variant="secondary" onPress={onRecipe} style={{ marginBottom: spacing.md }} /> : null}
+      <SheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
         <Field label="Название">
           <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Название блюда" placeholderTextColor={colors.textLight} />
         </Field>
         <Field label="Категория">
-          <Select value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ value: c.id, label: c.name }))} title="Категория" />
+          <Select value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ value: c.id, label: c.name , translate: false }))} title="Категория" />
         </Field>
         <Field label="Направление">
           <Select value={prepStation} onChange={(v) => setPrepStation(v as typeof prepStation)} options={STATION_OPTIONS} title="Направление" />
@@ -396,14 +417,14 @@ function DishModal({
 
         <View style={styles.checkRow}>
           <View style={{ flex: 1, paddingRight: spacing.md }}>
-            <Text style={styles.checkLabel}>Весовое блюдо</Text>
-            <Text style={styles.checkHint}>Количество выбирается в {weightedMeasure === 'weight' ? 'г / кг' : 'мл / л'}</Text>
+            <Text style={styles.checkLabel} translate>Весовое блюдо</Text>
+            <Text style={styles.checkHint} translate>Количество выбирается в {weightedMeasure === 'weight' ? 'г / кг' : 'мл / л'}</Text>
           </View>
           <Toggle checked={isWeighted} onChange={setIsWeighted} />
         </View>
         {isWeighted ? (
           <View style={styles.weightedBox}>
-            <Text style={styles.weightedTitle}>Параметры весового блюда</Text>
+            <Text style={styles.weightedTitle} translate>Параметры весового блюда</Text>
             <View style={styles.grid2}>
               <Field label="Единица" style={{ flex: 1 }}>
                 <Select
@@ -422,7 +443,7 @@ function DishModal({
                 />
               </Field>
             </View>
-            <Text style={styles.weightedHint}>Покупатель задаёт точное количество; стоимость пересчитывается автоматически.</Text>
+            <Text style={styles.weightedHint} translate>Покупатель задаёт точное количество; стоимость пересчитывается автоматически.</Text>
           </View>
         ) : null}
 
@@ -440,9 +461,9 @@ function DishModal({
         {/* Варианты */}
         {!isWeighted ? <View>
           <View style={styles.varHead}>
-            <Text style={styles.fieldLabel}>Варианты</Text>
+            <Text style={styles.fieldLabel} translate>Варианты</Text>
             <FastPressable onPress={() => setVariants((c) => [...c, variantDraft()])} hitSlop={6}>
-              <Text style={styles.addVarText}>+ Добавить</Text>
+              <Text style={styles.addVarText} translate>+ Добавить</Text>
             </FastPressable>
           </View>
           {variants.map((v, i) => (
@@ -483,16 +504,18 @@ function DishModal({
           <TextInput style={styles.input} value={voiceName} onChangeText={setVoiceName} placeholder="Необязательно" placeholderTextColor={colors.textLight} />
         </Field>
         <Field label="Фото (ссылка https://)">
-          <TextInput style={styles.input} value={photoUrl} onChangeText={setPhotoUrl} placeholder="https://…" placeholderTextColor={colors.textLight} autoCapitalize="none" />
+            <TextInput style={styles.input} value={photoUrl} onChangeText={(value) => { setPhotoUrl(value); setPhotoPayload(undefined); }} placeholder="https://…" placeholderTextColor={colors.textLight} autoCapitalize="none" />
         </Field>
         {preview ? <Image source={{ uri: preview }} style={styles.photoPreview} resizeMode="cover" /> : null}
+          <Button title="Загрузить фото" variant="secondary" size="md" loading={photoLoading} onPress={() => void pickPhoto()} />
+          {preview ? <Button title="Удалить фото" variant="secondary" size="md" onPress={() => { setPhotoPayload(''); setPhotoUrl(''); }} /> : null}
 
         <View style={styles.checkRow}>
-          <Text style={styles.checkLabel}>Доступно к заказу</Text>
+          <Text style={styles.checkLabel} translate>Доступно к заказу</Text>
           <Toggle checked={isAvailable} onChange={setIsAvailable} />
         </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
-      </ScrollView>
+      </SheetScrollView>
     </BottomSheet>
   );
 }
@@ -610,7 +633,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
       maxHeight="92%"
       footer={<Button title={isEdit ? 'Сохранить' : 'Создать сет'} size="lg" loading={pending} onPress={submit} />}
     >
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
+      <SheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
         <View style={styles.grid2}>
           <Field label="Название" style={{ flex: 1 }}>
             <TextInput
@@ -634,9 +657,9 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
         </View>
 
         <View>
-          <Text style={styles.setSectionTitle}>Состав сета</Text>
+          <Text style={styles.setSectionTitle} translate>Состав сета</Text>
           {components.length === 0 ? (
-            <Text style={styles.setEmptyBox}>Добавьте блюда из списка ниже</Text>
+            <Text style={styles.setEmptyBox} translate>Добавьте блюда из списка ниже</Text>
           ) : (
             <View style={{ gap: spacing.sm }}>
               {components.map((component) => (
@@ -665,14 +688,14 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
                       </View>
                       <View style={styles.setFlags}>
                         <View style={styles.setFlag}>
-                          <Text style={styles.setFlagLabel}>убирать</Text>
+                          <Text style={styles.setFlagLabel} translate>убирать</Text>
                           <Toggle
                             checked={component.removable}
                             onChange={(removable) => patchComp(component.uid, { removable })}
                           />
                         </View>
                         <View style={styles.setFlag}>
-                          <Text style={styles.setFlagLabel}>заменять</Text>
+                          <Text style={styles.setFlagLabel} translate>заменять</Text>
                           <Toggle
                             checked={component.replaceable}
                             onChange={(replaceable) => patchComp(component.uid, { replaceable })}
@@ -695,7 +718,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
         </View>
 
         <View>
-          <Text style={styles.setSectionTitle}>Добавить блюдо</Text>
+          <Text style={styles.setSectionTitle} translate>Добавить блюдо</Text>
           <TextInput
             style={styles.input}
             value={search}
@@ -716,7 +739,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
                 <PwaIcon name="plus" size={16} color={colors.primary} strokeWidth={2.4} />
               </FastPressable>
             ))}
-            {!dishesQ.isLoading && candidates.length === 0 ? <Text style={styles.emptySmall}>Блюда не найдены</Text> : null}
+            {!dishesQ.isLoading && candidates.length === 0 ? <Text style={styles.emptySmall} translate>Блюда не найдены</Text> : null}
             {dishesQ.isLoading ? (
               <View style={styles.loadingSmall}>
                 <ActivityIndicator color={colors.primary} />
@@ -726,7 +749,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
         </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
-      </ScrollView>
+      </SheetScrollView>
     </BottomSheet>
   );
 }
@@ -797,7 +820,7 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
       </View>
       {error ? <Text style={styles.error}>{error}</Text> : null}
 
-      <ScrollView style={{ marginTop: spacing.md, maxHeight: 380 }} showsVerticalScrollIndicator={false}>
+      <SheetScrollView style={{ marginTop: spacing.md, maxHeight: 380 }} showsVerticalScrollIndicator={false}>
         {sorted.map((c, index) => (
           <View key={c.id} style={styles.catRow}>
             <View style={styles.varMove}>
@@ -847,13 +870,13 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
             <View style={{ width: 130 }}>
               <Select value={c.prepStation ?? 'kitchen'} onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar' | 'none')} options={stationOpts} title="Направление" />
             </View>
-            <Text style={styles.catCount}>{c._count.dishes} бл.</Text>
+            <Text style={styles.catCount} translate>{c._count.dishes} бл.</Text>
             <FastPressable onPress={() => setDeleteTarget(c)} hitSlop={6} style={styles.iconBtn}>
               <PwaIcon name="trash" size={16} color={colors.danger} strokeWidth={2} />
             </FastPressable>
           </View>
         ))}
-      </ScrollView>
+      </SheetScrollView>
 
       {deleteTarget ? (
         <DeleteCategorySheet category={deleteTarget} categories={sorted} onDone={() => setDeleteTarget(null)} />
@@ -891,26 +914,26 @@ function DeleteCategorySheet({
     <BottomSheet visible onClose={onDone} title={`Удалить «${category.name}»`}>
       {!hasDishes ? (
         <View style={{ gap: spacing.md }}>
-          <Text style={styles.hint}>В категории нет блюд. Удалить её?</Text>
+          <Text style={styles.hint} translate>В категории нет блюд. Удалить её?</Text>
           <Button title="Удалить категорию" variant="danger" size="lg" loading={remove.isPending} onPress={() => run()} />
         </View>
       ) : (
         <View style={{ gap: spacing.lg }}>
-          <Text style={styles.hint}>В категории {category._count.dishes} блюд. Что сделать с ними?</Text>
+          <Text style={styles.hint} translate>В категории {category._count.dishes} блюд. Что сделать с ними?</Text>
           <View style={styles.deleteBox}>
-            <Text style={styles.deleteBoxTitle}>Перенести блюда в другую категорию</Text>
+            <Text style={styles.deleteBoxTitle} translate>Перенести блюда в другую категорию</Text>
             {others.length === 0 ? (
-              <Text style={styles.hint}>Нет другой категории для переноса.</Text>
+              <Text style={styles.hint} translate>Нет другой категории для переноса.</Text>
             ) : (
               <View style={{ gap: spacing.sm }}>
-                <Select value={targetId} onChange={setTargetId} options={others.map((c) => ({ value: c.id, label: c.name }))} title="Категория" />
+                <Select value={targetId} onChange={setTargetId} options={others.map((c) => ({ value: c.id, label: c.name , translate: false }))} title="Категория" />
                 <Button title="Перенести и удалить" size="md" loading={remove.isPending} disabled={!targetId} onPress={() => run('move', targetId)} />
               </View>
             )}
           </View>
           <View style={[styles.deleteBox, styles.deleteBoxDanger]}>
-            <Text style={styles.deleteBoxTitleDanger}>Удалить категорию вместе с блюдами</Text>
-            <Text style={styles.hint}>Блюда полностью удалятся из меню. История заказов и чеки сохранятся.</Text>
+            <Text style={styles.deleteBoxTitleDanger} translate>Удалить категорию вместе с блюдами</Text>
+            <Text style={styles.hint} translate>Блюда полностью удалятся из меню. История заказов и чеки сохранятся.</Text>
             <Button title="Удалить вместе с блюдами" variant="danger" size="md" loading={remove.isPending} onPress={() => run('delete')} />
           </View>
         </View>
@@ -924,28 +947,28 @@ function DeleteCategorySheet({
 function CatTab({ active, onPress, label }: { active: boolean; onPress: () => void; label: string }) {
   return (
     <FastPressable onPress={onPress} style={[styles.catTab, active && styles.catTabActive]}>
-      <Text style={[styles.catTabText, active && styles.catTabTextActive]}>{label}</Text>
+      <Text style={[styles.catTabText, active && styles.catTabTextActive]} translate>{label}</Text>
     </FastPressable>
   );
 }
 function MiniBadge({ label, bg, fg }: { label: string; bg: string; fg: string }) {
   return (
     <View style={[styles.miniBadge, { backgroundColor: bg }]}>
-      <Text style={[styles.miniBadgeText, { color: fg }]}>{label}</Text>
+      <Text style={[styles.miniBadgeText, { color: fg }]} translate>{label}</Text>
     </View>
   );
 }
 function Field({ label, children, style }: { label: string; children: React.ReactNode; style?: object }) {
   return (
     <View style={style}>
-      <Text style={styles.fieldLabel}>{label}</Text>
+      <Text style={styles.fieldLabel} translate>{label}</Text>
       {children}
     </View>
   );
 }
 function Sum({ label, value }: { label: string; value: string }) {
   return (
-    <Text style={styles.sumText}>
+    <Text style={styles.sumText} translate>
       {label}: <Text style={styles.sumValue}>{value}</Text>
     </Text>
   );
@@ -955,14 +978,15 @@ function Sep() {
 }
 
 const styles = StyleSheet.create({
-  listContent: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  headerWrap: { gap: spacing.sm, marginBottom: spacing.sm },
+  listContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: 12 },
+  menuCard: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: 16, overflow: 'hidden' },
+  headerWrap: { gap: 12, padding: 16, borderBottomWidth: 1, borderColor: colors.border },
   summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   sumText: { fontSize: fontSize.sm, color: colors.textSecondary },
   sumValue: { fontWeight: '500', color: colors.textPrimary },
   sumSep: { fontSize: fontSize.sm, color: colors.textLight },
   search: {
-    height: 44,
+    height: 40,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: radius.md,
@@ -972,8 +996,11 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   headerBtns: { flexDirection: 'row', gap: spacing.sm },
+  menuAction: { height: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.white },
+  menuActionPrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
+  menuActionText: { fontSize: 14, fontWeight: '500', color: colors.textPrimary },
   tabs: { gap: 6, paddingVertical: 4 },
-  catTab: { borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, paddingHorizontal: 14, paddingVertical: 8 },
+  catTab: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
   catTabActive: { borderColor: colors.primary, backgroundColor: colors.primary },
   catTabText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },
   catTabTextActive: { color: colors.white },
@@ -984,24 +1011,24 @@ const styles = StyleSheet.create({
   dishRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    borderWidth: 1,
+    borderBottomWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
-    borderRadius: radius.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.md,
-    marginTop: spacing.sm,
   },
+  tableHead: { flexDirection: 'row', borderBottomWidth: 1, borderColor: colors.border },
+  tableHeading: { paddingHorizontal: 16, paddingVertical: 12, fontSize: 12, fontWeight: '500', color: colors.textMuted },
+  menuCell: { paddingHorizontal: 16, paddingVertical: 12 },
+  menuCellText: { paddingHorizontal: 16, paddingVertical: 12, fontSize: 14, color: colors.textSecondary },
+  priceCell: { fontWeight: '500', color: colors.textPrimary, textAlign: 'right' },
   dishNameRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
-  dishName: { fontSize: fontSize.base, fontWeight: '600', color: colors.textPrimary, flexShrink: 1 },
+  dishName: { fontSize: 14, fontWeight: '500', color: colors.textPrimary, flexShrink: 1 },
   variantsLine: { marginTop: 2, fontSize: fontSize.xs, fontWeight: '500', color: colors.primary },
   dishDesc: { marginTop: 2, fontSize: fontSize.xs, color: colors.textMuted },
   dishMeta: { marginTop: 4, fontSize: fontSize.xs, color: colors.textSecondary },
   dishRight: { alignItems: 'flex-end', gap: 6 },
   statusBadge: { borderRadius: radius.sm, paddingHorizontal: 8, paddingVertical: 2 },
   statusText: { fontSize: fontSize.xs, fontWeight: '500' },
-  dishActions: { flexDirection: 'row', gap: 2 },
+  dishActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 4, paddingHorizontal: 16 },
   iconBtn: { width: 30, height: 30, borderRadius: radius.sm, alignItems: 'center', justifyContent: 'center' },
   miniBadge: { borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 1 },
   miniBadgeText: { fontSize: 11, fontWeight: '500' },

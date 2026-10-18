@@ -1,5 +1,6 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -11,6 +12,7 @@ import { ShiftRequiredScreen } from '@/components/ShiftRequiredScreen';
 import { FastPressable } from '@/components/FastPressable';
 import { Loading } from '@/components/ui';
 import { PwaIcon, type PwaIconName } from '@/components/PwaIcon';
+import { SheetPortalHost, SheetPortalProvider } from '@/components/SheetPortal';
 import { TablesScreen } from '@/screens/waiter/TablesScreen';
 import { MenuScreen } from '@/screens/waiter/MenuScreen';
 import { OrdersNavigator } from './OrdersNavigator';
@@ -64,6 +66,7 @@ export function WaiterNavigator() {
   // Обычный рабочий интерфейс. Если смена не начата, PWA показывает gate как
   // overlay поверх рабочих вкладок, но нижняя навигация и профиль остаются доступны.
   return (
+    <SheetPortalProvider>
     <SafeAreaView style={styles.workSafe} edges={['top']}>
       <OfflineBanner />
       <WaiterHeader />
@@ -105,7 +108,9 @@ export function WaiterNavigator() {
           </View>
         ) : null}
       </View>
+      <SheetPortalHost style={{ bottom: tabBarHeight }} />
     </SafeAreaView>
+    </SheetPortalProvider>
   );
 }
 
@@ -169,7 +174,7 @@ function WaiterTabBar({
                   </View>
                 ) : null}
               </View>
-              <Text style={[styles.tabLabel, { color }]} numberOfLines={1}>
+              <Text style={[styles.tabLabel, { color }]} numberOfLines={1} translate>
                 {label}
               </Text>
             </FastPressable>
@@ -212,7 +217,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   tabLabel: {
-    fontSize: fontSize.xs,
+    fontSize: fontSize.nav,
     lineHeight: 14,
     fontWeight: '400',
   },

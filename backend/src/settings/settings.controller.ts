@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Patch, Res } from '@nestjs/common';
+import { Body, Controller, Get, Patch, Post, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { Role } from '@prisma/client';
 import { SettingsService } from './settings.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { UpdateSettingsDto } from './dto';
@@ -20,8 +21,8 @@ export class SettingsController {
   /** QR-код как картинка с долгим кэшем (URL версионируется по updatedAt). */
   @Public()
   @Get('settings/qr')
-  async qrImage(@Res() res: Response) {
-    const img = await this.settings.getQrImage();
+  async qrImage(@Res() res: Response, @Query('ref') ref?: string) {
+    const img = await this.settings.getQrImage(ref);
     if (!img) {
       res.status(404).end();
       return;
@@ -31,16 +32,25 @@ export class SettingsController {
     res.end(img.buffer);
   }
 
-  /** Полные настройки — только владелец. */
+  /** Полные настройки — владелец всегда; админ — по праву sections.settings. */
   @Get('admin/settings')
-  @Roles(Role.OWNER)
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('sections.settings')
   get() {
-    return this.settings.get();
+    return this.settings.getForAdmin();
   }
 
   @Patch('admin/settings')
-  @Roles(Role.OWNER)
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('sections.settings')
   update(@Body() dto: UpdateSettingsDto, @CurrentUser() user: AuthUser) {
     return this.settings.update(dto, user);
+  }
+
+  /** Полный ключ виден только владельцу и только в ответе на выпуск/перевыпуск. */
+  @Post('admin/settings/delivery-api-key')
+  @Roles(Role.OWNER)
+  regenerateDeliveryApiKey(@CurrentUser() user: AuthUser) {
+    return this.settings.regenerateDeliveryApiKey(user);
   }
 }

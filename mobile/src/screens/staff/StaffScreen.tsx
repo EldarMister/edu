@@ -1,5 +1,6 @@
 import React from 'react';
-import { Linking, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button, Card, EmptyState, Loading } from '@/components/ui';
 import { OrderBadge } from '@/components/StatusBadge';
@@ -40,14 +41,14 @@ export function StaffScreen() {
       >
         <Card style={{ gap: spacing.md }}>
           <Text style={styles.cardTitle}>{user?.name}</Text>
-          <Text style={styles.muted}>
+          <Text style={styles.muted} translate>
             Полное управление (меню, персонал, статистика, склад) — в веб-версии.
           </Text>
           <Button title="Открыть PWA-админку" onPress={() => Linking.openURL(API_URL)} />
           <Button title="Выйти" variant="secondary" danger onPress={onLogout} />
         </Card>
 
-        <Text style={styles.sectionTitle}>Активные заказы</Text>
+        <Text style={styles.sectionTitle} translate>Активные заказы</Text>
 
         {orders.isLoading ? (
           <Loading />
@@ -57,9 +58,9 @@ export function StaffScreen() {
           orders.data!.map((o) => (
             <Card key={o.id} style={{ gap: spacing.sm }}>
               <View style={styles.row}>
-                <Text style={styles.orderNumber}>
+                <Text style={styles.orderNumber} translate>
                   {displayOrderNumber(o.orderNumber)}
-                  <Text style={styles.tableText}>
+                  <Text style={styles.tableText} translate>
                     {'  '}Стол {o.table.number}
                     {hallSuffix(o.table)}
                   </Text>

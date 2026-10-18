@@ -3,11 +3,13 @@ import { Role } from '@prisma/client';
 import { AdminOrdersService } from './admin-orders.service';
 import { OrdersService } from '../orders/orders.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 import { OrderQueryDto, UpdateOrderStatusDto } from './dto';
 
 @Controller('admin/orders')
 @Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.orders')
 export class AdminOrdersController {
   constructor(
     private readonly orders: AdminOrdersService,

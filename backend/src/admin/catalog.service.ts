@@ -427,7 +427,10 @@ export class CatalogService {
   }
 
   async updateDish(id: string, dto: UpdateDishDto, actor: AuditActor) {
-    const dish = await this.prisma.dish.findUnique({ where: { id } });
+    const dish = await this.prisma.dish.findUnique({
+      where: { id },
+      include: { _count: { select: { variants: true } } },
+    });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
     const { variants: variantsDto, ...dishDto } = dto;
     const variants = variantsDto !== undefined ? this.normalizeVariants(variantsDto) : undefined;
@@ -530,6 +533,7 @@ export class CatalogService {
         categoryId: updated.categoryId,
         isAvailable: updated.isAvailable,
         isActive: updated.isActive,
+        isWeighted: updated.isWeighted,
         variants: updated.variants.map((variant) => ({ name: variant.name, price: Number(variant.price) })),
       },
     });
