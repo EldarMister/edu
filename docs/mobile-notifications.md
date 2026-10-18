@@ -77,10 +77,12 @@ change. [Expo Android app links](https://docs.expo.dev/linking/android-app-links
 
 ## Implemented behavior
 
-This section describes the source in this branch. Production health and read-only
-Railway status confirm backend `main` commit `4b24251`, database `ok`, and 49/49
-migrations. The new push enhancements, background receipt events, and tenant QR
-fix are not deployed there yet. No production transactions were performed.
+This section describes the source in this branch. Backend changes were released
+through merged [PR #2](https://github.com/EldarMister/edu/pull/2). Public health,
+rechecked on 18 October 2026, confirms `main` commit
+`489f8d0d21ad93e352fd5461c4958b9bd3a592c2`, database `ok`, 49/49 migrations,
+`behind=false` and no failed migrations. Push enhancements, background receipt
+events and the tenant QR fix are deployed. No production transactions were performed.
 
 - Persistent installation binding and pending logout revocations use SecureStore.
   Logout captures the departing account's access token, so account switching
@@ -91,6 +93,12 @@ fix are not deployed there yet. No production transactions were performed.
   registration failures reconcile through one serialized lifecycle. Registration
   errors retry with bounded exponential delay. A revoked OS permission removes
   the server binding.
+- Android token acquisition calls the SDK 52 native bridge with a recoverable
+  request rather than retaining the SDK wrapper's rejected promise. Concurrent
+  requests share one operation; timeouts release it for retry, and late results
+  cannot replace a newer operation. Genuine token rotation reconciles the server
+  binding; duplicate native emissions do not repeat registration. Failure logs
+  contain only whitelisted stages/codes, without raw SDK exception messages or tokens.
 - Foreground socket/push notifications share event IDs and a bounded dedup cache.
   SDK 52's raw Android handler `dataString` is normalized before matching IDs;
   response listeners already supply mapped `data`.
@@ -124,11 +132,17 @@ node --test tests/push.test.cjs
 The mobile tests exercise failed registration, missing runtime configuration,
 persisted offline logout, account switching, logout/token and logout/register
 races, token rotation, permission revocation, event deduplication, and safe taps.
+Token-acquisition regressions also cover concurrent callers, retry after rejection,
+native and Expo timeouts, late completion, rotation during each stage and redacted
+diagnostics.
 The dedup regression includes SDK 52's raw Android `dataString` form in both
 push/socket arrival orders, plus malformed transport metadata.
 The backend tests exercise channel/sound/priority, user/cafe targeting, batching,
 invalid token cleanup, receipts, installation replacement, and token validation.
 These tests use local fakes. They do not connect to a database or send notifications.
+On 18 October 2026, mobile source `8493339` passed the full `npm run verify`:
+TypeScript, 97 tests and 12 order lifecycle contracts. These checks do not confirm
+remote delivery by themselves.
 
 For the local Android QA fixture, `.parity-reference/qa/server.cjs` captures native
 registrations in memory. Its token lookup requires loopback access and a random
@@ -188,10 +202,20 @@ orders, and a stable payment-success screen showing the receipt items and total
 approved a preliminary bill; Android system print rendered one page with Cyrillic,
 total 420, and the non-fiscal label. The dialog was cancelled with Back. BAR board,
 statistics, and drink-only stop-list updates also passed against the fixture.
-Latest source checks passed mobile typecheck, 74 mobile tests, backend build, and
+At that time, source checks passed mobile typecheck, 74 mobile tests, backend build, and
 10 backend tests. Physical printer/KKM, phone audio, GPS, and iOS were not tested.
 The consolidated report is
 [android-verification.md](android-verification.md).
+
+The 0.2.1 source `8493339` was checked again on 18 October. Native token
+acquisition retried after errors, and the profile enable button displayed its
+full label. Remote delivery was not confirmed: this dedicated emulator's Google
+Play Services reported `PHONE_REGISTRATION_ERROR`, then `SERVICE_NOT_AVAILABLE`
+and `AUTHENTICATION_FAILED` after one bounded reset. Google Messaging showed the
+same failures, and no `/push/devices` request reached the synthetic fixture.
+The failure occurred before the Expo exchange and backend registration. A device
+with working Google Play Services is needed to repeat delivery acceptance.
+The 0.2.1 UI/build evidence is in [mobile-ui-revision.md](mobile-ui-revision.md).
 
 The remaining device acceptance checks are:
 
