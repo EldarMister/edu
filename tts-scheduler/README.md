@@ -16,7 +16,14 @@ Goal:
 RAILWAY_API_TOKEN=
 RAILWAY_PROJECT_ID=
 RAILWAY_ENVIRONMENT_ID=
+
+# workspace | account | project | oauth (project tokens use a different header)
+RAILWAY_TOKEN_TYPE=workspace
 ```
+
+`RAILWAY_TOKEN_TYPE` defaults to `workspace` to match the existing scheduler
+token. Railway project tokens must be sent using the `Project-Access-Token`
+header; account, workspace, and OAuth tokens use `Authorization: Bearer ...`.
 
 Optional:
 

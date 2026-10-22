@@ -123,11 +123,21 @@ function resolveMode() {
 }
 
 async function gql(query, variables, token) {
+  const tokenType = (process.env.RAILWAY_TOKEN_TYPE || 'workspace').trim().toLowerCase();
+  const authorizationHeader = tokenType === 'project'
+    ? 'Project-Access-Token'
+    : tokenType === 'account' || tokenType === 'workspace' || tokenType === 'oauth'
+      ? 'Authorization'
+      : null;
+  if (!authorizationHeader) {
+    throw new Error('RAILWAY_TOKEN_TYPE must be project, account, workspace, or oauth');
+  }
+
   const res = await fetch(RAILWAY_GRAPHQL_URL, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      authorization: `Bearer ${token}`,
+      [authorizationHeader]: authorizationHeader === 'Authorization' ? `Bearer ${token}` : token,
     },
     body: JSON.stringify({ query, variables }),
   });
