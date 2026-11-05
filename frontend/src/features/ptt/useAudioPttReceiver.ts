@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { playRadioAudio } from '@/lib/audio';
+import { playPttMessage } from './sounds';
 import { PTT_EVENTS, type PttAudioPayload, type PttChannel } from './types';
 
 function base64ToBytes(value: string): Uint8Array {
@@ -26,7 +27,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     const bytes = base64ToBytes(payload.chunk);
     const data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
     const blob = new Blob([data], { type: payload.mimeType || 'application/octet-stream' });
-    await playRadioAudio(blob);
+    await playPttMessage(() => playRadioAudio(blob));
   }, []);
 
   const pump = useCallback(() => {

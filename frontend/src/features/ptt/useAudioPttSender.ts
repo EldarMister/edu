@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { setAudioRecording, unlockAudio } from '@/lib/audio';
+import { playPttCue } from './sounds';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
 
 type Ack = { ok: boolean; reason?: string };
@@ -41,12 +42,21 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
   const holdRef = useRef(false);
   const startingRef = useRef(false);
   const finishingRef = useRef(false);
+  const channelHeldRef = useRef(false);
 
   const cleanupStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
     streamRef.current = null;
     setAudioRecording(false);
   }, []);
+
+  const releaseChannel = useCallback(() => {
+    getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+    if (channelHeldRef.current) {
+      channelHeldRef.current = false;
+      void playPttCue('end');
+    }
+  }, [channel]);
 
   // Telegram-модель: запись идёт единым куском, пока держат кнопку. На отпускании
   // останавливаем рекордер — его onstop собирает цельный файл, отправляет его
@@ -70,13 +80,13 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       } catch {
         finishingRef.current = false;
         cleanupStream();
-        getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+        releaseChannel();
       }
     } else {
       cleanupStream();
-      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+      releaseChannel();
     }
-  }, [channel, cleanupStream]);
+  }, [releaseChannel, cleanupStream]);
 
   const start = useCallback(async () => {
     if (!enabled || activeRef.current || startingRef.current || finishingRef.current) return false;
@@ -91,6 +101,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     }
 
     startingRef.current = true;
+    const startCue = playPttCue('start');
     try {
       setAudioRecording(true);
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -105,13 +116,15 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       const ack = await socketAck(PTT_EVENTS.START_TALK, { channel });
       if (!ack.ok) {
         cleanupStream();
-        getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+        releaseChannel();
         setDeniedReason(ack.reason === 'busy' ? 'Канал занят' : 'Не удалось начать разговор');
         return false;
       }
+      channelHeldRef.current = true;
+      await startCue;
       if (!holdRef.current) {
         cleanupStream();
-        getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+        releaseChannel();
         return false;
       }
 
@@ -128,12 +141,12 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
         finishingRef.current = true;
         const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
         cleanupStream();
-        const releaseChannel = () => {
+        const finishMessage = () => {
           finishingRef.current = false;
-          getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+          releaseChannel();
         };
         if (blob.size === 0) {
-          releaseChannel();
+          finishMessage();
           return;
         }
         void blobToBase64(blob)
@@ -147,7 +160,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
             }
           })
           .catch(() => setDeniedReason('Не удалось отправить сообщение'))
-          .finally(releaseChannel);
+          .finally(finishMessage);
       };
       recorder.onerror = () => {
         setDeniedReason('Запись прервана. Попробуйте ещё раз');
@@ -164,7 +177,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
         recorderRef.current = null;
         setTalking(false);
         cleanupStream();
-        getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+        releaseChannel();
       };
 
       recorderRef.current = recorder;
@@ -177,13 +190,13 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
         ? 'Разрешите доступ к микрофону' : 'Не удалось начать запись');
       stop();
       cleanupStream();
-      getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
+      releaseChannel();
       return false;
     } finally {
       startingRef.current = false;
       if (!activeRef.current) holdRef.current = false;
     }
-  }, [channel, enabled, cleanupStream, stop]);
+  }, [channel, enabled, cleanupStream, stop, releaseChannel]);
 
   useEffect(() => {
     const sock = getSocket();

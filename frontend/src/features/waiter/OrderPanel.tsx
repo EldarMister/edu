@@ -131,7 +131,6 @@ export function OrderPanel({
   const policies = settings.data?.waiterOrderPermissions;
   const editable = waiterOrderPermission(order, 'edit', policies).allowed;
   const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
-  const inlineActions = order.status === 'ready' || order.status === 'picked_up';
   const finalCancelReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
 
   if (waitingDecision) {
@@ -320,20 +319,20 @@ export function OrderPanel({
               {t('Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.')}
             </div>
           )}
-          <div className={inlineActions ? 'flex gap-2' : undefined}>
+          <div className="flex gap-2">
           {[
             'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
             'picked_up', 'partially_rejected', 'waiting_payment',
           ].includes(order.status) && !order.requiresWaiterDecision && !unclaimedQr && (
             <button
-              className={`btn btn-lg border border-primary bg-white font-medium text-primary hover:bg-primary/5 ${inlineActions ? 'shrink-0 px-4' : 'mb-2 w-full'}`}
+              className="btn btn-lg shrink-0 border border-primary bg-white px-4 font-medium text-primary hover:bg-primary/5"
               disabled={preliminaryPending}
               onClick={onPreliminaryReceipt}
             >
               {preliminaryPending ? <Spinner /> : t('Счёт')}
             </button>
           )}
-          <div className={inlineActions ? 'min-w-0 flex-1' : undefined}>
+          <div className="min-w-0 flex-1">
           <ActionButton
             order={order}
             submitting={submitting}

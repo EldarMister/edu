@@ -172,15 +172,17 @@ test('normalized radio WAV preserves sample rate, stereo order, and amplitude he
   for (let i = 44; i < 52; i += 2) assert.ok(Math.abs(bytes.getInt16(i, true)) < 32767);
 });
 
-function senderHarness({ recorderFails = false, pendingPermission = false, pendingAck = false } = {}) {
+function senderHarness({ recorderFails = false, pendingPermission = false, pendingAck = false, pendingCue = false } = {}) {
   const events = [];
   const modes = [];
+  const cues = [];
   const effects = [];
   let stopped = 0;
   let permissionResolve;
   let ack;
   let recorder;
   let constraints;
+  let cueResolve;
   const stream = { getTracks: () => [{ stop: () => stopped++ }] };
   const socket = {
     emit(event, payload) { events.push({ event, payload }); },
@@ -215,14 +217,16 @@ function senderHarness({ recorderFails = false, pendingPermission = false, pendi
     };
     if (id === '@/lib/socket') return { getSocket: () => socket };
     if (id === '@/lib/audio') return { unlockAudio() {}, setAudioRecording: (value) => modes.push(value) };
+    if (id === './sounds') return { playPttCue: async (kind) => { cues.push(kind); if (pendingCue && kind === 'start') await new Promise(resolve => { cueResolve = resolve; }); } };
     if (id === './types') return { PTT_EVENTS: eventsApi };
     throw new Error(id);
   });
   return {
-    sender: api.useAudioPttSender('general', true), events, modes,
+    sender: api.useAudioPttSender('general', true), events, modes, cues,
     get stopped() { return stopped; }, get constraints() { return constraints; },
     grant: () => permissionResolve(stream), acknowledge: (...args) => ack(...args),
     get recorder() { return recorder; },
+    finishCue: () => cueResolve(),
   };
 }
 
@@ -266,4 +270,64 @@ test('normal radio recording enables mic gain and restores output after stop', a
   assert.equal(h.stopped, 1);
   assert.equal(h.modes.at(-1), false);
   assert.equal(h.events.at(-1).event, 'stop');
+  assert.deepEqual(h.cues, ['start', 'end']);
+});
+
+
+test('release during the start cue never opens the recorder and releases the channel once', async () => {
+  const h = senderHarness({ pendingCue: true });
+  const starting = h.sender.start();
+  await flush();
+  assert.equal(h.recorder, undefined);
+  h.sender.stop();
+  h.finishCue();
+  assert.equal(await starting, false);
+  assert.equal(h.recorder, undefined);
+  assert.deepEqual(h.cues, ['start', 'end']);
+  assert.equal(h.events.filter(e => e.event === 'stop').length, 1);
+});
+
+function cueHarness(mode) {
+  const calls = [];
+  const timers = new Map();
+  let next = 0;
+  class AudioPlayer {
+    play(url) {
+      calls.push(url);
+      if (mode === 'fail') return Promise.reject(new Error('missing cue'));
+      if (mode === 'stalled') return new Promise(() => {});
+      return Promise.resolve();
+    }
+    stop() { calls.push('stop'); }
+  }
+  const api = load('src/features/ptt/sounds.ts', {
+    console: { warn() {} },
+    window: { setTimeout(fn) { timers.set(++next, fn); return next; }, clearTimeout(id) { timers.delete(id); } },
+  }, id => { if (id === '@/lib/audio') return { AudioPlayer }; throw new Error(id); });
+  return { ...api, calls, timers };
+}
+
+test('incoming radio messages play start, speech, end sequentially, including queued messages', async () => {
+  const h = cueHarness();
+  for (let i = 0; i < 2; i++) await h.playPttMessage(async () => { h.calls.push('voice'); });
+  assert.deepEqual(h.calls, ['/sounds/ptt1.mp3', 'voice', '/sounds/ptt2.mp3', '/sounds/ptt1.mp3', 'voice', '/sounds/ptt2.mp3']);
+  assert.equal(h.timers.size, 0);
+});
+
+test('missing cues do not swallow speech; voice failure still ends the transmission', async () => {
+  const h = cueHarness('fail');
+  await h.playPttMessage(async () => { h.calls.push('voice'); });
+  assert.deepEqual(h.calls, ['/sounds/ptt1.mp3', 'voice', '/sounds/ptt2.mp3']);
+  const ok = cueHarness();
+  await assert.rejects(ok.playPttMessage(async () => { throw new Error('voice error'); }), /voice error/);
+  assert.deepEqual(ok.calls, ['/sounds/ptt1.mp3', '/sounds/ptt2.mp3']);
+});
+
+test('a stalled cue is stopped within its bound and its timer is cleared', async () => {
+  const h = cueHarness('stalled');
+  const pending = h.playPttCue('start');
+  [...h.timers.values()][0]();
+  await pending;
+  assert.deepEqual(h.calls, ['/sounds/ptt1.mp3', 'stop']);
+  assert.equal(h.timers.size, 0);
 });
