@@ -44,6 +44,8 @@ import { KitchenVoiceSettingsSheet } from './KitchenVoiceSettingsSheet';
 import { KitchenStatsSheet } from './KitchenStatsSheet';
 import { deliveryDetails, orderLocation } from '@/screens/waiter/orderRules';
 import type { Order, OrderItemStatus, OrderSetComponent, OrderStatus, PrepStation } from '@/types';
+import { KitchenHandControlProvider } from '@/features/hand-control/KitchenHandControl';
+import { HandTargetClip, HandTargetEnabled, HandTargetIdentity, HandTargetLayer } from '@/features/hand-control/targets';
 
 const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'new', label: 'Новые' },
@@ -126,6 +128,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   const rejectItems = useRejectItems(station);
   const logout = useAuth((s) => s.logout);
   const push = useNotifications((s) => s.push);
+  const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
@@ -259,6 +262,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   const contentPadding = winWidth >= 640 ? 20 : spacing.lg;
 
   return (
+    <KitchenHandControlProvider activeLayer={voiceOpen ? 'voice' : stopListOpen ? 'stop-list' : 'board'}>
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <OfflineBanner />
       <AppHeader
@@ -324,13 +328,14 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         />
       ) : (
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[styles.list, { paddingHorizontal: contentPadding, paddingTop: contentPadding }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={orders.isFetching} onRefresh={() => orders.refetch()} />
           }
         >
-          <BalancedKitchenOrders columns={columns} gap={colGap} initialWidth={winWidth - contentPadding * 2}>
+          <HandTargetClip viewRef={scrollRef}><BalancedKitchenOrders columns={columns} gap={colGap} initialWidth={winWidth - contentPadding * 2}>
             {list.map((o) => (
               <KitchenCard
                 key={o.id}
@@ -348,7 +353,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
                 onBatch={(type, ids) => onBatch(o.id, type, ids)}
               />
             ))}
-          </BalancedKitchenOrders>
+          </BalancedKitchenOrders></HandTargetClip>
         </ScrollView>
       )}
 
@@ -368,16 +373,17 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
                 <Text style={styles.undoSeconds} translate>{String(undoSecondsLeft).padStart(2, '0')} сек</Text>
               </Text>
             </View>
-            <FastPressable onPress={() => setPending(null)} style={styles.undoBtn}>
+            <FastPressable onPress={() => setPending(null)} style={styles.undoBtn} handTargetKey={JSON.stringify(pending)}>
               <Text style={styles.undoBtnText} translate>Отменить</Text>
             </FastPressable>
           </View>
         </View>
       ) : null}
 
-      <StopListSheet visible={stopListOpen} station={station} onClose={() => setStopListOpen(false)} />
-      <KitchenVoiceSettingsSheet visible={voiceOpen} onClose={() => setVoiceOpen(false)} />
+      <HandTargetLayer name="stop-list"><StopListSheet visible={stopListOpen} station={station} onClose={() => setStopListOpen(false)} /></HandTargetLayer>
+      <HandTargetLayer name="voice"><KitchenVoiceSettingsSheet visible={voiceOpen} onClose={() => setVoiceOpen(false)} /></HandTargetLayer>
     </SafeAreaView>
+    </KitchenHandControlProvider>
   );
 }
 
@@ -444,7 +450,7 @@ function BalancedKitchenOrders({ columns, gap, initialWidth, children }: { colum
       const placement = layout.placements[index];
       const measured = measurements[key];
       const ready = columns === 1 || (measured && Math.abs(measured.width - cardWidth) < 0.5);
-      return <View key={key} onLayout={event => recordHeight(key, event.nativeEvent.layout.width, event.nativeEvent.layout.height)} pointerEvents={ready ? 'auto' : 'none'} accessibilityElementsHidden={!ready} importantForAccessibility={ready ? 'auto' : 'no-hide-descendants'} style={columns === 1 ? { width: '100%' } : { position: 'absolute', left: placement.column * (cardWidth + gap), top: placement.top, width: cardWidth, opacity: ready ? 1 : 0 }}>{card}</View>;
+      return <View key={key} onLayout={event => recordHeight(key, event.nativeEvent.layout.width, event.nativeEvent.layout.height)} pointerEvents={ready ? 'auto' : 'none'} accessibilityElementsHidden={!ready} importantForAccessibility={ready ? 'auto' : 'no-hide-descendants'} style={columns === 1 ? { width: '100%' } : { position: 'absolute', left: placement.column * (cardWidth + gap), top: placement.top, width: cardWidth, opacity: ready ? 1 : 0 }}><HandTargetEnabled enabled={!!ready}>{card}</HandTargetEnabled></View>;
     })}
   </View>;
 }
@@ -599,6 +605,9 @@ function KitchenCard({
   };
 
   const selectionMode = selected.size > 0;
+  // Clock ticks do not change the action; order/selection/quantity updates do.
+  const handIdentity = JSON.stringify([order, tab, submitting, [...selected].sort(), actionQtys,
+    [...collapsed].sort(), pendingItemIds, pendingType, pendingPartial]);
 
   /** Подпись блюда состава сета (замена: старое зачёркнуто → новое выделено). */
   const componentLabel = (sc: OrderSetComponent) => {
@@ -699,6 +708,7 @@ function KitchenCard({
     ) : null;
 
   return (
+    <HandTargetIdentity value={handIdentity}>
     <Card style={{ gap: 0 }}>
       {/* Шапка карточки */}
       <View style={styles.cardHead}>
@@ -895,6 +905,7 @@ function KitchenCard({
         </View>
       ) : null}
     </Card>
+    </HandTargetIdentity>
   );
 }
 

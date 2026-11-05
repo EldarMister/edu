@@ -6,6 +6,7 @@ import { FastPressable } from '@/components/FastPressable';
 import { Button, Toggle } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { kitchenVoice } from '@/services/kitchenVoice';
+import { KitchenHandControlSetting } from '@/features/hand-control/KitchenHandControl';
 import {
   KITCHEN_SPEAKERS,
   KITCHEN_SPEECH_RATES,
@@ -107,6 +108,7 @@ export function KitchenVoiceSettingsSheet({
           </Text>
         ) : null}
       </View>
+      <KitchenHandControlSetting />
     </BottomSheet>
   );
 }

@@ -18,6 +18,8 @@ import { useSaveStopList, useStopList } from '@/services/api/kitchen';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 import type { PrepStation } from '@/types';
+import { HandPointer } from '@/features/hand-control/HandPointer';
+import { HandTargetClip, HandTargetModal } from '@/features/hand-control/targets';
 
 /**
  * «Стоп-лист»: станция временно отключает свои блюда — как PWA StopListDrawer.
@@ -41,6 +43,8 @@ export function StopListSheet({
 
   const [render, setRender] = useState(visible);
   const [search, setSearch] = useState('');
+  const scrollRef = React.useRef<ScrollView>(null);
+  const handPanelRef = React.useRef<View>(null);
   // Локальная доступность для мгновенного отклика: dishId → isAvailable.
   const [draft, setDraft] = useState<Record<string, boolean>>({});
 
@@ -111,11 +115,11 @@ export function StopListSheet({
       hardwareAccelerated
       onRequestClose={onClose}
     >
-      <View style={styles.root}>
+      <HandTargetModal><View style={styles.root}>
         <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]}>
-          <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} />
+          <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} handExclude={handPanelRef} />
         </Animated.View>
-        <Animated.View style={[styles.panel, { width: panelWidth }, panelStyle]}>
+        <Animated.View ref={handPanelRef} collapsable={false} style={[styles.panel, { width: panelWidth }, panelStyle]}>
           <SafeAreaView style={styles.panelSafe} edges={['top', 'bottom']}>
             <View style={styles.header}>
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -140,7 +144,8 @@ export function StopListSheet({
               </View>
             </View>
 
-            <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.listContent}>
+            <ScrollView ref={scrollRef} style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.listContent}>
+              <HandTargetClip viewRef={scrollRef}>
               {stopListQ.isLoading ? (
                 <Loading />
               ) : categories.length === 0 ? (
@@ -170,10 +175,12 @@ export function StopListSheet({
                   </View>
                 ))
               )}
+              </HandTargetClip>
             </ScrollView>
           </SafeAreaView>
         </Animated.View>
-      </View>
+        <HandPointer />
+      </View></HandTargetModal>
     </RNModal>
   );
 }

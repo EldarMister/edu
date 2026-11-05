@@ -2,7 +2,7 @@
   "expo": {
     "name": "EDU POS",
     "slug": "edu-pos-mobile",
-    "version": "0.2.1",
+    "version": "0.3.0",
     "orientation": "default",
     "icon": "./assets/launcher-icon.png",
     "scheme": "edupos",
@@ -20,6 +20,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.edupos.mobile",
       "infoPlist": {
+        "NSCameraUsageDescription": "EDU POS использует камеру для управления кухней жестами.",
         "NSMicrophoneUsageDescription": "EDU POS использует микрофон для внутренней рации Push-to-Talk.",
         "UIBackgroundModes": [
           "audio",
@@ -29,13 +30,14 @@
     },
     "android": {
       "package": "com.edupos.mobile",
-      "versionCode": 7,
+      "versionCode": 8,
       "adaptiveIcon": {
         "foregroundImage": "./assets/launcher-icon.png",
         "backgroundColor": "#FFFFFF"
       },
       "permissions": [
         "INTERNET",
+        "CAMERA",
         "RECORD_AUDIO",
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
@@ -73,6 +75,7 @@
         }
       ],
       "expo-asset",
+      "./plugins/withNativeNotifications",
       "./plugins/withPttBackgroundService"
     ],
     "extra": {

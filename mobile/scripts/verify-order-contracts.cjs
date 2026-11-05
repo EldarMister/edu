@@ -31,18 +31,46 @@ function backendStatuses(file, declaration) {
 
 async function main() {
   const format = load('src/utils/format.ts');
-  const rules = load('src/screens/waiter/orderRules.ts', { '@/utils/format': format });
+  const permissions = load('src/lib/order-permissions.ts');
+  const rules = load('src/screens/waiter/orderRules.ts', { '@/utils/format': format, '@/lib/order-permissions': permissions });
   const orderStatuses = [
     'draft', 'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
     'picked_up', 'served', 'waiting_payment', 'paid', 'rejected', 'partially_rejected', 'cancelled',
   ];
-  const cancellable = backendStatuses('backend/src/orders/orders.service.ts', 'waiterCancellableStatuses');
+  const itemStatuses = ['new', 'accepted', 'cooking', 'ready', 'served'];
+  const enumOf = (values) => Object.fromEntries(values.map((value) => [value, value]));
+  class PolicyError extends Error {}
+  const backendPolicy = load('../backend/src/orders/order-policy.ts', {
+    '@nestjs/common': { BadRequestException: PolicyError, ForbiddenException: PolicyError },
+    '@prisma/client': { OrderStatus: enumOf(orderStatuses), OrderItemStatus: enumOf([...itemStatuses, 'cancelled', 'rejected']) },
+  });
+  assert.deepEqual(permissions.DEFAULT_WAITER_PERMISSIONS, backendPolicy.normalizeWaiterOrderPermissions(null), 'Default permissions must match the server');
+  const policyVariants = [
+    backendPolicy.normalizeWaiterOrderPermissions(null),
+    Object.fromEntries(backendPolicy.WAITER_ORDER_STAGES.map((stage) => [stage, { edit: true, cancel: true }])),
+    Object.fromEntries(backendPolicy.WAITER_ORDER_STAGES.map((stage, index) => [stage, { edit: index % 2 === 0, cancel: index % 2 !== 0 }])),
+  ];
+  for (const policy of policyVariants) {
+    for (const status of backendPolicy.WAITER_ORDER_STAGES) {
+      for (const itemStatus of itemStatuses) {
+        const item = { id: 'item-1', status: itemStatus };
+        const order = { status, items: [item], payments: [] };
+        assert.equal(permissions.itemPermissionStage(order, item), backendPolicy.waiterItemStage(status, itemStatus), `Stage drifted: ${status}/${itemStatus}`);
+        for (const action of ['cancel', 'edit']) {
+          let allowed = true;
+          try { backendPolicy.assertWaiterItemOperation(policy, status, item, action); }
+          catch (error) { if (!(error instanceof PolicyError)) throw error; allowed = false; }
+          assert.equal(permissions.waiterItemPermission(order, item, action, policy).allowed, allowed, `Permission drifted: ${status}/${itemStatus}/${action}`);
+          if (action === 'cancel') assert.equal(rules.canWaiterCancelOrder(order, policy), allowed);
+        }
+      }
+    }
+  }
   const printable = backendStatuses('backend/src/receipt-prints/receipt-prints.service.ts', 'PRELIMINARY_ORDER_STATUSES');
   const base = { waiter: { id: 'waiter-1' }, requiresWaiterDecision: false, table: { id: 'table-1', number: 5, hall: { name: 'Зал' } } };
 
   for (const status of orderStatuses) {
     const order = { ...base, status };
-    assert.equal(rules.canWaiterCancelOrder(order), cancellable.has(status), `Cancel rule drifted for ${status}`);
     assert.equal(rules.canRequestPreliminaryBill(order), printable.has(status), `Bill rule drifted for ${status}`);
   }
   assert.equal(rules.canRequestPreliminaryBill({ ...base, status: 'ready', requiresWaiterDecision: true }), false);
@@ -72,7 +100,7 @@ async function main() {
     assert.deepEqual(call.body.itemIds, payload.itemIds);
     assert.deepEqual(call.body.setComponentIds, payload.setComponentIds);
   }
-  console.log('Order contracts passed: 12 lifecycle statuses, bill eligibility, delivery identity, partial ready/reject API payloads.');
+  console.log('Order contracts passed: 240 policy comparisons across 8 stages/5 item states/3 configurations, 12 bill statuses, delivery identity, partial ready/reject API payloads.');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

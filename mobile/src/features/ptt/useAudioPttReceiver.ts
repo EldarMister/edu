@@ -26,7 +26,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     const sock = getSocket();
     const onAudio = (payload: PttAudioPayload) => {
       if (Platform.OS === 'android' && AppState.currentState !== 'active') return;
-      if (payload.channel !== channel || payload.senderId === userId) return;
+      if ((payload.channel !== channel && payload.channel !== 'general') || payload.senderId === userId) return;
       playbackRef.current?.enqueue(payload);
     };
     sock.on(PTT_EVENTS.AUDIO_MESSAGE, onAudio);

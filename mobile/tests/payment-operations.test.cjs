@@ -233,3 +233,13 @@ test('printed realtime updates and the visible receipt sheet play exactly one ac
   ReceiptPrintSheet(); refCursor = 0; ReceiptPrintSheet();
   assert.deepEqual(sounds, ['accept']);
 });
+
+
+test('payment completion rejects disabled split methods before calling the payment API', async () => {
+  const env = paymentHarness(); env.render();
+  const split = env.find('SplitBillSheet');
+  assert.deepEqual(split.props.paymentMethods, ['cash']);
+  await assert.rejects(split.props.onComplete({ cash: 0, qr: 100, payments: [{ method: 'qr', amount: 50 }, { method: 'qr', amount: 50 }] }), /способ оплаты недоступен/);
+  assert.equal(env.paymentCalls.length, 0);
+  assert.equal(env.notices.length, 1);
+});

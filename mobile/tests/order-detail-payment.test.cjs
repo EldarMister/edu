@@ -29,7 +29,7 @@ function loadSource(file, modules) {
 // Execute the actual screen with persistent hook state and controlled query
 // snapshots. Native child components stay opaque: this tests the React element
 // boundary that owns PaymentSheet's payment/receipt state, not its internals.
-function screenHarness() {
+function screenHarness(options = {}) {
   const cells = [];
   let cursor = 0, pendingEffects = [], changed = false;
   const dependenciesChanged = (previous, next) => !previous || !next
@@ -76,9 +76,11 @@ function screenHarness() {
     'useRemoveRejectedItem', 'useCancelReadyItem', 'useCancelOrder', 'useClaimQrOrder',
     'useCreateReceiptPrintRequest', 'useCallAdministrator',
   ].map(name => [name, mutation]));
-  const store = selector => selector({
-    selectTable() {}, clear() {}, startEditing() {}, begin() {}, setTarget() {}, push() {},
-  });
+  const cart = { selectTable() {}, clear() {}, startEditing() {}, begin() {}, setTarget() {}, push() {}, ...options.cart };
+  const store = selector => selector(cart);
+  store.getState = () => ({ ...cart });
+  const cancellations = [];
+  api.useCancelOrder = () => ({ isPending: false, mutate: (payload, callbacks) => cancellations.push({ payload, callbacks }) });
   const { OrderDetailScreen } = loadSource('src/screens/waiter/OrderDetailScreen.tsx', {
     react: hooks,
     'react-native': {
@@ -112,6 +114,8 @@ function screenHarness() {
       useDishes: () => ({ data: [] }),
       fetchReceipt() {},
     },
+    '@/services/api/settings': { usePublicSettings: () => ({ data: undefined }) },
+    '@/lib/order-permissions': loadSource('src/lib/order-permissions.ts', {}),
     '@/lib/api': { apiError: String },
     '@/utils/format': { displayOrderNumber: String, money: String },
     '@/utils/orderCart': { orderToCartLines: () => [] },
@@ -122,7 +126,7 @@ function screenHarness() {
     },
   });
   return {
-    queries, navigations,
+    queries, navigations, cart, cancellations,
     render() {
       for (let iteration = 0; iteration < 10; iteration++) {
         cursor = 0; changed = false; pendingEffects = [];
@@ -186,4 +190,28 @@ test('initial loading and missing order keep the same payment slot and show thei
   const missing = env.render();
   assert.equal(paymentSlot(missing).props.visible, false);
   assert.equal(missing.props.children[1].type, 'EmptyState');
+});
+
+
+test('cancelling a partially rejected order leaves another table draft and a newer draft untouched', () => {
+  const rejected = { id: 'order-102', status: 'partially_rejected', requiresWaiterDecision: true, items: [], table: { id: 'table-a', number: 1 } };
+  for (const newerDraft of [false, true]) {
+    let clears = 0;
+    const env = screenHarness({ cart: { tableId: newerDraft ? 'table-a' : 'table-b', activeOrderId: newerDraft ? rejected.id : 'other-order', lines: [{ quantity: 1 }], clear() { clears++; } } });
+    env.queries.active = { data: [rejected], isLoading: false, isFetched: true };
+    env.render().props.onCancel();
+    if (newerDraft) env.cart.lines = [{ quantity: 2 }];
+    env.cancellations[0].callbacks.onSuccess();
+    assert.equal(clears, 0);
+  }
+});
+
+test('cancelling a partially rejected order clears its unchanged selected draft', () => {
+  let clears = 0;
+  const rejected = { id: 'order-102', status: 'partially_rejected', requiresWaiterDecision: true, items: [], table: { id: 'table-a', number: 1 } };
+  const env = screenHarness({ cart: { tableId: 'table-a', activeOrderId: rejected.id, lines: [{ quantity: 1 }], clear() { clears++; } } });
+  env.queries.active = { data: [rejected], isLoading: false, isFetched: true };
+  env.render().props.onCancel();
+  env.cancellations[0].callbacks.onSuccess();
+  assert.equal(clears, 1);
 });

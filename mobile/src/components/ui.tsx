@@ -259,13 +259,18 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (val
 }
 
 /** Круглая кнопка ±, как в корзине PWA (dec красная, inc синяя). */
-export function RoundBtn({ kind, onPress }: { kind: 'inc' | 'dec'; onPress: () => void }) {
+export function RoundBtn({ kind, onPress, disabled = false }: { kind: 'inc' | 'dec'; onPress: () => void; disabled?: boolean }) {
   const isDec = kind === 'dec';
   return (
     <FastPressable
       onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={kind === 'inc' ? 'Увеличить количество' : 'Уменьшить количество'}
+      accessibilityState={{ disabled }}
       style={[
         styles.roundBtn,
+        disabled && { opacity: 0.4 },
         { borderColor: isDec ? colors.red400 : colors.primary },
       ]}
     >

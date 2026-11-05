@@ -6,6 +6,7 @@ import { SERVER_EVENTS } from '@/services/socket/events';
 import { kitchenVoice } from '@/services/kitchenVoice';
 import { getKitchenVoiceSettings } from '@/services/kitchenVoiceSettings';
 import { waiterVoice } from '@/services/waiterVoice';
+import { announceAdministratorCall, announceReceiptRequest, type AdministratorVoiceCall } from '@/services/adminVoice';
 import {
   stationVoice,
   waiterVoiceKey,
@@ -17,7 +18,7 @@ import { scheduleRealtimeLocalNotification, isRemotePushRegistered } from '@/ser
 import { useAuth } from '@/store/auth';
 import { configureAudioPlayback } from '@/lib/sound';
 import { displayOrderNumber } from '@/utils/format';
-import type { PrepStation } from '@/types';
+import type { PrepStation, ReceiptPrintRequest } from '@/types';
 import {
   PTT_CHANNELS,
   PTT_CHANNEL_STORAGE_KEY,
@@ -74,7 +75,7 @@ function onBackgroundAudio(payload: PttAudioPayload) {
   if (Platform.OS !== 'android' || AppState.currentState === 'active') return;
   const userId = useAuth.getState().user?.id;
   if (!userId || !useAuth.getState().accessToken) return;
-  if (payload.channel !== currentChannel || payload.senderId === userId) return;
+  if ((payload.channel !== currentChannel && payload.channel !== 'general') || payload.senderId === userId) return;
   playback.enqueue(payload);
 }
 
@@ -165,6 +166,29 @@ function onBackgroundWaiterOrderChanged(order: WaiterVoicedOrder) {
   waiterVoice.enqueue(text);
 }
 
+function isBackgroundAdministrator() {
+  const role = useAuth.getState().user?.role;
+  return shouldHandleBackgroundRealtime() && (role === 'ADMIN' || role === 'OWNER');
+}
+
+function onBackgroundReceiptRequest(request: ReceiptPrintRequest) {
+  if (!isBackgroundAdministrator()) return;
+  announceReceiptRequest(request);
+  if (!isRemotePushRegistered()) void scheduleRealtimeLocalNotification({
+    title: 'Печать чека', body: `Заявка от ${request.waiterName} · Стол ${request.tableNumber}`,
+    data: { notificationId: `receipt:${request.id}:created`, orderId: request.orderId, url: '/admin/receipts' },
+  });
+}
+
+function onBackgroundAdministratorCall(call: AdministratorVoiceCall) {
+  if (!isBackgroundAdministrator()) return;
+  announceAdministratorCall(call);
+  if (!isRemotePushRegistered()) void scheduleRealtimeLocalNotification({
+    title: 'Вызов администратора', body: call.message,
+    data: { orderId: call.orderId, type: 'info', url: '/admin' },
+  });
+}
+
 function ensureBackgroundAudioSubscription() {
   if (subscribedToAudio) return;
   getSocket().on(PTT_EVENTS.AUDIO_MESSAGE, onBackgroundAudio);
@@ -180,6 +204,8 @@ function ensureBackgroundRealtimeSubscription() {
   sock.on(SERVER_EVENTS.ORDER_STATUS_CHANGED, onBackgroundWaiterOrderChanged);
   sock.on(SERVER_EVENTS.WAITER_ORDER_READY, onBackgroundWaiterOrderChanged);
   sock.on(SERVER_EVENTS.WAITER_ORDER_REJECTED, onBackgroundWaiterOrderChanged);
+  sock.on(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, onBackgroundReceiptRequest);
+  sock.on('administrator:called', onBackgroundAdministratorCall);
   subscribedToRealtime = true;
 }
 
@@ -200,6 +226,8 @@ function removeBackgroundRealtimeSubscription() {
   sock.off(SERVER_EVENTS.ORDER_STATUS_CHANGED, onBackgroundWaiterOrderChanged);
   sock.off(SERVER_EVENTS.WAITER_ORDER_READY, onBackgroundWaiterOrderChanged);
   sock.off(SERVER_EVENTS.WAITER_ORDER_REJECTED, onBackgroundWaiterOrderChanged);
+  sock.off(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, onBackgroundReceiptRequest);
+  sock.off('administrator:called', onBackgroundAdministratorCall);
   subscribedToRealtime = false;
 }
 
@@ -264,8 +292,8 @@ export async function startPttBackgroundRuntime(channel: PttChannel) {
       taskTitle: 'EDU POS Рация активна',
       taskDesc: 'Фоновое прослушивание канала рации',
       taskIcon: {
-        name: 'ic_launcher',
-        type: 'mipmap',
+        name: 'notification_icon',
+        type: 'drawable',
       },
       color: '#005BFF',
       linkingURI: 'edupos://ptt',

@@ -32,6 +32,8 @@ import {
 import { useCart } from '@/store/cart';
 import { useReceiptPrint } from '@/store/receiptPrint';
 import { useReplacement } from '@/store/replacement';
+import { usePublicSettings } from '@/services/api/settings';
+import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, money } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
@@ -41,7 +43,6 @@ import { canRequestPreliminaryBill, deliveryDetails, orderLocation } from './ord
 import type { Order, OrderItem, OrderItemStatus, OrderSetComponent } from '@/types';
 
 type R = RouteProp<{ OrderDetail: { orderId: string } }, 'OrderDetail'>;
-const DETAIL_EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
 const ITEM_CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
 const DEFAULT_ITEM_CANCEL_REASON = ITEM_CANCEL_REASONS[0];
 
@@ -51,6 +52,8 @@ export function OrderDetailScreen() {
   const { orderId } = route.params;
   const orders = useActiveOrders();
   const dishes = useDishes();
+  const settings = usePublicSettings();
+  const policies = settings.data?.waiterOrderPermissions;
   const activeOrder = orders.data?.find((o) => o.id === orderId) ?? null;
   const details = useOrderDetails(orderId, orders.isFetched && !activeOrder);
   const order = activeOrder ?? details.data ?? null;
@@ -66,7 +69,6 @@ export function OrderDetailScreen() {
   const print = useCreateReceiptPrintRequest();
   const administratorCall = useCallAdministrator();
   const selectTable = useCart((s) => s.selectTable);
-  const clearCart = useCart((s) => s.clear);
   const startEditing = useCart((s) => s.startEditing);
   const beginPrint = useReceiptPrint((s) => s.begin);
   const setReplacementTarget = useReplacement((s) => s.setTarget);
@@ -158,7 +160,9 @@ export function OrderDetailScreen() {
   const hasReadyStationItem = stationItems.some((item) => item.status === 'ready');
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
-  const billCorrection = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
+  const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
+  const currentBillItem = order.items.find((item) => item.id === billItem?.id);
+  const cancelPermission = currentBillItem ? waiterItemPermission(order, currentBillItem, 'cancel', policies) : { allowed: false, reason: 'Позиция уже завершена.' };
   const canPrintPreliminary = canRequestPreliminaryBill(order);
   const deliveryInfo = deliveryDetails(order);
 
@@ -184,9 +188,9 @@ export function OrderDetailScreen() {
       setBillItem(null);
       return;
     }
-    if (currentItem.status === 'ready' || currentItem.status === 'served') {
-      setBillItem(null);
-      setAdministratorOpen(true);
+    const permission = waiterItemPermission(order, currentItem, 'cancel', policies);
+    if (!permission.allowed) {
+      push({ message: permission.reason, type: 'error', at: new Date().toISOString() });
       return;
     }
     const reason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
@@ -252,19 +256,21 @@ export function OrderDetailScreen() {
             onError,
           })
         }
-        onCancel={() =>
+        onCancel={() => {
+          const draft = useCart.getState();
           cancelOrder.mutate(
             { orderId: order.id, reason: 'Клиент отменил заказ после частичного отказа кухни' },
             {
               onSuccess: () => {
-                clearCart();
+                const current = useCart.getState();
+                if (current.tableId === order.table.id && current.lines === draft.lines && (current.activeOrderId === order.id || current.editingOrderId === order.id)) current.clear();
                 push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
                 navigation.getParent()?.navigate('Tables');
               },
               onError,
             },
-          )
-        }
+          );
+        }}
       />
     );
   }
@@ -418,12 +424,12 @@ export function OrderDetailScreen() {
                 <Text style={styles.qrBadgeText}>QR</Text>
               </View>
             ) : null}
-            {DETAIL_EDITABLE.includes(order.status) && !unclaimedQr ? (
+            {waiterOrderPermission(order, 'edit', policies).allowed && !unclaimedQr ? (
               <FastPressable
                 onPress={() => {
-                  const lines = orderToCartLines(order, dishes.data ?? []);
+                  const lines = orderToCartLines(order, dishes.data ?? [], policies);
                   if (lines.length === 0) {
-                    push({ message: 'Не удалось восстановить позиции заказа для редактирования', type: 'error', at: new Date().toISOString() });
+                    push({ message: 'В заказе есть удалённое из меню блюдо. Используйте отмену отдельной позиции или обратитесь к администратору.', type: 'error', at: new Date().toISOString() });
                     return;
                   }
                   startEditing(
@@ -476,11 +482,15 @@ export function OrderDetailScreen() {
           <Text style={styles.totalLabel} translate>Итого</Text>
           <NumberTicker value={Number(order.finalAmount)} style={styles.totalValue} digitHeight={26} />
         </View>
-        {canPrintPreliminary && order.status !== 'served' ? (
-          <Button title="Счёт" variant="secondary" loading={print.isPending}
-            onPress={requestPreliminaryReceipt} />
-        ) : null}
-        {mainAction()}
+        <View style={styles.actions}>
+          {canPrintPreliminary && order.status !== 'served' ? (
+            <FastPressable disabled={print.isPending} onPress={requestPreliminaryReceipt}
+              style={[styles.preReceiptBtn, print.isPending && styles.preReceiptBtnDisabled]}>
+              {print.isPending ? <ActivityIndicator color={colors.primary} /> : <Text style={styles.preReceiptText} translate>Счёт</Text>}
+            </FastPressable>
+          ) : null}
+          <View style={{ flex: 1, minWidth: 0 }}>{mainAction()}</View>
+        </View>
       </View>
 
       <CancelReadyItemSheet
@@ -488,6 +498,7 @@ export function OrderDetailScreen() {
         reason={cancelReason}
         other={cancelOther}
         submitting={cancelReadyItem.isPending}
+        permission={cancelPermission}
         onReasonChange={setCancelReason}
         onOtherChange={setCancelOther}
         onClose={() => {
@@ -643,6 +654,7 @@ function CancelReadyItemSheet({
   reason,
   other,
   submitting,
+  permission,
   onReasonChange,
   onOtherChange,
   onClose,
@@ -652,6 +664,7 @@ function CancelReadyItemSheet({
   reason: string;
   other: string;
   submitting: boolean;
+  permission: { allowed: boolean; reason: string };
   onReasonChange: (value: string) => void;
   onOtherChange: (value: string) => void;
   onClose: () => void;
@@ -667,12 +680,14 @@ function CancelReadyItemSheet({
           <Button
             title="Отменить блюдо"
             variant="danger"
+            disabled={!permission.allowed}
             loading={submitting}
             onPress={onConfirm}
           />
         </View>
       }
     >
+      {!permission.allowed ? <View style={styles.warningBox}><Text style={styles.warningText} translate>{permission.reason}</Text></View> : null}
       {item ? (
         <View style={styles.cancelReadyDish}>
           <Text style={styles.cancelReadyName}>{orderItemName(item)}</Text>
@@ -928,7 +943,9 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: 20, fontWeight: '600', color: colors.textPrimary },
   actions: { flexDirection: 'row', gap: spacing.sm },
   preReceiptBtn: {
-    width: 110,
+    minWidth: 70,
+    flexShrink: 0,
+    paddingHorizontal: 16,
     height: 48,
     borderRadius: radius.md,
     borderWidth: 1,

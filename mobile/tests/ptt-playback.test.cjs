@@ -11,7 +11,7 @@ function loadSource(file, modules) {
   }).outputText;
   const module = { exports: {} };
   vm.runInNewContext(output, {
-    module, exports: module.exports, setTimeout, clearTimeout,
+    module, exports: module.exports, setTimeout, clearTimeout, AbortController,
     require: name => { assert.ok(name in modules, `Unexpected dependency: ${name}`); return modules[name]; },
   });
   return module.exports;
@@ -25,7 +25,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 const message = chunk => ({ channel: 'general', senderId: 'other', mimeType: 'audio/mp4', chunk });
 
 function playbackHarness({ writing, creating } = {}) {
-  const sounds = [], written = [], deleted = [], speakers = [];
+  const sounds = [], written = [], deleted = [], speakers = [], cues = [];
   const modules = {
     'expo-av': { Audio: { Sound: { createAsync: async () => {
       if (creating) await creating.promise;
@@ -45,11 +45,23 @@ function playbackHarness({ writing, creating } = {}) {
       deleteAsync: async file => deleted.push(file),
     },
     '@/lib/sound': { configureAudioPlayback: async () => {} },
+    './sounds': { playPttCue: async kind => { cues.push(kind); } },
   };
   const playback = loadSource('src/features/ptt/audioPlayback.ts', modules);
   const queue = new playback.PttPlaybackQueue(payload => speakers.push(payload?.chunk ?? null));
-  return { queue, playback, sounds, written, deleted, speakers };
+  return { queue, playback, sounds, written, deleted, speakers, cues };
 }
+
+test('every received radio message is wrapped by the PWA start and end cues', async () => {
+  const env = playbackHarness();
+  env.queue.enqueue(message('voice'));
+  await settle();
+  assert.deepEqual(env.cues, ['start']);
+  assert.equal(env.sounds[0].plays, 1);
+  env.sounds[0].finish();
+  await settle();
+  assert.deepEqual(env.cues, ['start', 'end']);
+});
 
 test('logout stops the current radio sound and discards queued messages', async () => {
   const env = playbackHarness();
@@ -146,6 +158,7 @@ test('logout cancels a background runtime waiting for native audio initializatio
     '@/services/kitchenVoice': { kitchenVoice: { enqueue: noop } },
     '@/services/kitchenVoiceSettings': { getKitchenVoiceSettings: () => ({}) },
     '@/services/waiterVoice': { waiterVoice: { enqueue: noop } },
+    '@/services/adminVoice': {},
     '@/services/realtimeVoice': {}, '@/services/push': {},
     '@/store/auth': { useAuth: { getState: () => auth } },
     '@/lib/sound': { configureAudioPlayback: () => configuring.promise },

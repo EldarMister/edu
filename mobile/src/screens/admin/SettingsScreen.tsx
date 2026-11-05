@@ -24,11 +24,14 @@ import {
 } from '@/services/api/settings';
 import { useAuth } from '@/store/auth';
 import { changedSettingsFields, mergeSavedSettingsDraft } from '@/utils/settingsDraft';
+import { DEFAULT_WAITER_PERMISSIONS, type WaiterOrderPermissions } from '@/lib/order-permissions';
+import { OrderPermissionsSettings } from './OrderPermissionsSettings';
 
 type FiscalProvider = '' | 'ekassa' | 'yakassa' | 'mock';
 type QueueMode = 'table' | 'number';
 
 type Form = {
+  waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;
   phone: string;
@@ -81,6 +84,7 @@ const toNumberOrNull = (value: string) => {
 
 function settingsForm(data: Settings): Form {
   return {
+    waiterOrderPermissions: data.waiterOrderPermissions ?? DEFAULT_WAITER_PERMISSIONS,
     cafeName: data.cafeName, address: data.address, phone: data.phone, phone2: data.phone2,
     instagram: data.instagram ?? '', website: data.website ?? '', receiptText: data.receiptText,
     language: data.language, payQr: data.payQr, payCash: data.payCash, payCard: data.payCard,
@@ -151,6 +155,7 @@ export function SettingsScreen() {
   };
 
   const toSettingsInput = (source: Form): SettingsInput => ({
+    waiterOrderPermissions: source.waiterOrderPermissions,
     cafeName: source.cafeName,
     address: source.address,
     phone: source.phone,
@@ -273,6 +278,8 @@ export function SettingsScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+      <OrderPermissionsSettings permissions={form.waiterOrderPermissions} disabled={update.isPending}
+        onPermissions={(value) => set('waiterOrderPermissions', value)} />
       <View style={[styles.settingsGrid, desktop && { flexDirection: 'row' }]} onLayout={event => setGridWidth(event.nativeEvent.layout.width)}>
       <Card style={{ ...styles.card, ...(desktop ? { width: gridWidth > 0 ? (gridWidth - 32) / 3 * 2 + 16 : undefined, flex: gridWidth > 0 ? undefined : 2, minWidth: 0 } : {}) }}>
         <Text style={styles.cardTitle} translate>Информация о кафе</Text>

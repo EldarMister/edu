@@ -73,6 +73,6 @@ const styles = StyleSheet.create({
   sm: { borderRadius: 6, paddingHorizontal: 8, paddingVertical: 2 },
   md: { borderRadius: radius.sm, paddingHorizontal: 10, paddingVertical: 4 },
   text: { fontWeight: '500' },
-  textSm: { fontSize: fontSize.xs },
-  textMd: { fontSize: fontSize.sm },
+  textSm: { fontSize: 11 },
+  textMd: { fontSize: fontSize.xs },
 });

@@ -1,0 +1,10 @@
+{
+  "runtime": "@mediapipe/tasks-vision",
+  "version": "1.2.2",
+  "license": "Apache-2.0",
+  "runtimeSource": "https://www.npmjs.com/package/@mediapipe/tasks-vision/v/1.2.2",
+  "modelSource": "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+  "modelSha256": "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1",
+  "wasmSha256": "f5bd25147ac89d506074293ce2675969b10e827180db95a0d9689c2ed80764ab",
+  "htmlSha256": "96cadd4213a37ec2e7398da3bf101a075626c2ce3df531748b6d30b9a384bfdd"
+}

@@ -53,3 +53,28 @@ test('old account requests are never retried under a different account', async (
   const env = setup(); const config = env.request(); env.state.user = { id: 'second' };
   await assert.rejects(env.failure(config)); assert.equal(env.refreshCalls(), 0); assert.equal(env.retried.length, 0);
 });
+
+for (const failure of [new Error('offline'), { code: 'ECONNABORTED' }, { response: { status: 503 } }]) {
+  test(`temporary refresh failure preserves the session: ${failure.code || failure.message || failure.response.status}`, async () => {
+    const env = setup();
+    const pending = env.failure(env.request());
+    env.rejectRefresh(failure);
+    await assert.rejects(pending);
+    assert.equal(env.state.user.id, 'first');
+    assert.equal(env.state.accessToken, 'old-access');
+    assert.equal(env.state.refreshToken, 'old-refresh');
+    assert.equal(env.retried.length, 0);
+  });
+}
+
+for (const status of [401, 403]) {
+  test(`rejected refresh clears the expired session: ${status}`, async () => {
+    const env = setup();
+    const pending = env.failure(env.request());
+    env.rejectRefresh({ response: { status } });
+    await assert.rejects(pending);
+    assert.equal(env.state.user, null);
+    assert.equal(env.state.accessToken, null);
+    assert.equal(env.state.refreshToken, null);
+  });
+}

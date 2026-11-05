@@ -50,9 +50,11 @@ export function useRealtimeSync() {
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
       qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
       qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
     };
     const invalidateTables = () => {
+      qc.invalidateQueries({ queryKey: ['audit'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
@@ -70,6 +72,8 @@ export function useRealtimeSync() {
     };
     const invalidateSettings = () => {
       qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['kitchen'] });
       qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
       qc.invalidateQueries({ queryKey: ['audit'] });
     };
@@ -83,6 +87,7 @@ export function useRealtimeSync() {
       void qc.refetchQueries({ queryKey: ['categories'], type: 'active' });
       void qc.refetchQueries({ queryKey: ['dishes'], type: 'active' });
       void qc.refetchQueries({ queryKey: ['admin'], type: 'active' });
+      void qc.refetchQueries({ queryKey: ['settings'], type: 'active' });
     };
     const onNotificationNew = (n: RealtimeNotification) => {
       if (AppState.currentState !== 'active' && isRemotePushRegistered()) return;

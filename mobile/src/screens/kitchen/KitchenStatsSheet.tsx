@@ -15,6 +15,7 @@ import {
   type KitchenStatsPeriod,
 } from '@/services/api/kitchen';
 import type { PrepStation } from '@/types';
+import { HandTargetClip } from '@/features/hand-control/targets';
 
 const PERIODS: { value: KitchenStatsPeriod; label: string }[] = [
   { value: 'today', label: 'Сегодня' },
@@ -96,6 +97,7 @@ export function KitchenStatsSheet({
   const [to, setTo] = useState(() => localDate());
   const [preparedOpen, setPreparedOpen] = useState(false);
   const [hourlyOpen, setHourlyOpen] = useState(false);
+  const handScrollRef = React.useRef<ScrollView>(null);
 
   const rangeValid = period !== 'custom' || validDateRange(from, to);
   const statsQ = useKitchenStats({ period, ...(period === 'custom' ? { from, to } : {}) }, station, visible && rangeValid);
@@ -121,7 +123,8 @@ export function KitchenStatsSheet({
           </FastPressable>
         </View> : null}
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ScrollView ref={handScrollRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <HandTargetClip viewRef={handScrollRef}>
           <PeriodTabs period={period} onChange={setPeriod} />
           {period === 'custom' ? <DateRangeFields from={from} to={to} onFrom={setFrom} onTo={setTo} /> : null}
 
@@ -192,6 +195,7 @@ export function KitchenStatsSheet({
               </View>
             </>
           )}
+          </HandTargetClip>
         </ScrollView>
       </SafeAreaView>
 
@@ -541,6 +545,7 @@ function HourlyModal({
   const [period, setPeriod] = useState<KitchenStatsPeriod>(initialPeriod);
   const [from, setFrom] = useState(initialFrom);
   const [to, setTo] = useState(initialTo);
+  const handScrollRef = React.useRef<ScrollView>(null);
   const rangeValid = period !== 'custom' || validDateRange(from, to);
   const statsQ = useKitchenStats({ period, ...(period === 'custom' ? { from, to } : {}) }, station, rangeValid);
   const hourly = statsQ.data?.hourly ?? [];
@@ -555,7 +560,8 @@ function HourlyModal({
 
   return (
     <DetailModalShell title="Приготовлено по часам" onClose={onClose}>
-      <ScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={handScrollRef} contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
+        <HandTargetClip viewRef={handScrollRef}>
         <PeriodTabs period={period} onChange={setPeriod} />
         {period === 'custom' ? <DateRangeFields from={from} to={to} onFrom={setFrom} onTo={setTo} /> : null}
         {!rangeValid ? null : statsQ.isError ? <Text style={styles.tableEmpty} translate>Не удалось загрузить статистику</Text> : statsQ.isLoading ? (
@@ -585,6 +591,7 @@ function HourlyModal({
             </View>
           </>
         )}
+        </HandTargetClip>
       </ScrollView>
     </DetailModalShell>
   );

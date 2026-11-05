@@ -1,16 +1,14 @@
+import { waiterOrderPermission, type WaiterOrderPermissions } from '@/lib/order-permissions';
 import type { Order, OrderStatus } from '@/types';
 import { hallSuffix } from '@/utils/format';
 
-const CANCELLABLE: OrderStatus[] = [
-  'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'partially_rejected',
-];
 const PRELIMINARY: OrderStatus[] = [
   'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
   'picked_up', 'served', 'partially_rejected', 'waiting_payment',
 ];
 
-export function canWaiterCancelOrder(order: Order): boolean {
-  return CANCELLABLE.includes(order.status);
+export function canWaiterCancelOrder(order: Order, policies?: WaiterOrderPermissions): boolean {
+  return waiterOrderPermission(order, 'cancel', policies).allowed;
 }
 
 export function canRequestPreliminaryBill(order: Order): boolean {

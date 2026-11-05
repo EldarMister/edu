@@ -34,7 +34,7 @@ import {
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { orderLocation } from './orderRules';
 
-type SplitMethod = 'qr' | 'cash' | 'mixed';
+type SplitMethod = PaymentMethod;
 type SplitPart = { method: Exclude<PaymentMethod, 'mixed'>; amount: number };
 type OperationOwner = { epoch: number; orderId: string; userId?: string };
 type PaymentPayload =
@@ -57,16 +57,15 @@ const METHOD_LABELS: Record<PaymentMethod, string> = {
   mixed: 'Смешанная',
 };
 
-const SPLIT_METHOD_LABELS: Record<SplitMethod, string> = {
-  qr: 'QR-код',
-  cash: 'Наличные',
-  mixed: 'Смешанная',
-};
-const SPLIT_METHODS: { key: SplitMethod; label: string }[] = [
-  { key: 'qr', label: SPLIT_METHOD_LABELS.qr },
-  { key: 'cash', label: SPLIT_METHOD_LABELS.cash },
-  { key: 'mixed', label: SPLIT_METHOD_LABELS.mixed },
-];
+const SPLIT_METHOD_LABELS = METHOD_LABELS;
+
+function paymentMethodEnabled(method: PaymentMethod, enabled: PaymentMethod[]) {
+  return method === 'mixed' ? enabled.includes('qr') && enabled.includes('cash') : enabled.includes(method);
+}
+
+function paymentMethodReady(method: PaymentMethod, enabled: PaymentMethod[], qrAvailable: boolean) {
+  return paymentMethodEnabled(method, enabled) && (qrAvailable || (method !== 'qr' && method !== 'mixed'));
+}
 
 function amountValue(value: string): number {
   return Number(value.replace(',', '.')) || 0;
@@ -210,7 +209,7 @@ export function PaymentSheet({
   const qrMissing = selected === 'qr' && !qrSrc;
   const activeItems = activeOrder.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
-  const confirmDisabled = pay.isPending || qrMissing || (mixedSelected && !mixedValid) || !allActiveItemsServed;
+  const confirmDisabled = pay.isPending || !paymentMethodReady(selected, enabled, !!qrSrc) || qrMissing || (mixedSelected && !mixedValid) || !allActiveItemsServed;
 
   const complement = (value: string) => {
     const trimmed = value.trim();
@@ -234,6 +233,10 @@ export function PaymentSheet({
     setError('');
     try {
       try {
+        const methods = 'splitPayments' in payload ? payload.splitPayments.map((part) => part.method) : [payload.method];
+        if (methods.some((method) => !paymentMethodReady(method, enabled, !!qrSrc))) {
+          throw new Error('Выбранный способ оплаты недоступен. Проверьте настройки оплаты.');
+        }
         await pay.mutateAsync(payload);
       } catch (e) {
         if (ownsOperation(owner)) {
@@ -304,8 +307,6 @@ export function PaymentSheet({
   };
 
   const handleSplitComplete = ({
-    cash,
-    qr,
     payments,
   }: {
     cash: number;
@@ -313,8 +314,8 @@ export function PaymentSheet({
     payments: SplitPart[];
   }) => {
     setError('');
-    const splitMethod: PaymentMethod =
-      cash > 0 && qr > 0 ? 'mixed' : qr > 0 ? 'qr' : 'cash';
+    const methods = [...new Set(payments.map((payment) => payment.method))];
+    const splitMethod: PaymentMethod = methods.length === 1 ? methods[0] : 'mixed';
     const payload: PaymentPayload = payments.length > 1
       ? { orderId: activeOrder.id, method: splitMethod, splitPayments: payments }
       : { orderId: activeOrder.id, method: splitMethod };
@@ -471,6 +472,8 @@ export function PaymentSheet({
         instantDismiss={showSuccess || isPaymentComplete}
         orderId={activeOrder.id}
         total={total}
+        paymentMethods={enabled}
+        qrAvailable={!!qrSrc}
         submitting={pay.isPending}
         onClose={() => setSplitOpen(false)}
         onComplete={handleSplitComplete}
@@ -621,6 +624,8 @@ function SplitBillSheet({
   instantDismiss,
   orderId,
   total,
+  paymentMethods,
+  qrAvailable,
   submitting,
   onClose,
   onComplete,
@@ -629,25 +634,43 @@ function SplitBillSheet({
   instantDismiss: boolean;
   orderId: string;
   total: number;
+  paymentMethods: PaymentMethod[];
+  qrAvailable: boolean;
   submitting: boolean;
   onClose: () => void;
   onComplete: (totals: { cash: number; qr: number; payments: SplitPart[] }) => Promise<void>;
 }) {
+  const availableMethods = useMemo(() => {
+    const methods: { key: SplitMethod; label: string }[] = ALL_METHODS.filter((method) => paymentMethods.includes(method.key));
+    if (paymentMethodEnabled('mixed', paymentMethods)) methods.push({ key: 'mixed', label: METHOD_LABELS.mixed });
+    return methods;
+  }, [paymentMethods]);
+  const defaultMethod = availableMethods[0]?.key ?? 'qr';
   const [count, setCount] = useState(2);
+  const [completionError, setCompletionError] = useState('');
+  const completionOwner = React.useRef({ orderId, epoch: 0, pending: false, mounted: true });
+  if (completionOwner.current.orderId !== orderId) {
+    completionOwner.current = { orderId, epoch: completionOwner.current.epoch + 1, pending: false, mounted: true };
+  }
   const [completing, setCompleting] = useState(false);
   const [payments, setPayments] = useState(() =>
-    Array.from({ length: 2 }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })),
+    Array.from({ length: 2 }, () => ({ method: defaultMethod, cash: '', qr: '', paid: false })),
   );
   const [amountInputs, setAmountInputs] = useState(() => splitAmounts(total, 2));
   const [methodMenuIndex, setMethodMenuIndex] = useState<number | null>(null);
 
   React.useEffect(() => {
     setCount(2);
+    setCompletionError('');
     setCompleting(false);
-    setPayments(Array.from({ length: 2 }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })));
+    setPayments(Array.from({ length: 2 }, () => ({ method: defaultMethod, cash: '', qr: '', paid: false })));
     setAmountInputs(splitAmounts(total, 2));
     setMethodMenuIndex(null);
-  }, [orderId, total]);
+  }, [orderId]);
+  React.useEffect(() => {
+    completionOwner.current.mounted = true;
+    return () => { completionOwner.current.mounted = false; };
+  }, []);
 
   const amounts = useMemo(() => amountInputs.map((value) => round2(amountValue(value))), [amountInputs]);
   const assignedSum = round2(amounts.reduce((sum, amount) => sum + amount, 0));
@@ -656,22 +679,51 @@ function SplitBillSheet({
   const paidSum = payments.reduce((sum, payment, index) => (payment.paid ? sum + amounts[index] : sum), 0);
   const remaining = round2(total - paidSum);
   const busy = submitting || completing;
+  const invalidPaidMethod = payments.some((payment) => payment.paid && !paymentMethodReady(payment.method, paymentMethods, qrAvailable));
+  const methodWarning = invalidPaidMethod
+    ? 'Способ уже отмеченного платежа отключён. Обратитесь к администратору, чтобы завершить оплату.'
+    : !availableMethods.length
+      ? 'Нет доступных способов оплаты. Обратитесь к администратору.'
+      : payments.some((payment) => !payment.paid && !paymentMethodReady(payment.method, paymentMethods, qrAvailable))
+        ? 'QR-оплата недоступна: QR-код не загружен. Выберите другой способ оплаты.'
+        : '';
+
+  React.useEffect(() => {
+    if (busy) return;
+    setMethodMenuIndex(null);
+    setPayments((current) => {
+      let changed = false;
+      const next = current.map((payment) => {
+        if (payment.paid || paymentMethodEnabled(payment.method, paymentMethods) || !availableMethods.length) return payment;
+        changed = true;
+        return { ...payment, method: defaultMethod, cash: '', qr: '' };
+      });
+      return changed ? next : current;
+    });
+  }, [paymentMethods, availableMethods, defaultMethod, busy]);
+
+  React.useEffect(() => {
+    // Keep already accepted parts if the order changes while the sheet is open.
+    // The remaining editable parts must be reconciled with the new total.
+    if (!anyPaid) setAmountInputs(splitAmounts(total, count));
+  }, [total, count, anyPaid]);
 
   const changeCount = (next: number) => {
-    if (anyPaid) return;
+    if (anyPaid || busy) return;
     const normalized = Math.max(2, Math.min(10, next));
     setMethodMenuIndex(null);
     setCount(normalized);
-    setPayments(Array.from({ length: normalized }, () => ({ method: 'qr' as SplitMethod, cash: '', qr: '', paid: false })));
+    setPayments(Array.from({ length: normalized }, () => ({ method: defaultMethod, cash: '', qr: '', paid: false })));
     setAmountInputs(splitAmounts(total, normalized));
   };
 
   const patchPayment = (index: number, patch: Partial<{ method: SplitMethod; cash: string; qr: string; paid: boolean }>) => {
+    if (busy || payments[index]?.paid || (patch.method && !paymentMethodEnabled(patch.method, paymentMethods))) return;
     setPayments((current) => current.map((payment, i) => (i === index ? { ...payment, ...patch } : payment)));
   };
 
   const onAmountChange = (index: number, value: string) => {
-    if (payments[index]?.paid) return;
+    if (payments[index]?.paid || busy) return;
     const clean = value.replace(',', '.');
     setAmountInputs((current) => {
       const next = [...current];
@@ -700,7 +752,7 @@ function SplitBillSheet({
 
   const canPay = (index: number) => {
     const payment = payments[index];
-    if (!payment || payment.paid || amounts[index] <= 0 || !assignedValid) return false;
+    if (!payment || payment.paid || amounts[index] <= 0 || !assignedValid || invalidPaidMethod || !paymentMethodReady(payment.method, paymentMethods, qrAvailable)) return false;
     if (payment.method !== 'mixed') return true;
     const cash = amountValue(payment.cash);
     const qr = amountValue(payment.qr);
@@ -708,7 +760,8 @@ function SplitBillSheet({
   };
 
   const payOne = async (index: number) => {
-    if (!canPay(index) || busy) return;
+    if (!canPay(index) || busy || completionOwner.current.pending) return;
+    setCompletionError('');
     setMethodMenuIndex(null);
     const next = payments.map((payment, i) => (i === index ? { ...payment, paid: true } : payment));
     setPayments(next);
@@ -725,6 +778,8 @@ function SplitBillSheet({
       } else if (payment.method === 'cash') {
         cash += amount;
         splitParts.push({ method: 'cash', amount });
+      } else if (payment.method === 'card') {
+        splitParts.push({ method: 'card', amount });
       } else {
         const cashPart = round2(amountValue(payment.cash));
         const qrPart = round2(amountValue(payment.qr));
@@ -735,16 +790,28 @@ function SplitBillSheet({
       }
     });
 
+    const owner = completionOwner.current;
+    owner.pending = true;
     setCompleting(true);
     try {
       await onComplete({ cash: round2(cash), qr: round2(qr), payments: splitParts });
+    } catch (error) {
+      if (completionOwner.current === owner && owner.mounted) {
+        // The server did not confirm the combined payment; let the waiter retry
+        // without losing the parts already marked before this last attempt.
+        setPayments((current) => current.map((payment, i) => i === index ? { ...payment, paid: false } : payment));
+        setCompletionError(apiError(error));
+      }
     } finally {
-      setCompleting(false);
+      owner.pending = false;
+      if (completionOwner.current === owner && owner.mounted) setCompleting(false);
     }
   };
 
   return (
     <BottomSheet visible={visible} onClose={onClose} title="Разделение счёта" animationPreset={instantDismiss ? 'default' : 'split'} maxHeight="88%">
+      {completionError ? <Text style={styles.splitError}>{completionError}</Text> : null}
+      {methodWarning ? <Text style={styles.splitError} translate>{methodWarning}</Text> : null}
       <View style={styles.splitHeader}>
         <View>
           <Text style={styles.splitHint} translate>Сумма к оплате</Text>
@@ -801,11 +868,12 @@ function SplitBillSheet({
                     <View style={styles.splitActionRow}>
                       <SplitMethodSelect
                         value={payment.method}
+                        methods={availableMethods}
                         open={methodMenuIndex === index}
-                        disabled={busy}
+                        disabled={busy || availableMethods.length === 0}
                         onToggle={() => setMethodMenuIndex((current) => (current === index ? null : index))}
                         onChange={(method) => {
-                          patchPayment(index, { method });
+                          patchPayment(index, { method, cash: '', qr: '' });
                           setMethodMenuIndex(null);
                         }}
                       />
@@ -824,6 +892,7 @@ function SplitBillSheet({
                           <Text style={styles.splitInputLabel} translate>Наличные</Text>
                           <TextInput
                             value={payment.cash}
+                            editable={!busy}
                             onChangeText={(value) => onMixedCash(index, value)}
                             keyboardType="decimal-pad"
                             placeholder="0"
@@ -835,6 +904,7 @@ function SplitBillSheet({
                           <Text style={styles.splitInputLabel}>QR</Text>
                           <TextInput
                             value={payment.qr}
+                            editable={!busy}
                             onChangeText={(value) => onMixedQr(index, value)}
                             keyboardType="decimal-pad"
                             placeholder="0"
@@ -887,12 +957,14 @@ function CounterButton({
 
 function SplitMethodSelect({
   value,
+  methods,
   open,
   disabled,
   onToggle,
   onChange,
 }: {
   value: SplitMethod;
+  methods: { key: SplitMethod; label: string }[];
   open: boolean;
   disabled: boolean;
   onToggle: () => void;
@@ -950,7 +1022,7 @@ function SplitMethodSelect({
             menuStyle,
           ]}
         >
-          {SPLIT_METHODS.map((method) => {
+          {methods.map((method) => {
             const active = method.key === value;
             return (
               <FastPressable

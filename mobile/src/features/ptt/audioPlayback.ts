@@ -2,6 +2,7 @@ import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import { configureAudioPlayback } from '@/lib/sound';
 import type { PttAudioPayload } from './types';
+import { playPttCue } from './sounds';
 
 /** Playback belongs to one receiver lifetime, including asynchronous file/sound creation. */
 export class PttPlaybackQueue {
@@ -9,6 +10,7 @@ export class PttPlaybackQueue {
   private epoch = 0;
   private pumping = false;
   private current: { sound: Audio.Sound; finish: () => void } | null = null;
+  private cue: AbortController | null = null;
 
   constructor(private onSpeaker?: (payload: PttAudioPayload | null) => void) {}
 
@@ -21,6 +23,8 @@ export class PttPlaybackQueue {
     this.epoch += 1;
     this.queue = [];
     this.pumping = false;
+    this.cue?.abort();
+    this.cue = null;
     const current = this.current;
     this.current = null;
     if (current) {
@@ -44,7 +48,15 @@ export class PttPlaybackQueue {
         try {
           await FileSystem.writeAsStringAsync(path, next.chunk, { encoding: FileSystem.EncodingType.Base64 });
           if (epoch !== this.epoch) continue;
-          await this.playFile(path, epoch);
+          const cue = new AbortController();
+          this.cue = cue;
+          await playPttCue('start', cue.signal);
+          try {
+            if (epoch === this.epoch) await this.playFile(path, epoch);
+          } finally {
+            if (epoch === this.epoch) await playPttCue('end', cue.signal);
+            if (this.cue === cue) this.cue = null;
+          }
         } catch { /* A failed radio message must not interrupt the next message. */ }
         finally { await FileSystem.deleteAsync(path, { idempotent: true }).catch(() => undefined); }
       }

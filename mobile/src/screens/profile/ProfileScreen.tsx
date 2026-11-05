@@ -1,8 +1,8 @@
 import React from 'react';
-import { Image, Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { BackHandler, Image, Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card } from '@/components/ui';
@@ -22,7 +22,7 @@ import { disconnectSocket } from '@/services/socket';
 import {
   playNotificationSoundTest,
   unregisterPushDevice,
-  useWaiterPushNotifications,
+  usePushNotifications,
   type PushStatus,
 } from '@/services/push';
 import {
@@ -59,6 +59,7 @@ const ITEM_STATUS: Record<OrderItemStatus, string> = {
 };
 
 export function ProfileScreen() {
+  const focused = useIsFocused();
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
   const isWaiter = user?.role === 'WAITER';
@@ -67,7 +68,7 @@ export function ProfileScreen() {
   const endShift = useEndShift();
   const push = useNotifications((s) => s.push);
   const history = useNotifications((s) => s.history);
-  const pushNotifications = useWaiterPushNotifications(isWaiter);
+  const pushNotifications = usePushNotifications(!!user);
   const [checkingSound, setCheckingSound] = React.useState(false);
   const [notifOpen, setNotifOpen] = React.useState(true);
   const [showAllNotif, setShowAllNotif] = React.useState(false);
@@ -78,16 +79,22 @@ export function ProfileScreen() {
   // Пробрасываем открытость личного кабинета в стор, чтобы PttOverlay спрятал
   // кнопку рации, пока кабинет открыт (кабинет — внутренний экран, не маршрут).
   React.useEffect(() => {
-    setRadioCabinetOpen(isWaiter && cabinetOpen);
+    setRadioCabinetOpen(isWaiter && cabinetOpen && focused);
     return () => setRadioCabinetOpen(false);
-  }, [isWaiter, cabinetOpen, setRadioCabinetOpen]);
+  }, [isWaiter, cabinetOpen, focused, setRadioCabinetOpen]);
+  useFocusEffect(React.useCallback(() => () => setCabinetOpen(false), []));
+  React.useEffect(() => {
+    if (!focused || !isWaiter || !cabinetOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => { setCabinetOpen(false); return true; });
+    return () => subscription.remove();
+  }, [focused, isWaiter, cabinetOpen]);
   const shift = isWaiter ? shiftQuery.data : null;
   const shiftActive = shift?.status === 'active';
   const visibleNotifs = showAllNotif ? history : history.slice(0, 3);
   const showEnablePush =
     pushNotifications.status !== 'subscribed' &&
     pushNotifications.status !== 'unsupported' &&
-    pushNotifications.status !== 'denied' &&
+    pushNotifications.status !== 'unavailable' &&
     pushNotifications.status !== 'checking';
 
   const onLogout = () => {
@@ -123,8 +130,8 @@ export function ProfileScreen() {
     try {
       const ended = await endShift.mutateAsync();
       setShiftSummary(ended);
-    } catch {
-      push({ message: 'Не удалось завершить смену', type: 'error', at: new Date().toISOString() });
+    } catch (error) {
+      push({ message: apiError(error), type: 'error', at: new Date().toISOString() });
     }
   };
 
@@ -222,11 +229,16 @@ export function ProfileScreen() {
                     </View>
                     {showEnablePush ? (
                       <Button
-                        title="Включить"
+                        title={pushNotifications.status === 'denied' ? 'Настройки' : 'Включить'}
                         size="md"
                         loading={pushNotifications.status === 'checking'}
                         style={styles.enablePushButton}
-                        onPress={() => void pushNotifications.enable()}
+                        onPress={() => {
+                          if (pushNotifications.status === 'denied') void Linking.openSettings().catch(() => {
+                            push({ message: 'Откройте настройки уведомлений EDU POS на телефоне', type: 'info', at: new Date().toISOString() });
+                          });
+                          else void pushNotifications.enable();
+                        }}
                       />
                     ) : null}
                   </View>
@@ -811,11 +823,11 @@ function duration(startIso: string, endIso: string): string {
 function pushStatusText(status: PushStatus) {
   switch (status) {
     case 'subscribed':
-      return 'Включены. Официант получит уведомление, даже если приложение свёрнуто.';
+      return 'Включены. Уведомления доступны, даже если приложение свёрнуто.';
     case 'denied':
       return 'Запрещены в настройках телефона. Разрешите уведомления для EDU POS.';
     case 'unavailable':
-      return 'Push-уведомления ещё не настроены на сервере.';
+      return 'Для уведомлений нужна установленная сборка EDU POS.';
     case 'unsupported':
       return 'Это устройство не поддерживает push-уведомления.';
     case 'checking':
@@ -823,7 +835,7 @@ function pushStatusText(status: PushStatus) {
     case 'error':
       return 'Не удалось включить. Проверьте разрешения и настройки push.';
     default:
-      return 'Нажмите "Включить", чтобы получать готовность заказа в фоне.';
+      return 'Нажмите "Включить", чтобы получать уведомления в фоне.';
   }
 }
 

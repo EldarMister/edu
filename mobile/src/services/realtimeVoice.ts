@@ -1,4 +1,4 @@
-import type { Order, PrepStation } from '@/types';
+import type { Order, PrepStation, ReceiptPrintRequest } from '@/types';
 
 export type WaiterVoicedOrder = Order & {
   voice?: { text?: string | null; waiterText?: string | null; suppressWaiter?: boolean } | null;
@@ -50,6 +50,11 @@ function tableNumberVoice(value: unknown): string {
   const raw = String(value ?? '').trim();
   if (!raw) return '';
   return /^\d+$/.test(raw) ? numberToWords(Number(raw)) : raw;
+}
+
+export function receiptRequestVoice(request: ReceiptPrintRequest): string {
+  const documentName = request.type === 'preliminary' ? 'счёта' : 'чека';
+  return request.voice?.text ?? `Официант ${request.waiterName} отправил заявку на печать ${documentName}. Стол номер ${tableNumberVoice(request.tableNumber)}.`;
 }
 
 export function waiterLocationText(order: Order): string {

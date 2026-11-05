@@ -1,14 +1,25 @@
+import { waiterItemPermission, type WaiterOrderPermissions } from '@/lib/order-permissions';
 import type { CartLine, CartSetComponent, Dish, Order } from '@/types';
 
 /** Восстанавливает заказ в линии корзины для режима редактирования. */
-export function orderToCartLines(order: Order, dishes: Dish[]): CartLine[] {
+export function orderToCartLines(order: Order, dishes: Dish[], policies?: WaiterOrderPermissions): CartLine[] {
   const dishById = new Map(dishes.map((dish) => [dish.id, dish]));
+
+  // Do not silently drop a live item: saving would cancel it on the server.
+  if (order.items.some((item) => !['rejected', 'cancelled'].includes(item.status) && (!item.dishId || !dishById.has(item.dishId)))) return [];
 
   return order.items
     .filter((item) => item.status !== 'rejected' && item.status !== 'cancelled')
     .map((item): CartLine | null => {
       const dish = item.dishId ? dishById.get(item.dishId) : undefined;
       if (!dish) return null;
+      const editPermission = waiterItemPermission(order, item, 'edit', policies);
+      const cancelPermission = waiterItemPermission(order, item, 'cancel', policies);
+      const origin = {
+        orderItemId: item.id, lineId: `edit-${item.id}`,
+        editAllowed: editPermission.allowed, cancelAllowed: cancelPermission.allowed,
+        restrictionReason: !editPermission.allowed ? editPermission.reason : !cancelPermission.allowed ? cancelPermission.reason : undefined,
+      };
 
       if (dish.isSet && item.setComponents?.length) {
         const defKey = (dishId: string | null | undefined, variantName?: string | null) =>
@@ -48,7 +59,9 @@ export function orderToCartLines(order: Order, dishes: Dish[]): CartLine[] {
         });
 
         return {
+          ...origin,
           dish,
+          comment: item.comment ?? undefined,
           quantity: item.quantity,
           takeaway: item.takeaway ?? undefined,
           lineId: `set-edit-${item.id}`,
@@ -61,6 +74,7 @@ export function orderToCartLines(order: Order, dishes: Dish[]): CartLine[] {
         : undefined;
 
       return {
+        ...origin,
         dish,
         variant,
         weightGrams: item.weightGrams ?? undefined,

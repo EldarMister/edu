@@ -17,6 +17,7 @@ function source(name) {
 }
 
 const { PushRegistrationManager } = source('registration.ts');
+const { registerPushWithSession } = source('request.ts');
 const { NotificationDeduper, notificationTarget, notificationData } = source('events.ts');
 const oldSession = { userId: 'waiter-a', accessToken: 'jwt-a' };
 function fixture(overrides = {}) {
@@ -110,6 +111,63 @@ test('rotated token replaces the previous binding on the same installation', asy
   await f.manager.reconcile();
   assert.equal(f.state.saved.binding.pushToken, 'ExpoPushToken[new]');
   assert.equal(f.state.registered[0].id, f.state.registered[1].id);
+});
+
+test('registration and persisted logout cleanup use JWT refreshed during token acquisition', async () => {
+  const f = fixture();
+  f.adapter.token = async () => {
+    f.state.session = { ...oldSession, accessToken: 'renewed-before-send' };
+    return f.state.token;
+  };
+  f.adapter.register = async binding => {
+    f.state.registered.push({ ...binding });
+    f.state.session = { ...oldSession, accessToken: 'renewed-during-send' };
+  };
+  assert.equal(await f.manager.reconcile(), 'subscribed');
+  assert.equal(f.state.registered[0].accessToken, 'renewed-before-send');
+  assert.equal(f.state.saved.binding.accessToken, 'renewed-during-send');
+});
+
+test('expired push registration refreshes once and sends the current account token', async () => {
+  let current = oldSession;
+  const sent = [];
+  let refreshes = 0;
+  await registerPushWithSession(oldSession, {
+    session: () => current,
+    refresh: async () => { refreshes++; current = { ...oldSession, accessToken: 'renewed' }; },
+    send: async token => { sent.push(token); if (token === 'jwt-a') throw { response: { status: 401 } }; },
+  });
+  assert.equal(refreshes, 1);
+  assert.deepEqual(sent, ['jwt-a', 'renewed']);
+});
+
+test('account switch while refreshing push registration never sends the new account credentials', async () => {
+  let current = oldSession;
+  const sent = [];
+  await assert.rejects(registerPushWithSession(oldSession, {
+    session: () => current,
+    refresh: async () => { current = { userId: 'other', accessToken: 'other-secret' }; },
+    send: async token => { sent.push(token); throw { response: { status: 401 } }; },
+  }));
+  assert.deepEqual(sent, ['jwt-a']);
+});
+
+test('push registration reuses an existing refresh and does not retry network failures as auth', async () => {
+  let current = oldSession;
+  const sent = [];
+  const refresh = () => { throw new Error('Unexpected refresh'); };
+  await registerPushWithSession(oldSession, {
+    session: () => current, refresh,
+    send: async token => {
+      sent.push(token);
+      if (token === 'jwt-a') { current = { ...oldSession, accessToken: 'already-renewed' }; throw { response: { status: 401 } }; }
+    },
+  });
+  assert.deepEqual(sent, ['jwt-a', 'already-renewed']);
+  await assert.rejects(registerPushWithSession(oldSession, {
+    session: () => current, refresh,
+    send: async () => { throw new Error('offline'); },
+  }), /offline/);
 });
 
 test('revoking OS permission removes a persisted registration', async () => {

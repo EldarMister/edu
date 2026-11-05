@@ -115,7 +115,8 @@ export class PushRegistrationManager {
         }
         const pushToken = await this.adapter.token();
         if (epoch !== this.epoch || this.adapter.session()?.userId !== session.userId) return this.status;
-        const binding = { ...session, pushToken };
+        // Native/Expo token acquisition can outlive an access-token refresh.
+        const binding = { ...this.adapter.session()!, pushToken };
         // Refresh registration on resume: the server may have removed a failed token.
         await this.adapter.register(binding, state.deviceId);
         if (epoch !== this.epoch || this.adapter.session()?.userId !== session.userId) {
@@ -125,7 +126,7 @@ export class PushRegistrationManager {
           return this.status;
         }
         if (state.binding && state.binding.pushToken !== pushToken) this.pend(state.binding);
-        state.binding = binding;
+        state.binding = { ...binding, ...this.adapter.session()! };
         // Successful registration transfers this installation atomically on the server.
         // Revocations that preceded it no longer need stale account credentials.
         state.pending = [];

@@ -324,6 +324,10 @@ export interface CartSetComponent {
 
 /** Локальная позиция корзины (до отправки на кухню). */
 export interface CartLine {
+  orderItemId?: string;
+  editAllowed?: boolean;
+  cancelAllowed?: boolean;
+  restrictionReason?: string;
   dish: Dish;
   variant?: DishVariant;
   weightGrams?: number;

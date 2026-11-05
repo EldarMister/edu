@@ -1,5 +1,31 @@
 # Native notification delivery and verification
 
+## 6 November 2026 revision (0.3.0)
+
+- Push reconciliation waits for auth hydration, so an empty initial auth store
+  cannot revoke a saved device binding. Registration uses the current access JWT
+  after native token acquisition and retries an expired JWT through the existing
+  auth refresh flow. An account switch cancels the retry instead of sending the
+  next account's credentials. The saved binding also captures the refreshed JWT.
+- Every signed-in role can enable notifications in Profile. Denied permission
+  opens the app's system settings; it no longer leaves kitchen/bar/admin without
+  a recovery action.
+- The radio foreground service uses the monochrome notification drawable instead
+  of the adaptive launcher icon. Expo notification cards also receive the original
+  EP brand asset as a large icon via SDK 52 manifest metadata.
+- Android prebuild validates Firebase configuration against the app package and
+  project sender and fails if it is missing. It cannot silently produce an APK
+  without the Firebase input needed for remote delivery.
+
+The focused token/registration/build tests pass (27 tests). These checks cover
+hydration, JWT expiry, account switching, token rotation and transient failures;
+they do not prove transport delivery on a physical device. Previous delivery
+results below describe their recorded versions, not 0.3.0.
+
+Implementation references: [SDK 52 Android notification plugin](https://github.com/expo/expo/blob/sdk-52/packages/expo-notifications/plugin/src/withNotificationsAndroid.ts),
+[SDK 52 notification builder](https://github.com/expo/expo/blob/sdk-52/packages/expo-notifications/android/src/main/java/expo/modules/notifications/notifications/presentation/builders/ExpoNotificationBuilder.kt),
+[Android background FCM delivery](https://firebase.google.com/docs/cloud-messaging/android/receive-messages).
+
 The mobile client is Expo SDK 52. Remote notifications use Expo Push Service, with
 FCM on Android and APNs on iOS. They do not depend on a running Socket.IO connection
 or the Android radio service. The backend remains compatible with the main PWA's

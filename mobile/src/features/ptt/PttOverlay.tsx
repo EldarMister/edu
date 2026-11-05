@@ -303,9 +303,9 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
     const seq = ++joinSeqRef.current;
     const attempt = (retriesLeft: number) => {
       if (joinSeqRef.current !== seq) return;
-      sock.emit(PTT_EVENTS.JOIN, { channel }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
+      sock.timeout(5000).emit(PTT_EVENTS.JOIN, { channel }, (error: Error | null, ack: { ok?: boolean; onlineCount?: number } | undefined) => {
         if (joinSeqRef.current !== seq) return;
-        if (ack?.ok) {
+        if (!error && ack?.ok) {
           if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);
           return;
         }
@@ -318,7 +318,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   // Последний выбранный канал переживает перезапуск приложения.
   React.useEffect(() => {
     let cancelled = false;
-    void AsyncStorage.getItem(PTT_CHANNEL_STORAGE_KEY).then((stored) => {
+    void AsyncStorage.getItem(PTT_CHANNEL_STORAGE_KEY).catch(() => null).then((stored) => {
       if (cancelled) return;
       setChannel(isPttChannel(stored) ? stored : defaultChannelForRole(user?.role));
     });
@@ -329,7 +329,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
 
   React.useEffect(() => {
     if (!user?.id) return undefined;
-    void startPttBackgroundRuntime(channel);
+    void startPttBackgroundRuntime(channel).catch(error => console.warn('[ptt] Фоновая рация недоступна:', error));
     return () => {
       void stopPttBackgroundRuntime();
     };
@@ -347,6 +347,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
     sock.on('connect', joinChannel);
     return () => {
       sock.off('connect', joinChannel);
+      joinSeqRef.current++;
     };
   }, [joinChannel]);
 
@@ -356,13 +357,13 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
       if (payload.channel === channel) setOnlineCount(payload.onlineCount);
     };
     const onBusy = (payload: PttBusyPayload) => {
-      if (payload.channel === channel) {
+      if (payload.channel === channel || payload.channel === 'general') {
         setBusySpeaker({ id: payload.speaker?.id ?? 'unknown', name: payload.speaker?.name });
         if (payload.speaker?.name) lastSpeakerNameRef.current = payload.speaker.name;
       }
     };
     const onFree = (payload: PttFreePayload) => {
-      if (payload.channel === channel) setBusySpeaker(null);
+      if (payload.channel === channel || payload.channel === 'general') setBusySpeaker(null);
     };
     sock.on(PTT_EVENTS.PRESENCE, onPresence);
     sock.on(PTT_EVENTS.CHANNEL_BUSY, onBusy);

@@ -9,6 +9,8 @@ import { PwaIcon } from './PwaIcon';
 import { FastPressable } from './FastPressable';
 import { sheetPresets, type SheetAnimationPreset } from './motion';
 import { SheetPortal, useSheetPortalViewportHeight } from './SheetPortal';
+import { HandPointer } from '@/features/hand-control/HandPointer';
+import { HandTargetModal } from '@/features/hand-control/targets';
 
 function dismissKeyboard() {
   const focused = TextInput.State.currentlyFocusedInput?.();
@@ -121,6 +123,7 @@ export function BottomSheet({ visible, onClose, onDismiss, animationPreset = 'de
   const { height: windowHeight } = useWindowDimensions();
   const portalViewportHeight = useSheetPortalViewportHeight();
   const [render, setRender] = React.useState(visible);
+  const handPanelRef = React.useRef<View>(null);
   const snapshot = React.useRef(currentContent);
   if (visible) snapshot.current = currentContent;
   const content = visible ? currentContent : snapshot.current;
@@ -218,12 +221,13 @@ export function BottomSheet({ visible, onClose, onDismiss, animationPreset = 'de
     ? Math.min(windowHeight * parseFloat(content.maxHeight) / 100, portalViewportHeight || windowHeight)
     : content.maxHeight;
   const sheet = (
+    <HandTargetModal>
       <GestureHandlerRootView style={[styles.root, inline && styles.inlineRoot]} pointerEvents="box-none">
         <Animated.View style={[styles.backdrop, content.bottomInset != null && { bottom: content.bottomInset }, content.backdropColor && { backgroundColor: content.backdropColor }, backdropStyle]}>
-          <FastPressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Закрыть" />
+          <FastPressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Закрыть" handExclude={handPanelRef} />
         </Animated.View>
         <View pointerEvents="box-none" style={[styles.viewport, centered && styles.centerViewport, content.bottomInset != null && { bottom: content.bottomInset }]}>
-          <Animated.View onLayout={event => {
+          <Animated.View ref={handPanelRef} collapsable={false} onLayout={event => {
             panelHeight.value = Math.max(1, event.nativeEvent.layout.height);
             if (inline && !ready.current) { ready.current = true; enter(); }
           }} style={[
@@ -239,7 +243,9 @@ export function BottomSheet({ visible, onClose, onDismiss, animationPreset = 'de
             </SafeAreaView>
           </Animated.View>
         </View>
+        <HandPointer />
       </GestureHandlerRootView>
+    </HandTargetModal>
   );
   if (inline) return <SheetPortal>{sheet}</SheetPortal>;
   return (

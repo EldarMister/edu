@@ -8,6 +8,8 @@ import { colors } from '@/theme';
 import { calendarCells, calendarMonth, dateToIso, displayDate, isAllowedDate, parseDisplayDate, shiftCalendarMonth } from '@/utils/calendarDate';
 import { FastPressable } from './FastPressable';
 import { PwaIcon } from './PwaIcon';
+import { HandTargetClip, HandTargetModal } from '@/features/hand-control/targets';
+import { HandPointer } from '@/features/hand-control/HandPointer';
 
 type Props = Omit<TextInputProps, 'value' | 'onChangeText'> & {
   value: string;
@@ -44,6 +46,8 @@ export function DateField({
   const [contentHeight, setContentHeight] = React.useState(340);
   const anchorRef = React.useRef<View>(null);
   const inputRef = React.useRef<TextInput>(null);
+  const handPanelRef = React.useRef<View>(null);
+  const handScrollRef = React.useRef<ScrollView>(null);
   const mountedRef = React.useRef(true);
   const openedRef = React.useRef(open);
   openedRef.current = open;
@@ -145,14 +149,15 @@ export function DateField({
       {error ? <Text style={styles.error}>{error}</Text> : null}
     </View>
     <Modal visible={open && canEdit} transparent animationType="none" hardwareAccelerated onRequestClose={close} onShow={measureAnchor}>
+      <HandTargetModal>
       <View style={styles.modalRoot} accessibilityViewIsModal onAccessibilityEscape={close}
         onLayout={event => { const { width, height } = event.nativeEvent.layout; setViewport({ width, height }); measureAnchor(); }}>
-        <FastPressable style={StyleSheet.absoluteFill} onPress={close} accessibilityRole="button" accessibilityLabel="Закрыть календарь" />
-        {anchor ? <View style={[styles.calendar, { top, left, width: popupWidth, height: popupHeight }]} accessibilityLabel={fieldLabel}>
-          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.calendarContent} showsVerticalScrollIndicator={false}
+        <FastPressable style={StyleSheet.absoluteFill} onPress={close} accessibilityRole="button" accessibilityLabel="Закрыть календарь" handExclude={handPanelRef} />
+        {anchor ? <View ref={handPanelRef} collapsable={false} style={[styles.calendar, { top, left, width: popupWidth, height: popupHeight }]} accessibilityLabel={fieldLabel}>
+          <ScrollView ref={handScrollRef} style={{ flex: 1 }} contentContainerStyle={styles.calendarContent} showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="always" bounces={false}
             onContentSizeChange={(_width, height) => { if (height > 0) setContentHeight(current => Math.abs(current - height) > 0.5 ? height : current); }}>
-            <View style={styles.header}>
+            <HandTargetClip viewRef={handScrollRef}><View style={styles.header}>
               <Text style={styles.month} accessibilityRole="header" accessibilityLiveRegion="polite" numberOfLines={1}>{tr(MONTHS[month.getMonth()])} {month.getFullYear()} г.</Text>
               <View style={styles.navigation}>
                 <FastPressable style={styles.arrow} accessibilityRole="button" accessibilityLabel="Предыдущий месяц"
@@ -190,9 +195,12 @@ export function DateField({
                 <Text style={[styles.footerText, !todayAllowed && styles.disabledText]} translate>Сегодня</Text>
               </FastPressable>
             </View>
+            </HandTargetClip>
           </ScrollView>
         </View> : null}
       </View>
+      <HandPointer />
+      </HandTargetModal>
     </Modal>
   </>;
 }

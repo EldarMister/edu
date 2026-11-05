@@ -1,0 +1,22 @@
+{
+  "format": "mp3",
+  "model": "v5_2_ru",
+  "speakers": [
+    "baya",
+    "kseniya",
+    "xenia",
+    "eugene",
+    "aidar"
+  ],
+  "scenarioIds": [
+    "s1",
+    "s2",
+    "s3",
+    "s4",
+    "s5",
+    "s6",
+    "s7",
+    "s8"
+  ],
+  "generatedAt": "2026-06-20T21:31:54"
+}

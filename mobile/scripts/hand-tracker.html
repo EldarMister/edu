@@ -1,0 +1,72 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
+<video id="camera" playsinline muted style="position:fixed;width:1px;height:1px;opacity:0"></video>
+<script>
+/* BUNDLED_ASSETS */
+const send = value => window.ReactNativeWebView?.postMessage(JSON.stringify(value));
+const video = document.getElementById('camera');
+let stream, worker, workerUrl, timer, watchdog, stopped = false, generation = 0, lastFrame = -1;
+function stop() {
+  stopped = true; generation++;
+  clearTimeout(timer); clearTimeout(watchdog);
+  stream?.getTracks().forEach(track => track.stop()); stream = null;
+  video.pause(); video.srcObject = null;
+  worker?.terminate(); worker = null;
+  if (workerUrl) URL.revokeObjectURL(workerUrl); workerUrl = null;
+}
+function fail(error) {
+  stop();
+  const message = error?.name === 'NotAllowedError' || error?.name === 'SecurityError'
+    ? 'Нет доступа к камере. Разрешите камеру в настройках приложения.'
+    : error?.name === 'NotFoundError' ? 'Камера не найдена. Управление касанием доступно.'
+    : error?.name === 'NotReadableError' ? 'Камера занята или недоступна. Закройте использующее её приложение и повторите.'
+    : error?.message || String(error);
+  send({ type: 'error', message });
+}
+function deadline(ms) { clearTimeout(watchdog); watchdog = setTimeout(() => fail(new Error('Камера или модель не отвечает. Включите управление снова.')), ms); }
+async function capture() {
+  const epoch = generation;
+  if (stopped) return;
+  if (video.readyState < 2 || lastFrame === video.currentTime) { timer = setTimeout(capture, 100); return; }
+  lastFrame = video.currentTime;
+  try {
+    const scale = Math.min(320 / video.videoWidth, 240 / video.videoHeight, 1);
+    const bitmap = await createImageBitmap(video, { resizeWidth: Math.max(1, Math.round(video.videoWidth * scale)), resizeHeight: Math.max(1, Math.round(video.videoHeight * scale)) });
+    if (stopped || epoch !== generation) { bitmap.close(); return; }
+    deadline(8000);
+    worker.postMessage({ type: 'frame', bitmap, timestamp: performance.now() }, [bitmap]);
+  } catch (error) { if (!stopped) fail(error); }
+}
+async function start() {
+  const epoch = generation;
+  deadline(30000);
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('Камера недоступна в этой версии WebView. Обновите Android System WebView.');
+    if (typeof Worker === 'undefined' || typeof createImageBitmap === 'undefined' || typeof OffscreenCanvas === 'undefined') throw new Error('Фоновое распознавание недоступно. Обновите Android System WebView.');
+    const incoming = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 15, max: 15 } } });
+    if (stopped || epoch !== generation) { incoming.getTracks().forEach(track => track.stop()); return; }
+    stream = incoming;
+    stream.getVideoTracks()[0].onended = () => { if (!stopped) fail(new Error('Камера отключена. Включите управление снова.')); };
+    video.srcObject = stream; await video.play();
+    if (stopped || epoch !== generation) return;
+    workerUrl = URL.createObjectURL(new Blob([assets.worker], { type: 'application/javascript' }));
+    worker = new Worker(workerUrl);
+    worker.onerror = event => fail(new Error(event.message || 'Ошибка модели'));
+    worker.onmessage = ({ data }) => {
+      if (stopped) return;
+      clearTimeout(watchdog);
+      if (data.type === 'error') { fail(new Error(data.message)); return; }
+      const elapsed = data.timestamp ? performance.now() - data.timestamp : 0;
+      const stale = elapsed > 450;
+      // Never let a delayed frame complete a pinch in the native controls.
+      send(stale ? { type: 'sample', sample: null, timestamp: performance.now() } : data);
+      const interval = data.sample && !stale ? Math.max(80, Math.min(400, data.duration * 1.5)) : Math.max(400, data.duration * 1.5);
+      timer = setTimeout(capture, data.type === 'ready' ? 0 : Math.max(0, interval - elapsed));
+    };
+    worker.postMessage({ type: 'init', loader: assets.loader, wasm: assets.wasm, model: assets.model });
+  } catch (error) { if (!stopped) fail(error); }
+}
+window.stopHandTracking = stop;
+document.addEventListener('visibilitychange', () => { if (document.hidden) { stop(); send({ type: 'paused' }); } });
+window.addEventListener('pagehide', stop);
+start();
+</script></body></html>

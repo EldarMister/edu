@@ -34,8 +34,11 @@ async function refreshTokens(): Promise<string | null> {
     if (useAuth.getState().refreshToken !== refreshToken || useAuth.getState().user?.id !== userId) return null;
     setTokens(res.data.accessToken, res.data.refreshToken);
     return res.data.accessToken as string;
-  } catch {
-    if (useAuth.getState().refreshToken === refreshToken && useAuth.getState().user?.id === userId) logout();
+  } catch (error) {
+    // A temporary connection failure is not an expired session. Keep its tokens
+    // and push binding so the next online request can retry the refresh.
+    const rejected = axios.isAxiosError(error) && [401, 403].includes(error.response?.status ?? 0);
+    if (rejected && useAuth.getState().refreshToken === refreshToken && useAuth.getState().user?.id === userId) logout();
     return null;
   }
 }

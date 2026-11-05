@@ -16,22 +16,22 @@ import { Button, Card, EmptyState, Loading } from '@/components/ui';
 import { popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
-import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, spacing } from '@/theme';
 import { useActiveOrders, useCallAdministrator, useCancelOrder, useClaimQrOrder, useDishes } from '@/services/api/waiter';
 import { useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
-import { displayOrderNumber, timeHM } from '@/utils/format';
+import { displayOrderNumber, hallSuffix, money, timeHM } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
+import { usePublicSettings } from '@/services/api/settings';
+import { waiterOrderPermission } from '@/lib/order-permissions';
 import { apiError } from '@/lib/api';
 import type { Order } from '@/types';
 import { InsufficientPermissionsSheet } from './InsufficientPermissionsSheet';
-import { canWaiterCancelOrder, deliveryDetails, orderLocation } from './orderRules';
+import { canWaiterCancelOrder, orderLocation } from './orderRules';
 
 /** Кастомная PNG-иконка отмены действия (красный круг) — как на PWA. */
 const UNDO_ACTION_ICON = require('../../../assets/undo-action-icon.png');
 
-const EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
 const CANCEL_UNDO_SECONDS = 6;
 const CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
 const DEFAULT_CANCEL_REASON = CANCEL_REASONS[0];
@@ -43,6 +43,8 @@ export function OrdersScreen() {
   const rootRef = React.useRef<View>(null);
   const { width: screenWidth } = useWindowDimensions();
   const orders = useActiveOrders();
+  const settings = usePublicSettings();
+  const policies = settings.data?.waiterOrderPermissions;
   const dishes = useDishes();
   const selectTable = useCart((s) => s.selectTable);
   const startEditing = useCart((s) => s.startEditing);
@@ -115,9 +117,14 @@ export function OrdersScreen() {
 
   const editOrder = React.useCallback((order: Order) => {
     closeMenu();
-    const lines = orderToCartLines(order, dishes.data ?? []);
+    const permission = waiterOrderPermission(order, 'edit', policies);
+    if (!permission.allowed) {
+      push({ message: permission.reason, type: 'error', at: new Date().toISOString() });
+      return;
+    }
+    const lines = orderToCartLines(order, dishes.data ?? [], policies);
     if (lines.length === 0) {
-      push({ message: 'Не удалось восстановить позиции заказа для редактирования', type: 'error', at: new Date().toISOString() });
+      push({ message: 'В заказе есть удалённое из меню блюдо. Используйте отмену отдельной позиции или обратитесь к администратору.', type: 'error', at: new Date().toISOString() });
       return;
     }
     startEditing(
@@ -126,15 +133,15 @@ export function OrdersScreen() {
       lines,
     );
     navigateToMenu();
-  }, [closeMenu, dishes.data, navigateToMenu, push, startEditing]);
+  }, [closeMenu, dishes.data, navigateToMenu, policies, push, startEditing]);
 
   const commitCancel = React.useCallback((pending: PendingCancel) => {
     setPendingCancel((current) => (
       current?.order.id === pending.order.id && current.deadline === pending.deadline ? null : current
     ));
     const current = orders.data?.find((order) => order.id === pending.order.id);
-    if (current && !canWaiterCancelOrder(current)) {
-      setAdministratorTarget(current);
+    if (current && !canWaiterCancelOrder(current, policies)) {
+      push({ message: waiterOrderPermission(current, 'cancel', policies).reason, type: 'error', at: new Date().toISOString() });
       return;
     }
     cancel.mutate(
@@ -149,7 +156,7 @@ export function OrdersScreen() {
         },
       },
     );
-  }, [cancel, orders.data, push]);
+  }, [cancel, orders.data, policies, push]);
 
   React.useEffect(() => {
     if (!pendingCancel) return undefined;
@@ -164,14 +171,14 @@ export function OrdersScreen() {
 
   const requestCancelOrder = React.useCallback((order: Order) => {
     closeMenu();
-    if (!canWaiterCancelOrder(order)) {
-      setAdministratorTarget(order);
+    if (!canWaiterCancelOrder(order, policies)) {
+      push({ message: `${waiterOrderPermission(order, 'cancel', policies).reason} Отмените разрешённые позиции отдельно.`, type: 'error', at: new Date().toISOString() });
       return;
     }
     setCancelReason(DEFAULT_CANCEL_REASON);
     setCancelOther('');
     setCancelTarget(order);
-  }, [closeMenu]);
+  }, [closeMenu, policies, push]);
 
   const confirmCancelOrder = React.useCallback(() => {
     if (!cancelTarget) return;
@@ -270,7 +277,7 @@ export function OrdersScreen() {
               menuStyle,
             ]}
           >
-            {EDITABLE.includes(menuRender.order.status) ? (
+            {waiterOrderPermission(menuRender.order, 'edit', policies).allowed ? (
               <FastPressable
                 onPress={() => editOrder(menuRender.order)}
                 style={styles.menuItem}
@@ -279,13 +286,13 @@ export function OrdersScreen() {
               </FastPressable>
             ) : null}
             <FastPressable
-              disabled={!canWaiterCancelOrder(menuRender.order)}
+              disabled={!canWaiterCancelOrder(menuRender.order, policies)}
               onPress={() => requestCancelOrder(menuRender.order)}
-              style={[styles.menuItem, !canWaiterCancelOrder(menuRender.order) && { opacity: 0.4 }]}
+              style={[styles.menuItem, !canWaiterCancelOrder(menuRender.order, policies) && { opacity: 0.4 }]}
             >
               <Text style={[styles.menuItemText, styles.menuDanger]} translate>Отменить заказ</Text>
             </FastPressable>
-            {!canWaiterCancelOrder(menuRender.order) && !['paid', 'cancelled'].includes(menuRender.order.status) ? (
+            {!canWaiterCancelOrder(menuRender.order, policies) && !['paid', 'cancelled'].includes(menuRender.order.status) ? (
               <FastPressable style={styles.menuItem} onPress={() => {
                 setAdministratorTarget(menuRender.order);
                 closeMenu();
@@ -441,8 +448,8 @@ const OrderCard = memo(function OrderCard({
                 <Text style={styles.qrTagText}>QR</Text>
               </View>
             ) : null}
-            <Text style={styles.tableText} numberOfLines={1}>
-              {orderLocation(order)}
+            <Text style={styles.tableText} numberOfLines={1} translate>
+              Стол {order.table.number}{hallSuffix(order.table)}
             </Text>
           </View>
           <View style={styles.metaRow}>
@@ -451,7 +458,6 @@ const OrderCard = memo(function OrderCard({
               {timeHM(order.createdAt)} · {order.items.length} поз.
             </Text>
           </View>
-          {deliveryDetails(order) ? <Text style={styles.metaText} numberOfLines={2}>{deliveryDetails(order)}</Text> : null}
         </View>
 
         <View style={styles.headRight}>
@@ -468,7 +474,7 @@ const OrderCard = memo(function OrderCard({
               <Text style={styles.claimText} translate>{claimPending ? 'Берём...' : 'Взять'}</Text>
             </FastPressable>
           ) : null}
-          <NumberTicker value={Number(order.finalAmount)} style={styles.money} digitHeight={20} />
+          <Text style={styles.money}>{money(order.finalAmount)}</Text>
         </View>
 
         {!unclaimedQr ? (
@@ -485,7 +491,7 @@ const OrderCard = memo(function OrderCard({
             hitSlop={12}
             style={[styles.dots, menuOpen && styles.dotsActive]}
           >
-            <PwaIcon name="dotsVertical" size={20} color={colors.textMuted} />
+            <PwaIcon name="dotsVertical" size={20} color={colors.textLight} />
           </FastPressable>
         ) : null}
       </View>
@@ -530,7 +536,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  claimText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.white },
+  claimText: { fontSize: fontSize.xs, fontWeight: '600', color: colors.white },
   actionsMenuOverlay: {
     position: 'absolute',
     width: 208,

@@ -177,7 +177,11 @@ test('root lifecycle uses fresh Android bridge requests and repeated native emis
   const clock = timerHarness();
   const tokenModule = loadSource('src/services/push/token.ts', {}, clock);
   const registrationModule = loadSource('src/services/push/registration.ts');
+  const requestModule = loadSource('src/services/push/request.ts');
   let listener, cleanup, nativeCalls = 0, registrations = 0, native = 'first-native';
+  let authListener;
+  let authState = { hydrated: false, user: null, accessToken: null };
+  let storageReads = 0;
   const exchanged = [], diagnostics = [];
   const noop = () => {};
   const notifications = {
@@ -199,7 +203,7 @@ test('root lifecycle uses fresh Android bridge requests and repeated native emis
     react: { useEffect: effect => { cleanup = effect(); }, useCallback: fn => fn, useRef: value => ({ current: value }), useState: value => [value, noop] },
     axios: { post: async () => { registrations += 1; }, delete: async () => {} },
     'expo-device': { isDevice: false }, 'expo-notifications': notifications,
-    'expo-secure-store': { getItemAsync: async () => null, setItemAsync: async () => {} },
+    'expo-secure-store': { getItemAsync: async () => { storageReads++; return JSON.stringify({ deviceId: 'persisted-installation', binding: { userId: 'test-user', accessToken: 'saved-credential', pushToken: 'test-expo' }, pending: [] }); }, setItemAsync: async () => {} },
     'expo-constants': { expoConfig: { extra: { eas: { projectId: 'test-project' } }, version: '0.2.1' }, appOwnership: 'standalone' },
     'expo-modules-core': { requireNativeModule: name => {
       assert.equal(name, 'ExpoPushTokenManager');
@@ -211,11 +215,18 @@ test('root lifecycle uses fresh Android bridge requests and repeated native emis
       } };
     } },
     '@/config/env': { API_BASE: 'http://test.local/api' },
-    '@/store/auth': { useAuth: { getState: () => ({ user: { id: 'test-user' }, accessToken: 'test-credential' }), subscribe: () => noop } },
+    '@/store/auth': { useAuth: { getState: () => authState, subscribe: fn => { authListener = fn; return noop; } } },
+    '@/lib/api': { api: { get: async () => {} } },
     '@/store/notifications': {}, '@/lib/queryClient': {}, '@/lib/sound': {}, '@/utils/format': {},
-    './registration': registrationModule, './token': tokenModule, './events': {},
+    './registration': registrationModule, './token': tokenModule, './request': requestModule, './events': { notificationDeduper: { clear: noop } },
   }, { ...clock, console: { warn: (label, diagnostic) => { diagnostics.push({ ...diagnostic }); } } });
   push.usePushNotificationLifecycle();
+  await settle();
+  assert.equal(nativeCalls, 0, 'Do not reconcile an empty auth store before SecureStore hydration');
+  assert.equal(storageReads, 0, 'A persisted push binding must not be loaded and revoked as an apparent logout');
+  const previous = authState;
+  authState = { hydrated: true, user: { id: 'test-user' }, accessToken: 'test-credential' };
+  authListener(authState, previous);
   await settle();
   assert.equal(nativeCalls, 1);
   assert.equal(registrations, 0);

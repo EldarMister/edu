@@ -3,6 +3,7 @@ import { api } from '@/lib/api';
 import { configureAudioPlayback } from '@/lib/sound';
 import { deleteTempFile, wavBufferToTempFile } from '@/lib/ttsFile';
 import { registerSessionCleanup } from '@/store/auth';
+import { kitchenVoiceSample } from './kitchenVoiceSamples';
 import {
   getKitchenVoiceSettings,
   type KitchenVoiceScenario,
@@ -39,7 +40,7 @@ class KitchenVoice {
     void this.pump();
   }
 
-  /** Проиграть тестовый сценарий сразу, без проверки voiceEnabled (в мобильном — всегда через TTS). */
+  /** Same bundled PWA preview; unavailable/corrupt samples fall back to TTS. */
   async testScenario(
     scenario: KitchenVoiceScenario,
     settings: KitchenVoiceSettings = getKitchenVoiceSettings(),
@@ -49,7 +50,13 @@ class KitchenVoice {
     this.pumpingEpoch = epoch;
     try {
       await stopped;
-      if (epoch === this.epoch) await this.playText(scenario.text, epoch, settings, true);
+      if (epoch !== this.epoch) return;
+      const sample = kitchenVoiceSample(settings.speaker, scenario.id);
+      if (sample !== undefined) {
+        try { await this.playFile(sample, settings.speechRate, epoch); return; }
+        catch { if (epoch !== this.epoch) return; }
+      }
+      await this.playText(scenario.text, epoch, settings, true);
     } catch (err) {
       if (epoch === this.epoch) throw err;
     } finally {
@@ -142,11 +149,11 @@ class KitchenVoice {
     }
   }
 
-  private async playFile(uri: string, rate: number, epoch: number) {
+  private async playFile(uri: string | number, rate: number, epoch: number) {
     await configureAudioPlayback();
     if (epoch !== this.epoch) return;
     const { sound } = await Audio.Sound.createAsync(
-      { uri },
+      typeof uri === 'number' ? uri : { uri },
       { shouldPlay: false, volume: 1, rate, shouldCorrectPitch: true },
     );
     if (epoch !== this.epoch) {

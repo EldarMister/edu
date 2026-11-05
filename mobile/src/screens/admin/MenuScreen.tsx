@@ -25,6 +25,7 @@ import {
 } from '@/services/api/admin';
 import type { PrepStation } from '@/types';
 import { RecipeEditor } from './WarehouseEditors';
+import { dishInventoryPayload, initialDishPrice } from './dishDraft';
 import * as DocumentPicker from 'expo-document-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
@@ -273,7 +274,7 @@ export function DishModal({
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(dish?.name ?? '');
   const [categoryId, setCategoryId] = useState(dish?.categoryId ?? (defaultCategoryId || categories[0]?.id || ''));
-  const [price, setPrice] = useState(dish ? (dish.variants.length > 0 ? '' : String(Number(dish.price))) : '');
+  const [price, setPrice] = useState(() => initialDishPrice(dish));
   const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : presetInventory ? '0' : '');
   const [unit, setUnit] = useState(normalizeUnitLabel(dish?.unit));
   const [description, setDescription] = useState(dish?.description ?? '');
@@ -366,18 +367,7 @@ export function DishModal({
         weightedPriceBase,
         imageUrl,
         prepStation: prepStation === '' ? null : prepStation,
-        trackInventory: !isWeighted && (filled.length > 0 ? filled.some((v) => v.stock !== '') : stock.trim() !== ''),
-        stock: !isWeighted && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
-        initialStock: !isWeighted && !isEdit && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
-        unit: !isWeighted && priceValue !== undefined ? unit : undefined,
-        variants: isWeighted ? [] : filled.map((v) => ({
-          id: v.id,
-          name: v.name,
-          price: Number(v.price),
-          stock: v.stock ? Number(v.stock) : undefined,
-          initialStock: (!isEdit || !v.id) && v.stock ? Number(v.stock) : undefined,
-          unit: v.unit,
-        })),
+        ...dishInventoryPayload({ isEdit, priceValue, stock, unit, variants: filled }),
       };
       if (isEdit) {
         await update.mutateAsync({ id: dish!.id, ...body });
@@ -459,7 +449,7 @@ export function DishModal({
         ) : null}
 
         {/* Варианты */}
-        {!isWeighted ? <View>
+        <View>
           <View style={styles.varHead}>
             <Text style={styles.fieldLabel} translate>Варианты</Text>
             <FastPressable onPress={() => setVariants((c) => [...c, variantDraft()])} hitSlop={6}>
@@ -495,10 +485,10 @@ export function DishModal({
               </FastPressable>
             </View>
           ))}
-        </View> : null}
+        </View>
 
         <Field label="Описание">
-          <TextInput style={[styles.input, styles.multiline]} value={description} onChangeText={setDescription} placeholder="Необязательно" placeholderTextColor={colors.textLight} multiline />
+          <TextInput style={[styles.input, styles.multiline]} value={description} onChangeText={setDescription} placeholder="Необязательно" placeholderTextColor={colors.textLight} multiline maxLength={300} />
         </Field>
         <Field label="Название для озвучки">
           <TextInput style={styles.input} value={voiceName} onChangeText={setVoiceName} placeholder="Необязательно" placeholderTextColor={colors.textLight} />

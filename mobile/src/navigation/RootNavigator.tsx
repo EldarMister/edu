@@ -35,6 +35,7 @@ const linking: LinkingOptions<RootStackParamList> = {
 
 /** Подключает глобальную realtime-синхронизацию в авторизованной зоне. */
 function AuthRuntime() {
+  const accessToken = useAuth((state) => state.accessToken);
   useSocketLifecycle();
   useRealtimeSync();
   React.useEffect(() => {
@@ -52,7 +53,7 @@ function AuthRuntime() {
       if (state === 'active') { void refresh(); void queryClient.invalidateQueries(); }
     });
     return () => { cancelled = true; subscription.remove(); };
-  }, []);
+  }, [accessToken]);
   return null;
 }
 function AuthedArea({ children }: { children: React.ReactNode }) { return <>{children}</>; }

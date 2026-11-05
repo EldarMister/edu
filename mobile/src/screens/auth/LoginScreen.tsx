@@ -3,9 +3,6 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 're
 import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '@/navigation/types';
 import { Ionicons } from '@expo/vector-icons';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, Field } from '@/components/ui';
@@ -17,7 +14,6 @@ import { apiError } from '@/lib/api';
 import { reconnectSocket } from '@/services/socket';
 
 export function LoginScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -26,6 +22,7 @@ export function LoginScreen() {
   const setSession = useAuth((s) => s.setSession);
 
   const onSubmit = () => {
+    if (login.isPending) return;
     setError(null);
     if (!phone.trim() || password.length < 1) {
       setError('Введите номер телефона и пароль');
@@ -63,6 +60,7 @@ export function LoginScreen() {
               placeholder="Введите номер телефона"
               keyboardType="phone-pad"
               autoCapitalize="none"
+              autoComplete="username"
               value={phone}
               onChangeText={setPhone}
             />
@@ -70,12 +68,13 @@ export function LoginScreen() {
               label="Пароль"
               placeholder="Введите пароль"
               secureTextEntry={!showPassword}
+              autoComplete="current-password"
               value={password}
               onChangeText={setPassword}
               onSubmitEditing={onSubmit}
               returnKeyType="go"
               rightSlot={
-                <FastPressable onPress={() => setShowPassword((v) => !v)} hitSlop={8}>
+                <FastPressable accessibilityRole="button" accessibilityLabel={showPassword ? 'Скрыть пароль' : 'Показать пароль'} onPress={() => setShowPassword((v) => !v)} hitSlop={8}>
                   <Ionicons
                     name={showPassword ? 'eye-off-outline' : 'eye-outline'}
                     size={20}
@@ -90,8 +89,6 @@ export function LoginScreen() {
             <Button title="Войти" onPress={onSubmit} loading={login.isPending} fontWeight="600" />
           </Card>
 
-          <FastPressable accessibilityRole="button" onPress={() => navigation.navigate('PublicHome')}><Text style={{ color: colors.primary, textAlign: 'center', fontSize: fontSize.sm }} translate>Меню гостей · Табло очереди · Платформа</Text></FastPressable>
-
           <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.1'}</Text>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -102,13 +99,13 @@ export function LoginScreen() {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   flex: { flex: 1 },
-  container: { flexGrow: 1, justifyContent: 'center', padding: spacing.lg, gap: spacing.xl },
-  brand: { alignItems: 'center', gap: 4 },
+  container: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.xl },
+  brand: { alignItems: 'center', gap: 4, marginBottom: 32 },
   subtitle: { fontSize: fontSize.sm, color: colors.textMuted },
-  cardForm: { padding: spacing.xl, gap: spacing.lg },
-  cardHead: { alignItems: 'center', gap: 6 },
-  title: { fontSize: fontSize.xl, fontWeight: '700', color: colors.textPrimary },
+  cardForm: { width: '100%', maxWidth: 400, padding: 28, gap: spacing.lg },
+  cardHead: { alignItems: 'center', gap: 6, marginBottom: 8 },
+  title: { fontSize: fontSize.xl, fontWeight: '600', color: colors.textPrimary },
   cardSub: { fontSize: fontSize.sm, color: colors.textMuted, textAlign: 'center', maxWidth: 260 },
   error: { color: colors.danger, fontSize: fontSize.sm },
-  version: { textAlign: 'center', fontSize: fontSize.xs, color: colors.textLight },
+  version: { textAlign: 'center', fontSize: fontSize.xs, color: colors.textLight, marginTop: 24 },
 });

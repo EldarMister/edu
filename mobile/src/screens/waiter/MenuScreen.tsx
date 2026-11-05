@@ -21,6 +21,7 @@ import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
 import { useActiveOrders, useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem } from '@/services/api/waiter';
 import { formatWeightedAmount, linePrice, useCart } from '@/store/cart';
+import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { useReplacement } from '@/store/replacement';
 import { buildSetLine, calcSetPrice, defaultSetComponents } from '@/utils/set';
@@ -45,6 +46,8 @@ function currentVariantQuantity(variantId: string): number {
 export function MenuScreen() {
   const navigation = useNavigation<any>();
   const connected = useConnectionStatus();
+  const mounted = React.useRef(true);
+  React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
   const tableId = useCart((s) => s.tableId);
   const tableNumber = useCart((s) => s.tableNumber);
@@ -52,13 +55,15 @@ export function MenuScreen() {
   const activeOrderId = useCart((s) => s.activeOrderId);
   const editingOrderId = useCart((s) => s.editingOrderId);
   const editingOrderNumber = useCart((s) => s.editingOrderNumber);
-  const orderComment = useCart((s) => s.comment);
-  const orderCommentOpen = useCart((s) => s.commentOpen);
   const cartLines = useCart((s) => s.lines);
+  const tableSubmitting = useCart((s) => !!(s.tableId && s.pendingTables[s.tableId]));
   const addToCart = useCart((s) => s.add);
   const addLineToCart = useCart((s) => s.addLine);
   const setCartQuantity = useCart((s) => s.setQuantity);
-  const clearCart = useCart((s) => s.clear);
+  const beginSubmission = useCart((s) => s.beginSubmission);
+  const endSubmission = useCart((s) => s.endSubmission);
+  const completeSubmission = useCart((s) => s.completeSubmission);
+  const cancelEditing = useCart((s) => s.cancelEditing);
   const cartCount = useCart((s) => s.lines.length);
   const cartTotal = useCart((s) => s.lines.reduce((sum, line) => sum + linePrice(line), 0));
   const push = useNotifications((s) => s.push);
@@ -74,6 +79,7 @@ export function MenuScreen() {
   const replaceRejected = useReplaceRejectedItem();
   const replacementTarget = useReplacement((s) => s.target);
   const clearReplacement = useReplacement((s) => s.clear);
+  const pendingReplacement = React.useRef<object | null>(null);
 
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string>('all');
@@ -119,29 +125,27 @@ export function MenuScreen() {
   }, [menuDishes, categoryId, search]);
 
   const replaceWithLine = useCallback((line: CartLine) => {
-    if (!replacementTarget) return;
-    replaceRejected.mutate(
-      {
-        orderId: replacementTarget.orderId,
-        itemId: replacementTarget.item.id,
-        line,
-      },
-      {
-        onSuccess: () => {
-          const itemName = orderItemName(replacementTarget.item);
-          clearReplacement();
-          push({ message: `${itemName} заменено`, type: 'success', at: new Date().toISOString() });
-          navigation.navigate('Orders', {
-            screen: 'OrderDetail',
-            params: { orderId: replacementTarget.orderId },
-          });
-        },
-        onError: (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() }),
-      },
-    );
-  }, [clearReplacement, navigation, push, replaceRejected, replacementTarget]);
+    const target = useReplacement.getState().target;
+    if (!target || pendingReplacement.current) return;
+    pendingReplacement.current = target;
+    const userId = useAuth.getState().user?.id;
+    const stillOwns = () => useAuth.getState().user?.id === userId && useReplacement.getState().target === target;
+    void replaceRejected.mutateAsync({ orderId: target.orderId, itemId: target.item.id, line }).then(() => {
+      if (!stillOwns()) return;
+      clearReplacement();
+      push({ message: `${orderItemName(target.item)} заменено`, type: 'success', at: new Date().toISOString() });
+      if (mounted.current && useCart.getState().tableId === target.table.id) {
+        navigation.navigate('Orders', { screen: 'OrderDetail', params: { orderId: target.orderId } });
+      }
+    }).catch((error: unknown) => {
+      if (stillOwns()) push({ message: apiError(error), type: 'error', at: new Date().toISOString() });
+    }).finally(() => {
+      if (pendingReplacement.current === target) pendingReplacement.current = null;
+    });
+  }, [clearReplacement, navigation, push, replaceRejected]);
 
   const onAddSet = useCallback((set: Dish, components: CartSetComponent[]) => {
+    if (tableSubmitting) return;
     const line = buildSetLine(set, components);
     if (replacementTarget) {
       replaceWithLine(line);
@@ -149,9 +153,10 @@ export function MenuScreen() {
     }
     addLineToCart(line);
     push({ message: `${set.name} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
-  }, [addLineToCart, push, replaceWithLine, replacementTarget]);
+  }, [addLineToCart, push, replaceWithLine, replacementTarget, tableSubmitting]);
 
   const onAddDish = useCallback((dish: Dish) => {
+    if (tableSubmitting) return;
     if (dish.isSet) {
       onAddSet(dish, defaultSetComponents(dish));
       return;
@@ -178,7 +183,7 @@ export function MenuScreen() {
     const nextQty = currentDishQuantity(dish.id) + 1;
     addToCart(dish);
     push({ message: `${dish.name} ×${nextQty} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
-  }, [addToCart, onAddSet, push, replaceWithLine, replacementTarget]);
+  }, [addToCart, onAddSet, push, replaceWithLine, replacementTarget, tableSubmitting]);
 
   const onDecDish = useCallback((dish: Dish) => {
     const lines = useCart.getState().lines;
@@ -191,11 +196,11 @@ export function MenuScreen() {
       dish={item}
       qty={cartQuantities[item.id] ?? 0}
       lineCount={cartLineCounts[item.id] ?? 0}
-      disabled={!item.isAvailable}
+      disabled={!item.isAvailable || tableSubmitting}
       onAdd={onAddDish}
       onDec={onDecDish}
     />
-  ), [cartLineCounts, cartQuantities, onAddDish, onDecDish]);
+  ), [cartLineCounts, cartQuantities, onAddDish, onDecDish, tableSubmitting]);
 
   const dishKey = useCallback((dish: Dish) => dish.id, []);
 
@@ -208,6 +213,11 @@ export function MenuScreen() {
   }
 
   const onSubmit = () => {
+    const { tableId, tableNumber, activeOrderId, editingOrderId, lines: cartLines, comment: orderComment, commentOpen: orderCommentOpen } = useCart.getState();
+    if (!tableId) return;
+    const selectedOrder = orders.data?.find((order) => order.id === activeOrderId);
+    const cartOnlyNone = !cartStations(cartLines, categories.data ?? []).hasPrep;
+    if (createOrder.isPending || addItems.isPending || editOrder.isPending || replaceRejected.isPending) return;
     if (!connected) {
       push({ message: 'Создание заказа недоступно без интернета.', type: 'error', at: new Date().toISOString() });
       return;
@@ -221,9 +231,16 @@ export function MenuScreen() {
       push({ message: 'Служебный стол доставки недоступен для нового заказа. Выберите стол в зале.', type: 'error', at: new Date().toISOString() });
       return;
     }
+    if (!beginSubmission(tableId)) return;
+    const owner = { tableId, userId: useAuth.getState().user?.id, lines: cartLines };
+    const stillOwns = () => useAuth.getState().user?.id === owner.userId && useCart.getState().pendingTables[owner.tableId] === owner.lines;
+    const settled = () => { if (stillOwns()) endSubmission(owner.tableId, owner.lines); };
     const idempotencyKey = makeIdempotencyKey();
     const done = (mode: 'create' | 'update', orderId?: string) => {
-      clearCart();
+      if (!stillOwns() || !orderId) return;
+      const stillOnTable = useCart.getState().tableId === owner.tableId;
+      const cleared = completeSubmission(owner.tableId, owner.lines, orderId);
+      if (!stillOnTable || !cleared || !mounted.current) return;
       setCartOpen(false);
       if (mode === 'update' && orderId) {
         navigation.navigate('Orders', { screen: 'OrderDetail', params: { orderId } });
@@ -231,54 +248,26 @@ export function MenuScreen() {
         navigation.navigate('Orders');
       }
     };
-    const onError = (e: unknown) => push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
+    const onError = (e: unknown) => { if (stillOwns()) push({ message: apiError(e), type: 'error', at: new Date().toISOString() }); };
 
-    if (editingOrderId) {
-      editOrder.mutate(
-        { orderId: editingOrderId, comment: orderCommentOpen ? orderComment : '', lines: cartLines },
-        {
-          onSuccess: (updated) => {
-            push({ message: 'Изменения сохранены', type: 'success', at: new Date().toISOString() });
-            done('update', updated.id);
-          },
-          onError,
-        },
-      );
-    } else if (activeOrderId) {
-      addItems.mutate(
-        { orderId: activeOrderId, idempotencyKey, lines: cartLines },
-        {
-          onSuccess: (updated) => {
-            push({
-              message: cartOnlyNone ? 'Позиции добавлены в заказ' : 'Заказ отправлен на кухню',
-              type: 'success',
-              at: new Date().toISOString(),
-            });
-            done('update', updated.id);
-          },
-          onError,
-        },
-      );
-    } else {
-      createOrder.mutate(
-        { tableId, idempotencyKey, comment: orderCommentOpen ? orderComment : '', lines: cartLines },
-        {
-          onSuccess: () => {
-            push({
-              message: cartOnlyNone ? 'Заказ создан' : 'Заказ отправлен на кухню',
-              type: 'success',
-              at: new Date().toISOString(),
-            });
-            done('create');
-          },
-          onError,
-        },
-      );
-    }
+    const request = editingOrderId
+      ? editOrder.mutateAsync({ orderId: editingOrderId, reason: 'Изменение состава заказа', comment: orderCommentOpen ? orderComment : '', lines: owner.lines })
+      : activeOrderId
+        ? addItems.mutateAsync({ orderId: activeOrderId, idempotencyKey, lines: owner.lines })
+        : createOrder.mutateAsync({ tableId: owner.tableId, idempotencyKey, comment: orderCommentOpen ? orderComment : '', lines: owner.lines });
+    void request.then((updated) => {
+      if (!stillOwns()) return;
+      push({
+        message: editingOrderId ? 'Изменения сохранены' : cartOnlyNone ? (activeOrderId ? 'Позиции добавлены в заказ' : 'Заказ создан') : 'Заказ отправлен на кухню',
+        type: 'success',
+        at: new Date().toISOString(),
+      });
+      done(editingOrderId || activeOrderId ? 'update' : 'create', updated.id);
+    }).catch(onError).finally(settled);
   };
 
   const count = cartCount;
-  const submitting = createOrder.isPending || addItems.isPending || editOrder.isPending || replaceRejected.isPending;
+  const submitting = tableSubmitting || createOrder.isPending || addItems.isPending || editOrder.isPending || replaceRejected.isPending;
   const stationInfo = cartStations(cartLines, categories.data ?? []);
   const cartOnlyNone = cartLines.length > 0 && !stationInfo.hasPrep;
   const cartSendLabel = cartOnlyNone
@@ -295,8 +284,26 @@ export function MenuScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
-      {/* Поиск + выбранный стол */}
+      {editingOrderId ? (
+        <View style={styles.editingBar}>
+          <Text style={styles.editingLabel} translate>Редактирование {displayOrderNumber(editingOrderNumber ?? '')}</Text>
+          <FastPressable disabled={tableSubmitting || editOrder.isPending} onPress={() => {
+            cancelEditing();
+            setCartOpen(false);
+            navigation.navigate('Orders');
+          }}><Text style={styles.editingCancel} translate>Отмена</Text></FastPressable>
+        </View>
+      ) : null}
+      {/* Выбранный стол + поиск */}
       <View style={styles.searchRow}>
+        <FastPressable style={[styles.tableChip, tablePickerOpen && styles.tableChipActive]}
+          accessibilityRole="button" accessibilityLabel={selectedOrder ? orderLocation(selectedOrder) : `Стол ${tableNumber}${hallName ? ` · ${hallName}` : ''}`}
+          disabled={tableSubmitting || deliveryOrder || !!editingOrderId} onPress={() => setTablePickerOpen(true)}>
+          <Text style={styles.tableChipText} numberOfLines={1} translate>
+            {deliveryOrder ? 'Доставка' : `Стол ${tableNumber}`}
+          </Text>
+          {!deliveryOrder ? <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} /> : null}
+        </FastPressable>
         <View style={styles.searchWrap}>
           <PwaIcon name="search" size={18} color={colors.textLight} strokeWidth={2} />
           <TextInput
@@ -307,13 +314,6 @@ export function MenuScreen() {
             style={styles.searchInput}
           />
         </View>
-        <FastPressable style={[styles.tableChip, tablePickerOpen && styles.tableChipActive]}
-          disabled={deliveryOrder} onPress={() => setTablePickerOpen(true)}>
-          <Text style={styles.tableChipText} translate>
-            {selectedOrder ? orderLocation(selectedOrder) : `Стол ${tableNumber}${hallName ? ` · ${hallName}` : ''}`}
-          </Text>
-          {!deliveryOrder ? <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} /> : null}
-        </FastPressable>
       </View>
 
       {/* Категории */}
@@ -404,6 +404,7 @@ export function MenuScreen() {
         dish={variantDish}
         onClose={() => setVariantDish(null)}
         onAdd={(variant) => {
+          if (tableSubmitting) return;
           if (variantDish) {
             if (variantDish.trackInventory && typeof variant.stock === 'number') {
               const currentQty = currentVariantQuantity(variant.id);
@@ -434,7 +435,12 @@ export function MenuScreen() {
         dish={weightDish}
         onClose={() => setWeightDish(null)}
         onAdd={(weightGrams) => {
+          if (tableSubmitting) return;
           if (!weightDish) return;
+          if (weightDish.trackInventory && typeof weightDish.stock === 'number' && currentDishQuantity(weightDish.id) >= weightDish.stock) {
+            push({ message: `Недостаточно на складе. Остаток: ${weightDish.stock}`, type: 'error', at: new Date().toISOString() });
+            return;
+          }
           if (replacementTarget) {
             replaceWithLine({ dish: weightDish, weightGrams, quantity: 1 });
           } else {
@@ -1200,6 +1206,9 @@ function InlineVariantSheet({
 }
 
 const styles = StyleSheet.create({
+  editingBar: { marginHorizontal: spacing.md, marginTop: spacing.sm, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.primaryFaint, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  editingLabel: { color: colors.primary, fontSize: fontSize.sm, flexShrink: 1 },
+  editingCancel: { color: colors.primary, fontSize: fontSize.sm, fontWeight: '600' },
   safe: { flex: 1, backgroundColor: colors.white },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md },
   searchWrap: {
@@ -1216,6 +1225,10 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontSize: fontSize.base, color: colors.textPrimary, padding: 0 },
   tableChip: {
+    minWidth: 96,
+    maxWidth: 112,
+    flexShrink: 0,
+    justifyContent: 'space-between',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -1227,7 +1240,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.white,
   },
   tableChipActive: { borderColor: colors.primary },
-  tableChipText: { fontSize: fontSize.tab, fontWeight: '500', color: colors.textPrimary },
+  tableChipText: { flexShrink: 1, minWidth: 0, fontSize: fontSize.tab, fontWeight: '500', color: colors.textPrimary },
 
   menuList: { flex: 1 },
   grid: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },

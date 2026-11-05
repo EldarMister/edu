@@ -41,6 +41,7 @@ export function CartSheet({
     useCart();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const hasLines = lines.length > 0;
+  const clearDisabled = submitting || lines.some((line) => line.editAllowed === false || line.cancelAllowed === false);
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
 
   const footer = (
@@ -48,6 +49,7 @@ export function CartSheet({
       {hasLines && commentOpen ? (
         <TextInput
           value={comment}
+          editable={!submitting}
           onChangeText={setOrderComment}
           placeholder="Комментарий к заказу"
           placeholderTextColor={colors.textLight}
@@ -68,10 +70,10 @@ export function CartSheet({
       />
       {hasLines ? (
         <View style={styles.actionsRow}>
-          <FastPressable onPress={() => { clear(); onClose(); }} style={styles.clearBtn}>
+          <FastPressable disabled={clearDisabled} onPress={() => { clear(); onClose(); }} style={[styles.clearBtn, clearDisabled && { opacity: 0.4 }]}>
             <Text style={styles.clearText} translate>Очистить</Text>
           </FastPressable>
-          <FastPressable onPress={() => setCommentOpen(!commentOpen)} style={styles.clearBtn}>
+          <FastPressable disabled={submitting} onPress={() => setCommentOpen(!commentOpen)} style={styles.clearBtn}>
             <Text style={[styles.clearText, commentOpen && styles.commentToggleActive]} translate>
               {commentOpen ? 'Скрыть комментарий' : 'Комментарий'}
             </Text>
@@ -106,6 +108,7 @@ export function CartSheet({
               <Text style={styles.takeawayLabel} translate>С собой</Text>
               <TakeawaySwitch
                 on={allTakeaway}
+                disabled={submitting}
                 onChange={setAllTakeaway}
               />
             </View>
@@ -141,21 +144,22 @@ export function CartSheet({
                   </Text>
                 ) : null}
                 {l.takeaway ? (
-                  <FastPressable onPress={() => setTakeaway(i, false)} style={styles.takeawayChip} hitSlop={6}>
+                  <FastPressable disabled={submitting || l.editAllowed === false} onPress={() => setTakeaway(i, false)} style={styles.takeawayChip} hitSlop={6}>
                     <PwaIcon name="bag" size={12} color={colors.textSecondary} strokeWidth={2} />
                     <Text style={styles.takeawayChipText} translate>С собой</Text>
                   </FastPressable>
                 ) : null}
               </View>
               <View style={styles.stepper}>
-                <RoundBtn kind="dec" onPress={() => setQuantity(i, l.quantity - 1)} />
+                <RoundBtn kind="dec" disabled={submitting || l.editAllowed === false || l.cancelAllowed === false} onPress={() => setQuantity(i, l.quantity - 1)} />
                 <Text style={styles.qty}>{l.quantity}</Text>
-                <RoundBtn kind="inc" onPress={() => setQuantity(i, l.quantity + 1)} />
+                <RoundBtn kind="inc" disabled={submitting || l.editAllowed === false} onPress={() => setQuantity(i, l.quantity + 1)} />
               </View>
               <View style={styles.linePrice}>
                 <NumberTicker value={linePrice(l)} style={styles.linePriceText} digitHeight={21} />
               </View>
               </View>
+              {l.restrictionReason ? <Text style={{ marginTop: 4, fontSize: 12, color: '#B45309' }} translate>{l.restrictionReason}</Text> : null}
               {isSet && open ? (
                 <View style={styles.setComponents}>
                   {l.set!.components.map((component) => (
@@ -178,7 +182,7 @@ export function CartSheet({
   );
 }
 
-function TakeawaySwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
+function TakeawaySwitch({ on, onChange, disabled = false }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
   const progress = React.useRef(new Animated.Value(on ? 1 : 0)).current;
 
   React.useEffect(() => {
@@ -194,7 +198,8 @@ function TakeawaySwitch({ on, onChange }: { on: boolean; onChange: (v: boolean) 
   return (
     <FastPressable
       accessibilityRole="switch"
-      accessibilityState={{ checked: on }}
+      accessibilityState={{ checked: on, disabled }}
+      disabled={disabled}
       onPress={() => onChange(!on)}
       style={styles.switchPress}
       hitSlop={8}

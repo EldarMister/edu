@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { API_URL } from '@/config/env';
+import type { WaiterOrderPermissions } from '@/lib/order-permissions';
 import type { PaymentMethod } from '@/types';
 
 export interface PublicSettings {
+  waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;
   phone: string;
@@ -21,6 +23,7 @@ export interface PublicSettings {
 }
 
 export interface Settings {
+  waiterOrderPermissions: WaiterOrderPermissions;
   id: string;
   cafeId: string | null;
   cafeName: string;
@@ -73,7 +76,8 @@ export function usePublicSettings() {
   return useQuery({
     queryKey: ['settings', 'public'],
     queryFn: async () => (await api.get<PublicSettings>('/settings')).data,
-    staleTime: 60_000,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 }
 

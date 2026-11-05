@@ -46,7 +46,7 @@ function authHarness() {
   });
 }
 
-function voiceHarness(kind, { writing, creating, configuring } = {}) {
+function voiceHarness(kind, { writing, creating, configuring, sample } = {}) {
   const auth = authHarness();
   const requests = [], sounds = [], written = [], deleted = [];
   const settings = { voiceEnabled: true, speaker: 'baya', speechRate: 1, preferredModel: 'v5_2_ru', fallbackModel: 'v4_ru' };
@@ -83,6 +83,7 @@ function voiceHarness(kind, { writing, creating, configuring } = {}) {
       return { sound };
     } } } },
     './kitchenVoiceSettings': { getKitchenVoiceSettings: () => settings },
+    './kitchenVoiceSamples': { kitchenVoiceSample: () => sample },
   };
   const voice = loadSource(`src/services/${kind}Voice.ts`, modules)[`${kind}Voice`];
   auth.useAuth.getState().setSession(session('first'));
@@ -219,4 +220,16 @@ test('kitchen: scenario preview aborts previous speech and cannot survive logout
   await settle();
   assert.deepEqual(env.written, []);
   assert.equal(env.sounds.length, 0);
+});
+
+test('kitchen: bundled PWA preview plays offline and is stopped on logout', async () => {
+  const env = voiceHarness('kitchen', { sample: 42 });
+  const preview = env.voice.testScenario({ id: 's1', text: 'pre-recorded' });
+  await settle();
+  assert.equal(env.requests.length, 0);
+  assert.equal(env.sounds[0].plays, 1);
+  env.auth.getState().logout();
+  await preview;
+  assert.equal(env.sounds[0].stops, 1);
+  assert.equal(env.sounds[0].unloads, 1);
 });

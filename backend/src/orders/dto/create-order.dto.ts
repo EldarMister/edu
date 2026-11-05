@@ -37,6 +37,10 @@ export class SetComponentInputDto {
 }
 
 export class CreateOrderItemDto {
+  /** Stable existing line identifier when editing; ignored for creation. */
+  @IsOptional()
+  @IsString()
+  id?: string;
   @IsString()
   @IsNotEmpty()
   dishId: string;

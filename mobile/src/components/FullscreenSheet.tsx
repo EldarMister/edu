@@ -10,6 +10,8 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { sheetTiming } from './motion';
+import { HandTargetModal } from '@/features/hand-control/targets';
+import { HandPointer } from '@/features/hand-control/HandPointer';
 
 export function FullscreenSheet({
   visible,
@@ -87,9 +89,10 @@ export function FullscreenSheet({
       onRequestClose={onClose}
       onShow={() => { ready.current = true; enter(); }}
     >
-      <GestureHandlerRootView style={styles.root}>
+      <HandTargetModal><GestureHandlerRootView style={styles.root}>
         <Animated.View style={[styles.screen, style, animatedStyle]}>{children}</Animated.View>
-      </GestureHandlerRootView>
+        <HandPointer />
+      </GestureHandlerRootView></HandTargetModal>
     </RNModal>
   );
 }

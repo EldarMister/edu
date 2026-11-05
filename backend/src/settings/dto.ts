@@ -1,6 +1,9 @@
-import { IsBoolean, IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { WaiterOrderPermissions } from '../orders/order-policy';
 
 export class UpdateSettingsDto {
+  @IsOptional() @IsObject()
+  waiterOrderPermissions?: WaiterOrderPermissions;
   // ---- Интеграция доставки ----
   @IsOptional() @IsBoolean()
   deliveryEnabled?: boolean;

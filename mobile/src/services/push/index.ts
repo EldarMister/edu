@@ -7,6 +7,7 @@ import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import { requireNativeModule } from 'expo-modules-core';
 import { API_BASE } from '@/config/env';
+import { api } from '@/lib/api';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { queryClient } from '@/lib/queryClient';
@@ -14,6 +15,7 @@ import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/utils/format';
 import { PushRegistrationManager, type PushRegistrationState, type PushStatus } from './registration';
 import { PushTokenAcquisition, type NativePushToken } from './token';
+import { registerPushWithSession } from './request';
 import { notificationData, notificationDeduper, notificationTarget, type NotificationTarget } from './events';
 
 export type { PushStatus, NotificationTarget };
@@ -99,10 +101,10 @@ const registration = new PushRegistrationManager({
   save: (state) => SecureStore.setItemAsync(STORAGE_KEY, JSON.stringify(state)),
   deviceId: () => `expo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`,
   register: async (binding, deviceId) => {
-    await axios.post(`${API_BASE}/push/devices`, {
+    await registerPushWithSession(binding, { session, refresh: () => api.get('/auth/me'), send: (accessToken) => axios.post(`${API_BASE}/push/devices`, {
       pushToken: binding.pushToken, deviceId, provider: 'EXPO', platform: Platform.OS,
       appVersion: Constants.expoConfig?.version,
-    }, { headers: { Authorization: `Bearer ${binding.accessToken}` }, timeout: 15_000 });
+    }, { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 15_000 }) });
   },
   unregister: async (binding) => {
     await axios.delete(`${API_BASE}/push/devices`, {
@@ -180,6 +182,8 @@ export function usePushNotificationLifecycle() {
     let attempts = 0;
     const sync = (prompt = false) => {
       clearTimeout(retry);
+      // SecureStore hydrates asynchronously. An empty pre-hydration store is not logout.
+      if (!useAuth.getState().hydrated) return;
       void registration.reconcile(prompt).then((status) => {
         if (disposed) return;
         if ((status === 'error' || registration.hasPendingRevocations) && AppState.currentState === 'active') {
@@ -189,13 +193,15 @@ export function usePushNotificationLifecycle() {
     };
     sync(!!session());
     const authSub = useAuth.subscribe((next, previous) => {
+      if (!next.hydrated) return;
       if (next.user?.id !== previous.user?.id) {
         notificationDeduper.clear();
         if (previous.user && previous.accessToken) {
           void registration.unregister({ userId: previous.user.id, accessToken: previous.accessToken });
         }
         sync(!!next.user);
-      } else if (next.accessToken !== previous.accessToken) { sync(); }
+      } else if (next.hydrated !== previous.hydrated) { sync(!!next.user); }
+      else if (next.accessToken !== previous.accessToken) { sync(); }
     });
     const tokenSub = Notifications.addPushTokenListener((token) => {
       if ((token.type === 'android' || token.type === 'ios') && typeof token.data === 'string' &&

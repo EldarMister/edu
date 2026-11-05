@@ -235,7 +235,7 @@ export function StaffScreen() {
               ))}</View></ScrollView></View>
             )}
           </>
-        ) : tab === 'waiter' ? <WaiterOrdersReport staff={staffQ.data ?? []} /> : (
+        ) : tab === 'waiter' ? <WaiterOrdersReport staff={staffQ.data ?? []} staffLoading={staffQ.isLoading} /> : (
           <>
             <HistoryFilters
               filters={historyFilters}

@@ -17,7 +17,8 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { disconnectSocket, useSocketEvent } from '@/services/socket';
 import { isRemotePushRegistered, notificationDeduper, unregisterPushDevice } from '@/services/push';
 import { beep } from '@/lib/sound';
-import { waiterVoice } from '@/services/waiterVoice';
+import { announceAdministratorCall, announceReceiptRequest, type AdministratorVoiceCall } from '@/services/adminVoice';
+import { isPttBackgroundRuntimeActive } from '@/features/ptt/backgroundFlag';
 import { useNotifications } from '@/store/notifications';
 import { ScreenTransition } from '@/components/ScreenTransition';
 import { StatisticsScreen } from '@/screens/admin/StatisticsScreen';
@@ -92,23 +93,25 @@ export function AdminNavigator() {
   const invalidateReceipts = () => { void qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] }); };
   useSocketEvent<ReceiptPrintRequest>('receipt_print_request_created', (request) => {
     invalidateReceipts();
-    if (AppState.currentState !== 'active' && isRemotePushRegistered()) return;
+    if (AppState.currentState !== 'active' && (isRemotePushRegistered() || isPttBackgroundRuntimeActive())) return;
     const label = request.type === 'preliminary' ? 'счёта' : 'чека';
     const message = `Официант ${request.waiterName} отправил заявку на печать ${label}. Стол ${request.tableNumber}.`;
-    if (!notificationDeduper.claim({ notificationId: `receipt:${request.id}:created`, type: 'info', orderId: request.orderId }, message)) return;
-    push({ message, type: 'info', orderId: request.orderId, at: request.createdAt });
-    void beep('notify');
-    waiterVoice.enqueue(request.voice?.text ?? message);
+    if (notificationDeduper.claim({ notificationId: `receipt:${request.id}:created`, type: 'info', orderId: request.orderId }, message)) {
+      push({ message, type: 'info', orderId: request.orderId, at: request.createdAt });
+      void beep('notify');
+    }
+    announceReceiptRequest(request);
   }, [qc, push]);
   useSocketEvent('receipt_print_request_approved', invalidateReceipts, [qc]);
   useSocketEvent('receipt_print_request_printed', invalidateReceipts, [qc]);
   useSocketEvent('receipt_print_request_rejected', invalidateReceipts, [qc]);
-  useSocketEvent<{ message: string; orderId?: string; orderNumber?: string; createdAt: string; voice?: { text?: string } }>('administrator:called', (call) => {
-    if (AppState.currentState !== 'active' && isRemotePushRegistered()) return;
-    if (!notificationDeduper.claim({ type: 'info', orderId: call.orderId }, call.message)) return;
-    push({ message: call.message, type: 'info', orderId: call.orderId, orderNumber: call.orderNumber, at: call.createdAt, durationMs: 12_000 });
-    void beep('notify');
-    waiterVoice.enqueue(call.voice?.text);
+  useSocketEvent<AdministratorVoiceCall>('administrator:called', (call) => {
+    if (AppState.currentState !== 'active' && (isRemotePushRegistered() || isPttBackgroundRuntimeActive())) return;
+    if (notificationDeduper.claim({ type: 'info', orderId: call.orderId }, call.message)) {
+      push({ message: call.message, type: 'info', orderId: call.orderId, orderNumber: call.orderNumber, at: call.createdAt, durationMs: 12_000 });
+      void beep('notify');
+    }
+    announceAdministratorCall(call);
   }, [push]);
 
   React.useEffect(() => {

@@ -1,6 +1,6 @@
 {
   "name": "edu-pos-mobile",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "main": "index.ts",
   "scripts": {
@@ -52,6 +52,7 @@
     "react-native-screens": "~4.4.0",
     "react-native-svg": "15.8.0",
     "react-native-url-polyfill": "^4.0.0",
+    "react-native-webview": "13.12.5",
     "socket.io-client": "^4.8.1",
     "zustand": "^4.5.5"
   },

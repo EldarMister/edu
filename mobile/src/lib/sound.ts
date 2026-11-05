@@ -12,15 +12,24 @@ const SOURCES: Record<SoundKind, number> = {
 
 const activeSounds = new Set<Audio.Sound>();
 const loadedAssets: Partial<Record<SoundKind, Asset>> = {};
+let recording = false;
+let modeChange: Promise<void> = Promise.resolve();
 
-export async function configureAudioPlayback() {
-  await Audio.setAudioModeAsync({
-    allowsRecordingIOS: false,
+export function configureAudioPlayback() {
+  // Notification/TTS playback must not disable an in-flight iOS microphone session.
+  modeChange = modeChange.catch(() => undefined).then(() => Audio.setAudioModeAsync({
+    allowsRecordingIOS: recording,
     playsInSilentModeIOS: true,
     staysActiveInBackground: true,
-    shouldDuckAndroid: true,
+    shouldDuckAndroid: !recording,
     playThroughEarpieceAndroid: false,
-  });
+  }));
+  return modeChange;
+}
+
+export function configureAudioRecording(active: boolean) {
+  recording = active;
+  return configureAudioPlayback();
 }
 
 export async function beep(kind: SoundKind = 'notify'): Promise<boolean> {
