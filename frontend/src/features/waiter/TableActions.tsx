@@ -47,10 +47,12 @@ export function TableSelectButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-border bg-white px-3 text-sm font-medium text-text-primary transition-colors hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
+      title={`${t('Стол')} ${number}${hallName ? ` · ${hallName}` : ''}`}
+      aria-label={`${t('Стол')} ${number}${hallName ? ` · ${hallName}` : ''}`}
+      className="inline-flex h-11 min-w-24 max-w-28 shrink-0 items-center justify-between gap-1 rounded-xl border border-border bg-white px-2 text-sm font-medium text-text-primary transition-colors hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
     >
-      {t('Стол')} {number}{hallName ? ` · ${hallName}` : ''}
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-muted">
+      <span className="truncate">{t('Стол')} {number}</span>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-text-muted">
         <path d="m6 9 6 6 6-6" />
       </svg>
     </button>

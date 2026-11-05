@@ -1,3 +1,5 @@
+import { usePublicSettings } from '@/features/settings/api';
+import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
 import { useEffect, useMemo, useState } from 'react';
 import type { Order, CartLine, DishVariant, WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
@@ -80,6 +82,7 @@ type ReplacementTarget = { order: Order; item: Order['items'][number] };
 
 export function WaiterApp() {
   useWaiterRealtime();
+  const settings = usePublicSettings();
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
   const t = useT();
@@ -313,12 +316,21 @@ export function WaiterApp() {
 
   // --- Редактирование заказа (Фаза 1: только пока кухня не приняла заказ) ---
   function startEditOrder(order: Order) {
+    const permission = waiterOrderPermission(order, 'edit', settings.data?.waiterOrderPermissions);
+    if (!permission.allowed) { push({ message: permission.reason, type: 'error', at: new Date().toISOString() }); return; }
+    if (order.items.some((it) => !['cancelled', 'rejected'].includes(it.status) && !dishesQ.data?.some((dish) => dish.id === it.dishId))) {
+      push({ message: 'В заказе есть удалённое из меню блюдо. Используйте отмену отдельной позиции или обратитесь к администратору.', type: 'error', at: new Date().toISOString() }); return;
+    }
     setViewingOrderId(null);
     cart.selectTable(order.table.id);
     const dishById = new Map((dishesQ.data ?? []).map((d) => [d.id, d]));
     const lines = order.items
       .filter((it) => it.status !== 'rejected' && it.status !== 'cancelled')
       .map((it) => {
+        const editPermission = waiterItemPermission(order, it, 'edit', settings.data?.waiterOrderPermissions);
+        const cancelPermission = waiterItemPermission(order, it, 'cancel', settings.data?.waiterOrderPermissions);
+        const origin = { orderItemId: it.id, lineId: `edit-${it.id}`, editAllowed: editPermission.allowed, cancelAllowed: cancelPermission.allowed,
+          restrictionReason: !editPermission.allowed ? editPermission.reason : !cancelPermission.allowed ? cancelPermission.reason : undefined };
         const dish = it.dishId ? dishById.get(it.dishId) : undefined;
         if (!dish) return null;
         // Сет — восстанавливаем линию с изменённым составом.
@@ -355,7 +367,9 @@ export function WaiterApp() {
             };
           });
           return {
+            ...origin,
             dish,
+            comment: it.comment ?? undefined,
             quantity: it.quantity,
             takeaway: it.takeaway ?? undefined,
             lineId: `set-edit-${it.id}`,
@@ -366,6 +380,7 @@ export function WaiterApp() {
           ? dish.variants.find((candidate) => candidate.id === it.dishVariantId)
           : undefined;
         return {
+          ...origin,
           dish,
           variant,
           weightGrams: it.weightGrams ?? undefined,
@@ -390,6 +405,7 @@ export function WaiterApp() {
     try {
       await editOrder.mutateAsync({
         orderId: editingOrderId,
+        reason: 'Изменение состава заказа',
         comment: cart.commentOpen ? cart.comment : '',
         lines: cart.lines,
       });
@@ -418,6 +434,8 @@ export function WaiterApp() {
   }
 
   function requestOrderCancellation(order: Order) {
+    const permission = waiterOrderPermission(order, 'cancel', settings.data?.waiterOrderPermissions);
+    if (!permission.allowed) { push({ message: `${permission.reason} Отмените разрешённые позиции отдельно.`, type: 'error', at: new Date().toISOString() }); return; }
     setCancelTarget(order);
   }
 

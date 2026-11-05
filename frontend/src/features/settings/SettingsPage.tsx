@@ -20,11 +20,14 @@ import {
   useTestFiscalConnection,
   type SettingsInput,
 } from './api';
+import { OrderPermissionsSettings } from './OrderPermissionsSettings';
+import { DEFAULT_WAITER_PERMISSIONS, type WaiterOrderPermissions } from '@/lib/order-permissions';
 import { QrPaymentCard } from './QrPaymentCard';
 
 type FiscalProvider = '' | 'ekassa' | 'yakassa' | 'mock';
 
 interface Form {
+  waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;
   phone: string;
@@ -72,6 +75,7 @@ export function SettingsPage() {
   useEffect(() => {
     if (data) {
       setForm({
+        waiterOrderPermissions: data.waiterOrderPermissions ?? DEFAULT_WAITER_PERMISSIONS,
         cafeName: data.cafeName,
         address: data.address,
         phone: data.phone,
@@ -119,6 +123,7 @@ export function SettingsPage() {
   }
 
   const toSettingsInput = (source: Form): SettingsInput => ({
+    waiterOrderPermissions: source.waiterOrderPermissions,
     cafeName: source.cafeName,
     address: source.address,
     phone: source.phone,
@@ -239,6 +244,8 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-4">
+      <OrderPermissionsSettings permissions={form.waiterOrderPermissions}
+        disabled={update.isPending} onPermissions={(value) => set('waiterOrderPermissions', value)} />
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Левая большая карточка — информация о кафе */}
         <div className="card p-5 lg:col-span-2">

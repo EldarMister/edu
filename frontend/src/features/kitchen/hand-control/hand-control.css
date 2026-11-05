@@ -1,0 +1,18 @@
+.hand-control{position:relative;display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:13px;max-width:100%}
+.hand-control-toggle,.hand-control-settings{min-height:44px;border:1px solid #005bff;border-radius:9px;background:#fff;color:#004edb;padding:8px 12px;font-weight:600}
+.hand-control-toggle[aria-pressed=true]{background:#005bff;color:#fff}
+.hand-control-settings{min-width:44px;font-size:20px;padding:6px}
+.hand-control-status{font-size:12px;color:#475569;flex-basis:100%}
+.hand-control-panel{position:absolute;right:0;top:100%;margin-top:8px;width:380px;max-width:calc(100vw - 24px);max-height:70dvh;overflow-y:auto;z-index:90;border:1px solid #cbd5e1;border-radius:14px;background:white;color:#0f172a;padding:16px;box-shadow:0 12px 36px #0f172a22}
+.hand-control-panel p{margin:10px 0;line-height:1.45}
+.hand-control-panel-title,.hand-control-adjust{display:flex;gap:8px;align-items:center;justify-content:space-between}
+.hand-control-panel-title button,.hand-control-adjust button{min-width:44px;min-height:44px;padding:6px;border-radius:8px;border:1px solid #cbd5e1;background:#f8fafc}
+.hand-control-adjust{margin:10px 0}
+.hand-control-adjust [aria-pressed=true]{border-color:#005bff;background:#eaf1ff}
+.hand-control-adjust button:disabled{opacity:.45}
+.hand-control-error{color:#b91c1c}
+.hand-control-panel summary{min-height:44px;padding-top:12px;cursor:pointer}
+.hand-control-cursor{position:fixed;top:0;left:0;width:30px;height:30px;pointer-events:none;z-index:10000;border:3px solid #fff;border-radius:50%;background:#005bffb0;box-shadow:0 0 0 2px #005bff,0 2px 9px #0005;opacity:0;will-change:transform}
+.hand-control-cursor[data-pinching=true]{background:#f59e0b;box-shadow:0 0 0 4px #d97706}
+[data-hand-hover=true]{outline:4px solid #f59e0b!important;outline-offset:3px!important}
+@media(max-width:640px){.hand-control-panel{position:fixed;top:auto;bottom:12px;left:12px;right:12px;width:auto}}

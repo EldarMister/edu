@@ -11,9 +11,8 @@ import { useCart } from '@/store/cart';
 import { displayOrderNumber, hallSuffix, money, timeHM } from '@/utils/format';
 import { apiError } from '@/lib/api';
 import type { Order } from '@/types';
-
-const EDITABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
-const CANCELLABLE = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready', 'partially_rejected'];
+import { usePublicSettings } from '@/services/api/settings';
+import { waiterOrderPermission } from '@/lib/order-permissions';
 
 export function OrdersScreen() {
   const orders = useActiveOrders();
@@ -58,12 +57,15 @@ function OrderCard({ order }: { order: Order }) {
   const navigation = useNavigation<any>();
   const selectTable = useCart((s) => s.selectTable);
   const cancel = useCancelOrder();
+  const settings = usePublicSettings();
   const attention = order.requiresWaiterDecision || ['ready', 'rejected'].includes(order.status);
   const unclaimedQr = order.source === 'qr' && !order.waiter;
 
   const openMenu = () => {
     const buttons: any[] = [];
-    if (EDITABLE.includes(order.status) || order.status === 'ready') {
+    const canEdit = waiterOrderPermission(order, 'edit', settings.data?.waiterOrderPermissions);
+    const canCancel = waiterOrderPermission(order, 'cancel', settings.data?.waiterOrderPermissions);
+    if (canEdit.allowed) {
       buttons.push({
         text: 'Добавить блюда',
         onPress: () => {
@@ -75,19 +77,18 @@ function OrderCard({ order }: { order: Order }) {
         },
       });
     }
-    if (CANCELLABLE.includes(order.status)) {
+    if (canCancel.allowed) {
       buttons.push({
         text: 'Отменить заказ',
         style: 'destructive',
-        onPress: () =>
-          cancel.mutate(
-            { orderId: order.id },
-            { onError: (e: unknown) => Alert.alert('Ошибка', apiError(e)) },
-          ),
+        onPress: () => cancel.mutate(
+          { orderId: order.id, reason: 'Отмена заказа официантом' },
+          { onError: (e: unknown) => Alert.alert('Ошибка', apiError(e)) },
+        ),
       });
     }
     buttons.push({ text: 'Закрыть', style: 'cancel' });
-    Alert.alert(`Заказ ${displayOrderNumber(order.orderNumber)}`, undefined, buttons);
+    Alert.alert(`Заказ ${displayOrderNumber(order.orderNumber)}`, canCancel.allowed ? undefined : canCancel.reason, buttons);
   };
 
   return (

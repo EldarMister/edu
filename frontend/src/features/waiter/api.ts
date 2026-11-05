@@ -147,6 +147,7 @@ export function useEndShift() {
 /** Преобразует линии корзины в позиции заказа (учитывает состав сета). */
 function linesToItems(lines: CartLine[]) {
   return lines.map((l) => ({
+    ...(l.orderItemId ? { id: l.orderItemId } : {}),
     dishId: l.dish.id,
     variantId: l.variant?.id,
     weightGrams: l.weightGrams,
@@ -215,10 +216,11 @@ export function useAddItems() {
 export function useEditOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { orderId: string; comment?: string; lines: CartLine[] }) => {
+    mutationFn: async (payload: { orderId: string; comment?: string; reason?: string; lines: CartLine[] }) => {
       const items = linesToItems(payload.lines);
       const { data } = await api.patch<Order>(`/orders/${payload.orderId}`, {
-        comment: payload.comment?.trim() || undefined,
+        reason: payload.reason,
+        comment: payload.comment?.trim() ?? '',
         items,
       });
       return data;
