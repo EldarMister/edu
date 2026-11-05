@@ -66,15 +66,16 @@ export function CartLinesList({
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2.5">
-                <RoundBtn variant="dec" onClick={() => dec(key)} label={t('Уменьшить количество')} />
+                <RoundBtn disabled={l.editAllowed === false || l.cancelAllowed === false} variant="dec" onClick={() => dec(key)} label={t('Уменьшить количество')} />
                 <span className="w-5 text-center text-[15px] font-medium text-text-primary">{l.quantity}</span>
-                <RoundBtn variant="inc" onClick={() => inc(key)} label={t('Увеличить количество')} />
+                <RoundBtn disabled={l.editAllowed === false} variant="inc" onClick={() => inc(key)} label={t('Увеличить количество')} />
               </div>
               <NumberTicker
                 value={unit * l.quantity}
                 className={`${priceWidth} shrink-0 justify-end text-[15px] font-semibold text-text-primary`}
               />
             </div>
+            {l.restrictionReason && <p className="mt-1 text-xs text-amber-700">{l.restrictionReason}</p>}
             {isSet && open && (
               <ul className="mt-1.5 space-y-0.5 pl-1 text-[13px]">
                 {l.set!.components.map((c) => (
@@ -140,7 +141,9 @@ export function RoundBtn({
   variant,
   onClick,
   label,
+  disabled,
 }: {
+  disabled?: boolean;
   variant: 'inc' | 'dec';
   onClick: () => void;
   label: string;
@@ -151,6 +154,7 @@ export function RoundBtn({
       type="button"
       onClick={onClick}
       aria-label={label}
+      disabled={disabled}
       className={`flex h-7 w-7 items-center justify-center rounded-full border bg-white transition-colors ${
         isDec
           ? 'border-red-400 text-red-500 hover:bg-red-50'

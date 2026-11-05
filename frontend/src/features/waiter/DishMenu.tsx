@@ -27,7 +27,7 @@ export function DishMenu({
   onAddSet: (set: Dish, components: CartSetComponent[]) => void;
   onDec: (dish: Dish) => void;
   disabled?: boolean;
-  /** Селект выбранного стола, который показывается справа от поиска (экран меню). */
+  /** Селект выбранного стола слева от поиска (экран меню). */
   tableSlot?: React.ReactNode;
 }) {
   const t = useT();
@@ -59,7 +59,7 @@ export function DishMenu({
 
   return (
     <div className="flex h-full flex-col">
-      {/* Выбранный стол + поиск в одну строку */}
+      {/* Выбранный стол слева, поиск блюда справа. */}
       <div className="mb-3 flex items-center gap-2">
         {tableSlot}
         <div className="relative min-w-0 flex-1">

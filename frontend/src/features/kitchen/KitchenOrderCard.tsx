@@ -308,7 +308,7 @@ export function KitchenOrderCard({
   }
 
   return (
-    <div className="card flex flex-col p-4">
+    <div data-order-id={order.id} className="card flex flex-col p-4">
       {/* Шапка карточки */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">

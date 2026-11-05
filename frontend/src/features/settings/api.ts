@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, API_URL } from '@/lib/api';
+import type { WaiterOrderPermissions } from '@/lib/order-permissions';
 import type { PaymentMethod } from '@/types';
 
 /** Преобразует значение QR из настроек в пригодный для <img src> адрес.
@@ -11,6 +12,7 @@ export function resolveQrSrc(value: string | null | undefined): string | null {
 }
 
 export interface Settings {
+  waiterOrderPermissions: WaiterOrderPermissions;
   id: string;
   cafeId: string | null;
   cafeName: string;
@@ -51,6 +53,7 @@ export interface Settings {
 }
 
 export interface PublicSettings {
+  waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;
   phone: string;
@@ -73,6 +76,7 @@ export function usePublicSettings() {
     queryKey: ['settings', 'public'],
     queryFn: async () => (await api.get<PublicSettings>('/settings')).data,
     staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 }
 

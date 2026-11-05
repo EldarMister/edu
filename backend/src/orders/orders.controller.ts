@@ -53,7 +53,7 @@ export class OrdersController {
   @Patch(':id')
   @Roles(Role.WAITER)
   edit(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: EditOrderDto) {
-    return this.orders.editOrder(id, user, dto.items, dto.comment);
+    return this.orders.editOrder(id, user, dto.items, dto.comment, dto.reason);
   }
 
   @Post(':id/cancel')

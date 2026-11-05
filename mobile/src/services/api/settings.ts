@@ -2,8 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { API_URL } from '@/config/env';
 import type { PaymentMethod } from '@/types';
+import type { WaiterOrderPermissions } from '@/lib/order-permissions';
 
 export interface PublicSettings {
+  waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   paymentMethods: PaymentMethod[];
   qrImageUrl: string | null;
@@ -21,6 +23,7 @@ export function usePublicSettings() {
   return useQuery({
     queryKey: ['settings', 'public'],
     queryFn: async () => (await api.get<PublicSettings>('/settings')).data,
-    staleTime: 60_000,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
   });
 }

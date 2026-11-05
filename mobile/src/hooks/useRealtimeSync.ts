@@ -28,11 +28,16 @@ export function useRealtimeSync() {
       qc.invalidateQueries({ queryKey: ['dishes'] });
       qc.invalidateQueries({ queryKey: ['categories'] });
     };
+    const invalidateSettings = () => {
+      qc.invalidateQueries({ queryKey: ['settings'] });
+      invalidateOrders();
+    };
 
     const handlers: Array<[string, () => void]> = [
       [SERVER_EVENTS.ORDER_NEW, invalidateOrders],
       [SERVER_EVENTS.ORDER_STATUS_CHANGED, invalidateOrders],
       [SERVER_EVENTS.KITCHEN_NEW_ORDER, invalidateOrders],
+      [SERVER_EVENTS.SETTINGS_UPDATED, invalidateSettings],
       [SERVER_EVENTS.WAITER_ORDER_READY, invalidateOrders],
       [SERVER_EVENTS.WAITER_ORDER_REJECTED, invalidateOrders],
       [SERVER_EVENTS.WAITER_SHIFT_STARTED, invalidateOrders],
@@ -48,6 +53,7 @@ export function useRealtimeSync() {
     const onReconnect = () => {
       invalidateOrders();
       invalidateTables();
+      invalidateSettings();
     };
     sock.on('connect', onReconnect);
 

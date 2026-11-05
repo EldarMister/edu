@@ -11,7 +11,7 @@ import type { PrepStation } from '@/types';
 import { useKitchenOrders, useAccept, useReadyItems, useRejectItems, type KitchenTab } from './api';
 import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
-import { KitchenVoiceSettings } from './KitchenVoiceSettings';
+import { KitchenHandControl } from './hand-control/KitchenHandControl';
 import { KitchenStats } from './KitchenStats';
 
 const TABS: { key: KitchenTab; label: string }[] = [
@@ -150,7 +150,7 @@ export function KitchenApp({
   const undoSecondsLeft = pending ? Math.max(0, Math.ceil((pending.deadline - now) / 1000)) : 0;
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div data-hand-scope className="flex h-full flex-col bg-background">
       <OfflineBanner />
 
       {/* Шапка */}
@@ -207,7 +207,7 @@ export function KitchenApp({
           >
             Статистика
           </button>
-          <KitchenVoiceSettings />
+          <KitchenHandControl />
           <button
             onClick={() => setStopListOpen(true)}
             className="shrink-0 rounded-lg border border-primary bg-white px-3.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"

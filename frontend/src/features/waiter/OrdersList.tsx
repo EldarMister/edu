@@ -1,3 +1,5 @@
+import { usePublicSettings } from '@/features/settings/api';
+import { waiterOrderPermission } from '@/lib/order-permissions';
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Order } from '@/types';
@@ -167,18 +169,11 @@ function OrderActionsMenu({
     };
   }, [open, onClose]);
 
-  // Редактирование: разрешено пока заказ не готов и не перешёл к оплате.
-  const editableStatuses = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'];
-  // Отмена официантом разрешена только до перехода заказа в статус «Готов».
-  const cancellableStatuses = [
-    'sent_to_kitchen',
-    'accepted_by_kitchen',
-    'cooking',
-    'partially_rejected',
-  ];
-  const editable = editableStatuses.includes(order.status);
-  const cancellable = cancellableStatuses.includes(order.status);
-  const showEdit = editable;
+  const settings = usePublicSettings();
+  const editPermission = waiterOrderPermission(order, 'edit', settings.data?.waiterOrderPermissions);
+  const cancelPermission = waiterOrderPermission(order, 'cancel', settings.data?.waiterOrderPermissions);
+  const cancellable = cancelPermission.allowed;
+  const showEdit = editPermission.allowed;
 
   return (
     <div className="self-center" onClick={(e) => e.stopPropagation()}>

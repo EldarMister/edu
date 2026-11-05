@@ -5,6 +5,10 @@ import { CreateOrderItemDto } from './create-order.dto';
 export class EditOrderDto {
   @IsOptional()
   @IsString()
+  @MaxLength(160)
+  reason?: string;
+  @IsOptional()
+  @IsString()
   @MaxLength(500)
   comment?: string;
 

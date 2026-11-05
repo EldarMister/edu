@@ -329,6 +329,10 @@ export interface CartSetComponent {
 }
 
 export interface CartLine {
+  orderItemId?: string;
+  editAllowed?: boolean;
+  cancelAllowed?: boolean;
+  restrictionReason?: string;
   dish: Dish;
   variant?: DishVariant;
   /** Выбранный вес весового блюда; цена линии остаётся ценой блюда. */

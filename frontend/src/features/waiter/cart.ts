@@ -159,7 +159,7 @@ export const useCart = create<CartState>((set) => ({
     set((s) =>
       mutate(s, (c) => ({
         ...c,
-        lines: c.lines.map((l) => (cartLineKey(l) === lineKey ? { ...l, quantity: l.quantity + 1 } : l)),
+        lines: c.lines.map((l) => (cartLineKey(l) === lineKey && l.editAllowed !== false ? { ...l, quantity: l.quantity + 1 } : l)),
       })),
     ),
 
@@ -168,19 +168,19 @@ export const useCart = create<CartState>((set) => ({
       mutate(s, (c) => ({
         ...c,
         lines: c.lines
-          .map((l) => (cartLineKey(l) === lineKey ? { ...l, quantity: l.quantity - 1 } : l))
+          .map((l) => (cartLineKey(l) === lineKey && l.editAllowed !== false && l.cancelAllowed !== false ? { ...l, quantity: l.quantity - 1 } : l))
           .filter((l) => l.quantity > 0),
       })),
     ),
 
   remove: (lineKey) =>
-    set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.filter((l) => cartLineKey(l) !== lineKey) }))),
+    set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.filter((l) => cartLineKey(l) !== lineKey || l.editAllowed === false || l.cancelAllowed === false) }))),
 
   setLineComment: (lineKey, comment) =>
     set((s) =>
       mutate(s, (c) => ({
         ...c,
-        lines: c.lines.map((l) => (cartLineKey(l) === lineKey ? { ...l, comment } : l)),
+        lines: c.lines.map((l) => (cartLineKey(l) === lineKey && l.editAllowed !== false ? { ...l, comment } : l)),
       })),
     ),
 
@@ -188,12 +188,12 @@ export const useCart = create<CartState>((set) => ({
     set((s) =>
       mutate(s, (c) => ({
         ...c,
-        lines: c.lines.map((l) => (cartLineKey(l) === lineKey ? { ...l, takeaway } : l)),
+        lines: c.lines.map((l) => (cartLineKey(l) === lineKey && l.editAllowed !== false ? { ...l, takeaway } : l)),
       })),
     ),
 
   setAllTakeaway: (takeaway) =>
-    set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.map((l) => ({ ...l, takeaway })) }))),
+    set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.map((l) => l.editAllowed === false ? l : ({ ...l, takeaway })) }))),
 
   setComment: (comment) => set((s) => mutate(s, (c) => ({ ...c, comment }))),
 

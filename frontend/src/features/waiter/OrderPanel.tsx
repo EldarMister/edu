@@ -1,3 +1,5 @@
+import { usePublicSettings } from '@/features/settings/api';
+import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
 import { useEffect, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
 import { OrderStatusBadges } from '@/components/StatusBadge';
@@ -97,7 +99,6 @@ export function OrderPanel({
   onReplaceRejectedItem,
   onRemoveRejectedItem,
   onCancelReadyItem,
-  onInsufficientPermissions,
   onCancelOrder,
   onEdit,
 }: {
@@ -126,8 +127,11 @@ export function OrderPanel({
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
   const unclaimedQr = order.source === 'qr' && !order.waiter;
   // Редактирование доступно, пока кухня не завершила заказ (как в списке заказов).
-  const editable = ['sent_to_kitchen', 'accepted_by_kitchen', 'cooking'].includes(order.status);
-  const billCorrection = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
+  const settings = usePublicSettings();
+  const policies = settings.data?.waiterOrderPermissions;
+  const editable = waiterOrderPermission(order, 'edit', policies).allowed;
+  const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
+  const inlineActions = order.status === 'ready' || order.status === 'picked_up';
   const finalCancelReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
 
   if (waitingDecision) {
@@ -162,6 +166,7 @@ export function OrderPanel({
             {onEdit && editable && !unclaimedQr && (
               <button
                 onClick={onEdit}
+                title={waiterOrderPermission(order, 'edit', policies).reason}
                 className="flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border px-2 text-[12px] font-medium text-text-secondary transition-colors hover:border-primary/50 hover:text-primary"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -315,6 +320,20 @@ export function OrderPanel({
               {t('Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.')}
             </div>
           )}
+          <div className={inlineActions ? 'flex gap-2' : undefined}>
+          {[
+            'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
+            'picked_up', 'partially_rejected', 'waiting_payment',
+          ].includes(order.status) && !order.requiresWaiterDecision && !unclaimedQr && (
+            <button
+              className={`btn btn-lg border border-primary bg-white font-medium text-primary hover:bg-primary/5 ${inlineActions ? 'shrink-0 px-4' : 'mb-2 w-full'}`}
+              disabled={preliminaryPending}
+              onClick={onPreliminaryReceipt}
+            >
+              {preliminaryPending ? <Spinner /> : t('Счёт')}
+            </button>
+          )}
+          <div className={inlineActions ? 'min-w-0 flex-1' : undefined}>
           <ActionButton
             order={order}
             submitting={submitting}
@@ -328,6 +347,8 @@ export function OrderPanel({
             onContinueAfterRejection={onContinueAfterRejection}
             onCancelOrder={onCancelOrder}
           />
+          </div>
+          </div>
         </div>
       </div>
       <Modal
@@ -339,14 +360,9 @@ export function OrderPanel({
           <div className="space-y-2">
             <button
               className="btn-danger btn-lg w-full font-semibold"
-              disabled={submitting}
+              disabled={submitting || !billItem || !waiterItemPermission(order, billItem, 'cancel', policies).allowed}
               onClick={() => {
                 if (!billItem) return;
-                if (billItem.status === 'ready' || billItem.status === 'served') {
-                  setBillItem(null);
-                  onInsufficientPermissions();
-                  return;
-                }
                 onCancelReadyItem(billItem, finalCancelReason);
                 setBillItem(null);
               }}
@@ -358,6 +374,7 @@ export function OrderPanel({
       >
         {billItem && (
           <div className="space-y-3">
+            {!waiterItemPermission(order, billItem, 'cancel', policies).allowed && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{waiterItemPermission(order, billItem, 'cancel', policies).reason}</p>}
             <div className="rounded-xl border border-border bg-background px-3 py-2">
               <p className="font-medium text-text-primary">{orderItemDisplayName(billItem)}</p>
               <p className="mt-1 text-sm text-text-muted">

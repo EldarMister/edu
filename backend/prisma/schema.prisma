@@ -99,6 +99,8 @@ enum WaiterShiftStatus {
 }
 
 enum KitchenEventType {
+  cancel
+  change
   accept
   reject_order
   reject_item
@@ -680,6 +682,7 @@ model AuditLog {
 
 // Настройки заведения (singleton, id = "default"). Этап 8.
 model Settings {
+  waiterOrderPermissions Json? @map("waiter_order_permissions")
   cafeId                       String? @unique @map("cafe_id")
   id                           String  @id @default(uuid())
   cafeName                     String  @default("EDU CAFE") @map("cafe_name")

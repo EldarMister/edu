@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Toggle } from '@/components/Toggle';
 import { kitchenVoice } from '@/services/kitchenVoice';
 import {
@@ -12,7 +12,7 @@ import {
 } from '@/services/kitchenVoiceSettings';
 import { KITCHEN_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
 
-export function KitchenVoiceSettings() {
+export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState<KitchenVoiceSettingsType>(() => getKitchenVoiceSettings());
   const [testing, setTesting] = useState(false);
@@ -87,13 +87,13 @@ export function KitchenVoiceSettings() {
 
           <Section>
             <p className="mb-3 font-semibold text-text-primary">Голос</p>
-            <div className="space-y-1.5">
+            <div className="grid grid-cols-3 gap-1.5">
               {KITCHEN_SPEAKERS.map((speaker) => (
                 <button
                   key={speaker.value}
                   type="button"
                   onClick={() => patch({ speaker: speaker.value })}
-                  className={`flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors ${
+                  className={`flex w-full items-center gap-1.5 rounded-lg px-1 py-2 text-left transition-colors ${
                     settings.speaker === speaker.value
                       ? 'bg-primary/10 text-primary'
                       : 'text-text-secondary hover:bg-background'
@@ -118,6 +118,8 @@ export function KitchenVoiceSettings() {
               onChange={(value) => patch({ voiceEnabled: value })}
             />
           </Section>
+
+          {handControl}
 
           <Section>
             <p className="mb-3 font-semibold text-text-primary">Скорость озвучки</p>

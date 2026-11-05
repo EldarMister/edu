@@ -7,9 +7,11 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { UpdateSettingsDto } from './dto';
+import { normalizeWaiterOrderPermissions, validateWaiterOrderPermissions } from '../orders/order-policy';
 
 /** Человекочитаемые названия полей настроек для описаний аудита. */
 const SETTINGS_FIELD_LABELS: Record<string, string> = {
+  waiterOrderPermissions: 'права официантов на изменение заказов',
   cafeName: 'название кафе',
   address: 'адрес',
   phone: 'телефон',
@@ -90,6 +92,7 @@ export class SettingsService {
     } = s;
     return {
       ...safe,
+      waiterOrderPermissions: normalizeWaiterOrderPermissions(s.waiterOrderPermissions),
       deliveryApiKeyConfigured: !!_secretHash,
     };
   }
@@ -131,6 +134,7 @@ export class SettingsService {
       // Включена ли ККМ — без раскрытия ключей (нужно фронтенду для подсказок/гейтинга).
       fiscalEnabled: !!s.fiscalProvider,
       deliveryEnabled: s.deliveryEnabled,
+      waiterOrderPermissions: normalizeWaiterOrderPermissions(s.waiterOrderPermissions),
     };
   }
 
@@ -167,6 +171,9 @@ export class SettingsService {
     }
 
     const data: Prisma.SettingsUpdateInput = { ...dto };
+    if (dto.waiterOrderPermissions !== undefined) {
+      data.waiterOrderPermissions = validateWaiterOrderPermissions(dto.waiterOrderPermissions);
+    }
     if (dto.serviceChargeAmount !== undefined) {
       data.serviceChargeAmount = new Prisma.Decimal(round2(dto.serviceChargeAmount));
     }

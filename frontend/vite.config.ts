@@ -80,6 +80,17 @@ export default defineConfig({
       includeAssets: ['edupos.png', 'sounds/*.mp3', 'sounds/*.wav', 'sounds/*.ogg'],
       workbox: {
         importScripts: ['push-sw.js'],
+        // Hand recognition is opt-in. Never download its large model/WASM at PWA installation.
+        globIgnores: ['**/vision_wasm*', '**/hand.worker-*', '**/hand_landmarker.task'],
+        runtimeCaching: [{
+          urlPattern: /\/(?:assets\/(?:vision_wasm[^/]*\.(?:js|wasm)|hand\.worker-[^/]+\.js)|hand-control\/hand_landmarker\.task)(?:\?|$)/,
+          handler: 'CacheFirst',
+          options: {
+            cacheName: 'hand-control-assets-v1',
+            expiration: { maxEntries: 8, maxAgeSeconds: 365 * 24 * 60 * 60 },
+            cacheableResponse: { statuses: [200] },
+          },
+        }],
         // Новый SW активируется сразу — не ждёт закрытия всех вкладок
         skipWaiting: true,
         clientsClaim: true,
