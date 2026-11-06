@@ -151,7 +151,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   useSocketEvent<StationVoicedOrder>(
     SERVER_EVENTS.KITCHEN_NEW_ORDER,
     (order) => {
-      const text = stationVoice(order, station);
+      const text = stationVoice(order, station, useAuth.getState().user?.cafeId);
       if (!text) return;
       if (backgroundRuntimeHandlesAudio()) return;
       const settings = getKitchenVoiceSettings();
@@ -183,7 +183,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   useSocketEvent<StationVoicedOrder>(
     SERVER_EVENTS.ORDER_STATUS_CHANGED,
     (order) => {
-      const text = stationVoice(order, station);
+      const text = stationVoice(order, station, useAuth.getState().user?.cafeId);
       if (!text) return;
       if (backgroundRuntimeHandlesAudio()) return;
       if (getKitchenVoiceSettings().notificationsEnabled && notificationDeduper.claim({

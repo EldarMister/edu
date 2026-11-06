@@ -3189,7 +3189,8 @@ export class OrdersService {
     } | undefined;
     const changedAt = order.updatedAt instanceof Date ? order.updatedAt.toISOString() : String(order.updatedAt ?? '');
     for (const [station, role] of [[PrepStation.kitchen, Role.KITCHEN], [PrepStation.bar, Role.BAR]] as const) {
-      const text = stationVoice?.byStation?.[station] ?? stationVoice?.text;
+      const hasStationItems = Array.isArray(order.items) && order.items.some(item => item?.prepStation === station);
+      const text = stationVoice?.byStation ? stationVoice.byStation[station] : hasStationItems ? stationVoice?.text : undefined;
       if (!text || stationVoice?.suppressStations?.[station]) continue;
       void this.push.notifyRole(role, {
         title: 'Обновление заказа', body: text, type: 'info', channel: 'kitchen',

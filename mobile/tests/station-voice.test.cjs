@@ -1,0 +1,8 @@
+const test=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const vm=require('node:vm');const ts=require('typescript');
+const moduleVoice={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(__dirname,'../src/services/realtimeVoice.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{module:moduleVoice,exports:moduleVoice.exports});
+const {stationVoice}=moduleVoice.exports;
+const order={id:'a',cafeId:'cafe-a',items:[{prepStation:'kitchen'}],voice:{text:'Отмена',byStation:{kitchen:null,bar:'Бар'}}};
+test('station map never falls back to another station cancellation',()=>{assert.equal(stationVoice(order,'kitchen','cafe-a'),null);assert.equal(stationVoice(order,'bar','cafe-a'),'Бар');assert.equal(stationVoice({...order,voice:{text:'Отмена',byStation:{bar:'Бар'}}},'kitchen'),null);});
+test('other cafe is rejected before any foreground or background announcement',()=>{assert.equal(stationVoice(order,'bar','cafe-b'),null);assert.equal(stationVoice({...order,cafeId:undefined},'bar','cafe-a'),null);});
+test('general cancellation is spoken only by stations with positions in the order',()=>{const event={...order,voice:{text:'Отмена'}};assert.equal(stationVoice(event,'kitchen','cafe-a'),'Отмена');assert.equal(stationVoice(event,'bar','cafe-a'),null);assert.equal(stationVoice(event,'none','cafe-a'),null);});
+test('explicit suppression wins over a station-specific text',()=>{assert.equal(stationVoice({...order,voice:{byStation:{kitchen:'Кухня'},suppressStations:{kitchen:true}}},'kitchen','cafe-a'),null);});

@@ -34,6 +34,7 @@ export interface EmployeePermissions {
 
 export interface AuthUser {
   id: string;
+  cafeId?: string | null;
   name: string;
   phone: string;
   role: Role;
@@ -212,6 +213,7 @@ export interface OrderItem {
 
 export interface Order {
   id: string;
+  cafeId?: string | null;
   orderNumber: string;
   status: OrderStatus;
   totalAmount: string;

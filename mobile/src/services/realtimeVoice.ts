@@ -148,8 +148,12 @@ export function waiterVoiceKey(order: WaiterVoicedOrder, text: string | null): s
   return `${order.status}:${text}`;
 }
 
-export function stationVoice(order: StationVoicedOrder, station: PrepStation): string | null {
+export function stationVoice(order: StationVoicedOrder, station: PrepStation, cafeId?: string | null): string | null {
+  if (cafeId !== undefined && order.cafeId !== cafeId) return null;
   if (station === 'none') return null;
   if (order.voice?.suppressStations?.[station]) return null;
-  return order.voice?.byStation?.[station] ?? order.voice?.text ?? null;
+  // A station map is authoritative: null/absent means this station has no announcement.
+  if (order.voice?.byStation) return order.voice.byStation[station] || null;
+  if (!order.items?.some(item => item.prepStation === station)) return null;
+  return order.voice?.text || null;
 }

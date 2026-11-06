@@ -122,7 +122,7 @@ function onBackgroundKitchenNewOrder(order: StationVoicedOrder) {
   if (!shouldHandleBackgroundRealtime()) return;
   const station = currentStation();
   if (!station) return;
-  const text = stationVoice(order, station);
+  const text = stationVoice(order, station, useAuth.getState().user?.cafeId);
   if (!text) return;
   const settings = getKitchenVoiceSettings();
   if (settings.notificationsEnabled && !isRemotePushRegistered()) {
@@ -140,7 +140,7 @@ function onBackgroundKitchenStatusChanged(order: StationVoicedOrder) {
   if (!shouldHandleBackgroundRealtime()) return;
   const station = currentStation();
   if (!station) return;
-  const text = stationVoice(order, station);
+  const text = stationVoice(order, station, useAuth.getState().user?.cafeId);
   if (!text) return;
   if (getKitchenVoiceSettings().notificationsEnabled && !isRemotePushRegistered()) {
     void scheduleRealtimeLocalNotification({
