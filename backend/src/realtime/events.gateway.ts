@@ -13,6 +13,7 @@ import { Server, Socket } from 'socket.io';
 import { ROOMS, SERVER_EVENTS, QR_CLIENT_EVENTS } from './events';
 import { getJwtAccessSecret } from '../auth/jwt.config';
 import { PrismaService } from '../prisma/prisma.service';
+import { getCafeId } from '../tenant/tenant-context';
 import { assertCafeActive } from '../platform/cafe-status';
 
 const QR_OFFLINE_CART_TTL_MS = 60 * 60 * 1000;
@@ -97,13 +98,13 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
       if (user.role === 'KITCHEN' || user.role === 'BAR') {
         // Бар получает ту же ленту, что и кухня; экран фильтрует позиции по станции.
-        client.join(ROOMS.KITCHEN);
+        client.join(ROOMS.cafeKitchen(user.cafeId));
       } else if (user.role === 'WAITER') {
         client.join(ROOMS.WAITERS);
         client.join(ROOMS.waiter(user.id));
       } else if (user.role === 'ADMIN' || user.role === 'OWNER') {
         client.join(ROOMS.ADMIN);
-        client.join(ROOMS.KITCHEN); // админ видит и кухонную ленту
+        client.join(ROOMS.cafeKitchen(user.cafeId)); // админ видит и кухонную ленту
         if (user.role === 'ADMIN') {
           client.join(ROOMS.ADMIN_ONLY);
           if (user.cafeId) client.join(ROOMS.cafeAdmins(user.cafeId));
@@ -160,7 +161,9 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   // ---- API для сервисов ----
 
   emitToKitchen(event: string, payload: unknown) {
-    this.server.to(ROOMS.KITCHEN).emit(event, payload);
+    const explicitCafe = payload && typeof payload === 'object' && 'cafeId' in payload ? payload.cafeId : undefined;
+    const cafeId = typeof explicitCafe === 'string' || explicitCafe === null ? explicitCafe : getCafeId();
+    this.server.to(ROOMS.cafeKitchen(cafeId)).emit(event, payload);
   }
 
   emitToWaiter(waiterId: string | null | undefined, event: string, payload: unknown) {
