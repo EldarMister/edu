@@ -25,7 +25,7 @@ export type BottomPanelProps = {
   closeActions?: readonly (() => void)[];
   children: React.ReactNode; title?: string; headerContent?: React.ReactNode; footer?: React.ReactNode;
   expanded?: boolean; persistent?: boolean; containerHeight?: number;
-  handlePlacement?: 'outside' | 'inside'; hideHeader?: boolean; hideHandle?: boolean; draggable?: boolean;
+  handlePlacement?: 'outside' | 'inside'; hideHeader?: boolean; hideHandle?: boolean; draggable?: boolean; bodyDraggable?: boolean;
   inline?: boolean; contentKey?: string; presentation?: 'bottom' | 'center';
   ownerKey?: string;
   bodyStyle?: ViewStyle; panelStyle?: ViewStyle; footerStyle?: ViewStyle;
@@ -42,7 +42,21 @@ function containsScroller(node: React.ReactNode): boolean {
   });
 }
 
-export function BottomPanel({ visible, onClose, onDismiss, inline = false, persistent = false, expanded,
+/** Each completed dismissal releases native modal/gesture state for the next visit. */
+export function BottomPanel(props: BottomPanelProps) {
+  const [presence, setPresence] = React.useState({ retained: props.visible, generation: 0 });
+  React.useLayoutEffect(() => {
+    if (props.visible) setPresence(old => old.retained ? old : { ...old, retained: true });
+  }, [props.visible]);
+  const onDismiss = React.useCallback(() => {
+    setPresence(old => ({ retained: false, generation: old.generation + 1 }));
+    props.onDismiss?.();
+  }, [props.onDismiss]);
+  return props.visible || presence.retained
+    ? <BottomPanelSession key={presence.generation} {...props} onDismiss={onDismiss} /> : null;
+}
+
+function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persistent = false, expanded,
   fillBody = false, draggable = true, handlePlacement = 'outside', containerHeight, controller, ...current }: BottomPanelProps) {
   const id = React.useId();
   const parent = React.useContext(PanelCloseContext);
@@ -129,9 +143,10 @@ export function BottomPanel({ visible, onClose, onDismiss, inline = false, persi
   </View> : null);
   const body = containsScroller(content.children) ? content.children : <PanelScrollView style={styles.scroll}
     keyboardShouldPersistTaps="handled">{content.children}</PanelScrollView>;
+  const bodyMotion = content.bodyDraggable === false ? { ...motion, draggable: false } : motion;
   const { width: panelWidth, maxWidth, alignSelf, height: _height, maxHeight: _maxHeight, ...surfaceStyle } = content.panelStyle ?? {};
 
-  const panel = <HandTargetModal><PanelCloseContext.Provider value={closeContext}><PanelMotionContext.Provider value={motion}>
+  const panel = <HandTargetModal><PanelCloseContext.Provider value={closeContext}><PanelMotionContext.Provider value={bodyMotion}>
     <GestureHandlerRootView style={styles.root} pointerEvents={interactive ? 'box-none' : 'none'}
       accessibilityElementsHidden={!interactive} importantForAccessibility={interactive ? 'auto' : 'no-hide-descendants'}>
       <View ref={rootRef} collapsable={false} style={styles.root} pointerEvents="box-none" onLayout={measureContainer}>
@@ -146,10 +161,10 @@ export function BottomPanel({ visible, onClose, onDismiss, inline = false, persi
             pointerEvents={active ? 'auto' : 'none'} onLayout={event => measure(event.nativeEvent.layout.height)}
             style={[styles.panel, { maxHeight: maximum, width: panelWidth ?? (dimensions.width >= 600 ? Math.min(dimensions.width - 48, 720) : '100%'), maxWidth, alignSelf: alignSelf ?? 'center' },
               full && { height: maximum }, centered && { maxWidth: 300 }, animation]}>
-            {outsideHandle ? <GestureDetector gesture={handlePan}><View style={styles.handleBand}>{handle}</View></GestureDetector> : null}
+            {outsideHandle ? <GestureDetector gesture={handlePan}><View collapsable={false} style={styles.handleBand}>{handle}</View></GestureDetector> : null}
             <View style={[styles.surface, surfaceStyle, { flexShrink: 1, minHeight: 0 }, full && styles.fill,
               { borderTopLeftRadius: 26, borderTopRightRadius: 26 }]}>
-              {handlePlacement === 'inside' && !content.hideHandle ? <GestureDetector gesture={handlePan}><View style={styles.handleBand}>{handle}</View></GestureDetector> : null}
+              {handlePlacement === 'inside' && !content.hideHandle ? <GestureDetector gesture={handlePan}><View collapsable={false} style={styles.handleBand}>{handle}</View></GestureDetector> : null}
               {!content.hideHeader ? <GestureDetector gesture={headerPan}><View collapsable={false}
                 onLayout={event => { motion.headerHeight.value = event.nativeEvent.layout.height + (content.hideHandle ? 0 : 24); }}>
                 {header}

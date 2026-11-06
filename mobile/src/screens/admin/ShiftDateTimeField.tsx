@@ -27,6 +27,6 @@ export function ShiftDateTimeField({ label, value, onChange }: { label: string; 
       <DateField containerStyle={{ flex: 2 }} value={date} onChangeText={(next) => onChange(next ? `${next}T${time || '00:00'}` : '')} accessibilityLabel={`${label}: дата`} />
       <Field containerStyle={{ flex: 1 }} value={time} onChangeText={(next) => onChange(`${date || fallbackDate}T${next}`)} placeholder="HH:mm" keyboardType="numbers-and-punctuation" maxLength={5} accessibilityLabel={`${label}: время`} rightSlot={<FastPressable onPress={showTime} accessibilityRole="button" accessibilityLabel="Выбрать время" hitSlop={10}><Text style={{ color: colors.primary, fontSize: 22 }}>◷</Text></FastPressable>} />
     </View>
-    {Platform.OS !== 'android' ? <BottomSheet visible={open} onClose={close} title="Выбрать время" draggable={false} footer={<Button title="Готово" onPress={close} />}><DateTimePicker value={selectedDate} mode="time" display="spinner" is24Hour onChange={(_event, selected) => { if (selected) chooseTime(selected); }} /></BottomSheet> : null}
+    {Platform.OS !== 'android' ? <BottomSheet visible={open} onClose={close} title="Выбрать время" bodyDraggable={false} footer={<Button title="Готово" onPress={close} />}><DateTimePicker value={selectedDate} mode="time" display="spinner" is24Hour onChange={(_event, selected) => { if (selected) chooseTime(selected); }} /></BottomSheet> : null}
   </View>;
 }

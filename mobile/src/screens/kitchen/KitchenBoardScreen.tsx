@@ -383,7 +383,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
       ) : null}
 
       <HandTargetLayer name="stop-list"><StopListSheet visible={stopListOpen} station={station} onClose={() => setStopListOpen(false)} /></HandTargetLayer>
-      <HandTargetLayer name="voice">{voiceOpen ? <KitchenVoiceSettingsSheet visible onClose={() => setVoiceOpen(false)} /> : null}</HandTargetLayer>
+      <HandTargetLayer name="voice"><KitchenVoiceSettingsSheet visible={voiceOpen} onClose={() => setVoiceOpen(false)} /></HandTargetLayer>
     </SafeAreaView>
     </KitchenHandControlProvider>
   );

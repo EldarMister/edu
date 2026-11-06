@@ -455,7 +455,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
         onClose={closeRadio}
         sheet
         panelStyle={styles.pttSheet}
-        draggable={false}
+        bodyDraggable={false}
         bottomInset={sheetBottomInset}
         backdropColor="rgba(0,0,0,0.3)"
         bodyStyle={styles.sheetBody}

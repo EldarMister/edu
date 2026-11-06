@@ -165,7 +165,7 @@ export function useBottomPanelPan(motion: PanelMotion, scrollY?: SharedValue<num
     return pan.manualActivation(true)
       .onTouchesDown((event, manager) => {
         const touch = event.allTouches[0];
-        eligible.value = !!touch && enabled.value && !closing.value && canStartPanelDrag(scrollY.value, touch.y + headerHeight.value);
+        eligible.value = !!touch && enabled.value && !closing.value && canStartPanelDrag(scrollY.value, touch.y);
         if (!eligible.value || !touch) { manager.fail(); return; }
         x.value = touch.absoluteX; y.value = touch.absoluteY;
       })

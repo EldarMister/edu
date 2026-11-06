@@ -85,3 +85,22 @@ test('closed voice panel opens on every subsequent visit',()=>{
   assert.equal(env.value.motion.offset.value,0);
  }
 });
+
+test('body drag remains available below a tall fixed header',()=>{
+ const geometry=load('geometry.ts');
+ const handlers={};const builder=new Proxy({}, {get:(_,key)=>(...args)=>{if(String(key).startsWith('on'))handlers[key]=args[0];return builder;}});
+ const value=v=>({value:v});let failed=0,activated=0,closed=0;
+ const motion={offset:value(0),travel:value(500),headerHeight:value(220),closing:value(false),enabled:value(true),reduceMotion:false,draggable:true,close:()=>closed++};
+ const {useBottomPanelPan}=load('useBottomPanel.ts',{
+  react:{useMemo:fn=>fn()},'react-native':{},'react-native-gesture-handler':{Gesture:{Pan:()=>builder}},
+  'react-native-reanimated':{Easing:{bezier(){}},useSharedValue:value,runOnJS:fn=>fn,cancelAnimation(){},withSpring:target=>target},
+  './history':{},'./context':{},'./geometry':geometry,
+ });
+ useBottomPanelPan(motion,value(0));
+ const manager={fail:()=>failed++,activate:()=>activated++};
+ handlers.onTouchesDown({allTouches:[{y:20,absoluteX:50,absoluteY:250}]},manager);
+ assert.equal(failed,0);
+ handlers.onTouchesMove({allTouches:[{absoluteX:51,absoluteY:280}]},manager);assert.equal(activated,1);
+ handlers.onStart({translationY:30});handlers.onUpdate({translationY:70});assert.equal(motion.offset.value,40);
+ handlers.onEnd({velocityY:900});assert.equal(closed,1);
+});
