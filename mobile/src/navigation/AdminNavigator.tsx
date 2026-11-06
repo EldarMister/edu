@@ -1,5 +1,5 @@
 import React from 'react';
-import { Animated, AppState, BackHandler, Easing, ScrollView, StyleSheet, View } from 'react-native';
+import { Animated, AppState, BackHandler, Easing, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';
 import Constants from 'expo-constants';
@@ -67,6 +67,8 @@ const SECTIONS: {
 
 /** Админ/владелец — порт PWA AdminApp (сайдбар → выезжающий drawer на мобиле). */
 export function AdminNavigator() {
+  const { width } = useWindowDimensions();
+  const permanentMenu = width >= 1000;
   const route = useRoute<RouteProp<RootStackParamList, 'Admin'>>();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const qc = useQueryClient();
@@ -137,20 +139,20 @@ export function AdminNavigator() {
   }, [navigation]);
   const openDrawer = React.useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = React.useCallback(() => setDrawerOpen(false), []);
-  const edgeSwipe = React.useMemo(() => Gesture.Pan().enabled(!drawerOpen).maxPointers(1)
+  const edgeSwipe = React.useMemo(() => Gesture.Pan().enabled(!drawerOpen && !permanentMenu).maxPointers(1)
     .activeOffsetX(72).failOffsetY([-48, 48])
     .onTouchesDown((event, manager) => {
       if ((event.allTouches[0]?.absoluteX ?? 999) > 68) manager.fail();
     })
-    .onStart(() => { runOnJS(openDrawer)(); }), [drawerOpen, openDrawer]);
+    .onStart(() => { runOnJS(openDrawer)(); }), [drawerOpen, openDrawer, permanentMenu]);
 
   return (
     <GestureDetector gesture={edgeSwipe}>
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <OfflineBanner />
-      <View style={styles.header}>
+      <View style={[styles.header, permanentMenu && { marginLeft: 208 }]}>
         <View style={styles.headerLeft}>
-          <FastPressable onPress={() => setDrawerOpen(true)} hitSlop={8} style={styles.burger} accessibilityLabel="Открыть меню">
+          <FastPressable onPress={() => setDrawerOpen(true)} hitSlop={8} style={[styles.burger, permanentMenu && { display: 'none' }]} accessibilityLabel="Открыть меню">
             <PwaIcon name="menu" size={22} color={colors.textSecondary} />
           </FastPressable>
           <Text style={styles.headerTitle} translate>{current?.label ?? ''}</Text>
@@ -158,7 +160,7 @@ export function AdminNavigator() {
         <ConnectionStatus />
       </View>
 
-      <ScreenTransition style={styles.body} transitionKey={section}>
+      <ScreenTransition style={[styles.body, permanentMenu && { marginLeft: 208 }]} transitionKey={section}>
         {!current ? <Text style={{ padding: spacing.lg, color: colors.textMuted }} translate>Нет доступных разделов. Обратитесь к владельцу.</Text> : section === 'stats' ? (
           <StatisticsScreen />
         ) : section === 'orders' ? (
@@ -183,7 +185,8 @@ export function AdminNavigator() {
       </ScreenTransition>
 
       <AdminDrawer
-        visible={drawerOpen}
+        visible={drawerOpen || permanentMenu}
+        permanent={permanentMenu}
         sections={sections}
         current={section}
         onSelect={go}
@@ -199,6 +202,7 @@ export function AdminNavigator() {
 
 function AdminDrawer({
   visible,
+  permanent = false,
   sections,
   current,
   onSelect,
@@ -208,6 +212,7 @@ function AdminDrawer({
   onOpenWorkspace,
 }: {
   visible: boolean;
+  permanent?: boolean;
   sections: { key: Section; label: string; icon: PwaIconName }[];
   current: Section;
   onSelect: (s: Section) => void;
@@ -221,23 +226,23 @@ function AdminDrawer({
   const initialIndex = React.useRef(0);
   const drawerState = React.useRef({ sections, current, onPreview });
   drawerState.current = { sections, current, onPreview };
-  const closeGesture = React.useMemo(() => Gesture.Pan().activeOffsetX(-70).failOffsetY([-48, 48])
-    .onStart(() => runOnJS(onClose)()), [onClose]);
-  const selectGesture = React.useMemo(() => Gesture.Pan().activeOffsetY([-44, 44]).failOffsetX([-48, 48]).runOnJS(true)
+  const closeGesture = React.useMemo(() => Gesture.Pan().enabled(!permanent).activeOffsetX(-70).failOffsetY([-48, 48])
+    .onStart(() => runOnJS(onClose)()), [onClose, permanent]);
+  const selectGesture = React.useMemo(() => Gesture.Pan().enabled(!permanent).activeOffsetY([-44, 44]).failOffsetX([-48, 48]).runOnJS(true)
     .onBegin(() => { initialIndex.current = Math.max(0, drawerState.current.sections.findIndex(s => s.key === drawerState.current.current)); })
     .onUpdate(event => {
       const state = drawerState.current;
       const index = Math.max(0, Math.min(state.sections.length - 1, initialIndex.current + Math.trunc(event.translationY / 44)));
       const next = state.sections[index];
       if (next && next.key !== state.current) state.onPreview(next.key);
-    }), []);
+    }), [permanent]);
   const drawerGesture = React.useMemo(() => Gesture.Race(closeGesture, selectGesture), [closeGesture, selectGesture]);
 
   React.useEffect(() => {
-    if (!visible) return;
+    if (!visible || permanent) return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => { onClose(); return true; });
     return () => subscription.remove();
-  }, [visible, onClose]);
+  }, [visible, onClose, permanent]);
 
   React.useEffect(() => {
     progress.stopAnimation();
@@ -265,17 +270,17 @@ function AdminDrawer({
   const opacity = progress;
 
   return (
-    <View style={StyleSheet.absoluteFill}>
-      <Animated.View style={[styles.backdrop, { opacity }]}>
+    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, permanent && { width: 208, zIndex: 50 }]}>
+      {!permanent && <Animated.View style={[styles.backdrop, { opacity }]}>
         <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} />
-      </Animated.View>
+      </Animated.View>}
       <GestureDetector gesture={drawerGesture}>
       <Animated.View style={[styles.drawer, { transform: [{ translateX }] }]}>
         <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom', 'left']}>
           <View style={styles.drawerLogo}>
             <BrandLogo />
           </View>
-          <View style={[styles.drawerNav, styles.drawerNavContent]}>
+          <ScrollView style={styles.drawerNav} contentContainerStyle={styles.drawerNavContent}>
             {sections.map((s) => {
               const active = s.key === current;
               return (
@@ -289,7 +294,7 @@ function AdminDrawer({
                 </FastPressable>
               );
             })}
-          </View>
+          </ScrollView>
           <View style={styles.drawerFooter}>
             <FastPressable onPress={onLogout} style={styles.navItem}>
               <PwaIcon name="logout" size={18} color={colors.textSecondary} />

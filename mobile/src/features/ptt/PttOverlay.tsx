@@ -1,4 +1,5 @@
 import React from 'react';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Image, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/typography';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -136,6 +137,15 @@ function PushToTalkCircle({
   onPressStart: () => void;
   onPressStop: () => void;
 }) {
+  const handlers = React.useRef({ onPressStart, onPressStop });
+  handlers.current = { onPressStart, onPressStop };
+  // Keep the recognizer stable when talking state changes; replacing an active
+  // recognizer would cancel the hold as soon as recording starts.
+  const hold = React.useMemo(() => Gesture.LongPress()
+    .enabled(!disabled).minDuration(0).maxDistance(72)
+    .shouldCancelWhenOutside(false).runOnJS(true)
+    .onStart(() => handlers.current.onPressStart())
+    .onFinalize(() => handlers.current.onPressStop()), [disabled]);
   const view = STATE_STYLES[state];
   const ringCount = state === 'speakingSelf' ? 3 : state === 'speakingOther' ? 1 : 0;
 
@@ -151,10 +161,8 @@ function PushToTalkCircle({
           borderWidth={1}
         />
       ))}
-      <FastPressable
-        disabled={disabled}
-        onPressIn={onPressStart}
-        onPressOut={onPressStop}
+      <GestureDetector gesture={hold}><View collapsable={false} accessible
+        accessibilityState={{ disabled }}
         accessibilityRole="button"
         accessibilityLabel="Нажмите и удерживайте, чтобы говорить"
         style={[
@@ -165,7 +173,7 @@ function PushToTalkCircle({
         ]}
       >
         <Image source={RADIO_ICON} style={styles.circleIcon} resizeMode="contain" />
-      </FastPressable>
+      </View></GestureDetector>
     </View>
   );
 }
@@ -406,7 +414,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
         ? 'Вы говорите'
         : state === 'speakingOther'
           ? `Говорит: ${speakerName}`
-          : 'Готово к разговору';
+          : sender.preparing ? 'Подготовка микрофона…' : 'Готово к разговору';
 
   const statusHint =
     state === 'error'
@@ -420,15 +428,17 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   const outerView = STATE_STYLES[state];
 
   return (
-    <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
+    <View pointerEvents="box-none" style={styles.overlayHost} collapsable={false}>
       {buttonVisible && (
-        <View pointerEvents="box-none" style={[styles.floatButtonWrap, { bottom: floatingBottom }]}>
+        <View pointerEvents="box-none" style={[styles.floatButtonWrap, { bottom: floatingBottom, right: Math.max(insets.right, spacing.sm) }]}>
           {outerSpeaking ? (
             <PttRipple mode="soft" size={74} color={outerView.ring} borderWidth={1} />
           ) : null}
           <FastPressable
             accessibilityRole="button"
             accessibilityLabel="Рация"
+            hitSlop={12}
+            pressRetentionOffset={32}
             onPress={() => setOpen(true)}
             style={[styles.floatButton, { backgroundColor: outerView.circle }]}
           >
@@ -443,6 +453,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
         sheet
         panelStyle={styles.pttSheet}
         maxHeight="55%"
+        draggable={false}
         bottomInset={sheetBottomInset}
         backdropColor="rgba(0,0,0,0.3)"
         bodyStyle={styles.sheetBody}
@@ -468,6 +479,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
 }
 
 const styles = StyleSheet.create({
+  overlayHost: { ...StyleSheet.absoluteFillObject, zIndex: 200, elevation: 20 },
   floatButtonWrap: {
     position: 'absolute',
     right: spacing.sm,

@@ -41,7 +41,8 @@ function harness() {
   const mutations = { create: mutation('create'), add: mutation('add'), edit: mutation('edit'), replace: mutation('replace') };
   const { MenuScreen } = load('src/screens/waiter/MenuScreen.tsx', {
     react: hooks,
-    'react-native': { FlatList: 'FlatList', ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: x => x } },
+    '@/lib/layout': load('src/lib/layout.ts'),
+    'react-native': { useWindowDimensions: () => ({ width: 390, height: 844 }), FlatList: 'FlatList', ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: x => x } },
     'react-native-gesture-handler': {}, 'react-native-reanimated': {},
     'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
     '@react-navigation/native': { useNavigation: () => ({ navigate: (...args) => navigations.push(args) }) },

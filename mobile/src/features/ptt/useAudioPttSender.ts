@@ -47,6 +47,7 @@ function socketAck(event: string, payload: unknown): Promise<Ack> {
 
 export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
   const [talking, setTalking] = React.useState(false);
+  const [preparing, setPreparing] = React.useState(false);
   const [deniedReason, setDeniedReason] = React.useState<string | null>(null);
   const activeRef = React.useRef(false);
   const holdRef = React.useRef(false);
@@ -96,6 +97,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
   }, [channel, releaseChannel]);
 
   const stop = React.useCallback(() => {
+    setPreparing(false);
     holdRef.current = false;
     cueRef.current?.abort();
     if (!activeRef.current) return;
@@ -110,6 +112,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
 
   const start = React.useCallback(async () => {
     if (!enabled || activeRef.current || startingRef.current || finishingRef.current) return false;
+    setPreparing(true);
     startingRef.current = true;
     holdRef.current = true;
     setDeniedReason(null);
@@ -118,7 +121,8 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     const startCue = playPttCue('start', cue.signal);
     let prepared: Audio.Recording | null = null;
     try {
-    const permission = await Audio.requestPermissionsAsync();
+    const currentPermission = await Audio.getPermissionsAsync();
+    const permission = currentPermission.granted ? currentPermission : await Audio.requestPermissionsAsync();
     if (!permission.granted) {
       setDeniedReason('Разрешите доступ к микрофону');
       return false;
@@ -184,6 +188,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     } finally {
       cue.abort();
       if (cueRef.current === cue) cueRef.current = null;
+      setPreparing(false);
       startingRef.current = false;
       if (!activeRef.current) holdRef.current = false;
     }
@@ -218,5 +223,5 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     return () => subscription.remove();
   }, [stop]);
 
-  return { talking, deniedReason, start, stop };
+  return { talking, preparing, deniedReason, start, stop };
 }

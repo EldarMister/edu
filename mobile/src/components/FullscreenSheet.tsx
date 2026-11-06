@@ -26,7 +26,7 @@ export function FullscreenSheet({
   children: React.ReactNode;
   style?: ViewStyle;
 }) {
-  const { height } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const reduceMotion = useReducedMotion();
   const [render, setRender] = React.useState(visible);
   const translateY = useSharedValue(height || 900);
@@ -90,7 +90,7 @@ export function FullscreenSheet({
       onShow={() => { ready.current = true; enter(); }}
     >
       <HandTargetModal><GestureHandlerRootView style={styles.root}>
-        <Animated.View style={[styles.screen, style, animatedStyle]}>{children}</Animated.View>
+        <Animated.View style={[styles.screen, width >= 600 && { width: Math.min(width - 48, 1120), alignSelf: 'center', marginVertical: 24, borderRadius: 16, overflow: 'hidden' }, style, animatedStyle]}>{children}</Animated.View>
         <HandPointer />
       </GestureHandlerRootView></HandTargetModal>
     </RNModal>

@@ -841,7 +841,7 @@ function pushStatusText(status: PushStatus) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
-  container: { padding: spacing.md, gap: spacing.lg },
+  container: { width: '100%', maxWidth: 800, alignSelf: 'center', padding: spacing.md, gap: spacing.lg },
   panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   userCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: 20 },
   avatar: {

@@ -7,7 +7,8 @@ const ts = require('typescript');
 
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const settle = () => new Promise(resolve => setImmediate(resolve));
-function harness({ permission, preparation } = {}) {
+function harness({ permission, preparation, permissionGranted = false } = {}) {
+  let permissionRequests = 0;
   const events = [], recordings = [], cues = [], effects = [], errors = [];
   let appState;
   let ackError = null;
@@ -25,7 +26,8 @@ function harness({ permission, preparation } = {}) {
     'react-native': { AppState: { addEventListener: (_, callback) => { appState = callback; return { remove() {} }; } } },
     'expo-av': { Audio: {
       AndroidOutputFormat: { MPEG_4: 1 }, AndroidAudioEncoder: { AAC: 1 }, IOSOutputFormat: { MPEG4AAC: 1 }, IOSAudioQuality: { HIGH: 1 },
-      requestPermissionsAsync: async () => permission ? permission.promise : { granted: true }, setAudioModeAsync: async () => {},
+      getPermissionsAsync: async () => ({ granted: permissionGranted }),
+      requestPermissionsAsync: async () => { permissionRequests++; return permission ? permission.promise : { granted: true }; }, setAudioModeAsync: async () => {},
       Recording: class {
         constructor() { this.stops = 0; recordings.push(this); }
         async prepareToRecordAsync() { if (preparation) await preparation.promise; }
@@ -47,7 +49,7 @@ function harness({ permission, preparation } = {}) {
   vm.runInNewContext(source, { module, exports: module.exports, AbortController, require: name => { assert.ok(name in modules, name); return modules[name]; } });
   const sender = module.exports.useAudioPttSender('general', true);
   effects.forEach(effect => effect());
-  return { sender, events, cues, recordings, errors, ack: error => { ackError = error; pendingAck(); }, background: () => appState('background') };
+  return { sender, events, cues, recordings, errors, permissionRequests: () => permissionRequests, ack: error => { ackError = error; pendingAck(); }, background: () => appState('background') };
 }
 
 test('a quick release during microphone permission does not reserve the channel or record', async () => {
@@ -97,4 +99,15 @@ test('backgrounding during preparation stops the late recorder instead of leavin
   await first; await settle();
   assert.equal(env.recordings[0].stops, 1);
   assert.equal(env.events.at(-1), 'stop');
+});
+
+
+test('an authorized microphone starts without reopening Android permission UI and cancelling the hold', async () => {
+  const env = harness({ permissionGranted: true });
+  const start = env.sender.start();
+  await settle(); env.ack(null);
+  assert.equal(await start, true);
+  assert.equal(env.permissionRequests(), 0);
+  env.sender.stop(); await settle();
+  assert.deepEqual(env.events, ['start', 'audio', 'stop']);
 });

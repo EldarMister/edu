@@ -34,8 +34,10 @@ type SheetContent = {
   fillBody?: boolean;
   presentation?: 'bottom' | 'center';
   hideHeader?: boolean;
+  draggable?: boolean;
 };
 type DragContext = {
+  canDrag: boolean;
   drag: SharedValue<number>;
   height: SharedValue<number>;
   enabled: SharedValue<boolean>;
@@ -51,7 +53,7 @@ function useSheetPan(context: DragContext, scrollOffset?: SharedValue<number>) {
   const startY = useSharedValue(0);
   return React.useMemo(() => {
     const { drag, height, enabled, dismissing, close, duration, easing } = context;
-    const pan = Gesture.Pan()
+    const pan = Gesture.Pan().enabled(context.canDrag)
       .maxPointers(1)
       .activeOffsetY([-8, 8])
       .failOffsetX([-16, 16])
@@ -120,7 +122,7 @@ export function BottomSheet({ visible, onClose, onDismiss, animationPreset = 'de
 }) {
   const timing = sheetPresets[animationPreset];
   const reduceMotion = useReducedMotion();
-  const { height: windowHeight } = useWindowDimensions();
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const portalViewportHeight = useSheetPortalViewportHeight();
   const [render, setRender] = React.useState(visible);
   const handPanelRef = React.useRef<View>(null);
@@ -188,9 +190,9 @@ export function BottomSheet({ visible, onClose, onDismiss, animationPreset = 'de
   }, [visible, enter, finishClose, progress, drag, panelHeight, enabled, dismissing, reduceMotion, timing, currentContent.presentation]);
 
   const context = React.useMemo<DragContext>(() => ({
-    drag, height: panelHeight, enabled, dismissing, close,
+    canDrag: currentContent.draggable !== false, drag, height: panelHeight, enabled, dismissing, close,
     duration: reduceMotion ? 0 : timing.exitMs || 220, easing: timing.easing,
-  }), [drag, panelHeight, enabled, dismissing, close, reduceMotion, timing]);
+  }), [drag, panelHeight, enabled, dismissing, close, reduceMotion, timing, currentContent.draggable]);
   const pan = useSheetPan(context);
   const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value * Math.max(0, 1 - drag.value / panelHeight.value) }));
   const centered = content.presentation === 'center';
@@ -231,7 +233,7 @@ export function BottomSheet({ visible, onClose, onDismiss, animationPreset = 'de
             panelHeight.value = Math.max(1, event.nativeEvent.layout.height);
             if (inline && !ready.current) { ready.current = true; enter(); }
           }} style={[
-            styles.sheet, inlineMaxHeight != null && { maxHeight: inlineMaxHeight },
+            styles.sheet, windowWidth >= 600 && { width: Math.min(windowWidth - 48, 720), alignSelf: 'center', borderRadius: 16 }, inlineMaxHeight != null && { maxHeight: inlineMaxHeight },
             content.fillBody && { height: inlineMaxHeight ?? '92%' }, centered && styles.centerPanel, content.panelStyle, sheetStyle,
           ]}>
             <SafeAreaView edges={centered || inline ? [] : ['bottom']} style={[styles.safe, centered && styles.centerSafe, content.fillBody && styles.fill, content.paddingBottomInset != null && { paddingBottom: content.paddingBottomInset }]}>

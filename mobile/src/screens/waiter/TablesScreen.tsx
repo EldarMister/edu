@@ -538,6 +538,11 @@ function getTableLayout(count: number, width: number, height: number) {
   const usableHeight = Math.max(0, height);
   const fallbackWidth = usableWidth || 340;
   const fallbackHeight = usableHeight || 420;
+  if (fallbackWidth >= 600) {
+    const columns = Math.max(1, Math.min(count || 1, 6, Math.floor((fallbackWidth + gap) / 180)));
+    const cardWidth = Math.floor((fallbackWidth - gap * (columns - 1)) / columns);
+    return { cardWidth, cardHeight: Math.min(220, Math.max(140, cardWidth * 0.8)), minHeight: 140, fontSize: 38, fill: false, roomy: true };
+  }
   const fullscreenSingle = count === 1;
   const splitVertical = count === 2;
   const roomyTwoColumn = count >= 3 && count <= 6;

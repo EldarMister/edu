@@ -1,3 +1,4 @@
+import { gridLayout } from '@/lib/layout';
 import React, { memo } from 'react';
 import { FlatList, Image, InteractionManager, RefreshControl, StyleSheet, View, useWindowDimensions, type View as RNView } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
@@ -42,6 +43,7 @@ export function OrdersScreen() {
   const navigation = useNavigation<any>();
   const rootRef = React.useRef<View>(null);
   const { width: screenWidth } = useWindowDimensions();
+  const orderGrid = gridLayout(screenWidth, 14, 12, 360, 3);
   const orders = useActiveOrders();
   const settings = usePublicSettings();
   const policies = settings.data?.waiterOrderPermissions;
@@ -214,7 +216,7 @@ export function OrdersScreen() {
   }, [claimQr, navigation, push, selectTable]);
 
   const renderOrder = React.useCallback(({ item }: { item: Order }) => (
-    <OrderCard
+    <View style={{ width: orderGrid.itemWidth }}><OrderCard
       order={item}
       menuOpen={menuFor?.order.id === item.id}
       claimPending={claimQr.isPending}
@@ -235,7 +237,8 @@ export function OrdersScreen() {
         });
       }}
     />
-  ), [claimOrder, claimQr.isPending, closeMenu, menuFor?.order.id, openOrder, screenWidth, showMenu]);
+    </View>
+  ), [orderGrid.itemWidth, claimOrder, claimQr.isPending, closeMenu, menuFor?.order.id, openOrder, screenWidth, showMenu]);
 
   const keyOrder = React.useCallback((order: Order) => order.id, []);
 
@@ -249,6 +252,9 @@ export function OrdersScreen() {
           <EmptyState text="Активных заказов нет" />
         ) : (
           <FlatList
+            key={`orders-${orderGrid.columns}`}
+            numColumns={orderGrid.columns}
+            columnWrapperStyle={orderGrid.columns > 1 ? { gap: 12 } : undefined}
             data={sorted}
             renderItem={renderOrder}
             keyExtractor={keyOrder}

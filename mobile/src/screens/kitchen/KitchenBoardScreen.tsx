@@ -1,3 +1,4 @@
+import { restoreAppOrientation } from '@/lib/orientation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Image, Platform, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, Vibration, View } from 'react-native';
 import { Text } from '@/components/typography';
@@ -141,7 +142,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   useEffect(() => {
     ScreenOrientation.unlockAsync().catch(() => {});
     return () => {
-      ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      restoreAppOrientation().catch(() => {});
     };
   }, []);
 

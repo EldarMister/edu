@@ -1,3 +1,4 @@
+import { gridLayout } from '@/lib/layout';
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
@@ -44,6 +45,8 @@ function currentVariantQuantity(variantId: string): number {
 }
 
 export function MenuScreen() {
+  const { width: menuWidth } = useWindowDimensions();
+  const menuGrid = gridLayout(menuWidth, 12, 10, 210, 5, 2);
   const navigation = useNavigation<any>();
   const connected = useConnectionStatus();
   const mounted = React.useRef(true);
@@ -193,6 +196,7 @@ export function MenuScreen() {
 
   const renderDish = useCallback(({ item }: { item: Dish }) => (
     <DishCard
+      width={menuGrid.itemWidth}
       dish={item}
       qty={cartQuantities[item.id] ?? 0}
       lineCount={cartLineCounts[item.id] ?? 0}
@@ -200,7 +204,7 @@ export function MenuScreen() {
       onAdd={onAddDish}
       onDec={onDecDish}
     />
-  ), [cartLineCounts, cartQuantities, onAddDish, onDecDish, tableSubmitting]);
+  ), [cartLineCounts, cartQuantities, onAddDish, onDecDish, tableSubmitting, menuGrid.itemWidth]);
 
   const dishKey = useCallback((dish: Dish) => dish.id, []);
 
@@ -338,7 +342,8 @@ export function MenuScreen() {
           data={filteredDishes}
           renderItem={renderDish}
           keyExtractor={dishKey}
-          numColumns={2}
+          key={`menu-${menuGrid.columns}`}
+          numColumns={menuGrid.columns}
           style={styles.menuList}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.grid}
@@ -509,6 +514,7 @@ function orderItemName(item: { dishNameSnapshot: string; dishVariantNameSnapshot
 
 const DishCard = memo(function DishCard({
   dish,
+  width,
   qty,
   lineCount,
   disabled,
@@ -516,6 +522,7 @@ const DishCard = memo(function DishCard({
   onDec,
 }: {
   dish: Dish;
+  width: number;
   qty: number;
   lineCount: number;
   disabled: boolean;
@@ -537,7 +544,7 @@ const DishCard = memo(function DishCard({
     <FastPressable
       disabled={isDisabled}
       onPress={() => onAdd(dish)}
-      style={[styles.dish, active && styles.dishActive, isDisabled && styles.dishDisabled]}
+      style={[styles.dish, { width }, active && styles.dishActive, isDisabled && styles.dishDisabled]}
     >
       {!dish.isAvailable ? (
         <View style={styles.unavailable}>
@@ -586,6 +593,7 @@ const DishCard = memo(function DishCard({
     </FastPressable>
   );
 }, (prev, next) =>
+  prev.width === next.width &&
   prev.dish === next.dish &&
   prev.qty === next.qty &&
   prev.lineCount === next.lineCount &&
@@ -1244,7 +1252,7 @@ const styles = StyleSheet.create({
 
   menuList: { flex: 1 },
   grid: { paddingHorizontal: spacing.md, paddingBottom: spacing.md },
-  gridRow: { justifyContent: 'space-between', marginBottom: 10 },
+  gridRow: { gap: 10, marginBottom: 10 },
   dish: {
     width: '48.5%',
     height: waiterLayout.dishCardHeight,

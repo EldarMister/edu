@@ -471,7 +471,7 @@ function ToggleRow({
 }
 
 const styles = StyleSheet.create({
-  content: { padding: spacing.lg, gap: 16, paddingBottom: spacing.xl },
+  content: { width: '100%', maxWidth: 960, alignSelf: 'center', padding: spacing.lg, gap: 16, paddingBottom: spacing.xl },
   settingsGrid: { gap: 16, alignItems: 'stretch' },
   settingsSide: { gap: 16, minWidth: 0 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl },
