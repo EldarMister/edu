@@ -93,7 +93,7 @@ export function MenuScreen() {
 
   return (
     <>
-    <ScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+    <SheetScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
       <View style={styles.summary}>
         <Sum label="Блюд" value={o ? String(o.dishesCount) : '—'} />
         <Sep />
@@ -111,18 +111,18 @@ export function MenuScreen() {
         onChangeText={setSearch}
       />
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.headerBtns}>
+      <SheetScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.headerBtns}>
         <MenuAction label="Категория" onPress={() => setCatModal(true)} />
         <MenuAction label="Сет" onPress={() => setSetModal('new')} />
         <MenuAction primary label="Добавить блюдо" onPress={() => setDishModal('new')} />
-      </ScrollView>
+      </SheetScrollView>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
+      <SheetScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
         <CatTab active={categoryId === ''} onPress={() => setCategoryId('')} label="Все блюда" />
         {categories.map((c) => (
           <CatTab key={c.id} active={categoryId === c.id} onPress={() => setCategoryId(c.id)} label={c.name} />
         ))}
-      </ScrollView>
+      </SheetScrollView>
       </View>
       {dishesQ.isLoading ? (
             <View style={styles.center}>
@@ -131,16 +131,16 @@ export function MenuScreen() {
           ) : !dishesQ.data?.length ? (
             <Text style={styles.empty} translate>Блюда не найдены</Text>
           ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ width: MENU_TABLE_WIDTH }}>
+            <SheetScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ width: MENU_TABLE_WIDTH }}>
               <View style={{ width: MENU_TABLE_WIDTH }}>
                 <View style={styles.tableHead}>{MENU_COLUMNS.map(column => <Text key={column.label} style={[styles.tableHeading, { width: column.width, textAlign: column.right ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
                 {dishesQ.data.map(dish => <DishRow key={dish.id} dish={dish} station={dishStation(dish)} onEdit={() => openEdit(dish)} onDelete={() => onDelete(dish)} />)}
               </View>
-            </ScrollView>
+            </SheetScrollView>
           )
       }
       </View>
-    </ScrollView>
+    </SheetScrollView>
 
       {dishModal !== null ? (
         <DishModal

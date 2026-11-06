@@ -16,21 +16,21 @@ export function InsufficientPermissionsSheet({
   const { width } = useWindowDimensions();
   const illustrationWidth = Math.min(300, width - 48);
   return (
-    <BottomSheet visible={visible} onClose={onClose} hideHeader>
-      <SheetScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Image source={require('../../../assets/insufficient-permissions.png')} style={[styles.illustration, { width: illustrationWidth, height: illustrationWidth * 517 / 738 }]} resizeMode="contain" />
-        <Text style={styles.title} translate>Недостаточно прав</Text>
-        <Text style={styles.text} translate>
-          У вас недостаточно прав для отмены заказа. Пожалуйста, позовите администратора.
-        </Text>
-        <View style={styles.actions}>
+    <BottomSheet visible={visible} onClose={onClose} hideHeader footer={<View style={[styles.actions, { marginTop: 0 }]}>
           <FastPressable disabled={pending} onPress={onCall} style={[styles.button, styles.primaryButton, pending && styles.disabled]}>
             <Text style={[styles.buttonText, styles.primaryButtonText]} translate>{pending ? 'Отправляем вызов…' : 'Позвать администратора'}</Text>
           </FastPressable>
           <FastPressable disabled={pending} onPress={onClose} style={[styles.button, styles.secondaryButton, pending && styles.disabled]}>
             <Text style={[styles.buttonText, styles.secondaryButtonText]} translate>Понятно</Text>
           </FastPressable>
-        </View>
+        </View>}>
+      <SheetScrollView style={{ flexShrink: 1, minHeight: 0 }} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Image source={require('../../../assets/insufficient-permissions.png')} style={[styles.illustration, { width: illustrationWidth, height: illustrationWidth * 517 / 738 }]} resizeMode="contain" />
+        <Text style={styles.title} translate>Недостаточно прав</Text>
+        <Text style={styles.text} translate>
+          У вас недостаточно прав для отмены заказа. Пожалуйста, позовите администратора.
+        </Text>
+
       </SheetScrollView>
     </BottomSheet>
   );

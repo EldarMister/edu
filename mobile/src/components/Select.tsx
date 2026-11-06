@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { useBottomPanelController } from './BottomPanel';
 import { ScrollView, StyleSheet, View, type ViewStyle } from 'react-native';
 import { Text } from '@/components/typography';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
@@ -28,20 +29,20 @@ export function Select<T extends string>({
   placeholder?: string;
   style?: ViewStyle;
 }) {
-  const [open, setOpen] = useState(false);
+  const panel = useBottomPanelController();
   const selected = options.find((o) => o.value === value);
 
   return (
     <>
-      <FastPressable style={[styles.control, style]} onPress={() => setOpen(true)}>
+      <FastPressable style={[styles.control, style]} onPress={panel.open}>
         <Text style={[styles.value, !selected && styles.placeholder]} numberOfLines={1} translate={selected?.translate !== false}>
           {selected?.label ?? placeholder ?? ''}
         </Text>
         <PwaIcon name="chevronDown" size={16} color={colors.textMuted} />
       </FastPressable>
 
-      <BottomSheet visible={open} onClose={() => setOpen(false)} sheet title={title ?? placeholder} maxHeight="70%">
-        <ScrollView showsVerticalScrollIndicator={false}>
+      <BottomSheet {...panel.bind} sheet title={title ?? placeholder} maxHeight="70%">
+        <SheetScrollView showsVerticalScrollIndicator={false}>
           {options.map((o) => {
             const active = o.value === value;
             return (
@@ -49,7 +50,7 @@ export function Select<T extends string>({
                 key={o.value}
                 onPress={() => {
                   onChange(o.value);
-                  setOpen(false);
+                  panel.close();
                 }}
                 style={[styles.option, active && styles.optionActive]}
               >
@@ -58,7 +59,7 @@ export function Select<T extends string>({
               </FastPressable>
             );
           })}
-        </ScrollView>
+        </SheetScrollView>
       </BottomSheet>
     </>
   );

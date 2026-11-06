@@ -38,11 +38,13 @@ export function ReceiptPrintSheet() {
     <BottomSheet
       visible={open}
       onClose={primaryClose}
+      closeActions={[closeSheet, dismiss]}
       sheet
+      contentKey={status}
       animationPreset="receipt"
       bodyStyle={{ paddingTop: 0, paddingBottom: 16 }}
       footerStyle={{ borderTopWidth: 0, paddingTop: 4, paddingBottom: 16 }}
-      headerContent={<View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }}><View style={{ alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: colors.slate300, marginBottom: 8 }} /><View style={styles.printHeader}><Text style={styles.printTitle} translate>{title}</Text><FastPressable onPress={primaryClose} hitSlop={12} style={styles.printClose} accessibilityLabel="Закрыть"><PwaIcon name="close" size={22} color={colors.textLight} strokeWidth={2} /></FastPressable></View></View>}
+      headerContent={<View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 4 }}><View style={styles.printHeader}><Text style={styles.printTitle} translate>{title}</Text><FastPressable onPress={primaryClose} hitSlop={12} style={styles.printClose} accessibilityLabel="Закрыть"><PwaIcon name="close" size={22} color={colors.textLight} strokeWidth={2} /></FastPressable></View></View>}
       maxHeight="80%"
       footer={
         <View>

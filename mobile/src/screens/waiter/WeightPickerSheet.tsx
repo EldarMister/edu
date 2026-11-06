@@ -149,7 +149,7 @@ export function WeightPickerSheet({
       panelStyle={{ ...styles.panel, minHeight: height * 0.55 }}
       bodyStyle={styles.sheetBody}
       headerContent={<View style={styles.sheetHeader}>
-        <View style={styles.handle} />
+
         <View style={styles.header}>
           <View style={styles.headerCopy}>
             <Text style={styles.title} translate>Весовой</Text>

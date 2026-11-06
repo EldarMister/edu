@@ -170,10 +170,6 @@ export function PaymentSheet({
   }, [order]);
 
   React.useEffect(() => {
-    if (!visible && !successVisible && !receipt) setRenderOrder(null);
-  }, [receipt, successVisible, visible]);
-
-  React.useEffect(() => {
     resetPayment();
     setStateOrderId(activeOrderId);
   }, [activeOrderId]);
@@ -332,8 +328,11 @@ export function PaymentSheet({
     <>
       <BottomSheet
         visible={visible}
+        ownerKey={activeOrder.id}
         onClose={close}
+        onDismiss={() => { if (mountedRef.current && !visibleRef.current) setRenderOrder(null); }}
         presentation={showSuccess ? 'center' : 'bottom'}
+        contentKey={showSuccess ? 'success' : showReceipt ? 'receipt' : 'payment'}
         hideHeader={showSuccess}
         bodyStyle={showSuccess ? { paddingHorizontal: 0, paddingVertical: 0 } : undefined}
         title={isPaymentComplete ? 'Оплата принята' : 'Оплата заказа'}
@@ -465,8 +464,6 @@ export function PaymentSheet({
         </View>
         {error ? <Text style={styles.inlineError}>{error}</Text> : null}
         </>}</SheetScrollView>}
-      </BottomSheet>
-
       <SplitBillSheet
         visible={splitOpen}
         instantDismiss={showSuccess || isPaymentComplete}
@@ -478,6 +475,9 @@ export function PaymentSheet({
         onClose={() => setSplitOpen(false)}
         onComplete={handleSplitComplete}
       />
+      </BottomSheet>
+
+
     </>
   );
 }

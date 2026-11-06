@@ -6,7 +6,7 @@ import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-
 import Svg, { Path } from 'react-native-svg';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading } from '@/components/ui';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import { NumberTicker } from '@/components/NumberTicker';
@@ -453,7 +453,7 @@ export function OrderDetailScreen() {
         {deliveryInfo ? <Text style={styles.orderComment}>{deliveryInfo}</Text> : null}
       </View>
 
-      <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
+      <SheetScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
         {order.items.map((it) => (
           <ItemCard
             key={it.id}
@@ -467,7 +467,7 @@ export function OrderDetailScreen() {
             }}
           />
         ))}
-      </ScrollView>
+      </SheetScrollView>
 
       <View style={styles.footer}>
         {unclaimedQr ? (
@@ -761,7 +761,7 @@ function PartialRejectionScreen({
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.partialList} showsVerticalScrollIndicator={false}>
+      <SheetScrollView contentContainerStyle={styles.partialList} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionTitle} translate>1. Активные блюда</Text>
         <View style={styles.partialStack}>
           {activeItems.map((item) => (
@@ -809,7 +809,7 @@ function PartialRejectionScreen({
         <FastPressable disabled={busy} onPress={onCancel} style={styles.cancelWholeBtn}>
           <Text style={styles.cancelWholeText} translate>Отменить весь заказ</Text>
         </FastPressable>
-      </ScrollView>
+      </SheetScrollView>
     </SafeAreaView>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { Alert, Text, TextInput } from '@/components/typography';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Button, Toggle } from '@/components/ui';
@@ -77,7 +77,7 @@ export function TablesScreen() {
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <SheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.topRow}>
           <View style={styles.summary}>
             <Sum label="Залов" value={o ? String(o.hallsCount) : '—'} />
@@ -156,7 +156,7 @@ export function TablesScreen() {
             );
           })
         )}
-      </ScrollView>
+      </SheetScrollView>
 
       {hallModal !== null ? (
         <HallModal hall={hallModal === 'new' ? null : hallModal} onClose={() => setHallModal(null)} />

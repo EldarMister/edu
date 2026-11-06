@@ -265,7 +265,7 @@ export function TablesScreen() {
           {halls.isLoading ? (
             <Loading />
           ) : (
-            <ScrollView
+            <SheetScrollView
               showsVerticalScrollIndicator={false}
               refreshControl={
                 <RefreshControl refreshing={halls.isFetching} onRefresh={() => halls.refetch()} />
@@ -280,12 +280,12 @@ export function TablesScreen() {
                   <React.Fragment key={table.id}>{renderTable(table)}</React.Fragment>
                 ))}
               </View>
-            </ScrollView>
+            </SheetScrollView>
           )}
         </View>
 
         {/* Легенда */}
-        <ScrollView
+        <SheetScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.legend}
@@ -297,7 +297,7 @@ export function TablesScreen() {
               <Text style={styles.legendText} translate>{TABLE_STATUS[s].label}</Text>
             </View>
           ))}
-        </ScrollView>
+        </SheetScrollView>
       </View>
 
       {actionsRender ? (

@@ -1,3 +1,4 @@
+import { PanelScreenBoundary } from '@/components/bottom-panel/context';
 import React from 'react';
 import { AppState, StatusBar, View } from 'react-native';
 import { NavigationContainer, createNavigationContainerRef, type LinkingOptions } from '@react-navigation/native';
@@ -95,7 +96,7 @@ export function RootNavigator() {
       <View style={{ flex: 1 }}>
       <StatusBar animated barStyle={activeRoot === 'Waiter' ? 'light-content' : 'dark-content'} backgroundColor={activeRoot === 'Waiter' ? colors.primary : colors.white} />
       {isAuthed ? <AuthRuntime key={user.id} /> : null}
-      <Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
+      <PanelScreenBoundary style={{ flex: 1 }}><Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
         <Stack.Group navigationKey={isAuthed ? user.id : 'guest'}>
         {!isAuthed ? (
           <Stack.Screen name="Login" component={LoginScreen} />
@@ -149,7 +150,7 @@ export function RootNavigator() {
         <Stack.Screen name="QrMenu" component={QrMenuScreen} />
         <Stack.Screen name="Queue" component={QueueScreen} />
         <Stack.Screen name="Platform" component={PlatformScreen} />
-      </Stack.Navigator>
+      </Stack.Navigator></PanelScreenBoundary>
       {isAuthed && (!activeRoot || ['Waiter', 'Kitchen', 'Bar', 'Admin', 'Staff'].includes(activeRoot)) ? <><PttOverlay navigationState={navigationState} /><ReceiptPrintSheet /><Toaster /></> : null}
       </View>
     </NavigationContainer>

@@ -2,16 +2,7 @@ import { gridLayout } from '@/lib/layout';
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { FlatList, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import Animated, {
-  cancelAnimation,
-  runOnJS,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { sheetTiming } from '@/components/motion';
 import { useNavigation } from '@react-navigation/native';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
@@ -92,7 +83,6 @@ export function MenuScreen() {
   const [weightDish, setWeightDish] = useState<Dish | null>(null);
   const [setPickerOpen, setSetPickerOpen] = useState(false);
   const [configSet, setConfigSet] = useState<Dish | null>(null);
-  const [pendingConfigSet, setPendingConfigSet] = useState<Dish | null>(null);
 
   const sortedCategories = useMemo(
     () => (categories.data ?? []).slice().sort((a, b) => a.sortOrder - b.sortOrder),
@@ -468,18 +458,8 @@ export function MenuScreen() {
           onAddSet(set, defaultSetComponents(set));
           setSetPickerOpen(false);
         }}
-        onConfigure={(set) => {
-          // Native Modal windows must finish closing before the next one opens.
-          setPendingConfigSet(set);
-          setSetPickerOpen(false);
-        }}
-        onDismiss={() => {
-          if (!pendingConfigSet) return;
-          setConfigSet(pendingConfigSet);
-          setPendingConfigSet(null);
-        }}
-      />
-
+        onConfigure={setConfigSet}
+      >
       <SetConfigSheet
         visible={!!configSet}
         set={configSet}
@@ -489,8 +469,12 @@ export function MenuScreen() {
         onAdd={(set, components) => {
           onAddSet(set, components);
           setConfigSet(null);
+          setSetPickerOpen(false);
         }}
       />
+      </SetPickerSheet>
+
+
 
       <TablePickerSheet visible={tablePickerOpen} onClose={() => setTablePickerOpen(false)} />
     </SafeAreaView>
@@ -630,7 +614,7 @@ function VariantSheet({
       maxHeight="82%"
       panelStyle={styles.customSheetPanel}
       headerContent={<View style={styles.variantHeader}>
-        <View style={styles.variantHandle} />
+
         <Text style={styles.variantTitle}>{renderedDish.name}</Text>
         <Text style={styles.variantHint} translate>Выберите размер</Text>
       </View>}
@@ -676,13 +660,15 @@ function SetPickerSheet({
   onPick,
   onConfigure,
   onDismiss,
+  children,
 }: {
   visible: boolean;
   sets: Dish[];
   onClose: () => void;
   onPick: (set: Dish) => void;
   onConfigure: (set: Dish) => void;
-  onDismiss: () => void;
+  onDismiss?: () => void;
+  children?: React.ReactNode;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -702,7 +688,7 @@ function SetPickerSheet({
       maxHeight="82%"
       panelStyle={styles.customSheetPanel}
       headerContent={<View style={styles.setHeader}>
-        <View style={styles.setHandle} />
+
         <Text style={styles.setTitle} translate>Сеты</Text>
         <Text style={styles.setHint} translate>Выберите сет</Text>
       </View>}
@@ -755,6 +741,7 @@ function SetPickerSheet({
           })}
         </SheetScrollView>
       )}
+      {children}
     </BottomSheet>
   );
 }
@@ -870,7 +857,7 @@ function SetConfigSheet({
         maxHeight="82%"
         panelStyle={styles.customSheetPanel}
         headerContent={<View style={styles.setHeader}>
-          <View style={styles.setHandle} />
+
           <Text style={styles.setTitle} translate>Настроить сет</Text>
         </View>}
         footerStyle={styles.variantFooter}
@@ -952,7 +939,6 @@ function SetConfigSheet({
             })}
           </View>
         </SheetScrollView>
-      </BottomSheet>
       <ReplacementPickerModal
         visible={!!replacingId}
         replacing={replacing}
@@ -971,6 +957,8 @@ function SetConfigSheet({
         onPickVariant={(variant) => variantDish && applyReplacement(variantDish, variant)}
         onBackFromVariant={() => setVariantDish(null)}
       />
+      </BottomSheet>
+
     </>
   );
 }
@@ -1004,11 +992,6 @@ function ReplacementPickerModal({
   onPickVariant: (variant: DishVariant) => void;
   onBackFromVariant: () => void;
 }) {
-  const { height: winHeight } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
-  // Явная высота области контента — иначе ScrollView внутри модалки не получает
-  // ограниченную высоту через flex-цепочку и не скроллится. Шапка ≈ 60px.
-  const contentHeight = Math.max(200, winHeight - insets.top - 60);
   return (
     <FullscreenSheet visible={visible} onClose={onClose} style={styles.replacementSafe}>
       <SafeAreaView style={styles.replacementSafe} edges={['top']}>
@@ -1023,7 +1006,7 @@ function ReplacementPickerModal({
             ) : null}
           </View>
         </View>
-        <View style={[styles.replacementContent, { height: contentHeight }]}>
+        <View style={[styles.replacementContent, { flex: 1, minHeight: 0 }]}>
           <View style={styles.replacementSearch}>
             <PwaIcon name="search" size={17} color={colors.textLight} strokeWidth={2} />
             <TextInput
@@ -1040,7 +1023,7 @@ function ReplacementPickerModal({
             onChange={onCategory}
             style={{ marginTop: spacing.sm, marginBottom: spacing.sm }}
           />
-          <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+          <SheetScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
             <View style={styles.replacementGrid}>
               {options.map((dish) => {
                 const hasVariants = dish.variants.length > 0;
@@ -1078,7 +1061,7 @@ function ReplacementPickerModal({
               })}
             </View>
             {options.length === 0 ? <Text style={styles.notFound} translate>Ничего не найдено</Text> : null}
-          </ScrollView>
+          </SheetScrollView>
         </View>
       </SafeAreaView>
       {/* Выбор размера блюда-замены — нижний лист с кнопкой «Заменить» (как в PWA). */}
@@ -1108,77 +1091,20 @@ function InlineVariantSheet({
   onClose: () => void;
   onAdd: (variant: DishVariant) => void;
 }) {
-  const [render, setRender] = useState(!!dish);
-  const [renderDish, setRenderDish] = useState<Dish | null>(dish);
+  const lastDish = React.useRef(dish);
+  if (dish) lastDish.current = dish;
+  const activeDish = dish ?? lastDish.current;
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { height: windowHeight } = useWindowDimensions();
-  const translateY = useSharedValue(600);
-  const panelHeight = useSharedValue(600);
-  const dragY = useSharedValue(0);
-  const backdrop = useSharedValue(0);
-  const animationSequence = React.useRef(0);
-  const finishClose = React.useCallback((sequence: number) => {
-    if (animationSequence.current === sequence) setRender(false);
-  }, []);
-  const panGesture = React.useMemo(() => Gesture.Pan()
-    .activeOffsetY(8)
-    .failOffsetX([-16, 16])
-    .onUpdate((event) => { dragY.value = Math.max(0, event.translationY); })
-    .onEnd((event) => {
-      if (event.translationY > 110 || event.velocityY > 900) runOnJS(onClose)();
-      else dragY.value = withTiming(0, { duration: 520, easing: sheetTiming.easing });
-    })
-    .onFinalize((_event, success) => {
-      if (!success) dragY.value = withTiming(0, { duration: 520, easing: sheetTiming.easing });
-    }), [dragY, onClose]);
-
-  React.useEffect(() => {
-    const sequence = ++animationSequence.current;
-    cancelAnimation(translateY);
-    cancelAnimation(backdrop);
-    cancelAnimation(dragY);
-    if (dish) {
-      setRender(true);
-      setRenderDish(dish);
-      setSelectedId(null);
-      dragY.value = 0;
-      translateY.value = panelHeight.value;
-      translateY.value = withTiming(0, { duration: 520, easing: sheetTiming.easing });
-      backdrop.value = withTiming(1, { duration: 520, easing: sheetTiming.easing });
-      return;
-    }
-    // Keep the current drag position during dismissal, so the sheet cannot jump up.
-    translateY.value += dragY.value;
-    dragY.value = 0;
-    backdrop.value = withTiming(0, { duration: 520, easing: sheetTiming.easing });
-    translateY.value = withTiming(panelHeight.value, { duration: 520, easing: sheetTiming.easing }, (finished) => {
-      if (finished) runOnJS(finishClose)(sequence);
-    });
-  }, [dish, backdrop, dragY, finishClose, panelHeight, translateY]);
-
-  const backdropStyle = useAnimatedStyle(() => ({ opacity: backdrop.value }));
-  const sheetStyle = useAnimatedStyle(() => ({ transform: [{ translateY: translateY.value + dragY.value }] }));
-
-  const activeDish = renderDish;
-  if (!render || !activeDish) return null;
-  const variants = activeDish.variants.slice().sort((a, b) => a.sortOrder - b.sortOrder);
-  const selected = variants.find((v) => v.id === selectedId) ?? null;
-
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <Animated.View style={[StyleSheet.absoluteFill, styles.inlineBackdrop, backdropStyle]}>
-        <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} />
-      </Animated.View>
-      <Animated.View style={[styles.inlineSheet, { maxHeight: windowHeight * 0.82 }, sheetStyle]} onLayout={(event) => { panelHeight.value = event.nativeEvent.layout.height; }}>
-        <SafeAreaView edges={['bottom']} style={{ flexShrink: 1, minHeight: 0 }}>
-          <GestureDetector gesture={panGesture}>
-          <View style={styles.inlineHandleWrap}>
-            <View style={styles.inlineHandle} />
-            <Text style={styles.inlineTitle}>{activeDish?.name}</Text>
-            <Text style={styles.inlineHint} translate>Выберите размер</Text>
-          </View>
-          </GestureDetector>
-          <ScrollView style={{ flexShrink: 1, minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.inlineList}>
+  React.useEffect(() => setSelectedId(null), [dish?.id]);
+  const variants = activeDish?.variants.slice().sort((a, b) => a.sortOrder - b.sortOrder) ?? [];
+  const selected = variants.find(v => v.id === selectedId) ?? null;
+  return <BottomSheet visible={!!dish} onClose={onClose}
+    headerContent={<View style={styles.inlineHandleWrap}>
+      <Text style={styles.inlineTitle}>{activeDish?.name}</Text>
+      <Text style={styles.inlineHint} translate>Выберите размер</Text>
+    </View>}
+    footer={<Button title={actionLabel} onPress={() => selected && onAdd(selected)} disabled={!selected} style={{ borderRadius: radius.sm }} />}>
+          <SheetScrollView style={{ flexShrink: 1, minHeight: 0 }} showsVerticalScrollIndicator={false} contentContainerStyle={styles.inlineList}>
             {variants.map((v) => {
               const isSel = v.id === selectedId;
               const price = activeDish
@@ -1203,14 +1129,8 @@ function InlineVariantSheet({
                 </FastPressable>
               );
             })}
-          </ScrollView>
-          <View style={styles.inlineFooter}>
-            <Button title={actionLabel} onPress={() => selected && onAdd(selected)} disabled={!selected} style={{ borderRadius: radius.sm }} />
-          </View>
-        </SafeAreaView>
-      </Animated.View>
-    </View>
-  );
+          </SheetScrollView>
+  </BottomSheet>;
 }
 
 const styles = StyleSheet.create({

@@ -1,7 +1,7 @@
 import React from 'react';
 import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text } from '@/components/typography';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
@@ -89,7 +89,7 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
         ) : undefined
       }
     >
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <SheetScrollView showsVerticalScrollIndicator={false}>
         {(halls.data ?? []).filter((hall) => hall.tables.length > 0).map((hall) => (
           <View key={hall.id} style={styles.section}>
             <Text style={styles.hallName}>{hall.name}</Text>
@@ -113,7 +113,7 @@ export function TablePickerSheet({ visible, onClose }: { visible: boolean; onClo
             </View>
           </View>
         ))}
-      </ScrollView>
+      </SheetScrollView>
     </BottomSheet>
   );
 }

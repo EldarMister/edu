@@ -1,3 +1,4 @@
+import { PanelScreenBoundary } from '@/components/bottom-panel/context';
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text } from '@/components/typography';
@@ -68,7 +69,7 @@ export function WaiterNavigator() {
   return (
     <SheetPortalProvider>
     <SafeAreaView style={styles.workSafe} edges={['top']}>
-      <OfflineBanner />
+      <PanelScreenBoundary mode="inline" style={{ flex: 1 }}><OfflineBanner />
       <WaiterHeader />
       <View style={styles.tabsHost}>
         <Tab.Navigator
@@ -108,7 +109,7 @@ export function WaiterNavigator() {
           </View>
         ) : null}
       </View>
-      <SheetPortalHost style={{ bottom: tabBarHeight }} />
+      </PanelScreenBoundary><SheetPortalHost style={{ bottom: tabBarHeight }} />
     </SafeAreaView>
     </SheetPortalProvider>
   );

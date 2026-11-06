@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
 import { Alert, Text, TextInput } from '@/components/typography';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Select } from '@/components/Select';
@@ -177,7 +177,7 @@ export function StaffScreen() {
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <SheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {tab !== 'waiter' ? <View style={styles.staffToolbar}>
           <Text style={styles.staffTitle} translate>Персонал и отчет по сменам</Text>
           <View style={styles.staffToolbarActions}>
@@ -191,11 +191,11 @@ export function StaffScreen() {
           </View>
         </View> : null}
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
+        <SheetScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsRow}>
           <TabBtn active={tab === 'current'} label="Текущая смена" onPress={() => setTab('current')} />
           <TabBtn active={tab === 'history'} label="История смен" onPress={() => setTab('history')} />
           <TabBtn active={tab === 'waiter'} label="Отчёт официанта" onPress={() => setTab('waiter')} />
-        </ScrollView>
+        </SheetScrollView>
 
         {tab === 'current' ? (
           <>
@@ -208,7 +208,7 @@ export function StaffScreen() {
             ) : rows.length === 0 ? (
               <Text style={styles.empty} translate>Нет данных за выбранную дату</Text>
             ) : (
-              <View style={styles.staffTableCard}><ScrollView horizontal showsHorizontalScrollIndicator><View style={{ width: STAFF_TABLE_WIDTH }}>
+              <View style={styles.staffTableCard}><SheetScrollView horizontal showsHorizontalScrollIndicator><View style={{ width: STAFF_TABLE_WIDTH }}>
               <View style={styles.staffTableHead}>{STAFF_COLUMNS.map((column, index) => <Text key={index} style={[styles.staffTableHeading, { width: column.width, textAlign: column.right ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
               {rows.map((row) => (
                 <ShiftRow
@@ -232,7 +232,7 @@ export function StaffScreen() {
                   }}
                   onDelete={() => delMember(row.waiterId, row.name)}
                 />
-              ))}</View></ScrollView></View>
+              ))}</View></SheetScrollView></View>
             )}
           </>
         ) : tab === 'waiter' ? <WaiterOrdersReport staff={staffQ.data ?? []} staffLoading={staffQ.isLoading} /> : (
@@ -256,7 +256,7 @@ export function StaffScreen() {
             />
           </>
         )}
-      </ScrollView>
+      </SheetScrollView>
 
       {editing !== null ? (
         <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onManagePermissions={editing !== 'new' && canManagePermissions && editing.role === 'ADMIN' && editing.id !== currentUser?.id ? () => { setPermissionsFor(editing); setEditing(null); } : undefined} />
@@ -349,7 +349,7 @@ function ShiftHistoryList({
   }
   return (
     <View style={styles.staffTableCard}>
-      <ScrollView horizontal showsHorizontalScrollIndicator><View style={{ width: HISTORY_TABLE_WIDTH }}>
+      <SheetScrollView horizontal showsHorizontalScrollIndicator><View style={{ width: HISTORY_TABLE_WIDTH }}>
       <View style={styles.staffTableHead}>{HISTORY_COLUMNS.map((column, index) => <Text key={index} style={[styles.staffTableHeading, { width: column.width, textAlign: index === HISTORY_COLUMNS.length - 1 ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
       {rows.map((row) => (
         <ShiftHistoryCard
@@ -361,7 +361,7 @@ function ShiftHistoryList({
           onClose={() => onClose(row)}
         />
       ))}
-      </View></ScrollView><View style={styles.historySummary}>
+      </View></SheetScrollView><View style={styles.historySummary}>
         <Text style={styles.summaryText} translate>Всего смен: <Text style={styles.summaryValue}>{data?.summary.shiftsCount ?? 0}</Text></Text>
         <Text style={styles.summaryText} translate>Общая выработка: <Text style={styles.summaryValue}>{durationLabel(data?.summary.totalDurationMin ?? 0)}</Text></Text>
         <Text style={styles.summaryText} translate>В смене сейчас: <Text style={styles.summaryValue}>{data?.summary.activeCount ?? 0}</Text></Text>

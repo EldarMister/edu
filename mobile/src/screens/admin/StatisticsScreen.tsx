@@ -6,7 +6,7 @@ import { colors, fontSize, radius, spacing } from '@/theme';
 import { money } from '@/utils/format';
 import { PwaIcon } from '@/components/PwaIcon';
 import { FastPressable } from '@/components/FastPressable';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { DateField } from '@/components/DateField';
 import { Button } from '@/components/ui';
 import { apiError } from '@/lib/api';
@@ -81,7 +81,7 @@ export function StatisticsScreen() {
   }, [d, publicSettingsQ.data]);
 
   return (
-    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <SheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={[styles.periodToolbar, !narrow && styles.periodToolbarWide]}>
       <View style={[styles.periodTabs, !narrow && { alignSelf: 'flex-start' }]}>
         {PERIODS.map((p) => {
@@ -207,7 +207,7 @@ export function StatisticsScreen() {
           />
         ) : null}
       </BottomSheet>
-    </ScrollView>
+    </SheetScrollView>
   );
 }
 

@@ -6,7 +6,7 @@ import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/n
 import Constants from 'expo-constants';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card } from '@/components/ui';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { ORDER_STATUS } from '@/theme/status';
@@ -156,7 +156,7 @@ export function ProfileScreen() {
   return (
     <>
       <SafeAreaView style={styles.safe} edges={[]}>
-        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <SheetScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           <Text style={styles.panelTitle} translate>Профиль</Text>
 
           {/* Карточка пользователя */}
@@ -287,7 +287,7 @@ export function ProfileScreen() {
           <Button title="Выйти" variant="secondary" danger onPress={onLogout} />
 
           <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.1'}</Text>
-        </ScrollView>
+        </SheetScrollView>
       </SafeAreaView>
 
       <ShiftSummarySheet
@@ -371,7 +371,7 @@ function WaiterCabinetScreen({
   return (
     <>
       <SafeAreaView style={styles.safe} edges={[]}>
-        <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
+        <SheetScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
           <View style={styles.cabinetHeaderRow}>
             <FastPressable onPress={onBack} hitSlop={12} style={styles.backButton}>
               <PwaIcon name="chevronLeft" size={24} color={colors.textSecondary} strokeWidth={2.2} />
@@ -435,7 +435,7 @@ function WaiterCabinetScreen({
           </Card>
 
           <Button title="Выйти" variant="secondary" danger onPress={onLogout} />
-        </ScrollView>
+        </SheetScrollView>
       </SafeAreaView>
 
       <PeriodPickerSheet
@@ -564,7 +564,7 @@ function OrderDetailsSheet({
       ) : !order ? (
         <Text style={styles.cabinetError} translate>Не удалось загрузить заказ</Text>
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.orderDetailsBody}>
+        <SheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.orderDetailsBody}>
           <View>
             <Text style={styles.detailSectionTitle} translate>Информация</Text>
             <View style={styles.detailInfoBox}>
@@ -634,7 +634,7 @@ function OrderDetailsSheet({
           </View>
 
           <FiscalBlock order={order} onRetried={onRetriedFiscal} />
-        </ScrollView>
+        </SheetScrollView>
       )}
     </BottomSheet>
   );

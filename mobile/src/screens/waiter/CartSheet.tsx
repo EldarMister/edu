@@ -95,7 +95,7 @@ export function CartSheet({
       bodyStyle={{ paddingVertical: 0 }}
       maxHeight="78%"
       headerContent={<View style={styles.header}>
-      <View style={styles.handle} />
+
       <View style={styles.headRow}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.title} numberOfLines={1} translate>

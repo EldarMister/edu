@@ -6,7 +6,7 @@ import { Select } from '@/components/Select';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { Button } from '@/components/ui';
-import { BottomSheet } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { DateField } from '@/components/DateField';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
@@ -172,7 +172,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
 
   return (
     <>
-      <ScrollView
+      <SheetScrollView
         style={styles.page}
         contentContainerStyle={styles.pageContent}
         showsVerticalScrollIndicator={false}
@@ -223,7 +223,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
           ) : items.length === 0 ? (
             <Text style={styles.empty} translate>Заказы не найдены</Text>
           ) : (
-            <ScrollView
+            <SheetScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={{ width: TABLE_WIDTH }}
@@ -249,7 +249,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
                   />
                 ))}
               </View>
-            </ScrollView>
+            </SheetScrollView>
           )}
           {items.length > 0 && isFetchingNextPage ? (
             <View style={styles.footerLoad}>
@@ -259,7 +259,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
             <Text style={styles.footerDone} translate>Все заказы загружены</Text>
           ) : null}
         </View>
-      </ScrollView>
+      </SheetScrollView>
 
       <CancelOrderModal
         visible={!!cancelTarget}

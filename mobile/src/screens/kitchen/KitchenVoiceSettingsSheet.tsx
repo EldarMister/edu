@@ -50,7 +50,19 @@ export function KitchenVoiceSettingsSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Настройки озвучки кухни" maxHeight="88%">
+    <BottomSheet visible={visible} onClose={onClose} title="Настройки озвучки кухни" maxHeight="88%" footer={<View style={[styles.section, { paddingBottom: spacing.md }]}>
+        <Button title={testing ? 'Тестируем...' : 'Тестировать'} loading={testing} onPress={() => void testVoice()} />
+        {testMessage ? (
+          <Text
+            style={[
+              styles.testMessage,
+              { color: testMessage.includes('Не удалось') ? colors.danger : colors.success },
+            ]}
+          >
+            {testMessage}
+          </Text>
+        ) : null}
+      </View>}>
       <View style={styles.section}>
         <Text style={styles.sectionTitle} translate>Голос</Text>
         <View style={styles.speakerList}>
@@ -95,19 +107,7 @@ export function KitchenVoiceSettingsSheet({
         />
       </View>
 
-      <View style={[styles.section, { paddingBottom: spacing.md }]}>
-        <Button title={testing ? 'Тестируем...' : 'Тестировать'} loading={testing} onPress={() => void testVoice()} />
-        {testMessage ? (
-          <Text
-            style={[
-              styles.testMessage,
-              { color: testMessage.includes('Не удалось') ? colors.danger : colors.success },
-            ]}
-          >
-            {testMessage}
-          </Text>
-        ) : null}
-      </View>
+
       <KitchenHandControlSetting />
     </BottomSheet>
   );
