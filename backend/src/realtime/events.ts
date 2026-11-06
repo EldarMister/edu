@@ -4,6 +4,7 @@
  */
 export const ROOMS = {
   KITCHEN: 'role:kitchen',
+  cafeKitchen: (cafeId: string | null | undefined) => cafeId ? `cafe:${cafeId}:kitchen` : 'cafe:legacy:kitchen',
   WAITERS: 'role:waiters',
   ADMIN: 'role:admin',
   ADMIN_ONLY: 'role:admin-only',
