@@ -1,3 +1,4 @@
+import { gridLayout } from '@/lib/layout';
 import { restoreAppOrientation } from '@/lib/orientation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Image, Platform, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, Vibration, View } from 'react-native';
@@ -258,9 +259,9 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   // PWA column-fill: balance keeps consecutive orders together in each column.
   const { width: winWidth } = useWindowDimensions();
   const stackedToolbar = winWidth < 960;
-  const columns = winWidth >= 1280 ? 4 : winWidth >= 1024 ? 3 : winWidth >= 640 ? 2 : 1;
   const colGap = spacing.lg;
-  const contentPadding = winWidth >= 640 ? 20 : spacing.lg;
+  const contentPadding = winWidth >= 600 ? 20 : spacing.lg;
+  const { columns } = gridLayout(winWidth, contentPadding, colGap, 264, 4);
 
   return (
     <KitchenHandControlProvider activeLayer={voiceOpen ? 'voice' : stopListOpen ? 'stop-list' : 'board'}>
@@ -382,7 +383,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
       ) : null}
 
       <HandTargetLayer name="stop-list"><StopListSheet visible={stopListOpen} station={station} onClose={() => setStopListOpen(false)} /></HandTargetLayer>
-      <HandTargetLayer name="voice"><KitchenVoiceSettingsSheet visible={voiceOpen} onClose={() => setVoiceOpen(false)} /></HandTargetLayer>
+      <HandTargetLayer name="voice">{voiceOpen ? <KitchenVoiceSettingsSheet visible onClose={() => setVoiceOpen(false)} /> : null}</HandTargetLayer>
     </SafeAreaView>
     </KitchenHandControlProvider>
   );
@@ -971,7 +972,7 @@ const styles = StyleSheet.create({
   actionsFullWidth: { width: '100%', flexGrow: 0, flexShrink: 0, minHeight: 40 },
   toolbarActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexShrink: 0 },
   toolbarBtn: {
-    height: 38,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

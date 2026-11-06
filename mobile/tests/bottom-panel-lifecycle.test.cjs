@@ -74,3 +74,14 @@ test('close invokes the initiating owner rather than replacing it with a later c
  const env=harness();env.value.motion.close();let later=0;env.props.onClose=()=>later++;env.render();env.finish();
  assert.equal(env.closes,1);assert.equal(later,0);
 });
+
+test('closed voice panel opens on every subsequent visit',()=>{
+ const env=harness();
+ env.props.onClose=()=>{env.props.visible=false;};env.render();
+ for(let visit=0;visit<3;visit++){
+  env.value.motion.close();env.finish();assert.equal(env.value.rendered,false);
+  env.props.visible=true;env.render();env.value.measure(420);env.render();
+  assert.equal(env.value.rendered,true);assert.equal(env.value.interactive,true);
+  assert.equal(env.value.motion.offset.value,0);
+ }
+});
