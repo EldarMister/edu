@@ -1,6 +1,6 @@
 import React from 'react';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { Image, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/typography';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Animated, {
@@ -89,29 +89,31 @@ function RadioHeader({ onClose }: { onClose: () => void }) {
   );
 }
 
-function RadioChannelTabs({
-  channel,
-  onChange,
-}: {
-  channel: PttChannel;
-  onChange: (next: PttChannel) => void;
+function RadioChannelSelector({ channel, onChange }: {
+  channel: PttChannel; onChange: (next: PttChannel) => void;
 }) {
-  return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.channels}>
-      {PTT_CHANNELS.map((item) => {
-        const active = item.key === channel;
-        return (
-          <FastPressable
-            key={item.key}
-            onPress={() => onChange(item.key)}
-            style={[styles.channelChip, active && styles.channelChipActive]}
-          >
-            <Text style={[styles.channelText, active && styles.channelTextActive]} translate>{item.label}</Text>
-          </FastPressable>
-        );
-      })}
-    </ScrollView>
-  );
+  const [expanded, setExpanded] = React.useState(false);
+  const selected = PTT_CHANNELS.find(item => item.key === channel) ?? PTT_CHANNELS[0];
+  return <View style={styles.channelSelector}>
+    <FastPressable onPress={() => setExpanded(value => !value)}
+      accessibilityRole="button" accessibilityLabel={`Выбрать линию: ${selected.label}`}
+      accessibilityState={{ expanded }} style={styles.lineButton}>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.lineCaption} translate>Выбрать линию</Text>
+        <Text style={styles.lineValue} translate>{selected.label}</Text>
+      </View>
+      <View style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}><PwaIcon name="chevronDown" size={22} color={colors.primary} /></View>
+    </FastPressable>
+    {expanded ? <View style={styles.channels}>
+      {PTT_CHANNELS.map(item => <FastPressable key={item.key}
+        accessibilityRole="radio" accessibilityLabel={item.label}
+        accessibilityState={{ checked: item.key === channel }}
+        onPress={() => { onChange(item.key); setExpanded(false); }}
+        style={[styles.channelChip, item.key === channel && styles.channelChipActive]}>
+        <Text style={[styles.channelText, item.key === channel && styles.channelTextActive]} translate>{item.label}</Text>
+      </FastPressable>)}
+    </View> : null}
+  </View>;
 }
 
 function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onlineCount: number }) {
@@ -261,6 +263,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   const connected = useConnectionStatus();
   const isWaiter = user?.role === 'WAITER';
   const [open, setOpen] = React.useState(false);
+  const closeRadio = React.useCallback(() => setOpen(false), []);
   const [channel, setChannel] = React.useState<PttChannel>(() => defaultChannelForRole(user?.role));
   const [onlineCount, setOnlineCount] = React.useState(0);
   const [busySpeaker, setBusySpeaker] = React.useState<{ id: string; name?: string } | null>(null);
@@ -449,18 +452,19 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
 
       <BottomSheet
         visible={open}
-        onClose={() => setOpen(false)}
+        onClose={closeRadio}
         sheet
         panelStyle={styles.pttSheet}
-        maxHeight="55%"
         draggable={false}
         bottomInset={sheetBottomInset}
         backdropColor="rgba(0,0,0,0.3)"
         bodyStyle={styles.sheetBody}
+        headerContent={<View style={styles.radioHeader}>
+          <RadioHeader onClose={closeRadio} />
+          <RadioChannelSelector channel={channel} onChange={changeChannel} />
+          <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
+        </View>}
       >
-        <RadioHeader onClose={() => setOpen(false)} />
-        <RadioChannelTabs channel={channel} onChange={changeChannel} />
-        <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
         <PushToTalkCircle
           state={state}
           disabled={state === 'error' || receivingFromOther}
@@ -525,12 +529,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  channels: {
-    gap: spacing.sm,
-    paddingBottom: spacing.md,
-  },
+  radioHeader: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
+  channelSelector: { gap: spacing.sm, marginBottom: spacing.md },
+  lineButton: { minHeight: 60, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.md, backgroundColor: colors.primaryFaint },
+  lineCaption: { fontSize: fontSize.xs, color: colors.textMuted },
+  lineValue: { fontSize: fontSize.md, fontWeight: '600', color: colors.primary },
+  channels: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   channelChip: {
-    minHeight: 40,
+    flexGrow: 1, flexBasis: '46%', minWidth: 130,
+    minHeight: 48,
     justifyContent: 'center',
     borderRadius: 20,
     borderWidth: 1,
