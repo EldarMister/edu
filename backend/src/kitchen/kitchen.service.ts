@@ -10,6 +10,9 @@ import { StopListItemDto } from './dto/stop-list.dto';
 
 export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
 
+/** Waiter/payment stages must never remove completed work from kitchen history. */
+const COMPLETED_ORDER_STATUSES: OrderStatus[] = [OrderStatus.served, OrderStatus.waiting_payment, OrderStatus.paid];
+
 /** Статусы заказа, в которых станция может иметь активные позиции. */
 const ACTIVE_TAB_STATUSES: OrderStatus[] = [
   OrderStatus.sent_to_kitchen,
@@ -121,7 +124,7 @@ export class KitchenService {
         ? {
             OR: [
               { status: { in: ACTIVE_TAB_STATUSES } },
-              { status: OrderStatus.paid },
+              { status: { in: COMPLETED_ORDER_STATUSES } },
             ],
           }
         : { status: { in: ACTIVE_TAB_STATUSES } };
@@ -141,11 +144,11 @@ export class KitchenService {
     });
 
     // Оставляем только позиции станции и раскладываем по вкладке станции.
-    // Оплаченные заказы (все позиции готовы/поданы) попадают в «Завершённые».
+    // Поданные, ожидающие оплаты и оплаченные заказы остаются в «Завершённых».
     // Завершённые показываем только за сегодня и сортируем: недавние сверху, старые снизу.
     const list = orders
       .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }))
-      .filter((o) => o.status === OrderStatus.paid ? tab === 'ready' : stationTabOf(o.items) === tab)
+      .filter((o) => COMPLETED_ORDER_STATUSES.includes(o.status) ? tab === 'ready' : stationTabOf(o.items) === tab)
       .filter((o) => tab === 'ready' ? isRecentKitchenHistory(o, todayStart) : true);
 
     if (tab === 'ready') {
