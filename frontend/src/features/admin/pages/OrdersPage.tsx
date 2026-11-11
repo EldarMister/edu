@@ -252,7 +252,7 @@ function StatusEditorModal({
   const tr = useT();
   if (!open || !order) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
+    <div data-radio-blocking className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
       <div className="w-full max-w-md rounded-xl border border-border bg-white shadow-soft">
         <div className="border-b border-border px-4 py-3">
           <h3 className="font-semibold text-text-primary">{tr('Изменить статус заказа')}</h3>

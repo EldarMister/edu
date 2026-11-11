@@ -260,7 +260,7 @@ test('server timeout releases microphone and permits another attempt', async () 
   assert.equal(h.modes.at(-1), false);
 });
 
-test('normal radio recording enables mic gain and restores output after stop', async () => {
+test('normal radio recording restores output after stop without an end cue for the sender', async () => {
   const h = senderHarness();
   assert.equal(await h.sender.start(), true);
   assert.equal(h.constraints.audio.autoGainControl, true);
@@ -270,7 +270,7 @@ test('normal radio recording enables mic gain and restores output after stop', a
   assert.equal(h.stopped, 1);
   assert.equal(h.modes.at(-1), false);
   assert.equal(h.events.at(-1).event, 'stop');
-  assert.deepEqual(h.cues, ['start', 'end']);
+  assert.deepEqual(h.cues, ['start']);
 });
 
 
@@ -283,7 +283,7 @@ test('release during the start cue never opens the recorder and releases the cha
   h.finishCue();
   assert.equal(await starting, false);
   assert.equal(h.recorder, undefined);
-  assert.deepEqual(h.cues, ['start', 'end']);
+  assert.deepEqual(h.cues, ['start']);
   assert.equal(h.events.filter(e => e.event === 'stop').length, 1);
 });
 

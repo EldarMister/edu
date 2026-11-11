@@ -66,7 +66,7 @@ export function StopListDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
+    <div data-radio-blocking className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden />
 
       <aside className="relative z-10 flex h-full w-full max-w-[420px] flex-col bg-white shadow-soft">

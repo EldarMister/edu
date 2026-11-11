@@ -114,6 +114,7 @@ export function Select({
         createPortal(
           <div
             ref={menuRef}
+            data-radio-blocking
             className="fixed z-[70] overflow-y-auto rounded-xl border border-border bg-white p-1 shadow-soft"
             style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
           >

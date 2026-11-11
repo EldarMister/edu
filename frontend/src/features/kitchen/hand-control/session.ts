@@ -32,6 +32,7 @@ export class HandCameraSession {
   private lastVideoTime = -1;
   private lastFrameAt = -Infinity;
   private inferenceMs = 0;
+  private compactFrames = false;
   private found = false;
   private diagnostics: HandDiagnostics = {};
 
@@ -55,6 +56,8 @@ export class HandCameraSession {
     this.found = false;
     this.lastVideoTime = -1;
     this.lastFrameAt = -Infinity;
+    this.inferenceMs = 0;
+    this.compactFrames = false;
     this.options.onSample(null, performance.now());
     this.options.onStatus(status);
   }
@@ -110,6 +113,7 @@ export class HandCameraSession {
         if (data.type === 'error') { this.fail(`Не удалось распознать руку. ${data.message}`); return; }
         if (data.type === 'ready') { this.options.onStatus('searching'); this.schedule(generation, 0); return; }
         this.inferenceMs = this.inferenceMs ? this.inferenceMs * 0.7 + data.duration * 0.3 : data.duration;
+        this.compactFrames = this.inferenceMs >= (this.compactFrames ? 65 : 120);
         this.found = performance.now() - data.timestamp <= 450 && handMetrics(data.sample) !== null;
         this.options.onStatus(this.found ? 'found' : 'searching');
         this.options.onSample(this.found ? data.sample : null, data.timestamp);
@@ -143,7 +147,9 @@ export class HandCameraSession {
     this.lastFrameAt = timestamp;
     let bitmap: ImageBitmap | null = null;
     try {
-      const scale = Math.min(320 / video.videoWidth, 240 / video.videoHeight, 1);
+      // Keep the full input size when searching for a hand again.
+      const compact = this.compactFrames && this.found;
+      const scale = Math.min((compact ? 256 : 320) / video.videoWidth, (compact ? 192 : 240) / video.videoHeight, 1);
       bitmap = await createImageBitmap(video, {
         resizeWidth: Math.max(1, Math.round(video.videoWidth * scale)),
         resizeHeight: Math.max(1, Math.round(video.videoHeight * scale)),

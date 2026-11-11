@@ -342,7 +342,7 @@ export function SetConfigSheet({
   if (replacingId) {
     const replacingComp = components.find((c) => c.componentId === replacingId);
     return (
-      <div className="fixed inset-0 z-[80] flex flex-col bg-white">
+      <div data-radio-blocking className="fixed inset-0 z-[80] flex flex-col bg-white">
         {/* Шапка */}
         <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
           <button

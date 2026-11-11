@@ -12,7 +12,7 @@ export function UpdateModal() {
   if (!updateAvailable) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-end justify-center p-4 sm:items-center">
+    <div data-radio-blocking className="fixed inset-0 z-[9999] flex items-end justify-center p-4 sm:items-center">
       {/* Полупрозрачный оверлей */}
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 

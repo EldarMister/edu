@@ -84,8 +84,8 @@ function harness() {
       const video = { muted: false, playsInline: false, style: {}, srcObject: null, currentTime: 1, readyState: 2, videoWidth: 320, videoHeight: 240, setAttribute() {}, play: async () => {}, pause() { this.paused = true; }, remove() { this.removed = true; } };
       videos.push(video); return video;
     } },
-    createImageBitmap: () => {
-      const bitmap = { width: 320, height: 240, closed: false, close() { this.closed = true; } }; bitmaps.push(bitmap);
+    createImageBitmap: (_, { resizeWidth, resizeHeight }) => {
+      const bitmap = { width: resizeWidth, height: resizeHeight, closed: false, close() { this.closed = true; } }; bitmaps.push(bitmap);
       return bitmapResolve === true ? new Promise((resolve) => { bitmapResolve = () => resolve(bitmap); }) : Promise.resolve(bitmap);
     },
     setTimeout: (fn, delay) => { timers.set(++sequence, { fn, delay }); return sequence; }, clearTimeout: (id) => timers.delete(id),
@@ -97,7 +97,7 @@ function harness() {
     delayBitmap() { bitmapResolve = true; }, resolveBitmap() { bitmapResolve(); },
     ready() { workers[0].onmessage({ data: { type: 'ready' } }); },
     runCapture() { const entry = [...timers].find(([, value]) => value.delay < 8000); assert.ok(entry); timers.delete(entry[0]); entry[1].fn(); },
-    result(sample = null) { clock += 20; workers[0].onmessage({ data: { type: 'result', timestamp: clock - 20, duration: 20, sample } }); },
+    result(sample = null, duration = 20) { clock += duration; workers[0].onmessage({ data: { type: 'result', timestamp: clock - duration, duration, sample } }); },
   };
 }
 test('explicit activation creates resources; off stops every track, worker, video and timer', async () => {
@@ -120,4 +120,23 @@ test('a bitmap resolving after pause is closed and never delivered', async () =>
   h.session.pause(); h.resolveBitmap(); await flush();
   assert.equal(h.bitmaps[0].closed, true); assert.equal(h.workers[0].messages.filter((m) => m.type === 'frame').length, 0);
   assert.equal(h.states.at(-1)[0], 'paused'); assert.equal(h.timers.size, 0);
+});
+
+test('slow tracking reduces the frame size and hand loss restores full-size search', async () => {
+  const h = harness();
+  await h.session.start('CPU');
+  h.ready(); h.runCapture(); await flush();
+  assert.equal(h.bitmaps[0].width, 320);
+  const landmarks = Array.from({ length: 21 }, () => ({ x: 0.5, y: 0.5 }));
+  landmarks[0] = { x: 0.5, y: 0.8 };
+  h.result({ landmarks, confidence: 0.9, aspect: 4 / 3 }, 150);
+  h.videos[0].currentTime = 2;
+  h.runCapture(); await flush();
+  assert.equal(h.bitmaps[1].width, 256);
+  assert.equal(h.bitmaps[1].height, 192);
+  h.result(null, 150);
+  h.videos[0].currentTime = 3;
+  h.runCapture(); await flush();
+  assert.equal(h.bitmaps[2].width, 320);
+  assert.equal(h.bitmaps[2].height, 240);
 });

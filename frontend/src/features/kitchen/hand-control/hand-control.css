@@ -13,6 +13,8 @@
 .hand-control-error{color:#b91c1c}
 .hand-control-panel summary{min-height:44px;padding-top:12px;cursor:pointer}
 .hand-control-cursor{position:fixed;top:0;left:0;width:30px;height:30px;pointer-events:none;z-index:10000;border:3px solid #fff;border-radius:50%;background:#005bffb0;box-shadow:0 0 0 2px #005bff,0 2px 9px #0005;opacity:0;will-change:transform}
+.hand-control-cursor[data-pinching=false]{transition:transform 65ms linear}
 .hand-control-cursor[data-pinching=true]{background:#f59e0b;box-shadow:0 0 0 4px #d97706}
+@media(prefers-reduced-motion:reduce){.hand-control-cursor[data-pinching=false]{transition:none}}
 [data-hand-hover=true]{outline:4px solid #f59e0b!important;outline-offset:3px!important}
 @media(max-width:640px){.hand-control-panel{position:fixed;top:auto;bottom:12px;left:12px;right:12px;width:auto}}

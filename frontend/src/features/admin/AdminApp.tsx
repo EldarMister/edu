@@ -323,7 +323,7 @@ export function AdminApp() {
 
       {/* Mobile drawer */}
       {mobileNav && (
-        <div className="fixed inset-0 z-40 lg:hidden">
+        <div data-radio-blocking className="fixed inset-0 z-40 lg:hidden">
           <div
             className="absolute inset-0 bg-black/40"
             onClick={() => setMobileNav(false)}

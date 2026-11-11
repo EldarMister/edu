@@ -43,10 +43,10 @@ export function KitchenHandControl() {
   const cursor = useRef<HTMLDivElement>(null);
   const session = useRef<HandCameraSession | null>(null);
   const gesture = useRef(new PinchGesture<Target>());
-  const desired = useRef<Point | null>(null);
   const position = useRef<Point | null>(null);
   const hover = useRef<Target | null>(null);
   const lastSample = useRef(-Infinity);
+  const staleTimer = useRef<ReturnType<typeof setTimeout> | undefined>();
   const [status, setStatus] = useState<HandStatus>('off');
   const [error, setError] = useState('');
   const [preferences] = useState(readPreferences);
@@ -54,12 +54,17 @@ export function KitchenHandControl() {
   const running = status === 'loading' || status === 'searching' || status === 'found';
 
   function clearPointer() {
+    clearTimeout(staleTimer.current);
+    staleTimer.current = undefined;
     hover.current?.element.removeAttribute('data-hand-hover');
     hover.current = null;
-    desired.current = null;
     position.current = null;
+    lastSample.current = -Infinity;
     gesture.current.reset();
-    if (cursor.current) cursor.current.style.opacity = '0';
+    if (cursor.current) {
+      cursor.current.style.opacity = '0';
+      cursor.current.removeAttribute('data-pinching');
+    }
   }
 
   useEffect(() => {
@@ -81,14 +86,42 @@ export function KitchenHandControl() {
       onDiagnostics: () => {},
       onSample: (sample, now) => {
         const metrics = handMetrics(sample);
-        if (!mounted || !metrics) { clearPointer(); return; }
-        lastSample.current = performance.now();
-        desired.current = metrics.point;
-        const clicked = gesture.current.update(metrics.pinch, now, hover.current, preferencesRef.current.sensitivity);
-        if (!clicked) return;
         const scope = root.current?.closest<HTMLElement>('[data-hand-scope]');
+        const pointer = cursor.current;
+        if (!mounted || !metrics || !scope || !pointer) { clearPointer(); return; }
+        const elapsed = now - lastSample.current;
+        if (elapsed > 450 && position.current) clearPointer();
+        lastSample.current = now;
+        clearTimeout(staleTimer.current);
+        staleTimer.current = setTimeout(clearPointer, 450);
+
+        // Hit testing follows recognition frames. CSS interpolates the cursor
+        // between samples without polling the layout or DOM on animation frames.
+        if (!gesture.current.locked || !position.current) {
+          const bounds = scope.getBoundingClientRect();
+          const left = Math.max(0, bounds.left), top = Math.max(0, bounds.top);
+          const width = Math.min(window.innerWidth, bounds.right) - left;
+          const height = Math.min(window.innerHeight, bounds.bottom) - top;
+          const target = { x: left + metrics.point.x * Math.max(0, width - 1), y: top + metrics.point.y * Math.max(0, height - 1) };
+          const point = position.current ?? target;
+          const alpha = 1 - Math.exp(-Math.min(160, elapsed) / 65);
+          point.x += (target.x - point.x) * alpha;
+          point.y += (target.y - point.y) * alpha;
+          position.current = point;
+          const element = targetAt(scope, point);
+          if (hover.current?.element !== element) {
+            hover.current?.element.removeAttribute('data-hand-hover');
+            element?.setAttribute('data-hand-hover', 'true');
+          }
+          hover.current = element ? { element, identity: identity(element), point: { ...point } } : null;
+        }
+        const clicked = gesture.current.update(metrics.pinch, now, hover.current, preferencesRef.current.sensitivity);
+        pointer.dataset.pinching = String(gesture.current.locked);
+        pointer.style.opacity = '1';
+        const point = position.current;
+        pointer.style.transform = `translate3d(${point.x - 15}px,${point.y - 15}px,0)`;
         // Revalidate after the entire gesture: cancellation/realtime updates may have changed the target.
-        if (scope && enabled(clicked.element) && identity(clicked.element) === clicked.identity && targetAt(scope, clicked.point) === clicked.element) {
+        if (clicked && enabled(clicked.element) && identity(clicked.element) === clicked.identity && targetAt(scope, clicked.point) === clicked.element) {
           clicked.element.click();
         }
       },
@@ -116,40 +149,6 @@ export function KitchenHandControl() {
       document.removeEventListener('scroll', geometryChanged, true);
     };
   }, []);
-
-  useEffect(() => {
-    if (!running) { clearPointer(); return; }
-    let animation = 0;
-    let previous = performance.now();
-    const render = (now: number) => {
-      animation = requestAnimationFrame(render);
-      const elapsed = Math.min(50, now - previous);
-      previous = now;
-      const scope = root.current?.closest<HTMLElement>('[data-hand-scope]');
-      if (!scope || !cursor.current || !desired.current) return;
-      if (now - lastSample.current > 450) { clearPointer(); return; }
-      const bounds = scope.getBoundingClientRect();
-      const left = Math.max(0, bounds.left), top = Math.max(0, bounds.top);
-      const width = Math.min(window.innerWidth, bounds.right) - left;
-      const height = Math.min(window.innerHeight, bounds.bottom) - top;
-      const target = { x: left + desired.current.x * Math.max(0, width - 1), y: top + desired.current.y * Math.max(0, height - 1) };
-      if (!position.current) position.current = target;
-      if (!gesture.current.locked) {
-        const alpha = 1 - Math.exp(-elapsed / 65);
-        position.current.x += (target.x - position.current.x) * alpha;
-        position.current.y += (target.y - position.current.y) * alpha;
-        const element = targetAt(scope, position.current);
-        if (hover.current?.element !== element) hover.current?.element.removeAttribute('data-hand-hover');
-        hover.current = element ? { element, identity: identity(element), point: { ...position.current } } : null;
-        element?.setAttribute('data-hand-hover', 'true');
-      }
-      cursor.current.dataset.pinching = String(gesture.current.locked);
-      cursor.current.style.opacity = '1';
-      cursor.current.style.transform = `translate3d(${position.current.x - 15}px,${position.current.y - 15}px,0)`;
-    };
-    animation = requestAnimationFrame(render);
-    return () => cancelAnimationFrame(animation);
-  }, [running]);
 
   function start() {
     setError('');

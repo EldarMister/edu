@@ -42,7 +42,6 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
   const holdRef = useRef(false);
   const startingRef = useRef(false);
   const finishingRef = useRef(false);
-  const channelHeldRef = useRef(false);
 
   const cleanupStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -52,10 +51,6 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
 
   const releaseChannel = useCallback(() => {
     getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-    if (channelHeldRef.current) {
-      channelHeldRef.current = false;
-      void playPttCue('end');
-    }
   }, [channel]);
 
   // Telegram-модель: запись идёт единым куском, пока держат кнопку. На отпускании
@@ -120,7 +115,6 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
         setDeniedReason(ack.reason === 'busy' ? 'Канал занят' : 'Не удалось начать разговор');
         return false;
       }
-      channelHeldRef.current = true;
       await startCue;
       if (!holdRef.current) {
         cleanupStream();
