@@ -8,7 +8,7 @@ import { AuditService, AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { StopListItemDto } from './dto/stop-list.dto';
 
-export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
+export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected' | 'cancelled';
 
 /** Waiter/payment stages must never remove completed work from kitchen history. */
 const COMPLETED_ORDER_STATUSES: OrderStatus[] = [OrderStatus.served, OrderStatus.waiting_payment, OrderStatus.paid];
@@ -70,7 +70,7 @@ type HistoryOrder = {
  * Вкладка станции вычисляется по её собственным позициям — независимо от другой
  * станции. Пусто (нет активных позиций станции) → null (заказ не показываем).
  */
-function stationTabOf(items: StationItem[]): Exclude<KitchenTab, 'rejected'> | null {
+function stationTabOf(items: StationItem[]): Exclude<KitchenTab, 'rejected' | 'cancelled'> | null {
   const active = items.filter(
     (i) => i.status !== OrderItemStatus.rejected && i.status !== OrderItemStatus.cancelled,
   );
@@ -89,7 +89,9 @@ function stationTabOf(items: StationItem[]): Exclude<KitchenTab, 'rejected'> | n
 
 /** Момент завершения для ленты кухни: для оплаченных — закрытие, иначе — обновление. */
 function kitchenHistoryAt(order: HistoryOrder): Date {
-  return order.status === OrderStatus.paid ? (order.closedAt ?? order.updatedAt) : order.updatedAt;
+  return order.status === OrderStatus.paid || order.status === OrderStatus.cancelled
+    ? (order.closedAt ?? order.updatedAt)
+    : order.updatedAt;
 }
 
 function isRecentKitchenHistory(order: HistoryOrder, cutoff: Date) {
@@ -107,10 +109,10 @@ export class KitchenService {
   async findByTab(tab: KitchenTab, station: PrepStation = PrepStation.kitchen) {
     const todayStart = startOfToday();
 
-    if (tab === 'rejected') {
-      // Отказанные — как и завершённые: только за сегодня, недавние сверху.
+    if (tab === 'rejected' || tab === 'cancelled') {
+      // История станции за сегодня, недавние сверху.
       const orders = await this.prisma.order.findMany({
-        where: { status: OrderStatus.rejected, items: { some: { prepStation: station } } },
+        where: { status: tab, items: { some: { prepStation: station } } },
         include: orderInclude,
       });
       return orders

@@ -16,3 +16,21 @@ test('served -> waiting payment -> paid stays in kitchen completed history',asyn
 test('completed histories stay isolated by preparation station and keep today only',async()=>{
  const {service}=fixture();assert.deepEqual((await service.findByTab('ready','bar')).map(o=>o.id),['bar-waiting']);assert.deepEqual((await service.findByTab('in_work','kitchen')).map(o=>o.id),['cooking']);assert.deepEqual((await service.findByTab('rejected','kitchen')).map(o=>o.id),['rejected']);
 });
+
+test('cancelled history includes recent bar orders and only the requested station items', async () => {
+ const {service, rows} = fixture();
+ const now = new Date();
+ const old = new Date(now);
+ old.setDate(old.getDate() - 1);
+ const barItem = {id: 'drink', prepStation: 'bar', status: 'cancelled'};
+ const mixed = rows.find(order => order.id === 'cancelled');
+ mixed.items.push(barItem);
+ rows.push({...mixed, id: 'old-bar-cancellation', closedAt: old, items: [barItem]});
+
+ const bar = await service.findByTab('cancelled', 'bar');
+ assert.deepEqual(bar.map(order => order.id), ['cancelled']);
+ assert.deepEqual(bar[0].items, [barItem]);
+ const kitchen = await service.findByTab('cancelled', 'kitchen');
+ assert.deepEqual(kitchen[0].items.map(item => item.prepStation), ['kitchen']);
+ assert.deepEqual(await service.findByTab('rejected', 'bar'), []);
+});

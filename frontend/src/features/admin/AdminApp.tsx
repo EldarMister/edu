@@ -107,8 +107,7 @@ const SECTIONS: { key: Section; label: string; icon: typeof IconStats; perm: Sec
 
 const MOBILE_NAV_EDGE_ZONE = 68;
 const MOBILE_NAV_OPEN_DISTANCE = 72;
-const MOBILE_NAV_CLOSE_DISTANCE = 70;
-const MOBILE_NAV_SELECT_STEP = 44;
+const MOBILE_NAV_CLOSE_DISTANCE = 40;
 const MOBILE_NAV_VERTICAL_TOLERANCE = 48;
 
 export function AdminApp() {
@@ -128,7 +127,7 @@ export function AdminApp() {
   const [section, setSection] = useState<Section>(isOwner ? 'stats' : 'orders');
   const [mobileNav, setMobileNav] = useState(false);
   const edgeSwipe = useRef<{ x: number; y: number } | null>(null);
-  const drawerPull = useRef<{ x: number; y: number; index: number } | null>(null);
+  const drawerPull = useRef<{ x: number; y: number } | null>(null);
 
   // Если текущий раздел стал недоступен (право отозвали) — уходим на первый доступный.
   useEffect(() => {
@@ -242,8 +241,7 @@ export function AdminApp() {
   function handleDrawerTouchStart(event: TouchEvent<HTMLDivElement>) {
     const touch = event.touches[0];
     if (!touch) return;
-    const currentIndex = Math.max(0, sections.findIndex((s) => s.key === section));
-    drawerPull.current = { x: touch.clientX, y: touch.clientY, index: currentIndex };
+    drawerPull.current = { x: touch.clientX, y: touch.clientY };
   }
 
   function handleDrawerTouchMove(event: TouchEvent<HTMLDivElement>) {
@@ -253,19 +251,11 @@ export function AdminApp() {
     const dx = touch.clientX - start.x;
     const dy = touch.clientY - start.y;
     if (dx < -MOBILE_NAV_CLOSE_DISTANCE && Math.abs(dx) > Math.abs(dy)) {
-      event.preventDefault();
-      setMobileNav(false);
       drawerPull.current = null;
-      return;
+      setMobileNav(false);
+    } else if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+      drawerPull.current = null;
     }
-    if (Math.abs(dy) < 6 || Math.abs(dx) > Math.abs(dy)) return;
-    const step = Math.trunc(dy / MOBILE_NAV_SELECT_STEP);
-    if (step === 0) return;
-    const nextIndex = Math.max(0, Math.min(sections.length - 1, start.index + step));
-    const nextSection = sections[nextIndex];
-    if (!nextSection || nextSection.key === section) return;
-    event.preventDefault();
-    setSection(nextSection.key);
   }
 
   function handleDrawerTouchEnd() {
@@ -330,7 +320,7 @@ export function AdminApp() {
             onTouchMove={(event) => event.preventDefault()}
           />
           <div
-            className="absolute inset-y-0 left-0"
+            className="absolute inset-y-0 left-0 touch-pan-y"
             onTouchStart={handleDrawerTouchStart}
             onTouchMove={handleDrawerTouchMove}
             onTouchEnd={handleDrawerTouchEnd}
