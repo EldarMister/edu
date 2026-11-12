@@ -32,20 +32,26 @@ test('compact 8.7 inch kitchen uses readable columns through rotation',()=>{
  }
 });
 
-test('14 tables fit on the reference phone in three columns', () => {
-  const layout = tableGridLayout(14, 368, 580, 12);
-  assert.equal(layout.columns, 3);
-  assert.equal(layout.side, 106);
+test('9 and 14 tables have the same large cards in three columns on phones', () => {
+  for (const width of [304, 368, 378, 414]) {
+    const nine = tableGridLayout(9, width, 530, 12);
+    const fourteen = tableGridLayout(14, width, 530, 12);
+    assert.equal(nine.columns, 3);
+    assert.equal(fourteen.columns, 3);
+    assert.equal(fourteen.side, nine.side);
+    assert.ok(fourteen.gridWidth <= width && width - fourteen.gridWidth < 3);
+  }
 });
 
-test('all rows and columns fit in portrait, landscape and narrow windows', () => {
-  for (const [width, height] of [[220, 560], [368, 380], [368, 580], [620, 240], [980, 560]]) {
-    for (let count = 1; count <= 100; count++) {
-      const { columns, side, gap, gridWidth } = tableGridLayout(count, width, height, 12);
-      const rows = Math.ceil(count / columns);
-      assert.ok(columns >= 1 && columns <= count);
-      assert.ok(side > 0 && gridWidth <= width);
-      assert.ok(rows * side + (rows - 1) * gap <= height);
-    }
+test('shorter viewports scroll rather than reducing the cards or changing columns', () => {
+  for (const [count, columns] of [[6, 2], [8, 3], [14, 3], [32, 3]]) {
+    const layout = tableGridLayout(count, 378, 400, 12);
+    const tall = tableGridLayout(count, 378, 650, 12);
+    assert.equal(layout.columns, columns);
+    assert.equal(layout.side, tall.side);
+    assert.equal(layout.gap, 12);
+    assert.ok(layout.gridWidth <= 378);
+    const rows = Math.ceil(count / columns);
+    assert.ok(rows * layout.side + (rows - 1) * layout.gap > 400 ? count !== 8 : count === 8);
   }
 });
