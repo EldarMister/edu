@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
@@ -14,7 +14,6 @@ import {
 } from './types';
 
 const CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
-const WAITER_NAV_INSET = 58;
 
 function defaultChannelForRole(role?: string): PttChannel {
   if (role === 'WAITER') return 'waiters';
@@ -199,10 +198,9 @@ function RadioChannelTabs({
   );
 }
 
-function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onlineCount: number }) {
+function RadioMetaRow({ onlineCount }: { onlineCount: number }) {
   return (
-    <div className="mb-3 flex h-10 items-center justify-between rounded-xl border border-border bg-background/60 px-4">
-      <span className="text-sm font-semibold text-text-primary">{channelLabel}</span>
+    <div className="mb-3 flex h-10 items-center justify-end rounded-xl border border-border bg-background/60 px-4">
       <span className="flex items-center gap-1.5 text-sm text-text-muted">
         <span className="h-2 w-2 rounded-full bg-success" />
         {onlineCount} онлайн
@@ -299,18 +297,12 @@ export function PttOverlay({
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
   const effectiveButtonHidden = buttonHidden || overlayOpen;
 
-  const selected = useMemo(
-    () => PTT_CHANNELS.find((item) => item.key === channel) ?? PTT_CHANNELS[0],
-    [channel],
-  );
   const sender = useAudioPttSender(channel, true);
   const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
 
-  const bottomNavInset = waiterMode && isMobile ? WAITER_NAV_INSET : 0;
   const floatingBottom = waiterMode && isMobile
     ? 'calc(var(--edu-ptt-floating-bottom, 78px) + env(safe-area-inset-bottom, 0px))'
     : 'calc(24px + env(safe-area-inset-bottom, 0px))';
-  const sheetBottom = `calc(${bottomNavInset}px + env(safe-area-inset-bottom, 0px))`;
 
   const joinSeqRef = useRef(0);
   const joinChannel = useCallback(() => {
@@ -459,21 +451,19 @@ export function PttOverlay({
           <button
             type="button"
             aria-label="Закрыть рацию"
-            className="absolute left-0 right-0 top-0 animate-fade-in bg-black/30"
-            style={{ bottom: sheetBottom }}
+            className="absolute inset-0 animate-fade-in bg-black/30"
             onClick={() => setOpen(false)}
           />
           <section
-            className="absolute left-0 right-0 mx-auto max-w-xl animate-sheet-up rounded-t-[24px] border border-border bg-white px-4 pt-2 shadow-none sm:px-6"
+            className="absolute inset-x-0 bottom-0 mx-auto max-w-xl animate-sheet-up rounded-t-[24px] border border-border bg-white px-4 pt-2 shadow-none sm:px-6"
             style={{
-              bottom: sheetBottom,
-              paddingBottom: 16,
+              paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
               maxHeight: '55dvh',
             }}
           >
             <RadioHeader onClose={() => setOpen(false)} />
             <RadioChannelTabs channel={channel} onChange={changeChannel} />
-            <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
+            <RadioMetaRow onlineCount={onlineCount} />
             <PushToTalkCircle
               state={state}
               disabled={state === 'error' || speakingOther}

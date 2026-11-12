@@ -6,28 +6,33 @@ import { useT } from '@/lib/i18n';
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
 const TABLE_GAP = 12;
 
-/** Pick the largest square that fits the hall, or keep the full-width grid scrollable. */
+/** Fit every row in the viewport using the largest square cards. */
 function tableGridLayout(count: number, width: number, height: number) {
-  const gap = TABLE_GAP;
-  const phoneColumns = width <= gap ? 1 : width < 240 ? 2 : 3;
-  const availableColumns = width < 600 ? phoneColumns : Math.max(phoneColumns, Math.min(6, Math.floor((width + gap) / (168 + gap))));
-  const maxColumns = Math.min(availableColumns, Math.max(1, count));
-  const minColumns = Math.min(maxColumns, count <= 2 ? 1 : 2);
+  const preferredGap = TABLE_GAP;
   const maxSide = count <= 2 ? 420 : 240;
-  const sideAtWidth = (columns: number) => Math.max(0, Math.floor(Math.min(maxSide, (width - gap * (columns - 1)) / columns)));
+  let columns = 1;
+  let side = 0;
+  let gap = 0;
 
-  let columns = maxColumns;
-  let side = Math.min(sideAtWidth(columns), Math.max(96, Math.floor(height)));
-  for (let candidate = maxColumns - 1; candidate >= minColumns; candidate--) {
+  for (let candidate = 1; candidate <= count; candidate++) {
+    const widthPerCard = width / candidate;
+    if (widthPerCard < side) break;
+
     const rows = Math.ceil(count / candidate);
-    const sideAtHeight = Math.floor((height - gap * (rows - 1)) / rows);
-    const fittedSide = Math.min(sideAtWidth(candidate), sideAtHeight);
-    if (fittedSide > side) {
+    const candidateGap = Math.min(preferredGap, Math.floor(Math.min(widthPerCard, height / rows) / 4));
+    const fittedSide = Math.floor(Math.min(
+      maxSide,
+      (width - candidateGap * (candidate - 1)) / candidate,
+      (height - candidateGap * (rows - 1)) / rows,
+    ));
+
+    if (fittedSide >= side) {
       columns = candidate;
       side = fittedSide;
+      gap = candidateGap;
     }
   }
-  return { columns, side };
+  return { columns, side, gap };
 }
 
 export function TablesGrid({
@@ -60,7 +65,7 @@ export function TablesGrid({
     return () => observer.disconnect();
   }, []);
 
-  const { columns, side } = tableGridLayout(hall?.tables.length ?? 0, viewport.width || 340, viewport.height || 420);
+  const { columns, side, gap } = tableGridLayout(hall?.tables.length ?? 0, viewport.width || 340, viewport.height || 420);
   const tableFontSize = Math.max(18, Math.min(54, Math.round(side / 5)));
   const dotClass = side >= 150 ? 'right-4 top-4 h-4 w-4' : 'right-2 top-2 h-2.5 w-2.5';
 
@@ -86,7 +91,7 @@ export function TablesGrid({
       <div ref={viewportRef} className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
         <div
           className="grid items-start justify-center"
-          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, ${side}px))`, gap: TABLE_GAP, fontSize: tableFontSize }}
+          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, ${side}px))`, gap, fontSize: tableFontSize }}
         >
           {hall?.tables.map((table) => {
             const meta = TABLE_STATUS[table.status];
