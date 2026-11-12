@@ -13,8 +13,10 @@ export function tableGridLayout(count: number, width: number, height: number, ga
   const maxColumns = fewTables ? phoneColumns : Math.min(count, 6);
   const { columns, itemWidth } = gridLayout(width, 0, gap, 168, maxColumns, phoneColumns);
   const rows = Math.max(1, Math.ceil(count / columns));
-  const maxSide = fewTables ? Math.min(420, Math.max(96, (height - gap * (rows - 1)) / rows)) : 240;
-  const side = Math.floor(Math.min(itemWidth, maxSide));
+  const heightPerRow = (height - gap * (rows - 1)) / rows;
+  const maxSide = fewTables ? Math.min(420, Math.max(96, heightPerRow)) : 240;
+  const fittedSide = count >= 3 && count <= 6 ? Math.min(maxSide, Math.max(0, heightPerRow)) : maxSide;
+  const side = Math.floor(Math.min(itemWidth, fittedSide));
   return { columns, side, gap, gridWidth: side * columns + gap * (columns - 1) };
 }
 
