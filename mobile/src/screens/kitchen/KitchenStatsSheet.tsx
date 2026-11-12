@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, StyleSheet, View, useWindowDimensions, type ScrollView } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
 import { FullscreenSheet } from '@/components/FullscreenSheet';
+import { SheetScrollView } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { DateField } from '@/components/DateField';
 import { colors, fontSize, radius, spacing } from '@/theme';
@@ -123,7 +124,7 @@ export function KitchenStatsSheet({
           </FastPressable>
         </View> : null}
 
-        <ScrollView ref={handScrollRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <SheetScrollView ref={handScrollRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <HandTargetClip viewRef={handScrollRef}>
           <PeriodTabs period={period} onChange={setPeriod} />
           {period === 'custom' ? <DateRangeFields from={from} to={to} onFrom={setFrom} onTo={setTo} /> : null}
@@ -196,7 +197,7 @@ export function KitchenStatsSheet({
             </>
           )}
           </HandTargetClip>
-        </ScrollView>
+        </SheetScrollView>
       </SafeAreaView>
 
       {longOpen && d ? (
@@ -468,7 +469,7 @@ function LongestDishesModal({
           onChangeText={s.setSearch}
         />
       </View>
-      <ScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
+      <SheetScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
         <MiniTable
           columns={[
             { label: 'Блюдо' },
@@ -480,7 +481,7 @@ function LongestDishesModal({
           rows={s.rows.map((x) => [x.name, minutes(x.avgMin), minutes(x.minMin), minutes(x.maxMin), `${x.count}`])}
           empty="Ничего не найдено"
         />
-      </ScrollView>
+      </SheetScrollView>
       <View style={styles.modalFooter}>
         <Text style={styles.footerMuted} translate>Всего блюд: {s.filtered.length}</Text>
         <Pagination page={s.current} pages={s.pages} onChange={s.setPage} />
@@ -513,14 +514,14 @@ function PreparedDishesModal({
           onChangeText={s.setSearch}
         />
       </View>
-      <ScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
+      <SheetScrollView contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
         <MiniTable
           columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }]}
           rows={s.rows.map((x) => [x.name, `${x.count} шт`])}
           footer={['Итого', `${totalCount} шт`]}
           empty="Ничего не найдено"
         />
-      </ScrollView>
+      </SheetScrollView>
       <View style={styles.modalFooter}>
         <Text style={styles.footerMuted} translate>Всего блюд: {s.filtered.length}</Text>
         <Pagination page={s.current} pages={s.pages} onChange={s.setPage} />
@@ -560,7 +561,7 @@ function HourlyModal({
 
   return (
     <DetailModalShell title="Приготовлено по часам" onClose={onClose}>
-      <ScrollView ref={handScrollRef} contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
+      <SheetScrollView ref={handScrollRef} contentContainerStyle={styles.modalScroll} showsVerticalScrollIndicator={false}>
         <HandTargetClip viewRef={handScrollRef}>
         <PeriodTabs period={period} onChange={setPeriod} />
         {period === 'custom' ? <DateRangeFields from={from} to={to} onFrom={setFrom} onTo={setTo} /> : null}
@@ -592,7 +593,7 @@ function HourlyModal({
           </>
         )}
         </HandTargetClip>
-      </ScrollView>
+      </SheetScrollView>
     </DetailModalShell>
   );
 }

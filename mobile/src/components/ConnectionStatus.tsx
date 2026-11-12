@@ -20,12 +20,12 @@ export function ConnectionStatus({ compact = false }: { compact?: boolean }) {
 }
 
 /** Баннер при потере соединения (ТЗ §9, PWA OfflineBanner). */
-export function OfflineBanner() {
+export function OfflineBanner({ reserveSpace = false }: { reserveSpace?: boolean }) {
   const online = useConnectionStatus();
-  if (online) return null;
+  if (online) return reserveSpace ? <View style={styles.bannerSlot} /> : null;
   return (
-    <View style={styles.banner}>
-      <Text style={styles.bannerText} translate>Нет соединения с сервером. Переподключаемся…</Text>
+    <View style={[styles.banner, reserveSpace && styles.bannerSlot]} accessibilityLiveRegion="polite">
+      <Text style={styles.bannerText} numberOfLines={reserveSpace ? 1 : undefined} translate>Нет соединения с сервером. Переподключаемся…</Text>
     </View>
   );
 }
@@ -34,6 +34,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   dot: { width: 8, height: 8, borderRadius: 4 },
   text: { fontSize: fontSize.sm },
+  bannerSlot: { height: 30, flexShrink: 0, paddingVertical: 0, justifyContent: 'center' },
   banner: {
     backgroundColor: colors.danger,
     paddingVertical: 8,

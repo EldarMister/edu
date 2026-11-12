@@ -2,12 +2,13 @@ import React from 'react';
 import { AppState, PermissionsAndroid, Platform, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
+import { createStore } from 'zustand/vanilla';
 import { Text } from '@/components/typography';
 import { Toggle } from '@/components/ui';
 import { colors, fontSize, spacing } from '@/theme';
 import { handMetrics, PinchGesture, type HandSample, type Point } from './gesture';
 import { HandTargetContext, HandTargetRegistry, type TargetHit } from './targets';
-import { HandControlContext, type HandStatus as Status } from './context';
+import { HandControlContext, HandPointerContext, type HandPointerState, type HandStatus as Status } from './context';
 import { HandPointer } from './HandPointer';
 import { waitForCameraForeground } from './cameraLifecycle';
 
@@ -17,6 +18,7 @@ const STATUS: Record<Status, string> = {
 };
 const CameraWebView = React.memo(WebView);
 const TRACKER_ORIGINS = ['file://*'];
+const HOVER_MEASUREMENT_INTERVAL = 160;
 let assetPromise: Promise<string> | null = null;
 function loadTracker() {
   if (!assetPromise) assetPromise = (async () => {
@@ -36,8 +38,7 @@ export function KitchenHandControlProvider({ activeLayer, children }: { activeLa
   const [status, setStatus] = React.useState<Status>('off');
   const [error, setError] = React.useState('');
   const [trackerUri, setTrackerUri] = React.useState<string | null>(null);
-  const [cursor, setCursor] = React.useState<(Point & { locked: boolean }) | null>(null);
-  const [highlight, setHighlight] = React.useState<TargetHit | null>(null);
+  const [pointer] = React.useState(() => createStore<HandPointerState>(() => ({ cursor: null, highlight: null })));
   const surface = React.useRef<View>(null);
   const web = React.useRef<WebView>(null);
   const generation = React.useRef(0);
@@ -47,20 +48,25 @@ export function KitchenHandControlProvider({ activeLayer, children }: { activeLa
   const position = React.useRef<Point | null>(null);
   const lastSample = React.useRef(0);
   const sampleVersion = React.useRef(0);
+  const processing = React.useRef(false);
+  const lastHoverMeasurement = React.useRef(-Infinity);
   const layerChangedAt = React.useRef(0);
   const geometry = React.useRef({ x: 0, y: 0, width: 0, height: 0 });
 
   const clearPointer = React.useCallback(() => {
     sampleVersion.current++;
     gesture.current.reset(); position.current = null;
-    setCursor(null); setHighlight(null);
-  }, []);
+    lastSample.current = 0;
+    lastHoverMeasurement.current = -Infinity;
+    const { cursor, highlight } = pointer.getState();
+    if (cursor || highlight) pointer.setState({ cursor: null, highlight: null });
+  }, [pointer]);
   const stop = React.useCallback((next: Status = 'off') => {
     generation.current++; requested.current = false;
     web.current?.injectJavaScript('window.stopHandTracking?.();true;');
     setTrackerUri(null); setStatus(next); clearPointer();
   }, [clearPointer]);
-  const start = async () => {
+  const start = React.useCallback(async () => {
     const epoch = ++generation.current;
     requested.current = true; setError(''); setStatus('loading');
     try {
@@ -86,13 +92,18 @@ export function KitchenHandControlProvider({ activeLayer, children }: { activeLa
       if (epoch !== generation.current) return;
       stop('error'); setError(cause instanceof Error ? cause.message : 'Не удалось включить управление рукой.');
     }
-  };
+  }, [stop]);
   React.useEffect(() => {
     const sub = AppState.addEventListener('change', state => { if (state !== 'active' && requested.current && !requestingPermission.current) stop('paused'); });
-    const timer = setInterval(() => { if (lastSample.current && Date.now() - lastSample.current > 450) clearPointer(); }, 150);
-    return () => { sub.remove(); clearInterval(timer); generation.current++; requested.current = false; web.current?.injectJavaScript('window.stopHandTracking?.();true;'); };
-  }, [stop, clearPointer]);
+    return () => { sub.remove(); generation.current++; requested.current = false; web.current?.injectJavaScript('window.stopHandTracking?.();true;'); };
+  }, [stop]);
   React.useEffect(() => { layerChangedAt.current = Date.now(); clearPointer(); }, [activeLayer, clearPointer]);
+  const enabled = status === 'loading' || status === 'searching' || status === 'found';
+  React.useEffect(() => {
+    if (!enabled) return;
+    const timer = setInterval(() => { if (lastSample.current && Date.now() - lastSample.current > 450) clearPointer(); }, 150);
+    return () => clearInterval(timer);
+  }, [enabled, clearPointer]);
 
   const onSample = React.useCallback(async (sample: HandSample | null) => {
     if (!requested.current) return;
@@ -100,7 +111,11 @@ export function KitchenHandControlProvider({ activeLayer, children }: { activeLa
     if (sample && (!Array.isArray(sample.landmarks) || typeof sample.confidence !== 'number' || !Number.isFinite(sample.aspect))) sample = null;
     const metrics = handMetrics(sample);
     if (!metrics) { clearPointer(); setStatus('searching'); return; }
+    // Native measurements can outlast a camera frame. Avoid accumulating
+    // overlapping measurements, but process hand loss immediately.
+    if (processing.current) return;
     const now = Date.now();
+    if (lastSample.current && now - lastSample.current > 450) clearPointer();
     const elapsed = Math.min(100, now - lastSample.current);
     lastSample.current = now;
     setStatus('found');
@@ -112,17 +127,31 @@ export function KitchenHandControlProvider({ activeLayer, children }: { activeLa
       position.current = { x: position.current.x + (desired.x - position.current.x) * alpha, y: position.current.y + (desired.y - position.current.y) * alpha };
     }
     const point = { ...position.current };
-    const version = ++sampleVersion.current;
-    const hit = gesture.current.lockedTarget ?? await registry.hit(point);
-    if (version !== sampleVersion.current || !requested.current || Date.now() - now > 450) return;
-    const clicked = gesture.current.update(metrics.pinch, now, hit);
-    setCursor({ ...point, locked: gesture.current.locked });
-    setHighlight(hit);
-    if (clicked) {
-      await registry.activate(clicked, () => requested.current && version === sampleVersion.current && Date.now() - now <= 450);
-      clearPointer();
+    const version = sampleVersion.current;
+    const pinch = gesture.current;
+    processing.current = true;
+    try {
+      let hit = pointer.getState().highlight;
+      if (pinch.locked) {
+        hit = pinch.lockedTarget;
+      } else if (pinch.willLock(metrics.pinch, now) || now - lastHoverMeasurement.current >= HOVER_MEASUREMENT_INTERVAL) {
+        lastHoverMeasurement.current = now;
+        hit = await registry.hit(point);
+      } else if (hit) {
+        const bounds = hit.bounds;
+        if (point.x < bounds.x || point.x > bounds.x + bounds.width || point.y < bounds.y || point.y > bounds.y + bounds.height) hit = null;
+      }
+      if (version !== sampleVersion.current || !requested.current || Date.now() - now > 450) return;
+      const clicked = pinch.update(metrics.pinch, now, hit);
+      pointer.setState({ cursor: { ...point, locked: pinch.locked }, highlight: hit });
+      if (clicked) {
+        await registry.activate(clicked, () => requested.current && version === sampleVersion.current && Date.now() - now <= 450);
+        if (version === sampleVersion.current) clearPointer();
+      }
+    } finally {
+      processing.current = false;
     }
-  }, [registry, clearPointer]);
+  }, [registry, clearPointer, pointer]);
   // Loading the file avoids three large string/base64 copies across JS, Java and
   // WebView, which exhaust the standard Android heap on lower-memory devices.
   const source = React.useMemo(() => trackerUri ? { uri: trackerUri } : undefined, [trackerUri]);
@@ -138,25 +167,28 @@ export function KitchenHandControlProvider({ activeLayer, children }: { activeLa
       else if (data.type === 'error') { stop('error'); setError(String(data.message || 'Не удалось распознать руку.')); }
     } catch { /* Ignore malformed messages; they cannot activate a native control. */ }
   }, [onSample, stop]);
-  const enabled = status === 'loading' || status === 'searching' || status === 'found';
+  const toggle = React.useCallback(() => { if (requested.current) stop(); else void start(); }, [start, stop]);
+  const control = React.useMemo(() => ({ enabled, status, error, toggle }), [enabled, status, error, toggle]);
   return (
     <HandTargetContext.Provider value={targets}>
-      <HandControlContext.Provider value={{ enabled, status, error, cursor, highlight, toggle: () => { if (requested.current) stop(); else void start(); } }}>
-        <View ref={surface} collapsable={false} style={styles.surface} onLayout={() => {
-          clearPointer(); surface.current?.measureInWindow((x, y, width, height) => { geometry.current = { x, y, width, height }; });
-        }}>
-          {children}
-          {trackerUri && <View pointerEvents="none" style={styles.tracker}>
-            <CameraWebView ref={web} source={source}
-              originWhitelist={TRACKER_ORIGINS} javaScriptEnabled domStorageEnabled={false} allowFileAccess
-              allowFileAccessFromFileURLs={false} allowUniversalAccessFromFileURLs={false}
-              allowingReadAccessToURL={trackerUri}
-              allowsInlineMediaPlayback mediaPlaybackRequiresUserAction={false} mediaCapturePermissionGrantType="grantIfSameHostElsePrompt"
-              onShouldStartLoadWithRequest={allowTrackerNavigation}
-              onError={onCameraError} onMessage={onCameraMessage} />
-          </View>}
-          <HandPointer />
-        </View>
+      <HandControlContext.Provider value={control}>
+        <HandPointerContext.Provider value={pointer}>
+          <View ref={surface} collapsable={false} style={styles.surface} onLayout={() => {
+            clearPointer(); surface.current?.measureInWindow((x, y, width, height) => { geometry.current = { x, y, width, height }; });
+          }}>
+            {children}
+            {trackerUri && <View pointerEvents="none" style={styles.tracker}>
+              <CameraWebView ref={web} source={source}
+                originWhitelist={TRACKER_ORIGINS} javaScriptEnabled domStorageEnabled={false} allowFileAccess
+                allowFileAccessFromFileURLs={false} allowUniversalAccessFromFileURLs={false}
+                allowingReadAccessToURL={trackerUri}
+                allowsInlineMediaPlayback mediaPlaybackRequiresUserAction={false} mediaCapturePermissionGrantType="grantIfSameHostElsePrompt"
+                onShouldStartLoadWithRequest={allowTrackerNavigation}
+                onError={onCameraError} onMessage={onCameraMessage} />
+            </View>}
+            <HandPointer />
+          </View>
+        </HandPointerContext.Provider>
       </HandControlContext.Provider>
     </HandTargetContext.Provider>
   );

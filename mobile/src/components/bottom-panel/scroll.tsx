@@ -9,7 +9,7 @@ function useScrollGesture(motion: PanelMotion, onScroll: ScrollViewProps['onScro
   const offset = useSharedValue(0);
   const pan = useBottomPanelPan(motion, offset);
   const native = React.useMemo(() => Gesture.Native(), []);
-  const gesture = React.useMemo(() => Gesture.Simultaneous(pan, native), [native, pan]);
+  const gesture = React.useMemo(() => Gesture.Exclusive(pan, native), [native, pan]);
   const notify = React.useCallback((event: NativeScrollEvent) => {
     onScroll?.({ nativeEvent: event } as NativeSyntheticEvent<NativeScrollEvent>);
   }, [onScroll]);

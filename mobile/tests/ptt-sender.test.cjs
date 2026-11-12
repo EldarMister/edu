@@ -63,7 +63,7 @@ test('a quick release during microphone permission does not reserve the channel 
   assert.equal(env.recordings.length, 0);
 });
 
-test('concurrent presses start only one recorder and send one message between the cues', async () => {
+test('concurrent presses send one message and only play the starting cue for the sender', async () => {
   const env = harness();
   const first = env.sender.start();
   assert.equal(await env.sender.start(), false);
@@ -72,7 +72,7 @@ test('concurrent presses start only one recorder and send one message between th
   env.sender.stop();
   await settle();
   assert.deepEqual(env.events, ['start', 'audio', 'stop']);
-  assert.deepEqual(env.cues, ['start', 'end']);
+  assert.deepEqual(env.cues, ['start']);
   assert.equal(env.recordings.length, 1);
   assert.equal(env.recordings[0].stops, 1);
 });

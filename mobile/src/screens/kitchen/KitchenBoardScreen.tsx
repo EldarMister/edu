@@ -1,10 +1,8 @@
 import { gridLayout } from '@/lib/layout';
-import { restoreAppOrientation } from '@/lib/orientation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Image, Platform, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, Vibration, View } from 'react-native';
 import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as ScreenOrientation from 'expo-screen-orientation';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, EmptyState, Loading, SegmentTabs } from '@/components/ui';
 import { OrderBadge } from '@/components/StatusBadge';
@@ -54,6 +52,7 @@ const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'in_work', label: 'В работе' },
   { key: 'ready', label: 'Завершенные' },
   { key: 'rejected', label: 'Отказанные' },
+  { key: 'cancelled', label: 'Отменённые' },
 ];
 
 /** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
@@ -135,16 +134,6 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, []);
-
-  // Кухня — единственный экран, где разрешён поворот. Следуем системной настройке
-  // устройства (auto-rotate вкл → крутится, заблокировано → фиксировано), как обычные
-  // приложения. При выходе возвращаем портрет всему приложению.
-  useEffect(() => {
-    ScreenOrientation.unlockAsync().catch(() => {});
-    return () => {
-      restoreAppOrientation().catch(() => {});
-    };
   }, []);
 
   // Новый заказ: звук + вибрация + тост (по настройкам) + озвучка станции.
@@ -325,7 +314,9 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
                 ? 'Нет заказов в работе'
                 : tab === 'ready'
                   ? 'Завершённых заказов нет'
-                  : 'Отказанных заказов нет'
+                  : tab === 'cancelled'
+                    ? 'Отменённых заказов нет'
+                    : 'Отказанных заказов нет'
           }
         />
       ) : (

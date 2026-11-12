@@ -529,7 +529,7 @@ export function useHallMutations() {
 export function useTableMutations() {
   const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
   const create = useMutation({
-    mutationFn: (b: { hallId: string; number: number; seats: number }) =>
+    mutationFn: (b: { hallId: string; number?: number; seats: number }) =>
       api.post('/admin/tables', b).then((r) => r.data),
     onSuccess: invalidate,
   });

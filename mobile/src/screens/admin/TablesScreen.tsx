@@ -241,8 +241,8 @@ function TableModal({ hall, table, onClose }: { hall: AdminHall; table: AdminTab
 
   const onSubmit = async () => {
     setError('');
-    if (!number || !seats) {
-      setError('Укажите номер и количество мест');
+    if (!seats || (isEdit && !number)) {
+      setError(isEdit ? 'Укажите номер и количество мест' : 'Укажите количество мест');
       return;
     }
     try {
@@ -250,7 +250,7 @@ function TableModal({ hall, table, onClose }: { hall: AdminHall; table: AdminTab
         await update.mutateAsync({ id: table!.id, number: Number(number), seats: Number(seats), isActive });
         push({ message: 'Стол обновлён', at: new Date().toISOString() });
       } else {
-        await create.mutateAsync({ hallId: hall.id, number: Number(number), seats: Number(seats) });
+        await create.mutateAsync({ hallId: hall.id, seats: Number(seats) });
         push({ message: 'Стол добавлен', at: new Date().toISOString() });
       }
       onClose();
@@ -266,11 +266,13 @@ function TableModal({ hall, table, onClose }: { hall: AdminHall; table: AdminTab
       title={isEdit ? `Стол №${table!.number}` : `Новый стол · ${hall.name}`}
       footer={<Button title={isEdit ? 'Сохранить' : 'Добавить'} size="lg" loading={pending} onPress={onSubmit} />}
     >
-      <View style={styles.grid2}>
-        <Field label="Номер стола" style={{ flex: 1 }}>
-          <TextInput style={styles.input} value={number} onChangeText={setNumber} keyboardType="number-pad" />
-        </Field>
-        <Field label="Мест" style={{ flex: 1 }}>
+      <View style={isEdit ? styles.grid2 : undefined}>
+        {isEdit && (
+          <Field label="Номер стола" style={{ flex: 1 }}>
+            <TextInput style={styles.input} value={number} onChangeText={setNumber} keyboardType="number-pad" />
+          </Field>
+        )}
+        <Field label="Мест" style={isEdit ? { flex: 1 } : undefined}>
           <TextInput style={styles.input} value={seats} onChangeText={setSeats} keyboardType="number-pad" />
         </Field>
       </View>

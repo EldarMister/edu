@@ -47,12 +47,20 @@ export class HandTargetRegistry {
   async hit(point: Point): Promise<TargetHit | null> {
     const layer = this.currentLayer;
     const layerVersion = this.layerVersion;
-    const hits = await Promise.all([...this.targets.values()].map(async target => {
-      if (target.disabled || !target.press || target.layer !== layer) return null;
+    const measurements = new Map<View | ScrollView, Promise<Bounds | null>>();
+    const measureOnce = (view: View | ScrollView | null) => {
+      if (!view) return null;
+      const existing = measurements.get(view);
+      if (existing) return existing;
+      const pending = measure(view);
+      measurements.set(view, pending);
+      return pending;
+    };
+    const candidates = [...this.targets.values()].filter(target => !target.disabled && target.press && target.layer === layer);
+    const hits = await Promise.all(candidates.map(async target => {
       const revision = target.revision;
       const [bounds, clip, exclude] = await Promise.all([
-        measure(target.view), target.clip ? measure(target.clip.current) : Promise.resolve(null),
-        target.exclude ? measure(target.exclude.current) : Promise.resolve(null),
+        measureOnce(target.view), measureOnce(target.clip?.current ?? null), measureOnce(target.exclude?.current ?? null),
       ]);
       if (this.targets.get(target.id) !== target || revision !== target.revision || target.disabled || layerVersion !== this.layerVersion) return null;
       if (!bounds || !contains(bounds, point) || (target.clip && (!clip || !contains(clip, point)))) return null;
@@ -60,7 +68,11 @@ export class HandTargetRegistry {
       return { target, revision, layerVersion, bounds, point: { ...point } };
     }));
     // A nested checkbox/button wins over a card's larger press target.
-    return hits.filter((hit): hit is TargetHit => hit !== null).sort((a, b) => a.bounds.width * a.bounds.height - b.bounds.width * b.bounds.height)[0] ?? null;
+    let closest: TargetHit | null = null;
+    for (const hit of hits) {
+      if (hit && (!closest || hit.bounds.width * hit.bounds.height < closest.bounds.width * closest.bounds.height)) closest = hit;
+    }
+    return closest;
   }
   async activate(hit: TargetHit, shouldActivate: () => boolean = () => true) {
     const current = await this.hit(hit.point);

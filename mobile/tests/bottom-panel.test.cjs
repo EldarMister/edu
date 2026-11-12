@@ -10,17 +10,21 @@ function load(file) {
     { module, exports: module.exports });
   return module.exports;
 }
-const { resistPanelOffset, shouldDismissPanel, canStartPanelDrag, remainingKeyboardOverlap, PanelCompletion } = load('geometry.ts');
+const { resistPanelOffset, panelDragOrigin, shouldDismissPanel, remainingKeyboardOverlap, PanelCompletion } = load('geometry.ts');
 const { PanelHistory } = load('history.ts');
 const entry = (id, parent, persistent = false, inline = false) => ({ id, parent, persistent, inline });
 
-test('downward movement is 1:1 and upward movement has bounded continuous resistance', () => {
+test('movement is 1:1 between the stops and has bounded resistance beyond both', () => {
   assert.equal(resistPanelOffset(87, 400), 87);
   assert.equal(resistPanelOffset(0, 400), 0);
   for (const x of [-1, -80, -1000]) {
     const value = resistPanelOffset(x, 400);
     assert.ok(value < 0 && value > x && value > -400);
     assert.equal(value, x * 400 * .55 / (400 + .55 * Math.abs(x)));
+  }
+  assert.ok(resistPanelOffset(450, 400) > 400 && resistPanelOffset(450, 400) < 450);
+  for (const x of [-80, 0, 87, 450]) {
+    assert.ok(Math.abs(panelDragOrigin(resistPanelOffset(x, 400), 400) - x) < 0.001);
   }
 });
 test('dismissal uses measured travel and both distance and velocity thresholds', () => {
@@ -30,11 +34,8 @@ test('dismissal uses measured travel and both distance and velocity thresholds',
   assert.equal(shouldDismissPanel(12, 1000, 400), false);
   assert.equal(shouldDismissPanel(13, 851, 400), true);
   assert.equal(shouldDismissPanel(13, -1000, 400), false);
-});
-test('scrolling can hand off only at the top and in the first 128 logical pixels', () => {
-  assert.equal(canStartPanelDrag(1, 128), true);
-  assert.equal(canStartPanelDrag(2, 20), false);
-  assert.equal(canStartPanelDrag(0, 129), false);
+  assert.equal(shouldDismissPanel(5, 1000, 400, 15), true);
+  assert.equal(shouldDismissPanel(120, -1000, 400), false);
 });
 test('adjustResize keyboard compensation only adds remaining overlap', () => {
   assert.equal(remainingKeyboardOverlap(0, 600, 600), 0);

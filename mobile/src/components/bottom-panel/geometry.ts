@@ -3,17 +3,24 @@ export const STEP_DURATION = 220;
 
 export function resistPanelOffset(offset: number, travel: number) {
   'worklet';
-  return offset >= 0 ? offset : offset * travel * 0.55 / (travel + 0.55 * Math.abs(offset));
+  const edge = Math.max(0, Math.min(travel, offset));
+  const overshoot = offset - edge;
+  return edge + overshoot * travel * 0.55 / (travel + 0.55 * Math.abs(overshoot));
 }
 
-export function shouldDismissPanel(offset: number, velocity: number, travel: number) {
+export function panelDragOrigin(offset: number, travel: number) {
   'worklet';
-  return offset > Math.min(160, travel * 0.24) || (offset > 12 && velocity > 850);
+  const edge = Math.max(0, Math.min(travel, offset));
+  const overshoot = offset - edge;
+  // Undo resistance when picking up an already stretched panel.
+  return edge + overshoot * travel / (0.55 * Math.max(1, travel - Math.abs(overshoot)));
 }
 
-export function canStartPanelDrag(scrollY: number, touchY: number) {
+export function shouldDismissPanel(offset: number, velocity: number, travel: number, displacement = offset) {
   'worklet';
-  return scrollY <= 1 && touchY <= 128;
+  const flickSpeed = 850;
+  return (offset > Math.min(160, travel * 0.24) && velocity > -flickSpeed)
+    || (displacement > 12 && velocity > flickSpeed);
 }
 
 export function remainingKeyboardOverlap(containerY: number, containerHeight: number, keyboardY: number) {

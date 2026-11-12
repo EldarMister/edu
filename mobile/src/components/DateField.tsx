@@ -10,6 +10,7 @@ import { FastPressable } from './FastPressable';
 import { PwaIcon } from './PwaIcon';
 import { HandTargetClip, HandTargetModal } from '@/features/hand-control/targets';
 import { HandPointer } from '@/features/hand-control/HandPointer';
+import { useRadioOverlayBlocker } from '@/features/ptt/radioVisibility';
 
 type Props = Omit<TextInputProps, 'value' | 'onChangeText'> & {
   value: string;
@@ -38,6 +39,7 @@ export function DateField({
   const minimum = minimumDate ? dateToIso(minimumDate) : '';
   const maximum = maximumDate ? dateToIso(maximumDate) : '';
   const [open, setOpen] = React.useState(openOnMount && canEdit);
+  useRadioOverlayBlocker(open && canEdit);
   const [focused, setFocused] = React.useState(false);
   const [typedDate, setTypedDate] = React.useState(() => displayDate(value));
   const [month, setMonth] = React.useState(() => calendarMonth(value || minimum || maximum));

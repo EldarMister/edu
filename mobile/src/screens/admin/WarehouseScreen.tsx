@@ -550,7 +550,7 @@ const styles = StyleSheet.create({
   metric: { width: '48%', gap: 8, padding: 12, borderRadius: 8 },
   metricLabel: { fontSize: 11, fontWeight: '500', textTransform: 'uppercase', letterSpacing: 1.1, color: colors.textMuted },
   metricValue: { fontSize: 22, fontWeight: '600', color: colors.textPrimary },
-  metricLarge: { padding: 16, borderRadius: 12, gap: 6 },
+  metricLarge: { flexGrow: 1, padding: 16, borderRadius: 12, gap: 6 },
   metricLargeLabel: { fontSize: 13, fontWeight: '400', textTransform: 'none', letterSpacing: 0 },
   metricLargeValue: { fontSize: 24 },
   panel: { flexGrow: 1, gap: 12, padding: 16, borderRadius: 12 },

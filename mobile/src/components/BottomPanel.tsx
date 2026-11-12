@@ -57,7 +57,7 @@ export function BottomPanel(props: BottomPanelProps) {
 }
 
 function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persistent = false, expanded,
-  fillBody = false, draggable = true, handlePlacement = 'outside', containerHeight, controller, ...current }: BottomPanelProps) {
+  fillBody = false, draggable = true, handlePlacement = 'inside', containerHeight, controller, ...current }: BottomPanelProps) {
   const id = React.useId();
   const parent = React.useContext(PanelCloseContext);
   const insets = useSafeAreaInsets();
@@ -82,9 +82,6 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
     return () => { controller.request.current = null; };
   }, [close, controller?.request]);
   const closeContext = React.useMemo(() => ({ id, onClose, close, closeActions: content.closeActions }), [close, content.closeActions, id, onClose]);
-  React.useLayoutEffect(() => {
-    if (content.hideHeader) motion.headerHeight.value = content.hideHandle ? 0 : 24;
-  }, [content.hideHandle, content.hideHeader, motion.headerHeight]);
   const measureContainer = React.useCallback(() => {
     const view = rootRef.current;
     view?.measureInWindow((_x, y, _width, height) => {
@@ -132,9 +129,15 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
   const stepStyle = useAnimatedStyle(() => ({ transform: [{ translateY: step.value }] }));
   if (!rendered) return null;
 
-  const handle = <FastPressable onPress={close} accessibilityLabel="Закрыть панель" style={styles.handleTouch}>
-    <View style={styles.handle} />
-  </FastPressable>;
+  const handle = content.hideHandle ? null : (
+    <GestureDetector gesture={handlePan}>
+      <View collapsable={false} style={styles.handleBand}>
+        <FastPressable testID="bottom-panel-handle" onPress={close} accessibilityRole="button" accessibilityLabel="Закрыть панель" style={styles.handleTouch}>
+          <View style={styles.handle} />
+        </FastPressable>
+      </View>
+    </GestureDetector>
+  );
   const header = content.headerContent ?? (content.title ? <View style={styles.header}>
     <Text style={styles.title} translate>{content.title}</Text>
     <FastPressable onPress={close} accessibilityLabel="Закрыть" hitSlop={12} style={styles.close}>
@@ -161,12 +164,11 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
             pointerEvents={active ? 'auto' : 'none'} onLayout={event => measure(event.nativeEvent.layout.height)}
             style={[styles.panel, { maxHeight: maximum, width: panelWidth ?? (dimensions.width >= 600 ? Math.min(dimensions.width - 48, 720) : '100%'), maxWidth, alignSelf: alignSelf ?? 'center' },
               full && { height: maximum }, centered && { maxWidth: 300 }, animation]}>
-            {outsideHandle ? <GestureDetector gesture={handlePan}><View collapsable={false} style={styles.handleBand}>{handle}</View></GestureDetector> : null}
+            {outsideHandle ? handle : null}
             <View style={[styles.surface, surfaceStyle, { flexShrink: 1, minHeight: 0 }, full && styles.fill,
               { borderTopLeftRadius: 26, borderTopRightRadius: 26 }]}>
-              {handlePlacement === 'inside' && !content.hideHandle ? <GestureDetector gesture={handlePan}><View collapsable={false} style={styles.handleBand}>{handle}</View></GestureDetector> : null}
-              {!content.hideHeader ? <GestureDetector gesture={headerPan}><View collapsable={false}
-                onLayout={event => { motion.headerHeight.value = event.nativeEvent.layout.height + (content.hideHandle ? 0 : 24); }}>
+              {handlePlacement === 'inside' ? handle : null}
+              {!content.hideHeader ? <GestureDetector gesture={headerPan}><View collapsable={false}>
                 {header}
               </View></GestureDetector> : null}
               <Animated.View style={[styles.body, full && styles.fill, content.bodyStyle, stepStyle]}>{body}</Animated.View>
@@ -194,8 +196,8 @@ const styles = StyleSheet.create({
   panel: { alignSelf: 'center', flexShrink: 1 },
   surface: { backgroundColor: colors.card, overflow: 'hidden' },
   fill: { flex: 1, minHeight: 0 },
-  handleBand: { height: 24, alignItems: 'center', justifyContent: 'center' },
-  handleTouch: { width: 88, height: 24, alignItems: 'center', justifyContent: 'center' },
+  handleBand: { height: 28, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  handleTouch: { width: 88, height: '100%', alignItems: 'center', justifyContent: 'center' },
   handle: { width: 34, height: 4, borderRadius: 2, backgroundColor: colors.slate300 },
   header: { paddingHorizontal: 20, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
   title: { flex: 1, fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },

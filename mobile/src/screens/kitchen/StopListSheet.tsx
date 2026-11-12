@@ -20,6 +20,7 @@ import { apiError } from '@/lib/api';
 import type { PrepStation } from '@/types';
 import { HandPointer } from '@/features/hand-control/HandPointer';
 import { HandTargetClip, HandTargetModal } from '@/features/hand-control/targets';
+import { useRadioOverlayBlocker } from '@/features/ptt/radioVisibility';
 
 /**
  * «Стоп-лист»: станция временно отключает свои блюда — как PWA StopListDrawer.
@@ -42,6 +43,7 @@ export function StopListSheet({
   const panelWidth = Math.min(420, width);
 
   const [render, setRender] = useState(visible);
+  useRadioOverlayBlocker(visible || render);
   const [search, setSearch] = useState('');
   const scrollRef = React.useRef<ScrollView>(null);
   const handPanelRef = React.useRef<View>(null);

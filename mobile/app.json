@@ -2,7 +2,7 @@
   "expo": {
     "name": "EDU POS",
     "slug": "edu-pos-mobile",
-    "version": "0.3.5",
+    "version": "0.3.6",
     "orientation": "default",
     "icon": "./assets/launcher-icon.png",
     "scheme": "edupos",
@@ -30,7 +30,7 @@
     },
     "android": {
       "package": "com.edupos.mobile",
-      "versionCode": 13,
+      "versionCode": 14,
       "adaptiveIcon": {
         "foregroundImage": "./assets/launcher-icon.png",
         "backgroundColor": "#FFFFFF"

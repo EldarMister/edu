@@ -1,6 +1,6 @@
 {
   "name": "edu-pos-mobile",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
   "main": "index.ts",
   "scripts": {
@@ -34,9 +34,9 @@
     "expo-font": "~13.0.4",
     "expo-image-manipulator": "~13.0.6",
     "expo-location": "~18.0.10",
+    "expo-network": "~7.0.5",
     "expo-notifications": "~0.29.11",
     "expo-print": "~14.0.3",
-    "expo-screen-orientation": "~8.0.4",
     "expo-secure-store": "~14.0.0",
     "expo-sharing": "~13.0.1",
     "expo-status-bar": "~2.0.0",

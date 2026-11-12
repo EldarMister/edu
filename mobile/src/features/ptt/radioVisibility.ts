@@ -1,3 +1,4 @@
+import { useLayoutEffect } from 'react';
 import { create } from 'zustand';
 
 /**
@@ -8,6 +9,7 @@ import { create } from 'zustand';
 type RadioVisibilityState = {
   cabinetOpen: boolean;
   shiftGateOpen: boolean;
+  blockingOverlays: number;
   setCabinetOpen: (open: boolean) => void;
   setShiftGateOpen: (open: boolean) => void;
 };
@@ -15,6 +17,18 @@ type RadioVisibilityState = {
 export const useRadioVisibility = create<RadioVisibilityState>((set) => ({
   cabinetOpen: false,
   shiftGateOpen: false,
+  blockingOverlays: 0,
   setCabinetOpen: (cabinetOpen) => set({ cabinetOpen }),
   setShiftGateOpen: (shiftGateOpen) => set({ shiftGateOpen }),
 }));
+
+/** Tracks overlays outside the shared BottomPanel lifecycle. */
+export function useRadioOverlayBlocker(open: boolean) {
+  useLayoutEffect(() => {
+    if (!open) return;
+    useRadioVisibility.setState(state => ({ blockingOverlays: state.blockingOverlays + 1 }));
+    return () => {
+      useRadioVisibility.setState(state => ({ blockingOverlays: state.blockingOverlays - 1 }));
+    };
+  }, [open]);
+}

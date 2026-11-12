@@ -1,6 +1,6 @@
 import React from 'react';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { Image, StyleSheet, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/typography';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Animated, {
@@ -14,6 +14,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BottomSheet } from '@/components/BottomSheet';
+import { useBottomPanelHistory } from '@/components/bottom-panel/context';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, softShadow, spacing, waiterLayout } from '@/theme';
@@ -89,37 +90,29 @@ function RadioHeader({ onClose }: { onClose: () => void }) {
   );
 }
 
-function RadioChannelSelector({ channel, onChange }: {
+function RadioChannelTabs({ channel, onChange }: {
   channel: PttChannel; onChange: (next: PttChannel) => void;
 }) {
-  const [expanded, setExpanded] = React.useState(false);
-  const selected = PTT_CHANNELS.find(item => item.key === channel) ?? PTT_CHANNELS[0];
-  return <View style={styles.channelSelector}>
-    <FastPressable onPress={() => setExpanded(value => !value)}
-      accessibilityRole="button" accessibilityLabel={`Выбрать линию: ${selected.label}`}
-      accessibilityState={{ expanded }} style={styles.lineButton}>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text style={styles.lineCaption} translate>Выбрать линию</Text>
-        <Text style={styles.lineValue} translate>{selected.label}</Text>
-      </View>
-      <View style={{ transform: [{ rotate: expanded ? '180deg' : '0deg' }] }}><PwaIcon name="chevronDown" size={22} color={colors.primary} /></View>
-    </FastPressable>
-    {expanded ? <View style={styles.channels}>
-      {PTT_CHANNELS.map(item => <FastPressable key={item.key}
-        accessibilityRole="radio" accessibilityLabel={item.label}
-        accessibilityState={{ checked: item.key === channel }}
-        onPress={() => { onChange(item.key); setExpanded(false); }}
-        style={[styles.channelChip, item.key === channel && styles.channelChipActive]}>
-        <Text style={[styles.channelText, item.key === channel && styles.channelTextActive]} translate>{item.label}</Text>
-      </FastPressable>)}
-    </View> : null}
-  </View>;
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false}
+      style={styles.channelTabs} contentContainerStyle={styles.channels}>
+      {PTT_CHANNELS.map(item => {
+        const active = item.key === channel;
+        return (
+          <FastPressable key={item.key} accessibilityRole="radio" accessibilityLabel={item.label}
+            accessibilityState={{ checked: active }} onPress={() => onChange(item.key)}
+            style={[styles.channelChip, active && styles.channelChipActive]}>
+            <Text style={[styles.channelText, active && styles.channelTextActive]} translate>{item.label}</Text>
+          </FastPressable>
+        );
+      })}
+    </ScrollView>
+  );
 }
 
-function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onlineCount: number }) {
+function RadioMetaRow({ onlineCount }: { onlineCount: number }) {
   return (
     <View style={styles.metaRow}>
-      <Text style={styles.metaChannel} numberOfLines={1}>{channelLabel}</Text>
       <View style={styles.metaOnline}>
         <View style={styles.greenDot} />
         <Text style={styles.metaOnlineText} translate>{onlineCount} онлайн</Text>
@@ -267,20 +260,18 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   const [channel, setChannel] = React.useState<PttChannel>(() => defaultChannelForRole(user?.role));
   const [onlineCount, setOnlineCount] = React.useState(0);
   const [busySpeaker, setBusySpeaker] = React.useState<{ id: string; name?: string } | null>(null);
-  const selected = React.useMemo(
-    () => PTT_CHANNELS.find((item) => item.key === channel) ?? PTT_CHANNELS[0],
-    [channel],
-  );
   const sender = useAudioPttSender(channel, true);
   const { speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
 
   // Кнопка рации у официанта — только на «Столах», списке «Заказов» и «Профиле».
-  // Прячем на «Меню», подробном заказе и в личном кабинете. Другие роли — без
-  // ограничений. Оверлей остаётся смонтированным, приём аудио не прерывается.
+  // Прячем на «Меню», подробном заказе и в личном кабинете.
   const cabinetOpen = useRadioVisibility((s) => s.cabinetOpen);
   const shiftGateOpen = useRadioVisibility((s) => s.shiftGateOpen);
+  const overlayOpen = useRadioVisibility((s) => s.blockingOverlays > 0);
+  const { temporary } = useBottomPanelHistory();
   const waiterNav = React.useMemo(() => isWaiter ? readWaiterNav(navigationState) : null, [isWaiter, navigationState]);
-  const buttonVisible = React.useMemo(() => {
+  const screenAllowsRadio = React.useMemo(() => {
+    if (overlayOpen) return false;
     if (!isWaiter || !waiterNav) return true;
     if (shiftGateOpen) return false;
     const { tab, ordersLeaf } = waiterNav;
@@ -289,11 +280,11 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
     if (tab === 'Orders') return ordersLeaf !== 'OrderDetail';
     if (tab === 'Profile') return !cabinetOpen;
     return true;
-  }, [isWaiter, waiterNav, cabinetOpen, shiftGateOpen]);
+  }, [overlayOpen, isWaiter, waiterNav, cabinetOpen, shiftGateOpen]);
 
   React.useEffect(() => {
-    if (!buttonVisible) setOpen(false);
-  }, [buttonVisible]);
+    if (!screenAllowsRadio) closeRadio();
+  }, [screenAllowsRadio, closeRadio]);
   // Имя последнего говорившего (из channel_busy) — фолбэк на время
   // воспроизведения, если бэкенд не кладёт senderName в аудио-сообщение.
   const lastSpeakerNameRef = React.useRef<string | undefined>(undefined);
@@ -303,7 +294,6 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   const floatingBottom = isWaiter
     ? waiterLayout.navBarHeight + spacing.lg + insets.bottom
     : insets.bottom + spacing.xl;
-  const sheetBottomInset = isWaiter ? waiterLayout.navBarHeight + insets.bottom : undefined;
 
   const joinSeqRef = React.useRef(0);
   const joinChannel = React.useCallback(() => {
@@ -432,7 +422,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
 
   return (
     <View pointerEvents="box-none" style={styles.overlayHost} collapsable={false}>
-      {buttonVisible && (
+      {screenAllowsRadio && !open && temporary === 0 && (
         <View pointerEvents="box-none" style={[styles.floatButtonWrap, { bottom: floatingBottom, right: Math.max(insets.right, spacing.sm) }]}>
           {outerSpeaking ? (
             <PttRipple mode="soft" size={74} color={outerView.ring} borderWidth={1} />
@@ -456,13 +446,12 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
         sheet
         panelStyle={styles.pttSheet}
         bodyDraggable={false}
-        bottomInset={sheetBottomInset}
         backdropColor="rgba(0,0,0,0.3)"
         bodyStyle={styles.sheetBody}
         headerContent={<View style={styles.radioHeader}>
           <RadioHeader onClose={closeRadio} />
-          <RadioChannelSelector channel={channel} onChange={changeChannel} />
-          <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
+          <RadioChannelTabs channel={channel} onChange={changeChannel} />
+          <RadioMetaRow onlineCount={onlineCount} />
         </View>}
       >
         <PushToTalkCircle
@@ -529,35 +518,30 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radioHeader: { paddingHorizontal: spacing.lg, paddingTop: spacing.md },
-  channelSelector: { gap: spacing.sm, marginBottom: spacing.md },
-  lineButton: { minHeight: 60, paddingHorizontal: spacing.lg, paddingVertical: spacing.sm,
-    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
-    borderWidth: 1, borderColor: colors.primary, borderRadius: radius.md, backgroundColor: colors.primaryFaint },
-  lineCaption: { fontSize: fontSize.xs, color: colors.textMuted },
-  lineValue: { fontSize: fontSize.md, fontWeight: '600', color: colors.primary },
-  channels: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  radioHeader: { paddingHorizontal: spacing.lg },
+  channelTabs: { flexGrow: 0, marginBottom: spacing.md },
+  channels: { gap: spacing.sm },
   channelChip: {
-    flexGrow: 1, flexBasis: '46%', minWidth: 130,
-    minHeight: 48,
+    flexShrink: 0,
     justifyContent: 'center',
-    borderRadius: 20,
+    borderRadius: 999,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.white,
     paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
   },
   channelChipActive: {
     borderColor: colors.primary,
     backgroundColor: colors.primary,
   },
-  channelText: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },
+  channelText: { fontSize: fontSize.sm, lineHeight: 20, fontWeight: '500', color: colors.textSecondary },
   channelTextActive: { color: colors.white },
   metaRow: {
     height: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -565,7 +549,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.md,
   },
-  metaChannel: { flexShrink: 1, fontSize: fontSize.sm, fontWeight: '600', color: colors.textPrimary },
   metaOnline: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaOnlineText: { fontSize: fontSize.sm, color: colors.textMuted },
   greenDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success },

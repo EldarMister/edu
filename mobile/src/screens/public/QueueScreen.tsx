@@ -6,7 +6,6 @@ import { Text } from '@/components/typography';
 import { useRoute, type RouteProp } from '@react-navigation/native';
 import { useQuery } from '@tanstack/react-query';
 import axios from 'axios';
-import * as ScreenOrientation from 'expo-screen-orientation';
 import { API_BASE } from '@/config/env';
 import { Button, Loading } from '@/components/ui';
 import { FastPressable } from '@/components/FastPressable';
@@ -55,10 +54,6 @@ export function QueueScreen() {
   const [soundOn, setSoundOn] = React.useState(false);
   const announced = React.useRef<Set<string> | null>(null);
   const voice = React.useMemo(() => new QueueVoice(params.code ? { code: params.code } : { cafe: params.cafe }), [params.code, params.cafe]);
-  React.useEffect(() => {
-    void ScreenOrientation.unlockAsync().catch(() => undefined);
-    return () => { void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => undefined); };
-  }, []);
   React.useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     const state = AppState.addEventListener('change', next => {

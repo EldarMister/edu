@@ -1,3 +1,5 @@
+import { addNetworkStateListener, getNetworkStateAsync, type NetworkState } from 'expo-network';
+import { create } from 'zustand';
 import { io, type Socket } from 'socket.io-client';
 import { useEffect, useState } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
@@ -6,7 +8,9 @@ import { API_URL } from '@/config/env';
 import { isPttBackgroundRuntimeActive } from '@/features/ptt/backgroundFlag';
 
 let socket: Socket | null = null;
-const OFFLINE_GRACE_MS = 5500;
+const OFFLINE_GRACE_MS = 1500;
+const NETWORK_CHECK_INTERVAL_MS = 1000;
+const useNetworkOffline = create<{ offline: boolean }>(() => ({ offline: false }));
 
 function socketIsConnecting(sock: Socket) {
   return Boolean((sock as Socket & { active?: boolean }).active);
@@ -72,6 +76,28 @@ export function useSocketLifecycle() {
     const sock = getSocket();
     reconnectSocket();
     let foregroundTimer: ReturnType<typeof setTimeout> | undefined;
+    let networkRevision = 0;
+    const onNetworkState = (state: NetworkState) => {
+      networkRevision++;
+      const offline = state.isConnected === false || state.isInternetReachable === false;
+      useNetworkOffline.setState({ offline });
+      if (!offline) connectIfNeeded(sock);
+    };
+    let checkingNetwork = false;
+    const refreshNetwork = () => {
+      if (checkingNetwork || AppState.currentState !== 'active') return;
+      checkingNetwork = true;
+      const revision = networkRevision;
+      void getNetworkStateAsync().then(state => {
+        if (revision === networkRevision) onNetworkState(state);
+      }).catch(() => {}).finally(() => {
+        checkingNetwork = false;
+      });
+    };
+    const network = addNetworkStateListener(onNetworkState);
+    refreshNetwork();
+    // The default network can change before Android delivers a callback.
+    const networkTimer = setInterval(refreshNetwork, NETWORK_CHECK_INTERVAL_MS);
 
     const onAppState = (next: AppStateStatus) => {
       clearTimeout(foregroundTimer);
@@ -79,6 +105,7 @@ export function useSocketLifecycle() {
         if (!isPttBackgroundRuntimeActive()) sock.disconnect();
         return;
       }
+      refreshNetwork();
       foregroundTimer = setTimeout(() => connectIfNeeded(sock), 350);
     };
     const sub = AppState.addEventListener('change', onAppState);
@@ -86,6 +113,9 @@ export function useSocketLifecycle() {
     return () => {
       clearTimeout(foregroundTimer);
       sub.remove();
+      networkRevision++;
+      clearInterval(networkTimer);
+      network.remove();
       if (!isPttBackgroundRuntimeActive()) sock.disconnect();
     };
   }, [token, userId, role]);
@@ -93,26 +123,25 @@ export function useSocketLifecycle() {
 
 /** Хук: статус соединения. Используется индикатором «Онлайн / Нет соединения». */
 export function useConnectionStatus(): boolean {
-  const s = getSocket();
-  const [connected, setConnected] = useState<boolean>(() => s.connected || AppState.currentState !== 'active');
+  const offline = useNetworkOffline(state => state.offline);
+  const [connected, setConnected] = useState(true);
 
   useEffect(() => {
     const sock = getSocket();
     let offlineTimer: ReturnType<typeof setTimeout> | null = null;
-    let foregroundTimer: ReturnType<typeof setTimeout> | undefined;
     const clearOfflineTimer = () => {
       if (!offlineTimer) return;
       clearTimeout(offlineTimer);
       offlineTimer = null;
     };
-    const onConnect = () => setConnected(true);
-    const markOfflineSoon = () => {
+    const onConnect = () => {
       clearOfflineTimer();
-      if (AppState.currentState !== 'active') {
-        setConnected(true);
-        return;
-      }
+      setConnected(true);
+    };
+    const markOfflineSoon = () => {
+      if (offlineTimer || AppState.currentState !== 'active') return;
       offlineTimer = setTimeout(() => {
+        offlineTimer = null;
         if (!sock.connected && AppState.currentState === 'active') setConnected(false);
       }, OFFLINE_GRACE_MS);
     };
@@ -122,7 +151,7 @@ export function useConnectionStatus(): boolean {
     sock.on('connect', onConnect);
     sock.on('disconnect', onDisconnect);
     sock.on('connect_error', onConnectError);
-    setConnected(sock.connected || AppState.currentState !== 'active');
+    if (!sock.connected) markOfflineSoon();
 
     const onAppState = (next: AppStateStatus) => {
       if (next !== 'active') {
@@ -130,17 +159,13 @@ export function useConnectionStatus(): boolean {
         setConnected(true);
         return;
       }
-      setConnected(sock.connected || true);
-      clearTimeout(foregroundTimer);
-      foregroundTimer = setTimeout(() => {
-        if (!sock.connected) markOfflineSoon();
-      }, 600);
+      if (sock.connected) onConnect();
+      else markOfflineSoon();
     };
     const sub = AppState.addEventListener('change', onAppState);
 
     return () => {
       clearOfflineTimer();
-      clearTimeout(foregroundTimer);
       sock.off('connect', onConnect);
       sock.off('disconnect', onDisconnect);
       sock.off('connect_error', onConnectError);
@@ -148,7 +173,7 @@ export function useConnectionStatus(): boolean {
     };
   }, []);
 
-  return connected;
+  return connected && !offline;
 }
 
 /** Хук-подписка на событие сокета. handler пересоздаётся через deps. */

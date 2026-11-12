@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { InteractionManager, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { InteractionManager, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text } from '@/components/typography';
 import Animated, {
   interpolate,
@@ -30,6 +30,7 @@ import {
 import { useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
+import { tableGridLayout } from '@/lib/layout';
 import type { TableStatus, TableItem, Order } from '@/types';
 
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
@@ -92,9 +93,10 @@ export function TablesScreen() {
 
   const tables = currentHall?.tables ?? [];
   const tableLayout = useMemo(
-    () => getTableLayout(tables.length, gridSize.width, gridSize.height),
+    () => tableGridLayout(tables.length, gridSize.width || 340, gridSize.height || 420, spacing.md),
     [gridSize.height, gridSize.width, tables.length],
   );
+  const tableFontSize = Math.max(18, Math.min(54, Math.round(tableLayout.side / 5)));
   const selectedTable = useMemo(
     () => (halls.data ?? []).flatMap((h) => h.tables).find((tbl) => tbl.id === selectedTableId) ?? null,
     [halls.data, selectedTableId],
@@ -195,11 +197,7 @@ export function TablesScreen() {
         onPress={() => onTablePress(tbl)}
         style={[
           styles.table,
-          {
-            width: tableLayout.cardWidth,
-            height: tableLayout.cardHeight,
-            minHeight: tableLayout.minHeight,
-          },
+          { width: tableLayout.side, height: tableLayout.side },
           selected ? styles.tableSelected : null,
         ]}
       >
@@ -207,7 +205,7 @@ export function TablesScreen() {
           <View
             style={[
               styles.dot,
-              tableLayout.roomy && styles.dotRoomy,
+              tableLayout.side >= 150 && styles.dotRoomy,
               { backgroundColor: meta.dot },
             ]}
           />
@@ -215,7 +213,7 @@ export function TablesScreen() {
         <Text
           style={[
             styles.tableNumber,
-            { fontSize: tableLayout.fontSize },
+            { fontSize: tableFontSize },
             selected && { color: colors.white },
           ]}
         >
@@ -223,7 +221,7 @@ export function TablesScreen() {
         </Text>
       </FastPressable>
     );
-  }, [onTablePress, selectedTableId, tableLayout]);
+  }, [onTablePress, selectedTableId, tableFontSize, tableLayout.side]);
 
   return (
     <SafeAreaView style={styles.safe} edges={[]}>
@@ -254,12 +252,9 @@ export function TablesScreen() {
         <View
           style={styles.tableList}
           onLayout={(event) => {
-            const { width, height } = event.nativeEvent.layout;
-            setGridSize((current) =>
-              Math.abs(current.width - width) > 1 || Math.abs(current.height - height) > 1
-                ? { width, height }
-                : current,
-            );
+            const width = Math.floor(event.nativeEvent.layout.width);
+            const height = Math.floor(event.nativeEvent.layout.height);
+            setGridSize((current) => current.width === width && current.height === height ? current : { width, height });
           }}
         >
           {halls.isLoading ? (
@@ -270,15 +265,24 @@ export function TablesScreen() {
               refreshControl={
                 <RefreshControl refreshing={halls.isFetching} onRefresh={() => halls.refetch()} />
               }
-              contentContainerStyle={[
-                styles.grid,
-                tableLayout.fill ? styles.gridFill : null,
-              ]}
+              contentContainerStyle={styles.grid}
             >
-              <View style={styles.tableGrid}>
-                {tables.map((table) => (
-                  <React.Fragment key={table.id}>{renderTable(table)}</React.Fragment>
-                ))}
+              <View style={{ gap: tableLayout.gap }}>
+                {Array.from({ length: Math.ceil(tables.length / tableLayout.columns) }, (_, rowIndex) => {
+                  const start = rowIndex * tableLayout.columns;
+                  const row = tables.slice(start, start + tableLayout.columns);
+                  const columnGap = tableLayout.columns > 1
+                    ? tableLayout.gap + Math.max(0, gridSize.width - tableLayout.gridWidth) / (tableLayout.columns - 1)
+                    : 0;
+                  return (
+                    <View key={row[0].id} style={[
+                      styles.tableRow,
+                      { columnGap, justifyContent: tableLayout.columns === 1 ? 'center' : 'flex-start' },
+                    ]}>
+                      {row.map((table) => <React.Fragment key={table.id}>{renderTable(table)}</React.Fragment>)}
+                    </View>
+                  );
+                })}
               </View>
             </SheetScrollView>
           )}
@@ -532,74 +536,6 @@ function TransferTableSheet({
   );
 }
 
-function getTableLayout(count: number, width: number, height: number) {
-  const gap = spacing.md;
-  const usableWidth = Math.max(0, width);
-  const usableHeight = Math.max(0, height);
-  const fallbackWidth = usableWidth || 340;
-  const fallbackHeight = usableHeight || 420;
-  if (fallbackWidth >= 600) {
-    const columns = Math.max(1, Math.min(count || 1, 6, Math.floor((fallbackWidth + gap) / 180)));
-    const cardWidth = Math.floor((fallbackWidth - gap * (columns - 1)) / columns);
-    return { cardWidth, cardHeight: Math.min(220, Math.max(140, cardWidth * 0.8)), minHeight: 140, fontSize: 38, fill: false, roomy: true };
-  }
-  const fullscreenSingle = count === 1;
-  const splitVertical = count === 2;
-  const roomyTwoColumn = count >= 3 && count <= 6;
-  const compactGrid = count > 10;
-  const columns = fullscreenSingle || splitVertical ? 1 : roomyTwoColumn ? 2 : compactGrid ? 4 : 3;
-  const rows = fullscreenSingle ? 1 : splitVertical ? 2 : roomyTwoColumn ? Math.ceil(count / 2) : Math.ceil(count / columns);
-  const cardWidth =
-    columns === 1
-      ? fallbackWidth
-      : Math.floor((fallbackWidth - gap * (columns - 1)) / columns);
-  const fillCardHeight = Math.floor((fallbackHeight - gap * Math.max(0, rows - 1)) / rows);
-  const squareHeight = cardWidth;
-  const roomy = fullscreenSingle || splitVertical || roomyTwoColumn;
-
-  if (fullscreenSingle) {
-    return {
-      cardWidth,
-      cardHeight: Math.min(Math.max(fillCardHeight, 300), 460),
-      minHeight: 300,
-      fontSize: 54,
-      fill: true,
-      roomy: true,
-    };
-  }
-
-  if (splitVertical) {
-    return {
-      cardWidth,
-      cardHeight: Math.max(fillCardHeight, 0),
-      minHeight: 0,
-      fontSize: 44,
-      fill: true,
-      roomy: true,
-    };
-  }
-
-  if (roomyTwoColumn) {
-    return {
-      cardWidth,
-      cardHeight: Math.max(fillCardHeight, 0),
-      minHeight: 0,
-      fontSize: 38,
-      fill: true,
-      roomy: true,
-    };
-  }
-
-  return {
-    cardWidth,
-    cardHeight: Math.max(squareHeight, compactGrid ? 74 : 104),
-    minHeight: compactGrid ? 74 : 104,
-    fontSize: compactGrid ? 20 : 24,
-    fill: false,
-    roomy,
-  };
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
   panel: { flex: 1, paddingHorizontal: spacing.sm, paddingTop: 10 },
@@ -639,14 +575,7 @@ const styles = StyleSheet.create({
 
   tableList: { flex: 1, minHeight: 0 },
   grid: { flexGrow: 1 },
-  gridFill: { minHeight: '100%' },
-  tableGrid: {
-    minHeight: '100%',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignContent: 'flex-start',
-    gap: spacing.md,
-  },
+  tableRow: { flexDirection: 'row' },
   table: {
     borderRadius: waiterLayout.tableCardRadius,
     borderWidth: 1,

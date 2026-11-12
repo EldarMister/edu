@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const moduleLayout = { exports: {} };
 vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/lib/layout.ts', 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, { module: moduleLayout, exports: moduleLayout.exports });
-const { gridLayout } = moduleLayout.exports;
+const { gridLayout, tableGridLayout } = moduleLayout.exports;
 test('menu cards fit phone, tablet portrait, landscape and split screen without last-row stretching', () => {
   for (const width of [320, 390, 599, 600, 768, 800, 1024, 1280, 1600]) {
     const grid = gridLayout(width, 12, 10, 210, 5, 2);
@@ -32,13 +32,20 @@ test('compact 8.7 inch kitchen uses readable columns through rotation',()=>{
  }
 });
 
-test('compact tablet keeps rotation even below 600 logical pixels',async()=>{
- const calls=[];const module={exports:{}};
- const source=fs.readFileSync('src/lib/orientation.ts','utf8');
- vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,{module,exports:module.exports,require:id=>({
-  'react-native':{Dimensions:{get:()=>({width:534,height:893})}},
-  'expo-device':{deviceType:2,DeviceType:{TABLET:2}},
-  'expo-screen-orientation':{unlockAsync:async()=>calls.push('unlock'),lockAsync:async()=>calls.push('lock'),OrientationLock:{PORTRAIT_UP:1}}
- }[id])});
- await module.exports.restoreAppOrientation();assert.deepEqual(calls,['unlock']);
+test('14 tables fit on the reference phone in three columns', () => {
+  const layout = tableGridLayout(14, 368, 580, 12);
+  assert.equal(layout.columns, 3);
+  assert.equal(layout.side, 106);
+});
+
+test('all rows and columns fit in portrait, landscape and narrow windows', () => {
+  for (const [width, height] of [[220, 560], [368, 380], [368, 580], [620, 240], [980, 560]]) {
+    for (let count = 1; count <= 100; count++) {
+      const { columns, side, gap, gridWidth } = tableGridLayout(count, width, height, 12);
+      const rows = Math.ceil(count / columns);
+      assert.ok(columns >= 1 && columns <= count);
+      assert.ok(side > 0 && gridWidth <= width);
+      assert.ok(rows * side + (rows - 1) * gap <= height);
+    }
+  }
 });

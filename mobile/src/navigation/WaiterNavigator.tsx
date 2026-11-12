@@ -69,7 +69,7 @@ export function WaiterNavigator() {
   return (
     <SheetPortalProvider>
     <SafeAreaView style={styles.workSafe} edges={['top']}>
-      <PanelScreenBoundary mode="inline" style={{ flex: 1 }}><OfflineBanner />
+      <PanelScreenBoundary mode="inline" style={{ flex: 1 }}><OfflineBanner reserveSpace />
       <WaiterHeader />
       <View style={styles.tabsHost}>
         <Tab.Navigator

@@ -214,11 +214,21 @@ export function StatisticsScreen() {
 /* ---------- KPI ---------- */
 
 export function DashboardGrid({ columns, gap = 12, children }: { columns: number; gap?: number; children: React.ReactNode }) {
-  const [width, setWidth] = useState(0);
-  const itemWidth = width > 0 ? Math.max(0, (width - gap * (columns - 1)) / columns) : undefined;
-  return <View onLayout={event => setWidth(event.nativeEvent.layout.width)} style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
-    {React.Children.toArray(children).map((child, index) => <View key={index} style={{ width: itemWidth ?? '100%', minWidth: 0 }}>{child}</View>)}
-  </View>;
+  const items = React.Children.toArray(children);
+  const rowCount = Math.ceil(items.length / columns);
+  return (
+    <View style={{ gap }}>
+      {Array.from({ length: rowCount }, (_, row) => (
+        <View key={row} style={{ flexDirection: 'row', gap }}>
+          {Array.from({ length: columns }, (_, column) => (
+            <View key={column} style={{ flex: 1, minWidth: 0 }}>
+              {items[row * columns + column]}
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
 }
 
 function DesktopMetric({ icon, label, value, delta }: { icon: 'list' | 'check'; label: string; value: string; delta: number }) {

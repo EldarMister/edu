@@ -100,6 +100,22 @@ test('disabled and scrolled-out controls are not targets even when native frames
   assert.equal(await registry.hit({ x: 20, y: 20 }), null);
   assert.ok(await registry.hit({ x: 20, y: 60 }));
 });
+
+test('a shared scroll boundary is measured once per scan and remeasured before clicking', async () => {
+  const registry = new HandTargetRegistry();
+  let measurements = 0;
+  let clipTop = 0;
+  const clip = { current: { measureInWindow(callback) { measurements++; callback(0, clipTop, 100, 100); } } };
+  const outer = add(registry, { clip });
+  const button = add(registry, { width: 30, height: 30, clip });
+  const hit = await registry.hit({ x: 20, y: 20 });
+  assert.equal(hit.target, button.target);
+  assert.equal(measurements, 1);
+  clipTop = 40;
+  assert.equal(await registry.activate(hit), false);
+  assert.equal(measurements, 2);
+  assert.equal(outer.clicks() + button.clicks(), 0);
+});
 test('a late geometry measurement after layer change is discarded', async () => {
   const registry = new HandTargetRegistry();
   let reply;

@@ -39,6 +39,11 @@ export class PinchGesture<T> {
   get locked() { return this.state === 'closing' || this.state === 'closed' || this.state === 'releasing'; }
   get lockedTarget() { return this.locked ? this.target : null; }
 
+  willLock(pinch: number, now: number, sensitivity = 1) {
+    return this.state === 'open' && now - this.lastSample <= 450
+      && now - this.lastClick >= 450 && pinch <= 0.24 * clamp(sensitivity, 0.75, 1.3);
+  }
+
   update(pinch: number | null, now: number, hover: T | null, sensitivity = 1): T | null {
     if (pinch === null || !Number.isFinite(pinch)) { this.reset(); return null; }
     // A stalled camera/worker is equivalent to losing the hand; never finish an old gesture.
@@ -54,7 +59,7 @@ export class PinchGesture<T> {
       return null;
     }
     if (this.state === 'open') {
-      if (pinch <= close && now - this.lastClick >= 450) {
+      if (this.willLock(pinch, now, sensitivity)) {
         this.target = hover;
         this.since = now;
         this.state = 'closing';

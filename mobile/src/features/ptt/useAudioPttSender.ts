@@ -53,16 +53,11 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
   const holdRef = React.useRef(false);
   const startingRef = React.useRef(false);
   const finishingRef = React.useRef(false);
-  const channelHeldRef = React.useRef(false);
   const cueRef = React.useRef<AbortController | null>(null);
   const recordingRef = React.useRef<Audio.Recording | null>(null);
 
   const releaseChannel = React.useCallback(() => {
     getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-    if (channelHeldRef.current) {
-      channelHeldRef.current = false;
-      void playPttCue('end');
-    }
   }, [channel]);
 
   // Telegram-модель: единая непрерывная запись. На отпускании кнопки
@@ -135,7 +130,6 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       setDeniedReason(ack.reason === 'busy' ? 'Канал занят' : 'Не удалось начать разговор');
       return false;
     }
-    channelHeldRef.current = true;
     await startCue;
 
     if (!holdRef.current) {

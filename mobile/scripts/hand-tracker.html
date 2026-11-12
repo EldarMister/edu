@@ -5,6 +5,7 @@
 const send = value => window.ReactNativeWebView?.postMessage(JSON.stringify(value));
 const video = document.getElementById('camera');
 let stream, worker, workerUrl, timer, watchdog, stopped = false, generation = 0, lastFrame = -1;
+let inferenceMs = 0, compactFrames = false, handFound = false;
 function stop() {
   stopped = true; generation++;
   clearTimeout(timer); clearTimeout(watchdog);
@@ -29,7 +30,8 @@ async function capture() {
   if (video.readyState < 2 || lastFrame === video.currentTime) { timer = setTimeout(capture, 100); return; }
   lastFrame = video.currentTime;
   try {
-    const scale = Math.min(320 / video.videoWidth, 240 / video.videoHeight, 1);
+    const compact = compactFrames && handFound;
+    const scale = Math.min((compact ? 256 : 320) / video.videoWidth, (compact ? 192 : 240) / video.videoHeight, 1);
     const bitmap = await createImageBitmap(video, { resizeWidth: Math.max(1, Math.round(video.videoWidth * scale)), resizeHeight: Math.max(1, Math.round(video.videoHeight * scale)) });
     if (stopped || epoch !== generation) { bitmap.close(); return; }
     deadline(8000);
@@ -55,12 +57,16 @@ async function start() {
       if (stopped) return;
       clearTimeout(watchdog);
       if (data.type === 'error') { fail(new Error(data.message)); return; }
-      const elapsed = data.timestamp ? performance.now() - data.timestamp : 0;
-      const stale = elapsed > 450;
+      if (data.type === 'ready') { send({ type: 'ready' }); timer = setTimeout(capture, 0); return; }
+      inferenceMs = inferenceMs ? inferenceMs * 0.7 + data.duration * 0.3 : data.duration;
+      compactFrames = inferenceMs >= (compactFrames ? 65 : 120);
+      const elapsed = performance.now() - data.timestamp;
       // Never let a delayed frame complete a pinch in the native controls.
-      send(stale ? { type: 'sample', sample: null, timestamp: performance.now() } : data);
-      const interval = data.sample && !stale ? Math.max(80, Math.min(400, data.duration * 1.5)) : Math.max(400, data.duration * 1.5);
-      timer = setTimeout(capture, data.type === 'ready' ? 0 : Math.max(0, interval - elapsed));
+      const sample = elapsed <= 450 && data.sample?.confidence >= 0.7 ? data.sample : null;
+      if (sample || handFound) send({ type: 'sample', sample });
+      handFound = !!sample;
+      const interval = handFound ? Math.max(80, Math.min(400, inferenceMs * 1.5)) : Math.max(400, inferenceMs * 1.5);
+      timer = setTimeout(capture, Math.max(0, interval - elapsed));
     };
     worker.postMessage({ type: 'init', loader: assets.loader, wasm: assets.wasm, model: assets.model });
   } catch (error) { if (!stopped) fail(error); }

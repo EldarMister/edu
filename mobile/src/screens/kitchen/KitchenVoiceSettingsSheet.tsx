@@ -66,21 +66,28 @@ export function KitchenVoiceSettingsSheet({
       <View style={styles.section}>
         <Text style={styles.sectionTitle} translate>Голос</Text>
         <View style={styles.speakerList}>
-          {KITCHEN_SPEAKERS.map((speaker) => {
-            const active = settings.speaker === speaker.value;
-            return (
-              <FastPressable
-                key={speaker.value}
-                onPress={() => patch({ speaker: speaker.value })}
-                style={[styles.speakerRow, active && styles.speakerRowActive]}
-              >
-                <View style={[styles.radio, active && { borderColor: colors.primary }]}>
-                  {active ? <View style={styles.radioDot} /> : null}
-                </View>
-                <Text style={[styles.speakerName, active && { color: colors.primary }]} translate>{speaker.label}</Text>
-              </FastPressable>
-            );
-          })}
+          {[KITCHEN_SPEAKERS.slice(0, 3), KITCHEN_SPEAKERS.slice(3)].map((row) => (
+            <View key={row[0].value} style={styles.speakerGridRow}>
+              {row.map((speaker) => {
+                const active = settings.speaker === speaker.value;
+                return (
+                  <FastPressable
+                    key={speaker.value}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: active }}
+                    onPress={() => patch({ speaker: speaker.value })}
+                    style={[styles.speakerRow, active && styles.speakerRowActive]}
+                  >
+                    <View style={[styles.radio, active && { borderColor: colors.primary }]}>
+                      {active ? <View style={styles.radioDot} /> : null}
+                    </View>
+                    <Text style={[styles.speakerName, active && { color: colors.primary }]} translate>{speaker.label}</Text>
+                  </FastPressable>
+                );
+              })}
+              {row.length < 3 && <View style={styles.speakerCell} />}
+            </View>
+          ))}
         </View>
       </View>
 
@@ -206,28 +213,32 @@ function SpeedSlider({
 const styles = StyleSheet.create({
   section: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, marginTop: spacing.md },
   sectionTitle: { fontSize: fontSize.base, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },
-  speakerList: { gap: 4 },
+  speakerList: { gap: 6 },
+  speakerGridRow: { flexDirection: 'row', gap: 6 },
+  speakerCell: { flex: 1, minWidth: 0 },
   speakerRow: {
-    minHeight: 48,
+    flex: 1,
+    minWidth: 0,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.md,
+    gap: 6,
     borderRadius: radius.sm,
-    paddingHorizontal: spacing.sm,
+    paddingHorizontal: 4,
     paddingVertical: spacing.sm,
   },
   speakerRowActive: { backgroundColor: colors.primarySoft },
   radio: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
     borderWidth: 2,
     borderColor: colors.slate300,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.primary },
-  speakerName: { flexShrink: 1, fontSize: fontSize.base, fontWeight: '500', color: colors.textSecondary },
+  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
+  speakerName: { flexShrink: 1, fontSize: fontSize.sm, fontWeight: '500', color: colors.textSecondary },
   settingRow: {
     minHeight: 48,
     flexDirection: 'row',

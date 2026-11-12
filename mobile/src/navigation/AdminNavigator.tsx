@@ -1,7 +1,7 @@
 import React from 'react';
-import { Animated, AppState, BackHandler, Easing, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { AppState, BackHandler, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import Animated, { cancelAnimation, Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Constants from 'expo-constants';
 import { Text } from '@/components/typography';
 import { useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
@@ -19,6 +19,7 @@ import { isRemotePushRegistered, notificationDeduper, unregisterPushDevice } fro
 import { beep } from '@/lib/sound';
 import { announceAdministratorCall, announceReceiptRequest, type AdministratorVoiceCall } from '@/services/adminVoice';
 import { isPttBackgroundRuntimeActive } from '@/features/ptt/backgroundFlag';
+import { useRadioOverlayBlocker } from '@/features/ptt/radioVisibility';
 import { useNotifications } from '@/store/notifications';
 import { ScreenTransition } from '@/components/ScreenTransition';
 import { StatisticsScreen } from '@/screens/admin/StatisticsScreen';
@@ -133,24 +134,46 @@ export function AdminNavigator() {
     setSection(s);
     setDrawerOpen(false);
   };
-  const preview = React.useCallback((s: Section) => {
-    navigation.setParams({ section: undefined, orderId: undefined });
-    setSection(s);
-  }, [navigation]);
   const openDrawer = React.useCallback(() => setDrawerOpen(true), []);
   const closeDrawer = React.useCallback(() => setDrawerOpen(false), []);
   const edgeSwipe = React.useMemo(() => Gesture.Pan().enabled(!drawerOpen && !permanentMenu).maxPointers(1)
-    .activeOffsetX(72).failOffsetY([-48, 48])
+    .activeOffsetX(16).failOffsetY([-16, 16])
     .onTouchesDown((event, manager) => {
-      if ((event.allTouches[0]?.absoluteX ?? 999) > 68) manager.fail();
+      if ((event.allTouches[0]?.absoluteX ?? 999) > 24) manager.fail();
     })
     .onStart(() => { runOnJS(openDrawer)(); }), [drawerOpen, openDrawer, permanentMenu]);
+
+  const hasSection = Boolean(current);
+  const orderId = route.params?.orderId;
+  const sectionContent = React.useMemo(() => (
+    !hasSection ? <Text style={{ padding: spacing.lg, color: colors.textMuted }} translate>Нет доступных разделов. Обратитесь к владельцу.</Text> : section === 'stats' ? (
+      <StatisticsScreen />
+    ) : section === 'orders' ? (
+      <OrdersScreen initialOrderId={orderId} />
+    ) : section === 'receipts' ? (
+      <ReceiptPrintsScreen initialOrderId={orderId} />
+    ) : section === 'tables' ? (
+      <TablesScreen />
+    ) : section === 'menu' ? (
+      <MenuScreen />
+    ) : section === 'warehouse' ? (
+      <WarehouseScreen />
+    ) : section === 'staff' ? (
+      <StaffScreen />
+    ) : section === 'audit' ? (
+      <AuditScreen />
+    ) : section === 'reconcile' ? (
+      <ReconciliationScreen />
+    ) : section === 'settings' ? (
+      <SettingsScreen />
+    ) : null
+  ), [hasSection, orderId, section]);
 
   return (
     <GestureDetector gesture={edgeSwipe}>
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <OfflineBanner />
-      <View style={[styles.header, permanentMenu && { marginLeft: 208 }]}>
+      <View style={[styles.header, permanentMenu && { marginLeft: DRAWER_WIDTH }]}>
         <View style={styles.headerLeft}>
           <FastPressable onPress={() => setDrawerOpen(true)} hitSlop={8} style={[styles.burger, permanentMenu && { display: 'none' }]} accessibilityLabel="Открыть меню">
             <PwaIcon name="menu" size={22} color={colors.textSecondary} />
@@ -160,28 +183,8 @@ export function AdminNavigator() {
         <ConnectionStatus />
       </View>
 
-      <ScreenTransition style={[styles.body, permanentMenu && { marginLeft: 208 }]} transitionKey={section}>
-        {!current ? <Text style={{ padding: spacing.lg, color: colors.textMuted }} translate>Нет доступных разделов. Обратитесь к владельцу.</Text> : section === 'stats' ? (
-          <StatisticsScreen />
-        ) : section === 'orders' ? (
-          <OrdersScreen initialOrderId={route.params?.orderId} />
-        ) : section === 'receipts' ? (
-          <ReceiptPrintsScreen initialOrderId={route.params?.orderId} />
-        ) : section === 'tables' ? (
-          <TablesScreen />
-        ) : section === 'menu' ? (
-          <MenuScreen />
-        ) : section === 'warehouse' ? (
-          <WarehouseScreen />
-        ) : section === 'staff' ? (
-          <StaffScreen />
-        ) : section === 'audit' ? (
-          <AuditScreen />
-        ) : section === 'reconcile' ? (
-          <ReconciliationScreen />
-        ) : section === 'settings' ? (
-          <SettingsScreen />
-        ) : null}
+      <ScreenTransition style={[styles.body, permanentMenu && { marginLeft: DRAWER_WIDTH }]} transitionKey={section}>
+        {sectionContent}
       </ScreenTransition>
 
       <AdminDrawer
@@ -190,15 +193,16 @@ export function AdminNavigator() {
         sections={sections}
         current={section}
         onSelect={go}
-        onPreview={preview}
         onClose={closeDrawer}
         onLogout={onLogout}
-        onOpenWorkspace={(target) => { setDrawerOpen(false); navigation.navigate(target); }}
       />
     </SafeAreaView>
     </GestureDetector>
   );
 }
+
+const DRAWER_WIDTH = 208;
+const DRAWER_TIMING = { duration: 160, easing: Easing.out(Easing.cubic) };
 
 function AdminDrawer({
   visible,
@@ -206,37 +210,52 @@ function AdminDrawer({
   sections,
   current,
   onSelect,
-  onPreview,
   onClose,
   onLogout,
-  onOpenWorkspace,
 }: {
   visible: boolean;
   permanent?: boolean;
   sections: { key: Section; label: string; icon: PwaIconName }[];
   current: Section;
   onSelect: (s: Section) => void;
-  onPreview: (s: Section) => void;
   onClose: () => void;
   onLogout: () => void;
-  onOpenWorkspace: (target: 'Kitchen' | 'Bar' | 'PublicHome') => void;
 }) {
   const [render, setRender] = React.useState(visible);
-  const progress = React.useRef(new Animated.Value(0)).current;
-  const initialIndex = React.useRef(0);
-  const drawerState = React.useRef({ sections, current, onPreview });
-  drawerState.current = { sections, current, onPreview };
-  const closeGesture = React.useMemo(() => Gesture.Pan().enabled(!permanent).activeOffsetX(-70).failOffsetY([-48, 48])
-    .onStart(() => runOnJS(onClose)()), [onClose, permanent]);
-  const selectGesture = React.useMemo(() => Gesture.Pan().enabled(!permanent).activeOffsetY([-44, 44]).failOffsetX([-48, 48]).runOnJS(true)
-    .onBegin(() => { initialIndex.current = Math.max(0, drawerState.current.sections.findIndex(s => s.key === drawerState.current.current)); })
+  useRadioOverlayBlocker(!permanent && (visible || render));
+  const offset = useSharedValue(permanent ? 0 : -DRAWER_WIDTH);
+  const startX = useSharedValue(0);
+  const activeDrag = useSharedValue(false);
+  const drawerStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: permanent ? 0 : offset.value }],
+  }));
+  const backdropStyle = useAnimatedStyle(() => ({
+    opacity: 1 + offset.value / DRAWER_WIDTH,
+  }));
+  const drawerGesture = React.useMemo(() => Gesture.Pan().enabled(visible && !permanent)
+    .maxPointers(1).activeOffsetX(-10).failOffsetY([-10, 10])
+    .onStart(event => {
+      cancelAnimation(offset);
+      startX.value = offset.value - event.absoluteX;
+      activeDrag.value = true;
+    })
     .onUpdate(event => {
-      const state = drawerState.current;
-      const index = Math.max(0, Math.min(state.sections.length - 1, initialIndex.current + Math.trunc(event.translationY / 44)));
-      const next = state.sections[index];
-      if (next && next.key !== state.current) state.onPreview(next.key);
-    }), [permanent]);
-  const drawerGesture = React.useMemo(() => Gesture.Race(closeGesture, selectGesture), [closeGesture, selectGesture]);
+      offset.value = Math.min(0, Math.max(-DRAWER_WIDTH, startX.value + event.absoluteX));
+    })
+    .onEnd((event, success) => {
+      if (!success) return;
+      activeDrag.value = false;
+      if (offset.value < -DRAWER_WIDTH * 0.35 || (event.velocityX < -550 && event.translationX < -12)) {
+        runOnJS(onClose)();
+      } else {
+        offset.value = withTiming(0, DRAWER_TIMING);
+      }
+    })
+    .onFinalize(() => {
+      if (!activeDrag.value) return;
+      activeDrag.value = false;
+      offset.value = withTiming(0, DRAWER_TIMING);
+    }), [activeDrag, offset, onClose, permanent, startX, visible]);
 
   React.useEffect(() => {
     if (!visible || permanent) return;
@@ -244,38 +263,30 @@ function AdminDrawer({
     return () => subscription.remove();
   }, [visible, onClose, permanent]);
 
-  React.useEffect(() => {
-    progress.stopAnimation();
-    if (visible) {
+  React.useLayoutEffect(() => {
+    cancelAnimation(offset);
+    if (permanent) {
+      setRender(false);
+      offset.value = 0;
+    } else if (visible) {
       setRender(true);
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: 220,
-        easing: Easing.bezier(0.4, 0, 0.2, 1),
-        useNativeDriver: true,
-      }).start();
+      offset.value = withTiming(0, DRAWER_TIMING);
     } else {
-      Animated.timing(progress, {
-        toValue: 0,
-        duration: 200,
-        easing: Easing.bezier(0.4, 0, 0.2, 1),
-        useNativeDriver: true,
-      }).start(({ finished }) => finished && setRender(false));
+      offset.value = withTiming(-DRAWER_WIDTH, DRAWER_TIMING, finished => {
+        if (finished) runOnJS(setRender)(false);
+      });
     }
-  }, [progress, visible]);
+  }, [offset, permanent, visible]);
 
-  if (!render) return null;
-
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [-208, 0] });
-  const opacity = progress;
+  if (!visible && !render) return null;
 
   return (
-    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, permanent && { width: 208, zIndex: 50 }]}>
-      {!permanent && <Animated.View style={[styles.backdrop, { opacity }]}>
+    <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, permanent && { width: DRAWER_WIDTH, zIndex: 50 }]}>
+      {!permanent && <Animated.View style={[styles.backdrop, backdropStyle]}>
         <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} />
       </Animated.View>}
       <GestureDetector gesture={drawerGesture}>
-      <Animated.View style={[styles.drawer, { transform: [{ translateX }] }]}>
+      <Animated.View style={[styles.drawer, drawerStyle]}>
         <SafeAreaView style={{ flex: 1 }} edges={['top', 'bottom', 'left']}>
           <View style={styles.drawerLogo}>
             <BrandLogo />
@@ -332,7 +343,7 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     left: 0,
-    width: 208,
+    width: DRAWER_WIDTH,
     backgroundColor: colors.white,
     borderRightWidth: 1,
     borderRightColor: colors.border,
