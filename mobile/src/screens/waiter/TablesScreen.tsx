@@ -267,18 +267,12 @@ export function TablesScreen() {
               }
               contentContainerStyle={styles.grid}
             >
-              <View style={{ gap: tableLayout.gap }}>
+              <View style={[styles.tableGrid, { width: tableLayout.gridWidth, gap: tableLayout.gap }]}>
                 {Array.from({ length: Math.ceil(tables.length / tableLayout.columns) }, (_, rowIndex) => {
                   const start = rowIndex * tableLayout.columns;
                   const row = tables.slice(start, start + tableLayout.columns);
-                  const columnGap = tableLayout.columns > 1
-                    ? tableLayout.gap + Math.max(0, gridSize.width - tableLayout.gridWidth) / (tableLayout.columns - 1)
-                    : 0;
                   return (
-                    <View key={row[0].id} style={[
-                      styles.tableRow,
-                      { columnGap, justifyContent: tableLayout.columns === 1 ? 'center' : 'flex-start' },
-                    ]}>
+                    <View key={row[0].id} style={[styles.tableRow, { columnGap: tableLayout.gap }]}>
                       {row.map((table) => <React.Fragment key={table.id}>{renderTable(table)}</React.Fragment>)}
                     </View>
                   );
@@ -575,6 +569,7 @@ const styles = StyleSheet.create({
 
   tableList: { flex: 1, minHeight: 0 },
   grid: { flexGrow: 1 },
+  tableGrid: { alignSelf: 'center' },
   tableRow: { flexDirection: 'row' },
   table: {
     borderRadius: waiterLayout.tableCardRadius,
