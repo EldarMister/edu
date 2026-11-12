@@ -311,8 +311,8 @@ function TableModal({
 
   async function onSubmit() {
     setError('');
-    if (!number || !seats) {
-      setError('Укажите номер и количество мест');
+    if (!seats || (isEdit && !number)) {
+      setError(isEdit ? 'Укажите номер и количество мест' : 'Укажите количество мест');
       return;
     }
     try {
@@ -320,7 +320,7 @@ function TableModal({
         await update.mutateAsync({ id: table!.id, number: Number(number), seats: Number(seats), isActive });
         push({ message: 'Стол обновлён', at: new Date().toISOString() });
       } else {
-        await create.mutateAsync({ hallId: hall.id, number: Number(number), seats: Number(seats) });
+        await create.mutateAsync({ hallId: hall.id, seats: Number(seats) });
         push({ message: 'Стол добавлен', at: new Date().toISOString() });
       }
       onClose();
@@ -341,16 +341,18 @@ function TableModal({
       }
     >
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Номер стола">
-            <input
-              className="input"
-              type="number"
-              inputMode="numeric"
-              value={number}
-              onChange={(e) => setNumber(e.target.value)}
-            />
-          </Field>
+        <div className={isEdit ? "grid grid-cols-2 gap-3" : undefined}>
+          {isEdit && (
+            <Field label="Номер стола">
+              <input
+                className="input"
+                type="number"
+                inputMode="numeric"
+                value={number}
+                onChange={(e) => setNumber(e.target.value)}
+              />
+            </Field>
+          )}
           <Field label="Мест">
             <input
               className="input"

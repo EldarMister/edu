@@ -41,8 +41,8 @@ export class CreateTableDto {
   @IsString() @IsNotEmpty()
   hallId: string;
 
-  @IsInt() @Min(1)
-  number: number;
+  @IsOptional() @IsInt() @Min(1)
+  number?: number;
 
   @IsInt() @Min(1)
   seats: number;

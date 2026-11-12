@@ -1,9 +1,34 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { Hall, TableStatus } from '@/types';
 import { TABLE_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
 
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
+const TABLE_GAP = 12;
+
+/** Pick the largest square that fits the hall, or keep the full-width grid scrollable. */
+function tableGridLayout(count: number, width: number, height: number) {
+  const gap = TABLE_GAP;
+  const phoneColumns = width <= gap ? 1 : width < 240 ? 2 : 3;
+  const availableColumns = width < 600 ? phoneColumns : Math.max(phoneColumns, Math.min(6, Math.floor((width + gap) / (168 + gap))));
+  const maxColumns = Math.min(availableColumns, Math.max(1, count));
+  const minColumns = Math.min(maxColumns, count <= 2 ? 1 : 2);
+  const maxSide = count <= 2 ? 420 : 240;
+  const sideAtWidth = (columns: number) => Math.max(0, Math.floor(Math.min(maxSide, (width - gap * (columns - 1)) / columns)));
+
+  let columns = maxColumns;
+  let side = Math.min(sideAtWidth(columns), Math.max(96, Math.floor(height)));
+  for (let candidate = maxColumns - 1; candidate >= minColumns; candidate--) {
+    const rows = Math.ceil(count / candidate);
+    const sideAtHeight = Math.floor((height - gap * (rows - 1)) / rows);
+    const fittedSide = Math.min(sideAtWidth(candidate), sideAtHeight);
+    if (fittedSide > side) {
+      columns = candidate;
+      side = fittedSide;
+    }
+  }
+  return { columns, side };
+}
 
 export function TablesGrid({
   halls,
@@ -17,36 +42,27 @@ export function TablesGrid({
   const t = useT();
   const [hallId, setHallId] = useState(halls[0]?.id ?? '');
   const hall = halls.find((h) => h.id === hallId) ?? halls[0];
-  const tableCount = hall?.tables.length ?? 0;
-  const fullscreenSingle = tableCount === 1;
-  const splitVertical = tableCount === 2;
-  const roomyTwoColumn = tableCount >= 3 && tableCount <= 6;
-  const compactGrid = tableCount > 10;
-  const gridClass = fullscreenSingle
-    ? 'grid-cols-1 grid-rows-1'
-    : splitVertical
-      ? 'grid-cols-1 grid-rows-2'
-      : roomyTwoColumn && tableCount <= 4
-        ? 'grid-cols-2 grid-rows-2'
-        : roomyTwoColumn
-          ? 'grid-cols-2 grid-rows-3'
-          : compactGrid
-            ? 'grid-cols-4'
-            : 'grid-cols-3';
-  const gridFlowClass =
-    fullscreenSingle || splitVertical || roomyTwoColumn ? 'auto-rows-fr' : 'content-start auto-rows-max';
-  const cardSizeClass = fullscreenSingle
-    ? 'min-h-[300px] h-full max-h-[460px] text-[54px] sm:min-h-[340px] sm:max-h-[520px] sm:text-6xl'
-    : splitVertical
-      ? 'h-full min-h-0 text-[44px] sm:text-[52px]'
-      : roomyTwoColumn
-        ? 'h-full min-h-0 text-[38px] sm:text-[44px]'
-        : compactGrid
-        ? 'aspect-square min-h-[74px] text-xl'
-        : 'aspect-square min-h-[104px] text-2xl';
-  const cardPaddingClass = fullscreenSingle || splitVertical || roomyTwoColumn ? 'p-4' : 'p-2';
-  const dotClass =
-    fullscreenSingle || splitVertical || roomyTwoColumn ? 'right-4 top-4 h-4 w-4' : 'right-2 top-2 h-2.5 w-2.5';
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const element = viewportRef.current;
+    if (!element) return;
+    function measure(width: number, height: number) {
+      setViewport((current) => current.width === width && current.height === height ? current : { width, height });
+    }
+    measure(element.clientWidth, element.clientHeight);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => {
+      measure(Math.floor(entry.contentRect.width), Math.floor(entry.contentRect.height));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const { columns, side } = tableGridLayout(hall?.tables.length ?? 0, viewport.width || 340, viewport.height || 420);
+  const tableFontSize = Math.max(18, Math.min(54, Math.round(side / 5)));
+  const dotClass = side >= 150 ? 'right-4 top-4 h-4 w-4' : 'right-2 top-2 h-2.5 w-2.5';
 
   return (
     <div className="flex h-full flex-col">
@@ -67,28 +83,33 @@ export function TablesGrid({
         ))}
       </div>
 
-      {/* Сетка столов: мало столов -> крупнее, много -> компактнее. */}
-      <div className={`no-scrollbar grid min-h-0 flex-1 ${gridClass} ${gridFlowClass} gap-3 overflow-y-auto`}>
-        {hall?.tables.map((t) => {
-          const meta = TABLE_STATUS[t.status];
-          const selected = t.id === selectedTableId;
-          return (
-            <button
-              key={t.id}
-              onClick={() => onSelect(t.id)}
-              className={`relative flex w-full flex-col items-center justify-center rounded-[22px] border font-medium transition-all ${cardSizeClass} ${cardPaddingClass} ${
-                selected
-                  ? 'border-primary/90 bg-primary/90 text-white shadow-soft'
-                  : 'border-border bg-white text-text-primary hover:border-primary/40'
-              }`}
-            >
-              <span>{t.number}</span>
-              {!selected && (
-                <span className={`absolute rounded-full ${dotClass} ${meta.dot}`} />
-              )}
-            </button>
-          );
-        })}
+      <div ref={viewportRef} className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
+        <div
+          className="grid items-start justify-center"
+          style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, ${side}px))`, gap: TABLE_GAP, fontSize: tableFontSize }}
+        >
+          {hall?.tables.map((table) => {
+            const meta = TABLE_STATUS[table.status];
+            const selected = table.id === selectedTableId;
+            return (
+              <button
+                key={table.id}
+                type="button"
+                onClick={() => onSelect(table.id)}
+                className={`relative flex aspect-square w-full min-w-0 items-center justify-center rounded-[22px] border font-medium transition-colors ${
+                  selected
+                    ? 'border-primary/90 bg-primary/90 text-white shadow-soft'
+                    : 'border-border bg-white text-text-primary hover:border-primary/40'
+                }`}
+              >
+                <span>{table.number}</span>
+                {!selected && (
+                  <span className={`absolute rounded-full ${dotClass} ${meta.dot}`} />
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Легенда */}

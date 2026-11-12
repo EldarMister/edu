@@ -2,6 +2,7 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma, TableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
+import { getCafeId } from '../tenant/tenant-context';
 import { SERVER_EVENTS } from '../realtime/events';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
@@ -106,37 +107,47 @@ export class CatalogService {
   }
 
   async createTable(dto: CreateTableDto) {
-    await this.ensureHall(dto.hallId);
-    const exists = await this.prisma.table.findUnique({
-      where: { hallId_number: { hallId: dto.hallId, number: dto.number } },
-    });
-    if (exists) {
-      if (exists.isActive) {
-        throw new BadRequestException(`Стол №${dto.number} уже есть в этом зале`);
+    const { hallId, seats, number } = dto;
+    const result = await this.prisma.$transaction(async (tx) => {
+      const cafeId = getCafeId();
+      // Serialize table creation per hall and verify access before reading its numbers.
+      const halls = cafeId
+        ? await tx.$queryRaw<{ id: string }[]>`SELECT id FROM halls WHERE id = ${hallId} AND cafe_id = ${cafeId} FOR UPDATE`
+        : await tx.$queryRaw<{ id: string }[]>`SELECT id FROM halls WHERE id = ${hallId} FOR UPDATE`;
+      if (!halls.length) throw new NotFoundException('Зал не найден');
+
+      if (number == null) {
+        // Archived tables still reserve their numbers and QR codes.
+        const [last] = await tx.$queryRaw<{ number: number }[]>`
+          SELECT COALESCE(MAX(number), 0) AS number FROM tables WHERE hall_id = ${hallId}
+        `;
+        const next = last.number + 1;
+        if (next > 2147483647) throw new BadRequestException('Достигнут максимальный номер стола');
+        const table = await tx.table.create({ data: { hallId, number: next, seats, sortOrder: next } });
+        return { table, action: 'create-table' };
       }
 
-      // Стол с историей заказов удаляется мягко, поэтому его номер остаётся
-      // занят в базе. При повторном добавлении возвращаем этот же стол в работу.
-      const restored = await this.prisma.table.update({
-        where: { id: exists.id },
-        data: {
-          isActive: true,
-          seats: dto.seats,
-          sortOrder: dto.number,
-          status: TableStatus.free,
-        },
+      const exists = await tx.table.findUnique({
+        where: { hallId_number: { hallId, number } },
       });
-      this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, {
-        tableId: restored.id,
-        hallId: restored.hallId,
-        action: 'restore-table',
-      });
-      return restored;
-    }
-    const table = await this.prisma.table.create({
-      data: { hallId: dto.hallId, number: dto.number, seats: dto.seats, sortOrder: dto.number },
+      if (exists?.isActive) {
+        throw new BadRequestException(`Стол №${number} уже есть в этом зале`);
+      }
+
+      // Older clients can still explicitly restore an archived table by number.
+      if (exists) {
+        const table = await tx.table.update({
+          where: { id: exists.id },
+          data: { isActive: true, seats, sortOrder: number, status: TableStatus.free },
+        });
+        return { table, action: 'restore-table' };
+      }
+
+      const table = await tx.table.create({ data: { hallId, number, seats, sortOrder: number } });
+      return { table, action: 'create-table' };
     });
-    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: table.id, hallId: table.hallId, action: 'create-table' });
+    const { table, action } = result;
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: table.id, hallId: table.hallId, action });
     return table;
   }
 
