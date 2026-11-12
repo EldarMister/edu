@@ -170,6 +170,55 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         await orders.cancelOrder(order.id, owner, 'Отмена после возврата');
         assert.equal((await orders.findById(order.id)).status, 'cancelled');
       });
+
+      await t.test('waiter history pages through tied timestamps and stays scoped to the waiter and cafe', async () => {
+        const historyWaiter = await makeUser('History waiter', 'WAITER');
+        const table = await db.table.create({ data: { hallId: hall.id, number: tableNumber++ } });
+        const createdAt = new Date('2025-01-02T10:00:00.000Z');
+        const orderData = {
+          tableId: table.id,
+          waiterId: historyWaiter.id,
+          businessDate: createdAt,
+          createdAt,
+          finalAmount: '50.25',
+        };
+        const ownOrders = Array.from({ length: 32 }, (_, index) => ({
+          ...orderData,
+          id: randomUUID(),
+          orderNumber: String(index + 1),
+          status: ['paid', 'cancelled'][index % 2],
+          createdAt: index === 31 ? new Date('2025-01-01T10:00:00.000Z') : createdAt,
+        }));
+        await db.order.createMany({ data: [
+          ...ownOrders,
+          { ...orderData, waiterId: waiter.id, orderNumber: '33' },
+        ] });
+        const foreignCafe = await db.cafe.create({ data: { name: 'Foreign history cafe' } });
+        await runWithTenant({ cafeId: foreignCafe.id }, async () => {
+          const foreignHall = await db.hall.create({ data: { name: 'Foreign hall' } });
+          const foreignTable = await db.table.create({ data: { hallId: foreignHall.id, number: 1 } });
+          await db.order.create({ data: { ...orderData, tableId: foreignTable.id, orderNumber: '1' } });
+        });
+
+        const expected = ownOrders
+          .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+          .map((order) => order.id);
+        const first = await orders.waiterOrderHistory(historyWaiter.id);
+        assert.deepEqual(first.items.map((order) => order.id), expected.slice(0, 30));
+        assert.ok(first.nextCursor);
+        assert.equal(first.items[0].tableNumber, table.number);
+        assert.equal(first.items[0].finalAmount, '50.25');
+        assert.ok(first.items.some((order) => order.status === 'paid'));
+        assert.ok(first.items.some((order) => order.status === 'cancelled'));
+
+        // A transfer between pages should not invalidate the previously issued cursor.
+        await db.order.update({ where: { id: expected[29] }, data: { waiterId: waiter.id } });
+        const second = await orders.waiterOrderHistory(historyWaiter.id, first.nextCursor);
+        assert.deepEqual(second.items.map((order) => order.id), expected.slice(30));
+        assert.equal(second.nextCursor, null);
+        assert.deepEqual(await orders.waiterOrderHistory(owner.id), { items: [], nextCursor: null });
+        await assert.rejects(orders.waiterOrderHistory(historyWaiter.id, 'invalid'), { status: 400 });
+      });
       assert.ok(initialSettings.cafeId === cafe.id);
     });
   } finally {

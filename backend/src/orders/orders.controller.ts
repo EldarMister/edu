@@ -32,6 +32,12 @@ export class OrdersController {
     return this.orders.waiterCabinet(user.id, period);
   }
 
+  @Get('history')
+  @Roles(Role.WAITER)
+  history(@CurrentUser() user: AuthUser, @Query('cursor') cursor?: string) {
+    return this.orders.waiterOrderHistory(user.id, cursor);
+  }
+
   @Get(':id')
   @Roles(Role.WAITER, Role.KITCHEN, Role.ADMIN, Role.OWNER)
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {

@@ -50,6 +50,27 @@ const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.partially_rejected,
 ];
 
+const WAITER_HISTORY_PAGE_SIZE = 30;
+const cabinetOrderSelect = {
+  id: true,
+  orderNumber: true,
+  finalAmount: true,
+  status: true,
+  createdAt: true,
+  table: { select: { number: true } },
+} satisfies Prisma.OrderSelect;
+
+function formatCabinetOrder(order: Prisma.OrderGetPayload<{ select: typeof cabinetOrderSelect }>) {
+  return {
+    id: order.id,
+    orderNumber: order.orderNumber,
+    tableNumber: order.table.number,
+    finalAmount: String(order.finalAmount),
+    status: order.status,
+    createdAt: order.createdAt,
+  };
+}
+
 const PAYMENT_METHOD_LABEL: Record<PaymentMethod, string> = {
   [PaymentMethod.qr]: 'QR',
   [PaymentMethod.cash]: 'Наличные',
@@ -188,16 +209,9 @@ export class OrdersService {
       }),
       this.prisma.order.findMany({
         where: { waiterId },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 8,
-        select: {
-          id: true,
-          orderNumber: true,
-          finalAmount: true,
-          status: true,
-          createdAt: true,
-          table: { select: { number: true } },
-        },
+        select: cabinetOrderSelect,
       }),
     ]);
 
@@ -207,14 +221,35 @@ export class OrdersService {
         cancelled,
         revenue: String(revenue._sum.finalAmount ?? 0),
       },
-      recentOrders: recent.map((o) => ({
-        id: o.id,
-        orderNumber: o.orderNumber,
-        tableNumber: o.table.number,
-        finalAmount: String(o.finalAmount),
-        status: o.status,
-        createdAt: o.createdAt,
-      })),
+      recentOrders: recent.map(formatCabinetOrder),
+    };
+  }
+
+  async waiterOrderHistory(waiterId: string, cursor?: string) {
+    const where: Prisma.OrderWhereInput = { waiterId };
+    if (cursor !== undefined) {
+      const [timestamp, id, extra] = typeof cursor === 'string' ? cursor.split(',') : [];
+      const createdAt = new Date(timestamp);
+      if (!id || extra !== undefined || !Number.isFinite(createdAt.getTime()) || createdAt.toISOString() !== timestamp) {
+        throw new BadRequestException('Неверный курсор истории заказов');
+      }
+      where.OR = [
+        { createdAt: { lt: createdAt } },
+        { createdAt, id: { lt: id } },
+      ];
+    }
+
+    const orders = await this.prisma.order.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: WAITER_HISTORY_PAGE_SIZE + 1,
+      select: cabinetOrderSelect,
+    });
+    const page = orders.slice(0, WAITER_HISTORY_PAGE_SIZE);
+    const last = page[page.length - 1];
+    return {
+      items: page.map(formatCabinetOrder),
+      nextCursor: orders.length > page.length ? `${last.createdAt.toISOString()},${last.id}` : null,
     };
   }
 
