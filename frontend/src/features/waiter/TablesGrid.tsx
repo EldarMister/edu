@@ -6,33 +6,19 @@ import { useT } from '@/lib/i18n';
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
 const TABLE_GAP = 12;
 
-/** Fit every row in the viewport using the largest square cards. */
+/** Size squares by the available width and let extra rows scroll. */
 function tableGridLayout(count: number, width: number, height: number) {
-  const preferredGap = TABLE_GAP;
-  const maxSide = count <= 2 ? 420 : 240;
-  let columns = 1;
-  let side = 0;
-  let gap = 0;
-
-  for (let candidate = 1; candidate <= count; candidate++) {
-    const widthPerCard = width / candidate;
-    if (widthPerCard < side) break;
-
-    const rows = Math.ceil(count / candidate);
-    const candidateGap = Math.min(preferredGap, Math.floor(Math.min(widthPerCard, height / rows) / 4));
-    const fittedSide = Math.floor(Math.min(
-      maxSide,
-      (width - candidateGap * (candidate - 1)) / candidate,
-      (height - candidateGap * (rows - 1)) / rows,
-    ));
-
-    if (fittedSide >= side) {
-      columns = candidate;
-      side = fittedSide;
-      gap = candidateGap;
-    }
-  }
-  return { columns, side, gap };
+  const gap = TABLE_GAP;
+  const fewTables = count <= 2;
+  const stack = count <= 1 || (count === 2 && height >= width);
+  const phoneColumns = stack ? 1 : count <= 6 || width < 240 ? 2 : 3;
+  const columns = width >= 600 && !fewTables
+    ? Math.min(count, 6, Math.max(phoneColumns, Math.floor((width + gap) / (168 + gap))))
+    : phoneColumns;
+  const itemWidth = (width - gap * (columns - 1)) / columns;
+  const rows = Math.max(1, Math.ceil(count / columns));
+  const maxSide = fewTables ? Math.min(420, Math.max(96, (height - gap * (rows - 1)) / rows)) : 240;
+  return { columns, side: Math.max(0, Math.floor(Math.min(itemWidth, maxSide))), gap };
 }
 
 export function TablesGrid({
