@@ -66,7 +66,10 @@ export function KitchenApp({
   const assignedStation = user?.prepStation ?? defaultStation;
   const availableStations = (stations.data ?? []).filter((item) => canAccessBoth || item.id === assignedStation);
   const requestedStation = searchParams.get('station') ?? selectedStation;
-  const station = availableStations.some((item) => item.id === requestedStation) ? requestedStation : assignedStation;
+  const fallbackStation = canAccessBoth && !availableStations.some((item) => item.id === assignedStation && item.isActive)
+    ? availableStations.find((item) => item.isActive)?.id ?? assignedStation
+    : assignedStation;
+  const station = availableStations.some((item) => item.id === requestedStation) ? requestedStation : fallbackStation;
   useKitchenRealtime(station);
   const push = useNotifications((s) => s.push);
   const pushNotifications = usePushNotifications(user?.role === 'KITCHEN' || user?.role === 'BAR');

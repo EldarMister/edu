@@ -8,7 +8,7 @@ import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { normalizeDishImage, withDishImageRef } from '../dishes/dish-image';
 import { normalizeUnit, unitLabel } from '../warehouse/units';
-import { assertAssignableStation, lockStationRouting } from '../kitchen/preparation-stations';
+import { assertAssignableStation, defaultCategoryStation, lockStationRouting } from '../kitchen/preparation-stations';
 import {
   CreateCategoryDto,
   CreateDishDto,
@@ -216,9 +216,10 @@ export class CatalogService {
   async createCategory(dto: CreateCategoryDto, actor: AuditActor) {
     const category = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
-      await assertAssignableStation(tx, dto.prepStation);
+      const prepStation = dto.prepStation ?? await defaultCategoryStation(tx);
+      await assertAssignableStation(tx, prepStation);
       return tx.category.create({
-        data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation: dto.prepStation ?? undefined },
+        data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation },
       });
     });
     await this.audit.log({
@@ -621,10 +622,10 @@ export class CatalogService {
 
   async createSet(dto: CreateSetDto, actor: AuditActor) {
     await this.validateSetComponents(dto.components);
-    const categoryId = await this.ensureSetsCategory();
     const set = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
       await assertAssignableStation(tx, dto.prepStation);
+      const categoryId = await this.ensureSetsCategory(tx);
       return tx.dish.create({
         data: {
           name: dto.name,
@@ -728,12 +729,12 @@ export class CatalogService {
   }
 
   /** Категория «Сеты» (создаётся при необходимости). */
-  private async ensureSetsCategory(): Promise<string> {
-    const existing = await this.prisma.category.findFirst({ where: { name: 'Сеты' } });
+  private async ensureSetsCategory(tx: Prisma.TransactionClient): Promise<string> {
+    const existing = await tx.category.findFirst({ where: { name: 'Сеты' } });
     if (existing) return existing.id;
-    const agg = await this.prisma.category.aggregate({ _max: { sortOrder: true } });
-    const cat = await this.prisma.category.create({
-      data: { name: 'Сеты', sortOrder: (agg._max.sortOrder ?? 0) + 1 },
+    const agg = await tx.category.aggregate({ _max: { sortOrder: true } });
+    const cat = await tx.category.create({
+      data: { name: 'Сеты', sortOrder: (agg._max.sortOrder ?? 0) + 1, prepStation: await defaultCategoryStation(tx) },
     });
     return cat.id;
   }

@@ -347,7 +347,7 @@ export function StaffPage() {
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="font-medium text-text-primary">{row.name}</div>
-                          <div className="text-xs text-text-muted">{(member?.prepStation && stationNames.get(member.prepStation)) || tr(ROLE_LABEL[row.role])}</div>
+                          <div className="text-xs text-text-muted">{stationNames.get(member?.prepStation ?? (row.role === 'KITCHEN' ? 'kitchen' : row.role === 'BAR' ? 'bar' : '')) ?? tr(ROLE_LABEL[row.role])}</div>
                         </td>
                         {isWaiter ? (
                           <>
@@ -946,11 +946,14 @@ function StaffModal({
   const [phone, setPhone] = useState(member?.phone ?? '');
   const [assignment, setAssignment] = useState(member?.prepStation ?? member?.role ?? 'WAITER');
   const stations = usePreparationStations().data ?? [];
-  const roleOptions = (['WAITER', 'KITCHEN', 'BAR', 'ADMIN', 'OWNER'] as const)
-    .map((value) => ({ value, label: ROLE_LABEL[value] }));
+  const roles = ['WAITER', 'ADMIN', 'OWNER'] as const;
   const stationOptions = stations
-    .filter((station) => !station.isBuiltIn && (station.isActive || station.id === assignment))
-    .map((station) => ({ value: station.id, label: station.name }));
+    .map((station) => ({
+      value: station.id === 'kitchen' ? 'KITCHEN' : station.id === 'bar' ? 'BAR' : station.id,
+      label: station.name,
+      isActive: station.isActive,
+    }))
+    .filter((station) => station.isActive || station.value === assignment);
   const [password, setPassword] = useState('');
   const [isActive, setIsActive] = useState(member?.isActive ?? true);
   const [error, setError] = useState('');
@@ -959,7 +962,7 @@ function StaffModal({
 
   async function onSubmit() {
     setError('');
-    const selectedRole = roleOptions.find(({ value }) => value === assignment)?.value;
+    const selectedRole = assignment === 'KITCHEN' || assignment === 'BAR' ? assignment : roles.find((role) => role === assignment);
     const role = selectedRole ?? (member?.role === 'BAR' ? 'BAR' : 'KITCHEN');
     const prepStation = selectedRole ? null : assignment;
     try {
@@ -1012,7 +1015,7 @@ function StaffModal({
             className="h-11 w-full"
             value={assignment}
             onChange={setAssignment}
-            options={[...roleOptions, ...stationOptions]}
+            options={[{ value: 'WAITER', label: ROLE_LABEL.WAITER }, ...stationOptions, ...roles.slice(1).map((value) => ({ value, label: ROLE_LABEL[value] }))]}
           />
         </Field>
         <Field label={isEdit ? 'Новый пароль (если менять)' : 'Пароль'}>

@@ -1,5 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
-import { Prisma, Role } from '@prisma/client';
+import { OrderItemStatus, Prisma, Role } from '@prisma/client';
 import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { AuditService } from '../audit/audit.service';
@@ -8,7 +8,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { SERVER_EVENTS } from '../realtime/events';
 import { EventsGateway } from '../realtime/events.gateway';
-import { BUILTIN_STATIONS, lockStationRouting } from './preparation-stations';
+import { BUILTIN_STATIONS, lockStationRouting, PrepStation, stationCatalog, stationRecordId } from './preparation-stations';
 
 class CreateStationDto {
   @IsString() @MaxLength(80)
@@ -41,7 +41,7 @@ export class PreparationStationsController {
           orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
         })
       : [];
-    return [...BUILTIN_STATIONS, ...stations.map((station) => ({ ...station, isBuiltIn: false }))];
+    return user.cafeId ? stationCatalog(stations, user.cafeId) : BUILTIN_STATIONS;
   }
 
   @Post()
@@ -61,30 +61,41 @@ export class PreparationStationsController {
   @Roles(Role.OWNER)
   async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateStationDto) {
     const cafeId = this.cafeId(user);
-    if (BUILTIN_STATIONS.some((station) => station.id === id)) {
-      throw new BadRequestException('Встроенную станцию нельзя изменить');
-    }
+    if (id.startsWith('builtin:')) throw new NotFoundException('Станция не найдена');
+    const builtin = BUILTIN_STATIONS.find((station) => station.id === id);
+    const recordId = stationRecordId(cafeId, id);
     const name = dto.name == null ? undefined : this.stationName(dto.name);
     const station = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx, cafeId);
-      const current = await tx.preparationStation.findFirst({ where: { id, cafeId } });
+      const record = await tx.preparationStation.findFirst({ where: { id: recordId, cafeId } });
+      const current = record ?? builtin;
       if (!current) throw new NotFoundException('Станция не найдена');
       if (name !== undefined) await this.ensureUniqueName(tx, cafeId, name, id);
       if (dto.isActive === false && current.isActive) {
-        const [categories, dishes, staff] = await Promise.all([
+        const [categories, dishes, staff, pending] = await Promise.all([
           tx.category.count({ where: { cafeId, prepStation: id } }),
           tx.dish.count({ where: { cafeId, prepStation: id } }),
-          tx.user.count({ where: { cafeId, prepStation: id } }),
+          tx.user.count({ where: {
+            cafeId,
+            OR: [
+              { prepStation: id },
+              ...(builtin ? [{ prepStation: null, role: id === PrepStation.bar ? Role.BAR : Role.KITCHEN }] : []),
+            ],
+          } }),
+          tx.orderItem.count({ where: {
+            cafeId, prepStation: id,
+            status: { in: [OrderItemStatus.new, OrderItemStatus.accepted, OrderItemStatus.cooking] },
+          } }),
         ]);
         if (categories || dishes) throw new ConflictException('Сначала переназначьте блюда и категории станции');
         if (staff) throw new ConflictException('Сначала переназначьте сотрудников станции');
+        if (pending) throw new ConflictException('Сначала завершите текущие заказы станции');
       }
-      return tx.preparationStation.update({
-        where: { id },
-        data: { name, isActive: dto.isActive ?? undefined },
-      });
+      const data = { name: name ?? current.name, isActive: dto.isActive ?? current.isActive };
+      if (record) return tx.preparationStation.update({ where: { id: recordId, cafeId }, data });
+      return tx.preparationStation.create({ data: { id: recordId, cafeId, ...data } });
     });
-    return this.publish(user, station);
+    return this.publish(user, { ...station, id }, !!builtin);
   }
 
   private cafeId(user: AuthUser) {
@@ -99,15 +110,15 @@ export class PreparationStationsController {
   }
 
   private async ensureUniqueName(tx: Prisma.TransactionClient, cafeId: string, name: string, excludeId?: string) {
-    const reserved = [...BUILTIN_STATIONS.map((station) => station.name), 'Без отправки'];
-    if (reserved.some((entry) => entry.toLowerCase() === name.toLowerCase()) || await tx.preparationStation.findFirst({
-      where: { cafeId, name: { equals: name, mode: 'insensitive' }, id: excludeId ? { not: excludeId } : undefined },
-      select: { id: true },
-    })) throw new ConflictException('Станция с таким названием уже существует');
+    const records = await tx.preparationStation.findMany({ where: { cafeId }, select: { id: true, name: true, isActive: true } });
+    const normalized = name.toLowerCase();
+    if (normalized === 'без отправки' || stationCatalog(records, cafeId).some((station) =>
+      station.id !== excludeId && station.name.toLowerCase() === normalized
+    )) throw new ConflictException('Станция с таким названием уже существует');
   }
 
-  private async publish(user: AuthUser, station: { id: string; name: string; isActive: boolean }) {
-    const record = { id: station.id, name: station.name, isActive: station.isActive, isBuiltIn: false };
+  private async publish(user: AuthUser, station: { id: string; name: string; isActive: boolean }, isBuiltIn = false) {
+    const record = { id: station.id, name: station.name, isActive: station.isActive, isBuiltIn };
     await this.audit.log({
       actor: user,
       actionType: AuditAction.SETTINGS_UPDATED,

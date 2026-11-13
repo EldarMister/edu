@@ -156,6 +156,52 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         await assert.rejects(catalog.updateCategory(customCategory.id, { prepStation: station.id }, owner), /действующую станцию/);
       });
 
+      await t.test('built-in station settings are per cafe and archive preserves order history', async () => {
+        const separate = await db.cafe.create({ data: { name: 'Built-in station lifecycle' } });
+        const stationApi = new PreparationStationsController(db, events, audit);
+        await runWithTenant({ cafeId: separate.id }, async () => {
+          const stationOwner = await makeUser('Station owner', 'OWNER');
+          const legacyCook = await makeUser('Legacy cook', 'KITCHEN');
+          const staff = new StaffService(db, audit);
+          const catalog = new CatalogService(db, events, audit);
+          const localHall = await db.hall.create({ data: { name: 'Station hall' } });
+          const table = await db.table.create({ data: { hallId: localHall.id, number: 1 } });
+          const category = await catalog.createCategory({ name: 'Main' }, stationOwner);
+          assert.equal(category.prepStation, 'kitchen');
+          const renamed = await stationApi.update(stationOwner, 'kitchen', { name: 'Горячий цех' });
+          assert.deepEqual(renamed, { id: 'kitchen', name: 'Горячий цех', isActive: true, isBuiltIn: true });
+          assert.equal((await resolveStation(db, legacyCook)).name, 'Горячий цех');
+          await assert.rejects(stationApi.update(stationOwner, 'bar', { name: 'горячий цех' }), /уже существует/);
+          await assert.rejects(stationApi.update(stationOwner, 'kitchen', { isActive: false }), /блюда и категории/);
+          const dish = await catalog.createDish({ name: 'Рис', categoryId: category.id, price: 50 }, stationOwner);
+          const order = await orders.createFromQr({ tableId: table.id, items: [{ dishId: dish.id, quantity: 1 }] });
+          await catalog.updateCategory(category.id, { prepStation: 'bar' }, stationOwner);
+          await assert.rejects(stationApi.update(stationOwner, 'kitchen', { isActive: false }), /переназначьте сотрудников/);
+          await staff.update(legacyCook.id, { role: 'BAR' }, stationOwner);
+          await assert.rejects(stationApi.update(stationOwner, 'kitchen', { isActive: false }), /текущие заказы/);
+          await orders.kitchenReadyItems(order.id, order.items.map(({ id }) => id), legacyCook.id, 'kitchen');
+          const archived = await stationApi.update(stationOwner, 'kitchen', { isActive: false });
+          assert.equal(archived.isActive, false);
+          assert.equal((await catalog.createCategory({ name: 'New' }, stationOwner)).prepStation, 'bar');
+          await assert.rejects(catalog.updateCategory(category.id, { prepStation: 'kitchen' }, stationOwner), /действующую станцию/);
+          await assert.rejects(staff.update(legacyCook.id, { role: 'KITCHEN' }, stationOwner), /действующую станцию/);
+          const board = new KitchenService(db, events, audit);
+          assert.ok((await board.findByTab('ready', 'kitchen')).some(({ id }) => id === order.id));
+          assert.equal((await stationApi.update(stationOwner, 'kitchen', { isActive: true })).name, 'Горячий цех');
+          assert.equal((await stationApi.update(stationOwner, 'bar', { name: 'Напитки' })).name, 'Напитки');
+        });
+        assert.equal((await resolveStation(db, owner, 'kitchen')).name, 'Кухня');
+        assert.equal((await resolveStation(db, owner, 'bar')).name, 'Бар');
+        const empty = await db.cafe.create({ data: { name: 'Cafe without stations' } });
+        await runWithTenant({ cafeId: empty.id }, async () => {
+          const stationOwner = await makeUser('Owner without stations', 'OWNER');
+          const catalog = new CatalogService(db, events, audit);
+          await stationApi.update(stationOwner, 'kitchen', { isActive: false });
+          await stationApi.update(stationOwner, 'bar', { isActive: false });
+          assert.equal((await catalog.createCategory({ name: 'No preparation' }, stationOwner)).prepStation, 'none');
+        });
+      });
+
       await t.test('live policy update is scoped to cafe and emits settings sync', async () => {
         await setPolicy({ cooking: { cancel: false, edit: true } });
         assert.deepEqual((await settings.getPublic()).waiterOrderPermissions.cooking, { cancel: false, edit: true });

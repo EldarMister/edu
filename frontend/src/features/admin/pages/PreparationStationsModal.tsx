@@ -51,13 +51,11 @@ export function PreparationStationsModal({ stations, onClose }: {
           <li key={station.id} className="flex flex-wrap items-center gap-2 py-3 text-sm">
             <span className="min-w-24 flex-1 break-words font-medium">{station.name}</span>
             {!station.isActive && <span className="text-text-muted">В архиве</span>}
-            {!station.isBuiltIn && <>
-              <button type="button" className="btn-secondary btn-md" disabled={save.isPending} onClick={() => edit(station)}>Изменить</button>
-              <button type="button" className="btn-secondary btn-md" disabled={save.isPending}
-                onClick={() => void update({ id: station.id, isActive: !station.isActive })}>
-                {station.isActive ? 'В архив' : 'Восстановить'}
-              </button>
-            </>}
+            <button type="button" className="btn-secondary btn-md" disabled={save.isPending} onClick={() => edit(station)}>Изменить</button>
+            <button type="button" className="btn-secondary btn-md" disabled={save.isPending}
+              onClick={() => void update({ id: station.id, isActive: !station.isActive })}>
+              {station.isActive ? 'Удалить' : 'Восстановить'}
+            </button>
           </li>
         ))}
       </ul>

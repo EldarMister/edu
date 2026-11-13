@@ -31,7 +31,7 @@ import { DishPopularityService } from '../dishes/dish-popularity.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { IngredientStockService } from '../warehouse/ingredient-stock.service';
-import { PrepStation } from '../kitchen/preparation-stations';
+import { assertAssignableStation, lockStationRouting, PrepStation } from '../kitchen/preparation-stations';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
 import { lockOrder } from './order-lock';
@@ -309,6 +309,7 @@ export class OrdersService {
     let order: Awaited<ReturnType<typeof this.findById>>;
     try {
       order = await this.prisma.$transaction(async (tx) => {
+        await this.ensureOrderStations(tx, itemsData);
         const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
         const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
         const totals = this.calcTotals(itemsData, serviceChargeAmount);
@@ -420,6 +421,7 @@ export class OrdersService {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         order = await this.prisma.$transaction(async (tx) => {
+          await this.ensureOrderStations(tx, itemsData);
           const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
           const totals = this.calcTotals(itemsData, serviceChargeAmount);
           const businessDate = this.businessDateOf();
@@ -544,6 +546,7 @@ export class OrdersService {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         order = await this.prisma.$transaction(async (tx) => {
+          await this.ensureOrderStations(tx, itemsData);
           // Доставка не получает ресторанный сервисный сбор: внешний клиент
           // ориентируется на цены меню, которые возвращает integration API.
           const totals = this.calcTotals(itemsData, 0);
@@ -1240,7 +1243,9 @@ export class OrdersService {
     });
 
     if (applied) {
-      const acceptedText = station === PrepStation.bar ? 'Бар принял ваш заказ'
+      const acceptedText = stationName && stationName !== 'Бар' && stationName !== 'Кухня'
+        ? `Станция «${stationName}» приняла ваш заказ`
+        : station === PrepStation.bar ? 'Бар принял ваш заказ'
         : station === PrepStation.kitchen ? 'Кухня приняла ваш заказ' : `Станция ${stationName ?? station} приняла ваш заказ`;
       this.emitStatusChanged(updated, {
         waiterText: `${acceptedText}. Стол номер ${tableNumberVoice(updated.table.number)}.`,
@@ -2621,12 +2626,21 @@ export class OrdersService {
     return { itemsData, dishDeductions, variantDeductions };
   }
 
+  private async ensureOrderStations(tx: Prisma.TransactionClient, items: Prisma.OrderItemUncheckedCreateWithoutOrderInput[]) {
+    const cafeId = getCafeId();
+    const stations = stationIds(items.map((item) => ({ prepStation: item.prepStation ?? PrepStation.kitchen })));
+    if (!cafeId || !stations.length) return;
+    await lockStationRouting(tx, cafeId, 'shared');
+    await Promise.all(stations.map((station) => assertAssignableStation(tx, station)));
+  }
+
   /** Создаёт позиции заказа по одной (поддерживает вложенный состав сета). */
   private async createOrderItems(
     tx: Prisma.TransactionClient,
     orderId: string,
     itemsData: Prisma.OrderItemUncheckedCreateWithoutOrderInput[],
   ) {
+    await this.ensureOrderStations(tx, itemsData);
     const created = [];
     for (const item of itemsData) {
       created.push(await tx.orderItem.create({ data: { ...item, orderId } }));

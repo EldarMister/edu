@@ -727,7 +727,9 @@ function CategoryModal({
   const { create, update, reorder } = useCategoryMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState('');
-  const [prepStation, setPrepStation] = useState('kitchen');
+  const defaultStation = stations.find((station) => station.isActive)?.id ?? 'none';
+  const [selectedStation, setPrepStation] = useState<string>();
+  const prepStation = selectedStation ?? defaultStation;
   const [error, setError] = useState('');
   // Инлайн-переименование.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -743,7 +745,7 @@ function CategoryModal({
     try {
       await create.mutateAsync({ name: name.trim(), prepStation });
       setName('');
-      setPrepStation('kitchen');
+      setPrepStation(undefined);
       push({ message: 'Категория добавлена', at: new Date().toISOString() });
     } catch (err) {
       setError(apiError(err));
