@@ -41,10 +41,10 @@ function isSpeechRate(value: unknown): value is KitchenSpeechRate {
   return KITCHEN_SPEECH_RATES.includes(Number(value) as KitchenSpeechRate);
 }
 
-function readStored(): Partial<KitchenVoiceSettings> {
+function readStored(key = STORAGE_KEY): Partial<KitchenVoiceSettings> {
   if (typeof window === 'undefined') return {};
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.localStorage.getItem(key);
     if (!raw) return {};
     const parsed = JSON.parse(raw) as Partial<KitchenVoiceSettings>;
     return parsed && typeof parsed === 'object' ? parsed : {};
@@ -86,4 +86,24 @@ export function subscribeKitchenVoiceSettings(listener: (settings: KitchenVoiceS
   return () => {
     listeners.delete(listener);
   };
+}
+
+type WaiterVoicePreference = Pick<KitchenVoiceSettings, 'speaker' | 'speechRate'>;
+const waiterStorageKey = (userId: string) => `edu-pos-waiter-voice-settings-v1:${userId}`;
+const waiterPreferences = new Map<string, WaiterVoicePreference>();
+
+export function getWaiterVoiceSettings(userId: string): KitchenVoiceSettings {
+  return normalize(waiterPreferences.get(userId) ?? readStored(waiterStorageKey(userId)));
+}
+
+export function saveWaiterVoiceSettings(userId: string, patch: Partial<WaiterVoicePreference>) {
+  const next = normalize({ ...getWaiterVoiceSettings(userId), ...patch });
+  const preference = { speaker: next.speaker, speechRate: next.speechRate };
+  waiterPreferences.set(userId, preference);
+  try {
+    window.localStorage.setItem(waiterStorageKey(userId), JSON.stringify(preference));
+  } catch {
+    // Keep the selection usable even when browser storage is unavailable.
+  }
+  return next;
 }

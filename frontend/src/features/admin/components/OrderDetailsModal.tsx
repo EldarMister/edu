@@ -23,11 +23,13 @@ export function OrderDetailsModal({
   onClose,
   onOrderChange,
   allowItemCancellation = false,
+  waiterLayout = false,
 }: {
   order: Order | null;
   onClose: () => void;
   onOrderChange?: (order: Order) => void;
   allowItemCancellation?: boolean;
+  waiterLayout?: boolean;
 }) {
   const [cancelItem, setCancelItem] = useState<Order['items'][number] | null>(null);
   const cancelOrderItem = useCancelOrderItem();
@@ -74,6 +76,12 @@ export function OrderDetailsModal({
       { label: 'Оплата', value: order.paymentMethod ? paymentDisplayLabel(order) : '—' },
     ],
   ];
+  if (waiterLayout) {
+    const [dateCell, amountCell] = infoRows[1];
+    const [tableCell, paymentCell] = infoRows[2];
+    infoRows[1] = [dateCell, tableCell];
+    infoRows[2] = [amountCell, paymentCell];
+  }
   if (showMixedBreakdown) {
     infoRows.push([
       { label: 'Наличными', value: money(mixedSumBy(order, 'cash')) },
@@ -106,17 +114,17 @@ export function OrderDetailsModal({
             {infoRows.map((pair, ri, rows) => (
               <div
                 key={ri}
-                className={`grid grid-cols-1 sm:grid-cols-2 ${ri < rows.length - 1 ? 'border-b border-border' : ''}`}
+                className={`grid ${waiterLayout && pair.length === 2 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'} ${ri < rows.length - 1 ? 'border-b border-border' : ''}`}
               >
                 {pair.map((cell, ci) => (
                   <div
                     key={ci}
-                    className={`flex items-center justify-between gap-3 px-4 py-3 ${
-                      ci === 1 ? 'border-t border-border sm:border-l sm:border-t-0' : ''
+                    className={`flex min-w-0 px-4 py-3 ${waiterLayout ? 'flex-col gap-1' : 'items-center justify-between gap-3'} ${
+                      ci === 1 ? (waiterLayout ? 'border-l border-border' : 'border-t border-border sm:border-l sm:border-t-0') : ''
                     }`}
                   >
                     <span className="text-text-muted">{cell.label}</span>
-                    <span className="text-right font-medium text-text-primary">{cell.value}</span>
+                    <span className={`break-words font-medium text-text-primary ${waiterLayout ? '' : 'text-right'}`}>{cell.value}</span>
                   </div>
                 ))}
               </div>

@@ -7,6 +7,8 @@
  */
 import { api } from '@/lib/api';
 import { AudioPlayer } from '@/lib/audio';
+import { useAuth } from '@/store/auth';
+import { getWaiterVoiceSettings } from './kitchenVoiceSettings';
 
 /**
  * Голосовое уведомление актуально только «здесь и сейчас». Если TTS-сервис тормозит
@@ -18,13 +20,14 @@ const MAX_VOICE_AGE_MS = 30_000;
 
 class WaiterVoice {
   private player = new AudioPlayer();
-  private queue: { text: string; at: number }[] = [];
+  private queue: { text: string; at: number; userId: string }[] = [];
   private pumping = false;
 
   enqueue(text: string | null | undefined) {
     const t = (text ?? '').trim();
-    if (!t) return;
-    this.queue.push({ text: t, at: Date.now() });
+    const userId = useAuth.getState().user?.id;
+    if (!t || !userId) return;
+    this.queue.push({ text: t, at: Date.now(), userId });
     void this.pump();
   }
 
@@ -36,7 +39,7 @@ class WaiterVoice {
         const item = this.queue.shift()!;
         if (Date.now() - item.at > MAX_VOICE_AGE_MS) continue; // устаревшая озвучка — пропускаем
         try {
-          await this.playText(item.text);
+          await this.playText(item.text, item.userId);
         } catch (err) {
           console.error('[waiter-tts] озвучка не удалась:', err);
         }
@@ -46,19 +49,19 @@ class WaiterVoice {
     }
   }
 
-  private async playText(text: string): Promise<void> {
-    const res = await api.post('/tts/synthesize', { text }, { responseType: 'blob', timeout: 45_000 });
+  private async playText(text: string, userId: string): Promise<void> {
+    if (useAuth.getState().user?.id !== userId) return;
+    const { speaker, speechRate } = getWaiterVoiceSettings(userId);
+    const res = await api.post('/tts/synthesize', { text, speaker }, { responseType: 'blob', timeout: 45_000 });
+    if (useAuth.getState().user?.id !== userId) return;
     const url = URL.createObjectURL(res.data as Blob);
     try {
-      await this.playUrl(url);
+      await this.player.play(url, speechRate);
     } finally {
       URL.revokeObjectURL(url);
     }
   }
 
-  private playUrl(url: string): Promise<void> {
-    return this.player.play(url);
-  }
 }
 
 export const waiterVoice = new WaiterVoice();

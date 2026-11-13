@@ -855,17 +855,16 @@ export function WaiterApp() {
 
   // Личный кабинет официанта — отдельный экран поверх вкладки «Профиль».
   const cabinetNode = (
-    <WaiterCabinet onBack={() => setCabinetOpen(false)} onViewAll={() => changeTab('orders')} />
+    <WaiterCabinet onBack={() => setCabinetOpen(false)} />
   );
 
   const desktopView: DesktopTab = activeNavTab === 'orders' || activeNavTab === 'profile' ? activeNavTab : 'tables';
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <OfflineBanner />
-
       {/* Шапка */}
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border bg-white py-2 pl-2 pr-4 sm:pl-4">
+      <div className="relative shrink-0">
+      <header className="flex items-center justify-between gap-4 border-b border-border bg-white py-2 pl-2 pr-4 sm:pl-4">
         <div className="flex items-center gap-2">
           <BrandLogo />
         </div>
@@ -879,6 +878,8 @@ export function WaiterApp() {
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
         </div>
       </header>
+      <OfflineBanner inHeader />
+      </div>
 
       {showPushBanner && (
         <BackgroundPushBanner onEnable={pushNotifications.enable} />

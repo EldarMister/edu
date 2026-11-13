@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
@@ -14,7 +14,6 @@ import {
 } from './types';
 
 const CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
-const WAITER_NAV_INSET = 58;
 
 function defaultChannelForRole(role?: string): PttChannel {
   if (role === 'WAITER') return 'waiters';
@@ -156,7 +155,7 @@ const STATE_STYLES: Record<
 function RadioHeader({ onClose }: { onClose: () => void }) {
   return (
     <>
-      <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-slate-300" />
+      <div className="mb-2 flex h-7 items-center justify-center"><span className="h-1 w-[34px] rounded-full bg-slate-300" /></div>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold text-text-primary">Рация</h2>
         <button
@@ -199,10 +198,9 @@ function RadioChannelTabs({
   );
 }
 
-function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onlineCount: number }) {
+function RadioMetaRow({ onlineCount }: { onlineCount: number }) {
   return (
-    <div className="mb-3 flex h-10 items-center justify-between rounded-xl border border-border bg-background/60 px-4">
-      <span className="text-sm font-semibold text-text-primary">{channelLabel}</span>
+    <div className="mb-3 flex justify-end">
       <span className="flex items-center gap-1.5 text-sm text-text-muted">
         <span className="h-2 w-2 rounded-full bg-success" />
         {onlineCount} онлайн
@@ -294,23 +292,23 @@ export function PttOverlay({
   const isMobile = useMediaQuery('(max-width: 1023px)');
   const overlayOpen = useBlockingOverlayOpen();
   const [open, setOpen] = useState(false);
+  const [docked, setDocked] = useState(false);
   const [channel, setChannel] = useState<PttChannel>(() => initialChannel(user?.role));
   const [onlineCount, setOnlineCount] = useState(0);
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
   const effectiveButtonHidden = buttonHidden || overlayOpen;
 
-  const selected = useMemo(
-    () => PTT_CHANNELS.find((item) => item.key === channel) ?? PTT_CHANNELS[0],
-    [channel],
-  );
+  useEffect(() => {
+    if (!isMobile || effectiveButtonHidden || open || docked) return;
+    const timer = window.setTimeout(() => setDocked(true), 5000);
+    return () => window.clearTimeout(timer);
+  }, [isMobile, effectiveButtonHidden, open, docked]);
   const sender = useAudioPttSender(channel, true);
   const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
 
-  const bottomNavInset = waiterMode && isMobile ? WAITER_NAV_INSET : 0;
   const floatingBottom = waiterMode && isMobile
     ? 'calc(var(--edu-ptt-floating-bottom, 78px) + env(safe-area-inset-bottom, 0px))'
     : 'calc(24px + env(safe-area-inset-bottom, 0px))';
-  const sheetBottom = `calc(${bottomNavInset}px + env(safe-area-inset-bottom, 0px))`;
 
   const joinSeqRef = useRef(0);
   const joinChannel = useCallback(() => {
@@ -433,8 +431,8 @@ export function PttOverlay({
     <>
       {!effectiveButtonHidden && !open && (
         <div
-          className="fixed right-2 z-[70] flex h-14 w-14 items-center justify-center"
-          style={{ bottom: floatingBottom }}
+          className="fixed right-2 z-[70] flex h-14 w-14 items-center justify-center transition-transform motion-reduce:transition-none"
+          style={{ bottom: floatingBottom, transform: isMobile && docked ? 'translateX(40px)' : undefined }}
         >
           {/* Кольцо вокруг кнопки — только пока идёт передача или приём. */}
           {outerSpeaking && (
@@ -446,10 +444,15 @@ export function PttOverlay({
           <button
             type="button"
             aria-label="Рация"
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              if (isMobile && docked) setDocked(false);
+              else setOpen(true);
+            }}
             className={`ptt-no-select relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:scale-95 ${outerView.circle}`}
           >
-            <RadioIcon size={25} />
+            <span className={isMobile && docked ? '-translate-x-4 scale-75' : undefined}>
+              <RadioIcon size={25} />
+            </span>
           </button>
         </div>
       )}
@@ -459,21 +462,20 @@ export function PttOverlay({
           <button
             type="button"
             aria-label="Закрыть рацию"
-            className="absolute left-0 right-0 top-0 animate-fade-in bg-black/30"
-            style={{ bottom: sheetBottom }}
+            className="absolute inset-0 animate-fade-in bg-black/30"
             onClick={() => setOpen(false)}
           />
           <section
             className="absolute left-0 right-0 mx-auto max-w-xl animate-sheet-up rounded-t-[24px] border border-border bg-white px-4 pt-2 shadow-none sm:px-6"
             style={{
-              bottom: sheetBottom,
-              paddingBottom: 16,
+              bottom: 0,
+              paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
               maxHeight: '55dvh',
             }}
           >
             <RadioHeader onClose={() => setOpen(false)} />
             <RadioChannelTabs channel={channel} onChange={changeChannel} />
-            <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
+            <RadioMetaRow onlineCount={onlineCount} />
             <PushToTalkCircle
               state={state}
               disabled={state === 'error' || speakingOther}

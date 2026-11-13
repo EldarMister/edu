@@ -7,18 +7,24 @@ import { ORDER_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { OrderDetailsModal } from '@/features/admin/components/OrderDetailsModal';
+import { WaiterVoiceSettings } from '@/features/kitchen/KitchenVoiceSettings';
 import { Select } from '@/components/Select';
+import { Modal } from '@/components/Modal';
 import { useState } from 'react';
-import { useWaiterCabinet, useOrderDetails, type CabinetRecentOrder } from './api';
+import { useWaiterCabinet, useWaiterOrderHistory, useOrderDetails, type CabinetRecentOrder } from './api';
 
-export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onViewAll: () => void }) {
+export function WaiterCabinet({ onBack }: { onBack: () => void }) {
   const logout = useAuth((s) => s.logout);
+  const userId = useAuth((s) => s.user?.id);
   const { locale, setLocale } = useLocale();
   const t = useT();
   const [period, setPeriod] = useState<'day' | 'week' | 'month'>('week');
   const cabinetQ = useWaiterCabinet(period);
   const [detailId, setDetailId] = useState<string | null>(null);
   const detailQ = useOrderDetails(detailId);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const history = useWaiterOrderHistory(historyOpen);
+  const orders = history.data?.pages.flatMap((page) => page.items) ?? [];
 
   function onLogout() {
     disconnectSocket();
@@ -56,6 +62,8 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
         </div>
       </div>
 
+      {userId && <div className="flex justify-end"><WaiterVoiceSettings userId={userId} /></div>}
+
       {/* Статистика */}
       <div className="card p-5">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -90,7 +98,7 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
       <div className="card p-5">
         <div className="mb-2 flex items-center justify-between gap-3">
           <h3 className="text-[15px] font-semibold text-text-primary">{t('Последние заказы')}</h3>
-          <button onClick={onViewAll} className="text-sm font-medium text-primary hover:underline">
+          <button onClick={() => setHistoryOpen(true)} className="text-sm font-medium text-primary hover:underline">
             {t('Смотреть все')}
           </button>
         </div>
@@ -126,7 +134,29 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
         {t('Выйти')}
       </button>
 
-      <OrderDetailsModal order={detailQ.data ?? null} onClose={() => setDetailId(null)} />
+      <Modal open={historyOpen} suspended={!!detailId} onClose={() => setHistoryOpen(false)} title={t('История заказов')}>
+        {history.isLoading && <Spinner className="mx-auto h-5 w-5" />}
+        {history.isError && <p className="py-2 text-sm text-danger">{t('Не удалось загрузить заказы')}</p>}
+        {!history.isLoading && !history.isError && !orders.length && <p>{t('Заказов пока нет')}</p>}
+        {orders.map((order, index) => {
+          const date = new Date(order.createdAt).toDateString();
+          return <div key={order.id} className="border-b border-border">
+            {(index === 0 || new Date(orders[index - 1].createdAt).toDateString() !== date) &&
+              <p className="pt-3 text-xs text-text-muted">{new Date(order.createdAt).toLocaleDateString('ru-RU')}</p>}
+            <OrderRow order={order} tableLabel={t('Стол')} onOpen={() => setDetailId(order.id)} />
+          </div>;
+        })}
+        {(history.hasNextPage || (history.isError && !orders.length)) && <button
+          type="button"
+          className="btn-secondary btn-md mt-3 w-full"
+          disabled={history.isFetching}
+          onClick={() => void (orders.length ? history.fetchNextPage({ cancelRefetch: false }) : history.refetch())}
+        >{t(history.isError ? 'Повторить' : 'Показать ещё')}</button>}
+      </Modal>
+      <OrderDetailsModal order={detailQ.data ?? null} onClose={() => setDetailId(null)} waiterLayout />
+      <Modal open={!!detailId && !detailQ.data} onClose={() => setDetailId(null)} title={t('Заказ')}>
+        {detailQ.isError ? <p>{t('Не удалось загрузить заказ')}</p> : <Spinner className="mx-auto h-5 w-5" />}
+      </Modal>
     </div>
   );
 }

@@ -5,7 +5,9 @@ import {
   KITCHEN_SPEAKERS,
   KITCHEN_SPEECH_RATES,
   getKitchenVoiceSettings,
+  getWaiterVoiceSettings,
   saveKitchenVoiceSettings,
+  saveWaiterVoiceSettings,
   subscribeKitchenVoiceSettings,
   type KitchenSpeechRate,
   type KitchenVoiceSettings as KitchenVoiceSettingsType,
@@ -13,13 +15,26 @@ import {
 import { KITCHEN_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
 
 export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode }) {
+  return <VoiceSettings handControl={handControl} />;
+}
+
+export function WaiterVoiceSettings({ userId }: { userId: string }) {
+  return <VoiceSettings key={userId} waiterId={userId} />;
+}
+
+function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; waiterId?: string }) {
   const [open, setOpen] = useState(false);
-  const [settings, setSettings] = useState<KitchenVoiceSettingsType>(() => getKitchenVoiceSettings());
+  const [settings, setSettings] = useState<KitchenVoiceSettingsType>(() =>
+    waiterId ? getWaiterVoiceSettings(waiterId) : getKitchenVoiceSettings(),
+  );
   const [testing, setTesting] = useState(false);
   const [testMessage, setTestMessage] = useState('');
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => subscribeKitchenVoiceSettings(setSettings), []);
+  const title = waiterId ? 'Настройки озвучки' : 'Настройки озвучки кухни';
+  useEffect(() => {
+    if (!waiterId) return subscribeKitchenVoiceSettings(setSettings);
+  }, [waiterId]);
 
   useEffect(() => {
     if (!open) return;
@@ -38,14 +53,14 @@ export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode 
   }, [open]);
 
   function patch(next: Partial<KitchenVoiceSettingsType>) {
-    setSettings(saveKitchenVoiceSettings(next));
+    setSettings(waiterId ? saveWaiterVoiceSettings(waiterId, next) : saveKitchenVoiceSettings(next));
     setTestMessage('');
   }
 
   async function testVoice() {
     setTesting(true);
     setTestMessage('');
-    const scenario = KITCHEN_VOICE_TEST_SCENARIOS[
+    const scenario = waiterId ? { id: 'waiter-ready', text: 'Заказ номер четыре. Стол шесть. Заказ готов.' } : KITCHEN_VOICE_TEST_SCENARIOS[
       Math.floor(Math.random() * KITCHEN_VOICE_TEST_SCENARIOS.length)
     ];
     try {
@@ -80,10 +95,10 @@ export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode 
       {open && (
         <div
           role="dialog"
-          aria-label="Настройки озвучки кухни"
+          aria-label={title}
           className="absolute right-0 top-[calc(100%+10px)] z-50 w-[calc(100vw-2rem)] max-w-[320px] rounded-xl border border-border bg-white p-4 text-sm shadow-soft"
         >
-          <h3 className="text-[15px] font-semibold text-text-secondary">Настройки озвучки кухни</h3>
+          <h3 className="text-[15px] font-semibold text-text-secondary">{title}</h3>
 
           <Section>
             <p className="mb-3 font-semibold text-text-primary">Голос</p>
@@ -92,6 +107,7 @@ export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode 
                 <button
                   key={speaker.value}
                   type="button"
+                  aria-pressed={settings.speaker === speaker.value}
                   onClick={() => patch({ speaker: speaker.value })}
                   className={`flex w-full items-center gap-1.5 rounded-lg px-1 py-2 text-left transition-colors ${
                     settings.speaker === speaker.value
@@ -106,7 +122,7 @@ export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode 
             </div>
           </Section>
 
-          <Section>
+          {!waiterId && <Section>
             <SettingRow
               label="Уведомления"
               checked={settings.notificationsEnabled}
@@ -117,7 +133,7 @@ export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode 
               checked={settings.voiceEnabled}
               onChange={(value) => patch({ voiceEnabled: value })}
             />
-          </Section>
+          </Section>}
 
           {handControl}
 

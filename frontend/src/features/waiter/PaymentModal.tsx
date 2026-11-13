@@ -150,29 +150,14 @@ export function PaymentModal({
   // Завершение разделения счёта: все платежи оплачены → проводим оплату заказа
   // суммарными наличными/QR (как обычная/смешанная оплата) и идём к чеку.
   async function handleSplitComplete({
-    cash,
-    qr,
     payments,
   }: {
-    cash: number;
-    qr: number;
     payments: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[];
   }) {
     setError('');
-    try {
-      const splitMethod =
-        cash > 0 && qr > 0 ? ('mixed' as PaymentMethod) : qr > 0 ? ('qr' as PaymentMethod) : ('cash' as PaymentMethod);
-      const payload =
-        payments.length > 1
-          ? ({ orderId: order.id, method: splitMethod, splitPayments: payments })
-          : qr > 0
-            ? ({ orderId: order.id, method: 'qr' as PaymentMethod })
-            : ({ orderId: order.id, method: 'cash' as PaymentMethod });
-      await completePayment(payload);
-    } catch (err) {
-      setSplitOpen(false);
-      setError(apiError(err));
-    }
+    const methods = new Set(payments.map((part) => part.method));
+    const method = methods.size === 1 ? payments[0].method : 'mixed';
+    await completePayment({ orderId: order.id, method, splitPayments: payments });
   }
 
   function close() {
@@ -443,8 +428,10 @@ export function PaymentModal({
 
     {/* Разделение счёта — открывается поверх окна оплаты, состояние не сбрасывается */}
     <SplitBillSheet
+      key={order.id}
       open={splitOpen}
       total={total}
+      paymentMethods={enabled}
       submitting={pay.isPending}
       onClose={() => setSplitOpen(false)}
       onComplete={handleSplitComplete}

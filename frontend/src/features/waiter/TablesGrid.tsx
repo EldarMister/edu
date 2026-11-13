@@ -9,10 +9,14 @@ const TABLE_GAP = 12;
 /** Pick the largest square that fits the hall, or keep the full-width grid scrollable. */
 function tableGridLayout(count: number, width: number, height: number) {
   const gap = TABLE_GAP;
+  if (count === 8 && width >= 240 && width < 600) {
+    const side = Math.floor((width - gap) / 2);
+    if (4 * side + 3 * gap <= height) return { columns: 2, side };
+  }
   const phoneColumns = width <= gap ? 1 : width < 240 ? 2 : 3;
   const availableColumns = width < 600 ? phoneColumns : Math.max(phoneColumns, Math.min(6, Math.floor((width + gap) / (168 + gap))));
   const maxColumns = Math.min(availableColumns, Math.max(1, count));
-  const minColumns = Math.min(maxColumns, count <= 2 ? 1 : 2);
+  const minColumns = count >= 7 ? maxColumns : Math.min(maxColumns, count <= 2 ? 1 : 2);
   const maxSide = count <= 2 ? 420 : 240;
   const sideAtWidth = (columns: number) => Math.max(0, Math.floor(Math.min(maxSide, (width - gap * (columns - 1)) / columns)));
 

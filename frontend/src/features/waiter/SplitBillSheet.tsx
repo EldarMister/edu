@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { apiError } from '@/lib/api';
+import type { PaymentMethod } from '@/types';
 import { money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
@@ -15,7 +17,7 @@ import { Select } from '@/components/Select';
 const SHEET_MS = 300;
 const SHEET_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
 
-type Method = 'qr' | 'cash' | 'mixed';
+type Method = PaymentMethod;
 type SplitPaymentPart = { method: Exclude<Method, 'mixed'>; amount: number };
 interface SplitPayment {
   method: Method;
@@ -27,6 +29,7 @@ interface SplitPayment {
 const METHODS: { value: Method; label: string }[] = [
   { value: 'qr', label: 'QR-код' },
   { value: 'cash', label: 'Наличные' },
+  { value: 'card', label: 'Карта' },
   { value: 'mixed', label: 'Смешанная' },
 ];
 
@@ -44,21 +47,30 @@ function splitAmounts(total: number, count: number): string[] {
 export function SplitBillSheet({
   open,
   total,
+  paymentMethods,
   submitting,
   onClose,
   onComplete,
 }: {
   open: boolean;
   total: number;
+  paymentMethods: PaymentMethod[];
   submitting: boolean;
   onClose: () => void;
-  onComplete: (totals: { cash: number; qr: number; payments: SplitPaymentPart[] }) => void | Promise<void>;
+  onComplete: (totals: { payments: SplitPaymentPart[] }) => Promise<void>;
 }) {
   const t = useT();
+  const allowed = (method: Method) => method === 'mixed'
+    ? paymentMethods.includes('cash') && paymentMethods.includes('qr')
+    : paymentMethods.includes(method);
+  const available = METHODS.filter((method) => allowed(method.value));
+  const defaultMethod = available[0]?.value ?? 'qr';
+  const inFlight = useRef(false);
+  const [completionError, setCompletionError] = useState('');
   const [count, setCount] = useState(2);
   const [completing, setCompleting] = useState(false);
   const [payments, setPayments] = useState<SplitPayment[]>(() =>
-    Array.from({ length: 2 }, () => ({ method: 'qr', cash: '', qr: '', paid: false })),
+    Array.from({ length: 2 }, () => ({ method: defaultMethod, cash: '', qr: '', paid: false })),
   );
   const [amountInputs, setAmountInputs] = useState<string[]>(() => splitAmounts(total, 2));
 
@@ -67,6 +79,7 @@ export function SplitBillSheet({
   const assignedValid = Math.abs(assignedSum - total) < 0.01;
 
   const anyPaid = payments.some((p) => p.paid);
+  const invalidPaidMethod = payments.some((p) => p.paid && !allowed(p.method));
   const paidSum = payments.reduce((s, p, i) => (p.paid ? s + amounts[i] : s), 0);
   const remaining = round2(total - paidSum);
 
@@ -79,12 +92,16 @@ export function SplitBillSheet({
     if (anyPaid) return; // менять число платежей можно только пока ничего не оплачено
     const n = Math.max(2, Math.min(10, next));
     setCount(n);
-    setPayments(Array.from({ length: n }, () => ({ method: 'qr', cash: '', qr: '', paid: false })));
+    setPayments(Array.from({ length: n }, () => ({ method: defaultMethod, cash: '', qr: '', paid: false })));
     setAmountInputs(splitAmounts(total, n));
   }
 
   function patch(i: number, upd: Partial<SplitPayment>) {
-    setPayments((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...upd } : p)));
+    setPayments((prev) => prev.map((p, idx) => (idx === i ? {
+      ...p,
+      ...(!allowed(p.method) && { cash: '', qr: '' }),
+      ...upd,
+    } : p)));
   }
 
   function onAmountChange(i: number, value: string) {
@@ -115,41 +132,44 @@ export function SplitBillSheet({
   }
 
   function canPay(i: number): boolean {
-    const p = payments[i];
-    if (amounts[i] <= 0 || !assignedValid) return false;
+    const p = paymentAt(i);
+    if (p.paid || invalidPaidMethod || !allowed(p.method) || amounts[i] <= 0 || !assignedValid) return false;
     if (p.method !== 'mixed') return true;
     return Math.abs(num(p.cash) + num(p.qr) - amounts[i]) < 0.01 && num(p.cash) > 0 && num(p.qr) > 0;
   }
 
+  function paymentAt(i: number) {
+    const payment = payments[i];
+    return payment.paid || allowed(payment.method) ? payment : { ...payment, method: defaultMethod, cash: '', qr: '' };
+  }
+
   async function payOne(i: number) {
-    if (!canPay(i) || completing) return;
-    const next = payments.map((p, idx) => (idx === i ? { ...p, paid: true } : p));
+    if (!canPay(i) || inFlight.current || submitting) return;
+    setCompletionError('');
+    const next = payments.map((p, idx) => (idx === i ? { ...paymentAt(i), paid: true } : p));
     setPayments(next);
     if (next.every((p) => p.paid)) {
-      let cash = 0;
-      let qr = 0;
       const splitParts: SplitPaymentPart[] = [];
       next.forEach((p, idx) => {
         const amount = amounts[idx];
-        if (p.method === 'qr') {
-          qr += amount;
-          splitParts.push({ method: 'qr', amount });
-        } else if (p.method === 'cash') {
-          cash += amount;
-          splitParts.push({ method: 'cash', amount });
+        if (p.method !== 'mixed') {
+          splitParts.push({ method: p.method, amount });
         } else {
           const cashPart = round2(num(p.cash));
           const qrPart = round2(num(p.qr));
-          cash += cashPart;
-          qr += qrPart;
           if (cashPart > 0) splitParts.push({ method: 'cash', amount: cashPart });
           if (qrPart > 0) splitParts.push({ method: 'qr', amount: qrPart });
         }
       });
+      inFlight.current = true;
       setCompleting(true);
       try {
-        await onComplete({ cash: round2(cash), qr: round2(qr), payments: splitParts });
+        await onComplete({ payments: splitParts });
+      } catch (error) {
+        setPayments(next.map((part, index) => index === i ? { ...part, paid: false } : part));
+        setCompletionError(apiError(error));
       } finally {
+        inFlight.current = false;
         setCompleting(false);
       }
     }
@@ -188,6 +208,9 @@ export function SplitBillSheet({
         </div>
 
         <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          {completionError && <p role="alert" className="mb-2 text-sm text-danger">{completionError}</p>}
+          {invalidPaidMethod && <p role="alert" className="mb-2 text-sm text-danger">{t('Способ оплаты отмеченного платежа отключён')}</p>}
+          {!available.length && <p role="alert" className="mb-2 text-sm text-danger">{t('Нет доступных способов оплаты')}</p>}
           {/* Сумма + счётчик платежей */}
           <div className="mb-3 flex items-center justify-between">
             <div>
@@ -203,7 +226,9 @@ export function SplitBillSheet({
 
           {/* Платежи */}
           <div className="space-y-2.5">
-            {payments.map((p, i) => (
+            {payments.map((_, i) => {
+              const p = paymentAt(i);
+              return (
               <div
                 key={i}
                 className={`rounded-xl border p-3 transition-colors ${
@@ -245,8 +270,8 @@ export function SplitBillSheet({
                       <Select
                         value={p.method}
                         onChange={(value) => patch(i, { method: value as Method })}
-                        options={METHODS.map((m) => ({ value: m.value, label: t(m.label) }))}
-                        disabled={busy}
+                        options={available.map((m) => ({ value: m.value, label: t(m.label) }))}
+                        disabled={busy || !available.length}
                         className="h-12 min-w-[118px] shrink-0 basis-[36%] rounded-lg px-3 text-sm font-medium"
                       />
                       <button
@@ -289,7 +314,8 @@ export function SplitBillSheet({
                   </>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

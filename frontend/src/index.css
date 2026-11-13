@@ -291,6 +291,9 @@
   .animate-sheet-up {
     animation: sheet-up 0.24s cubic-bezier(0.4, 0, 0.2, 1) both;
   }
+  .animate-panel-open {
+    animation: sheet-up 550ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
   /* Рация: iOS PWA – убираем выделение при тапе и callout при долгом нажатии. */
   .ptt-no-select {
     -webkit-tap-highlight-color: transparent;
