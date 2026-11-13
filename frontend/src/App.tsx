@@ -36,10 +36,14 @@ export function App() {
   useEffect(() => {
     if (!accessToken) return;
     let cancelled = false;
+    const userId = useAuth.getState().user?.id;
     api
       .get<AuthUser>('/auth/me')
       .then(({ data }) => {
-        if (!cancelled && data?.permissions) updateUser({ permissions: data.permissions, role: data.role, prepStation: data.prepStation });
+        const session = useAuth.getState();
+        if (cancelled || session.user?.id !== userId) return;
+        if (data?.id === userId) updateUser(data);
+        else if (session.accessToken === accessToken) session.logout();
       })
       .catch(() => {});
     return () => {

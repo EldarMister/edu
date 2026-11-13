@@ -22,20 +22,18 @@ api.interceptors.request.use((config) => {
 });
 
 // При 401 — пробуем один раз обновить токены через refresh.
-let refreshing: Promise<string | null> | null = null;
+const refreshRequests = new Map<string, Promise<string | null>>();
 
-async function refreshTokens(): Promise<string | null> {
-  const { refreshToken, setTokens, logout } = useAuth.getState();
-  if (!refreshToken) {
-    logout();
-    return null;
-  }
+async function refreshTokens(refreshToken: string): Promise<string | null> {
   try {
     const res = await axios.post(`${API_URL}/api/auth/refresh`, { refreshToken });
-    setTokens(res.data.accessToken, res.data.refreshToken);
+    const session = useAuth.getState();
+    if (session.refreshToken !== refreshToken) return null;
+    session.setTokens(res.data.accessToken, res.data.refreshToken);
     return res.data.accessToken as string;
   } catch {
-    logout();
+    const session = useAuth.getState();
+    if (session.refreshToken === refreshToken) session.logout();
     return null;
   }
 }
@@ -45,11 +43,20 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
     if (error.response?.status === 401 && original && !original._retry) {
+      const { accessToken, refreshToken } = useAuth.getState();
+      if (!accessToken || original.headers.Authorization !== `Bearer ${accessToken}`) return Promise.reject(error);
+      if (!refreshToken) {
+        useAuth.getState().logout();
+        return Promise.reject(error);
+      }
       original._retry = true;
-      refreshing = refreshing ?? refreshTokens();
-      const newToken = await refreshing;
-      refreshing = null;
-      if (newToken) {
+      let pending = refreshRequests.get(refreshToken);
+      if (!pending) {
+        pending = refreshTokens(refreshToken).finally(() => refreshRequests.delete(refreshToken));
+        refreshRequests.set(refreshToken, pending);
+      }
+      const newToken = await pending;
+      if (newToken && useAuth.getState().accessToken === newToken) {
         original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
       }
