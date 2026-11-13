@@ -16,6 +16,24 @@ function load(relativePath, globals = {}, requireMock = require) {
 }
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
+test('waiter signal and speech preferences are independent and saved per account', () => {
+  const storage = new Map();
+  const window = { localStorage: {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  } };
+  const loadSettings = () => load('src/services/kitchenVoiceSettings.ts', { window });
+  const settings = loadSettings();
+  settings.saveWaiterVoiceSettings('first', { notificationsEnabled: false });
+  settings.saveWaiterVoiceSettings('second', { voiceEnabled: false });
+  const restored = loadSettings();
+  assert.equal(restored.waiterNotificationSoundEnabled('first'), false);
+  assert.equal(restored.getWaiterVoiceSettings('first').voiceEnabled, true);
+  assert.equal(restored.waiterNotificationSoundEnabled('second'), true);
+  assert.equal(restored.getWaiterVoiceSettings('second').voiceEnabled, false);
+  assert.equal(restored.getKitchenVoiceSettings().notificationsEnabled, true);
+});
+
 function audioHarness() {
   const elements = [];
   const timers = new Map();

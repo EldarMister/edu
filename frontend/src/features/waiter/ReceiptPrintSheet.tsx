@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
+import { SheetHandle } from '@/components/SheetHandle';
 import { displayOrderNumber, money, orderItemDisplayName } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { beep } from '@/lib/sound';
+import { useAuth } from '@/store/auth';
+import { waiterNotificationSoundEnabled } from '@/services/kitchenVoiceSettings';
 import { useReceiptPrint } from './receiptPrint';
 
 const SHEET_MS = 380;
@@ -20,6 +23,7 @@ export function ReceiptPrintSheet() {
 
   const [render, setRender] = useState(open);
   const [visible, setVisible] = useState(false);
+  const panel = useRef<HTMLDivElement>(null);
   const lastAcceptedSoundRequestId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -51,7 +55,7 @@ export function ReceiptPrintSheet() {
     if (!open || status !== 'printed' || !request) return;
     if (lastAcceptedSoundRequestId.current === request.id) return;
     lastAcceptedSoundRequestId.current = request.id;
-    beep('accept');
+    if (waiterNotificationSoundEnabled(useAuth.getState().user?.id)) beep('accept');
   }, [open, request, status]);
 
   if (!render || !request) return null;
@@ -73,6 +77,7 @@ export function ReceiptPrintSheet() {
       />
 
       <div
+        ref={panel}
         className="absolute inset-x-0 bottom-0 flex max-h-[80vh] flex-col rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] shadow-soft"
         style={{
           transform: visible ? 'translateY(0)' : 'translateY(100%)',
@@ -82,8 +87,8 @@ export function ReceiptPrintSheet() {
         aria-label={title}
       >
         {/* Шапка */}
-        <div className="relative shrink-0 px-4 pb-1 pt-2.5">
-          <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-300" />
+        <SheetHandle panel={panel} onClose={primaryClose} enabled={open} />
+        <div className="relative shrink-0 px-4 pb-1">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
             <button

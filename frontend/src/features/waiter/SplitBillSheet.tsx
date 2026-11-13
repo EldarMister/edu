@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SheetHandle } from '@/components/SheetHandle';
 import { apiError } from '@/lib/api';
 import type { PaymentMethod } from '@/types';
 import { money } from '@/lib/format';
@@ -66,6 +67,7 @@ export function SplitBillSheet({
   const available = METHODS.filter((method) => allowed(method.value));
   const defaultMethod = available[0]?.value ?? 'qr';
   const inFlight = useRef(false);
+  const panel = useRef<HTMLDivElement>(null);
   const [completionError, setCompletionError] = useState('');
   const [count, setCount] = useState(2);
   const [completing, setCompleting] = useState(false);
@@ -188,6 +190,7 @@ export function SplitBillSheet({
 
       {/* Лист */}
       <div
+        ref={panel}
         className="absolute inset-x-0 bottom-0 mx-auto flex max-h-[88vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft sm:bottom-4 sm:rounded-2xl"
         style={{
           transform: open ? 'translateY(0)' : 'translateY(110%)',
@@ -197,6 +200,7 @@ export function SplitBillSheet({
         role="dialog"
         aria-label={t('Разделение счёта')}
       >
+        <SheetHandle panel={panel} onClose={onClose} enabled={open && !busy} />
         {/* Шапка */}
         <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
           <h3 className="text-base font-semibold text-text-primary">{t('Разделение счёта')}</h3>

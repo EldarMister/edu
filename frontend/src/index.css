@@ -294,6 +294,14 @@
   .animate-panel-open {
     animation: sheet-up 550ms cubic-bezier(0.16, 1, 0.3, 1) both;
   }
+  [data-sheet-drag] {
+    animation: none !important;
+    transform: translateY(var(--sheet-drag-offset, 0px)) !important;
+    transition: none !important;
+  }
+  [data-sheet-drag="settle"] {
+    transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1) !important;
+  }
   /* Рация: iOS PWA – убираем выделение при тапе и callout при долгом нажатии. */
   .ptt-no-select {
     -webkit-tap-highlight-color: transparent;

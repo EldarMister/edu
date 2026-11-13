@@ -1,3 +1,4 @@
+import { SheetHandle } from '@/components/SheetHandle';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CartSetComponent, Category, Dish, DishVariant } from '@/types';
 import { dishUnitPrice, minDishUnitPrice, money, variantNamesLine } from '@/lib/format';
@@ -56,18 +57,11 @@ function SheetShell({
 }) {
   const [render, setRender] = useState(open);
   const [visible, setVisible] = useState(false);
-  const [drag, setDrag] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const startY = useRef<number | null>(null);
-  const dragRef = useRef(0);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) {
       setRender(true);
-      setDrag(0);
-      dragRef.current = 0;
       let raf2 = 0;
       const raf1 = requestAnimationFrame(() => {
         raf2 = requestAnimationFrame(() => setVisible(true));
@@ -80,36 +74,11 @@ function SheetShell({
     setVisible(false);
     const id = setTimeout(() => {
       setRender(false);
-      setDrag(0);
-      dragRef.current = 0;
     }, SHEET_MS);
     return () => clearTimeout(id);
   }, [open]);
 
   if (!render) return null;
-
-  const sheetTransform = visible ? `translateY(${drag}px)` : 'translateY(100%)';
-
-  function onPointerDown(e: React.PointerEvent) {
-    startY.current = e.clientY;
-    setDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-  function onPointerMove(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    const dy = e.clientY - startY.current;
-    const next = dy > 0 ? dy : 0;
-    dragRef.current = next;
-    setDrag(next);
-  }
-  function onPointerUp(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    startY.current = null;
-    e.currentTarget.releasePointerCapture?.(e.pointerId);
-    setDragging(false);
-    if (dragRef.current > 110) onCloseRef.current();
-    else requestAnimationFrame(() => { dragRef.current = 0; setDrag(0); });
-  }
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center">
@@ -122,22 +91,16 @@ function SheetShell({
       />
       {/* Лист */}
       <div
+        ref={panel}
         className="relative z-10 flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft"
         style={{
-          transform: sheetTransform,
-          transition: dragging ? 'none' : `transform ${SHEET_MS}ms ${SHEET_EASE}`,
+          transform: visible ? 'translateY(0)' : 'translateY(100%)',
+          transition: `transform ${SHEET_MS}ms ${SHEET_EASE}`,
         }}
         role="dialog"
       >
-        {/* Drag handle + заголовок */}
-        <div
-          className="shrink-0 cursor-grab touch-none px-4 pb-1 pt-2.5"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
-          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300" />
+        <SheetHandle panel={panel} onClose={onClose} enabled={open && visible} />
+        <div className="shrink-0 px-4 pb-2">
           <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
           {subtitle && <p className="mt-0.5 text-sm text-text-muted">{subtitle}</p>}
         </div>

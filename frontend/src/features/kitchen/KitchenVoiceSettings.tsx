@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Toggle } from '@/components/Toggle';
+import { Modal } from '@/components/Modal';
+import { useT } from '@/lib/i18n';
 import { kitchenVoice } from '@/services/kitchenVoice';
+import { waiterVoice } from '@/services/waiterVoice';
 import {
   KITCHEN_SPEAKERS,
   KITCHEN_SPEECH_RATES,
@@ -23,6 +26,7 @@ export function WaiterVoiceSettings({ userId }: { userId: string }) {
 }
 
 function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; waiterId?: string }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState<KitchenVoiceSettingsType>(() =>
     waiterId ? getWaiterVoiceSettings(waiterId) : getKitchenVoiceSettings(),
@@ -31,13 +35,13 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
   const [testMessage, setTestMessage] = useState('');
   const rootRef = useRef<HTMLDivElement | null>(null);
 
-  const title = waiterId ? 'Настройки озвучки' : 'Настройки озвучки кухни';
+  const title = waiterId ? t('Настройки озвучки') : 'Настройки озвучки кухни';
   useEffect(() => {
     if (!waiterId) return subscribeKitchenVoiceSettings(setSettings);
   }, [waiterId]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || waiterId) return;
     const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -50,10 +54,11 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
       document.removeEventListener('pointerdown', onPointerDown);
       document.removeEventListener('keydown', onKeyDown);
     };
-  }, [open]);
+  }, [open, waiterId]);
 
   function patch(next: Partial<KitchenVoiceSettingsType>) {
     setSettings(waiterId ? saveWaiterVoiceSettings(waiterId, next) : saveKitchenVoiceSettings(next));
+    if (waiterId && next.voiceEnabled === false) waiterVoice.stop();
     setTestMessage('');
   }
 
@@ -74,6 +79,74 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
     }
   }
 
+  const controls = (
+    <>
+      <Section>
+        <p className="mb-3 font-semibold text-text-primary">{t('Голос')}</p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {KITCHEN_SPEAKERS.map((speaker) => (
+            <button
+              key={speaker.value}
+              type="button"
+              aria-pressed={settings.speaker === speaker.value}
+              onClick={() => patch({ speaker: speaker.value })}
+              className={`flex w-full items-center gap-1.5 rounded-lg px-1 py-2 text-left transition-colors ${
+                settings.speaker === speaker.value
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-text-secondary hover:bg-background'
+              }`}
+            >
+              <Radio checked={settings.speaker === speaker.value} />
+              <span className="font-medium">{speaker.label}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <Section>
+        <SettingRow
+          label={t(waiterId ? 'Звук уведомлений' : 'Уведомления')}
+          checked={settings.notificationsEnabled}
+          onChange={(value) => patch({ notificationsEnabled: value })}
+        />
+        <SettingRow
+          label={t('Голосовая озвучка')}
+          checked={settings.voiceEnabled}
+          onChange={(value) => patch({ voiceEnabled: value })}
+        />
+      </Section>
+
+      {handControl}
+
+      <Section>
+        <p className="mb-3 font-semibold text-text-primary">{t('Скорость озвучки')}</p>
+        <SpeedSlider
+          rates={KITCHEN_SPEECH_RATES}
+          value={settings.speechRate}
+          onChange={(rate) => patch({ speechRate: rate })}
+        />
+      </Section>
+    </>
+  );
+
+  const preview = (
+    <>
+        <button
+          type="button"
+          onClick={testVoice}
+          disabled={testing}
+          className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {t(testing ? 'Тестируем...' : 'Тестировать')}
+        </button>
+        {testMessage && (
+          <p role="status" className={`mt-2 text-center text-xs ${testMessage.includes('Не удалось') ? 'text-danger' : 'text-success'}`}>
+            {t(testMessage)}
+          </p>
+        )}
+    </>
+  );
+
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -88,79 +161,23 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
         aria-haspopup="dialog"
       >
         <SpeakerIcon />
-        Озвучка
-        <ChevronIcon open={open} />
+        {waiterId ? title : 'Озвучка'}
+        {!waiterId && <ChevronIcon open={open} />}
       </button>
 
-      {open && (
+      {waiterId ? (
+        <Modal open={open} onClose={() => setOpen(false)} title={title} bottomSheet panelClassName="max-w-xl" footer={preview}>
+          {controls}
+        </Modal>
+      ) : open && (
         <div
           role="dialog"
           aria-label={title}
           className="absolute right-0 top-[calc(100%+10px)] z-50 w-[calc(100vw-2rem)] max-w-[320px] rounded-xl border border-border bg-white p-4 text-sm shadow-soft"
         >
           <h3 className="text-[15px] font-semibold text-text-secondary">{title}</h3>
-
-          <Section>
-            <p className="mb-3 font-semibold text-text-primary">Голос</p>
-            <div className="grid grid-cols-3 gap-1.5">
-              {KITCHEN_SPEAKERS.map((speaker) => (
-                <button
-                  key={speaker.value}
-                  type="button"
-                  aria-pressed={settings.speaker === speaker.value}
-                  onClick={() => patch({ speaker: speaker.value })}
-                  className={`flex w-full items-center gap-1.5 rounded-lg px-1 py-2 text-left transition-colors ${
-                    settings.speaker === speaker.value
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-text-secondary hover:bg-background'
-                  }`}
-                >
-                  <Radio checked={settings.speaker === speaker.value} />
-                  <span className="font-medium">{speaker.label}</span>
-                </button>
-              ))}
-            </div>
-          </Section>
-
-          {!waiterId && <Section>
-            <SettingRow
-              label="Уведомления"
-              checked={settings.notificationsEnabled}
-              onChange={(value) => patch({ notificationsEnabled: value })}
-            />
-            <SettingRow
-              label="Голосовая озвучка"
-              checked={settings.voiceEnabled}
-              onChange={(value) => patch({ voiceEnabled: value })}
-            />
-          </Section>}
-
-          {handControl}
-
-          <Section>
-            <p className="mb-3 font-semibold text-text-primary">Скорость озвучки</p>
-            <SpeedSlider
-              rates={KITCHEN_SPEECH_RATES}
-              value={settings.speechRate}
-              onChange={(rate) => patch({ speechRate: rate })}
-            />
-          </Section>
-
-          <Section>
-            <button
-              type="button"
-              onClick={testVoice}
-              disabled={testing}
-              className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {testing ? 'Тестируем...' : 'Тестировать'}
-            </button>
-            {testMessage && (
-              <p className={`mt-2 text-xs ${testMessage.includes('Не удалось') ? 'text-danger' : 'text-success'}`}>
-                {testMessage}
-              </p>
-            )}
-          </Section>
+          {controls}
+          <Section>{preview}</Section>
         </div>
       )}
     </div>
@@ -265,7 +282,7 @@ function SettingRow({
   return (
     <div className="flex items-center justify-between gap-4 py-2">
       <span className="font-medium text-text-primary">{label}</span>
-      <Toggle checked={checked} onChange={onChange} />
+      <Toggle checked={checked} onChange={onChange} ariaLabel={label} />
     </div>
   );
 }

@@ -1,9 +1,9 @@
+import { SheetHandle } from '@/components/SheetHandle';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { resolveApiImage } from '@/lib/image';
 
 const SHEET_MS = 260;
 const SHEET_EASE = 'cubic-bezier(0.4, 0, 0.2, 1)';
-const SHEET_CLOSE_DRAG_PX = 190;
 
 /** Логотип EDU MENU — картинка из public. */
 export function EduMenuLogo() {
@@ -122,14 +122,11 @@ export function BottomSheet({
 }) {
   const [render, setRender] = useState(open);
   const [visible, setVisible] = useState(false);
-  const [drag, setDrag] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const startY = useRef<number | null>(null);
+  const panel = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (open) {
       setRender(true);
-      setDrag(0);
       let raf2 = 0;
       const raf1 = requestAnimationFrame(() => {
         raf2 = requestAnimationFrame(() => setVisible(true));
@@ -153,29 +150,6 @@ export function BottomSheet({
 
   if (!render) return null;
 
-  const sheetTransform = visible ? `translateY(${drag}px)` : 'translateY(100%)';
-
-  function onPointerDown(e: React.PointerEvent) {
-    startY.current = e.clientY;
-    setDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    const dy = e.clientY - startY.current;
-    setDrag(dy > 0 ? dy : 0);
-  }
-
-  function onPointerUp(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    startY.current = null;
-    e.currentTarget.releasePointerCapture?.(e.pointerId);
-    setDragging(false);
-    if (drag > SHEET_CLOSE_DRAG_PX) onClose();
-    else requestAnimationFrame(() => setDrag(0));
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div
@@ -184,21 +158,14 @@ export function BottomSheet({
         onClick={onClose}
       />
       <div
+        ref={panel}
         className="relative z-10 flex max-h-[88vh] w-full max-w-md flex-col rounded-t-3xl bg-card shadow-soft"
         style={{
-          transform: sheetTransform,
-          transition: dragging ? 'none' : `transform ${SHEET_MS}ms ${SHEET_EASE}`,
+          transform: visible ? 'translateY(0)' : 'translateY(100%)',
+          transition: `transform ${SHEET_MS}ms ${SHEET_EASE}`,
         }}
       >
-        <div
-          className="shrink-0 cursor-grab touch-none px-5 pb-2 pt-2.5"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
-          <div className="mx-auto h-1 w-12 rounded-full bg-slate-300" />
-        </div>
+        <SheetHandle panel={panel} onClose={onClose} enabled={open && visible} />
         {children}
       </div>
     </div>

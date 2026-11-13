@@ -1,3 +1,4 @@
+import { SheetHandle } from '@/components/SheetHandle';
 import { useEffect, useRef, useState } from 'react';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
@@ -42,10 +43,7 @@ export function CartSheet({
   // Монтирование + анимация входа/выхода.
   const [render, setRender] = useState(open);
   const [visible, setVisible] = useState(false);
-  // Свайп вниз для закрытия.
-  const [drag, setDrag] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const startY = useRef<number | null>(null);
+  const panel = useRef<HTMLDivElement>(null);
 
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -53,7 +51,6 @@ export function CartSheet({
   useEffect(() => {
     if (open) {
       setRender(true);
-      setDrag(0);
       // Двойной rAF: гарантируем, что стартовое положение (translateY(100%))
       // отрисовано до переключения на 0, иначе переход «проскакивает».
       let raf2 = 0;
@@ -88,30 +85,6 @@ export function CartSheet({
 
   if (!render) return null;
 
-  const sheetTransform = visible ? `translateY(${drag}px)` : 'translateY(100%)';
-
-  // Drag вниз для закрытия (pointer events: работает с тачем, мышью и пером).
-  function onPointerDown(e: React.PointerEvent) {
-    startY.current = e.clientY;
-    setDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-  function onPointerMove(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    const dy = e.clientY - startY.current;
-    setDrag(dy > 0 ? dy : 0);
-  }
-  function onPointerUp(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    startY.current = null;
-    e.currentTarget.releasePointerCapture?.(e.pointerId);
-    // Сначала включаем обратно анимацию (dragging=false), затем на следующем
-    // кадре сбрасываем смещение — так возврат «немножко» проходит плавно.
-    setDragging(false);
-    if (drag > 110) onClose();
-    else requestAnimationFrame(() => setDrag(0));
-  }
-
   return (
     <div className="fixed inset-0 z-40 lg:hidden">
       {/* Затемнение фона */}
@@ -124,24 +97,18 @@ export function CartSheet({
 
       {/* Лист корзины */}
       <div
+        ref={panel}
         className="absolute inset-x-0 bottom-0 flex max-h-[78vh] flex-col rounded-t-2xl bg-white shadow-soft"
         style={{
-          transform: sheetTransform,
-          transition: dragging ? 'none' : `transform ${SHEET_MS}ms ${SHEET_EASE}`,
+          transform: visible ? 'translateY(0)' : 'translateY(100%)',
+          transition: `transform ${SHEET_MS}ms ${SHEET_EASE}`,
           paddingBottom: 'calc(58px + env(safe-area-inset-bottom))',
         }}
         role="dialog"
         aria-label={t('Корзина')}
       >
-        {/* Шапка с drag handle */}
-        <div
-          className="shrink-0 cursor-grab touch-none px-4 pb-2 pt-2.5"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
-          <div className="mx-auto mb-2.5 h-1 w-10 rounded-full bg-slate-300" />
+        <SheetHandle panel={panel} onClose={onClose} enabled={open && visible} />
+        <div className="shrink-0 px-4 pb-2">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-semibold text-text-primary">{t('Корзина')}</h2>
             {hasLines && (

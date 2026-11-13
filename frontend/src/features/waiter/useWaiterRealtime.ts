@@ -7,6 +7,7 @@ import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/lib/format';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import { waiterVoice } from '@/services/waiterVoice';
+import { waiterNotificationSoundEnabled } from '@/services/kitchenVoiceSettings';
 import type { AppNotification, Order, ReceiptPrintRequest } from '@/types';
 import { useReceiptPrint } from './receiptPrint';
 
@@ -183,7 +184,7 @@ export function useWaiterRealtime() {
     const orderNumber = n.orderNumber ? displayOrderNumber(n.orderNumber) : undefined;
     const message = n.orderNumber && orderNumber ? n.message.replace(n.orderNumber, orderNumber) : n.message;
     push({ message, type: n.type ?? 'info', orderId: n.orderId, orderNumber, at: n.at });
-    beep('notify');
+    if (waiterNotificationSoundEnabled(userId)) beep('notify');
   });
 
   useSocketEvent<VoicedOrder>('order:status_changed', (order) => {
@@ -275,7 +276,7 @@ export function useWaiterRealtime() {
         at: new Date().toISOString(),
       });
       st.dismiss();
-      beep('notify');
+      if (waiterNotificationSoundEnabled(userId)) beep('notify');
     }
   });
 
@@ -292,6 +293,6 @@ export function useWaiterRealtime() {
       });
       st.dismiss();
     }
-    beep('notify');
+    if (waiterNotificationSoundEnabled(userId)) beep('notify');
   });
 }

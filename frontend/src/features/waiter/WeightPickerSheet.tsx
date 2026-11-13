@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { SheetHandle } from '@/components/SheetHandle';
 import type { Dish } from '@/types';
 import { dishUnitPrice, money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -55,6 +56,7 @@ export function WeightPickerSheet({
   const [editingWeight, setEditingWeight] = useState(false);
   const [weightInput, setWeightInput] = useState(String(DEFAULT_WEIGHT));
   const dialRef = useRef<SVGSVGElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ lastAngle: number; scale: number } | null>(null);
 
   useEffect(() => {
@@ -140,6 +142,7 @@ export function WeightPickerSheet({
         aria-label={t('Закрыть')}
       />
       <div
+        ref={panel}
         className="absolute inset-x-0 bottom-0 mx-auto flex max-h-[94dvh] w-full max-w-md flex-col overflow-hidden rounded-t-[28px] bg-white shadow-2xl"
         style={{
           transform: visible ? 'translateY(0)' : 'translateY(100%)',
@@ -149,9 +152,9 @@ export function WeightPickerSheet({
         aria-modal="true"
         aria-label={t('Выбор веса')}
       >
-        <div className="no-scrollbar flex min-h-[55dvh] flex-col overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-2.5 sm:px-5">
-          <div className="mx-auto h-1.5 w-10 rounded-full bg-slate-300" />
-          <div className="mt-4 flex items-start justify-between gap-4">
+        <SheetHandle panel={panel} onClose={onClose} enabled={!!dish} />
+        <div className="no-scrollbar flex min-h-0 flex-col overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] sm:px-5">
+          <div className="mt-2 flex items-start justify-between gap-4">
             <div>
               <h2 className="text-[24px] font-bold leading-tight text-text-primary">{t('Весовой')}</h2>
               <p className="mt-2 text-[16px] text-text-muted">{t('Выберите вес')}</p>

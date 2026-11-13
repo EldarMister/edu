@@ -22,11 +22,18 @@ class WaiterVoice {
   private player = new AudioPlayer();
   private queue: { text: string; at: number; userId: string }[] = [];
   private pumping = false;
+  private request: AbortController | null = null;
+
+  stop() {
+    this.queue = [];
+    this.request?.abort();
+    this.player.stop();
+  }
 
   enqueue(text: string | null | undefined) {
     const t = (text ?? '').trim();
     const userId = useAuth.getState().user?.id;
-    if (!t || !userId) return;
+    if (!t || !userId || !getWaiterVoiceSettings(userId).voiceEnabled) return;
     this.queue.push({ text: t, at: Date.now(), userId });
     void this.pump();
   }
@@ -51,14 +58,25 @@ class WaiterVoice {
 
   private async playText(text: string, userId: string): Promise<void> {
     if (useAuth.getState().user?.id !== userId) return;
-    const { speaker, speechRate } = getWaiterVoiceSettings(userId);
-    const res = await api.post('/tts/synthesize', { text, speaker }, { responseType: 'blob', timeout: 45_000 });
-    if (useAuth.getState().user?.id !== userId) return;
-    const url = URL.createObjectURL(res.data as Blob);
+    const { speaker, speechRate, voiceEnabled } = getWaiterVoiceSettings(userId);
+    if (!voiceEnabled) return;
+    const request = new AbortController();
+    this.request = request;
     try {
-      await this.player.play(url, speechRate);
+      const res = await api.post<Blob>('/tts/synthesize', { text, speaker }, {
+        responseType: 'blob', timeout: 45_000, signal: request.signal,
+      });
+      if (request.signal.aborted || useAuth.getState().user?.id !== userId) return;
+      const url = URL.createObjectURL(res.data);
+      try {
+        await this.player.play(url, speechRate);
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      if (!request.signal.aborted) throw error;
     } finally {
-      URL.revokeObjectURL(url);
+      this.request = null;
     }
   }
 

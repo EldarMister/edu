@@ -6,31 +6,15 @@ import { useT } from '@/lib/i18n';
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
 const TABLE_GAP = 12;
 
-/** Pick the largest square that fits the hall, or keep the full-width grid scrollable. */
+/** Keep the hall's column count stable when the viewport changes. */
 function tableGridLayout(count: number, width: number, height: number) {
   const gap = TABLE_GAP;
-  if (count === 8 && width >= 240 && width < 600) {
-    const side = Math.floor((width - gap) / 2);
-    if (4 * side + 3 * gap <= height) return { columns: 2, side };
-  }
-  const phoneColumns = width <= gap ? 1 : width < 240 ? 2 : 3;
-  const availableColumns = width < 600 ? phoneColumns : Math.max(phoneColumns, Math.min(6, Math.floor((width + gap) / (168 + gap))));
-  const maxColumns = Math.min(availableColumns, Math.max(1, count));
-  const minColumns = count >= 7 ? maxColumns : Math.min(maxColumns, count <= 2 ? 1 : 2);
+  const columns = Math.min(Math.max(1, count), count <= 6 || count === 8 ? 2 : 3);
+  const rowsToFit = Math.max(1, Math.ceil(Math.min(count, 9) / columns));
   const maxSide = count <= 2 ? 420 : 240;
-  const sideAtWidth = (columns: number) => Math.max(0, Math.floor(Math.min(maxSide, (width - gap * (columns - 1)) / columns)));
-
-  let columns = maxColumns;
-  let side = Math.min(sideAtWidth(columns), Math.max(96, Math.floor(height)));
-  for (let candidate = maxColumns - 1; candidate >= minColumns; candidate--) {
-    const rows = Math.ceil(count / candidate);
-    const sideAtHeight = Math.floor((height - gap * (rows - 1)) / rows);
-    const fittedSide = Math.min(sideAtWidth(candidate), sideAtHeight);
-    if (fittedSide > side) {
-      columns = candidate;
-      side = fittedSide;
-    }
-  }
+  const sideAtWidth = Math.max(0, Math.floor((width - gap * (columns - 1)) / columns));
+  const sideAtHeight = Math.floor((height - gap * (rowsToFit - 1)) / rowsToFit);
+  const side = Math.min(maxSide, sideAtWidth, Math.max(64, sideAtHeight));
   return { columns, side };
 }
 

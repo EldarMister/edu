@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
+import { SheetHandle } from '@/components/SheetHandle';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
@@ -155,7 +156,6 @@ const STATE_STYLES: Record<
 function RadioHeader({ onClose }: { onClose: () => void }) {
   return (
     <>
-      <div className="mb-2 flex h-7 items-center justify-center"><span className="h-1 w-[34px] rounded-full bg-slate-300" /></div>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold text-text-primary">Рация</h2>
         <button
@@ -292,6 +292,7 @@ export function PttOverlay({
   const isMobile = useMediaQuery('(max-width: 1023px)');
   const overlayOpen = useBlockingOverlayOpen();
   const [open, setOpen] = useState(false);
+  const panel = useRef<HTMLElement>(null);
   const [docked, setDocked] = useState(false);
   const [channel, setChannel] = useState<PttChannel>(() => initialChannel(user?.role));
   const [onlineCount, setOnlineCount] = useState(0);
@@ -385,11 +386,13 @@ export function PttOverlay({
 
   // Закрываем панель рации, сохраняя приём аудио.
   const stopSending = sender.stop;
-  useEffect(() => {
-    if (!effectiveButtonHidden) return;
+  const closeRadio = useCallback(() => {
     stopSending();
     setOpen(false);
-  }, [effectiveButtonHidden, stopSending]);
+  }, [stopSending]);
+  useEffect(() => {
+    if (effectiveButtonHidden) closeRadio();
+  }, [effectiveButtonHidden, closeRadio]);
 
   // «Занято» = кто-то держит кнопку (channel_busy) ИЛИ у нас сейчас играет
   // входящий файл (receiving). Второе продлевает блокировку на всё
@@ -463,9 +466,10 @@ export function PttOverlay({
             type="button"
             aria-label="Закрыть рацию"
             className="absolute inset-0 animate-fade-in bg-black/30"
-            onClick={() => setOpen(false)}
+            onClick={closeRadio}
           />
           <section
+            ref={panel}
             className="absolute left-0 right-0 mx-auto max-w-xl animate-sheet-up rounded-t-[24px] border border-border bg-white px-4 pt-2 shadow-none sm:px-6"
             style={{
               bottom: 0,
@@ -473,7 +477,8 @@ export function PttOverlay({
               maxHeight: '55dvh',
             }}
           >
-            <RadioHeader onClose={() => setOpen(false)} />
+            <SheetHandle panel={panel} onClose={closeRadio} enabled={!sender.talking} />
+            <RadioHeader onClose={closeRadio} />
             <RadioChannelTabs channel={channel} onChange={changeChannel} />
             <RadioMetaRow onlineCount={onlineCount} />
             <PushToTalkCircle
