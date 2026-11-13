@@ -99,10 +99,10 @@ export class PushService {
     return this.notifyUser(waiterId, payload);
   }
 
-  async notifyRole(role: Role, payload: PushPayload, cafeId?: string | null) {
+  async notifyRole(role: Role, payload: PushPayload, cafeId?: string | null, prepStation?: string | null) {
     payload = { notificationId: randomUUID(), at: new Date().toISOString(), ...payload };
     const tenantId = cafeId === undefined ? getCafeId() ?? null : cafeId;
-    const userWhere = { role, isActive: true, cafeId: tenantId };
+    const userWhere = { role, isActive: true, cafeId: tenantId, ...(prepStation !== undefined ? { prepStation } : {}) };
     // Native push для роли (мобильные устройства).
     const devices = await this.prisma.userDevice.findMany({
       where: { isActive: true, pushToken: { not: null }, user: userWhere },

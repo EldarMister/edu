@@ -39,7 +39,7 @@ export function App() {
     api
       .get<AuthUser>('/auth/me')
       .then(({ data }) => {
-        if (!cancelled && data?.permissions) updateUser({ permissions: data.permissions, role: data.role });
+        if (!cancelled && data?.permissions) updateUser({ permissions: data.permissions, role: data.role, prepStation: data.prepStation });
       })
       .catch(() => {});
     return () => {

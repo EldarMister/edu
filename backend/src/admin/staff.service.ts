@@ -4,6 +4,7 @@ import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
+import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import {
   CreateStaffDto,
@@ -24,6 +25,7 @@ const STAFF_SELECT = {
   name: true,
   phone: true,
   role: true,
+  prepStation: true,
   isActive: true,
   permissions: true,
   createdAt: true,
@@ -172,9 +174,13 @@ export class StaffService {
       throw new BadRequestException('Сотрудник с таким телефоном уже есть');
     }
     const passwordHash = await bcrypt.hash(dto.password, 10);
-    const created = await this.prisma.user.create({
-      data: { name: dto.name, phone, role: dto.role, passwordHash },
-      select: STAFF_SELECT,
+    const created = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      const prepStation = await staffStation(tx, dto.role, dto.prepStation);
+      return tx.user.create({
+        data: { name: dto.name, phone, role: dto.role, prepStation, passwordHash },
+        select: STAFF_SELECT,
+      });
     });
     await this.audit.log({
       actor,
@@ -182,7 +188,7 @@ export class StaffService {
       entityType: AuditEntity.STAFF,
       entityId: created.id,
       description: `${actor.name ?? 'Сотрудник'} добавил сотрудника ${created.name} (${created.role})`,
-      newValue: { name: created.name, phone: created.phone, role: created.role },
+      newValue: { name: created.name, phone: created.phone, role: created.role, prepStation: created.prepStation },
     });
     return this.withPermissions(created);
   }
@@ -217,7 +223,17 @@ export class StaffService {
       data.passwordHash = await bcrypt.hash(dto.password, 10);
     }
 
-    const updated = await this.prisma.user.update({ where: { id }, data, select: STAFF_SELECT });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      const current = await tx.user.findUnique({ where: { id } });
+      if (!current) throw new NotFoundException('Сотрудник не найден');
+      this.assertCanManageRole(actor, current.role);
+      const role = dto.role ?? current.role;
+      if (dto.prepStation !== undefined || role !== current.role) {
+        data.prepStation = await staffStation(tx, role, dto.prepStation);
+      }
+      return tx.user.update({ where: { id }, data, select: STAFF_SELECT });
+    });
     await this.audit.log({
       actor,
       actionType: AuditAction.STAFF_UPDATED,
@@ -230,8 +246,8 @@ export class StaffService {
             ? ' · доступ включён'
             : ' · доступ выключен'
           : ''),
-      oldValue: { name: user.name, role: user.role, phone: user.phone, isActive: user.isActive },
-      newValue: { name: updated.name, role: updated.role, phone: updated.phone, isActive: updated.isActive },
+      oldValue: { name: user.name, role: user.role, phone: user.phone, isActive: user.isActive, prepStation: user.prepStation },
+      newValue: { name: updated.name, role: updated.role, phone: updated.phone, isActive: updated.isActive, prepStation: updated.prepStation },
       metadata: { passwordChanged: !!dto.password },
     });
     return this.withPermissions(updated);

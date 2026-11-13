@@ -13,12 +13,13 @@ export const BUILTIN_STATIONS = [
 type StationDatabase = Pick<Prisma.TransactionClient, 'preparationStation'>;
 
 export async function resolveStation(db: StationDatabase, user: AuthUser, station?: string) {
-  const id = station ?? (user.role === Role.BAR ? PrepStation.bar : PrepStation.kitchen);
+  const ownStation = user.prepStation ?? (user.role === Role.BAR ? PrepStation.bar : PrepStation.kitchen);
+  const id = station ?? ownStation;
+  if ((user.role === Role.KITCHEN || user.role === Role.BAR) && id !== ownStation) {
+    throw new ForbiddenException('Нет доступа к этой станции');
+  }
   const builtin = BUILTIN_STATIONS.find((entry) => entry.id === id);
   if (builtin) {
-    if ((user.role === Role.KITCHEN && id !== PrepStation.kitchen) || (user.role === Role.BAR && id !== PrepStation.bar)) {
-      throw new ForbiddenException('Нет доступа к этой станции');
-    }
     return builtin;
   }
   const record = user.cafeId && typeof id === 'string'
@@ -26,6 +27,22 @@ export async function resolveStation(db: StationDatabase, user: AuthUser, statio
     : null;
   if (!record) throw new NotFoundException('Станция не найдена');
   return { id: record.id, name: record.name, isActive: record.isActive, isBuiltIn: false };
+}
+
+export async function staffStation(db: StationDatabase, role: Role, id?: string | null) {
+  if (id == null) return null;
+  if ((role !== Role.KITCHEN && role !== Role.BAR) || id === PrepStation.none) {
+    throw new BadRequestException('Станцию можно назначить только сотруднику кухни или бара');
+  }
+  const builtin = BUILTIN_STATIONS.find((entry) => entry.id === id);
+  if (builtin) {
+    if (id !== (role === Role.BAR ? PrepStation.bar : PrepStation.kitchen)) {
+      throw new BadRequestException('Выберите роль, соответствующую станции');
+    }
+    return null;
+  }
+  await assertAssignableStation(db, id);
+  return id;
 }
 
 export async function lockStationRouting(tx: Prisma.TransactionClient, cafeId = getCafeId()) {

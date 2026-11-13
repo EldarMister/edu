@@ -63,9 +63,10 @@ export function KitchenApp({
   const stations = usePreparationStations();
   usePreparationStationUpdates();
   const canAccessBoth = user?.role === 'OWNER' || user?.role === 'ADMIN';
-  const availableStations = (stations.data ?? []).filter((item) => canAccessBoth || !item.isBuiltIn || item.id === defaultStation);
+  const assignedStation = user?.prepStation ?? defaultStation;
+  const availableStations = (stations.data ?? []).filter((item) => canAccessBoth || item.id === assignedStation);
   const requestedStation = searchParams.get('station') ?? selectedStation;
-  const station = availableStations.some((item) => item.id === requestedStation) ? requestedStation : defaultStation;
+  const station = availableStations.some((item) => item.id === requestedStation) ? requestedStation : assignedStation;
   useKitchenRealtime(station);
   const push = useNotifications((s) => s.push);
   const pushNotifications = usePushNotifications(user?.role === 'KITCHEN' || user?.role === 'BAR');
@@ -174,7 +175,7 @@ export function KitchenApp({
       {/* Шапка */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
         <div className="flex items-baseline gap-3">
-          <Select
+          {canAccessBoth ? <Select
             ariaLabel="Станция приготовления"
             className="h-10 max-w-[45vw]"
             value={station}
@@ -189,7 +190,9 @@ export function KitchenApp({
               try { localStorage.setItem(stationKey, value); } catch { /* Storage can be disabled. */ }
             }}
             disabled={!!pending || actingId !== null || stopListOpen}
-          />
+          /> : <span className="text-sm font-medium text-text-primary">
+            {availableStations[0]?.name ?? (assignedStation === 'bar' ? 'Бар' : assignedStation === 'kitchen' ? 'Кухня' : 'Станция приготовления')}
+          </span>}
           <span className="text-[26px] font-medium tracking-tight text-text-primary">
             {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
           </span>

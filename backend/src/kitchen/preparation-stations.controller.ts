@@ -71,11 +71,13 @@ export class PreparationStationsController {
       if (!current) throw new NotFoundException('Станция не найдена');
       if (name !== undefined) await this.ensureUniqueName(tx, cafeId, name, id);
       if (dto.isActive === false && current.isActive) {
-        const [categories, dishes] = await Promise.all([
+        const [categories, dishes, staff] = await Promise.all([
           tx.category.count({ where: { cafeId, prepStation: id } }),
           tx.dish.count({ where: { cafeId, prepStation: id } }),
+          tx.user.count({ where: { cafeId, prepStation: id } }),
         ]);
         if (categories || dishes) throw new ConflictException('Сначала переназначьте блюда и категории станции');
+        if (staff) throw new ConflictException('Сначала переназначьте сотрудников станции');
       }
       return tx.preparationStation.update({
         where: { id },

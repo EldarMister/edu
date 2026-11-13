@@ -29,6 +29,7 @@ export interface EmployeePermissions {
 }
 
 export interface AuthUser {
+  prepStation?: string | null;
   id: string;
   name: string;
   phone: string;

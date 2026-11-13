@@ -7,6 +7,7 @@ export interface AuthUser {
   name: string;
   phone: string;
   cafeId: string | null;
+  prepStation?: string | null;
   /** Итоговые права доступа (дефолты по роли + сохранённые). */
   permissions: EmployeePermissions;
 }

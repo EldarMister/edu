@@ -8,6 +8,8 @@ import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useAuth } from '@/store/auth';
+import { usePreparationStations, usePreparationStationUpdates } from '@/features/kitchen/stations';
+import { PreparationStationsModal } from './PreparationStationsModal';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { IconPlus, IconEdit, IconTrash } from '../components/icons';
@@ -103,6 +105,10 @@ function fromDateTimeLocal(value: string) {
 }
 
 export function StaffPage() {
+  const [stationsOpen, setStationsOpen] = useState(false);
+  const stations = usePreparationStations().data ?? [];
+  usePreparationStationUpdates();
+  const stationNames = new Map(stations.map(({ id, name }) => [id, name]));
   const [tab, setTab] = useState<'current' | 'history' | 'waiter-orders'>('current');
   const [showWaiterReportBadge, setShowWaiterReportBadge] = useState(
     () => Date.now() < WAITER_REPORT_BADGE_EXPIRES_AT,
@@ -250,6 +256,7 @@ export function StaffPage() {
               </button>
             </>
           )}
+          {isOwner && <button className="btn-secondary btn-md" onClick={() => setStationsOpen(true)}>{tr('Станции')}</button>}
           <button
             className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
             onClick={() => setEditing('new')}
@@ -340,7 +347,7 @@ export function StaffPage() {
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="font-medium text-text-primary">{row.name}</div>
-                          <div className="text-xs text-text-muted">{tr(ROLE_LABEL[row.role])}</div>
+                          <div className="text-xs text-text-muted">{(member?.prepStation && stationNames.get(member.prepStation)) || tr(ROLE_LABEL[row.role])}</div>
                         </td>
                         {isWaiter ? (
                           <>
@@ -395,6 +402,7 @@ export function StaffPage() {
         />
       )}
 
+      {isOwner && stationsOpen && <PreparationStationsModal stations={stations} onClose={() => setStationsOpen(false)} />}
       {editing !== null && (
         <StaffModal
           member={editing === 'new' ? null : editing}
@@ -936,7 +944,13 @@ function StaffModal({
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(member?.name ?? '');
   const [phone, setPhone] = useState(member?.phone ?? '');
-  const [role, setRole] = useState<Role>(member?.role ?? 'WAITER');
+  const [assignment, setAssignment] = useState(member?.prepStation ?? member?.role ?? 'WAITER');
+  const stations = usePreparationStations().data ?? [];
+  const roleOptions = (['WAITER', 'KITCHEN', 'BAR', 'ADMIN', 'OWNER'] as const)
+    .map((value) => ({ value, label: ROLE_LABEL[value] }));
+  const stationOptions = stations
+    .filter((station) => !station.isBuiltIn && (station.isActive || station.id === assignment))
+    .map((station) => ({ value: station.id, label: station.name }));
   const [password, setPassword] = useState('');
   const [isActive, setIsActive] = useState(member?.isActive ?? true);
   const [error, setError] = useState('');
@@ -945,6 +959,9 @@ function StaffModal({
 
   async function onSubmit() {
     setError('');
+    const selectedRole = roleOptions.find(({ value }) => value === assignment)?.value;
+    const role = selectedRole ?? (member?.role === 'BAR' ? 'BAR' : 'KITCHEN');
+    const prepStation = selectedRole ? null : assignment;
     try {
       if (isEdit) {
         await update.mutateAsync({
@@ -952,6 +969,7 @@ function StaffModal({
           name,
           phone,
           role,
+          prepStation,
           isActive,
           ...(password ? { password } : {}),
         });
@@ -961,7 +979,7 @@ function StaffModal({
           setError('Укажите пароль');
           return;
         }
-        await create.mutateAsync({ name, phone, role, password });
+        await create.mutateAsync({ name, phone, role, password, prepStation });
         push({ message: 'Сотрудник добавлен', at: new Date().toISOString() });
       }
       onClose();
@@ -988,18 +1006,13 @@ function StaffModal({
         <Field label="Телефон">
           <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
         </Field>
-        <Field label="Роль">
+        <Field label="Роль или станция">
           <Select
+            ariaLabel="Роль или станция"
             className="h-11 w-full"
-            value={role}
-            onChange={(v) => setRole(v as Role)}
-            options={[
-              { value: 'WAITER', label: 'Официант' },
-              { value: 'KITCHEN', label: 'Кухня' },
-              { value: 'BAR', label: 'Бар' },
-              { value: 'ADMIN', label: 'Администратор' },
-              { value: 'OWNER', label: 'Владелец' },
-            ]}
+            value={assignment}
+            onChange={setAssignment}
+            options={[...roleOptions, ...stationOptions]}
           />
         </Field>
         <Field label={isEdit ? 'Новый пароль (если менять)' : 'Пароль'}>

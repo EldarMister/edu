@@ -209,6 +209,7 @@ model User {
   passwordHash String   @map("password_hash")
   pinHash      String?  @map("pin_hash")
   role         Role
+  prepStation  String?  @map("prep_station")
   isActive     Boolean  @default(true) @map("is_active")
   // Права доступа сотрудника (разделы/действия). null = дефолты по роли.
   permissions  Json?    @map("permissions")
@@ -229,6 +230,7 @@ model User {
   receiptPrintRequests ReceiptPrintRequest[] @relation("WaiterReceiptPrints")
   cashReports          ShiftCashReport[]     @relation("WaiterCashReports")
 
+  @@index([cafeId, prepStation])
   @@map("users")
 }
 

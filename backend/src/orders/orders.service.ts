@@ -115,12 +115,12 @@ function stationVoices(items: { prepStation: PrepStation }[], message: (station:
 }
 
 function stationPushTargets(stations: Set<PrepStation>) {
-  const custom = [...stations].find((station) => station !== PrepStation.kitchen && station !== PrepStation.bar);
   return ([[PrepStation.kitchen, Role.KITCHEN], [PrepStation.bar, Role.BAR]] as const).flatMap(([builtin, role]) => {
-    const station = stations.has(builtin) ? builtin : custom;
-    if (!station) return [];
-    const url = station === builtin ? `/${builtin}` : `/${builtin}?station=${encodeURIComponent(station)}`;
-    return [{ role, station, url }];
+    return [...stations].filter((station) => station === builtin || (station !== PrepStation.kitchen && station !== PrepStation.bar)).map((station) => ({
+      role, station,
+      prepStation: station === builtin ? null : station,
+      url: station === builtin ? `/${builtin}` : `/${builtin}?station=${encodeURIComponent(station)}`,
+    }));
   });
 }
 
@@ -3244,12 +3244,12 @@ export class OrdersService {
       const message = stationVoice?.byStation ? stationVoice.byStation[station] : stationVoice?.text;
       return message && !stationVoice?.suppressStations?.[station] ? [[station, message] as const] : [];
     }));
-    for (const { role, station, url } of stationPushTargets(new Set(updates.keys()))) {
+    for (const { role, station, url, prepStation } of stationPushTargets(new Set(updates.keys()))) {
       void this.push.notifyRole(role, {
         title: 'Обновление заказа', body: updates.get(station)!, type: 'info', channel: 'kitchen',
         notificationId: `kitchen-status:${String(order.id)}:${changedAt}:${station}`,
         orderId: String(order.id), orderNumber: String(order.orderNumber), url,
-      }, typeof order.cafeId === 'string' ? order.cafeId : undefined);
+      }, typeof order.cafeId === 'string' ? order.cafeId : undefined, prepStation);
     }
     // Гости QR-меню стола видят смену статуса своего заказа.
     if (order.source === 'qr' && typeof order.tableId === 'string') {
@@ -3319,8 +3319,8 @@ export class OrdersService {
       orderNumber: order.orderNumber,
       channel: 'kitchen' as const,
     };
-    return Promise.all(stationPushTargets(stations).map(({ role, url }) =>
-      this.push.notifyRole(role, { ...payload, url }, order.cafeId),
+    return Promise.all(stationPushTargets(stations).map(({ role, url, prepStation }) =>
+      this.push.notifyRole(role, { ...payload, url }, order.cafeId, prepStation),
     ));
   }
 }

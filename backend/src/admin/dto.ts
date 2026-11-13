@@ -312,6 +312,9 @@ export class UpdateSetDto {
 
 // ---------- Персонал ----------
 export class CreateStaffDto {
+  @IsOptional() @IsString() @MaxLength(80)
+  prepStation?: string | null;
+
   @IsString() @IsNotEmpty() @MaxLength(80)
   name: string;
 
@@ -325,6 +328,9 @@ export class CreateStaffDto {
   password: string;
 }
 export class UpdateStaffDto {
+  @IsOptional() @IsString() @MaxLength(80)
+  prepStation?: string | null;
+
   @IsOptional() @IsString() @MaxLength(80)
   name?: string;
 

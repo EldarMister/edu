@@ -1,7 +1,9 @@
 require('ts-node/register/transpile-only');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { randomUUID } = require('node:crypto');
+const { randomInt, randomUUID } = require('node:crypto');
+const { JwtService } = require('@nestjs/jwt');
+const { AuthService } = require('../src/auth/auth.service.ts');
 const { PrismaClient } = require('@prisma/client');
 const { OrdersService } = require('../src/orders/orders.service.ts');
 const { SettingsService } = require('../src/settings/settings.service.ts');
@@ -12,6 +14,7 @@ const { lockOrder } = require('../src/orders/order-lock.ts');
 const { KitchenService } = require('../src/kitchen/kitchen.service.ts');
 const { PreparationStationsController } = require('../src/kitchen/preparation-stations.controller.ts');
 const { CatalogService } = require('../src/admin/catalog.service.ts');
+const { StaffService } = require('../src/admin/staff.service.ts');
 const { resolveStation } = require('../src/kitchen/preparation-stations.ts');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
@@ -24,7 +27,8 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
   const eventLog = [];
   const events = new Proxy({}, { get: (_, event) => (...args) => eventLog.push({ event, args }) });
   const audit = { log: async () => {} };
-  const push = { notifyRole: async () => {}, notifyUser: async () => {}, notifyWaiter: async () => {} };
+  const pushCalls = [];
+  const push = { notifyRole: async (...args) => pushCalls.push(args), notifyUser: async () => {}, notifyWaiter: async () => {} };
   try {
     await runWithTenant({ cafeId: cafe.id }, async () => {
       const makeUser = (name, role) => db.user.create({ data: { name, role, phone: randomUUID(), passwordHash: 'unused-test-hash' } });
@@ -90,7 +94,17 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         assert.equal(station.isBuiltIn, false);
         assert.ok((await stationApi.list(waiter)).some(({ id }) => id === station.id));
         await assert.rejects(stationApi.create(owner, { name: 'Кухня' }), /уже существует/);
-        assert.equal((await resolveStation(db, cooks[0], station.id)).id, station.id);
+        const staff = new StaffService(db, audit);
+        const phone = `+996700${String(randomInt(1_000_000)).padStart(6, '0')}`;
+        const password = 'test-password';
+        const cook = await staff.create({ name: 'Station cook', phone, role: 'KITCHEN', password, prepStation: station.id }, owner);
+        const auth = new AuthService(db, new JwtService());
+        const { user: assignedCook } = await auth.login({ phone, password });
+        assert.equal(assignedCook.id, cook.id);
+        assert.equal((await auth.me(cook.id)).prepStation, station.id);
+        assert.equal((await resolveStation(db, assignedCook)).id, station.id);
+        await assert.rejects(resolveStation(db, assignedCook, 'kitchen'), /Нет доступа/);
+        await assert.rejects(resolveStation(db, cooks[0], station.id), /Нет доступа/);
         await assert.rejects(resolveStation(db, cooks[0], 'bar'), /Нет доступа/);
         const otherCafe = await db.cafe.create({ data: { name: 'Foreign preparation stations' } });
         await runWithTenant({ cafeId: otherCafe.id }, async () => {
@@ -98,6 +112,7 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
           assert.deepEqual((await stationApi.list(foreign)).map(({ id }) => id), ['kitchen', 'bar']);
           await assert.rejects(resolveStation(db, foreign, station.id), /не найдена/);
           await assert.rejects(catalog.createCategory({ name: 'Invalid route', prepStation: station.id }, foreign), /действующую станцию/);
+          await assert.rejects(staff.create({ name: 'Foreign cook', phone: '+996700000000', role: 'KITCHEN', password, prepStation: station.id }, foreign), /действующую станцию/);
         });
         const customCategory = await catalog.createCategory({ name: 'Закуски', prepStation: station.id }, owner);
         const customDish = await catalog.createDish({ name: 'Салат', categoryId: customCategory.id, price: 90 }, owner);
@@ -106,11 +121,20 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         const order = await newOrder([{ dishId: dishes[0].id, quantity: 1 }, { dishId: customDish.id, quantity: 1 }, { dishId: barDish.id, quantity: 1 }]);
         const [kitchenLine, customLine, barLine] = order.items;
         assert.deepEqual(order.items.map(({ prepStation }) => prepStation), ['kitchen', station.id, 'bar']);
+        const stationPushes = pushCalls
+          .filter(([, payload]) => payload.orderId === order.id)
+          .map(([role, , targetCafe, prepStation]) => [role, targetCafe, prepStation]);
+        assert.deepEqual(stationPushes, [
+          ['KITCHEN', cafe.id, null],
+          ['KITCHEN', cafe.id, station.id],
+          ['BAR', cafe.id, station.id],
+          ['BAR', cafe.id, null],
+        ]);
         assert.deepEqual((await board.findByTab('new', station.id)).find(({ id }) => id === order.id).items.map(({ id }) => id), [customLine.id]);
         assert.ok(eventLog.some(({ event, args }) => event === 'emitToKitchen' && args[0] === 'kitchen:new_order' && args[1].voice.byStation[station.id]));
-        await assert.rejects(orders.kitchenReadyItems(order.id, [kitchenLine.id], cooks[0].id, station.id), /Нет блюд/);
-        await orders.stationAccept(order.id, cooks[0].id, station.id, station.name);
-        await orders.kitchenReadyItems(order.id, [customLine.id], cooks[0].id, station.id);
+        await assert.rejects(orders.kitchenReadyItems(order.id, [kitchenLine.id], assignedCook.id, station.id), /Нет блюд/);
+        await orders.stationAccept(order.id, assignedCook.id, station.id, station.name);
+        await orders.kitchenReadyItems(order.id, [customLine.id], assignedCook.id, station.id);
         const finished = (await board.findByTab('ready', station.id)).find(({ id }) => id === order.id);
         assert.deepEqual(finished.items.map(({ id }) => id), [customLine.id]);
         assert.ok(finished.stationHistoryAt instanceof Date);
@@ -122,9 +146,12 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         assert.equal((await board.findByTab('ready', station.id)).find(({ id }) => id === order.id).stationHistoryAt.getTime(), finished.stationHistoryAt.getTime());
         await assert.rejects(board.findByTab('ready', station.id, '2026-02-31'), /действительную дату/);
         await catalog.updateCategory(customCategory.id, { prepStation: 'kitchen' }, owner);
+        await assert.rejects(stationApi.update(owner, station.id, { isActive: false }), /переназначьте сотрудников/);
+        assert.equal((await staff.update(cook.id, { prepStation: null }, owner)).prepStation, null);
+        assert.equal((await resolveStation(db, (await auth.login({ phone, password })).user)).id, 'kitchen');
         const archived = await stationApi.update(owner, station.id, { isActive: false });
         assert.equal(archived.isActive, false);
-        assert.equal((await resolveStation(db, cooks[0], station.id)).isActive, false);
+        assert.equal((await resolveStation(db, owner, station.id)).isActive, false);
         assert.ok((await board.findByTab('ready', station.id)).some(({ id }) => id === order.id));
         await assert.rejects(catalog.updateCategory(customCategory.id, { prepStation: station.id }, owner), /действующую станцию/);
       });

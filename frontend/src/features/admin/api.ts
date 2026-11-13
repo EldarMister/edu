@@ -74,6 +74,7 @@ export interface AdminDishVariant {
   unit?: string;
 }
 export interface StaffMember {
+  prepStation?: string | null;
   id: string;
   name: string;
   phone: string;
@@ -813,6 +814,7 @@ export function useStaff(role: string, search: string) {
   });
 }
 export interface StaffInput {
+  prepStation?: string | null;
   name: string;
   phone: string;
   role: Role;
