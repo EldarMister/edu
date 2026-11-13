@@ -7,6 +7,8 @@ export const warehouseWriteoffReasons = {
   expired: 'Просрочка',
   damage: 'Брак',
   staff_meal: 'Питание персонала',
+  tasting: 'Дегустация',
+  household: 'Хозяйственные нужды',
   other: 'Другое',
 } satisfies Record<WarehouseWriteoffReason, string>;
 
@@ -37,7 +39,18 @@ export class UpdateWarehouseDocumentDto extends WarehouseDocumentRevisionDto {
   recount?: boolean;
 }
 
+export class ReverseWarehouseDocumentDto extends WarehouseDocumentRevisionDto {
+  @IsString() @IsNotEmpty() @MaxLength(1000)
+  note: string;
+}
+
 export class CreateWarehouseDocumentDto extends UpdateWarehouseDocumentDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  destinationWarehouseId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  sourcePurchaseId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  requestKey?: string;
   @IsString() @IsNotEmpty() @MaxLength(160)
   warehouseId: string;
 

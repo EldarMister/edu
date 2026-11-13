@@ -5,10 +5,10 @@ import { getCafeId } from '../tenant/tenant-context';
 const locationSelect = { id: true, cafeId: true, name: true, isDefault: true } as const;
 
 export type WarehouseLocation = Prisma.WarehouseGetPayload<{ select: typeof locationSelect }>;
-type IngredientBalance = { stock: Prisma.Decimal; avgCost: Prisma.Decimal };
-type IngredientWithBalance = IngredientBalance & { id: string };
+type IngredientBalance = { stock: Prisma.Decimal; avgCost: Prisma.Decimal; valuationKnown: boolean };
+type IngredientWithBalance = Pick<IngredientBalance, 'stock' | 'avgCost'> & { id: string; valuationKnown?: boolean };
 const zero = new Prisma.Decimal(0);
-const emptyBalance = { stock: zero, avgCost: zero };
+const emptyBalance = { stock: zero, avgCost: zero, valuationKnown: false };
 
 export async function resolveWarehouse(db: Prisma.TransactionClient, warehouseId?: string | null): Promise<WarehouseLocation | null> {
   const cafeId = getCafeId();
@@ -26,7 +26,7 @@ export async function resolveWarehouse(db: Prisma.TransactionClient, warehouseId
   const existing = await db.warehouse.findFirst({ where, select: locationSelect });
   if (existing) return existing;
   await db.warehouse.createMany({
-    data: { id: `warehouse:default:${cafeId}`, cafeId, name: 'Общий склад', isDefault: true },
+    data: { id: `warehouse:default:${cafeId}`, cafeId, name: 'Основной склад', isDefault: true },
     skipDuplicates: true,
   });
   return db.warehouse.findFirstOrThrow({ where, select: locationSelect });
@@ -44,10 +44,10 @@ export async function getWarehouseBalance(
   warehouse: WarehouseLocation | null,
   ingredient: IngredientWithBalance,
 ): Promise<IngredientBalance> {
-  if (!warehouse || warehouse.isDefault) return { stock: ingredient.stock, avgCost: ingredient.avgCost };
+  if (!warehouse || warehouse.isDefault) return { stock: ingredient.stock, avgCost: ingredient.avgCost, valuationKnown: ingredient.valuationKnown === true };
   return await db.warehouseStock.findUnique({
     where: { cafeId: warehouse.cafeId, warehouseId_ingredientId: { warehouseId: warehouse.id, ingredientId: ingredient.id } },
-    select: { stock: true, avgCost: true },
+    select: { stock: true, avgCost: true, valuationKnown: true },
   }) ?? emptyBalance;
 }
 
@@ -78,7 +78,7 @@ export async function warehouseBalances(
   const rows = cafeId && ingredients.length && !warehouse?.isDefault
     ? await db.warehouseStock.findMany({
         where: { cafeId, warehouseId: warehouse?.id, ingredientId: { in: ingredients.map(({ id }) => id) } },
-        select: { ingredientId: true, stock: true, avgCost: true },
+        select: { ingredientId: true, stock: true, avgCost: true, valuationKnown: true },
       })
     : [];
   const byIngredient = new Map<string, IngredientBalance[]>();
@@ -107,6 +107,7 @@ export async function warehouseBalances(
     const avgCost = balances.length === 1 ? balances[0].avgCost
       : positiveStock.gt(0) ? positiveValue.div(positiveStock)
       : balances[0]?.avgCost ?? zero;
-    return [ingredient.id, { stock, avgCost, stockValue }];
+    const valuationKnown = balances.length > 0 && balances.every((balance) => balance.stock.isZero() || balance.valuationKnown === true) && balances.some((balance) => balance.stock.gt(0));
+    return [ingredient.id, { stock, avgCost, stockValue, valuationKnown }];
   }));
 }

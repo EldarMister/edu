@@ -42,7 +42,7 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
       const hall = await db.hall.create({ data: { name: 'Test hall' } });
       const category = await db.category.create({ data: { name: 'Test menu' } });
       const dishes = await Promise.all(['Роллы', 'Пицца', 'Шашлык', 'Салат'].map((name, i) => db.dish.create({ data: { name, categoryId: category.id, price: 100, trackInventory: true, stock: 1000 } })));
-      const ingredient = await db.ingredient.create({ data: { name: 'Test rice', unitType: 'mass', displayUnit: 'g', stock: 100000, avgCost: 1 } });
+      const ingredient = await db.ingredient.create({ data: { name: 'Test rice', unitType: 'mass', displayUnit: 'g', stock: 100000, avgCost: 1, valuationKnown: true } });
       await db.recipeItem.create({ data: { dishId: dishes[0].id, ingredientId: ingredient.id, amount: 10 } });
       const settings = new SettingsService(db, audit, events);
       const orders = new OrdersService(db, events, { getRequiredActiveShift: async () => shift }, push, settings, { recalculateDishes: async () => {} }, audit, new IngredientStockService());
@@ -213,7 +213,7 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         const { locations } = await warehouseApi.list(cafe.id);
         const common = locations.find(({ isDefault }) => isDefault);
         const createIngredient = (name, stock, avgCost) => db.ingredient.create({ data: {
-          name, unitType: 'count', displayUnit: 'pcs', stock, avgCost,
+          name, unitType: 'count', displayUnit: 'pcs', stock, avgCost, valuationKnown: true,
         } });
         const soda = await createIngredient('Кола', 20, 5);
         const commonCup = await createIngredient('Стакан', 20, 2);

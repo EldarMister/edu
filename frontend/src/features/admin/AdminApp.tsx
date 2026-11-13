@@ -36,6 +36,7 @@ import { AuditPage } from './pages/AuditPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
 import { ReceiptPrintsPage } from './pages/ReceiptPrintsPage';
 import { WarehouseSection } from './pages/warehouse/WarehouseSection';
+import { WAREHOUSE_NAV, MENU_NAV, type WarehouseView, type MenuView } from './pages/warehouse/navigation';
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -50,8 +51,30 @@ const TEENS = [
   'восемнадцать',
   'девятнадцать',
 ];
-const TENS = ['', '', 'двадцать', 'тридцать', 'сорок', 'пятьдесят', 'шестьдесят', 'семьдесят', 'восемьдесят', 'девяносто'];
-const HUNDREDS = ['', 'сто', 'двести', 'триста', 'четыреста', 'пятьсот', 'шестьсот', 'семьсот', 'восемьсот', 'девятьсот'];
+const TENS = [
+  '',
+  '',
+  'двадцать',
+  'тридцать',
+  'сорок',
+  'пятьдесят',
+  'шестьдесят',
+  'семьдесят',
+  'восемьдесят',
+  'девяносто',
+];
+const HUNDREDS = [
+  '',
+  'сто',
+  'двести',
+  'триста',
+  'четыреста',
+  'пятьсот',
+  'шестьсот',
+  'семьсот',
+  'восемьсот',
+  'девятьсот',
+];
 
 function numberToWords(n: number): string {
   if (!Number.isFinite(n) || n < 0 || n >= 1000) return String(n);
@@ -73,8 +96,13 @@ function numberToWords(n: number): string {
 
 function receiptRequestVoice(request: ReceiptPrintRequest): string {
   const documentName = request.type === 'preliminary' ? 'счёта' : 'чека';
-  const tableNumber = Number.isInteger(request.tableNumber) ? numberToWords(request.tableNumber) : String(request.tableNumber);
-  return request.voice?.text ?? `Официант ${request.waiterName} отправил заявку на печать ${documentName}. Стол номер ${tableNumber}.`;
+  const tableNumber = Number.isInteger(request.tableNumber)
+    ? numberToWords(request.tableNumber)
+    : String(request.tableNumber);
+  return (
+    request.voice?.text ??
+    `Официант ${request.waiterName} отправил заявку на печать ${documentName}. Стол номер ${tableNumber}.`
+  );
 }
 import { SettingsPage } from '../settings/SettingsPage';
 
@@ -92,7 +120,13 @@ type Section =
 
 // perm — ключ права раздела (управляется через «Права доступа» сотрудника).
 // adminOnly — раздел структурно только для админа (владельцу не показываем).
-const SECTIONS: { key: Section; label: string; icon: typeof IconStats; perm: SectionKey; adminOnly?: boolean }[] = [
+const SECTIONS: {
+  key: Section;
+  label: string;
+  icon: typeof IconStats;
+  perm: SectionKey;
+  adminOnly?: boolean;
+}[] = [
   { key: 'stats', label: 'Статистика', icon: IconStats, perm: 'statistics' },
   { key: 'orders', label: 'Заказы', icon: IconOrders, perm: 'orders' },
   { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks', adminOnly: true },
@@ -115,7 +149,7 @@ export function AdminApp() {
   const qc = useQueryClient();
   const pushNotification = useNotifications((state) => state.push);
   const t = useT();
-  const { canSection } = usePermissions();
+  const { canSection, can } = usePermissions();
   const isOwner = user?.role === 'OWNER';
   const isAdmin = user?.role === 'ADMIN';
 
@@ -126,6 +160,8 @@ export function AdminApp() {
   });
   const [section, setSection] = useState<Section>(isOwner ? 'stats' : 'orders');
   const [mobileNav, setMobileNav] = useState(false);
+  const [warehouseView, setWarehouseView] = useState<WarehouseView>('balances');
+  const [menuView, setMenuView] = useState<MenuView>('all');
   const edgeSwipe = useRef<{ x: number; y: number } | null>(null);
   const drawerPull = useRef<{ x: number; y: number } | null>(null);
 
@@ -141,8 +177,7 @@ export function AdminApp() {
       drawerPull.current = null;
     }
   }, [mobileNav]);
-  const invalidateReceipts = () =>
-    qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
+  const invalidateReceipts = () => qc.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] });
 
   // Живое обновление: при изменении статуса заказа обновляем admin-данные.
   useSocketEvent<Order>('order:status_changed', (order) => {
@@ -273,21 +308,57 @@ export function AdminApp() {
       <div className="flex h-16 items-center px-5">
         <BrandLogo />
       </div>
-      <nav className="flex-1 space-y-1 px-3 py-2">
+      <nav className="app-scrollbar-subtle min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
         {sections.map((s) => {
           const Icon = s.icon;
           const active = s.key === section;
+          const children =
+            s.key === 'warehouse'
+              ? WAREHOUSE_NAV.filter(
+                  (item) =>
+                    (!item.permission || can(`actions.${item.permission}`)) &&
+                    (!item.costs || can('actions.warehouseCosts')),
+                )
+              : s.key === 'menu'
+                ? MENU_NAV
+                : [];
           return (
-            <button
-              key={s.key}
-              onClick={() => go(s.key)}
-              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${
-                active ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-              }`}
-            >
-              <Icon />
-              {t(s.label)}
-            </button>
+            <div key={s.key}>
+              <button
+                onClick={() => go(s.key)}
+                aria-expanded={children.length ? active : undefined}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${active ? 'bg-primary/10 text-primary' : 'text-text-secondary hover:bg-background'}`}
+              >
+                <Icon />
+                {t(s.label)}
+                {children.length > 0 && (
+                  <span className="ml-auto text-xs" aria-hidden>
+                    {active ? '⌄' : '›'}
+                  </span>
+                )}
+              </button>
+              {active && children.length > 0 && (
+                <div className="mb-2 ml-5 space-y-0.5 border-l border-border pl-2">
+                  {children.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      aria-current={
+                        (s.key === 'warehouse' ? warehouseView : menuView) === item.key ? 'page' : undefined
+                      }
+                      onClick={() => {
+                        if (s.key === 'warehouse') setWarehouseView(item.key as WarehouseView);
+                        else setMenuView(item.key as MenuView);
+                        setMobileNav(false);
+                      }}
+                      className={`block w-full rounded-lg px-3 py-2 text-left text-[13px] transition-colors ${(s.key === 'warehouse' ? warehouseView : menuView) === item.key ? 'bg-primary text-white font-medium' : 'text-text-secondary hover:bg-background'}`}
+                    >
+                      {t(item.label)}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           );
         })}
       </nav>
@@ -345,19 +416,37 @@ export function AdminApp() {
               onClick={() => setMobileNav(true)}
               aria-label="Меню"
             >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <h1 className="text-xl font-semibold text-text-primary lg:text-2xl">{current ? t(current.label) : ''}</h1>
+            <h1 className="text-xl font-semibold text-text-primary lg:text-2xl">
+              {current
+                ? t(
+                    section === 'warehouse'
+                      ? (WAREHOUSE_NAV.find((item) => item.key === warehouseView)?.label ?? current.label)
+                      : section === 'menu'
+                        ? (MENU_NAV.find((item) => item.key === menuView)?.label ?? current.label)
+                        : current.label,
+                  )
+                : ''}
+            </h1>
           </div>
           <div className="flex items-center gap-3">
             <ConnectionStatus />
           </div>
         </header>
 
-        <main className={`app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}>
-
+        <main
+          className={`app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
+        >
           {!current ? (
             <NoAccessScreen />
           ) : (
@@ -366,8 +455,17 @@ export function AdminApp() {
               {section === 'orders' && canSection('orders') && <OrdersPage />}
               {section === 'receipts' && isAdmin && canSection('checks') && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
-              {section === 'menu' && canSection('menu') && <MenuPage />}
-              {section === 'warehouse' && canSection('warehouse') && <WarehouseSection />}
+              {section === 'menu' && canSection('menu') && <MenuPage view={menuView} onView={setMenuView} />}
+              {section === 'warehouse' && canSection('warehouse') && (
+                <WarehouseSection
+                  view={warehouseView}
+                  onView={setWarehouseView}
+                  onMenu={(view) => {
+                    setMenuView(view);
+                    setSection('menu');
+                  }}
+                />
+              )}
               {section === 'staff' && canSection('staff') && <StaffPage />}
               {section === 'audit' && canSection('journal') && <AuditPage />}
               {section === 'reconcile' && canSection('paymentReconciliation') && <ReconciliationPage />}
@@ -385,13 +483,24 @@ function NoAccessScreen() {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
       <div className="flex h-14 w-14 items-center justify-center rounded-full bg-background text-text-light">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+        <svg
+          width="28"
+          height="28"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
           <rect x="5" y="11" width="14" height="10" rx="2" />
           <path d="M8 11V7a4 4 0 0 1 8 0v4" />
         </svg>
       </div>
       <p className="text-base font-medium text-text-primary">У вас нет доступа к этому разделу</p>
-      <p className="max-w-xs text-sm text-text-muted">Обратитесь к владельцу или администратору, чтобы открыть доступ.</p>
+      <p className="max-w-xs text-sm text-text-muted">
+        Обратитесь к владельцу или администратору, чтобы открыть доступ.
+      </p>
     </div>
   );
 }

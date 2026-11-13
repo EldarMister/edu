@@ -6,6 +6,8 @@ export const WRITEOFF_REASONS: { value: WriteoffReason; label: string }[] = [
   { value: 'expired', label: 'Просрочка' },
   { value: 'damage', label: 'Брак' },
   { value: 'staff_meal', label: 'Питание персонала' },
+  { value: 'tasting', label: 'Дегустация' },
+  { value: 'household', label: 'Хозяйственные нужды' },
   { value: 'other', label: 'Другое' },
 ];
 
@@ -13,6 +15,7 @@ const STATUS_LABEL: Record<StockDocumentStatus, string> = {
   draft: 'Черновик',
   submitted: 'На утверждении',
   posted: 'Проведён',
+  reversed: 'Сторнирован',
 };
 
 const DOCUMENT_DATE = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short' });
@@ -22,7 +25,10 @@ export function documentStatus(status: StockDocumentStatus) {
 }
 
 export function documentLabel(document: StockDocument) {
-  if (document.kind === 'inventory') return document.mode === 'full' ? 'Полная инвентаризация' : 'Частичная инвентаризация';
+  if (document.kind === 'transfer') return 'Перемещение';
+  if (document.kind === 'supplier_return') return 'Возврат поставщику';
+  if (document.kind === 'inventory')
+    return document.mode === 'full' ? 'Полная инвентаризация' : 'Частичная инвентаризация';
   return WRITEOFF_REASONS.find(({ value }) => value === document.reason)?.label ?? 'Списание';
 }
 

@@ -1,3 +1,5 @@
+import { ModifierPicker } from './ModifierPicker';
+import type { CartModifiers } from './cart';
 import { usePublicSettings } from '@/features/settings/api';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
 import { useEffect, useMemo, useState } from 'react';
@@ -130,6 +132,7 @@ export function WaiterApp() {
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [pendingTableId, setPendingTableId] = useState<string | null>(null);
   const [cartSheetOpen, setCartSheetOpen] = useState(false);
+  const [modifierLine, setModifierLine] = useState<CartLine | null>(null);
   const [replacementTarget, setReplacementTarget] = useState<ReplacementTarget | null>(null);
   const [idemKey, setIdemKey] = useState(() => clientId());
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
@@ -370,6 +373,7 @@ export function WaiterApp() {
             ...origin,
             dish,
             comment: it.comment ?? undefined,
+            modifierSelections: it.modifierSelections, excludedIngredientIds: it.excludedIngredientIds, excludedIngredientNames: it.excludedIngredientNames,
             quantity: it.quantity,
             takeaway: it.takeaway ?? undefined,
             lineId: `set-edit-${it.id}`,
@@ -386,6 +390,7 @@ export function WaiterApp() {
           weightGrams: it.weightGrams ?? undefined,
           quantity: it.quantity,
           comment: it.comment ?? undefined,
+            modifierSelections: it.modifierSelections, excludedIngredientIds: it.excludedIngredientIds, excludedIngredientNames: it.excludedIngredientNames,
           takeaway: it.takeaway ?? undefined,
         } as CartLine;
       })
@@ -529,39 +534,33 @@ export function WaiterApp() {
     }
   }
 
-  function addDishToCart(dish: Parameters<typeof cart.add>[0], variant?: DishVariant, weightGrams?: number) {
-    if (dish.trackInventory) {
-      const currentQty = (variant ? cartQuantities[variant.id] : cartQuantities[dish.id]) ?? 0;
-      const stock = variant ? variant.stock : dish.stock;
-      if (stock !== undefined && stock !== null && currentQty >= stock) {
-        push({ message: `Недостаточно на складе. Остаток: ${stock}`, type: 'error', at: new Date().toISOString() });
-        return;
-      }
-    }
+  function addDishToCart(dish: Parameters<typeof cart.add>[0], variant?: DishVariant, weightGrams?: number, modifiers?: CartModifiers) {
+    if ((dish.hasModifiers || dish.allowIngredientExclusions) && !modifiers) { setModifierLine({ dish, variant, weightGrams, quantity: 1 }); return; }
 
     if (replacementTarget) {
-      void replaceRejectedWithLine({ dish, variant, weightGrams, quantity: 1 });
+      void replaceRejectedWithLine({ dish, variant, weightGrams, quantity: 1, ...modifiers });
       return;
     }
 
-    const key = cartLineKeyFromParts(dish.id, variant?.id, weightGrams);
-    const nextQuantity = (cart.lines.find((line) => cartLineKeyFromParts(line.dish.id, line.variant?.id, line.weightGrams) === key)?.quantity ?? 0) + 1;
-    cart.add(dish, variant, weightGrams);
+    const key = cartLineKeyFromParts(dish.id, variant?.id, weightGrams, modifiers);
+    const nextQuantity = (cart.lines.find((line) => cartLineKeyFromParts(line.dish.id, line.variant?.id, line.weightGrams, line) === key)?.quantity ?? 0) + 1;
+    cart.add(dish, variant, weightGrams, modifiers);
     const name = cartLineName({ dish, variant, weightGrams, quantity: 1 });
     push({ message: `${name} ×${nextQuantity} добавлено`, at: new Date().toISOString(), durationMs: 1800 });
   }
 
-  function addSetToCart(set: Parameters<typeof cart.addSet>[0], components: Parameters<typeof cart.addSet>[1]) {
+  function addSetToCart(set: Parameters<typeof cart.addSet>[0], components: Parameters<typeof cart.addSet>[1], modifiers?: CartModifiers) {
+    if ((set.hasModifiers || set.allowIngredientExclusions) && !modifiers) { setModifierLine({ dish: set, quantity: 1, set: { components } }); return; }
     if (replacementTarget) {
       void replaceRejectedWithLine({
         dish: set,
         quantity: 1,
         lineId: `set-replacement-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        set: { components },
+        set: { components }, ...modifiers,
       });
       return;
     }
-    cart.addSet(set, components);
+    cart.addSet(set, components, modifiers);
     push({ message: `${set.name} добавлен`, at: new Date().toISOString(), durationMs: 1800 });
   }
 
@@ -975,6 +974,11 @@ export function WaiterApp() {
       )}
 
       {/* Корзина как bottom sheet поверх меню */}
+      {modifierLine && <ModifierPicker key={modifierLine.dish.id} line={modifierLine} onClose={() => setModifierLine(null)} onConfirm={(modifiers) => {
+        if (modifierLine.set) addSetToCart(modifierLine.dish, modifierLine.set.components, modifiers);
+        else addDishToCart(modifierLine.dish, modifierLine.variant, modifierLine.weightGrams, modifiers);
+        setModifierLine(null);
+      }} />}
       <CartSheet
         open={cartSheetOpen && tab === 'menu' && !replacementTarget}
         onClose={() => setCartSheetOpen(false)}

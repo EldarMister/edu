@@ -10,6 +10,8 @@ interface TableCart {
   commentOpen: boolean;
 }
 
+export type CartModifiers = Pick<CartLine, 'modifierSelections' | 'excludedIngredientIds' | 'excludedIngredientNames'>;
+
 interface CartState {
   tableId: string | null;
   // Зеркало корзины активного стола (для удобства потребителей).
@@ -21,13 +23,14 @@ interface CartState {
   selectTable: (tableId: string) => void;
   // Переносит текущий черновик корзины на другой стол (смена стола на экране меню).
   moveDraftTo: (targetTableId: string) => void;
-  add: (dish: Dish, variant?: DishVariant, weightGrams?: number) => void;
+  add: (dish: Dish, variant?: DishVariant, weightGrams?: number, modifiers?: CartModifiers) => void;
   /** Добавляет сет отдельной линией (сеты не сливаются — у каждого свой состав). */
-  addSet: (dish: Dish, components: CartSetComponent[]) => void;
+  addSet: (dish: Dish, components: CartSetComponent[], modifiers?: CartModifiers) => void;
   replaceLines: (lines: CartLine[], comment: string) => void;
   inc: (lineKey: string) => void;
   dec: (lineKey: string) => void;
   remove: (lineKey: string) => void;
+  setLineModifiers: (lineKey: string, modifiers: CartModifiers) => void;
   setLineComment: (lineKey: string, comment: string) => void;
   setLineTakeaway: (lineKey: string, takeaway: boolean) => void;
   /** Пометить «с собой» все позиции (тумблер на весь заказ). */
@@ -40,12 +43,14 @@ interface CartState {
 
 const EMPTY: TableCart = { lines: [], comment: '', commentOpen: false };
 
-export function cartLineKeyFromParts(dishId: string, variantId?: string | null, weightGrams?: number | null) {
-  return `${dishId}:${variantId ?? 'base'}:${weightGrams ?? 'fixed'}`;
+export function cartLineKeyFromParts(dishId: string, variantId?: string | null, weightGrams?: number | null, modifiers?: CartModifiers) {
+  const selected = (modifiers?.modifierSelections ?? []).map((option) => `${option.optionId}:${option.quantity}`).sort().join(',');
+  const excluded = (modifiers?.excludedIngredientIds ?? []).slice().sort().join(',');
+  return `${dishId}:${variantId ?? 'base'}:${weightGrams ?? 'fixed'}:${selected}:${excluded}`;
 }
 
 export function cartLineKey(line: CartLine) {
-  return line.lineId ?? cartLineKeyFromParts(line.dish.id, line.variant?.id, line.weightGrams);
+  return line.lineId ?? cartLineKeyFromParts(line.dish.id, line.variant?.id, line.weightGrams, line);
 }
 
 export function cartLineName(line: CartLine) {
@@ -67,10 +72,11 @@ export function cartSetChanged(line: CartLine) {
 }
 
 export function cartLineBasePrice(line: CartLine) {
+  const extra = (line.modifierSelections ?? []).reduce((sum, option) => sum + Number(option.price) * option.quantity, 0);
   if (line.dish.isWeighted && line.weightGrams) {
-    return Number(line.dish.price) * line.weightGrams / (line.dish.weightedPriceBase ?? 100);
+    return Number(line.dish.price) * line.weightGrams / (line.dish.weightedPriceBase ?? 100) + extra;
   }
-  return line.variant?.price ?? line.dish.price;
+  return Number(line.variant?.price ?? line.dish.price) + extra;
 }
 
 export function cartLineUnitPrice(line: CartLine) {
@@ -122,19 +128,19 @@ export const useCart = create<CartState>((set) => ({
       };
     }),
 
-  add: (dish, variant, weightGrams) =>
+  add: (dish, variant, weightGrams, modifiers) =>
     set((s) =>
       mutate(s, (c) => {
-        const key = cartLineKeyFromParts(dish.id, variant?.id, weightGrams);
+        const key = cartLineKeyFromParts(dish.id, variant?.id, weightGrams, modifiers);
         const existing = c.lines.find((l) => cartLineKey(l) === key);
         const lines = existing
           ? c.lines.map((l) => (cartLineKey(l) === key ? { ...l, quantity: l.quantity + 1 } : l))
-          : [...c.lines, { dish, variant, weightGrams, quantity: 1 }];
+          : [...c.lines, { dish, variant, weightGrams, quantity: 1, ...modifiers }];
         return { ...c, lines };
       }),
     ),
 
-  addSet: (dish, components) =>
+  addSet: (dish, components, modifiers) =>
     set((s) =>
       mutate(s, (c) => ({
         ...c,
@@ -145,6 +151,7 @@ export const useCart = create<CartState>((set) => ({
             quantity: 1,
             lineId: `set-${Date.now()}-${Math.random().toString(36).slice(2)}`,
             set: { components },
+            ...modifiers,
           },
         ],
       })),
@@ -175,6 +182,8 @@ export const useCart = create<CartState>((set) => ({
 
   remove: (lineKey) =>
     set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.filter((l) => cartLineKey(l) !== lineKey || l.editAllowed === false || l.cancelAllowed === false) }))),
+
+  setLineModifiers: (lineKey, modifiers) => set((s) => mutate(s, (c) => ({ ...c, lines: c.lines.map((line) => cartLineKey(line) === lineKey && line.editAllowed !== false && line.cancelAllowed !== false ? { ...line, ...modifiers, lineId: line.lineId ?? `configured-${Date.now()}-${Math.random().toString(36).slice(2)}` } : line) }))),
 
   setLineComment: (lineKey, comment) =>
     set((s) =>

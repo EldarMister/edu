@@ -6,10 +6,11 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import {
-  CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WarehouseDocumentRevisionDto,
+  ReverseWarehouseDocumentDto, CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WarehouseDocumentRevisionDto,
   WarehouseDocumentsQueryDto, warehouseWriteoffReasons,
 } from './documents.dto';
 import { WarehouseDocumentsService } from './documents.service';
+import { assertWarehousePermission } from './warehouse-permissions';
 
 @Controller('admin/warehouse/documents')
 @Roles(Role.OWNER, Role.ADMIN)
@@ -34,34 +35,52 @@ export class WarehouseDocumentsController {
 
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateWarehouseDocumentDto) {
+    this.assertDocumentPermission(user, dto.kind);
     return this.documents.create(user, dto);
   }
 
   @Patch(':id')
-  update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateWarehouseDocumentDto) {
+  async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateWarehouseDocumentDto) {
+    this.assertDocumentPermission(user, (await this.documents.get(id)).kind);
     return this.documents.update(user, id, dto);
   }
 
   @Post(':id/submit')
   async submit(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: WarehouseDocumentRevisionDto) {
+    this.assertDocumentPermission(user, (await this.documents.get(id)).kind);
     const document = await this.documents.submit(user, id, dto?.revision);
     this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
     return document;
   }
 
   @Post(':id/approve')
-  @Roles(Role.OWNER)
   async approve(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: WarehouseDocumentRevisionDto) {
+    const kind = (await this.documents.get(id)).kind;
+    if (kind === 'inventory' || kind === 'writeoff') assertWarehousePermission(user, 'warehouseApprove');
+    else this.assertDocumentPermission(user, kind);
     const document = await this.documents.approve(user, id, dto?.revision);
     this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
     return document;
   }
 
+  @Post(':id/reverse')
+  @RequirePermission('actions.warehouseApprove')
+  async reverse(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ReverseWarehouseDocumentDto) {
+    const document = await this.documents.reverse(user, id, dto.note, dto.revision);
+    this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
+    return document;
+  }
+
   @Post(':id/reopen')
-  @Roles(Role.OWNER)
+  @RequirePermission('actions.warehouseApprove')
   async reopen(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: WarehouseDocumentRevisionDto) {
     const document = await this.documents.reopen(user, id, dto?.revision);
     this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
     return document;
+  }
+
+  private assertDocumentPermission(user: AuthUser, kind: string) {
+    assertWarehousePermission(user, kind === 'inventory' ? 'warehouseCount' : kind === 'writeoff' ? 'warehouseWriteoff'
+      : kind === 'transfer' ? 'warehouseTransfer' : 'warehouseReceive');
   }
 }

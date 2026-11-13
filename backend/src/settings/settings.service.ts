@@ -8,6 +8,7 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { UpdateSettingsDto } from './dto';
 import { normalizeWaiterOrderPermissions, validateWaiterOrderPermissions } from '../orders/order-policy';
+import { getCafeId } from '../tenant/tenant-context';
 
 /** Человекочитаемые названия полей настроек для описаний аудита. */
 const SETTINGS_FIELD_LABELS: Record<string, string> = {
@@ -68,6 +69,8 @@ export class SettingsService {
    *  findFirst/create скоупятся по cafeId middleware'ом (контекст тенанта).
    *  Без контекста (фоновые/публичные) — вернётся единственная строка. */
   async ensure(): Promise<Settings> {
+    const cafeId = getCafeId();
+    if (cafeId) return this.prisma.settings.upsert({ where: { cafeId }, create: { cafeId }, update: {} });
     const existing = await this.prisma.settings.findFirst();
     if (existing) return existing;
     return this.prisma.settings.create({ data: {} });

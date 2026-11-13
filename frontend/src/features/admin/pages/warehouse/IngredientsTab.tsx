@@ -1,408 +1,206 @@
 import { useState } from 'react';
-import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
-import { Spinner } from '@/components/Spinner';
-import { apiError } from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
 import { money } from '@/lib/format';
-import { useNotifications } from '@/store/notifications';
-import { StatCard, StatCardsRow } from '../../components/StatCard';
-import { IconCategory, IconEdit, IconPlus, IconTrash, IconMoney } from '../../components/icons';
-import {
-  useIngredients,
-  useIngredientsOverview,
-  useIngredientMutations,
-  qty,
-  type Ingredient,
-  type IngredientInput,
-  type WarehouseLocation,
-  useWarehouseLocationMutations,
-} from './api';
-import { UNIT_OPTIONS, costUnitLabel, unitsForType, unitTypeOf, type UnitCode } from './units';
-
-export function IngredientsTab({ warehouse, locations }: { warehouse: WarehouseLocation; locations: WarehouseLocation[] }) {
+import { ITEM_KINDS, qty, useIngredients, type Ingredient } from './api';
+import { QueryState } from './WarehouseUi';
+export type StockFilter = '' | 'low' | 'empty';
+export function IngredientsTab({
+  warehouseId,
+  filter,
+  onFilter,
+  onOpen,
+  onCreate,
+  onHistory,
+  onProduce,
+  catalogue = false,
+}: {
+  warehouseId?: string;
+  filter: StockFilter;
+  onFilter: (v: StockFilter) => void;
+  onOpen: (i: Ingredient) => void;
+  onCreate: () => void;
+  onHistory: (id: string) => void;
+  onProduce: (i: Ingredient) => void;
+  catalogue?: false | 'ingredients' | 'preparations';
+}) {
+  const { can } = usePermissions();
+  const costs = can('actions.warehouseCosts');
   const [search, setSearch] = useState('');
-  const [modal, setModal] = useState<Ingredient | null | 'new'>(null);
-  const [transferOpen, setTransferOpen] = useState(false);
-
-  const overview = useIngredientsOverview(warehouse.id);
-  const itemsQ = useIngredients(search, warehouse.id);
-  const { remove } = useIngredientMutations();
-  const push = useNotifications((s) => s.push);
-  const o = overview.data;
-
-  async function onDelete(item: Ingredient) {
-    if (!confirm(`Удалить «${item.name}»? Если сырьё используется в техкартах — оно будет деактивировано.`)) return;
-    try {
-      const res: any = await remove.mutateAsync(item.id);
-      push({
-        message: res?.deactivated ? 'Сырьё деактивировано (используется в техкартах)' : 'Сырьё удалено',
-        at: new Date().toISOString(),
-      });
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
-    }
-  }
-
+  const [kind, setKind] = useState('');
+  const [category, setCategory] = useState('');
+  const query = useIngredients(search, warehouseId);
+  const rows = (query.data ?? []).filter(
+    (i) =>
+      (catalogue === 'preparations'
+        ? i.isPrepared
+        : catalogue === 'ingredients'
+          ? !i.isPrepared && i.kind !== 'goods' && i.kind !== 'beverage'
+          : true) &&
+      (!kind || i.kind === kind) &&
+      (!category || i.category === category) &&
+      (!filter || (filter === 'empty' ? i.stock <= 0 : i.isLow && i.stock > 0)),
+  );
+  const categories = [...new Set((query.data ?? []).flatMap((i) => (i.category ? [i.category] : [])))].sort();
+  const type = (i: Ingredient) =>
+    ITEM_KINDS.find((k) => k.value === i.kind)?.label ?? (i.isPrepared ? 'Полуфабрикат' : 'Ингредиент');
+  const stock = (i: Ingredient) => (i.preparationMode === 'virtual' ? 'По рецепту' : qty(i.stock, i.unit));
+  const actions = (i: Ingredient) => (
+    <div className="flex flex-wrap justify-end gap-2">
+      {can('actions.warehouseReports') && costs && (
+        <button className="btn-ghost btn-md" onClick={() => onHistory(i.id)}>
+          История
+        </button>
+      )}
+      {i.isPrepared && i.preparationMode !== 'virtual' && can('actions.warehouseProduce') && (
+        <button className="btn-secondary btn-md" onClick={() => onProduce(i)}>
+          Приготовить
+        </button>
+      )}
+    </div>
+  );
   return (
-    <div className="space-y-4">
-      <StatCardsRow>
-        <StatCard label="Всего ингредиентов" value={o?.totalIngredients ?? '—'} icon={<IconCategory />} tone="primary" />
-        <StatCard label="Низкий остаток" value={o?.lowStockCount ?? '—'} icon={<IconTrash />} tone="warning" />
-        <StatCard
-          label="Средняя себестоимость"
-          value={o ? money(o.avgCost) : '—'}
-          icon={<IconMoney />}
-          tone="success"
+    <div className="card overflow-hidden">
+      <div className="flex flex-wrap gap-2 border-b border-border p-4">
+        <input
+          aria-label="Поиск позиции"
+          className="input h-10 min-w-40 flex-1 sm:max-w-xs"
+          placeholder="Поиск по названию или штрихкоду"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
         />
-      </StatCardsRow>
-
-      <div className="card overflow-hidden">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border p-4">
-          <input
-            className="input h-10 sm:max-w-xs"
-            placeholder="Поиск по сырью"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
+        {!catalogue && (
+          <Select
+            ariaLabel="Тип"
+            className="h-10 min-w-36"
+            value={kind}
+            onChange={setKind}
+            options={[{ value: '', label: 'Все типы' }, ...ITEM_KINDS]}
           />
-          <div className="flex flex-wrap gap-2">
-            {locations.length > 1 && (
-              <button type="button" className="btn-secondary btn-md" onClick={() => setTransferOpen(true)}>Переместить</button>
-            )}
-            <button type="button" className="btn-primary btn-md font-medium" onClick={() => setModal('new')}>
-              <IconPlus className="h-4 w-4" /> Добавить сырьё
-            </button>
-          </div>
-        </div>
-
-        {itemsQ.isLoading ? (
-          <div className="flex justify-center py-12 text-primary">
-            <Spinner className="h-6 w-6" />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead>
-                <tr className="border-b border-border bg-background/50 text-left text-xs text-text-muted">
-                  <th className="px-4 py-3 font-medium">Ингредиент</th>
-                  <th className="px-4 py-3 text-center font-medium">Ед. изм.</th>
-                  <th className="px-4 py-3 text-center font-medium">Текущий остаток</th>
-                  <th className="px-4 py-3 text-center font-medium">Ср. себестоимость</th>
-                  <th className="px-4 py-3 text-center font-medium">Порог низкого остатка</th>
-                  <th className="px-4 py-3 font-medium">Статус</th>
-                  <th className="px-4 py-3 text-right font-medium">Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                {itemsQ.data?.map((item) => (
-                  <tr key={item.id} className="border-b border-border last:border-0 hover:bg-background/60">
-                    <td className="px-4 py-3 font-medium text-text-primary">{item.name}</td>
-                    <td className="px-4 py-3 text-center text-text-secondary">{item.unit}</td>
-                    <td className="px-4 py-3 text-center font-medium text-text-primary">
-                      {qty(item.stock, item.unit)}
-                    </td>
-                    <td className="px-4 py-3 text-center text-text-secondary">
-                      {money(item.avgCost)}/{item.unit}
-                    </td>
-                    <td className="px-4 py-3 text-center text-text-secondary">
-                      {qty(item.lowStockThreshold, item.unit)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge tone={item.isLow ? 'warning' : 'success'}>{item.isLow ? 'Низкий' : 'Норма'}</Badge>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => setModal(item)}
-                          className="p-2 text-text-light transition-colors hover:text-primary"
-                          title="Редактировать"
-                        >
-                          <IconEdit className="h-4 w-4" />
-                        </button>
-                        <button
-                          onClick={() => onDelete(item)}
-                          className="p-2 text-text-light transition-colors hover:text-danger"
-                          title="Удалить / деактивировать"
-                        >
-                          <IconTrash className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {itemsQ.data?.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="px-4 py-10 text-center text-text-muted">
-                      Сырьё не найдено
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+        )}
+        <Select
+          ariaLabel="Категория"
+          className="h-10 min-w-36"
+          value={category}
+          onChange={setCategory}
+          options={[
+            { value: '', label: 'Все категории' },
+            ...categories.map((c) => ({ value: c, label: c })),
+          ]}
+        />
+        <Select
+          ariaLabel="Остатки"
+          className="h-10 min-w-36"
+          value={filter}
+          onChange={(v) => onFilter(v as StockFilter)}
+          options={[
+            { value: '', label: 'Все остатки' },
+            { value: 'low', label: 'Ниже лимита' },
+            { value: 'empty', label: 'Закончилось' },
+          ]}
+        />
+        {can('actions.warehouseReceive') && (
+          <button className="btn-primary btn-md ml-auto" onClick={onCreate}>
+            {catalogue ? '+ Добавить' : 'Открыть каталог'}
+          </button>
         )}
       </div>
-
-      <div className="card flex items-start gap-3 p-4 text-sm text-text-secondary">
-        <span className="mt-0.5 text-primary">
-          <IconCategory className="h-5 w-5" />
-        </span>
-        <p>
-          <span className="font-medium text-text-primary">Правило низкого остатка:</span>{' '}
-          сырьё помечается как «Низкий», когда текущий остаток меньше или равен заданному порогу низкого остатка.
-        </p>
-      </div>
-
-      {modal !== null && (
-        <IngredientModal item={modal === 'new' ? null : modal} warehouse={warehouse} onClose={() => setModal(null)} />
-      )}
-      {transferOpen && <TransferModal warehouse={warehouse} locations={locations} onClose={() => setTransferOpen(false)} />}
-    </div>
-  );
-}
-
-function IngredientModal({ item, warehouse, onClose }: { item: Ingredient | null; warehouse: WarehouseLocation; onClose: () => void }) {
-  const isEdit = !!item;
-  const { create, update } = useIngredientMutations();
-  const push = useNotifications((s) => s.push);
-
-  const [name, setName] = useState(item?.name ?? '');
-  const [unit, setUnit] = useState<UnitCode>(item?.displayUnit ?? 'g');
-  const [stock, setStock] = useState(String(item?.stock ?? 0));
-  const [avgCost, setAvgCost] = useState(String(item?.avgCost ?? 0));
-  const [threshold, setThreshold] = useState(String(item?.lowStockThreshold ?? 0));
-  const [error, setError] = useState('');
-  const pending = create.isPending || update.isPending;
-
-  async function onSubmit() {
-    setError('');
-    if (!name.trim()) {
-      setError('Укажите название сырья');
-      return;
-    }
-    const body: IngredientInput = {
-      name: name.trim(),
-      warehouseId: warehouse.id,
-      unit,
-      stock: isEdit ? undefined : Number(stock) || 0,
-      avgCost: !item || Number(avgCost) !== item.avgCost ? Number(avgCost) || 0 : undefined,
-      lowStockThreshold: Number(threshold) || 0,
-    };
-    try {
-      if (isEdit) {
-        await update.mutateAsync({ id: item!.id, ...body });
-        push({ message: 'Сырьё обновлено', at: new Date().toISOString() });
-      } else {
-        await create.mutateAsync(body);
-        push({ message: 'Сырьё добавлено', at: new Date().toISOString() });
-      }
-      onClose();
-    } catch (err) {
-      setError(apiError(err));
-    }
-  }
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={`${isEdit ? 'Редактировать сырьё' : 'Добавить сырьё'} · ${warehouse.name}`}
-      panelClassName="max-w-lg"
-      footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={pending} onClick={onSubmit}>
-          {pending ? <Spinner /> : isEdit ? 'Сохранить изменения' : 'Создать'}
-        </button>
-      }
-    >
-      <div className="space-y-4">
-        <Field label="Название сырья">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Куриное филе" />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Единица измерения">
-            <Select
-              className="h-11 w-full"
-              value={unit}
-              onChange={(v) => setUnit(v as UnitCode)}
-              options={UNIT_OPTIONS}
-            />
-          </Field>
-          {!isEdit && (
-            <Field label="Начальный остаток">
-              <input className="input" type="number" min="0" step="0.001" value={stock} onChange={(e) => setStock(e.target.value)} />
-            </Field>
-          )}
-          <Field label={`Ср. себестоимость (${costUnitLabel(unit)})`}>
-            <input className="input" type="number" step="0.01" value={avgCost} onChange={(e) => setAvgCost(e.target.value)} />
-          </Field>
-          <Field label="Порог низкого остатка">
-            <input
-              className="input"
-              type="number"
-              step="0.001"
-              value={threshold}
-              onChange={(e) => setThreshold(e.target.value)}
-            />
-          </Field>
+      <QueryState pending={query.isPending} error={query.error} empty={query.isSuccess && !rows.length}>
+        <div className="hidden overflow-x-auto md:block">
+          <table className="w-full text-left text-sm">
+            <thead className="border-b border-border bg-background/40 text-xs text-text-muted">
+              <tr>
+                <th className="p-3">Название</th>
+                <th className="p-3">Тип</th>
+                <th className="p-3">Категория</th>
+                <th className="p-3 text-right">Остаток</th>
+                {costs && (
+                  <>
+                    <th className="p-3 text-right">Себестоимость</th>
+                    <th className="p-3 text-right">Сумма</th>
+                  </>
+                )}
+                <th className="p-3 text-right">Лимит</th>
+                <th className="p-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map((i) => (
+                <tr key={i.id} className="hover:bg-background/60">
+                  <td className="p-3">
+                    <button
+                      className="text-left font-medium text-text-primary hover:text-primary"
+                      onClick={() => onOpen(i)}
+                    >
+                      {i.name}
+                    </button>
+                  </td>
+                  <td className="p-3 text-text-muted">{type(i)}</td>
+                  <td className="p-3">{i.category || '—'}</td>
+                  <td
+                    className={`p-3 text-right whitespace-nowrap ${i.stock <= 0 ? 'text-danger' : i.isLow ? 'text-warning' : ''}`}
+                  >
+                    {stock(i)}
+                  </td>
+                  {costs && (
+                    <>
+                      <td className="p-3 text-right whitespace-nowrap">
+                        {i.avgCost != null ? money(i.avgCost) : '—'}
+                      </td>
+                      <td className="p-3 text-right whitespace-nowrap">
+                        {i.avgCost != null ? money(i.stock * i.avgCost) : '—'}
+                      </td>
+                    </>
+                  )}
+                  <td className="p-3 text-right">{qty(i.lowStockThreshold, i.unit)}</td>
+                  <td className="p-3">{actions(i)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-        {error && <p className="text-sm text-danger">{error}</p>}
-        {isEdit && item && <AdjustBlock ingredient={item} warehouseId={warehouse.id} />}
-      </div>
-    </Modal>
-  );
-}
-
-/** Блок ручной корректировки остатка: добавить / списать / установить (ТЗ §8). */
-function AdjustBlock({ ingredient, warehouseId }: { ingredient: Ingredient; warehouseId: string }) {
-  const { adjust } = useIngredientMutations();
-  const push = useNotifications((s) => s.push);
-  const [mode, setMode] = useState<'add' | 'writeoff' | 'set'>('add');
-  const [quantity, setQuantity] = useState('');
-  const [unit, setUnit] = useState<UnitCode>(ingredient.displayUnit);
-  const [error, setError] = useState('');
-
-  const unitOptions = unitsForType(unitTypeOf(ingredient.displayUnit));
-  const MODE_LABEL = { add: 'Добавить', writeoff: 'Списать', set: 'Установить остаток' } as const;
-
-  async function onApply() {
-    setError('');
-    const q = Number(quantity);
-    if (!quantity.trim() || !Number.isFinite(q) || q < 0 || (mode !== 'set' && q === 0)) {
-      setError('Укажите количество');
-      return;
-    }
-    try {
-      await adjust.mutateAsync({ id: ingredient.id, mode, quantity: q, unit, warehouseId });
-      setQuantity('');
-      push({ message: `${MODE_LABEL[mode]}: ${q} ${unitOptions.find((u) => u.value === unit)?.label ?? ''}`, at: new Date().toISOString() });
-    } catch (err) {
-      setError(apiError(err));
-    }
-  }
-
-  return (
-    <div className="rounded-xl border border-border bg-background/40 p-3">
-      <p className="mb-2 text-xs font-medium text-text-secondary">Корректировка остатка</p>
-      <div className="grid grid-cols-[1.1fr_0.9fr_0.7fr_auto] items-end gap-2">
-        <Field label="Операция">
-          <Select
-            className="h-9 w-full text-sm"
-            value={mode}
-            onChange={(v) => setMode(v as 'add' | 'writeoff' | 'set')}
-            options={[
-              { value: 'add', label: 'Добавить' },
-              { value: 'writeoff', label: 'Списать' },
-              { value: 'set', label: 'Установить' },
-            ]}
-          />
-        </Field>
-        <Field label="Кол-во">
-          <input
-            className="input h-9 text-sm"
-            type="number"
-            step="0.001"
-            value={quantity}
-            onChange={(e) => setQuantity(e.target.value)}
-          />
-        </Field>
-        <Field label="Ед.">
-          <Select
-            className="h-9 w-full text-sm"
-            value={unit}
-            onChange={(v) => setUnit(v as UnitCode)}
-            options={unitOptions}
-          />
-        </Field>
-        <button type="button" className="btn-secondary btn-md h-9" onClick={onApply} disabled={adjust.isPending}>
-          {adjust.isPending ? <Spinner className="h-4 w-4" /> : 'Применить'}
-        </button>
-      </div>
-      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
-    </div>
-  );
-}
-
-function TransferModal({ warehouse, locations, onClose }: {
-  warehouse: WarehouseLocation;
-  locations: WarehouseLocation[];
-  onClose: () => void;
-}) {
-  const ingredients = useIngredients('', warehouse.id);
-  const { transfer } = useWarehouseLocationMutations();
-  const [ingredientId, setIngredientId] = useState('');
-  const [targetId, setTargetId] = useState('');
-  const [quantity, setQuantity] = useState('');
-  const [unit, setUnit] = useState<UnitCode>();
-  const [error, setError] = useState('');
-  const push = useNotifications((s) => s.push);
-  const available = ingredients.data?.filter((ingredient) => ingredient.stock > 0) ?? [];
-  const selected = available.find((ingredient) => ingredient.id === ingredientId);
-  const selectedUnit = unit ?? selected?.displayUnit;
-  const targets = locations.filter((location) => location.id !== warehouse.id);
-  const amount = Number(quantity);
-  const canTransfer = selected && selectedUnit && targets.some(({ id }) => id === targetId) && Number.isFinite(amount) && amount > 0;
-
-  async function submit() {
-    if (!selected || !selectedUnit || !canTransfer || transfer.isPending) return;
-    setError('');
-    try {
-      await transfer.mutateAsync({
-        ingredientId: selected.id,
-        fromWarehouseId: warehouse.id,
-        toWarehouseId: targetId,
-        quantity: amount,
-        unit: selectedUnit,
-      });
-      push({ message: 'Сырьё перемещено', at: new Date().toISOString() });
-      onClose();
-    } catch (err) {
-      setError(apiError(err));
-    }
-  }
-
-  return (
-    <Modal open onClose={onClose} title={`Переместить сырьё · ${warehouse.name}`} footer={
-      <button type="button" className="btn-primary btn-lg w-full" disabled={!canTransfer || transfer.isPending} onClick={submit}>Переместить</button>
-    }>
-      <div className="space-y-3">
-        <Field label="Сырьё">
-          <Select ariaLabel="Сырьё" className="h-10 w-full" value={ingredientId} options={available.map(({ id, name }) => ({ value: id, label: name }))}
-            onChange={(id) => { setIngredientId(id); setUnit(undefined); }} />
-        </Field>
-        {selected && <p className="text-sm text-text-secondary">Доступно {qty(selected.stock, selected.unit)}</p>}
-        {ingredients.isSuccess && !available.length && <p className="text-sm text-text-muted">На этом складе нет сырья для перемещения</p>}
-        <Field label="На склад">
-          <Select ariaLabel="На склад" className="h-10 w-full" value={targetId} onChange={setTargetId} options={targets.map(({ id, name }) => ({ value: id, label: name }))} />
-        </Field>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Количество">
-            <input className="input" aria-label="Количество" type="number" min="0" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} />
-          </Field>
-          <Field label="Единица измерения">
-            <Select ariaLabel="Единица измерения" className="h-10 w-full" value={selectedUnit ?? ''} disabled={!selected}
-              options={selected ? unitsForType(selected.unitType) : []} onChange={(value) => setUnit(value as UnitCode)} />
-          </Field>
+        <div className="divide-y divide-border md:hidden">
+          {rows.map((i) => (
+            <article key={i.id} className="space-y-3 p-4">
+              <button className="text-left font-semibold text-primary" onClick={() => onOpen(i)}>
+                {i.name}
+              </button>
+              <p className="text-xs text-text-muted">
+                {type(i)}
+                {i.category ? ` · ${i.category}` : ''}
+              </p>
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <span>Остаток</span>
+                <span className={`text-right ${i.isLow ? 'text-danger' : ''}`}>{stock(i)}</span>
+                {costs && (
+                  <>
+                    <span>Стоимость / сумма</span>
+                    <span className="text-right">
+                      {i.avgCost != null
+                        ? `${money(i.avgCost)} / ${money(i.stock * i.avgCost)}`
+                        : 'Не задана'}
+                    </span>
+                  </>
+                )}
+                <span>Лимит</span>
+                <span className="text-right">{qty(i.lowStockThreshold, i.unit)}</span>
+              </div>
+              {actions(i)}
+            </article>
+          ))}
         </div>
-        {(error || ingredients.isError) && <p role="alert" className="text-sm text-danger">{error || apiError(ingredients.error)}</p>}
-      </div>
-    </Modal>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="mb-1 block text-xs font-medium text-text-secondary">{label}</label>
-      {children}
+        {costs && rows.length > 0 && (
+          <div className="border-t border-border p-4 text-right text-sm font-semibold">
+            {rows.some((i) => i.avgCost == null && i.stock !== 0) ? 'Известная стоимость' : 'Итого'}:{' '}
+            {money(rows.reduce((s, i) => s + i.stock * (i.avgCost ?? 0), 0))}
+            {rows.some((i) => i.avgCost == null && i.stock !== 0) && (
+              <p className="mt-1 text-xs font-normal text-warning">
+                Для части позиций стоимость неизвестна. Итог неполный.
+              </p>
+            )}
+          </div>
+        )}
+      </QueryState>
     </div>
   );
-}
-
-function Badge({ children, tone }: { children: React.ReactNode; tone: 'success' | 'warning' | 'danger' | 'muted' }) {
-  const cls = {
-    success: 'bg-success/10 text-success',
-    warning: 'bg-warning/10 text-warning',
-    danger: 'bg-danger/10 text-danger',
-    muted: 'bg-slate-100 text-text-muted',
-  }[tone];
-  return <span className={`inline-flex rounded-lg px-2 py-0.5 text-xs font-medium ${cls}`}>{children}</span>;
 }

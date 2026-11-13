@@ -3,41 +3,56 @@ import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { resolveWarehouse, warehouseBalances, warehouseDocumentFilter } from './warehouse-location';
 import { fromBase, unitLabel, type UnitCode } from './units';
+import { warehouseDateRange, warehouseDay } from './report-range';
+import { preparedLossQuantity } from './movement-cost';
 
 @Injectable()
 export class WarehouseOverviewService {
   constructor(private prisma: PrismaService) {}
 
   async getOverview(params: { dateFrom?: string; dateTo?: string; warehouseId?: string }) {
-    const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, params.warehouseId);
+    return this.prisma.$transaction((tx) => this.readOverview(tx, params), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  private async readOverview(db: Prisma.TransactionClient, params: { dateFrom?: string; dateTo?: string; warehouseId?: string }) {
+    const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(db, params.warehouseId);
     const location = warehouseDocumentFilter(warehouse);
     const range = this.dateRange(params.dateFrom, params.dateTo);
     const days = this.daysBetween(range.from, range.to);
 
-    const [ingredients, purchases, consumptionMovements, recentMovements] = await Promise.all([
-      this.prisma.ingredient.findMany({
-        where: { isActive: true },
-        select: { id: true, name: true, displayUnit: true, stock: true, avgCost: true, lowStockThreshold: true },
+    const [ingredients, purchases, consumptionMovements, recentMovements, missingRecipeDishes] = await Promise.all([
+      db.ingredient.findMany({
+        where: { isActive: true, preparationMode: { not: 'virtual' } },
+        select: { id: true, name: true, displayUnit: true, stock: true, avgCost: true, valuationKnown: true, lowStockThreshold: true },
         orderBy: { name: 'asc' },
       }),
-      this.prisma.purchase.findMany({
+      db.purchase.findMany({
         where: { ...location, status: 'completed', date: { gte: range.from, lte: range.to } },
         select: { supplier: true, totalAmount: true },
       }),
-      this.prisma.stockMovement.findMany({
-        where: { ...location, type: { in: [StockMovementType.sale, StockMovementType.return, StockMovementType.writeoff] }, createdAt: { gte: range.from, lte: range.to } },
+      db.stockMovement.findMany({
+        where: { ...location, type: { in: [StockMovementType.sale, StockMovementType.return, StockMovementType.writeoff, StockMovementType.inventory, StockMovementType.cancel] }, createdAt: { gte: range.from, lte: range.to } },
         include: { ingredient: { select: { name: true, displayUnit: true } } },
       }),
-      this.prisma.stockMovement.findMany({
+      db.stockMovement.findMany({
         where: location,
         orderBy: { createdAt: 'desc' },
         take: 7,
         include: { ingredient: { select: { name: true, displayUnit: true } } },
       }),
+      db.dish.findMany({ where: { isActive: true, isSet: false, stockIngredientId: null, recipeItems: { none: {} } },
+        select: { id: true, name: true, variants: { select: { id: true, name: true, stockIngredientId: true } } } }),
     ]);
 
-    const balances = await warehouseBalances(this.prisma, warehouse, ingredients);
-    const stockValue = round2(ingredients.reduce((sum, item) => sum + Number(balances.get(item.id)!.stockValue), 0));
+    const missingRecipeConfigurations = missingRecipeDishes.flatMap<{ dishId: string; variantId: string | null; name: string }>((dish) => dish.variants.length
+      ? dish.variants.filter((variant) => !variant.stockIngredientId).map((variant) => ({ dishId: dish.id, variantId: variant.id, name: `${dish.name} · ${variant.name}` }))
+      : [{ dishId: dish.id, variantId: null, name: dish.name }]);
+    const missingRecipeCount = missingRecipeConfigurations.length;
+
+    const balances = await warehouseBalances(db, warehouse, ingredients);
+    const stockKnown = ingredients.every((item) => { const balance = balances.get(item.id)!; return balance.stock.isZero() || balance.valuationKnown; });
+    const bookValue = Number(ingredients.reduce((sum, item) => sum.add(balances.get(item.id)!.stockValue), new Prisma.Decimal(0)).toDecimalPlaces(2));
+    const stockValue = stockKnown ? bookValue : null;
     const lowStockItems = ingredients
       .map((item) => ({ ...item, stock: balances.get(item.id)!.stock }))
       .filter((item) => item.stock.lte(item.lowStockThreshold))
@@ -52,20 +67,38 @@ export class WarehouseOverviewService {
         };
       });
 
-    const purchasesTotal = round2(purchases.reduce((sum, p) => sum + Number(p.totalAmount), 0));
-    const ingredientWriteOffTotal = round2(
-      consumptionMovements.reduce((sum, movement) => {
-        return sum - Number(movement.change) * Number(movement.costAtMoment);
-      }, 0),
-    );
+    const purchasesTotal = Number(purchases.reduce((sum, p) => sum.add(p.totalAmount), new Prisma.Decimal(0)).toDecimalPlaces(2));
+    const consumption = consumptionMovements.filter((movement) => ['sale', 'return', 'writeoff'].includes(movement.type));
+    // Keep this legacy field for older clients, but never label recipe consumption as losses.
+    const ingredientWriteOffTotal = consumption.every((movement) => movement.costKnown) ? Number(consumption.reduce((sum, movement) => sum.sub(movement.change.mul(movement.costAtMoment)), new Prisma.Decimal(0)).toDecimalPlaces(2)) : null;
+    const losses = consumptionMovements.filter((movement) => movement.sourceType === 'writeoff'
+      || (movement.sourceType === 'inventory' && ((movement.type === 'inventory' && movement.change.lt(0)) || (movement.type === 'cancel' && movement.change.gt(0))))
+      || preparedLossQuantity(movement).gt(0));
+    const lossesTotal = losses.every((movement) => movement.costKnown) ? Number(losses.reduce((sum, movement) => sum.sub(movement.change.mul(movement.costAtMoment))
+        .add(preparedLossQuantity(movement).mul(movement.costAtMoment)), new Prisma.Decimal(0)).toDecimalPlaces(2)) : null;
+    const outOfStockCount = ingredients.filter((item) => balances.get(item.id)!.stock.lte(0)).length;
+    const unknownCostCount = ingredients.filter((item) => !balances.get(item.id)!.valuationKnown).length;
 
-    const topConsumedIngredients = this.topConsumed(consumptionMovements);
+    const topConsumedIngredients = this.topConsumed(consumption);
     const suppliersTop = this.suppliersTop(purchases);
-    const stockValueTrend = await this.stockValueTrend(days, stockValue, location);
+    const stockValueTrend = await this.stockValueTrend(db, days, bookValue, location, stockKnown);
 
     return {
       stockValue,
-      lowStockCount: lowStockItems.length,
+      valuationKnown: stockKnown,
+      itemCount: ingredients.length,
+      totalItemsCount: ingredients.length,
+      outOfStockCount,
+      missingRecipeCount,
+      missingRecipeConfigurations: missingRecipeConfigurations.slice(0, 30),
+      unknownCostCount,
+      lossesTotal,
+      messages: [
+        ...(missingRecipeCount ? [{ code: 'missing_recipe', text: `Не настроен складской учёт: ${missingRecipeCount} блюд и вариантов`, count: missingRecipeCount, section: 'recipes' }] : []),
+        ...(unknownCostCount ? [{ code: 'unknown_cost', text: `Не подтверждена себестоимость ${unknownCostCount} позиций`, count: unknownCostCount, section: 'items' }] : []),
+        ...(outOfStockCount ? [{ code: 'out_of_stock', text: `Закончились ${outOfStockCount} позиций`, count: outOfStockCount, section: 'items' }] : []),
+      ],
+      lowStockCount: lowStockItems.filter((item) => item.stock > 0).length,
       purchasesTotal,
       ingredientWriteOffTotal,
       stockValueTrend,
@@ -78,6 +111,9 @@ export class WarehouseOverviewService {
           warehouseId: m.warehouseId,
           createdAt: m.createdAt,
           type: m.type,
+          sourceType: m.sourceType,
+          sourceId: m.sourceId,
+          ingredientId: m.ingredientId,
           ingredientName: m.ingredient.name,
           unit: unitLabel(display),
           change: round3(fromBase(Number(m.change), display)),
@@ -93,13 +129,14 @@ export class WarehouseOverviewService {
       ingredientId: string;
       change: Prisma.Decimal;
       costAtMoment: Prisma.Decimal;
+      costKnown: boolean;
       ingredient: { name: string; displayUnit: string };
     }>,
   ) {
     // quantity накапливаем в базе, cost = база × себестоимость-за-базу (валюта).
     const byIngredient = new Map<
       string,
-      { ingredientId: string; name: string; displayUnit: UnitCode; quantityBase: number; cost: number }
+      { ingredientId: string; name: string; displayUnit: UnitCode; quantityBase: number; cost: number; costKnown: boolean }
     >();
     for (const movement of movements) {
       const current = byIngredient.get(movement.ingredientId) ?? {
@@ -108,10 +145,12 @@ export class WarehouseOverviewService {
         displayUnit: movement.ingredient.displayUnit as UnitCode,
         quantityBase: 0,
         cost: 0,
+        costKnown: true,
       };
       const quantityBase = -Number(movement.change);
       current.quantityBase += quantityBase;
       current.cost += quantityBase * Number(movement.costAtMoment);
+      current.costKnown &&= movement.costKnown;
       byIngredient.set(movement.ingredientId, current);
     }
     return [...byIngredient.values()]
@@ -123,7 +162,7 @@ export class WarehouseOverviewService {
         name: item.name,
         unit: unitLabel(item.displayUnit),
         quantity: round3(fromBase(item.quantityBase, item.displayUnit)),
-        cost: round2(item.cost),
+        cost: item.costKnown ? round2(item.cost) : null,
       }));
   }
 
@@ -139,44 +178,42 @@ export class WarehouseOverviewService {
       .slice(0, 5);
   }
 
-  private async stockValueTrend(days: Date[], currentValue: number, location: Prisma.StockMovementWhereInput) {
+  private async stockValueTrend(db: Prisma.TransactionClient, days: Date[], currentValue: number, location: Prisma.StockMovementWhereInput, valuationKnown: boolean) {
     if (days.length === 0) return [];
-    const first = startOfDay(days[0]);
-    const movements = await this.prisma.stockMovement.findMany({
+    const first = days[0];
+    const movements = await db.stockMovement.findMany({
       where: { ...location, createdAt: { gte: first } },
-      select: { createdAt: true, change: true, costAtMoment: true },
+      select: { createdAt: true, change: true, costAtMoment: true, valuationAdjustment: true, costKnown: true },
     });
 
     if (currentValue === 0 && movements.length === 0) return [];
 
     return days.map((day) => {
-      const end = endOfDay(day);
+      const end = new Date(day.getTime() + 86400000 - 1);
       const valueAfterDay = movements.reduce((sum, movement) => {
         if (movement.createdAt <= end) return sum;
-        return sum + Number(movement.change) * Number(movement.costAtMoment);
+        return sum + Number(movement.change.mul(movement.costAtMoment).add(movement.valuationAdjustment));
       }, 0);
       return {
-        date: isoDate(day),
-        value: round2(Math.max(0, currentValue - valueAfterDay)),
+        date: warehouseDay(day),
+        value: valuationKnown && movements.every((movement) => movement.costKnown) ? round2(currentValue - valueAfterDay) : null,
       };
     });
   }
 
   private dateRange(dateFrom?: string, dateTo?: string) {
     const now = new Date();
-    const to = dateTo ? endOfDay(new Date(dateTo)) : endOfDay(now);
-    const from = dateFrom ? startOfDay(new Date(dateFrom)) : startOfDay(addDays(to, -6));
-    if (from > to) return { from: startOfDay(to), to };
-    return { from, to };
+    const range = warehouseDateRange(dateFrom || warehouseDay(addDays(now, -6)), dateTo || warehouseDay(now))!;
+    return { from: range.gte!, to: range.lte! };
   }
 
   private daysBetween(from: Date, to: Date) {
     const days: Date[] = [];
-    const cursor = startOfDay(from);
-    const last = startOfDay(to);
+    const cursor = new Date(from);
+    const last = to;
     while (cursor <= last && days.length < 62) {
       days.push(new Date(cursor));
-      cursor.setDate(cursor.getDate() + 1);
+      cursor.setTime(cursor.getTime() + 86400000);
     }
     return days;
   }

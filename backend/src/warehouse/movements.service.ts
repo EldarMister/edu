@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { Prisma, StockMovementSource, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MovementsQueryDto } from './dto';
 import { resolveWarehouse, warehouseDocumentFilter } from './warehouse-location';
 import { costFromBase, fromBase, unitLabel, type UnitCode } from './units';
+import { warehouseDateRange } from './report-range';
 
 @Injectable()
 export class MovementsService {
@@ -12,17 +13,20 @@ export class MovementsService {
   private async buildWhere(query: MovementsQueryDto): Promise<Prisma.StockMovementWhereInput> {
     const warehouse = query.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, query.warehouseId);
     const where: Prisma.StockMovementWhereInput = warehouseDocumentFilter(warehouse);
-    if (query.type && this.isType(query.type)) where.type = query.type;
-    if (query.sourceType && this.isSource(query.sourceType)) where.sourceType = query.sourceType;
+    if (query.type) {
+      if (!this.isType(query.type)) throw new BadRequestException('Неизвестный тип движения');
+      where.type = query.type;
+    }
+    if (query.sourceType) {
+      if (!this.isSource(query.sourceType)) throw new BadRequestException('Неизвестный источник движения');
+      where.sourceType = query.sourceType;
+    }
     if (query.ingredientId) where.ingredientId = query.ingredientId;
     if (query.search) {
       where.ingredient = { name: { contains: query.search, mode: 'insensitive' } };
     }
-    const gte = query.from ? new Date(query.from) : undefined;
-    const lte = query.to ? new Date(`${query.to}T23:59:59.999`) : undefined;
-    if (gte || lte) {
-      where.createdAt = { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) };
-    }
+    const period = warehouseDateRange(query.from, query.to);
+    if (period) where.createdAt = period;
     return where;
   }
 
@@ -56,7 +60,7 @@ export class MovementsService {
       let documentLabel: string | null = null;
       if (m.sourceType === 'purchase' && m.sourceId) {
         const num = purchaseMap.get(m.sourceId);
-        documentLabel = num != null ? `Закупка №${num}` : 'Закупка';
+        documentLabel = num != null ? `Поставка №${num}` : 'Поставка';
       } else if (m.sourceType === 'order' && m.sourceId) {
         const num = orderMap.get(m.sourceId);
         documentLabel = num != null ? `Заказ №${num}` : 'Заказ';
@@ -64,6 +68,14 @@ export class MovementsService {
         documentLabel = 'Инвентаризация';
       } else if (m.sourceType === 'writeoff') {
         documentLabel = 'Акт списания';
+      } else if (m.sourceType === 'transfer') {
+        documentLabel = 'Перемещение';
+      } else if (m.sourceType === 'supplier_return') {
+        documentLabel = 'Возврат поставщику';
+      } else if (m.sourceType === 'production') {
+        documentLabel = 'Производство';
+      } else if (m.sourceType === 'processing') {
+        documentLabel = 'Переработка';
       }
       const display = m.ingredient.displayUnit as UnitCode;
       return {
@@ -81,7 +93,13 @@ export class MovementsService {
         beforeStock: round3(fromBase(Number(m.beforeStock), display)),
         change: round3(fromBase(Number(m.change), display)),
         afterStock: round3(fromBase(Number(m.afterStock), display)),
-        costAtMoment: round2(costFromBase(Number(m.costAtMoment), display)),
+        costAtMoment: m.costKnown ? round2(costFromBase(Number(m.costAtMoment), display)) : null,
+        totalCost: m.costKnown ? Number(m.change.mul(m.costAtMoment).toDecimalPlaces(2)) : null,
+        costKnown: m.costKnown,
+        valuationAdjustment: Number(m.valuationAdjustment),
+        actorId: m.actorId,
+        actorName: m.actorName,
+        reason: m.reason,
         comment: m.comment,
         createdAt: m.createdAt,
       };
@@ -108,10 +126,10 @@ export class MovementsService {
   }
 
   private isType(v: string): v is StockMovementType {
-    return ['purchase', 'sale', 'return', 'correction', 'cancel', 'inventory', 'writeoff'].includes(v);
+    return Object.values(StockMovementType).includes(v as StockMovementType);
   }
   private isSource(v: string): v is StockMovementSource {
-    return ['purchase', 'order', 'manual', 'inventory', 'writeoff'].includes(v);
+    return Object.values(StockMovementSource).includes(v as StockMovementSource);
   }
 }
 

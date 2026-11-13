@@ -68,6 +68,16 @@ const ACTION_ICONS: Record<ActionKey, IconCmp> = {
   closeShift: IconLock,
   manageStaff: IconStaff,
   editPermissions: IconKey,
+  warehouseReceive: IconWarehouse,
+  warehouseTransfer: IconReconcile,
+  warehouseWriteoff: IconJournal,
+  warehouseCount: IconTables,
+  warehouseApprove: IconKey,
+  warehouseRecipes: IconMenu,
+  warehouseProduce: IconOrders,
+  warehouseCosts: IconCard,
+  warehouseReports: IconStats,
+  warehouseSettings: IconSettings,
 };
 
 const ROLE_LABEL: Record<Role, string> = {

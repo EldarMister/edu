@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { PurchaseStatus, Role } from '@prisma/client';
 import { PurchasesService } from './purchases.service';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -12,11 +13,13 @@ export class PurchasesController {
   constructor(private readonly purchases: PurchasesService) {}
 
   @Get('overview')
+  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
   overview(@Query('from') from?: string, @Query('to') to?: string, @Query('warehouseId') warehouseId?: string) {
     return this.purchases.overview({ from, to, warehouseId });
   }
 
   @Get()
+  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
   findAll(
     @Query('status') status?: PurchaseStatus,
     @Query('search') search?: string,
@@ -28,26 +31,31 @@ export class PurchasesController {
   }
 
   @Get(':id')
+  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
   findOne(@Param('id') id: string) {
     return this.purchases.findOne(id);
   }
 
   @Post()
-  create(@Body() dto: CreatePurchaseDto) {
-    return this.purchases.create(dto);
+  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
+  create(@Body() dto: CreatePurchaseDto, @CurrentUser() user: AuthUser) {
+    return this.purchases.create(dto, user);
   }
 
   @Patch(':id')
+  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
   update(@Param('id') id: string, @Body() dto: UpdatePurchaseDto) {
     return this.purchases.update(id, dto);
   }
 
   @Post(':id/complete')
-  complete(@Param('id') id: string) {
-    return this.purchases.complete(id);
+  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
+  complete(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.purchases.complete(id, user);
   }
 
   @Post(':id/cancel')
+  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
   cancel(@Param('id') id: string) {
     return this.purchases.cancel(id);
   }

@@ -1,33 +1,50 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { RecipesService } from './recipes.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { CreateRecipeItemDto, UpdateRecipeItemDto } from './dto';
+import { RecipeItemInputDto, RecipeItemUpdateDto, RecipeSettingsDto } from './recipes.dto';
 
 @Controller('admin/warehouse')
-@Roles(Role.ADMIN, Role.OWNER)
+@Roles(Role.ADMIN, Role.OWNER, Role.KITCHEN, Role.BAR)
 @RequirePermission('sections.warehouse')
 export class RecipesController {
   constructor(private readonly recipes: RecipesService) {}
 
+  @Get('dishes')
+  listDishes(@Query('search') search?: string) { return this.recipes.listDishes(search); }
+
   @Get('dishes/:dishId/recipe')
-  getByDish(@Param('dishId') dishId: string) {
-    return this.recipes.getByDish(dishId);
+  getByDish(@Param('dishId') dishId: string, @Query('variantId') variantId?: string) {
+    return this.recipes.getByDish(dishId, variantId);
   }
 
   @Post('dishes/:dishId/recipe')
-  addItem(@Param('dishId') dishId: string, @Body() dto: CreateRecipeItemDto) {
+  @RequirePermission('actions.warehouseRecipes')
+  addItem(@Param('dishId') dishId: string, @Body() dto: RecipeItemInputDto) {
     return this.recipes.addItem(dishId, dto);
   }
 
   @Patch('recipe/:id')
-  updateItem(@Param('id') id: string, @Body() dto: UpdateRecipeItemDto) {
+  @RequirePermission('actions.warehouseRecipes')
+  updateItem(@Param('id') id: string, @Body() dto: RecipeItemUpdateDto) {
     return this.recipes.updateItem(id, dto);
   }
 
   @Delete('recipe/:id')
+  @RequirePermission('actions.warehouseRecipes')
   removeItem(@Param('id') id: string) {
     return this.recipes.removeItem(id);
+  }
+
+  @Patch('dishes/:dishId/recipe-settings')
+  @RequirePermission('actions.warehouseRecipes')
+  updateSettings(@Param('dishId') dishId: string, @Body() dto: RecipeSettingsDto) {
+    return this.recipes.updateSettings(dishId, dto);
+  }
+
+  @Get('dishes/:dishId/recipe-revisions')
+  revisions(@Param('dishId') dishId: string) {
+    return this.recipes.revisions(dishId);
   }
 }

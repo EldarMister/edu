@@ -37,7 +37,7 @@ const TENANT_MODELS = new Set<string>([
   'QrTableSession', 'QrGuest', 'QrSessionItem', 'Ingredient', 'RecipeItem',
   'Purchase', 'PurchaseItem', 'StockMovement', 'PreparationStation',
   'Warehouse', 'WarehouseStock', 'StationWarehouse', 'PreparationRecipe', 'PreparationRecipeItem',
-  'WarehouseDocument', 'WarehouseDocumentItem',
+  'WarehouseDocument', 'WarehouseDocumentItem', 'PreparationBatch', 'RecipeRevision', 'WarehouseSupplier', 'WarehousePackage', 'ProcessingDocument', 'ProcessingLine', 'MenuModifierGroup', 'MenuModifierOption',
 ]);
 
 /** Ключи вложенных операций записи Prisma — по ним отличаем relation-write от Json-поля. */

@@ -21,11 +21,11 @@ export class PermissionsGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
-    const required = this.reflector.getAllAndOverride<string>(PERMISSION_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (!required) return true;
+    const required = [
+      this.reflector.get<string | string[] | undefined>(PERMISSION_KEY, context.getHandler()),
+      this.reflector.get<string | string[] | undefined>(PERMISSION_KEY, context.getClass()),
+    ].flatMap((permission) => permission ? (Array.isArray(permission) ? permission : [permission]) : []);
+    if (!required.length) return true;
 
     const { user } = context.switchToHttp().getRequest();
     if (!user) {
@@ -35,7 +35,7 @@ export class PermissionsGuard implements CanActivate {
 
     const perms: EmployeePermissions =
       user.permissions ?? resolvePermissions(user.role, null);
-    if (!hasPermission(perms, required)) {
+    if (!required.every((permission) => hasPermission(perms, permission))) {
       throw new ForbiddenException('У вас нет доступа к этому разделу');
     }
     return true;

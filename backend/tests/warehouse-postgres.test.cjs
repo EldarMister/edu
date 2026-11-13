@@ -15,7 +15,7 @@ if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new 
   throw new Error('Only a dedicated local test database is allowed');
 }
 
-test('PostgreSQL: warehouse purchasing, correction and transfer are scoped and consistent', { skip: !url }, async () => {
+test('PostgreSQL: warehouse receipts and transfers are scoped and consistent', { skip: !url }, async () => {
   const db = new PrismaClient({ datasourceUrl: url });
   db.$use(tenantPrismaMiddleware);
   const cafes = [];
@@ -51,11 +51,11 @@ test('PostgreSQL: warehouse purchasing, correction and transfer are scoped and c
       });
       const completions = await Promise.allSettled([purchases.complete(purchase.id), purchases.complete(purchase.id)]);
       assert.deepEqual(completions.map((entry) => entry.status).sort(), ['fulfilled', 'rejected']);
-      await assert.rejects(purchases.update(purchase.id, { warehouseId: main.id }), /проведённой закупке/);
+      await assert.rejects(purchases.update(purchase.id, { warehouseId: main.id }), /Проведённый приход/);
 
       await Promise.all([
-        ingredients.adjust(cola.id, { mode: 'add', quantity: 1, unit: 'pcs', warehouseId: bar.id }),
-        ingredients.adjust(cola.id, { mode: 'add', quantity: 1, unit: 'pcs', warehouseId: bar.id }),
+        purchases.create({ supplier: 'Поставщик', complete: true, warehouseId: bar.id, items: [{ ingredientId: cola.id, quantity: 1, unit: 'pcs', purchasePrice: 5 }] }),
+        purchases.create({ supplier: 'Поставщик', complete: true, warehouseId: bar.id, items: [{ ingredientId: cola.id, quantity: 1, unit: 'pcs', purchasePrice: 5 }] }),
       ]);
       const [commonCola] = await ingredients.findAll({ warehouseId: main.id, search: 'Кола' });
       const [barCola] = await ingredients.findAll({ warehouseId: bar.id, search: 'Кола' });
@@ -67,18 +67,19 @@ test('PostgreSQL: warehouse purchasing, correction and transfer are scoped and c
       assert.equal((await purchases.findAll({ warehouseId: bar.id }))[0].warehouseId, bar.id);
       assert.deepEqual(await purchases.findAll({ warehouseId: main.id }), []);
       const journal = await movements.findAll({ ingredientId: cola.id });
-      assert.equal(journal.filter((entry) => entry.type === 'purchase').length, 1);
+      assert.equal(journal.filter((entry) => entry.type === 'purchase').length, 3);
       assert.equal(journal.filter((entry) => entry.warehouseId === bar.id).length, 4);
-      assert.equal(journal.filter((entry) => entry.warehouseId === main.id).length, 1);
+      assert.equal(journal.filter((entry) => entry.warehouseId === main.id).length, 2);
+      assert.equal(journal.filter((entry) => entry.comment === 'Начальный остаток').length, 1);
       assert.equal((await ingredients.remove(cola.id)).deactivated, true);
-      assert.equal((await movements.findAll({ ingredientId: cola.id })).length, 5);
+      assert.equal((await movements.findAll({ ingredientId: cola.id })).length, 6);
       return { warehouseId: bar.id, ingredientId: cola.id };
     });
 
     await runWithTenant({ cafeId: foreign.id }, async () => {
       assert.deepEqual((await locations.list(foreign.id)).locations.map((location) => location.isDefault), [true]);
       await assert.rejects(ingredients.findAll({ warehouseId }), /Склад не найден/);
-      await assert.rejects(ingredients.adjust(ingredientId, { mode: 'set', quantity: 1, unit: 'pcs' }), /Сырьё не найдено/);
+      await assert.rejects(purchases.create({ supplier: 'Поставщик', complete: true, items: [{ ingredientId, quantity: 1, unit: 'pcs', purchasePrice: 5 }] }), /не найдено/);
       await assert.rejects(purchases.findAll({ warehouseId }), /Склад не найден/);
       await assert.rejects(movements.findAll({ warehouseId }), /Склад не найден/);
     });
@@ -86,6 +87,7 @@ test('PostgreSQL: warehouse purchasing, correction and transfer are scoped and c
     for (const cafeId of cafes) {
       await db.stockMovement.deleteMany({ where: { cafeId } });
       await db.purchase.deleteMany({ where: { cafeId } });
+      await db.warehouseDocument.deleteMany({ where: { cafeId } });
       await db.ingredient.deleteMany({ where: { cafeId } });
       await db.cafe.delete({ where: { id: cafeId } });
     }

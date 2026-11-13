@@ -221,6 +221,7 @@ export function useWaiterRealtime() {
   useSocketEvent('tables:updated', invalidateTables);
   // Админ изменил меню/категории/сеты — обновляем меню официанта без перезагрузки.
   useSocketEvent('menu:updated', () => {
+    qc.invalidateQueries({ queryKey: ['dish-modifiers'] });
     qc.invalidateQueries({ queryKey: ['categories'] });
     qc.invalidateQueries({ queryKey: ['dishes'] });
   });

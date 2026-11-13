@@ -21,7 +21,17 @@ export type ActionKey =
   | 'exportReports'
   | 'closeShift'
   | 'manageStaff'
-  | 'editPermissions';
+  | 'editPermissions'
+  | 'warehouseReceive'
+  | 'warehouseTransfer'
+  | 'warehouseWriteoff'
+  | 'warehouseCount'
+  | 'warehouseApprove'
+  | 'warehouseRecipes'
+  | 'warehouseProduce'
+  | 'warehouseCosts'
+  | 'warehouseReports'
+  | 'warehouseSettings';
 
 export interface EmployeePermissions {
   sections: Record<SectionKey, boolean>;
@@ -91,6 +101,8 @@ export interface DishVariant {
 }
 
 export interface Dish {
+  hasModifiers?: boolean;
+  allowIngredientExclusions?: boolean;
   id: string;
   categoryId: string;
   name: string;
@@ -195,6 +207,9 @@ export interface WaiterShift {
 }
 
 export interface OrderItem {
+  modifierSelections?: MenuModifierSelection[];
+  excludedIngredientIds?: string[];
+  excludedIngredientNames?: string[];
   id: string;
   /** null — блюдо удалено из меню; позиция остаётся в истории по снимкам. */
   dishId: string | null;
@@ -331,6 +346,9 @@ export interface CartSetComponent {
 }
 
 export interface CartLine {
+  modifierSelections?: MenuModifierSelection[];
+  excludedIngredientIds?: string[];
+  excludedIngredientNames?: string[];
   orderItemId?: string;
   editAllowed?: boolean;
   cancelAllowed?: boolean;
@@ -360,3 +378,5 @@ export interface AppNotification {
   /** Сколько мс держать тост на экране (по умолчанию — по типу). */
   durationMs?: number;
 }
+
+export interface MenuModifierSelection { optionId: string; quantity: number; name: string; price: string | number; }

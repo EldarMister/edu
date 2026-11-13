@@ -1,12 +1,14 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
 import { IngredientsService } from './ingredients.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { AdjustIngredientDto, CreateIngredientDto, UpdateIngredientDto } from './dto';
+import { CreateIngredientDto, UpdateIngredientDto } from './dto';
+import { assertWarehousePermission } from './warehouse-permissions';
 
 @Controller('admin/warehouse/ingredients')
-@Roles(Role.ADMIN, Role.OWNER)
+@Roles(Role.ADMIN, Role.OWNER, Role.KITCHEN, Role.BAR)
 @RequirePermission('sections.warehouse')
 export class IngredientsController {
   constructor(private readonly ingredients: IngredientsService) {}
@@ -29,23 +31,28 @@ export class IngredientsController {
     });
   }
 
+  @Get(':id')
+  findOne(@Param('id') id: string) { return this.ingredients.findOne(id); }
+
   @Post()
-  create(@Body() dto: CreateIngredientDto) {
-    return this.ingredients.create(dto);
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('actions.warehouseReceive')
+  create(@Body() dto: CreateIngredientDto, @CurrentUser() actor: AuthUser) {
+    if (dto.stock) assertWarehousePermission(actor, 'warehouseApprove');
+    if (dto.avgCost) assertWarehousePermission(actor, 'warehouseCosts');
+    return this.ingredients.create(dto, actor);
   }
 
   @Patch(':id')
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('actions.warehouseSettings')
   update(@Param('id') id: string, @Body() dto: UpdateIngredientDto) {
     return this.ingredients.update(id, dto);
   }
 
-  // Ручная корректировка остатка: добавить / списать / установить (ТЗ §8).
-  @Post(':id/adjust')
-  adjust(@Param('id') id: string, @Body() dto: AdjustIngredientDto) {
-    return this.ingredients.adjust(id, dto);
-  }
-
   @Delete(':id')
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('actions.warehouseSettings')
   remove(@Param('id') id: string) {
     return this.ingredients.remove(id);
   }

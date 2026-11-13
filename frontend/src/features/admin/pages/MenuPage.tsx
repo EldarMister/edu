@@ -8,11 +8,17 @@ import { downscaleToDataUrl, resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { useAuth } from '@/store/auth';
-import { routingOptions, usePreparationStations, usePreparationStationUpdates, type PreparationStation } from '@/features/kitchen/stations';
+import {
+  routingOptions,
+  usePreparationStations,
+  usePreparationStationUpdates,
+  type PreparationStation,
+} from '@/features/kitchen/stations';
 import { PreparationStationsModal } from './PreparationStationsModal';
 import { IconEdit, IconTrash, IconPlus } from '../components/icons';
+import type { MenuView } from './warehouse/navigation';
+import { MenuStockCatalogue } from './warehouse/MenuStockCatalogue';
 import { RecipeEditor } from './warehouse/RecipeEditor';
-import { useRecipe } from './warehouse/api';
 import { normalizeUnitLabel, unitLabelOptions } from './warehouse/units';
 import {
   useMenuOverview,
@@ -26,7 +32,11 @@ import {
   type AdminDishVariant,
 } from '../api';
 
-export function MenuPage() {
+export function MenuPage({ view = 'all' }: { view?: MenuView; onView?: (v: MenuView) => void } = {}) {
+  if (view === 'ingredients' || view === 'preparations') return <MenuStockCatalogue key={view} view={view} />;
+  return <MenuDishList key={view} view={view} />;
+}
+function MenuDishList({ view }: { view: MenuView }) {
   const [categoryId, setCategoryId] = useState('');
   const [search, setSearch] = useState('');
   const [dishModal, setDishModal] = useState<AdminDish | null | 'new'>(null);
@@ -44,6 +54,9 @@ export function MenuPage() {
   const push = useNotifications((s) => s.push);
   const tr = useT();
   const o = overview.data;
+  const rows = (dishesQ.data ?? []).filter((d) =>
+    view === 'goods' ? d.hasDirectStock : view === 'recipes' ? !d.hasDirectStock : true,
+  );
 
   // Эффективное направление блюда: своё, иначе — направление категории.
   const stationByCat = new Map((categoriesQ.data ?? []).map((c) => [c.id, c.prepStation ?? 'kitchen']));
@@ -82,7 +95,11 @@ export function MenuPage() {
               onChange={(e) => setSearch(e.target.value)}
             />
             <div className="flex flex-wrap gap-2">
-              {owner && <button className="btn-secondary btn-md" onClick={() => setStationsOpen(true)}>{tr('Станции')}</button>}
+              {owner && (
+                <button className="btn-secondary btn-md" onClick={() => setStationsOpen(true)}>
+                  {tr('Станции')}
+                </button>
+              )}
               <button className="btn-secondary btn-md" onClick={() => setCatModal(true)}>
                 <IconPlus className="h-4 w-4" /> {tr('Категория')}
               </button>
@@ -90,7 +107,12 @@ export function MenuPage() {
                 <IconPlus className="h-4 w-4" /> {tr('Сет')}
               </button>
               <button className="btn-primary btn-md font-medium" onClick={() => setDishModal('new')}>
-                <IconPlus className="h-4 w-4" /> {tr('Добавить блюдо')}
+                <IconPlus className="h-4 w-4" />{' '}
+                {view === 'goods'
+                  ? 'Добавить товар'
+                  : view === 'recipes'
+                    ? 'Добавить техкарту'
+                    : tr('Добавить блюдо')}
               </button>
             </div>
           </div>
@@ -112,24 +134,29 @@ export function MenuPage() {
             <Spinner className="h-6 w-6" />
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="hidden overflow-x-auto md:block">
             <table className="w-full min-w-[640px] text-sm">
               <thead>
                 <tr className="border-b border-border text-left text-xs text-text-muted">
                   <th className="px-4 py-3 font-medium">{tr('Название')}</th>
                   <th className="px-4 py-3 font-medium">{tr('Категория')}</th>
                   <th className="px-4 py-3 text-right font-medium">{tr('Цена')}</th>
-                  <th className="px-4 py-3 text-right font-medium">{tr('Остаток')}</th>
                   <th className="px-4 py-3 font-medium">{tr('Статус')}</th>
                   <th className="px-4 py-3 text-right font-medium">{tr('Действия')}</th>
                 </tr>
               </thead>
               <tbody>
-                {dishesQ.data?.map((d) => (
+                {rows.map((d) => (
                   <tr key={d.id} className="border-b border-border last:border-0 hover:bg-background/60">
                     <td className="px-4 py-3">
                       <p className="flex items-center gap-2 font-medium text-text-primary">
-                        {d.name}
+                        <button
+                          type="button"
+                          className="text-left hover:text-primary"
+                          onClick={() => (d.isSet ? setSetModal(d) : setDishModal(d))}
+                        >
+                          {d.name}
+                        </button>
                         {d.isSet && (
                           <span className="inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
                             Сет
@@ -160,24 +187,8 @@ export function MenuPage() {
                     <td className="px-4 py-3 text-right font-medium text-text-primary">
                       {d.variants.length > 0 ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}
                     </td>
-                    <td className="px-4 py-3 text-right text-text-secondary">
-                      {(() => {
-                        if (!d.trackInventory) return '—';
-                        const hasVar = d.variants.length > 0;
-                        const stock = hasVar ? d.variants.reduce((a, v) => a + (v.stock ?? 0), 0) : (d.stock ?? 0);
-                        const units = hasVar
-                          ? new Set(d.variants.map((variant) => normalizeUnitLabel(variant.unit)))
-                          : new Set([normalizeUnitLabel(d.unit)]);
-                        return `${stock} ${units.size === 1 ? [...units][0] : 'по вариантам'}`;
-                      })()}
-                    </td>
                     <td className="px-4 py-3">
                       {(() => {
-                        const hasVar = d.variants.length > 0;
-                        const stock = hasVar ? d.variants.reduce((a, v) => a + (v.stock ?? 0), 0) : (d.stock ?? 0);
-                        if (d.trackInventory && stock === 0) {
-                          return <Badge tone="danger">{tr('Нет в наличии')}</Badge>;
-                        }
                         if (d.isActive && d.isAvailable) {
                           return <Badge tone="success">{tr('Активно')}</Badge>;
                         }
@@ -186,7 +197,10 @@ export function MenuPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex justify-end gap-1">
-                        <IconBtn onClick={() => (d.isSet ? setSetModal(d) : setDishModal(d))} title="Изменить">
+                        <IconBtn
+                          onClick={() => (d.isSet ? setSetModal(d) : setDishModal(d))}
+                          title="Изменить"
+                        >
                           <IconEdit className="h-4 w-4" />
                         </IconBtn>
                         <IconBtn onClick={() => onDelete(d)} title="Удалить" danger>
@@ -196,9 +210,9 @@ export function MenuPage() {
                     </td>
                   </tr>
                 ))}
-                {dishesQ.data?.length === 0 && (
+                {rows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-text-muted">
+                    <td colSpan={5} className="px-4 py-10 text-center text-text-muted">
                       Блюда не найдены
                     </td>
                   </tr>
@@ -207,10 +221,49 @@ export function MenuPage() {
             </table>
           </div>
         )}
+        {!dishesQ.isLoading && (
+          <div className="divide-y divide-border md:hidden">
+            {rows.map((d) => (
+              <article key={d.id} className="space-y-2 p-4">
+                <div className="flex justify-between gap-3">
+                  <button
+                    className="text-left font-semibold text-primary"
+                    onClick={() => (d.isSet ? setSetModal(d) : setDishModal(d))}
+                  >
+                    {d.name}
+                  </button>
+                  <span className="whitespace-nowrap font-medium">
+                    {d.variants.length ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}
+                  </span>
+                </div>
+                <p className="text-sm text-text-muted">
+                  {d.category.name}
+                  {d.variants.length ? ` · ${variantNamesLine(d.variants)}` : ''}
+                </p>
+                <div className="flex items-center justify-between">
+                  <Badge tone={d.isActive && d.isAvailable ? 'success' : 'muted'}>
+                    {d.isActive && d.isAvailable ? 'Активно' : 'Скрыто'}
+                  </Badge>
+                  <button className="btn-ghost btn-md" onClick={() => void onDelete(d)}>
+                    Удалить
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        {dishesQ.isError && (
+          <p role="alert" className="p-4 text-danger">
+            {apiError(dishesQ.error)}
+          </p>
+        )}
       </div>
 
       {dishModal !== null && (
         <DishModal
+          key={dishModal === 'new' ? 'new' : dishModal.id}
+          initialRecipe={view === 'recipes' || view === 'goods'}
+          onCreated={setDishModal}
           dish={dishModal === 'new' ? null : dishModal}
           categories={categoriesQ.data ?? []}
           stations={stations}
@@ -219,12 +272,22 @@ export function MenuPage() {
         />
       )}
       {setModal !== null && (
-        <SetModal set={setModal === 'new' ? null : setModal} stations={stations} onClose={() => setSetModal(null)} />
+        <SetModal
+          set={setModal === 'new' ? null : setModal}
+          stations={stations}
+          onClose={() => setSetModal(null)}
+        />
       )}
       {catModal && (
-        <CategoryModal categories={categoriesQ.data ?? []} stations={stations} onClose={() => setCatModal(false)} />
+        <CategoryModal
+          categories={categoriesQ.data ?? []}
+          stations={stations}
+          onClose={() => setCatModal(false)}
+        />
       )}
-      {owner && stationsOpen && <PreparationStationsModal stations={stations} onClose={() => setStationsOpen(false)} />}
+      {owner && stationsOpen && (
+        <PreparationStationsModal stations={stations} onClose={() => setStationsOpen(false)} />
+      )}
     </div>
   );
 }
@@ -263,12 +326,16 @@ function variantDraft(variant?: AdminDishVariant): DishVariantDraft {
 
 function DishModal({
   dish,
+  initialRecipe = false,
+  onCreated,
   categories,
   stations,
   defaultCategoryId,
   onClose,
 }: {
   dish: AdminDish | null;
+  initialRecipe?: boolean;
+  onCreated?: (d: AdminDish) => void;
   categories: AdminCategory[];
   stations: PreparationStation[];
   defaultCategoryId: string;
@@ -284,27 +351,22 @@ function DishModal({
   const [price, setPrice] = useState(
     dish ? (dish.variants.length > 0 && !dish.isWeighted ? '' : String(Number(dish.price))) : '',
   );
-  const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : '');
   const [unit, setUnit] = useState(normalizeUnitLabel(dish?.unit));
   const [description, setDescription] = useState(dish?.description ?? '');
   const [voiceName, setVoiceName] = useState(dish?.voiceName ?? '');
   const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
   const [isWeighted, setIsWeighted] = useState(dish?.isWeighted ?? false);
-  const [weightedMeasure, setWeightedMeasure] = useState<'weight' | 'volume'>(dish?.weightedMeasure ?? 'weight');
+  const [weightedMeasure, setWeightedMeasure] = useState<'weight' | 'volume'>(
+    dish?.weightedMeasure ?? 'weight',
+  );
   const [weightedPriceBase, setWeightedPriceBase] = useState(dish?.weightedPriceBase ?? 100);
   // '' = брать направление из категории; иначе приоритет блюда.
   const [prepStation, setPrepStation] = useState(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'main' | 'recipe'>('main');
+  const [tab, setTab] = useState<'main' | 'recipe'>(dish && initialRecipe ? 'recipe' : 'main');
   const pending = create.isPending || update.isPending || remove.isPending;
-  const recipeQ = useRecipe(isEdit ? dish.id : null);
-  const hasRecipe = (recipeQ.data?.items.length ?? 0) > 0;
-  const hasDishStock = variants.length > 0
-    ? variants.some((variant) => variant.stock.trim() !== '')
-    : stock.trim() !== '';
-
   // Фото блюда: preview — что показываем; payload — что отправляем (data URL | ссылка для загрузки | '' удалить | undefined без изменений).
   const initialImageUrl = dish?.imageUrl ?? null;
   const initialResolved = resolveApiImage(initialImageUrl);
@@ -360,8 +422,13 @@ function DishModal({
     setPhotoUrlInput('');
   }
 
-  function updateVariant(uid: string, patch: Partial<Pick<DishVariantDraft, 'name' | 'price' | 'stock' | 'unit'>>) {
-    setVariants((current) => current.map((variant) => (variant.uid === uid ? { ...variant, ...patch } : variant)));
+  function updateVariant(
+    uid: string,
+    patch: Partial<Pick<DishVariantDraft, 'name' | 'price' | 'stock' | 'unit'>>,
+  ) {
+    setVariants((current) =>
+      current.map((variant) => (variant.uid === uid ? { ...variant, ...patch } : variant)),
+    );
   }
 
   function addVariant() {
@@ -393,7 +460,7 @@ function DishModal({
         id: variant.id,
         name: variant.name.trim(),
         price: variant.price.trim(),
-        stock: variant.stock.trim(),
+
         unit: variant.unit,
       }))
       .filter((variant) => variant.name || variant.price);
@@ -436,16 +503,13 @@ function DishModal({
         // Фото отправляем только при изменении (новое data URL или '' для удаления).
         imageUrl,
         prepStation: prepStation === '' ? null : prepStation,
-        trackInventory: filledVariants.length > 0 ? filledVariants.some(v => v.stock.trim() !== '') : stock.trim() !== '',
-        stock: priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
-        initialStock: !isEdit && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
+
         unit: priceValue !== undefined ? unit : undefined,
         variants: filledVariants.map((variant) => ({
           id: variant.id,
           name: variant.name,
           price: Number(variant.price),
-          stock: variant.stock.trim() ? Number(variant.stock) : undefined,
-          initialStock: (!isEdit || !variant.id) && variant.stock.trim() ? Number(variant.stock) : undefined,
+
           unit: variant.unit,
         })),
       };
@@ -453,7 +517,15 @@ function DishModal({
         await update.mutateAsync({ id: dish!.id, ...body });
         push({ message: 'Блюдо обновлено', at: new Date().toISOString() });
       } else {
-        await create.mutateAsync(body);
+        const created = await create.mutateAsync(body);
+        if (onCreated && created?.id) {
+          onCreated({
+            ...created,
+            variants: created.variants ?? [],
+            category: created.category ?? categories.find((c) => c.id === categoryId),
+          });
+          return;
+        }
         push({ message: 'Блюдо добавлено', at: new Date().toISOString() });
       }
       onClose();
@@ -478,7 +550,7 @@ function DishModal({
   const smallUnit = weightedMeasure === 'weight' ? 'г' : 'мл';
   const largeUnit = weightedMeasure === 'weight' ? 'кг' : 'л';
   const baseLabel = weightedPriceBase === 1000 ? `1 ${largeUnit}` : `${weightedPriceBase} ${smallUnit}`;
-  const sampleTotal = Number(price || 0) * sampleAmount / weightedPriceBase;
+  const sampleTotal = (Number(price || 0) * sampleAmount) / weightedPriceBase;
 
   return (
     <Modal
@@ -490,14 +562,25 @@ function DishModal({
         <div className="flex items-center justify-between gap-3">
           <div>
             {isEdit && (
-              <button type="button" className="btn-secondary btn-md border-danger/50 text-danger hover:bg-danger/5" disabled={pending} onClick={onDeleteDish}>
+              <button
+                type="button"
+                className="btn-secondary btn-md border-danger/50 text-danger hover:bg-danger/5"
+                disabled={pending}
+                onClick={onDeleteDish}
+              >
                 <IconTrash className="h-4 w-4" /> Удалить блюдо
               </button>
             )}
           </div>
           <div className="flex gap-2">
-            <button type="button" className="btn-secondary btn-md px-6" disabled={pending} onClick={onClose}>Отмена</button>
-            <button className="btn-primary btn-md min-w-36 font-semibold" disabled={pending} onClick={onSubmit}>
+            <button type="button" className="btn-secondary btn-md px-6" disabled={pending} onClick={onClose}>
+              Отмена
+            </button>
+            <button
+              className="btn-primary btn-md min-w-36 font-semibold"
+              disabled={pending}
+              onClick={onSubmit}
+            >
               {pending ? <Spinner /> : 'Сохранить'}
             </button>
           </div>
@@ -511,55 +594,149 @@ function DishModal({
           </ModalTab>
           {isEdit && (
             <ModalTab active={tab === 'recipe'} onClick={() => setTab('recipe')}>
-              Техкарта
+              Состав и себестоимость
             </ModalTab>
           )}
         </div>
 
-        {tab === 'recipe' && isEdit && (
-          <RecipeEditor dishId={dish!.id} price={Number(dish!.price)} />
-        )}
+        {tab === 'recipe' && isEdit && <RecipeEditor dishId={dish!.id} price={Number(dish!.price)} />}
 
         <div className={tab === 'main' ? 'space-y-3' : 'hidden'}>
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.04fr)]">
             <section className="rounded-xl border border-border p-4">
               <Field label="Фото блюда">
-                <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onPhoto} />
+                <input
+                  ref={photoRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={onPhoto}
+                />
                 <div className="flex gap-4">
                   <div className="group relative flex h-[118px] w-[130px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-background">
-                    {photoPreview ? <img src={photoPreview} alt="" className="h-full w-full object-cover" /> : <span className="text-xs text-text-muted">Нет фото</span>}
-                    {photoPreview && <button type="button" onClick={removePhoto} className="absolute right-1.5 top-1.5 rounded-md bg-white/90 p-1 text-danger opacity-0 shadow group-hover:opacity-100" aria-label="Удалить фото"><IconTrash className="h-4 w-4" /></button>}
+                    {photoPreview ? (
+                      <img src={photoPreview} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <span className="text-xs text-text-muted">Нет фото</span>
+                    )}
+                    {photoPreview && (
+                      <button
+                        type="button"
+                        onClick={removePhoto}
+                        className="absolute right-1.5 top-1.5 rounded-md bg-white/90 p-1 text-danger opacity-0 shadow group-hover:opacity-100"
+                        aria-label="Удалить фото"
+                      >
+                        <IconTrash className="h-4 w-4" />
+                      </button>
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <button type="button" className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-primary/35 bg-primary/[0.02] px-3 text-sm font-medium text-primary hover:bg-primary/5" disabled={photoBusy} onClick={() => photoRef.current?.click()}>
-                      {photoBusy ? <Spinner /> : <><IconPlus className="h-4 w-4" /> Загрузить фото</>}
+                    <button
+                      type="button"
+                      className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-primary/35 bg-primary/[0.02] px-3 text-sm font-medium text-primary hover:bg-primary/5"
+                      disabled={photoBusy}
+                      onClick={() => photoRef.current?.click()}
+                    >
+                      {photoBusy ? (
+                        <Spinner />
+                      ) : (
+                        <>
+                          <IconPlus className="h-4 w-4" /> Загрузить фото
+                        </>
+                      )}
                     </button>
-                    <p className="mt-2 text-[11px] text-text-muted">PNG, JPG, WEBP. Рекомендуемый размер 800×800px</p>
+                    <p className="mt-2 text-[11px] text-text-muted">
+                      PNG, JPG, WEBP. Рекомендуемый размер 800×800px
+                    </p>
                     <div className="mt-2 flex gap-2">
-                      <input className="input h-9 flex-1 text-xs" placeholder="или ссылка https://..." value={photoUrlInput} onChange={(e) => setPhotoUrlInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && onPhotoUrlCommit()} onBlur={onPhotoUrlCommit} />
-                      <button type="button" className="btn-secondary h-9 shrink-0 px-3 text-xs" onClick={onPhotoUrlCommit}>По ссылке</button>
+                      <input
+                        className="input h-9 flex-1 text-xs"
+                        placeholder="или ссылка https://..."
+                        value={photoUrlInput}
+                        onChange={(e) => setPhotoUrlInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && onPhotoUrlCommit()}
+                        onBlur={onPhotoUrlCommit}
+                      />
+                      <button
+                        type="button"
+                        className="btn-secondary h-9 shrink-0 px-3 text-xs"
+                        onClick={onPhotoUrlCommit}
+                      >
+                        По ссылке
+                      </button>
                     </div>
                   </div>
                 </div>
               </Field>
               <div className="mt-3 space-y-3">
-                <Field label="Название"><input className="input h-11" value={name} onChange={(e) => setName(e.target.value)} /></Field>
+                <Field label="Название">
+                  <input className="input h-11" value={name} onChange={(e) => setName(e.target.value)} />
+                </Field>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="Категория"><Select className="h-11 w-full" value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ value: c.id, label: c.name }))} /></Field>
-                  <Field label="Куда отправлять"><Select className="h-11 w-full" value={prepStation} onChange={setPrepStation} options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, prepStation)]} /></Field>
+                  <Field label="Категория">
+                    <Select
+                      className="h-11 w-full"
+                      value={categoryId}
+                      onChange={setCategoryId}
+                      options={categories.map((c) => ({ value: c.id, label: c.name }))}
+                    />
+                  </Field>
+                  <Field label="Куда отправлять">
+                    <Select
+                      className="h-11 w-full"
+                      value={prepStation}
+                      onChange={setPrepStation}
+                      options={[
+                        { value: '', label: 'По категории' },
+                        ...routingOptions(stations, prepStation),
+                      ]}
+                    />
+                  </Field>
                 </div>
                 <Field label="Описание">
-                  <div className="relative"><textarea className="input min-h-[84px] resize-none py-2.5 pr-12" maxLength={300} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Необязательно" /><span className="absolute bottom-2 right-3 text-[11px] text-text-muted">{description.length}/300</span></div>
+                  <div className="relative">
+                    <textarea
+                      className="input min-h-[84px] resize-none py-2.5 pr-12"
+                      maxLength={300}
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Необязательно"
+                    />
+                    <span className="absolute bottom-2 right-3 text-[11px] text-text-muted">
+                      {description.length}/300
+                    </span>
+                  </div>
                 </Field>
                 {variants.length === 0 && !isWeighted && (
-                  <div className="grid grid-cols-3 gap-3">
-                    <Field label="Цена (с)"><input className="input h-11" type="number" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></Field>
-                    <Field label="Остаток"><input className="input h-11" type="number" inputMode="numeric" value={stock} placeholder="Без учета" onChange={(e) => setStock(e.target.value)} /></Field>
-                    <Field label="Ед. изм."><Select value={unit} onChange={setUnit} options={unitLabelOptions(unit)} className="h-11 w-full" /></Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Цена (с)">
+                      <input
+                        className="input h-11"
+                        type="number"
+                        inputMode="decimal"
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value)}
+                      />
+                    </Field>
+                    <Field label="Ед. изм.">
+                      <Select
+                        value={unit}
+                        onChange={setUnit}
+                        options={unitLabelOptions(unit)}
+                        className="h-11 w-full"
+                      />
+                    </Field>
                   </div>
                 )}
-                <div className="rounded-lg border border-border bg-background/60 p-3 text-xs leading-relaxed text-text-secondary">ⓘ &nbsp;Для напитков и готовых товаров используйте остаток блюда.<br />&nbsp;&nbsp;&nbsp;&nbsp;Для блюд кухни используйте техкарту. Не включайте оба варианта.</div>
-                {isEdit && hasRecipe && hasDishStock && <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs leading-relaxed text-warning">У блюда есть техкарта и заполнен остаток. Проверьте, нужен ли двойной учёт.</div>}
+                <div className="rounded-lg border border-border bg-background/60 p-3 text-xs text-text-secondary">
+                  {isEdit ? (
+                    <button type="button" className="text-primary" onClick={() => setTab('recipe')}>
+                      Настроить списание товара или ингредиентов → Состав и себестоимость
+                    </button>
+                  ) : (
+                    'После создания откройте «Состав и себестоимость» и выберите товар или добавьте ингредиенты. Остатки изменяются складскими документами.'
+                  )}
+                </div>
               </div>
             </section>
 
@@ -567,37 +744,110 @@ function DishModal({
               <h4 className="text-base font-semibold text-text-primary">Настройки блюда</h4>
               <div className="mt-3 grid grid-cols-2 divide-x divide-border">
                 <Toggle checked={isAvailable} onChange={setIsAvailable} label="Доступно для заказа" />
-                <div className="pl-6"><Toggle checked={isWeighted} onChange={setIsWeighted} label="Весовое блюдо" /></div>
+                <div className="pl-6">
+                  <Toggle checked={isWeighted} onChange={setIsWeighted} label="Весовое блюдо" />
+                </div>
               </div>
               {isWeighted && (
                 <div className="mt-4 rounded-xl border border-border p-4">
                   <h5 className="font-semibold text-text-primary">Параметры весового блюда</h5>
                   <div className="mt-3 grid grid-cols-[minmax(0,1fr)_12px_minmax(150px,.62fr)] items-end gap-2">
-                    <Field label="Ед. измерения (автоматическое масштабирование)"><Select className="h-11 w-full" value={weightedMeasure} onChange={(v) => setWeightedMeasure(v as 'weight' | 'volume')} options={[{ value: 'weight', label: 'г / кг' }, { value: 'volume', label: 'мл / л' }]} /></Field>
+                    <Field label="Ед. измерения (автоматическое масштабирование)">
+                      <Select
+                        className="h-11 w-full"
+                        value={weightedMeasure}
+                        onChange={(v) => setWeightedMeasure(v as 'weight' | 'volume')}
+                        options={[
+                          { value: 'weight', label: 'г / кг' },
+                          { value: 'volume', label: 'мл / л' },
+                        ]}
+                      />
+                    </Field>
                     <span className="pb-3 text-center text-text-muted">·</span>
-                    <Field label="Цена указана за"><Select className="h-11 w-full" value={String(weightedPriceBase)} onChange={(v) => setWeightedPriceBase(Number(v))} options={[1, 100, 1000].map((value) => ({ value: String(value), label: value === 1000 ? `1 ${largeUnit}` : `${value} ${smallUnit}` }))} /></Field>
+                    <Field label="Цена указана за">
+                      <Select
+                        className="h-11 w-full"
+                        value={String(weightedPriceBase)}
+                        onChange={(v) => setWeightedPriceBase(Number(v))}
+                        options={[1, 100, 1000].map((value) => ({
+                          value: String(value),
+                          label: value === 1000 ? `1 ${largeUnit}` : `${value} ${smallUnit}`,
+                        }))}
+                      />
+                    </Field>
                   </div>
                   <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(150px,.62fr)] gap-6">
-                    <div className="rounded-lg bg-background p-3 text-xs leading-relaxed text-text-secondary"><b className="text-primary">• {weightedMeasure === 'weight' ? 'г / кг' : 'мл / л'}</b><br />До 999 — в {smallUnit === 'г' ? 'граммах' : 'миллилитрах'}, свыше — в {largeUnit === 'кг' ? 'килограммах' : 'литрах'} (например, 1.25 {largeUnit})</div>
-                    <Field label="Цена"><div className="relative"><input className="input h-11 pr-14" type="number" min="0" step="0.01" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /><span className="absolute right-3 top-3 text-sm text-text-muted">сом</span></div><p className="mt-2 text-xs text-text-muted">Например: {price || '50'} сом за {baseLabel}</p></Field>
+                    <div className="rounded-lg bg-background p-3 text-xs leading-relaxed text-text-secondary">
+                      <b className="text-primary">• {weightedMeasure === 'weight' ? 'г / кг' : 'мл / л'}</b>
+                      <br />
+                      До 999 — в {smallUnit === 'г' ? 'граммах' : 'миллилитрах'}, свыше — в{' '}
+                      {largeUnit === 'кг' ? 'килограммах' : 'литрах'} (например, 1.25 {largeUnit})
+                    </div>
+                    <Field label="Цена">
+                      <div className="relative">
+                        <input
+                          className="input h-11 pr-14"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          inputMode="decimal"
+                          value={price}
+                          onChange={(e) => setPrice(e.target.value)}
+                        />
+                        <span className="absolute right-3 top-3 text-sm text-text-muted">сом</span>
+                      </div>
+                      <p className="mt-2 text-xs text-text-muted">
+                        Например: {price || '50'} сом за {baseLabel}
+                      </p>
+                    </Field>
                   </div>
                 </div>
               )}
               {isWeighted && (
                 <div className="mt-4 rounded-xl border border-primary/20 bg-primary/[0.035] p-4">
-                  <h5 className="flex items-center gap-2 font-semibold text-text-primary"><span className="text-primary">▣</span> Пример расчёта</h5>
+                  <h5 className="flex items-center gap-2 font-semibold text-text-primary">
+                    <span className="text-primary">▣</span> Пример расчёта
+                  </h5>
                   <div className="mt-4 grid grid-cols-[1fr_1fr_24px_1fr] items-end gap-3 text-xs text-text-muted">
-                    <div><span>Выбрано количество:</span><strong className="mt-1 block text-sm text-primary">1250 {smallUnit} = 1.25 {largeUnit}</strong></div>
-                    <div><span>Цена за {baseLabel}:</span><strong className="mt-1 block text-sm text-text-primary">{Number(price || 0).toFixed(2)} сом</strong></div>
+                    <div>
+                      <span>Выбрано количество:</span>
+                      <strong className="mt-1 block text-sm text-primary">
+                        1250 {smallUnit} = 1.25 {largeUnit}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Цена за {baseLabel}:</span>
+                      <strong className="mt-1 block text-sm text-text-primary">
+                        {Number(price || 0).toFixed(2)} сом
+                      </strong>
+                    </div>
                     <span className="pb-1 text-xl text-text-muted">→</span>
-                    <div><span>Итоговая цена:</span><strong className="mt-1 block text-sm text-primary">{sampleTotal.toFixed(2)} сом</strong></div>
+                    <div>
+                      <span>Итоговая цена:</span>
+                      <strong className="mt-1 block text-sm text-primary">
+                        {sampleTotal.toFixed(2)} сом
+                      </strong>
+                    </div>
                   </div>
-                  <p className="mt-6 text-center text-xs text-text-muted">Система автоматически пересчитывает вес и рассчитывает итоговую цену.</p>
+                  <p className="mt-6 text-center text-xs text-text-muted">
+                    Система автоматически пересчитывает вес и рассчитывает итоговую цену.
+                  </p>
                 </div>
               )}
 
               <div className="mt-4 space-y-4">
-                <Field label="Название для озвучки"><input className="input h-11" value={voiceName} onChange={(e) => setVoiceName(e.target.value)} placeholder={name.trim() ? `Напр. «Пепперрони» (на экране — ${name.trim()})` : 'Как произносить вслух (необязательно)'} /></Field>
+                <Field label="Название для озвучки">
+                  <input
+                    className="input h-11"
+                    value={voiceName}
+                    onChange={(e) => setVoiceName(e.target.value)}
+                    placeholder={
+                      name.trim()
+                        ? `Напр. «Пепперрони» (на экране — ${name.trim()})`
+                        : 'Как произносить вслух (необязательно)'
+                    }
+                  />
+                </Field>
 
                 <section className="rounded-xl border border-border p-4">
                   <div className="mb-2 flex items-center justify-between gap-3">
@@ -607,11 +857,11 @@ function DishModal({
                     </button>
                   </div>
                   <div className="overflow-hidden overflow-x-auto rounded-xl border border-border">
-                    <div className="grid min-w-[520px] grid-cols-[28px_minmax(118px,1fr)_92px_92px_92px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
+                    <div className="grid min-w-[520px] grid-cols-[28px_minmax(118px,1fr)_92px_92px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
                       <span />
                       <span>Название варианта</span>
                       <span>Цена (с)</span>
-                      <span>Остаток</span>
+
                       <span>Ед. изм.</span>
                       <span />
                     </div>
@@ -630,11 +880,14 @@ function DishModal({
                               setDragIndex(null);
                             }}
                             onDragEnd={() => setDragIndex(null)}
-                            className={`grid grid-cols-[28px_minmax(118px,1fr)_92px_92px_92px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
+                            className={`grid grid-cols-[28px_minmax(118px,1fr)_92px_92px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
                               dragIndex === index ? 'bg-primary/5' : 'bg-white'
                             }`}
                           >
-                            <span className="cursor-grab select-none text-center text-lg leading-none text-text-light" title="Изменить порядок">
+                            <span
+                              className="cursor-grab select-none text-center text-lg leading-none text-text-light"
+                              title="Изменить порядок"
+                            >
                               ⋮⋮
                             </span>
                             <input
@@ -651,15 +904,6 @@ function DishModal({
                               value={variant.price}
                               placeholder="400"
                               onChange={(e) => updateVariant(variant.uid, { price: e.target.value })}
-                            />
-                            <input
-                              className="input h-10"
-                              type="number"
-                              inputMode="numeric"
-                              min="0"
-                              value={variant.stock}
-                              placeholder="Без учета"
-                              onChange={(e) => updateVariant(variant.uid, { stock: e.target.value })}
                             />
                             <Select
                               value={variant.unit}
@@ -691,13 +935,23 @@ function DishModal({
   );
 }
 
-function ModalTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function ModalTab({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       className={`-mb-px shrink-0 border-b-2 px-3.5 py-2 text-sm font-medium transition-colors ${
-        active ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'
+        active
+          ? 'border-primary text-primary'
+          : 'border-transparent text-text-secondary hover:text-text-primary'
       }`}
     >
       {children}
@@ -705,10 +959,23 @@ function ModalTab({ active, onClick, children }: { active: boolean; onClick: () 
   );
 }
 
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (checked: boolean) => void; label: string }) {
+function Toggle({
+  checked,
+  onChange,
+  label,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+}) {
   return (
     <label className="flex cursor-pointer items-center gap-3 text-sm text-text-secondary">
-      <input type="checkbox" className="peer sr-only" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <input
+        type="checkbox"
+        className="peer sr-only"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
       <span className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary/30 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:after:translate-x-4" />
       <span>{label}</span>
     </label>
@@ -816,7 +1083,16 @@ function CategoryModal({
                 className="text-text-muted hover:text-primary disabled:opacity-30"
                 title="Выше"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 15-6-6-6 6" /></svg>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="m18 15-6-6-6 6" />
+                </svg>
               </button>
               <button
                 onClick={() => move(index, 1)}
@@ -824,7 +1100,16 @@ function CategoryModal({
                 className="text-text-muted hover:text-primary disabled:opacity-30"
                 title="Ниже"
               >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
               </button>
             </div>
 
@@ -844,7 +1129,10 @@ function CategoryModal({
             ) : (
               <button
                 className="min-w-0 flex-1 truncate text-left text-[15px] text-text-primary hover:text-primary"
-                onClick={() => { setEditingId(c.id); setEditName(c.name); }}
+                onClick={() => {
+                  setEditingId(c.id);
+                  setEditName(c.name);
+                }}
                 title="Переименовать"
               >
                 {c.name}
@@ -913,7 +1201,11 @@ function DeleteCategorySheet({
       {!hasDishes ? (
         <div className="space-y-3">
           <p className="text-sm text-text-secondary">В категории нет блюд. Удалить её?</p>
-          <button className="btn-danger btn-lg w-full font-semibold" disabled={remove.isPending} onClick={() => run()}>
+          <button
+            className="btn-danger btn-lg w-full font-semibold"
+            disabled={remove.isPending}
+            onClick={() => run()}
+          >
             {remove.isPending ? <Spinner /> : 'Удалить категорию'}
           </button>
         </div>
@@ -975,7 +1267,15 @@ interface SetCompDraft {
   replaceable: boolean;
 }
 
-function SetModal({ set, stations, onClose }: { set: AdminDish | null; stations: PreparationStation[]; onClose: () => void }) {
+function SetModal({
+  set,
+  stations,
+  onClose,
+}: {
+  set: AdminDish | null;
+  stations: PreparationStation[];
+  onClose: () => void;
+}) {
   const isEdit = !!set;
   const { create, update } = useSetMutations();
   const push = useNotifications((s) => s.push);
@@ -1074,7 +1374,12 @@ function SetModal({ set, stations, onClose }: { set: AdminDish | null; stations:
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Название">
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Сет-6" />
+            <input
+              className="input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Сет-6"
+            />
           </Field>
           <Field label="Цена (с)">
             <input
@@ -1088,8 +1393,12 @@ function SetModal({ set, stations, onClose }: { set: AdminDish | null; stations:
         </div>
 
         <Field label="Куда отправлять сет">
-          <Select className="h-11 w-full" value={prepStation} onChange={setPrepStation}
-            options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, prepStation)]} />
+          <Select
+            className="h-11 w-full"
+            value={prepStation}
+            onChange={setPrepStation}
+            options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, prepStation)]}
+          />
         </Field>
         <div>
           <p className="mb-1.5 text-sm font-medium text-text-secondary">Состав сета</p>
@@ -1100,7 +1409,10 @@ function SetModal({ set, stations, onClose }: { set: AdminDish | null; stations:
           ) : (
             <div className="space-y-1.5">
               {components.map((c) => (
-                <div key={c.uid} className="flex flex-wrap items-center gap-2 rounded-xl border border-border px-3 py-2">
+                <div
+                  key={c.uid}
+                  className="flex flex-wrap items-center gap-2 rounded-xl border border-border px-3 py-2"
+                >
                   <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{c.name}</span>
                   <input
                     className="input h-9 w-16 px-2 text-center"
@@ -1205,7 +1517,11 @@ function Badge({ children, tone }: { children: React.ReactNode; tone: 'success' 
     danger: 'bg-danger/15 text-danger-dark',
     muted: 'bg-slate-100 text-slate-600',
   }[tone];
-  return <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${bg}`}>{children}</span>;
+  return (
+    <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${bg}`}>
+      {children}
+    </span>
+  );
 }
 function IconBtn({
   children,

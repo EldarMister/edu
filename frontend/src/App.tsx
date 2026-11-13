@@ -13,6 +13,7 @@ import { LoginPage } from '@/features/auth/LoginPage';
 import { WaiterApp } from '@/features/waiter/WaiterApp';
 import { KitchenApp } from '@/features/kitchen/KitchenApp';
 import { BarApp } from '@/features/bar/BarApp';
+import { WarehouseStaffApp } from '@/features/admin/pages/warehouse/WarehouseStaffApp';
 import { AdminApp } from '@/features/admin/AdminApp';
 import { QrMenuApp } from '@/features/qr/QrMenuApp';
 import { QueueApp } from '@/features/queue/QueueApp';
@@ -27,7 +28,7 @@ export function App() {
   const onWaiter = location.pathname.startsWith('/waiter');
   const showPtt =
     !!user &&
-    ['/waiter', '/kitchen', '/bar', '/admin', '/owner'].some((prefix) =>
+    ['/waiter', '/kitchen', '/bar', '/admin', '/owner', '/warehouse'].some((prefix) =>
       location.pathname.startsWith(prefix),
     );
 
@@ -98,6 +99,8 @@ export function App() {
             </ProtectedRoute>
           }
         />
+
+        <Route path="/warehouse/*" element={<ProtectedRoute roles={['OWNER','ADMIN','KITCHEN','BAR']}><WarehouseStaffApp/></ProtectedRoute>}/>
 
         {/* Этап 6 — администратор, Этап 7 — владелец (одна панель, нав зависит от роли) */}
         <Route

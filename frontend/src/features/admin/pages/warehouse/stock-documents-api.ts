@@ -1,12 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 
-export type StockDocumentKind = 'inventory' | 'writeoff';
+export type StockDocumentKind = 'inventory' | 'writeoff' | 'transfer' | 'supplier_return';
 export type InventoryMode = 'full' | 'partial';
-export type WriteoffReason = 'spoilage' | 'expired' | 'damage' | 'staff_meal' | 'other';
-export type StockDocumentStatus = 'draft' | 'submitted' | 'posted';
+export type WriteoffReason =
+  'spoilage' | 'expired' | 'damage' | 'staff_meal' | 'tasting' | 'household' | 'other';
+export type StockDocumentStatus = 'draft' | 'submitted' | 'posted' | 'reversed';
 
 export interface StockDocumentItem {
+  costKnown?:boolean;
   ingredientId: string;
   name: string;
   unit: string;
@@ -20,6 +22,8 @@ export interface StockDocumentItem {
 export interface StockDocument {
   id: string;
   warehouseId: string;
+  destinationWarehouseId?: string | null;
+  sourcePurchaseId?: string | null;
   kind: StockDocumentKind;
   mode: InventoryMode | null;
   reason: WriteoffReason | null;
@@ -39,7 +43,10 @@ export interface StockDocumentDetails extends StockDocument {
   items: StockDocumentItem[];
 }
 
-interface DocumentInput {
+export interface DocumentInput {
+  requestKey?: string;
+  destinationWarehouseId?: string;
+  sourcePurchaseId?: string;
   revision?: number;
   recount?: boolean;
   reason?: WriteoffReason | null;
@@ -51,7 +58,7 @@ const BASE_URL = '/admin/warehouse/documents';
 const WAREHOUSE_KEY = ['admin', 'warehouse'] as const;
 const DOCUMENTS_KEY = [...WAREHOUSE_KEY, 'documents'] as const;
 
-export function useStockDocuments(warehouseId: string, kind: StockDocumentKind) {
+export function useStockDocuments(warehouseId: string, kind?: StockDocumentKind) {
   return useQuery({
     queryKey: [...DOCUMENTS_KEY, 'list', warehouseId, kind],
     queryFn: async () => (await api.get<StockDocument[]>(BASE_URL, { params: { warehouseId, kind } })).data,
@@ -72,8 +79,9 @@ export function useStockDocumentMutations() {
     void qc.invalidateQueries({ queryKey: [...DOCUMENTS_KEY, 'list'] });
   };
   const create = useMutation({
-    mutationFn: async (body: DocumentInput & { warehouseId: string; kind: StockDocumentKind; mode?: InventoryMode }) =>
-      (await api.post<StockDocumentDetails>(BASE_URL, body)).data,
+    mutationFn: async (
+      body: DocumentInput & { warehouseId: string; kind: StockDocumentKind; mode?: InventoryMode },
+    ) => (await api.post<StockDocumentDetails>(BASE_URL, body)).data,
     onSuccess: saved,
   });
   const update = useMutation({
@@ -82,11 +90,27 @@ export function useStockDocumentMutations() {
     onSuccess: saved,
   });
   const transition = useMutation({
-    mutationFn: async ({ id, action, revision }: { id: string; action: 'submit' | 'approve' | 'reopen'; revision: number }) =>
-      (await api.post<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}/${action}`, { revision })).data,
+    mutationFn: async ({
+      id,
+      action,
+      revision,
+      note,
+    }: {
+      id: string;
+      action: 'submit' | 'approve' | 'reopen' | 'reverse';
+      revision: number;
+      note?: string;
+    }) =>
+      (
+        await api.post<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}/${action}`, {
+          revision,
+          note,
+        })
+      ).data,
     onSuccess: (document) => {
       saved(document);
-      if (document.status === 'posted') void qc.invalidateQueries({ queryKey: WAREHOUSE_KEY });
+      if (document.status === 'posted' || document.status === 'reversed')
+        void qc.invalidateQueries({ queryKey: WAREHOUSE_KEY });
     },
   });
   return { create, update, transition };

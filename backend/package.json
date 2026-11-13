@@ -19,6 +19,8 @@
     "prisma:studio": "prisma studio",
     "backup:prod": "ts-node --transpile-only scripts/backup-postgres-to-drive.ts",
     "popularity:recalculate": "ts-node --transpile-only scripts/recalculate-dish-popularity.ts",
+    "warehouse:reconcile": "ts-node --transpile-only scripts/warehouse-reconcile.ts",
+    "test:warehouse": "node --test tests/warehouse-postgres.test.cjs tests/warehouse-documents-postgres.test.cjs tests/warehouse-unified-postgres.test.cjs tests/warehouse-order-accounting-postgres.test.cjs tests/warehouse-reports.test.cjs tests/warehouse-sales-cost.test.cjs tests/warehouse-menu-availability.test.cjs tests/warehouse-processing-postgres.test.cjs tests/warehouse-active-migration-postgres.test.cjs tests/warehouse-read-snapshot-postgres.test.cjs tests/warehouse-http.test.cjs",
     "drive:oauth:url": "ts-node --transpile-only scripts/google-drive-oauth.ts url",
     "drive:oauth:token": "ts-node --transpile-only scripts/google-drive-oauth.ts token",
     "postinstall": "prisma generate"

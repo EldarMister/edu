@@ -1,14 +1,15 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
+import { assertWarehousePermission } from './warehouse-permissions';
+import { WarehouseDocumentsService } from './documents.service';
+import { getCafeId } from '../tenant/tenant-context';
 import { AuthUser } from '../common/decorators/current-user.decorator';
 import { lockStationRouting, resolveStation, stationCatalog } from '../kitchen/preparation-stations';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
-import { lockIngredients } from './stock-lock';
 import { assertUnitMatchesType, normalizeUnit, toBase } from './units';
-import { getWarehouseBalance, resolveWarehouse, setWarehouseBalance } from './warehouse-location';
+import { resolveWarehouse } from './warehouse-location';
 
 @Injectable()
 export class WarehouseLocationsService {
@@ -23,7 +24,7 @@ export class WarehouseLocationsService {
     const [locations, records, routes] = await Promise.all([
       this.prisma.warehouse.findMany({
         where: { cafeId },
-        select: { id: true, name: true, isDefault: true },
+        select: { id: true, name: true, address: true, isDefault: true },
         orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
       }),
       this.prisma.preparationStation.findMany({ where: { cafeId }, orderBy: { name: 'asc' } }),
@@ -38,7 +39,7 @@ export class WarehouseLocationsService {
     return { locations, stationRoutes };
   }
 
-  async save(cafeId: string | null, value: string, id?: string) {
+  async save(cafeId: string | null, value: string, id?: string, address?: string | null) {
     if (!cafeId) throw new BadRequestException('Заведение не назначено');
     const name = value.trim();
     if (!name) throw new BadRequestException('Укажите название склада');
@@ -54,16 +55,17 @@ export class WarehouseLocationsService {
       if (otherLocations.some((location) => location.name.toLowerCase() === normalized)) {
         throw new ConflictException('Склад с таким названием уже существует');
       }
-      const select = { id: true, name: true, isDefault: true } as const;
+      const select = { id: true, name: true, address: true, isDefault: true } as const;
       return id === undefined
-        ? tx.warehouse.create({ data: { cafeId, name }, select })
-        : tx.warehouse.update({ where: { id, cafeId }, data: { name }, select });
+        ? tx.warehouse.create({ data: { cafeId, name, address: address?.trim() || null }, select })
+        : tx.warehouse.update({ where: { id, cafeId }, data: { name, address: address === undefined ? undefined : address?.trim() || null }, select });
     });
     this.events.emitBroadcast(SERVER_EVENTS.SETTINGS_UPDATED, { cafeId });
     return location;
   }
 
   async route(user: AuthUser, stationId: string, warehouseId: string | null) {
+    assertWarehousePermission(user, 'warehouseSettings');
     const cafeId = user.cafeId;
     if (!cafeId) throw new BadRequestException('Заведение не назначено');
     const assignment = await this.prisma.$transaction(async (tx) => {
@@ -87,46 +89,22 @@ export class WarehouseLocationsService {
   }
 
   async transfer(input: {
-    ingredientId: string;
-    fromWarehouseId: string;
-    toWarehouseId: string;
-    quantity: number;
-    unit: string;
-  }) {
-    if (input.fromWarehouseId === input.toWarehouseId) throw new BadRequestException('Выберите разные склады');
-    const [from, to] = await Promise.all([
-      resolveWarehouse(this.prisma, input.fromWarehouseId),
-      resolveWarehouse(this.prisma, input.toWarehouseId),
-    ]);
-    if (!from || !to) throw new NotFoundException('Склад не найден');
+    ingredientId: string; fromWarehouseId: string; toWarehouseId: string;
+    quantity: number; unit: string; requestKey?: string;
+  }, actor?: AuthUser) {
+    const ingredient = await this.prisma.ingredient.findUnique({ where: { id: input.ingredientId } });
+    if (!ingredient) throw new NotFoundException('Товар не найден');
     const unit = normalizeUnit(input.unit);
-    await this.prisma.$transaction(async (tx) => {
-      await lockIngredients(tx, [input.ingredientId]);
-      const ingredient = await tx.ingredient.findUnique({ where: { id: input.ingredientId, cafeId: from.cafeId } });
-      if (!ingredient) throw new NotFoundException('Сырьё не найдено');
-      assertUnitMatchesType(unit, ingredient.unitType);
-      const quantity = new Prisma.Decimal(toBase(input.quantity, unit)).toDecimalPlaces(3);
-      if (quantity.lte(0)) throw new BadRequestException('Количество должно быть больше нуля');
-
-      const source = await getWarehouseBalance(tx, from, ingredient);
-      const target = await getWarehouseBalance(tx, to, ingredient);
-      if (source.stock.lt(quantity)) throw new BadRequestException('На складе недостаточно сырья');
-      const sourceAfter = source.stock.sub(quantity);
-      const targetAfter = target.stock.add(quantity);
-      const targetAvg = target.stock.gt(0)
-        ? target.stock.mul(target.avgCost).add(quantity.mul(source.avgCost)).div(targetAfter)
-        : source.avgCost;
-
-      await setWarehouseBalance(tx, from, ingredient.id, { stock: sourceAfter, avgCost: source.avgCost });
-      await setWarehouseBalance(tx, to, ingredient.id, { stock: targetAfter, avgCost: targetAvg });
-      const sourceId = randomUUID();
-      const comment = `Перемещение: ${from.name} → ${to.name}`;
-      const common = { cafeId: from.cafeId, ingredientId: ingredient.id, sourceId, type: 'correction', sourceType: 'manual', comment } as const;
-      await tx.stockMovement.createMany({ data: [
-        { ...common, warehouseId: from.id, beforeStock: source.stock, change: quantity.negated(), afterStock: sourceAfter, costAtMoment: source.avgCost },
-        { ...common, warehouseId: to.id, beforeStock: target.stock, change: quantity, afterStock: targetAfter, costAtMoment: source.avgCost },
-      ] });
-    });
-    return { ok: true };
+    assertUnitMatchesType(unit, ingredient.unitType);
+    const quantity = toBase(input.quantity, unit) / toBase(1, normalizeUnit(ingredient.displayUnit));
+    const user = actor ?? { id: 'system', name: 'Система', role: 'OWNER', cafeId: getCafeId() ?? null };
+    const documents = new WarehouseDocumentsService(this.prisma);
+    let document = await documents.create(user, { kind: 'transfer', warehouseId: input.fromWarehouseId,
+      destinationWarehouseId: input.toWarehouseId, requestKey: input.requestKey,
+      items: [{ ingredientId: ingredient.id, quantity }] });
+    if (document.status === 'posted') return { ok: true, documentId: document.id };
+    if (document.status === 'draft') document = await documents.submit(user, document.id, document.revision);
+    await documents.approve(user, document.id, document.revision);
+    return { ok: true, documentId: document.id };
   }
 }

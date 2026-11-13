@@ -1,3 +1,4 @@
+import { lockRecipeGraph } from '../warehouse/recipe-resolution';
 import {
   BadRequestException,
   ConflictException,
@@ -34,6 +35,7 @@ import { IngredientStockService } from '../warehouse/ingredient-stock.service';
 import { assertAssignableStation, lockStationRouting, PrepStation } from '../kitchen/preparation-stations';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
+import { resolveMenuSelections, selectionIdentity } from '../warehouse/menu-modifiers';
 import { lockOrder } from './order-lock';
 import { aggregateOrderStatus, assertWaiterItemOperation, normalizeWaiterOrderPermissions } from './order-policy';
 import { buildNewOrderText, buildCancelText, buildEditVoiceText, buildReplacementText, numberToWordsRu, orderNumberWords, withVariantVoice } from '../tts/kitchen-voice';
@@ -298,7 +300,7 @@ export class OrdersService {
       throw new BadRequestException('У этого стола уже есть активный заказ');
     }
 
-    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(dto.items);
+    const { itemsData } = await this.buildItemsData(dto.items);
 
     // Есть ли позиции, которые реально уходят на станцию (кухня/бар).
     // Заказ только из «Без отправки» сразу готов: на кухню/бар ничего не шлём.
@@ -309,7 +311,11 @@ export class OrdersService {
     let order: Awaited<ReturnType<typeof this.findById>>;
     try {
       order = await this.prisma.$transaction(async (tx) => {
-        await this.ensureOrderStations(tx, itemsData);
+        const { itemsData } = await this.buildItemsData(dto.items, tx);
+          const hasPrep = itemsData.some((item) => item.prepStation !== PrepStation.none);
+          const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
+          const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
+          await this.ensureOrderStations(tx, itemsData);
         const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
         const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
         const totals = this.calcTotals(itemsData, serviceChargeAmount);
@@ -319,7 +325,6 @@ export class OrdersService {
           where: { id: dto.tableId },
           data: { status: initialTableStatus },
         });
-        await this.deductInventory(tx, dishDeductions, variantDeductions);
         const createdOrder = await tx.order.create({
           data: {
             orderNumber,
@@ -412,7 +417,7 @@ export class OrdersService {
       throw new NotFoundException('Стол не найден');
     }
 
-    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(params.items);
+    const { itemsData } = await this.buildItemsData(params.items);
     const hasPrep = itemsData.some((i) => i.prepStation !== PrepStation.none);
     const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
     const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
@@ -421,13 +426,16 @@ export class OrdersService {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         order = await this.prisma.$transaction(async (tx) => {
+          const { itemsData } = await this.buildItemsData(params.items, tx);
+          const hasPrep = itemsData.some((item) => item.prepStation !== PrepStation.none);
+          const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
+          const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
           await this.ensureOrderStations(tx, itemsData);
           const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
           const totals = this.calcTotals(itemsData, serviceChargeAmount);
           const businessDate = this.businessDateOf();
           const orderNumber = await this.nextOrderNumber(tx, businessDate);
           await tx.table.update({ where: { id: tableId }, data: { status: initialTableStatus } });
-          await this.deductInventory(tx, dishDeductions, variantDeductions);
           const createdOrder = await tx.order.create({
             data: {
               orderNumber,
@@ -538,7 +546,7 @@ export class OrdersService {
 
     const table = await this.ensureDeliveryTable(settings.id, settings.deliveryTableId, cafeId);
     const deliveryItems = params.items.map((item) => ({ ...item, takeaway: true }));
-    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(deliveryItems);
+    const { itemsData } = await this.buildItemsData(deliveryItems);
     const hasPrep = itemsData.some((item) => item.prepStation !== PrepStation.none);
     const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
 
@@ -546,13 +554,16 @@ export class OrdersService {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         order = await this.prisma.$transaction(async (tx) => {
+          const { itemsData } = await this.buildItemsData(deliveryItems, tx);
+          const hasPrep = itemsData.some((item) => item.prepStation !== PrepStation.none);
+          const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
+          const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
           await this.ensureOrderStations(tx, itemsData);
           // Доставка не получает ресторанный сервисный сбор: внешний клиент
           // ориентируется на цены меню, которые возвращает integration API.
           const totals = this.calcTotals(itemsData, 0);
           const businessDate = this.businessDateOf();
           const orderNumber = await this.nextOrderNumber(tx, businessDate);
-          await this.deductInventory(tx, dishDeductions, variantDeductions);
           const createdOrder = await tx.order.create({
             data: {
               orderNumber,
@@ -771,8 +782,7 @@ export class OrdersService {
   }
 
   private async cancelLine(tx: Prisma.TransactionClient, orderId: string, item: { id: string; dishId: string | null; dishVariantId: string | null; quantity: number; status: OrderItemStatus; prepStation: PrepStation }, actor: AuditActor, reason: string) {
-    await this.restoreInventory(tx, [item]);
-    await this.ingredientStock.restoreDishSale(tx, orderId, [item]);
+    await this.ingredientStock.restoreDishSale(tx, orderId, [item], reason);
     await tx.orderItem.update({ where: { id: item.id }, data: { status: OrderItemStatus.cancelled, rejectReason: reason } });
     await tx.orderItemSetComponent.updateMany({ where: { orderItemId: item.id, status: { notIn: [OrderItemStatus.cancelled, OrderItemStatus.rejected] } }, data: { status: OrderItemStatus.cancelled } });
     await tx.kitchenEvent.create({ data: { orderId, orderItemId: item.id, prepStation: item.prepStation, type: KitchenEventType.cancel, createdById: actor.id, reason,
@@ -835,8 +845,10 @@ export class OrdersService {
           quantity: number;
         }[]
       | undefined,
+    modifierSelections?: unknown,
+    excludedIngredientIds?: unknown,
   ): string {
-    const base = `${dishId ?? ''}|${variantId ?? ''}|${weightGrams ?? ''}|${(comment ?? '').trim()}`;
+    const base = `${dishId ?? ''}|${variantId ?? ''}|${weightGrams ?? ''}|${(comment ?? '').trim()}|${selectionIdentity(modifierSelections, excludedIngredientIds)}`;
     if (!comps || comps.length === 0) return base;
     const sig = comps
       .map(
@@ -880,7 +892,7 @@ export class OrdersService {
     // Пул статусов старых позиций по подписи (может быть несколько одинаковых).
     const pool = new Map<string, OrderItemStatus[]>();
     for (const it of oldItems) {
-      const sig = this.editItemSig(it.dishId, it.dishVariantId, it.weightGrams, it.comment, it.setComponents);
+      const sig = this.editItemSig(it.dishId, it.dishVariantId, it.weightGrams, it.comment, it.setComponents, (it as any).modifierSelections, (it as any).excludedIngredientIds);
       const arr = pool.get(sig) ?? [];
       arr.push(it.status);
       pool.set(sig, arr);
@@ -888,7 +900,7 @@ export class OrdersService {
     for (const data of itemsData) {
       if (data.prepStation === PrepStation.none) continue; // «без отправки» всегда готово
       const create = (data.setComponents as { create?: any[] } | undefined)?.create;
-      const sig = this.editItemSig(data.dishId, data.dishVariantId, data.weightGrams as number | null | undefined, data.comment, create as any);
+      const sig = this.editItemSig(data.dishId, data.dishVariantId, data.weightGrams as number | null | undefined, data.comment, create as any, data.modifierSelections, data.excludedIngredientIds);
       const arr = pool.get(sig);
       if (!arr || arr.length === 0) continue;
       const carried = arr.shift()!;
@@ -921,7 +933,7 @@ export class OrdersService {
       const used = new Set<string>();
       const additions: CreateOrderItemDto[] = [];
       const changed: string[] = [];
-      const signature = (i: any) => this.editItemSig(i.dishId, i.dishVariantId, i.weightGrams, '', Array.isArray(i.setComponents) ? i.setComponents : i.setComponents?.create);
+      const signature = (i: any) => this.editItemSig(i.dishId, i.dishVariantId, i.weightGrams, '', Array.isArray(i.setComponents) ? i.setComponents : i.setComponents?.create, i.modifierSelections, i.excludedIngredientIds);
       for (let index = 0; index < items.length; index++) {
         const input = items[index]; const data = prepared.itemsData[index];
         const old = input.id ? active.find(i => i.id === input.id) : active.find(i => !used.has(i.id) && signature(i) === signature(data));
@@ -941,13 +953,13 @@ export class OrdersService {
             const raw = await tx.orderItem.findUniqueOrThrow({ where: { id: old.id }, include: { setComponents: true } });
             const { id: _id, orderId: _order, createdAt: _created, updatedAt: _updated, setComponents, ...copy } = raw;
             const removedQty = old.quantity - input.quantity;
-            const cancelled = await tx.orderItem.create({ data: { ...copy, orderId, quantity: removedQty,
+            const cancelled = await tx.orderItem.create({ data: { ...copy, stockAccountingSnapshot: copy.stockAccountingSnapshot ?? undefined, modifierSelections: copy.modifierSelections ?? undefined, excludedIngredientIds: copy.excludedIngredientIds ?? undefined, excludedIngredientNames: copy.excludedIngredientNames ?? undefined, orderId, quantity: removedQty,
+              stockSourceLineId: old.stockSourceLineId ?? old.id,
               discountAmount: new Prisma.Decimal(round2(Number(old.discountAmount) * removedQty / old.quantity)),
               finalPrice: new Prisma.Decimal(round2(Number(old.finalPrice) * removedQty / old.quantity)),
               status: OrderItemStatus.cancelled, rejectReason: cleanReason,
               setComponents: { create: setComponents.map(({ id, orderItemId, createdAt, ...c }) => ({ ...c, status: OrderItemStatus.cancelled })) } } });
-            await this.restoreInventory(tx, [cancelled]);
-            await this.ingredientStock.restoreDishSale(tx, orderId, [{ ...cancelled, sourceLineId: old.id, sourceLineQuantity: old.quantity }]);
+            await this.ingredientStock.restoreDishSale(tx, orderId, [{ ...cancelled, sourceLineId: old.stockSourceLineId ?? old.id, sourceLineQuantity: old.quantity, sourceStatus: old.status }], cleanReason);
             await tx.orderItem.update({ where: { id: old.id }, data: { quantity: input.quantity,
               discountAmount: new Prisma.Decimal(round2(Number(old.discountAmount) * input.quantity / old.quantity)),
               finalPrice: new Prisma.Decimal(round2(Number(old.finalPrice) * input.quantity / old.quantity)), comment: input.comment ?? null, takeaway: input.takeaway ?? false } });
@@ -974,7 +986,6 @@ export class OrdersService {
         if (actor.role === Role.WAITER) assertWaiterItemOperation(policy, OrderStatus.sent_to_kitchen, { status: OrderItemStatus.new }, 'edit');
         const built = await this.buildItemsData(additions, tx);
         const created = await this.createOrderItems(tx, orderId, built.itemsData);
-        await this.deductInventory(tx, built.dishDeductions, built.variantDeductions);
         await this.ingredientStock.applyDishSale(tx, orderId, created);
         changed.push(...created.map(i => i.id));
       }
@@ -1110,7 +1121,7 @@ export class OrdersService {
       }
     }
 
-    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData(items);
+    const { itemsData } = await this.buildItemsData(items);
 
     // Добавляемые позиции «Без отправки» не возвращают заказ на кухню/бар.
     const hasPrepAdded = itemsData.some((i) => i.prepStation !== PrepStation.none);
@@ -1137,7 +1148,6 @@ export class OrdersService {
       assertWaiterItemOperation(await this.orderPolicy(tx), OrderStatus.sent_to_kitchen, { status: OrderItemStatus.new }, 'edit');
       const fresh = await this.buildItemsData(items, tx);
       const createdItems = await this.createOrderItems(tx, orderId, fresh.itemsData);
-      await this.deductInventory(tx, fresh.dishDeductions, fresh.variantDeductions);
       const ingredientStockWarnings = await this.ingredientStock.applyDishSale(tx, orderId, createdItems);
       await this.recalcOrder(tx, orderId);
       // Статус заказа всегда считаем по составу активных позиций, а не
@@ -1321,11 +1331,10 @@ export class OrdersService {
     this.ensureNoPendingWaiterDecision(order);
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.lockKitchenSnapshot(tx, orderId, order);
-      const itemsToReject = order.items.filter(item => 
+      const itemsToReject = order.items.filter(item =>
         ![OrderItemStatus.rejected, OrderItemStatus.cancelled].includes(item.status as any)
       );
-      await this.restoreInventory(tx, itemsToReject);
-      await this.ingredientStock.restoreDishSale(tx, orderId, itemsToReject);
+      await this.ingredientStock.restoreDishSale(tx, orderId, itemsToReject, reason);
       await tx.orderItem.updateMany({
         where: { orderId, status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
         data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
@@ -1370,8 +1379,7 @@ export class OrdersService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.lockKitchenSnapshot(tx, orderId, order);
-      await this.restoreInventory(tx, [item]);
-      await this.ingredientStock.restoreDishSale(tx, orderId, [item]);
+      await this.ingredientStock.restoreDishSale(tx, orderId, [item], reason);
       await tx.orderItem.update({
         where: { id: itemId },
         data: { status: OrderItemStatus.rejected, rejectReason: reason, rejectionDecision: RejectionDecision.pending },
@@ -1444,7 +1452,6 @@ export class OrdersService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.lockKitchenSnapshot(tx, orderId, order);
       if (item.status !== OrderItemStatus.served) {
-        await this.restoreInventory(tx, [item]);
       }
       await tx.orderItem.update({
         where: { id: itemId },
@@ -1624,6 +1631,11 @@ export class OrdersService {
             dishVoiceSnapshot: it.dishVoiceSnapshot,
             priceSnapshot: it.priceSnapshot,
             quantity: readyQuantity,
+            stockSourceLineId: it.stockSourceLineId ?? it.id,
+            stockAccountingSnapshot: it.stockAccountingSnapshot ?? undefined,
+            modifierSelections: it.modifierSelections ?? undefined,
+            excludedIngredientIds: it.excludedIngredientIds ?? undefined,
+            excludedIngredientNames: it.excludedIngredientNames ?? undefined,
             discountAmount: new Prisma.Decimal(readyDiscount),
             finalPrice: new Prisma.Decimal(readyFinal),
             status: OrderItemStatus.ready,
@@ -1723,6 +1735,7 @@ export class OrdersService {
         originalNameSnapshot: true,
         finalNameSnapshot: true,
         finalVariantNameSnapshot: true,
+        status: true,
       },
     });
   }
@@ -1784,8 +1797,7 @@ export class OrdersService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.lockKitchenSnapshot(tx, orderId, order);
-      await this.restoreInventory(tx, inventoryToRestore);
-      await this.ingredientStock.restoreDishSale(tx, orderId, fullItems);
+      await this.ingredientStock.restoreDishSale(tx, orderId, fullItems, reason);
       if (fullIds.length > 0) {
         await tx.orderItem.updateMany({
           where: { id: { in: fullIds }, orderId },
@@ -1826,6 +1838,11 @@ export class OrdersService {
             dishVoiceSnapshot: it.dishVoiceSnapshot,
             priceSnapshot: it.priceSnapshot,
             quantity: rejectQty,
+            stockSourceLineId: it.stockSourceLineId ?? it.id,
+            stockAccountingSnapshot: it.stockAccountingSnapshot ?? undefined,
+            modifierSelections: it.modifierSelections ?? undefined,
+            excludedIngredientIds: it.excludedIngredientIds ?? undefined,
+            excludedIngredientNames: it.excludedIngredientNames ?? undefined,
             discountAmount: new Prisma.Decimal(round2(unitDiscount * rejectQty)),
             finalPrice: new Prisma.Decimal(round2(unitFinal * rejectQty)),
             status: OrderItemStatus.rejected,
@@ -1836,10 +1853,17 @@ export class OrdersService {
             rejectionDecision: RejectionDecision.pending,
           },
         });
-        await this.ingredientStock.restoreDishSale(tx, orderId, [{ ...rejected, sourceLineId: it.id, sourceLineQuantity: it.quantity }]);
+        await this.ingredientStock.restoreDishSale(tx, orderId, [{ ...rejected, sourceLineId: it.stockSourceLineId ?? it.id, sourceLineQuantity: it.quantity, sourceStatus: it.status }], reason);
         partialRejectedIds.push(rejected.id);
       }
       if (components.length > 0) {
+        for (const component of components) {
+          const parent = order.items.find((item) => item.id === component.orderItemId);
+          if (parent) await this.ingredientStock.restoreDishSale(tx, orderId, [{
+            id: component.id, sourceLineId: parent.id, componentId: component.id, quantity: parent.quantity,
+            sourceStatus: component.status, prepStation: parent.prepStation,
+          }], reason);
+        }
         await tx.orderItemSetComponent.updateMany({
           where: { id: { in: components.map((c) => c.id) } },
           data: { status: OrderItemStatus.rejected, rejectReason: reason },
@@ -1861,8 +1885,7 @@ export class OrdersService {
           data: { rejectionDecision: RejectionDecision.pending },
         });
       }
-      await this.restoreInventory(tx, setsRejected);
-      await this.ingredientStock.restoreDishSale(tx, orderId, setsRejected);
+      await this.ingredientStock.restoreDishSale(tx, orderId, setsRejected, reason);
 
       // Если отказаны все блюда — заказ rejected, иначе partially_rejected.
       const remaining = await tx.orderItem.count({
@@ -2012,7 +2035,7 @@ export class OrdersService {
 
     const activeShift = await this.shifts.getRequiredActiveShift(waiterId);
     const oldName = this.orderItemName(item);
-    const { itemsData, dishDeductions, variantDeductions } = await this.buildItemsData([replacement]);
+    const { itemsData } = await this.buildItemsData([replacement]);
     const replacementData = itemsData[0];
     replacementData.comment = [replacementData.comment, `Замена вместо ${oldName}`].filter(Boolean).join(' · ');
     replacementData.replacementForItemId = itemId;
@@ -2035,8 +2058,10 @@ export class OrdersService {
         where: { id: itemId },
         data: { rejectionDecision: RejectionDecision.replaced },
       });
-      const createdItems = await this.createOrderItems(tx, orderId, itemsData);
-      await this.deductInventory(tx, dishDeductions, variantDeductions);
+      const fresh = await this.buildItemsData([replacement], tx);
+      fresh.itemsData[0].comment = [fresh.itemsData[0].comment, `Замена вместо ${oldName}`].filter(Boolean).join(' · ');
+      fresh.itemsData[0].replacementForItemId = itemId;
+      const createdItems = await this.createOrderItems(tx, orderId, fresh.itemsData);
       const ingredientStockWarnings = await this.ingredientStock.applyDishSale(tx, orderId, createdItems);
       await this.recalcOrder(tx, orderId);
       const pending = await this.pendingRejectedDecisions(tx, orderId);
@@ -2331,7 +2356,6 @@ export class OrdersService {
       const latest = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       if (latest.updatedAt.getTime() !== order.updatedAt.getTime()) throw new ConflictException('Заказ изменился. Обновите его и повторите действие');
       if (fromClosedCancelled && targetIsActive) {
-        await this.deductExistingInventory(tx, order.items);
         await this.ingredientStock.applyDishSale(tx, order.id, order.items, true);
       }
 
@@ -2344,8 +2368,7 @@ export class OrdersService {
         const itemsToRestore = order.items.filter(
           (item) => !closedItemStatuses.includes(item.status),
         );
-        await this.restoreInventory(tx, itemsToRestore);
-        await this.ingredientStock.restoreDishSale(tx, order.id, itemsToRestore);
+        await this.ingredientStock.restoreDishSale(tx, order.id, itemsToRestore, cleanReason);
       }
 
       if (targetItemStatus) {
@@ -2416,15 +2439,15 @@ export class OrdersService {
 
   private async buildItemsData(items: CreateOrderItemDto[], client: Prisma.TransactionClient = this.prisma, skipInventory = false, existingDishIds: string[] = []): Promise<{
     itemsData: Prisma.OrderItemUncheckedCreateWithoutOrderInput[];
-    dishDeductions: Map<string, number>;
-    variantDeductions: Map<string, number>;
   }> {
+    if (client !== this.prisma) await lockRecipeGraph(client, true);
     const dishIds = [...new Set(items.map((i) => i.dishId))];
     const variantIds = [...new Set(items.map((i) => i.variantId).filter((id): id is string => !!id))];
     const dishes = await client.dish.findMany({
       where: { id: { in: dishIds }, OR: [{ isActive: true }, { id: { in: existingDishIds } }] },
       include: {
         variants: { orderBy: { sortOrder: 'asc' } },
+        _count: { select: { recipeItems: true } },
         category: { select: { prepStation: true } },
         setComponents: { select: { dishId: true, dishVariantId: true, quantity: true } },
       },
@@ -2471,10 +2494,14 @@ export class OrdersService {
       : [];
     const compVariantById = new Map(componentVariants.map((v) => [v.id, v]));
 
-    const dishDeductions = new Map<string, number>();
-    const variantDeductions = new Map<string, number>();
 
-    const itemsData = items.map((i): Prisma.OrderItemUncheckedCreateWithoutOrderInput => {
+    const selections = await Promise.all(items.map(async (input) => {
+      const existing = input.id && skipInventory ? await client.orderItem.findFirst({ where: { id: input.id, dishId: input.dishId } }) : null;
+      const options = input.modifierSelections ?? (existing?.modifierSelections as { optionId: string; quantity: number }[] | null) ?? [];
+      const exclusions = input.excludedIngredientIds ?? (existing?.excludedIngredientIds as string[] | null) ?? [];
+      return resolveMenuSelections(client, input.dishId, options, exclusions, existing ?? undefined);
+    }));
+    const itemsData = items.map((i, index): Prisma.OrderItemUncheckedCreateWithoutOrderInput => {
       const dish = byId.get(i.dishId);
       if (!dish) {
         throw new BadRequestException(`Блюдо недоступно`);
@@ -2498,26 +2525,6 @@ export class OrdersService {
       }
       if (variant && variant.dishId !== dish.id) {
         throw new BadRequestException('Вариант не относится к выбранному блюду');
-      }
-
-      if (dish.trackInventory && !skipInventory) {
-        if (!dish.isWeighted && hasVariants && variant) {
-          if (variant.stock !== null) {
-            const current = variantDeductions.get(variant.id) ?? 0;
-            if ((variant.stock ?? 0) < current + i.quantity) {
-              throw new BadRequestException(`Недостаточно остатка для «${dish.name} - ${variant.name}»`);
-            }
-            variantDeductions.set(variant.id, current + i.quantity);
-          }
-        } else {
-          if (dish.stock !== null) {
-            const current = dishDeductions.get(dish.id) ?? 0;
-            if ((dish.stock ?? 0) < current + i.quantity) {
-              throw new BadRequestException(`Недостаточно остатка для «${dish.name}»`);
-            }
-            dishDeductions.set(dish.id, current + i.quantity);
-          }
-        }
       }
 
       // Направление позиции: приоритет у блюда, иначе — направление категории.
@@ -2599,7 +2606,8 @@ export class OrdersService {
       const basePrice = dish.isWeighted
         ? Number(dish.price) * i.weightGrams! / dish.weightedPriceBase
         : (variant?.price ?? dish.price);
-      const pricing = unitPricing(new Prisma.Decimal(basePrice), dish.discountType, dish.discountValue);
+      const selected = selections[index];
+      const pricing = unitPricing(new Prisma.Decimal(basePrice).add(selected.price), dish.discountType, dish.discountValue);
       // Для сета корректируем цену на дельту состава (не уходим в минус).
       const unit = dish.isSet ? Math.max(0, round2(pricing.unit + setDelta)) : pricing.unit;
       const unitDiscount = dish.isSet ? 0 : pricing.unitDiscount;
@@ -2610,6 +2618,9 @@ export class OrdersService {
         dishNameSnapshot: dish.name,
         dishVariantNameSnapshot: dish.isWeighted ? weightSnapshot(i.weightGrams!, dish.weightedMeasure) : variant?.name,
         weightGrams: dish.isWeighted ? i.weightGrams : null,
+        modifierSelections: selected.options,
+        excludedIngredientIds: selected.exclusions,
+        excludedIngredientNames: selected.exclusionNames,
         dishVoiceSnapshot: dish.voiceName ?? null,
         priceSnapshot: new Prisma.Decimal(unit),
         quantity: i.quantity,
@@ -2623,7 +2634,7 @@ export class OrdersService {
       };
     });
 
-    return { itemsData, dishDeductions, variantDeductions };
+    return { itemsData };
   }
 
   private async ensureOrderStations(tx: Prisma.TransactionClient, items: Prisma.OrderItemUncheckedCreateWithoutOrderInput[]) {
@@ -2646,99 +2657,6 @@ export class OrdersService {
       created.push(await tx.orderItem.create({ data: { ...item, orderId } }));
     }
     return created;
-  }
-
-  private async deductInventory(
-    tx: Prisma.TransactionClient,
-    dishDeductions: Map<string, number>,
-    variantDeductions: Map<string, number>,
-  ) {
-    for (const [dishId, qty] of dishDeductions.entries()) {
-      await tx.dish.update({ where: { id: dishId }, data: { stock: { decrement: qty } } });
-    }
-    for (const [variantId, qty] of variantDeductions.entries()) {
-      await tx.dishVariant.update({ where: { id: variantId }, data: { stock: { decrement: qty } } });
-    }
-  }
-
-  private async restoreInventory(
-    tx: Prisma.TransactionClient,
-    items: { dishId: string | null; dishVariantId: string | null; quantity: number }[],
-  ) {
-    if (!items.length) return;
-    // Удалённое из меню блюдо (dishId === null) не имеет остатков для возврата.
-    const dishIds = [...new Set(items.map((i) => i.dishId).filter((id): id is string => !!id))];
-    const variantIds = items.map((i) => i.dishVariantId).filter((id): id is string => !!id);
-    const variants = variantIds.length
-      ? await tx.dishVariant.findMany({ where: { id: { in: variantIds } } })
-      : [];
-    const nonNullVariantIds = new Set(variants.filter((v) => v.stock !== null).map((v) => v.id));
-
-    const dishes = await tx.dish.findMany({
-      where: { id: { in: dishIds }, trackInventory: true },
-      select: { id: true, stock: true },
-    });
-    const trackedDishIds = new Set(dishes.map((d) => d.id));
-    const dishesWithStock = new Set(dishes.filter((d) => d.stock !== null).map((d) => d.id));
-
-    const dishIncrements = new Map<string, number>();
-    const variantIncrements = new Map<string, number>();
-
-    for (const item of items) {
-      if (item.dishId && trackedDishIds.has(item.dishId)) {
-        if (item.dishVariantId) {
-          if (nonNullVariantIds.has(item.dishVariantId)) {
-            variantIncrements.set(item.dishVariantId, (variantIncrements.get(item.dishVariantId) ?? 0) + item.quantity);
-          }
-        } else {
-          if (dishesWithStock.has(item.dishId)) {
-            dishIncrements.set(item.dishId, (dishIncrements.get(item.dishId) ?? 0) + item.quantity);
-          }
-        }
-      }
-    }
-
-    for (const [dishId, qty] of dishIncrements.entries()) {
-      await tx.dish.update({ where: { id: dishId }, data: { stock: { increment: qty } } });
-    }
-    for (const [variantId, qty] of variantIncrements.entries()) {
-      await tx.dishVariant.update({ where: { id: variantId }, data: { stock: { increment: qty } } });
-    }
-  }
-
-  private async deductExistingInventory(
-    tx: Prisma.TransactionClient,
-    items: { dishId: string | null; dishVariantId: string | null; quantity: number }[],
-  ) {
-    if (!items.length) return;
-    const dishIds = [...new Set(items.map((i) => i.dishId).filter((id): id is string => !!id))];
-    const variantIds = items.map((i) => i.dishVariantId).filter((id): id is string => !!id);
-    const variants = variantIds.length
-      ? await tx.dishVariant.findMany({ where: { id: { in: variantIds } }, select: { id: true, stock: true } })
-      : [];
-    const nonNullVariantIds = new Set(variants.filter((v) => v.stock !== null).map((v) => v.id));
-
-    const dishes = await tx.dish.findMany({
-      where: { id: { in: dishIds }, trackInventory: true },
-      select: { id: true, stock: true },
-    });
-    const trackedDishIds = new Set(dishes.map((d) => d.id));
-    const dishesWithStock = new Set(dishes.filter((d) => d.stock !== null).map((d) => d.id));
-
-    const dishDeductions = new Map<string, number>();
-    const variantDeductions = new Map<string, number>();
-    for (const item of items) {
-      if (!item.dishId || !trackedDishIds.has(item.dishId)) continue;
-      if (item.dishVariantId) {
-        if (nonNullVariantIds.has(item.dishVariantId)) {
-          variantDeductions.set(item.dishVariantId, (variantDeductions.get(item.dishVariantId) ?? 0) + item.quantity);
-        }
-      } else if (dishesWithStock.has(item.dishId)) {
-        dishDeductions.set(item.dishId, (dishDeductions.get(item.dishId) ?? 0) + item.quantity);
-      }
-    }
-
-    await this.deductInventory(tx, dishDeductions, variantDeductions);
   }
 
   private calcTotals(

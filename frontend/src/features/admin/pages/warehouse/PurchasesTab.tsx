@@ -1,720 +1,468 @@
-import { DatePicker } from '@/components/DatePicker';
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
+import { DateTimePicker } from '@/components/DatePicker';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
 import { money } from '@/lib/format';
-import { useNotifications } from '@/store/notifications';
-import { StatCard, StatCardsRow } from '../../components/StatCard';
-import { IconCart, IconUsers, IconMoney, IconPlus, IconTrash, IconCheck, IconEdit } from '../../components/icons';
+import { useSuppliers } from './settings-api';
+import { usePackages } from './extended-api';
+import { DocumentField, DocumentFooter } from './WarehouseUi';
+import { ItemCard, Field } from './ItemCard';
 import {
-  usePurchases,
-  usePurchase,
-  usePurchasesOverview,
-  usePurchaseMutations,
   useIngredients,
+  usePurchase,
+  usePurchaseMutations,
   purchaseNumber,
-  qty,
+  type Ingredient,
   type Purchase,
   type WarehouseLocation,
-  type PurchaseStatus,
-  type UpdatePurchaseInput,
-  type Ingredient,
 } from './api';
 import { unitsForType, unitLabel, type UnitCode } from './units';
 
-type StatusFilter = '' | 'completed' | 'draft';
-
-const STATUS_LABEL: Record<PurchaseStatus, { label: string; tone: 'success' | 'warning' | 'muted' }> = {
-  completed: { label: 'Проведена', tone: 'success' },
-  draft: { label: 'Черновик', tone: 'warning' },
-  cancelled: { label: 'Отменена', tone: 'muted' },
-};
-
-export function PurchasesTab({ warehouseId, locations }: { warehouseId?: string; locations: WarehouseLocation[] }) {
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<StatusFilter>('');
-  const [detailsId, setDetailsId] = useState<string | null>(null);
-  const [editId, setEditId] = useState<string | null>(null);
-
-  const overview = usePurchasesOverview(warehouseId);
-  const purchasesQ = usePurchases({ status, search, warehouseId });
-  const defaultWarehouse = locations.find((location) => location.isDefault);
-  const warehouseNames = new Map(locations.map(({ id, name }) => [id, name]));
-  const { complete, cancel } = usePurchaseMutations();
-  const push = useNotifications((s) => s.push);
-  const o = overview.data;
-
-  async function onComplete(p: Purchase) {
-    try {
-      await complete.mutateAsync(p.id);
-      push({ message: `Закупка ${purchaseNumber(p.number)} проведена`, at: new Date().toISOString() });
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
-    }
-  }
-
-  async function onCancel(p: Purchase) {
-    if (!confirm(`Отменить закупку ${purchaseNumber(p.number)}?`)) return;
-    try {
-      await cancel.mutateAsync(p.id);
-      push({ message: 'Закупка отменена', at: new Date().toISOString() });
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
-    }
-  }
-
+export function PurchaseModal({
+  id,
+  warehouseId,
+  locations,
+  onClose,
+}: {
+  id?: string;
+  warehouseId: string;
+  locations: WarehouseLocation[];
+  onClose: () => void;
+}) {
+  const query = usePurchase(id ?? null);
   return (
-    <div className="space-y-4">
-      <StatCardsRow>
-        <StatCard label="Закупок за период" value={o?.count ?? '—'} icon={<IconCart />} tone="primary" />
-        <StatCard label="Поставщиков" value={o?.suppliers ?? '—'} icon={<IconUsers />} tone="muted" />
-        <StatCard label="Сумма закупок" value={o ? money(o.sum) : '—'} icon={<IconMoney />} tone="success" />
-      </StatCardsRow>
-
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1.4fr_1fr]">
-        {/* История закупок */}
-        <div className="card flex flex-col overflow-hidden">
-          <div className="border-b border-border p-4">
-            <h3 className="mb-3 text-[15px] font-semibold text-text-primary">История закупок</h3>
-            <div className="flex flex-wrap items-center gap-2">
-              <input
-                className="input h-9 flex-1 sm:max-w-[220px]"
-                placeholder="Поиск по поставщику"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <div className="flex gap-1">
-                <FilterTab active={status === ''} onClick={() => setStatus('')}>
-                  Все
-                </FilterTab>
-                <FilterTab active={status === 'completed'} onClick={() => setStatus('completed')}>
-                  Проведённые
-                </FilterTab>
-                <FilterTab active={status === 'draft'} onClick={() => setStatus('draft')}>
-                  Черновики
-                </FilterTab>
-              </div>
-            </div>
-          </div>
-
-          {purchasesQ.isLoading ? (
-            <div className="flex justify-center py-12 text-primary">
-              <Spinner className="h-6 w-6" />
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[560px] text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-background/50 text-left text-xs text-text-muted">
-                    <th className="px-3 py-2.5 font-medium">№</th>
-                    <th className="px-3 py-2.5 font-medium">Дата</th>
-                    <th className="px-3 py-2.5 font-medium">Поставщик</th>
-                    {locations.length > 1 && <th className="px-3 py-2.5 font-medium">Склад</th>}
-                    <th className="px-3 py-2.5 text-center font-medium">Позиций</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Сумма</th>
-                    <th className="px-3 py-2.5 font-medium">Статус</th>
-                    <th className="px-3 py-2.5 text-right font-medium">Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {purchasesQ.data?.map((p) => {
-                    const st = STATUS_LABEL[p.status];
-                    return (
-                      <tr
-                        key={p.id}
-                        className="cursor-pointer border-b border-border last:border-0 hover:bg-background/60"
-                        onClick={() => setDetailsId(p.id)}
-                      >
-                        <td className="px-3 py-2.5 font-medium text-text-primary">{purchaseNumber(p.number)}</td>
-                        <td className="px-3 py-2.5 text-text-secondary">{formatDate(p.date)}</td>
-                        <td className="px-3 py-2.5 text-text-secondary">{p.supplier}</td>
-                        {locations.length > 1 && <td className="px-3 py-2.5 text-text-secondary">{warehouseNames.get(p.warehouseId ?? defaultWarehouse?.id ?? '') ?? '—'}</td>}
-                        <td className="px-3 py-2.5 text-center text-text-secondary">{p.itemsCount}</td>
-                        <td className="px-3 py-2.5 text-right font-medium text-text-primary">{money(p.totalAmount)}</td>
-                        <td className="px-3 py-2.5">
-                          <Badge tone={st.tone}>{st.label}</Badge>
-                        </td>
-                        <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => setEditId(p.id)}
-                              className="p-1.5 text-text-light transition-colors hover:text-primary"
-                              title="Редактировать"
-                            >
-                              <IconEdit className="h-4 w-4" />
-                            </button>
-                            {p.status === 'draft' && (
-                              <>
-                                <button
-                                  onClick={() => onComplete(p)}
-                                  className="p-1.5 text-text-light transition-colors hover:text-success"
-                                  title="Провести"
-                                >
-                                  <IconCheck className="h-4 w-4" />
-                                </button>
-                                <button
-                                  onClick={() => onCancel(p)}
-                                  className="p-1.5 text-text-light transition-colors hover:text-danger"
-                                  title="Отменить"
-                                >
-                                  <IconTrash className="h-4 w-4" />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {purchasesQ.data?.length === 0 && (
-                    <tr>
-                      <td colSpan={locations.length > 1 ? 8 : 7} className="px-3 py-10 text-center text-text-muted">
-                        Закупки не найдены
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+    <Modal
+      open
+      onClose={onClose}
+      title={query.data ? `Поставка ${purchaseNumber(query.data.number)}` : 'Новая поставка'}
+      panelClassName="max-w-4xl"
+    >
+      {id && query.isPending && (
+        <div className="flex justify-center p-8">
+          <Spinner />
         </div>
-
-        {/* Новая закупка */}
-        <NewPurchaseForm key={warehouseId ?? 'all'} warehouseId={warehouseId ?? defaultWarehouse?.id} locations={locations} />
-      </div>
-
-      <div className="card flex items-start gap-3 p-4 text-sm text-text-secondary">
-        <span className="mt-0.5 text-primary">
-          <IconMoney className="h-5 w-5" />
-        </span>
-        <div>
-          <p className="font-medium text-text-primary">Формула средневзвешенной себестоимости</p>
-          <p className="mt-1">
-            новая себестоимость = (старый остаток × старая себестоимость + кол-во × цена закупки) ÷ (старый остаток + кол-во)
-          </p>
-        </div>
-      </div>
-
-      {detailsId && <PurchaseDetailsModal id={detailsId} locations={locations} onClose={() => setDetailsId(null)} />}
-      {editId && <PurchaseEditModal id={editId} onClose={() => setEditId(null)} />}
-    </div>
+      )}
+      {query.isError && (
+        <p role="alert" className="text-danger">
+          {apiError(query.error)}
+        </p>
+      )}
+      {(!id || query.data) && (
+        <PurchaseForm
+          key={`${id ?? 'new'}:${query.data?.status ?? ''}`}
+          purchase={query.data}
+          warehouseId={warehouseId}
+          locations={locations}
+          onClose={onClose}
+        />
+      )}
+    </Modal>
   );
 }
 
-function PurchaseEditModal({ id, onClose }: { id: string; onClose: () => void }) {
-  const purchaseQ = usePurchase(id);
-  const ingredientsQ = useIngredients('');
-  const { update } = usePurchaseMutations();
-  const push = useNotifications((s) => s.push);
-  const p = purchaseQ.data;
-  const ingredients = ingredientsQ.data ?? [];
-  const isDraft = p?.status === 'draft';
-
-  const [date, setDate] = useState('');
-  const [supplier, setSupplier] = useState('');
-  const [rows, setRows] = useState<Row[]>([]);
+type Row = { key: string; ingredientId: string; quantity: string; unit: string; price: string };
+function PurchaseForm({
+  purchase,
+  warehouseId,
+  locations,
+  onClose,
+}: {
+  purchase?: Purchase;
+  warehouseId: string;
+  locations: WarehouseLocation[];
+  onClose: () => void;
+}) {
+  const { can } = usePermissions();
+  const costs = can('actions.warehouseCosts');
+  const [requestKey] = useState(() => crypto.randomUUID());
+  const [location, setLocation] = useState(purchase?.warehouseId ?? warehouseId);
+  const suppliers = useSuppliers();
+  const [supplier, setSupplier] = useState(purchase?.supplier ?? '');
+  const [date, setDate] = useState(localTime(purchase?.date));
+  const packages = usePackages();
+  const [rows, setRows] = useState<Row[]>(
+    () =>
+      purchase?.items?.map((item) => ({
+        key: item.id,
+        ingredientId: item.ingredientId,
+        quantity: String(item.quantity),
+        unit: item.packageId ? `package:${item.packageId}` : item.unitCode,
+        price: String(item.purchasePrice),
+      })) ?? [],
+  );
+  const [discount, setDiscount] = useState(String(purchase?.discount ?? 0));
+  const [note, setNote] = useState(purchase?.note ?? '');
+  const [attachments, setAttachments] = useState((purchase?.attachments ?? []).join('\n'));
+  const [search, setSearch] = useState('');
+  const [creatingItem, setCreatingItem] = useState(false);
   const [error, setError] = useState('');
-
-  // Заполняем форму, когда закупка загрузилась.
-  useEffect(() => {
-    if (!p) return;
-    setDate(new Date(p.date).toISOString().slice(0, 10));
-    setSupplier(p.supplier);
-    setRows(
-      (p.items ?? []).map((it) => ({
-        uid: it.id,
-        ingredientId: it.ingredientId,
-        unit: it.unitCode,
-        quantity: String(it.quantity),
-        purchasePrice: String(it.purchasePrice),
-        total: String(it.total),
-      })),
-    );
-  }, [p]);
-
-  function updateRow(uid: string, patch: Partial<Row>) {
-    setRows((cur) => cur.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
+  const mutations = usePurchaseMutations();
+  const ingredients = useIngredients('', location);
+  const byId = new Map((ingredients.data ?? []).map((item) => [item.id, item]));
+  const editable = can('actions.warehouseReceive') && costs && (!purchase || purchase.status === 'draft');
+  const busy =
+    mutations.create.isPending ||
+    mutations.update.isPending ||
+    mutations.complete.isPending ||
+    mutations.cancel.isPending ||
+    mutations.reverse.isPending;
+  const total =
+    rows.reduce((sum, row) => sum + Number(row.quantity || 0) * Number(row.price || 0), 0) -
+    Number(discount || 0);
+  function add(item: Ingredient) {
+    setRows((current) => [
+      ...current,
+      {
+        key: crypto.randomUUID(),
+        ingredientId: item.id,
+        quantity: '1',
+        unit: item.displayUnit,
+        price: item.avgCost == null ? '' : String(item.avgCost),
+      },
+    ]);
+    setSearch('');
   }
-  function selectIngredient(uid: string, ingredientId: string) {
-    updateRow(uid, { ingredientId, unit: defaultUnitFor(ingredients, ingredientId) });
+  function update(key: string, patch: Partial<Row>) {
+    setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }
-  function lineStr(quantity: string, unitPrice: string) {
-    const lt = (Number(quantity) || 0) * (Number(unitPrice) || 0);
-    return lt ? String(Math.round(lt * 100) / 100) : '';
-  }
-
-  async function onSave() {
-    setError('');
-    if (!supplier.trim()) {
-      setError('Укажите поставщика');
+  async function save(complete: boolean) {
+    if (busy) return;
+    if (
+      !supplier.trim() ||
+      !location ||
+      !rows.length ||
+      rows.some(
+        (r) =>
+          !r.ingredientId ||
+          !(Number(r.quantity) > 0) ||
+          !r.price.trim() ||
+          !Number.isFinite(Number(r.price)) ||
+          Number(r.price) < 0,
+      ) ||
+      !Number.isFinite(total) ||
+      total < 0
+    ) {
+      setError(
+        'Выберите поставщика, склад и товары. Введите количество и закупочную цену; для бесплатной поставки явно укажите 0.',
+      );
       return;
     }
-    const body: UpdatePurchaseInput = { id, date, supplier: supplier.trim() };
-    if (isDraft) {
-      const items = rows
-        .filter((r) => r.ingredientId && Number(r.quantity) > 0)
-        .map((r) => {
-          const hasTotal = r.total !== '' && Number.isFinite(Number(r.total));
-          return {
-            ingredientId: r.ingredientId,
-            unit: r.unit || defaultUnitFor(ingredients, r.ingredientId) || undefined,
-            quantity: Number(r.quantity),
-            purchasePrice: Number(r.purchasePrice) || 0,
-            total: hasTotal ? Number(r.total) : undefined,
-          };
-        });
-      if (items.length === 0) {
-        setError('Добавьте хотя бы одну позицию');
-        return;
-      }
-      body.items = items;
-    }
+    setError('');
     try {
-      await update.mutateAsync(body);
-      push({ message: 'Закупка обновлена', at: new Date().toISOString() });
+      const body = {
+        warehouseId: location,
+        supplier: supplier.trim(),
+        supplierId: suppliers.data?.find((s) => s.name === supplier.trim())?.id,
+        date: new Date(date).toISOString(),
+        note: note.trim(),
+        discount: Number(discount || 0),
+        attachments: attachments
+          .split('\n')
+          .map((a) => a.trim())
+          .filter(Boolean),
+        items: rows.map((row) => {
+          const item = byId.get(row.ingredientId);
+          const packs = item?.purchaseUnits?.length
+            ? item.purchaseUnits
+            : item?.purchaseUnit && item.purchaseFactor
+              ? [{ name: item.purchaseUnit, factor: item.purchaseFactor }]
+              : [];
+          const globalPackage = row.unit.startsWith('package:') ? row.unit.slice(8) : undefined;
+          if (globalPackage)
+            return {
+              ingredientId: row.ingredientId,
+              quantity: Number(row.quantity),
+              packageId: globalPackage,
+              purchasePrice: Number(row.price),
+            };
+          const pack = row.unit.startsWith('pack:');
+          const factor = pack ? (packs[Number(row.unit.slice(5))]?.factor ?? 1) : 1;
+          return {
+            ingredientId: row.ingredientId,
+            quantity: Number(row.quantity) * factor,
+            unit: pack ? item?.displayUnit : row.unit,
+            purchasePrice: Number(row.price) / factor,
+          };
+        }),
+      };
+      if (purchase) {
+        await mutations.update.mutateAsync({ id: purchase.id, ...body });
+        if (complete) await mutations.complete.mutateAsync(purchase.id);
+      } else await mutations.create.mutateAsync({ ...body, complete, requestKey });
       onClose();
     } catch (err) {
       setError(apiError(err));
     }
   }
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={p ? `Редактировать ${purchaseNumber(p.number)}` : 'Редактировать закупку'}
-      panelClassName="max-w-lg"
-      footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={update.isPending || !p} onClick={onSave}>
-          {update.isPending ? <Spinner /> : 'Сохранить изменения'}
-        </button>
-      }
-    >
-      {purchaseQ.isLoading || !p ? (
-        <div className="flex justify-center py-10 text-primary">
-          <Spinner className="h-6 w-6" />
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Дата">
-              <DatePicker className="input h-10" value={date} onChange={(value) => setDate(value)} />
-            </Field>
-            <Field label="Поставщик">
-              <input className="input h-10" value={supplier} onChange={(e) => setSupplier(e.target.value)} />
-            </Field>
-          </div>
-
-          {isDraft ? (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-text-secondary">Позиции</p>
-              {rows.map((r) => {
-                const unitCode = (r.unit || defaultUnitFor(ingredients, r.ingredientId)) as UnitCode | '';
-                const unitLbl = unitCode ? unitLabel(unitCode) : '';
-                return (
-                  <div key={r.uid} className="rounded-xl border border-border bg-background/40 p-2.5">
-                    <Select
-                      className="h-9 w-full text-sm"
-                      value={r.ingredientId}
-                      onChange={(v) => selectIngredient(r.uid, v)}
-                      placeholder="Выберите сырьё…"
-                      options={ingredients.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
-                    />
-                    <div className="mt-2 grid grid-cols-4 gap-2">
-                      <Field label="Кол-во">
-                        <input
-                          className="input h-9 text-sm"
-                          type="number"
-                          step="0.001"
-                          value={r.quantity}
-                          onChange={(e) => updateRow(r.uid, { quantity: e.target.value, total: lineStr(e.target.value, r.purchasePrice) })}
-                        />
-                      </Field>
-                      <Field label="Ед.">
-                        <Select
-                          className="h-9 w-full text-sm"
-                          value={unitCode}
-                          onChange={(v) => updateRow(r.uid, { unit: v })}
-                          placeholder="—"
-                          options={rowUnitOptions(ingredients, r.ingredientId)}
-                        />
-                      </Field>
-                      <Field label={`Цена${unitLbl ? ` (с/${unitLbl})` : ' (с)'}`}>
-                        <input
-                          className="input h-9 text-sm"
-                          type="number"
-                          step="0.01"
-                          value={r.purchasePrice}
-                          onChange={(e) => updateRow(r.uid, { purchasePrice: e.target.value, total: lineStr(r.quantity, e.target.value) })}
-                        />
-                      </Field>
-                      <Field label="Сумма (с)">
-                        <input
-                          className="input h-9 text-sm"
-                          type="number"
-                          step="0.01"
-                          value={r.total}
-                          onChange={(e) => {
-                            const q = Number(r.quantity) || 0;
-                            const unitPrice = q > 0 && e.target.value !== '' ? String(Math.round((Number(e.target.value) / q) * 10000) / 10000) : r.purchasePrice;
-                            updateRow(r.uid, { total: e.target.value, purchasePrice: unitPrice });
-                          }}
-                        />
-                      </Field>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="rounded-xl border border-border bg-background/40 p-3 text-xs text-text-muted">
-              Закупка проведена — состав изменить нельзя (это затронуло бы остатки и себестоимость). Можно изменить
-              только поставщика и дату.
-            </p>
-          )}
-
-          {error && <p className="text-sm text-danger">{error}</p>}
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function PurchaseDetailsModal({ id, locations, onClose }: { id: string; locations: WarehouseLocation[]; onClose: () => void }) {
-  const purchaseQ = usePurchase(id);
-  const p = purchaseQ.data;
-  const st = p ? STATUS_LABEL[p.status] : null;
-
-  return (
-    <Modal open onClose={onClose} title={p ? `Закупка ${purchaseNumber(p.number)}` : 'Закупка'} panelClassName="max-w-lg">
-      {purchaseQ.isLoading || !p ? (
-        <div className="flex justify-center py-10 text-primary">
-          <Spinner className="h-6 w-6" />
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 text-sm">
-            <Info label="Дата">{formatDate(p.date)}</Info>
-            <Info label="Поставщик">{p.supplier}</Info>
-            <Info label="Склад">{(p.warehouseId ? locations.find((location) => location.id === p.warehouseId) : locations.find((location) => location.isDefault))?.name ?? '—'}</Info>
-            <Info label="Статус">{st && <Badge tone={st.tone}>{st.label}</Badge>}</Info>
-            <Info label="Позиций">{p.itemsCount}</Info>
-          </div>
-
-          <div className="overflow-hidden rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-background/50 text-left text-xs text-text-muted">
-                  <th className="px-3 py-2 font-medium">Сырьё</th>
-                  <th className="px-3 py-2 text-center font-medium">Кол-во</th>
-                  <th className="px-3 py-2 text-right font-medium">Цена за ед.</th>
-                  <th className="px-3 py-2 text-right font-medium">Сумма</th>
-                </tr>
-              </thead>
-              <tbody>
-                {p.items?.map((it) => (
-                  <tr key={it.id} className="border-b border-border last:border-0">
-                    <td className="px-3 py-2 font-medium text-text-primary">{it.ingredientName}</td>
-                    <td className="px-3 py-2 text-center text-text-secondary">{qty(it.quantity, it.unit)}</td>
-                    <td className="px-3 py-2 text-right text-text-secondary">{money(it.purchasePrice)}</td>
-                    <td className="px-3 py-2 text-right font-medium text-text-primary">{money(it.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr className="border-t border-border bg-background/60">
-                  <td colSpan={3} className="px-3 py-2.5 text-right font-medium text-text-secondary">
-                    Итого
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-text-primary">{money(p.totalAmount)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
-      )}
-    </Modal>
-  );
-}
-
-function Info({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <p className="text-xs text-text-muted">{label}</p>
-      <p className="mt-0.5 text-text-primary">{children}</p>
-    </div>
-  );
-}
-
-function NewPurchaseForm({ warehouseId, locations }: { warehouseId?: string; locations: WarehouseLocation[] }) {
-  const today = new Date().toISOString().slice(0, 10);
-  const ingredientsQ = useIngredients('');
-  const { create } = usePurchaseMutations();
-  const push = useNotifications((s) => s.push);
-
-  const [date, setDate] = useState(today);
-  const [destinationId, setDestinationId] = useState(warehouseId ?? '');
-  const [supplier, setSupplier] = useState('');
-  const [rows, setRows] = useState<Row[]>([emptyRow()]);
-  const [error, setError] = useState('');
-
-  const ingredients = ingredientsQ.data ?? [];
-  const total = useMemo(
-    () => rows.reduce((acc, r) => acc + (Number(r.quantity) || 0) * (Number(r.purchasePrice) || 0), 0),
-    [rows],
-  );
-
-  function updateRow(uid: string, patch: Partial<Row>) {
-    setRows((cur) => cur.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
-  }
-  function selectIngredient(uid: string, ingredientId: string) {
-    updateRow(uid, { ingredientId, unit: defaultUnitFor(ingredients, ingredientId) });
-  }
-  // Сумма позиции = кол-во × цена за ед. (для редактируемого поля «Сумма»).
-  function lineTotalStr(quantity: string, unitPrice: string) {
-    const lt = (Number(quantity) || 0) * (Number(unitPrice) || 0);
-    return lt ? String(Math.round(lt * 100) / 100) : '';
-  }
-  function setQuantity(uid: string, quantity: string) {
-    setRows((cur) =>
-      cur.map((r) => (r.uid === uid ? { ...r, quantity, total: lineTotalStr(quantity, r.purchasePrice) } : r)),
-    );
-  }
-  function setUnitPrice(uid: string, purchasePrice: string) {
-    setRows((cur) =>
-      cur.map((r) => (r.uid === uid ? { ...r, purchasePrice, total: lineTotalStr(r.quantity, purchasePrice) } : r)),
-    );
-  }
-  // Владелец вводит сумму напрямую — выводим цену за единицу обратным счётом.
-  function setLineTotal(uid: string, total: string) {
-    setRows((cur) =>
-      cur.map((r) => {
-        if (r.uid !== uid) return r;
-        const q = Number(r.quantity) || 0;
-        const purchasePrice = q > 0 && total !== '' ? String(Math.round((Number(total) / q) * 10000) / 10000) : r.purchasePrice;
-        return { ...r, total, purchasePrice };
-      }),
-    );
-  }
-  function addRow() {
-    setRows((cur) => [...cur, emptyRow()]);
-  }
-  function removeRow(uid: string) {
-    setRows((cur) => (cur.length > 1 ? cur.filter((r) => r.uid !== uid) : cur));
-  }
-  function reset() {
-    setSupplier('');
-    setRows([emptyRow()]);
-    setError('');
-  }
-
-  async function onSubmit() {
-    setError('');
-    if (!supplier.trim()) {
-      setError('Укажите поставщика');
-      return;
-    }
-    const items = rows
-      .filter((r) => r.ingredientId && Number(r.quantity) > 0)
-      .map((r) => {
-        // Сумма, если введена, — авторитетна; иначе считаем по цене за единицу.
-        const hasTotal = r.total !== '' && Number.isFinite(Number(r.total));
-        return {
-          ingredientId: r.ingredientId,
-          unit: r.unit || defaultUnitFor(ingredients, r.ingredientId) || undefined,
-          quantity: Number(r.quantity),
-          purchasePrice: Number(r.purchasePrice) || 0,
-          total: hasTotal ? Number(r.total) : undefined,
-        };
-      });
-    if (items.length === 0) {
-      setError('Добавьте хотя бы одну позицию с количеством');
-      return;
-    }
+  async function reverse() {
+    if (!purchase || busy) return;
+    const reason = window.prompt('Причина сторнирования прихода');
+    if (!reason?.trim()) return;
     try {
-      await create.mutateAsync({ date, supplier: supplier.trim(), warehouseId: destinationId || undefined, items, complete: true });
-      push({ message: 'Закупка проведена', at: new Date().toISOString() });
-      reset();
+      await mutations.reverse.mutateAsync({ id: purchase.id, note: reason.trim() });
+      onClose();
     } catch (err) {
       setError(apiError(err));
     }
   }
-
+  const matches = (ingredients.data ?? []).filter(
+    (item) =>
+      !search || item.name.toLowerCase().includes(search.toLowerCase()) || item.barcode?.includes(search),
+  );
   return (
-    <div className="card flex flex-col p-4">
-      <h3 className="mb-3 text-[15px] font-semibold text-text-primary">Новая закупка</h3>
-      {locations.length > 1 && (
-        <div className="mb-3">
-          <Field label="Склад поступления">
-            <Select ariaLabel="Склад поступления" className="h-10 w-full" value={destinationId} onChange={setDestinationId}
-              options={locations.map(({ id, name }) => ({ value: id, label: name }))} />
-          </Field>
-        </div>
+    <div className="space-y-4">
+      {!costs && (
+        <p role="alert" className="rounded-lg bg-warning/10 p-3 text-sm">
+          Для приёмки товара с закупочными ценами нужен доступ к себестоимости. Обратитесь к владельцу.
+        </p>
       )}
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Дата">
-          <DatePicker className="input h-9" value={date} onChange={(value) => setDate(value)} />
-        </Field>
-        <Field label="Поставщик">
+      <div className="space-y-3 py-2">
+        <DocumentField label="Дата и время">
+          <DateTimePicker
+            className="input h-10 w-full"
+            value={date}
+            onChange={setDate}
+            disabled={!editable}
+          />
+        </DocumentField>
+        <DocumentField label="Поставщик">
           <input
-            className="input h-9"
+            className="input w-full"
+            list="warehouse-suppliers"
             value={supplier}
             onChange={(e) => setSupplier(e.target.value)}
-            placeholder="ФудСервис"
+            disabled={!editable}
           />
-        </Field>
+          <datalist id="warehouse-suppliers">
+            {suppliers.data?.map((s) => (
+              <option key={s.id} value={s.name} />
+            ))}
+          </datalist>
+        </DocumentField>
+        <DocumentField label="Склад">
+          <Select
+            ariaLabel="Склад поставки"
+            className="h-10 w-full"
+            value={location}
+            onChange={setLocation}
+            options={locations.map((l) => ({ value: l.id, label: l.name }))}
+            disabled={!!purchase}
+          />
+        </DocumentField>
+        <DocumentField label="Комментарий">
+          <textarea
+            className="input min-h-20 w-full"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            disabled={!editable}
+          />
+        </DocumentField>
       </div>
-
-      <div className="mt-4 space-y-2">
-        {rows.map((r) => {
-          const unitCode = (r.unit || defaultUnitFor(ingredients, r.ingredientId)) as UnitCode | '';
-          const unitLbl = unitCode ? unitLabel(unitCode) : '';
-          const lineTotal = (Number(r.quantity) || 0) * (Number(r.purchasePrice) || 0);
-          return (
-            <div key={r.uid} className="rounded-xl border border-border bg-background/40 p-2.5">
-              <div className="flex items-center gap-2">
-                <Select
-                  className="h-9 flex-1 text-sm"
-                  value={r.ingredientId}
-                  onChange={(v) => selectIngredient(r.uid, v)}
-                  placeholder="Выберите сырьё…"
-                  options={ingredients.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
-                />
-                <button
-                  type="button"
-                  onClick={() => removeRow(r.uid)}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/10"
-                  title="Удалить позицию"
-                >
-                  <IconTrash className="h-4 w-4" />
-                </button>
-              </div>
-              <div className="mt-2 grid grid-cols-4 items-end gap-2">
-                <Field label="Кол-во">
-                  <input
-                    className="input h-9 text-sm"
-                    type="number"
-                    step="0.001"
-                    value={r.quantity}
-                    onChange={(e) => setQuantity(r.uid, e.target.value)}
-                  />
-                </Field>
-                <Field label="Ед.">
-                  <Select
-                    className="h-9 w-full text-sm"
-                    value={unitCode}
-                    onChange={(v) => updateRow(r.uid, { unit: v })}
-                    placeholder="—"
-                    options={rowUnitOptions(ingredients, r.ingredientId)}
-                  />
-                </Field>
-                <Field label={`Цена${unitLbl ? ` (с/${unitLbl})` : ' (с)'}`}>
-                  <input
-                    className="input h-9 text-sm"
-                    type="number"
-                    step="0.01"
-                    value={r.purchasePrice}
-                    onChange={(e) => setUnitPrice(r.uid, e.target.value)}
-                  />
-                </Field>
-                <Field label="Сумма (с)">
-                  <input
-                    className="input h-9 text-sm"
-                    type="number"
-                    step="0.01"
-                    value={r.total}
-                    placeholder="0"
-                    onChange={(e) => setLineTotal(r.uid, e.target.value)}
-                  />
-                </Field>
-              </div>
-              <p className="mt-1 text-right text-xs text-text-muted">
-                Итого по позиции: {money(lineTotal)}
-              </p>
-            </div>
+      {editable && (
+        <div className="rounded-xl border border-border p-3">
+          <div className="flex flex-wrap gap-2">
+            <input
+              className="input h-10 min-w-40 flex-1"
+              aria-label="Поиск или сканирование штрихкода"
+              placeholder="Найти товар или отсканировать штрихкод"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  const exact = (ingredients.data ?? []).find((i) => i.barcode === search);
+                  if (exact) add(exact);
+                }
+              }}
+            />
+            <button type="button" className="btn-secondary btn-md" onClick={() => setCreatingItem(true)}>
+              + Новый товар
+            </button>
+          </div>
+          <Select
+            ariaLabel="Добавить товар в приход"
+            className="mt-2 h-10 w-full"
+            value=""
+            placeholder="Добавить товар"
+            options={matches.map((item) => ({ value: item.id, label: `${item.name} · ${item.unit}` }))}
+            onChange={(id) => {
+              const item = byId.get(id);
+              if (item) add(item);
+            }}
+          />
+        </div>
+      )}
+      {rows.map((row) => {
+        const item = byId.get(row.ingredientId);
+        const options = item
+          ? unitsForType(item.unitType).map((u) => ({ ...u, value: String(u.value) }))
+          : [];
+        const packs = item?.purchaseUnits?.length
+          ? item.purchaseUnits
+          : item?.purchaseUnit && item.purchaseFactor
+            ? [{ name: item.purchaseUnit, factor: item.purchaseFactor }]
+            : [];
+        (packages.data ?? [])
+          .filter((p) => item && unitsForType(item.unitType).some((u) => u.value === p.unit))
+          .forEach((p) =>
+            options.push({
+              value: `package:${p.id}`,
+              label: `${p.name} (${p.quantity} ${unitLabel(p.unit)})`,
+            }),
           );
-        })}
-      </div>
-
-      <button type="button" className="btn-secondary btn-md mt-2 self-start" onClick={addRow}>
-        <IconPlus className="h-4 w-4" /> Добавить позицию
-      </button>
-
-      <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
-        <span className="text-sm text-text-secondary">Итого</span>
-        <span className="text-lg font-semibold text-text-primary">{money(total)}</span>
-      </div>
-
-      {error && <p className="mt-2 text-sm text-danger">{error}</p>}
-
-      <div className="mt-3 flex gap-2">
-        <button type="button" className="btn-secondary btn-md flex-1" onClick={reset} disabled={create.isPending}>
-          Отмена
-        </button>
-        <button type="button" className="btn-primary btn-md flex-1 font-semibold" onClick={onSubmit} disabled={create.isPending}>
-          {create.isPending ? <Spinner /> : 'Провести закупку'}
-        </button>
-      </div>
+        const original = purchase?.items?.find((i) => i.id === row.key);
+        if (!options.some((o) => o.value === row.unit))
+          options.push({ value: row.unit, label: original?.packageName ?? original?.unit ?? row.unit });
+        packs.forEach((pack, index) =>
+          options.push({ value: `pack:${index}`, label: `${pack.name} (${pack.factor} ${item?.unit})` }),
+        );
+        return (
+          <div
+            key={row.key}
+            className="grid gap-2 rounded-xl border border-border p-3 lg:grid-cols-[1.5fr_1.1fr_0.7fr_0.8fr_0.7fr_auto] sm:items-end"
+          >
+            <div className="text-sm font-medium">
+              {item?.name ??
+                purchase?.items?.find((i) => i.ingredientId === row.ingredientId)?.ingredientName}
+            </div>
+            <Field label="Фасовка">
+              <Select
+                ariaLabel="Единица закупки"
+                className="h-10 w-full"
+                value={row.unit}
+                options={
+                  options.length ? options : [{ value: row.unit, label: unitLabel(row.unit as UnitCode) }]
+                }
+                disabled={!editable}
+                onChange={(unit) => update(row.key, { unit })}
+              />
+            </Field>
+            <Field label="Количество">
+              <input
+                className="input h-10 w-full"
+                type="number"
+                min="0"
+                step="any"
+                value={row.quantity}
+                disabled={!editable}
+                onChange={(e) => update(row.key, { quantity: e.target.value })}
+              />
+            </Field>
+            {costs && (
+              <Field label="Цена за единицу, сом">
+                <input
+                  className="input h-10 w-full"
+                  type="number"
+                  min="0"
+                  step="any"
+                  value={row.price}
+                  disabled={!editable}
+                  onChange={(e) => update(row.key, { price: e.target.value })}
+                />
+              </Field>
+            )}
+            {costs && (
+              <div className="text-sm">
+                <span className="block text-xs text-text-muted">Сумма</span>
+                <strong>{money(Number(row.quantity || 0) * Number(row.price || 0))}</strong>
+              </div>
+            )}
+            {editable && (
+              <button
+                type="button"
+                className="btn-secondary btn-md"
+                aria-label={`Убрать ${item?.name ?? 'товар'}`}
+                onClick={() => setRows((current) => current.filter((r) => r.key !== row.key))}
+              >
+                Убрать
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {!rows.length && (
+        <p className="text-sm text-text-muted">
+          Добавьте товары: количество и цена сразу покажут итог прихода.
+        </p>
+      )}
+      <details className="rounded-xl border border-border p-3">
+        <summary className="cursor-pointer text-sm font-medium">Скидка и вложения</summary>
+        <div className="mt-3 space-y-3">
+          <Field label="Скидка поставщика, сом">
+            <input
+              className="input w-full"
+              type="number"
+              min="0"
+              step="0.01"
+              value={discount}
+              disabled={!editable}
+              onChange={(e) => setDiscount(e.target.value)}
+            />
+          </Field>
+          <Field label="Ссылки на накладные, по одной на строку">
+            <textarea
+              className="input w-full"
+              value={attachments}
+              disabled={!editable}
+              onChange={(e) => setAttachments(e.target.value)}
+            />
+          </Field>
+        </div>
+      </details>
+      {(error || ingredients.isError) && (
+        <p role="alert" className="text-sm text-danger">
+          {error || apiError(ingredients.error)}
+        </p>
+      )}
+      <DocumentFooter total={costs ? `Итого: ${money(total)}` : undefined}>
+        {editable ? (
+          <>
+            <button
+              type="button"
+              className="btn-secondary btn-md"
+              disabled={busy}
+              onClick={() => void save(false)}
+            >
+              Сохранить черновик
+            </button>
+            <button
+              type="button"
+              className="btn-primary btn-md"
+              disabled={busy}
+              onClick={() => void save(true)}
+            >
+              Провести приход
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="mr-auto text-sm text-text-muted">
+              {purchase?.status === 'cancelled'
+                ? 'Приход сторнирован'
+                : 'Проведённый приход сохранён в истории'}
+            </span>
+            {purchase?.status === 'completed' && can('actions.warehouseApprove') && (
+              <button
+                type="button"
+                className="btn-secondary btn-md"
+                disabled={busy}
+                onClick={() => void reverse()}
+              >
+                Сторнировать
+              </button>
+            )}
+          </>
+        )}
+      </DocumentFooter>
+      {creatingItem && <ItemCard onClose={() => setCreatingItem(false)} onSaved={add} />}
     </div>
   );
 }
 
-interface Row {
-  uid: string;
-  ingredientId: string;
-  unit: string; // код единицы закупки (g/kg/...)
-  quantity: string;
-  purchasePrice: string;
-  total: string;
-}
-function emptyRow(): Row {
-  return { uid: `r-${Date.now()}-${Math.random()}`, ingredientId: '', unit: '', quantity: '', purchasePrice: '', total: '' };
-}
-
-/** Опции единиц для строки: совместимые с типом выбранного ингредиента. */
-function rowUnitOptions(ingredients: Ingredient[], ingredientId: string) {
-  const ing = ingredients.find((i) => i.id === ingredientId);
-  return ing ? unitsForType(ing.unitType) : [];
-}
-function defaultUnitFor(ingredients: Ingredient[], ingredientId: string): string {
-  return ingredients.find((i) => i.id === ingredientId)?.displayUnit ?? '';
-}
-
-function formatDate(value: string): string {
-  const d = new Date(value);
-  return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="mb-1 block text-xs font-medium text-text-secondary">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-function FilterTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
-        active ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Badge({ children, tone }: { children: React.ReactNode; tone: 'success' | 'warning' | 'danger' | 'muted' }) {
-  const cls = {
-    success: 'bg-success/10 text-success',
-    warning: 'bg-warning/10 text-warning',
-    danger: 'bg-danger/10 text-danger',
-    muted: 'bg-slate-100 text-text-muted',
-  }[tone];
-  return <span className={`inline-flex rounded-lg px-2 py-0.5 text-xs font-medium ${cls}`}>{children}</span>;
+function localTime(value?: string) {
+  const d = value ? new Date(value) : new Date();
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }

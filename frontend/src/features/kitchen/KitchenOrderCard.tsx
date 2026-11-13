@@ -388,6 +388,8 @@ export function KitchenOrderCard({
           const header = (
             <>
               <span className="font-semibold">{it.quantity}×</span> {itemName}
+              {it.modifierSelections?.map((option) => <span key={option.optionId} className="block text-sm text-primary">+ {option.name} ×{option.quantity}</span>)}
+              {it.excludedIngredientNames?.map((name) => <span key={name} className="block text-sm text-warning">Без {name}</span>)}
               {itemComment && <span className="text-warning font-medium"> · {itemComment}</span>}
               {/* Точечная метка «с собой» — только если весь заказ не навынос. */}
               {it.takeaway && !allTakeaway && (

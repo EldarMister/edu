@@ -10,6 +10,7 @@ const { WarehouseDocumentsService } = require('../src/warehouse/documents.servic
 const { IngredientStockService } = require('../src/warehouse/ingredient-stock.service.ts');
 const { MovementsService } = require('../src/warehouse/movements.service.ts');
 const { WarehouseOverviewService } = require('../src/warehouse/overview.service.ts');
+const { PurchasesService } = require('../src/warehouse/purchases.service.ts');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new URL(url).pathname.includes('test'))) {
@@ -40,7 +41,7 @@ test('PostgreSQL: count discrepancies preserve later movement and owner approval
       const bar = await locations.save(cafe.id, 'Бар');
       const cola = await ingredients.create({ name: 'Кола', unit: 'pcs', stock: 24, avgCost: 12, warehouseId: bar.id });
       const syrup = await ingredients.create({ name: 'Сироп', unit: 'l', stock: 2, avgCost: 40, warehouseId: bar.id });
-      await ingredients.adjust(cola.id, { warehouseId: common.id, mode: 'add', unit: 'pcs', quantity: 5 });
+      await new PurchasesService(db).create({ supplier: 'Начальная поставка', warehouseId: common.id, complete: true, items: [{ ingredientId: cola.id, unit: 'pcs', quantity: 5, purchasePrice: 12 }] });
       const stock = async (ingredient, warehouseId) => {
         const rows = await ingredients.findAll({ search: ingredient.name, warehouseId });
         return rows.find(({ id }) => id === ingredient.id).stock;
@@ -63,9 +64,11 @@ test('PostgreSQL: count discrepancies preserve later movement and owner approval
       const dish = await db.dish.create({ data: { categoryId: category.id, name: 'Кола', price: 60 } });
       await db.recipeItem.create({ data: { dishId: dish.id, ingredientId: cola.id, amount: 1 } });
       await locations.route(owner, 'bar', bar.id);
-      await db.$transaction((tx) => new IngredientStockService().applyDishSale(tx, randomUUID(), [
-        { id: randomUUID(), dishId: dish.id, prepStation: 'bar', quantity: 2 },
-      ]));
+      const hall = await db.hall.create({ data: { name: 'Inventory sale fixture' } });
+      const table = await db.table.create({ data: { hallId: hall.id, number: 1 } });
+      const sale = await db.order.create({ data: { tableId: table.id, waiterId: owner.id, orderNumber: '1', status: 'sent_to_kitchen',
+        items: { create: { dishId: dish.id, dishNameSnapshot: dish.name, priceSnapshot: 60, quantity: 2, finalPrice: 120, prepStation: 'bar' } } }, include: { items: true } });
+      await db.$transaction((tx) => new IngredientStockService().applyDishSale(tx, sale.id, sale.items));
       const attempts = await Promise.allSettled([
         docs.approve(owner, full.id, submitted.revision),
         docs.approve(owner, full.id, submitted.revision),
@@ -126,7 +129,11 @@ test('PostgreSQL: count discrepancies preserve later movement and owner approval
     try {
       for (const cafeId of cafes) {
         await db.stockMovement.deleteMany({ where: { cafeId } });
+        await db.purchase.deleteMany({ where: { cafeId } });
         await db.warehouseDocument.deleteMany({ where: { cafeId } });
+        await db.order.deleteMany({ where: { cafeId } });
+        await db.table.deleteMany({ where: { cafeId } });
+        await db.hall.deleteMany({ where: { cafeId } });
         await db.user.deleteMany({ where: { cafeId } });
         await db.recipeItem.deleteMany({ where: { cafeId } });
         await db.dish.deleteMany({ where: { cafeId } });

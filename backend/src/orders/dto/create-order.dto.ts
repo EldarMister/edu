@@ -1,6 +1,7 @@
 import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEnum,
@@ -36,7 +37,17 @@ export class SetComponentInputDto {
   action: SetComponentAction;
 }
 
+class OrderModifierSelectionDto {
+  @IsString() @IsNotEmpty() optionId: string;
+  @IsInt() @Min(1) quantity: number;
+}
+
 export class CreateOrderItemDto {
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => OrderModifierSelectionDto)
+  modifierSelections?: OrderModifierSelectionDto[];
+
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @IsString({ each: true })
+  excludedIngredientIds?: string[];
   /** Stable existing line identifier when editing; ignored for creation. */
   @IsOptional()
   @IsString()

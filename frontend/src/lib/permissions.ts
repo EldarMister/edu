@@ -20,6 +20,8 @@ export const ACTION_KEYS: ActionKey[] = [
   'closeShift',
   'manageStaff',
   'editPermissions',
+  'warehouseReceive', 'warehouseTransfer', 'warehouseWriteoff', 'warehouseCount', 'warehouseApprove',
+  'warehouseRecipes', 'warehouseProduce', 'warehouseCosts', 'warehouseReports', 'warehouseSettings',
 ];
 
 /** Подписи разделов — как в референсе. */
@@ -44,6 +46,16 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   closeShift: 'Закрытие смены',
   manageStaff: 'Управление сотрудниками',
   editPermissions: 'Редактирование прав доступа',
+  warehouseReceive: 'Склад: приход и возврат поставщику',
+  warehouseTransfer: 'Склад: перемещения',
+  warehouseWriteoff: 'Склад: списания',
+  warehouseCount: 'Склад: подсчёт остатков',
+  warehouseApprove: 'Склад: проведение и сторнирование документов',
+  warehouseRecipes: 'Склад: редактирование техкарт',
+  warehouseProduce: 'Склад: производство заготовок',
+  warehouseCosts: 'Склад: просмотр себестоимости',
+  warehouseReports: 'Склад: отчёты',
+  warehouseSettings: 'Склад: настройки и справочник',
 };
 
 const allSections = (v: boolean): Record<SectionKey, boolean> =>
@@ -77,6 +89,9 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
           closeShift: true,
           manageStaff: false,
           editPermissions: false,
+          warehouseReceive: true, warehouseTransfer: true, warehouseWriteoff: true, warehouseCount: true,
+          warehouseApprove: false, warehouseRecipes: true, warehouseProduce: true, warehouseCosts: true,
+          warehouseReports: true, warehouseSettings: false,
         },
       };
     case 'WAITER':

@@ -7,7 +7,35 @@ const get = async <T>(url: string) => (await api.get<T>(url)).data;
 
 import type { UnitCode, UnitType } from './units';
 
+export type ProcessingMethod = 'cleaning' | 'boiling' | 'frying' | 'stewing' | 'baking';
+export const PROCESSING_METHODS: { value: ProcessingMethod; label: string }[] = [
+  { value: 'cleaning', label: 'Очистка' },
+  { value: 'boiling', label: 'Варка' },
+  { value: 'frying', label: 'Жарка' },
+  { value: 'stewing', label: 'Тушение' },
+  { value: 'baking', label: 'Запекание' },
+];
+export type ItemKind = 'raw' | 'beverage' | 'goods' | 'preparation' | 'prepared_dish' | 'consumable';
+export const ITEM_KINDS: { value: ItemKind; label: string }[] = [
+  { value: 'raw', label: 'Сырьё' },
+  { value: 'beverage', label: 'Напитки' },
+  { value: 'goods', label: 'Готовые товары' },
+  { value: 'preparation', label: 'Полуфабрикаты' },
+  { value: 'prepared_dish', label: 'Заготовленные блюда' },
+  { value: 'consumable', label: 'Расходники' },
+];
 export interface Ingredient {
+  valuationKnown?: boolean;
+  processingLosses?: Partial<Record<ProcessingMethod, number>>;
+  kind?: ItemKind;
+  category?: string | null;
+  barcode?: string | null;
+  supplier?: string | null;
+  purchaseUnits?: { name: string; factor: number }[];
+  supplierId?: string | null;
+  purchaseUnit?: string | null;
+  purchaseFactor?: number | null;
+  preparationMode?: 'stocked' | 'virtual';
   id: string;
   isPrepared?: boolean;
   name: string;
@@ -16,11 +44,11 @@ export interface Ingredient {
   displayUnit: UnitCode;
   unit: string; // кириллица display-единицы
   stock: number; // в display-единице
-  avgCost: number; // за display-единицу
+  avgCost: number | null; // за display-единицу
   lowStockThreshold: number;
   costUnitLabel: string; // «с/кг»
   stockBase: number;
-  avgCostBase: number;
+  avgCostBase: number | null;
   isActive: boolean;
   isLow: boolean;
 }
@@ -28,10 +56,16 @@ export interface Ingredient {
 export interface IngredientsOverview {
   totalIngredients: number;
   lowStockCount: number;
-  avgCost: number;
+  avgCost: number | null;
 }
 
 export interface RecipeItem {
+  costKnown?: boolean;
+  processingMethod?: ProcessingMethod | null;
+  warehouseId?: string | null;
+  netAmount?: number;
+  lossPercent?: number;
+  variantAmounts?: Record<string, number>;
   id: string;
   isPrepared?: boolean;
   fromCommonWarehouse?: boolean;
@@ -42,26 +76,56 @@ export interface RecipeItem {
   unitType: UnitType;
   ingredientDisplayUnit: UnitCode;
   amount: number; // в amountUnit
-  avgCost: number; // за amountUnit
+  avgCost: number | null; // за amountUnit
   costUnitLabel: string;
-  lineCost: number;
+  lineCost: number | null;
   stock: number; // в amountUnit
   isLow: boolean;
   isActive: boolean;
 }
 
+export interface RecipeMetadata {
+  instructions?: string;
+  outputQuantity?: number;
+  outputUnit?: string;
+  photoUrl?: string;
+}
 export interface Recipe {
+  costKnown?: boolean;
+  version?: number;
+  metadata?: RecipeMetadata | null;
+  stockIngredientId?: string | null;
+  stockAmount?: number;
+  variants?: { id: string; name: string }[];
+  components?: {
+    dishId: string;
+    dishName: string;
+    variantId?: string;
+    quantity: number;
+    foodCost: number | null;
+    accountingConfigured: boolean;
+  }[];
+  missingCosts?: string[];
+  accountingConfigured?: boolean;
+  marginAmount?: number | null;
+  foodCostPercent?: number | null;
   dishId: string;
   dishName: string;
   price: number;
-  foodCost: number;
-  marginPercent: number;
+  foodCost: number | null;
+  marginPercent: number | null;
   items: RecipeItem[];
 }
 
 export type PurchaseStatus = 'draft' | 'completed' | 'cancelled';
 
 export interface PurchaseItem {
+  grossTotal?: number;
+  packageId?: string | null;
+  packageName?: string | null;
+  packageQuantity?: number | null;
+  packageUnit?: string | null;
+  packageFactor?: number | null;
   id: string;
   ingredientId: string;
   ingredientName: string;
@@ -73,6 +137,10 @@ export interface PurchaseItem {
 }
 
 export interface Purchase {
+  supplierId?: string | null;
+  note?: string | null;
+  attachments?: string[];
+  discount?: number;
   id: string;
   warehouseId?: string | null;
   number: number;
@@ -91,8 +159,28 @@ export interface PurchasesOverview {
   sum: number;
 }
 
-export type StockMovementType = 'purchase' | 'sale' | 'return' | 'correction' | 'cancel' | 'inventory' | 'writeoff';
-export type StockMovementSource = 'purchase' | 'order' | 'manual' | 'inventory' | 'writeoff';
+export type StockMovementType =
+  | 'purchase'
+  | 'sale'
+  | 'return'
+  | 'correction'
+  | 'cancel'
+  | 'inventory'
+  | 'writeoff'
+  | 'transfer'
+  | 'supplier_return'
+  | 'production'
+  | 'processing';
+export type StockMovementSource =
+  | 'purchase'
+  | 'order'
+  | 'manual'
+  | 'inventory'
+  | 'writeoff'
+  | 'transfer'
+  | 'supplier_return'
+  | 'production'
+  | 'processing';
 
 export interface StockMovement {
   id: string;
@@ -108,7 +196,7 @@ export interface StockMovement {
   beforeStock: number;
   change: number;
   afterStock: number;
-  costAtMoment: number;
+  costAtMoment: number | null;
   comment: string | null;
   createdAt: string;
 }
@@ -120,11 +208,17 @@ export interface MovementsSummary {
 }
 
 export interface WarehouseOverview {
-  stockValue: number;
+  itemCount?: number;
+  outOfStockCount?: number;
+  lossesTotal?: number | null;
+  missingRecipeCount?: number;
+  unknownCostCount?: number;
+  messages?: { code: string; text: string; count: number; section: 'recipes' | 'items' }[];
+  stockValue: number | null;
   lowStockCount: number;
   purchasesTotal: number;
-  ingredientWriteOffTotal: number;
-  stockValueTrend: Array<{ date: string; value: number }>;
+  ingredientWriteOffTotal: number | null;
+  stockValueTrend: Array<{ date: string; value: number | null }>;
   lowStockItems: Array<{
     id: string;
     name: string;
@@ -137,7 +231,7 @@ export interface WarehouseOverview {
     name: string;
     unit: string;
     quantity: number;
-    cost: number;
+    cost: number | null;
   }>;
   recentMovements: Array<{
     id: string;
@@ -147,6 +241,8 @@ export interface WarehouseOverview {
     unit: string;
     change: number;
     after: number;
+    sourceId?: string | null;
+    sourceType?: string;
   }>;
   suppliersTop: Array<{ supplier: string; total: number }>;
 }
@@ -157,6 +253,7 @@ const warehouseLocationsKey = [...KEY, 'locations'] as const;
 export interface WarehouseLocation {
   id: string;
   name: string;
+  address?: string | null;
   isDefault: boolean;
 }
 
@@ -176,11 +273,11 @@ export function useWarehouseLocationMutations() {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: KEY });
   const save = useMutation({
-    mutationFn: ({ id, name }: { id?: string; name: string }) => (
-      id
-        ? api.patch<WarehouseLocation>(`/admin/warehouse/locations/${encodeURIComponent(id)}`, { name })
-        : api.post<WarehouseLocation>('/admin/warehouse/locations', { name })
-    ).then((r) => r.data),
+    mutationFn: ({ id, ...body }: { id?: string; name: string; address?: string }) =>
+      (id
+        ? api.patch<WarehouseLocation>(`/admin/warehouse/locations/${encodeURIComponent(id)}`, body)
+        : api.post<WarehouseLocation>('/admin/warehouse/locations', body)
+      ).then((r) => r.data),
     onSuccess: invalidate,
   });
   const setRoute = useMutation({
@@ -189,8 +286,13 @@ export function useWarehouseLocationMutations() {
     onSuccess: invalidate,
   });
   const transfer = useMutation({
-    mutationFn: (body: { ingredientId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; unit: string }) =>
-      api.post('/admin/warehouse/locations/transfer', body),
+    mutationFn: (body: {
+      ingredientId: string;
+      fromWarehouseId: string;
+      toWarehouseId: string;
+      quantity: number;
+      unit: string;
+    }) => api.post('/admin/warehouse/locations/transfer', body),
     onSuccess: invalidate,
   });
   return { save, setRoute, transfer };
@@ -227,11 +329,34 @@ export function useIngredients(search: string, warehouseId?: string) {
 export function useIngredientsOverview(warehouseId?: string) {
   return useQuery({
     queryKey: [...KEY, 'ingredients', 'overview', warehouseId],
-    queryFn: () => get<IngredientsOverview>(`/admin/warehouse/ingredients/overview?${warehouseQuery(warehouseId)}`),
+    queryFn: () =>
+      get<IngredientsOverview>(`/admin/warehouse/ingredients/overview?${warehouseQuery(warehouseId)}`),
   });
 }
 
+export interface IngredientDetails extends Ingredient {
+  balances: { warehouseId: string; warehouseName: string; stock: number; avgCost: number | null }[];
+  usedInDishes: { id: string; name: string }[];
+  lastPurchasePrice: number | null;
+}
+export function useIngredient(id: string | null) {
+  return useQuery({
+    queryKey: [...KEY, 'ingredient', id],
+    queryFn: () => get<IngredientDetails>(`/admin/warehouse/ingredients/${id}`),
+    enabled: !!id,
+  });
+}
 export interface IngredientInput {
+  processingLosses?: Partial<Record<ProcessingMethod, number>>;
+  kind?: ItemKind;
+  category?: string | null;
+  barcode?: string | null;
+  supplier?: string | null;
+  purchaseUnits?: { name: string; factor: number }[];
+  supplierId?: string | null;
+  purchaseUnit?: string | null;
+  purchaseFactor?: number | null;
+  preparationMode?: 'stocked' | 'virtual';
   name: string;
   warehouseId?: string;
   unit: string;
@@ -255,28 +380,35 @@ export function useIngredientMutations() {
     onSuccess: invalidate,
   });
   const remove = useMutation({
-    mutationFn: (id: string) =>
-      api.delete(`/admin/warehouse/ingredients/${id}`).then((r) => r.data),
+    mutationFn: (id: string) => api.delete(`/admin/warehouse/ingredients/${id}`).then((r) => r.data),
     onSuccess: invalidate,
   });
-  const adjust = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; mode: 'add' | 'writeoff' | 'set'; quantity: number; unit: string; warehouseId?: string }) =>
-      api.post<Ingredient>(`/admin/warehouse/ingredients/${id}/adjust`, body).then((r) => r.data),
-    onSuccess: invalidate,
-  });
-  return { create, update, remove, adjust };
+  return { create, update, remove };
 }
 
 // ---------- Техкарта ----------
 
-export function useRecipe(dishId: string | null) {
+export function useRecipe(dishId: string | null, variantId?: string) {
   return useQuery({
-    queryKey: [...KEY, 'recipe', dishId],
-    queryFn: () => get<Recipe>(`/admin/warehouse/dishes/${dishId}/recipe`),
+    queryKey: [...KEY, 'recipe', dishId, variantId],
+    queryFn: () =>
+      get<Recipe>(
+        `/admin/warehouse/dishes/${dishId}/recipe${variantId ? `?variantId=${encodeURIComponent(variantId)}` : ''}`,
+      ),
     enabled: !!dishId,
   });
 }
 
+export interface RecipeRowInput {
+  processingMethod?: ProcessingMethod | null;
+  amount: number;
+  unit?: string;
+  fromCommonWarehouse?: boolean;
+  warehouseId?: string | null;
+  netAmount?: number;
+  lossPercent?: number;
+  variantAmounts?: Record<string, number>;
+}
 export function useRecipeMutations(dishId: string | null) {
   const qc = useQueryClient();
   const invalidate = () => {
@@ -284,21 +416,30 @@ export function useRecipeMutations(dishId: string | null) {
     qc.invalidateQueries({ queryKey: KEY });
   };
   const addItem = useMutation({
-    mutationFn: (body: { ingredientId: string; amount: number; unit?: string; fromCommonWarehouse?: boolean }) =>
+    mutationFn: (body: RecipeRowInput & { ingredientId: string }) =>
       api.post<Recipe>(`/admin/warehouse/dishes/${dishId}/recipe`, body).then((r) => r.data),
     onSuccess: invalidate,
   });
   const updateItem = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; amount: number; unit?: string; fromCommonWarehouse?: boolean }) =>
+    mutationFn: ({ id, ...body }: RecipeRowInput & { id: string }) =>
       api.patch<Recipe>(`/admin/warehouse/recipe/${id}`, body).then((r) => r.data),
     onSuccess: invalidate,
   });
   const removeItem = useMutation({
-    mutationFn: (id: string) =>
-      api.delete<Recipe>(`/admin/warehouse/recipe/${id}`).then((r) => r.data),
+    mutationFn: (id: string) => api.delete<Recipe>(`/admin/warehouse/recipe/${id}`).then((r) => r.data),
     onSuccess: invalidate,
   });
-  return { addItem, updateItem, removeItem };
+  const settings = useMutation({
+    mutationFn: (body: {
+      variantId?: string;
+      stockIngredientId?: string | null;
+      stockAmount?: number;
+      stockUnit?: string;
+      metadata?: RecipeMetadata;
+    }) => api.patch<Recipe>(`/admin/warehouse/dishes/${dishId}/recipe-settings`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { addItem, updateItem, removeItem, settings };
 }
 
 // ---------- Полуфабрикаты ----------
@@ -310,16 +451,27 @@ interface PreparedIngredient {
   displayUnit: UnitCode;
   unitType: UnitType;
   stock: number;
-  avgCost: number;
+  avgCost: number | null;
 }
 
 interface PreparationRecipeInput {
+  instructions?: string;
+  mode?: 'stocked' | 'virtual';
   outputQuantity: number;
   outputUnit: UnitCode;
-  items: { ingredientId: string; quantity: number; unit: UnitCode }[];
+  items: {
+    ingredientId: string;
+    quantity: number;
+    unit: UnitCode;
+    netAmount?: number;
+    lossPercent?: number;
+    processingMethod?: ProcessingMethod | null;
+  }[];
 }
 
 export interface PreparationRecipe extends Omit<PreparationRecipeInput, 'items'> {
+  totalCost?: number | null;
+  missingCosts?: string[];
   id: string;
   name: string;
   displayUnit: UnitCode;
@@ -336,13 +488,50 @@ export function usePreparedIngredients(warehouseId: string) {
   });
 }
 
-export function usePreparationRecipe(id: string) {
+export function usePreparationRecipe(id: string, warehouseId?: string) {
   return useQuery({
-    queryKey: [...KEY, 'preparation', id, 'recipe'],
-    queryFn: () => get<PreparationRecipe>(`${PREPARATION_URL}/${id}/recipe`),
+    queryKey: [...KEY, 'preparation', id, 'recipe', warehouseId],
+    queryFn: () => get<PreparationRecipe>(`${PREPARATION_URL}/${id}/recipe?${warehouseQuery(warehouseId)}`),
   });
 }
 
+export interface ProductionBatch {
+  costKnown?: boolean;
+  reversedAt?: string | null;
+  reverseReason?: string | null;
+  id: string;
+  batchId: string;
+  ingredientName: string;
+  warehouseId: string;
+  plannedQuantity: number;
+  actualQuantity: number;
+  yieldDifference: number;
+  unit: UnitCode;
+  totalCost: number | null;
+  unitCost: number | null;
+  producedAt: string;
+  expiresAt: string | null;
+  batchNumber: string | null;
+  items: { actual: { ingredientId: string; name: string; quantity: number; unit: UnitCode; cost: string | null; costKnown?: boolean }[] };
+}
+export function useProductionJournal(warehouseId?: string) {
+  return useQuery({
+    queryKey: [...KEY, 'production', 'journal', warehouseId],
+    queryFn: () => get<ProductionBatch[]>(`${PREPARATION_URL}/batches?${warehouseQuery(warehouseId)}`),
+  });
+}
+export function useProductionBatches(id: string) {
+  return useQuery({
+    queryKey: [...KEY, 'production', id],
+    queryFn: () => get<ProductionBatch[]>(`${PREPARATION_URL}/${id}/batches`),
+  });
+}
+export function useProductionBatch(id: string) {
+  return useQuery({
+    queryKey: [...KEY, 'production', 'batch', id],
+    queryFn: () => get<ProductionBatch>(`${PREPARATION_URL}/batches/${id}`),
+  });
+}
 export function usePreparationMutations() {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: KEY });
@@ -357,23 +546,53 @@ export function usePreparationMutations() {
     onSuccess: invalidate,
   });
   const produce = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; warehouseId: string; quantity: number; unit: UnitCode }) =>
-      api.post<{ batchId: string; quantity: number; unit: string; warehouseId: string | null; totalCost: number }>(
-        `${PREPARATION_URL}/${id}/batches`, body,
-      ).then((r) => r.data),
+    mutationFn: ({
+      id,
+      ...body
+    }: {
+      id: string;
+      warehouseId: string;
+      quantity: number;
+      unit: UnitCode;
+      plannedQuantity?: number;
+      requestKey?: string;
+      batchNumber?: string;
+      expiresAt?: string;
+      items?: { ingredientId: string; quantity: number; unit: UnitCode }[];
+    }) =>
+      api
+        .post<{
+          batchId: string;
+          quantity: number;
+          unit: string;
+          warehouseId: string | null;
+          totalCost: number | null;
+        }>(`${PREPARATION_URL}/${id}/batches`, body)
+        .then((r) => r.data),
     onSuccess: invalidate,
   });
-  return { create, saveRecipe, produce };
+  const reverseBatch = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post(`${PREPARATION_URL}/batches/${id}/reverse`, { reason }),
+    onSuccess: invalidate,
+  });
+  return { create, saveRecipe, produce, reverseBatch };
 }
 
 // ---------- Закупки ----------
 
-export function usePurchases(params: { status: string; search: string; warehouseId?: string }) {
+export function usePurchases(params: {
+  status: string;
+  search: string;
+  warehouseId?: string;
+  enabled?: boolean;
+}) {
   const q = warehouseQuery(params.warehouseId);
   if (params.status) q.set('status', params.status);
   if (params.search) q.set('search', params.search);
   return useQuery({
     queryKey: [...KEY, 'purchases', params],
+    enabled: params.enabled ?? true,
     queryFn: () => get<Purchase[]>(`/admin/warehouse/purchases?${q.toString()}`),
   });
 }
@@ -389,23 +608,47 @@ export function usePurchase(id: string | null) {
 export function usePurchasesOverview(warehouseId?: string) {
   return useQuery({
     queryKey: [...KEY, 'purchases', 'overview', warehouseId],
-    queryFn: () => get<PurchasesOverview>(`/admin/warehouse/purchases/overview?${warehouseQuery(warehouseId)}`),
+    queryFn: () =>
+      get<PurchasesOverview>(`/admin/warehouse/purchases/overview?${warehouseQuery(warehouseId)}`),
   });
 }
 
 export interface CreatePurchaseInput {
+  requestKey?: string;
+  supplierId?: string;
+  note?: string;
+  attachments?: string[];
+  discount?: number;
   date?: string;
   warehouseId?: string;
   supplier: string;
-  items: { ingredientId: string; quantity: number; unit?: string; purchasePrice?: number; total?: number }[];
+  items: {
+    ingredientId: string;
+    packageId?: string;
+    quantity: number;
+    unit?: string;
+    purchasePrice?: number;
+    total?: number;
+  }[];
   complete?: boolean;
 }
 
 export interface UpdatePurchaseInput {
+  supplierId?: string;
+  note?: string;
+  attachments?: string[];
+  discount?: number;
   id: string;
   date?: string;
   supplier?: string;
-  items?: { ingredientId: string; quantity: number; unit?: string; purchasePrice?: number; total?: number }[];
+  items?: {
+    ingredientId: string;
+    packageId?: string;
+    quantity: number;
+    unit?: string;
+    purchasePrice?: number;
+    total?: number;
+  }[];
 }
 
 export function usePurchaseMutations() {
@@ -431,7 +674,12 @@ export function usePurchaseMutations() {
       api.post<Purchase>(`/admin/warehouse/purchases/${id}/cancel`).then((r) => r.data),
     onSuccess: invalidate,
   });
-  return { create, update, complete, cancel };
+  const reverse = useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string }) =>
+      api.post(`/admin/warehouse/purchases/${id}/reverse`, { note }),
+    onSuccess: invalidate,
+  });
+  return { create, update, complete, cancel, reverse };
 }
 
 // ---------- Движения ----------
@@ -485,4 +733,23 @@ export function qty(value: number, unit: string): string {
   const rounded = Math.round(value * 1000) / 1000;
   const str = Number.isInteger(rounded) ? String(rounded) : String(rounded).replace('.', ',');
   return `${str} ${unit}`;
+}
+
+export function useWarehouseDishes(search: string) {
+  return useQuery({
+    queryKey: [...KEY, 'recipe-dishes', search],
+    queryFn: () =>
+      get<
+        {
+          id: string;
+          name: string;
+          price: string;
+          category?: { name: string };
+          isSet?: boolean;
+          hasDirectStock?: boolean;
+          hasRecipe?: boolean;
+          stockIngredientId?: string | null;
+        }[]
+      >(`/admin/warehouse/dishes?${new URLSearchParams({ search })}`),
+  });
 }

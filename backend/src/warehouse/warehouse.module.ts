@@ -14,9 +14,17 @@ import { WarehouseLocationsController } from './locations.controller';
 import { WarehouseLocationsService } from './locations.service';
 import { WarehouseDocumentsController } from './documents.controller';
 import { WarehouseDocumentsService } from './documents.service';
+import { WarehouseReportsController } from './reports.controller';
+import { WarehouseReportsService } from './reports.service';
+import { WarehousePolicyController } from './policy.controller';
+import { WarehouseSuppliersModule } from './suppliers';
+import { WarehousePackagesModule } from './packages';
+import { ProcessingModule } from './processing';
+import { MenuModifiersController, MenuModifiersService } from './menu-modifiers';
 
 /** Склад: сырьё, техкарты, закупки, движения. */
 @Module({
+  imports: [WarehouseSuppliersModule, WarehousePackagesModule, ProcessingModule],
   controllers: [
     IngredientsController,
     RecipesController,
@@ -25,6 +33,9 @@ import { WarehouseDocumentsService } from './documents.service';
     WarehouseOverviewController,
     WarehouseLocationsController,
     WarehouseDocumentsController,
+    WarehouseReportsController,
+    WarehousePolicyController,
+    MenuModifiersController,
   ],
   providers: [
     IngredientsService,
@@ -34,7 +45,9 @@ import { WarehouseDocumentsService } from './documents.service';
     WarehouseOverviewService,
     WarehouseLocationsService,
     WarehouseDocumentsService,
+    WarehouseReportsService,
     IngredientStockService,
+    MenuModifiersService,
   ],
   // IngredientStockService используется заказами для списания/возврата сырья.
   exports: [IngredientStockService],

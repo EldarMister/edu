@@ -8,6 +8,7 @@ import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { normalizeDishImage, withDishImageRef } from '../dishes/dish-image';
 import { normalizeUnit, unitLabel } from '../warehouse/units';
+import { projectDishStock } from '../warehouse/dish-stock-projection';
 import { assertAssignableStation, defaultCategoryStation, lockStationRouting } from '../kitchen/preparation-stations';
 import {
   CreateCategoryDto,
@@ -347,7 +348,12 @@ export class CatalogService {
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       include: this.dishInclude(),
     });
-    return dishes.map(withDishImageRef);
+    const recipeDishIds = new Set((await this.prisma.recipeItem.findMany({ where: { dishId: { in: dishes.map((dish) => dish.id) } }, select: { dishId: true }, distinct: ['dishId'] })).map((row) => row.dishId));
+    const stock = await projectDishStock(this.prisma, dishes);
+    return dishes.map((dish) => withDishImageRef({ ...dish, trackInventory: stock.get(dish.id)!.trackInventory, stock: stock.get(dish.id)!.stock,
+      variants: dish.variants.map((variant) => ({ ...variant, stock: stock.get(dish.id)!.variantStocks.get(variant.id) ?? null })),
+      hasRecipe: recipeDishIds.has(dish.id),
+      hasDirectStock: !!dish.stockIngredientId || dish.variants.some((variant) => !!variant.stockIngredientId) }));
   }
 
   private normalizeVariants(variants?: DishVariantDto[]): NormalizedDishVariant[] {
@@ -395,7 +401,7 @@ export class CatalogService {
 
   private dishInclude() {
     return {
-      category: { select: { id: true, name: true } },
+      category: { select: { id: true, name: true, prepStation: true } },
       variants: { orderBy: { sortOrder: 'asc' as const } },
       setComponents: {
         orderBy: { sortOrder: 'asc' as const },
@@ -413,6 +419,9 @@ export class CatalogService {
   }
 
   async createDish(dto: CreateDishDto, actor: AuditActor) {
+    if (dto.trackInventory || Number(dto.stock ?? 0) !== 0 || dto.variants?.some((variant) => Number(variant.stock ?? 0) !== 0)) {
+      throw new BadRequestException('Складской учёт настраивается в «Состав и себестоимость». Остатки вносятся приходом или инвентаризацией');
+    }
     await this.ensureCategory(dto.categoryId);
     const variants = this.normalizeVariants(dto.variants);
     const price = this.resolveDishPrice(dto.price, variants);
@@ -434,9 +443,7 @@ export class CatalogService {
           isWeighted: dto.isWeighted ?? false,
           weightedMeasure: dto.weightedMeasure ?? 'weight',
           weightedPriceBase: dto.weightedPriceBase ?? 100,
-          trackInventory: dto.trackInventory ?? false,
-          stock: dto.stock,
-          initialStock: dto.initialStock,
+          trackInventory: false,
           unit: this.normalizeInventoryUnit(dto.unit),
           prepStation: dto.prepStation ?? null,
           voiceName: dto.voiceName?.trim() || null,
@@ -446,8 +453,6 @@ export class CatalogService {
                   name: variant.name,
                   price: new Prisma.Decimal(variant.price),
                   sortOrder: variant.sortOrder,
-                  stock: variant.stock,
-                  initialStock: variant.initialStock,
                   unit: variant.unit,
                 })),
               }
@@ -476,15 +481,21 @@ export class CatalogService {
   async updateDish(id: string, dto: UpdateDishDto, actor: AuditActor) {
     const dish = await this.prisma.dish.findUnique({
       where: { id },
-      include: { _count: { select: { variants: true } } },
+      include: { _count: { select: { variants: true } }, variants: true },
     });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
-    const { variants: variantsDto, ...dishDto } = dto;
+    const legacyError = 'Остатки изменяются в складе документом прихода или инвентаризации. Способ учёта — в «Состав и себестоимость»';
+    if ((dto.trackInventory !== undefined && dto.trackInventory !== dish.trackInventory)
+      || (dto.stock !== undefined && dto.stock !== dish.stock)
+      || (dto.initialStock !== undefined && dto.initialStock !== dish.initialStock)) throw new BadRequestException(legacyError);
+    for (const variant of dto.variants ?? []) {
+      const previous = dish.variants.find((entry) => entry.id === variant.id);
+      if ((variant.stock !== undefined && variant.stock !== (previous?.stock ?? 0))
+        || (variant.initialStock !== undefined && variant.initialStock !== (previous?.initialStock ?? 0))) throw new BadRequestException(legacyError);
+    }
+    const { variants: variantsDto, stock: _stock, initialStock: _initialStock, trackInventory: _trackInventory, ...dishDto } = dto;
     const variants = variantsDto !== undefined ? this.normalizeVariants(variantsDto) : undefined;
     const data: Prisma.DishUpdateInput = { ...dishDto } as Prisma.DishUpdateInput;
-    if (dto.trackInventory !== undefined) {
-      data.trackInventory = dto.trackInventory;
-    }
     if (variants !== undefined || dto.price !== undefined) {
       data.price = new Prisma.Decimal(this.resolveDishPrice(dto.price, variants ?? [], dish.price));
     }
@@ -518,8 +529,6 @@ export class CatalogService {
                 name: variant.name,
                 price: new Prisma.Decimal(variant.price),
                 sortOrder: variant.sortOrder,
-                stock: variant.stock,
-                initialStock: variant.initialStock,
                 unit: variant.unit,
               },
             });
@@ -530,8 +539,6 @@ export class CatalogService {
                 name: variant.name,
                 price: new Prisma.Decimal(variant.price),
                 sortOrder: variant.sortOrder,
-                stock: variant.stock,
-                initialStock: variant.initialStock,
                 unit: variant.unit,
               },
             });

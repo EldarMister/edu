@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
@@ -54,6 +55,7 @@ export function KitchenApp({
   station?: PrepStation;
 } = {}) {
   const { user, logout } = useAuth();
+  const {canSection}=usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
   const stationKey = `edu-pos-prep-station:${user?.id ?? ''}:${defaultStation}`;
   const [selectedStation, setSelectedStation] = useState(() => {
@@ -201,6 +203,7 @@ export function KitchenApp({
           </span>
         </div>
         <div className="flex items-center gap-4 text-sm">
+          {canSection('warehouse')&&<Link to="/warehouse" className="text-primary">Склад и техкарты</Link>}
           <ConnectionStatus />
           {pushNotifications.status !== 'subscribed' &&
             pushNotifications.status !== 'unsupported' &&

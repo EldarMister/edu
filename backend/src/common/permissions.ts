@@ -25,6 +25,16 @@ export const ACTION_KEYS = [
   'closeShift',
   'manageStaff',
   'editPermissions',
+  'warehouseReceive',
+  'warehouseTransfer',
+  'warehouseWriteoff',
+  'warehouseCount',
+  'warehouseApprove',
+  'warehouseRecipes',
+  'warehouseProduce',
+  'warehouseCosts',
+  'warehouseReports',
+  'warehouseSettings',
 ] as const;
 export type ActionKey = (typeof ACTION_KEYS)[number];
 
@@ -68,6 +78,16 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
           closeShift: true,
           manageStaff: false,
           editPermissions: false,
+          warehouseReceive: true,
+          warehouseTransfer: true,
+          warehouseWriteoff: true,
+          warehouseCount: true,
+          warehouseApprove: false,
+          warehouseRecipes: true,
+          warehouseProduce: true,
+          warehouseCosts: true,
+          warehouseReports: true,
+          warehouseSettings: false,
         },
       };
     case Role.WAITER:
