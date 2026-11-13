@@ -2782,7 +2782,7 @@ export class OrdersService {
 
   private async currentServiceChargeAmount(tx?: Prisma.TransactionClient): Promise<number> {
     const settings = tx
-      ? await tx.settings.findUnique({ where: { id: 'default' }, select: { serviceChargeAmount: true } })
+      ? await tx.settings.findFirst({ select: { serviceChargeAmount: true } })
       : await this.settings.ensure();
     return Math.max(0, round2(Number(settings?.serviceChargeAmount ?? 0)));
   }

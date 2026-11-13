@@ -47,6 +47,32 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         order.items.sort((a, b) => items.findIndex(i => i.dishId === a.dishId) - items.findIndex(i => i.dishId === b.dishId));
         return order;
       };
+
+      await t.test('single-record order and table access is constrained by cafe', async () => {
+        const foreign = await db.cafe.create({ data: { name: 'Foreign order access cafe' } });
+        const foreignRecords = await runWithTenant({ cafeId: foreign.id }, async () => {
+          const foreignHall = await db.hall.create({ data: { name: 'Foreign hall' } });
+          const foreignTable = await db.table.create({ data: { hallId: foreignHall.id, number: 1 } });
+          const foreignOrder = await db.order.create({
+            data: { tableId: foreignTable.id, source: 'qr', orderNumber: '№1', status: 'ready' },
+          });
+          return { table: foreignTable, order: foreignOrder };
+        });
+        await assert.rejects(orders.findByIdForActor(foreignRecords.order.id, owner));
+        await assert.rejects(orders.findByIdForActor(foreignRecords.order.id, waiter));
+        await assert.rejects(orders.findByIdForActor(foreignRecords.order.id, cooks[0]));
+        await assert.rejects(orders.create(waiter, {
+          tableId: foreignRecords.table.id,
+          items: [{ dishId: dishes[0].id, quantity: 1 }],
+        }), /Стол не найден/);
+        await assert.rejects(orders.closeTable(foreignRecords.table.id, waiter), /Стол не найден/);
+        assert.equal(await db.order.findUnique({ where: { id: foreignRecords.order.id } }), null);
+        await assert.rejects(db.table.update({ where: { id: foreignRecords.table.id }, data: { seats: 11 } }), { code: 'P2025' });
+        await assert.rejects(db.table.delete({ where: { id: foreignRecords.table.id } }), { code: 'P2025' });
+        await runWithTenant({ cafeId: foreign.id }, async () => {
+          assert.equal((await db.table.findUnique({ where: { id: foreignRecords.table.id } })).seats, foreignRecords.table.seats);
+        });
+      });
       const editLine = i => ({ id: i.id, dishId: i.dishId, quantity: i.quantity, comment: i.comment ?? undefined, takeaway: i.takeaway });
       const setPolicy = async overrides => {
         const policy = normalizeWaiterOrderPermissions(null);

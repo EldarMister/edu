@@ -28,11 +28,7 @@ interface SocketUser {
 
 /**
  * Единый шлюз реального времени.
- * Клиент подключается с JWT в auth.token; по роли его добавляют в нужные комнаты:
- *  - кухня → ROOMS.KITCHEN
- *  - официант → персональная комната waiter:<id>
- *  - админ/владелец → ROOMS.ADMIN
- *  - только админ → ROOMS.ADMIN_ONLY
+ * Клиент с JWT получает события в комнатах своего кафе и своей роли.
  */
 @WebSocketGateway({
   cors: {
@@ -95,19 +91,19 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
       const user: SocketUser = { id: dbUser.id, role: dbUser.role, name: dbUser.name, cafeId: dbUser.cafeId };
       client.data.user = user;
+      client.join(ROOMS.cafeStaff(user.cafeId));
 
       if (user.role === 'KITCHEN' || user.role === 'BAR') {
         // Бар получает ту же ленту, что и кухня; экран фильтрует позиции по станции.
         client.join(ROOMS.cafeKitchen(user.cafeId));
       } else if (user.role === 'WAITER') {
-        client.join(ROOMS.WAITERS);
+        client.join(ROOMS.cafeWaiters(user.cafeId));
         client.join(ROOMS.waiter(user.id));
       } else if (user.role === 'ADMIN' || user.role === 'OWNER') {
-        client.join(ROOMS.ADMIN);
+        client.join(ROOMS.cafeManagement(user.cafeId));
         client.join(ROOMS.cafeKitchen(user.cafeId)); // админ видит и кухонную ленту
         if (user.role === 'ADMIN') {
-          client.join(ROOMS.ADMIN_ONLY);
-          if (user.cafeId) client.join(ROOMS.cafeAdmins(user.cafeId));
+          client.join(ROOMS.cafeAdmins(user.cafeId));
         }
       }
 
@@ -133,18 +129,34 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   @SubscribeMessage(QR_CLIENT_EVENTS.JOIN)
   async handleQrJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { tableId?: string; guestKey?: string },
+    @MessageBody() body: { tableId?: string; guestKey?: string; tableToken?: string },
   ) {
     const tableId = body?.tableId;
-    if (!tableId) return { ok: false };
+    const guestKey = body?.guestKey;
+    if (typeof tableId !== 'string' || typeof guestKey !== 'string' || !tableId || !guestKey) return { ok: false };
+    const table = await this.prisma.table.findFirst({
+      where: { id: tableId, isActive: true },
+      select: { cafeId: true, qrToken: true },
+    });
+    if (!table) return { ok: false };
+    if (body.tableToken !== table.qrToken) {
+      const lastVisit = await this.prisma.qrTableSession.findFirst({
+        where: { tableId },
+        orderBy: { createdAt: 'desc' },
+        select: { guests: { where: { guestKey }, select: { id: true }, take: 1 } },
+      });
+      if (!lastVisit?.guests.length) return { ok: false };
+    }
+    try {
+      await assertCafeActive(this.prisma, table.cafeId);
+    } catch {
+      return { ok: false };
+    }
     if (client.data.qr) await this.releaseQrGuest(client, false);
     client.join(ROOMS.qrTable(tableId));
-    client.data.qr = { tableId, guestKey: body.guestKey };
-    await this.retainQrGuest(tableId, body.guestKey);
-    this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_GUEST_JOINED, {
-      tableId,
-      guestKey: body.guestKey,
-    });
+    client.data.qr = { tableId, guestKey };
+    await this.retainQrGuest(tableId, guestKey);
+    this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_GUEST_JOINED, { tableId });
     await this.emitQrSessionSnapshot(tableId);
     return { ok: true };
   }
@@ -160,10 +172,13 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
   // ---- API для сервисов ----
 
-  emitToKitchen(event: string, payload: unknown) {
+  private cafeFor(payload: unknown) {
     const explicitCafe = payload && typeof payload === 'object' && 'cafeId' in payload ? payload.cafeId : undefined;
-    const cafeId = typeof explicitCafe === 'string' || explicitCafe === null ? explicitCafe : getCafeId();
-    this.server.to(ROOMS.cafeKitchen(cafeId)).emit(event, payload);
+    return typeof explicitCafe === 'string' || explicitCafe === null ? explicitCafe : getCafeId();
+  }
+
+  emitToKitchen(event: string, payload: unknown) {
+    this.server.to(ROOMS.cafeKitchen(this.cafeFor(payload))).emit(event, payload);
   }
 
   emitToWaiter(waiterId: string | null | undefined, event: string, payload: unknown) {
@@ -173,15 +188,15 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   }
 
   emitToWaiters(event: string, payload: unknown) {
-    this.server.to(ROOMS.WAITERS).emit(event, payload);
+    this.server.to(ROOMS.cafeWaiters(this.cafeFor(payload))).emit(event, payload);
   }
 
   emitToAdmin(event: string, payload: unknown) {
-    this.server.to(ROOMS.ADMIN).emit(event, payload);
+    this.server.to(ROOMS.cafeManagement(this.cafeFor(payload))).emit(event, payload);
   }
 
   emitToAdminOnly(event: string, payload: unknown) {
-    this.server.to(ROOMS.ADMIN_ONLY).emit(event, payload);
+    this.server.to(ROOMS.cafeAdmins(this.cafeFor(payload))).emit(event, payload);
   }
 
   emitToCafeAdmins(cafeId: string | null | undefined, event: string, payload: unknown) {
@@ -189,9 +204,14 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     this.server.to(ROOMS.cafeAdmins(cafeId)).emit(event, payload);
   }
 
-  /** Широковещательно (например, изменение статуса стола видят все). */
+  /** События стола, меню и настроек получают только сотрудники кафе. */
   emitBroadcast(event: string, payload: unknown) {
-    this.server.emit(event, payload);
+    this.server.to(ROOMS.cafeStaff(this.cafeFor(payload))).emit(event, payload);
+  }
+
+  /** Плановое обновление рейтинга затрагивает меню всех заведений. */
+  emitPopularityRefresh() {
+    this.server.emit(SERVER_EVENTS.MENU_UPDATED, { source: 'dish-popularity-cron' });
   }
 
   /** Всем гостям QR-меню конкретного стола. */
@@ -247,10 +267,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     }
 
     if (emit) {
-      this.server.to(ROOMS.qrTable(qr.tableId)).emit(SERVER_EVENTS.QR_GUEST_LEFT, {
-        tableId: qr.tableId,
-        guestKey: qr.guestKey,
-      });
+      this.server.to(ROOMS.qrTable(qr.tableId)).emit(SERVER_EVENTS.QR_GUEST_LEFT, { tableId: qr.tableId });
       await this.emitQrSessionSnapshot(qr.tableId);
     }
   }

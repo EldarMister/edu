@@ -110,13 +110,10 @@ export class IngredientStockService {
     if (direction === 'sale') {
       const warnings = await this.shortages(tx, planned);
       if (warnings.length > 0) {
-        const settings = await tx.settings.upsert({
-          where: { id: 'default' },
-          update: {},
-          create: { id: 'default' },
+        const settings = await tx.settings.findFirst({
           select: { allowNegativeIngredientStock: true },
         });
-        if (!settings.allowNegativeIngredientStock) {
+        if (settings?.allowNegativeIngredientStock === false) {
           throw new BadRequestException({
             message: 'Недостаточно сырья',
             shortages: warnings,

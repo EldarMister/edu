@@ -3,12 +3,11 @@
  * Соответствуют ТЗ §22 (раздел «С сервера клиентам»).
  */
 export const ROOMS = {
-  KITCHEN: 'role:kitchen',
-  cafeKitchen: (cafeId: string | null | undefined) => cafeId ? `cafe:${cafeId}:kitchen` : 'cafe:legacy:kitchen',
-  WAITERS: 'role:waiters',
-  ADMIN: 'role:admin',
-  ADMIN_ONLY: 'role:admin-only',
-  cafeAdmins: (cafeId: string) => `cafe:${cafeId}:admins`,
+  cafeStaff: (cafeId: string | null | undefined) => `cafe:${cafeId ?? 'legacy'}:staff`,
+  cafeKitchen: (cafeId: string | null | undefined) => `cafe:${cafeId ?? 'legacy'}:kitchen`,
+  cafeWaiters: (cafeId: string | null | undefined) => `cafe:${cafeId ?? 'legacy'}:waiters`,
+  cafeManagement: (cafeId: string | null | undefined) => `cafe:${cafeId ?? 'legacy'}:management`,
+  cafeAdmins: (cafeId: string | null | undefined) => `cafe:${cafeId ?? 'legacy'}:admins`,
   waiter: (waiterId: string) => `waiter:${waiterId}`,
   // Комната QR-меню конкретного стола: все гости стола получают обновления общего заказа.
   qrTable: (tableId: string) => `qr-table:${tableId}`,

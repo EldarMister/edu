@@ -35,7 +35,7 @@ const TENANT_MODELS = new Set<string>([
   'OrderItemSetComponent', 'Payment', 'KitchenEvent', 'PenaltyReward', 'Incident',
   'AuditLog', 'Settings', 'PushSubscription', 'ReceiptPrintRequest',
   'QrTableSession', 'QrGuest', 'QrSessionItem', 'Ingredient', 'RecipeItem',
-  'Purchase', 'PurchaseItem', 'StockMovement',
+  'Purchase', 'PurchaseItem', 'StockMovement', 'PreparationStation',
 ]);
 
 /** Ключи вложенных операций записи Prisma — по ним отличаем relation-write от Json-поля. */
@@ -95,11 +95,8 @@ function processRelationWrite(wrapper: AnyObj, cafeId: string): void {
 
 /**
  * Prisma-middleware авто-скоупа по кафе.
- * Покрывает: списочные/агрегатные чтения и массовые записи (where += cafeId),
- * а также проставляет cafeId в create/createMany/upsert/update (включая вложенные create).
- * НЕ трогает: findUnique/findUniqueOrThrow/update/delete по уникальному where
- * (Prisma не примет cafeId в WhereUniqueInput; id/ключи — глобальные UUID).
- * Строгую изоляцию single-record и raw-SQL добиваем в Фазе 3.
+ * Ограничивает чтение и запись текущим кафе. Prisma 5 поддерживает дополнительные
+ * поля в WhereUniqueInput при наличии уникального ключа. Raw SQL требует явного скоупа.
  */
 export const tenantPrismaMiddleware: Prisma.Middleware = async (params, next) => {
   const cafeId = getCafeId();
@@ -112,12 +109,15 @@ export const tenantPrismaMiddleware: Prisma.Middleware = async (params, next) =>
   switch (params.action) {
     case 'findFirst':
     case 'findFirstOrThrow':
+    case 'findUnique':
+    case 'findUniqueOrThrow':
     case 'findMany':
     case 'count':
     case 'aggregate':
     case 'groupBy':
     case 'updateMany':
     case 'deleteMany':
+    case 'delete':
       args.where = { ...(args.where as AnyObj), cafeId };
       params.args = args;
       break;
@@ -136,19 +136,19 @@ export const tenantPrismaMiddleware: Prisma.Middleware = async (params, next) =>
     }
 
     case 'update':
-      // where уникальный — не трогаем; вложенные create в data получают cafeId.
+      args.where = { ...(args.where as AnyObj), cafeId };
       injectCafeId(args.data, cafeId);
       params.args = args;
       break;
 
     case 'upsert':
+      args.where = { ...(args.where as AnyObj), cafeId };
       injectCafeId(args.create, cafeId);
       injectCafeId(args.update, cafeId);
       params.args = args;
       break;
 
     default:
-      // findUnique / findUniqueOrThrow / delete — оставляем как есть.
       break;
   }
 
