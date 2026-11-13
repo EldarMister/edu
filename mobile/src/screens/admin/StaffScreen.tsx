@@ -10,6 +10,8 @@ import { Button, Toggle } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
+import { usePrepStations } from '@/services/api/prepStations';
+import { PrepStationsSheet } from './PrepStationsSheet';
 import { displayOrderNumber, money, timeHM } from '@/utils/format';
 import {
   useSetCashHanded,
@@ -42,10 +44,8 @@ const ROLE_LABEL: Record<Role, string> = {
   OWNER: 'Владелец',
 };
 
-const ROLE_OPTIONS = [
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
   { value: 'WAITER', label: 'Официант' },
-  { value: 'KITCHEN', label: 'Кухня' },
-  { value: 'BAR', label: 'Бар' },
   { value: 'ADMIN', label: 'Администратор' },
   { value: 'OWNER', label: 'Владелец' },
 ];
@@ -105,6 +105,9 @@ function fromDateTimeLocal(value: string) {
 
 /** Персонал и текущая смена (порт PWA StaffPage — вкладка «Текущая смена» + CRUD). */
 export function StaffScreen() {
+  const [stationsOpen, setStationsOpen] = useState(false);
+  const { stations } = usePrepStations();
+  const stationNames = useMemo(() => new Map(stations.map(({ id, name }) => [id, name])), [stations]);
   const [date, setDate] = useState(todayYmd());
   const [tab, setTab] = useState<'current' | 'history' | 'waiter'>('current');
   const [historyFilters, setHistoryFilters] = useState<ShiftHistoryFilters>({ period: 'today' });
@@ -187,6 +190,7 @@ export function StaffScreen() {
               <Button title="Обновить" size="md" style={styles.toolbarButton} variant="secondary" loading={reportQ.isFetching} onPress={() => void reportQ.refetch()} />
               {canAction('exportReports') ? <Button title="Экспорт" size="md" style={styles.toolbarButton} variant="secondary" disabled={!rows.length} loading={exporting} onPress={() => void exportReport()} /> : null}
             </> : null}
+            {currentUser?.role === 'OWNER' && <Button title="Станции" size="md" variant="secondary" onPress={() => setStationsOpen(true)} />}
             <FastPressable style={styles.addStaff} onPress={() => setEditing('new')}><PwaIcon name="plus" size={16} color={colors.white} /><Text style={styles.addStaffText} translate>Добавить сотрудника</Text></FastPressable>
           </View>
         </View> : null}
@@ -214,6 +218,7 @@ export function StaffScreen() {
                 <ShiftRow
                   key={row.waiterId}
                   row={row}
+                  stationName={stationNames.get(memberById.get(row.waiterId)?.prepStation ?? (row.role === 'KITCHEN' ? 'kitchen' : row.role === 'BAR' ? 'bar' : ''))}
                   date={date}
                   open={expanded === row.waiterId}
                   onToggle={() => setExpanded((cur) => (cur === row.waiterId ? null : row.waiterId))}
@@ -258,6 +263,7 @@ export function StaffScreen() {
         )}
       </SheetScrollView>
 
+      {currentUser?.role === 'OWNER' && stationsOpen && <PrepStationsSheet onClose={() => setStationsOpen(false)} />}
       {editing !== null ? (
         <StaffModal member={editing === 'new' ? null : editing} onClose={() => setEditing(null)} onManagePermissions={editing !== 'new' && canManagePermissions && editing.role === 'ADMIN' && editing.id !== currentUser?.id ? () => { setPermissionsFor(editing); setEditing(null); } : undefined} />
       ) : null}
@@ -512,6 +518,7 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
 
 function ShiftRow({
   row,
+  stationName,
   date,
   open,
   onToggle,
@@ -519,6 +526,7 @@ function ShiftRow({
   onDelete,
 }: {
   row: ShiftReportRow;
+  stationName?: string;
   date: string;
   open: boolean;
   onToggle: () => void;
@@ -543,7 +551,7 @@ function ShiftRow({
             <Text style={styles.staffName} numberOfLines={1}>
               {row.name}
             </Text>
-          <Text style={styles.staffRole}>{ROLE_LABEL[row.role]}</Text>
+          <Text style={styles.staffRole} numberOfLines={1}>{stationName ?? ROLE_LABEL[row.role]}</Text>
         </View>
         {isWaiter ? <>
           <Text style={[styles.staffCellText, { width: 130 }]}>{shiftLabel(row)}</Text>
@@ -684,7 +692,16 @@ function StaffModal({ member, onClose, onManagePermissions }: { member: StaffMem
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(member?.name ?? '');
   const [phone, setPhone] = useState(member?.phone ?? '');
-  const [role, setRole] = useState<Role>(member?.role ?? 'WAITER');
+  const [assignment, setAssignment] = useState(member?.prepStation ?? member?.role ?? 'WAITER');
+  const { stations } = usePrepStations();
+  const stationOptions = stations
+    .map((station) => ({
+      value: station.id === 'kitchen' ? 'KITCHEN' : station.id === 'bar' ? 'BAR' : station.id,
+      label: station.name,
+      translate: station.isBuiltIn,
+      isActive: station.isActive,
+    }))
+    .filter((station) => station.isActive || station.value === assignment);
   const [password, setPassword] = useState('');
   const [isActive, setIsActive] = useState(member?.isActive ?? true);
   const [error, setError] = useState('');
@@ -692,16 +709,19 @@ function StaffModal({ member, onClose, onManagePermissions }: { member: StaffMem
 
   const onSubmit = async () => {
     setError('');
+    const selectedRole = assignment === 'KITCHEN' || assignment === 'BAR' ? assignment : ROLE_OPTIONS.find(({ value }) => value === assignment)?.value;
+    const role = selectedRole ?? (member?.role === 'BAR' ? 'BAR' : 'KITCHEN');
+    const prepStation = selectedRole ? null : assignment;
     try {
       if (isEdit) {
-        await update.mutateAsync({ id: member!.id, name, phone, role, isActive, ...(password ? { password } : {}) });
+        await update.mutateAsync({ id: member!.id, name, phone, role, isActive, prepStation, ...(password ? { password } : {}) });
         push({ message: 'Сотрудник обновлён', at: new Date().toISOString() });
       } else {
         if (!password) {
           setError('Укажите пароль');
           return;
         }
-        await create.mutateAsync({ name, phone, role, password });
+        await create.mutateAsync({ name, phone, role, password, prepStation });
         push({ message: 'Сотрудник добавлен', at: new Date().toISOString() });
       }
       onClose();
@@ -724,8 +744,8 @@ function StaffModal({ member, onClose, onManagePermissions }: { member: StaffMem
         <Field label="Телефон">
           <TextInput style={styles.input} value={phone} onChangeText={setPhone} keyboardType="phone-pad" placeholderTextColor={colors.textLight} />
         </Field>
-        <Field label="Роль">
-          <Select value={role} onChange={(v) => setRole(v as Role)} options={ROLE_OPTIONS} title="Роль" />
+        <Field label="Роль или станция">
+          <Select value={assignment} onChange={setAssignment} options={[ROLE_OPTIONS[0], ...stationOptions, ...ROLE_OPTIONS.slice(1)]} title="Роль или станция" />
         </Field>
         <Field label={isEdit ? 'Новый пароль (если менять)' : 'Пароль'}>
           <TextInput

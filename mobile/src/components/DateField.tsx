@@ -1,6 +1,7 @@
 import React from 'react';
 import { Keyboard, Modal, Platform, ScrollView, StyleSheet, View, useWindowDimensions, type TextInputProps, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { Text, TextInput } from '@/components/typography';
 import { useT } from '@/lib/i18n';
@@ -8,9 +9,12 @@ import { colors } from '@/theme';
 import { calendarCells, calendarMonth, dateToIso, displayDate, isAllowedDate, parseDisplayDate, shiftCalendarMonth } from '@/utils/calendarDate';
 import { FastPressable } from './FastPressable';
 import { PwaIcon } from './PwaIcon';
+import { sheetTiming } from './motion';
 import { HandTargetClip, HandTargetModal } from '@/features/hand-control/targets';
 import { HandPointer } from '@/features/hand-control/HandPointer';
 import { useRadioOverlayBlocker } from '@/features/ptt/radioVisibility';
+
+const calendarEnter = FadeIn.duration(sheetTiming.enterMs);
 
 type Props = Omit<TextInputProps, 'value' | 'onChangeText'> & {
   value: string;
@@ -155,7 +159,7 @@ export function DateField({
       <View style={styles.modalRoot} accessibilityViewIsModal onAccessibilityEscape={close}
         onLayout={event => { const { width, height } = event.nativeEvent.layout; setViewport({ width, height }); measureAnchor(); }}>
         <FastPressable style={StyleSheet.absoluteFill} onPress={close} accessibilityRole="button" accessibilityLabel="Закрыть календарь" handExclude={handPanelRef} />
-        {anchor ? <View ref={handPanelRef} collapsable={false} style={[styles.calendar, { top, left, width: popupWidth, height: popupHeight }]} accessibilityLabel={fieldLabel}>
+        {anchor ? <Animated.View entering={calendarEnter} ref={handPanelRef} collapsable={false} style={[styles.calendar, { top, left, width: popupWidth, height: popupHeight }]} accessibilityLabel={fieldLabel}>
           <ScrollView ref={handScrollRef} style={{ flex: 1 }} contentContainerStyle={styles.calendarContent} showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="always" bounces={false}
             onContentSizeChange={(_width, height) => { if (height > 0) setContentHeight(current => Math.abs(current - height) > 0.5 ? height : current); }}>
@@ -199,7 +203,7 @@ export function DateField({
             </View>
             </HandTargetClip>
           </ScrollView>
-        </View> : null}
+        </Animated.View> : null}
       </View>
       <HandPointer />
       </HandTargetModal>

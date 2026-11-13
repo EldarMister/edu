@@ -1,4 +1,5 @@
 export const PANEL_DURATION = 300;
+export const PANEL_OPEN_MS = 550;
 export const STEP_DURATION = 220;
 
 export function resistPanelOffset(offset: number, travel: number) {

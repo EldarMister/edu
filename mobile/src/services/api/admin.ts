@@ -111,6 +111,7 @@ export interface OrdersSummary {
   revenue: number;
 }
 export interface StaffMember {
+  prepStation?: string | null;
   id: string;
   name: string;
   phone: string;
@@ -186,6 +187,7 @@ export function useStaff(role: string, search: string) {
 
 // ---------- Персонал: CRUD + отчёт по сменам (порт PWA) ----------
 export interface StaffInput {
+  prepStation?: string | null;
   name: string;
   phone: string;
   role: Role;
@@ -629,6 +631,7 @@ export interface SetComponentInput {
 export interface SetInput {
   name: string;
   price: number;
+  prepStation?: PrepStation | null;
   components: SetComponentInput[];
 }
 

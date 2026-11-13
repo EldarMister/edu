@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View, useWindowDimensions, type ScrollView } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { Text, TextInput } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { FastPressable } from '@/components/FastPressable';
@@ -7,6 +8,7 @@ import { FullscreenSheet } from '@/components/FullscreenSheet';
 import { SheetScrollView } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { DateField } from '@/components/DateField';
+import { sheetTiming } from '@/components/motion';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { money } from '@/utils/format';
 import {
@@ -17,6 +19,8 @@ import {
 } from '@/services/api/kitchen';
 import type { PrepStation } from '@/types';
 import { HandTargetClip } from '@/features/hand-control/targets';
+
+const statsEnter = FadeIn.duration(sheetTiming.enterMs);
 
 const PERIODS: { value: KitchenStatsPeriod; label: string }[] = [
   { value: 'today', label: 'Сегодня' },
@@ -226,7 +230,7 @@ function StatsSurface({ inline, visible, onClose, children }: {
   inline: boolean; visible: boolean; onClose: () => void; children: React.ReactNode;
 }) {
   return inline
-    ? <View style={styles.screen}>{children}</View>
+    ? <Animated.View entering={statsEnter} style={styles.screen}>{children}</Animated.View>
     : <FullscreenSheet visible={visible} onClose={onClose} style={styles.screen}>{children}</FullscreenSheet>;
 }
 

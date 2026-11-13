@@ -230,7 +230,11 @@ export function SegmentTabs<T extends string>({
 }
 
 /** Тумблер — повторяет PWA Toggle (track 44×24, анимированный бегунок). */
-export function Toggle({ checked, onChange }: { checked: boolean; onChange: (value: boolean) => void }) {
+export function Toggle({ checked, onChange, accessibilityLabel }: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
+  accessibilityLabel?: string;
+}) {
   const progress = React.useRef(new Animated.Value(checked ? 1 : 0)).current;
 
   React.useEffect(() => {
@@ -246,6 +250,7 @@ export function Toggle({ checked, onChange }: { checked: boolean; onChange: (val
   return (
     <FastPressable
       accessibilityRole="switch"
+      accessibilityLabel={accessibilityLabel}
       accessibilityState={{ checked }}
       onPress={() => onChange(!checked)}
       hitSlop={8}

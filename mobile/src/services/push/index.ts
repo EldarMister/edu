@@ -12,6 +12,7 @@ import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { queryClient } from '@/lib/queryClient';
 import { beep } from '@/lib/sound';
+import { waiterNotificationSoundEnabled } from '@/services/waiterVoiceSettings';
 import { displayOrderNumber } from '@/utils/format';
 import { PushRegistrationManager, type PushRegistrationState, type PushStatus } from './registration';
 import { PushTokenAcquisition, type NativePushToken } from './token';
@@ -21,6 +22,7 @@ import { notificationData, notificationDeduper, notificationTarget, type Notific
 export type { PushStatus, NotificationTarget };
 export { notificationDeduper };
 export const ORDER_NOTIFICATION_CHANNEL_ID = 'orders_v3';
+const SILENT_ORDER_CHANNEL_ID = 'orders_silent_v1';
 const NOTIFICATION_SOUND = 'notify.mp3';
 const STORAGE_KEY = 'edu-pos-push-registration-v2';
 const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
@@ -41,6 +43,10 @@ export function ensureAndroidNotificationChannels(): Promise<void> {
         lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
       });
     }
+    await Notifications.setNotificationChannelAsync(SILENT_ORDER_CHANNEL_ID, {
+      name: 'Заказы без звука', importance: Notifications.AndroidImportance.HIGH,
+      sound: null, vibrationPattern: [0, 250, 250, 250], lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
+    });
   })().catch((error) => { channelsReady = null; throw error; });
   return channelsReady;
 }
@@ -138,11 +144,12 @@ Notifications.setNotificationHandler({
       void queryClient.invalidateQueries({ queryKey: ['orders'] });
       void queryClient.invalidateQueries({ queryKey: ['kitchen'] });
       void queryClient.invalidateQueries({ queryKey: ['admin'] });
-      void beep(data.channel === 'kitchen' ? 'newOrder' : 'notify');
+      if (waiterNotificationSoundEnabled()) void beep(data.channel === 'kitchen' ? 'newOrder' : 'notify');
     }
     // In the foreground one toast/sound is shared with realtime. With JS suspended
     // or terminated, the OS presents the server's remote notification itself.
-    return { shouldShowAlert: accepted && AppState.currentState !== 'active', shouldPlaySound: accepted && AppState.currentState !== 'active', shouldSetBadge: false };
+    const backgroundAlert = accepted && AppState.currentState !== 'active';
+    return { shouldShowAlert: backgroundAlert, shouldPlaySound: backgroundAlert && waiterNotificationSoundEnabled(), shouldSetBadge: false };
   },
 });
 
@@ -152,10 +159,11 @@ export async function scheduleRealtimeLocalNotification({ title, body, data = {}
   try {
     await ensureAndroidNotificationChannels();
     if (!(await Notifications.getPermissionsAsync()).granted) return false;
+    const playSound = data.kind === 'sound-test' || waiterNotificationSoundEnabled();
     await Notifications.scheduleNotificationAsync({
-      content: { title, body, sound: NOTIFICATION_SOUND, priority: Notifications.AndroidNotificationPriority.HIGH,
+      content: { title, body, sound: playSound ? NOTIFICATION_SOUND : false, priority: Notifications.AndroidNotificationPriority.HIGH,
         vibrate: [0, 250, 250, 250], data: { ...data, recipientUserId: useAuth.getState().user?.id } },
-      trigger: Platform.OS === 'android' ? { channelId: ORDER_NOTIFICATION_CHANNEL_ID } : null,
+      trigger: Platform.OS === 'android' ? { channelId: playSound ? ORDER_NOTIFICATION_CHANNEL_ID : SILENT_ORDER_CHANNEL_ID } : null,
     });
     return true;
   } catch { return false; }

@@ -9,6 +9,7 @@ import { OrderBadge } from '@/components/StatusBadge';
 import { AppHeader } from '@/components/AppHeader';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { PwaIcon } from '@/components/PwaIcon';
+import { DateField } from '@/components/DateField';
 import { colors, fontSize, radius, spacing } from '@/theme';
 
 /** Кастомная PNG-иконка отмены действия (красный круг) — как на PWA. */
@@ -19,7 +20,10 @@ import {
   useReadyItems,
   useRejectItems,
   type KitchenTab,
+  type KitchenHistoryRange,
 } from '@/services/api/kitchen';
+import { usePrepStations } from '@/services/api/prepStations';
+import { dateToIso } from '@/utils/calendarDate';
 import { useSocketEvent } from '@/services/socket';
 import { SERVER_EVENTS } from '@/services/socket/events';
 import { useAuth } from '@/store/auth';
@@ -39,6 +43,7 @@ import {
   orderItemDisplayName,
 } from '@/utils/format';
 import { apiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { StopListSheet } from './StopListSheet';
 import { KitchenVoiceSettingsSheet } from './KitchenVoiceSettingsSheet';
 import { KitchenStatsSheet } from './KitchenStatsSheet';
@@ -65,6 +70,7 @@ const QR_ORDER_COMMENT = 'Заказ из QR-меню';
 
 type PendingAction = {
   orderId: string;
+  station: PrepStation;
   type: 'reject' | 'ready';
   itemIds: string[];
   setComponentIds: string[];
@@ -88,6 +94,8 @@ function pluralPositions(n: number): string {
 }
 
 function kitchenCardBadgeStatus(order: Order, tab: KitchenTab): OrderStatus {
+  if (tab === 'cancelled') return 'cancelled';
+  if (tab === 'rejected') return 'rejected';
   if (tab !== 'ready' || order.status === 'paid') return order.status;
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   if (activeItems.length === 0) return order.status;
@@ -116,14 +124,21 @@ function kitchenOrderComment(comment: string | null, qrOrder: boolean) {
   return value;
 }
 
-export function KitchenBoardScreen({ station }: { station: PrepStation }) {
+export function KitchenBoardScreen({ defaultStation }: { defaultStation: 'kitchen' | 'bar' }) {
+  const t = useT();
   const [tab, setTab] = useState<KitchenTab>('new');
+  const { stations } = usePrepStations();
+  const station = useAuth((state) => state.user?.prepStation) ?? defaultStation;
+  const stationName = stations.find((entry) => entry.id === station)?.name ??
+    (station === 'bar' ? 'Бар' : station === 'kitchen' ? 'Кухня' : 'Станция приготовления');
+  const [history, setHistory] = useState<KitchenHistoryRange | undefined>();
+  const historyTab = tab === 'ready' || tab === 'cancelled' || tab === 'rejected';
   const [now, setNow] = useState(() => Date.now());
   const [stopListOpen, setStopListOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
-  const orders = useKitchenOrders(tab, station);
+  const orders = useKitchenOrders(tab, station, historyTab ? history : undefined);
   const accept = useAccept(station);
   const readyItems = useReadyItems(station);
   const rejectItems = useRejectItems(station);
@@ -198,12 +213,14 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         p.type === 'reject'
           ? rejectItems.mutateAsync({
               orderId: p.orderId,
+              station: p.station,
               itemIds: p.itemIds,
               setComponentIds: p.setComponentIds,
               partial: p.partial,
             })
           : readyItems.mutateAsync({
               orderId: p.orderId,
+              station: p.station,
               itemIds: p.itemIds,
               setComponentIds: p.setComponentIds,
               partial: p.partial,
@@ -235,13 +252,14 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
       // Новое действие, пока предыдущее не подтверждено — фиксируем предыдущее сразу.
       setPending((current) => {
         if (current) commitRef.current(current);
-        return { orderId, type, ...ids, deadline: Date.now() + UNDO_SECONDS * 1000 };
+        return { orderId, station, type, ...ids, deadline: Date.now() + UNDO_SECONDS * 1000 };
       });
     },
-    [],
+    [station],
   );
 
   const list = orders.data ?? [];
+  const stationPending = pending?.station === station ? pending : null;
   const undoSecondsLeft = pending ? Math.max(0, Math.ceil((pending.deadline - now) / 1000)) : 0;
   const pendingCount = pending ? pending.itemIds.length + pending.setComponentIds.length : 0;
 
@@ -251,6 +269,7 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
   const colGap = spacing.lg;
   const contentPadding = winWidth >= 600 ? 20 : spacing.lg;
   const { columns } = gridLayout(winWidth, contentPadding, colGap, 264, 4);
+  const today = dateToIso(new Date(now));
 
   return (
     <KitchenHandControlProvider activeLayer={voiceOpen ? 'voice' : stopListOpen ? 'stop-list' : 'board'}>
@@ -271,6 +290,10 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
           </>
         }
       />
+
+      <View style={{ paddingHorizontal: contentPadding, paddingTop: spacing.sm }}>
+        <Text style={styles.toolbarBtnText} translate>{stationName}</Text>
+      </View>
 
       <View style={[styles.tabsBar, stackedToolbar && styles.tabsBarStacked]}>
         <View style={stackedToolbar ? styles.tabsFullWidth : styles.tabsFlexible}>
@@ -301,10 +324,32 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
         </ToolbarActions>
       </View>
 
+      {historyTab && !statsOpen ? (
+        <View style={{ flexDirection: 'row', gap: spacing.sm, paddingHorizontal: contentPadding, paddingBottom: spacing.sm }}>
+          <DateField label="Дата с" value={history?.from ?? today} maximumDate={new Date()}
+            containerStyle={{ flex: 1 }} onChangeText={(from) => {
+              const nextFrom = from || today;
+              const currentTo = history?.to ?? today;
+              setHistory({ from: nextFrom, to: nextFrom > currentTo ? nextFrom : currentTo });
+            }} />
+          <DateField label="Дата по" value={history?.to ?? today} maximumDate={new Date()}
+            containerStyle={{ flex: 1 }} onChangeText={(to) => {
+              const nextTo = to || today;
+              const currentFrom = history?.from ?? today;
+              setHistory({ from: nextTo < currentFrom ? nextTo : currentFrom, to: nextTo });
+            }} />
+        </View>
+      ) : null}
+
       {statsOpen ? (
         <KitchenStatsSheet inline visible station={station} onClose={() => setStatsOpen(false)} />
       ) : orders.isLoading ? (
         <Loading />
+      ) : orders.isError && !orders.data ? (
+        <View style={{ paddingHorizontal: contentPadding, gap: spacing.sm }}>
+          <Text accessibilityRole="alert" style={{ color: colors.danger }}>{apiError(orders.error)}</Text>
+          <Button title="Повторить" variant="secondary" onPress={() => void orders.refetch()} />
+        </View>
       ) : list.length === 0 ? (
         <EmptyState
           text={
@@ -331,16 +376,19 @@ export function KitchenBoardScreen({ station }: { station: PrepStation }) {
           <HandTargetClip viewRef={scrollRef}><BalancedKitchenOrders columns={columns} gap={colGap} initialWidth={winWidth - contentPadding * 2}>
             {list.map((o) => (
               <KitchenCard
-                key={o.id}
+                key={`${station}:${tab}:${o.id}`}
                 order={o}
                 tab={tab}
                 now={now}
                 submitting={accept.isPending}
-                pendingItemIds={pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []}
-                pendingType={pending?.orderId === o.id ? pending.type : null}
-                pendingPartial={pending?.orderId === o.id ? pending.partial ?? [] : []}
+                pendingItemIds={stationPending?.orderId === o.id ? [...stationPending.itemIds, ...stationPending.setComponentIds] : []}
+                pendingType={stationPending?.orderId === o.id ? stationPending.type : null}
+                pendingPartial={stationPending?.orderId === o.id ? stationPending.partial ?? [] : []}
                 onAccept={() => accept.mutate(o.id, {
-                  onSuccess: () => { if (tab === 'new' && list.length === 1) setTab('in_work'); },
+                  onSuccess: () => {
+                    const activeStation = useAuth.getState().user?.prepStation ?? defaultStation;
+                    if (activeStation === station && tab === 'new' && list.length === 1) setTab('in_work');
+                  },
                   onError: (err: unknown) => push({ message: apiError(err), at: new Date().toISOString() }),
                 })}
                 onBatch={(type, ids) => onBatch(o.id, type, ids)}
@@ -473,9 +521,11 @@ function KitchenCard({
     ids: { itemIds: string[]; setComponentIds: string[]; partial?: { itemId: string; quantity: number }[] },
   ) => void;
 }) {
+  const t = useT();
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
   const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
   const badgeStatus = kitchenCardBadgeStatus(order, tab);
+  const historyAt = order.stationHistoryAt ?? order.createdAt;
   const qrOrder = isQrOrder(order);
   const visibleOrderComment = kitchenOrderComment(order.comment, qrOrder);
   // Частичный отказ/ожидание решения — только если отказ есть среди позиций ЭТОЙ станции.
@@ -690,6 +740,11 @@ function KitchenCard({
     );
   };
 
+  const historyReason = (status: OrderItemStatus, reason?: string | null) =>
+    reason && (status === 'cancelled' || status === 'rejected') ? (
+      <Text style={styles.itemReason}>{t('Причина')}: {reason}</Text>
+    ) : null;
+
   // Точечная метка «с собой» — пилюля с иконкой пакета (паритет с PWA), только если
   // весь заказ не навынос. Рисуется как View рядом с текстом, а не inline в Text.
   const takeawayPill = (it: Order['items'][number]) =>
@@ -720,7 +775,7 @@ function KitchenCard({
           <Text style={styles.time}>
             {tab === 'new' || tab === 'in_work'
               ? timeHM(order.createdAt)
-              : `${dateDM(order.createdAt)} ${timeHM(order.createdAt)}`}
+              : `${dateDM(historyAt)} ${timeHM(historyAt)}`}
           </Text>
           {tab === 'new' || tab === 'in_work' ? (
             <Text style={[styles.elapsed, slow && { color: colors.danger }]}>{elapsed(order.createdAt, now)}</Text>
@@ -771,6 +826,7 @@ function KitchenCard({
             return (
               <View key={it.id}>
                 {renderLine(it.id, it.status, itemHeader(it), false, takeawayPill(it))}
+                {historyReason(it.status, it.rejectReason)}
                 {showStepper ? (
                   <View style={styles.stepperRow}>
                     <Text style={styles.stepperLabel} translate>Количество:</Text>
@@ -825,6 +881,7 @@ function KitchenCard({
                   </View>
                 </FastPressable>
               </View>
+              {historyReason(it.status, it.rejectReason)}
               {!isCollapsed ? (
                 <View style={styles.setComponents}>
                   {setParts.map((sc) =>
@@ -834,7 +891,10 @@ function KitchenCard({
                         <Text style={styles.removedNote} translate>— убрали</Text>
                       </View>
                     ) : (
-                      renderLine(sc.id, sc.status, componentLabel(sc), true)
+                      <View key={sc.id}>
+                        {renderLine(sc.id, sc.status, componentLabel(sc), true)}
+                        {historyReason(sc.status, sc.rejectReason)}
+                      </View>
                     ),
                   )}
                 </View>
@@ -1056,6 +1116,7 @@ const styles = StyleSheet.create({
   freshBadgeText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.primary },
   itemFlagDone: { fontSize: fontSize.sm, fontWeight: '700', color: colors.green600 },
   itemFlagRej: { fontSize: fontSize.sm, fontWeight: '700', color: colors.danger },
+  itemReason: { fontSize: fontSize.sm, color: colors.textSecondary, marginBottom: spacing.xs },
   setHeadRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   setHeadPress: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
   collapseBtn: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },

@@ -228,4 +228,9 @@ test('notification taps are role/account scoped and accept only internal destina
   assert.equal(notificationTarget({ url: '//example.com' }, 'waiter-a', 'WAITER'), null);
   assert.equal(notificationTarget({ kind: 'sound-test' }, 'waiter-a', 'WAITER'), null);
   assert.deepEqual(notificationTarget({ url: '/admin/receipts' }, 'admin-a', 'ADMIN'), { kind: 'admin-receipts', orderId: undefined });
+  const station = 'd551792e-c4db-46ba-932c-ea5f1e9fc074';
+  assert.deepEqual(notificationTarget({ url: `/kitchen?station=${station}` }, 'cook-a', 'KITCHEN'), { kind: 'kitchen', station });
+  assert.deepEqual(notificationTarget({ url: `/bar?station=${station}` }, 'bar-a', 'BAR'), { kind: 'bar', station });
+  assert.deepEqual(notificationTarget({ url: '/kitchen?station=bar' }, 'cook-a', 'KITCHEN'), { kind: 'kitchen' });
+  assert.equal(notificationTarget({ url: `/bar?station=${station}` }, 'cook-a', 'KITCHEN'), null);
 });

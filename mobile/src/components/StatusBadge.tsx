@@ -4,6 +4,7 @@ import { Text } from '@/components/typography';
 import type { Order, OrderStatus, TableStatus } from '@/types';
 import { ORDER_STATUS, TABLE_STATUS, orderStationStatuses } from '@/theme/status';
 import { fontSize, radius, spacing } from '@/theme';
+import { usePrepStations } from '@/services/api/prepStations';
 
 /** Бейдж статуса заказа — зеркало OrderBadge из PWA. */
 export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?: 'sm' | 'md' }) {
@@ -33,7 +34,8 @@ export function OrderStatusBadges({
   size?: 'sm' | 'md';
   align?: 'start' | 'end';
 }) {
-  const chips = orderStationStatuses(order);
+  const { stations } = usePrepStations();
+  const chips = orderStationStatuses(order, stations);
   if (chips.length === 0) return <OrderBadge status={order.status} size={size} />;
 
   return (

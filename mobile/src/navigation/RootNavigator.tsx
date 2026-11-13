@@ -75,8 +75,10 @@ export function RootNavigator() {
         ? { screen: 'OrderDetail', params: { orderId: target.orderId }, initial: false }
         : { screen: 'OrdersList' },
     });
-    else if (target.kind === 'kitchen') navigationRef.navigate('Kitchen', { screen: 'Board' });
-    else if (target.kind === 'bar') navigationRef.navigate('Bar', { screen: 'Board' });
+    else if (target.kind === 'kitchen' || target.kind === 'bar') {
+      if (target.kind === 'kitchen') navigationRef.navigate('Kitchen', { screen: 'Board' });
+      else navigationRef.navigate('Bar', { screen: 'Board' });
+    }
     else navigationRef.navigate('Admin', { section: target.kind === 'admin-receipts' ? 'receipts' : 'orders', orderId: target.orderId });
   }, []);
   useNotificationNavigation({ ready: hydrated && !!user && !!token && navigationReady, userId: user?.id, role: user?.role, onNavigate: onNotification });

@@ -56,31 +56,29 @@ test('reopen and unmount invalidate old animation completions', () => {
   const next = guard.close(); guard.invalidate();
   assert.equal(guard.finish(next), false);
 });
-test('temporary panels wait for the previous exit before opening, then return through history', () => {
+test('temporary panels become active as soon as they are registered, then return through history', () => {
   const history = new PanelHistory();
   history.add(entry('cart')); history.add(entry('picker', 'cart'));
-  assert.equal(history.getSnapshot().active, 'cart');
-  assert.equal(history.getSnapshot().desired, 'picker');
-  history.yield('cart'); assert.equal(history.getSnapshot().active, 'picker');
+  assert.equal(history.getSnapshot().active, 'picker');
   history.remove('picker'); assert.equal(history.getSnapshot().active, 'cart');
 });
 test('nested layout effects registering a child before its parent retain correct order', () => {
   const history = new PanelHistory();
   history.add(entry('variant', 'replacement')); history.add(entry('replacement', 'set')); history.add(entry('set'));
-  assert.equal(history.getSnapshot().desired, 'variant');
-  history.remove('variant'); assert.equal(history.getSnapshot().desired, 'replacement');
-  history.remove('replacement'); assert.equal(history.getSnapshot().desired, 'set');
+  assert.equal(history.getSnapshot().active, 'variant');
+  history.remove('variant'); assert.equal(history.getSnapshot().active, 'replacement');
+  history.remove('replacement'); assert.equal(history.getSnapshot().active, 'set');
 });
-test('cancelling a queued panel cannot steal the active panel from its replacement', () => {
+test('removing a suspended panel keeps the replacement active', () => {
   const history = new PanelHistory(); history.add(entry('a')); history.add(entry('b')); history.remove('b');
-  history.yield('b'); assert.equal(history.getSnapshot().active, 'a');
-  history.add(entry('c')); history.yield('a'); history.yield('a');
+  assert.equal(history.getSnapshot().active, 'a');
+  history.add(entry('c')); history.remove('a');
   assert.equal(history.getSnapshot().active, 'c');
 });
 test('persistent map panel remains registered below temporary details and does not isolate the map', () => {
   const history = new PanelHistory(); history.add(entry('map', undefined, true, true));
   assert.equal(history.getSnapshot().temporary, 0);
-  history.add(entry('details', 'map')); history.yield('map');
+  history.add(entry('details', 'map'));
   assert.equal(history.getSnapshot().temporary, 1);
   history.remove('details'); assert.equal(history.getSnapshot().active, 'map');
   assert.equal(history.getSnapshot().temporary, 0);

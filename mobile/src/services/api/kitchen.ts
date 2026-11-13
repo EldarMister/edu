@@ -4,11 +4,14 @@ import type { Order, PrepStation } from '@/types';
 
 export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected' | 'cancelled';
 
-export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitchen') {
+export type KitchenHistoryRange = { from: string; to: string };
+
+export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitchen', range?: KitchenHistoryRange) {
+  const historyQuery = range ? `&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}` : '';
   return useQuery({
-    queryKey: ['kitchen', station, tab],
+    queryKey: ['kitchen', station, tab, range],
     queryFn: async () =>
-      (await api.get<Order[]>(`/kitchen/orders?tab=${tab}&station=${station}`)).data,
+      (await api.get<Order[]>(`/kitchen/orders?tab=${tab}&station=${encodeURIComponent(station)}${historyQuery}`)).data,
     refetchInterval: 15_000, // подстраховка, основное обновление — через сокет
   });
 }
@@ -51,7 +54,7 @@ export function useKitchenStats(
   enabled = true,
 ) {
   // Строим query вручную (URLSearchParams в RN ненадёжен) — как остальной kitchen API.
-  const parts = [`period=${params.period}`, `station=${station}`];
+  const parts = [`period=${params.period}`, `station=${encodeURIComponent(station)}`];
   if (params.from) parts.push(`from=${params.from}`);
   if (params.to) parts.push(`to=${params.to}`);
   const query = parts.join('&');
@@ -77,16 +80,16 @@ export function useStopList(enabled: boolean, station: PrepStation = 'kitchen') 
   return useQuery({
     queryKey: ['kitchen', 'stop-list', station],
     queryFn: async () =>
-      (await api.get<StopListCategory[]>(`/kitchen/stop-list?station=${station}`)).data,
+      (await api.get<StopListCategory[]>(`/kitchen/stop-list?station=${encodeURIComponent(station)}`)).data,
     enabled,
   });
 }
 
-export function useSaveStopList() {
+export function useSaveStopList(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (items: { dishId: string; isAvailable: boolean }[]) =>
-      (await api.patch<StopListCategory[]>('/kitchen/stop-list', { items })).data,
+      (await api.patch<StopListCategory[]>(`/kitchen/stop-list?station=${encodeURIComponent(station)}`, { items })).data,
     retry: networkRetry,
     onSuccess: () => {
       // Стоп-лист общий по составу, но фильтруется по станции — обновляем оба экрана.
@@ -105,7 +108,7 @@ export function useAccept(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (orderId: string) =>
-      (await api.post<Order>(`/kitchen/orders/${orderId}/accept?station=${station}`)).data,
+      (await api.post<Order>(`/kitchen/orders/${orderId}/accept?station=${encodeURIComponent(station)}`)).data,
     retry: networkRetry,
     onSettled: () => invalidateKitchen(qc),
   });
@@ -165,9 +168,10 @@ export function useReadyItems(station: PrepStation = 'kitchen') {
       orderId: string;
       itemIds: string[];
       setComponentIds: string[];
+      station?: PrepStation;
       partial?: { itemId: string; quantity: number }[];
     }) =>
-      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/ready-batch?station=${station}`, {
+      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/ready-batch?station=${encodeURIComponent(p.station ?? station)}`, {
         itemIds: p.itemIds,
         setComponentIds: p.setComponentIds,
         partial: p.partial,
@@ -185,12 +189,13 @@ export function useRejectItems(station: PrepStation = 'kitchen') {
       orderId: string;
       itemIds: string[];
       setComponentIds: string[];
+      station?: PrepStation;
       /** Частичный отказ по количеству для обычных позиций. */
       partial?: { itemId: string; quantity: number }[];
       reason?: string;
       comment?: string;
     }) =>
-      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/reject-batch?station=${station}`, {
+      (await api.post<Order>(`/kitchen/orders/${p.orderId}/items/reject-batch?station=${encodeURIComponent(p.station ?? station)}`, {
         itemIds: p.itemIds,
         setComponentIds: p.setComponentIds,
         partial: p.partial,

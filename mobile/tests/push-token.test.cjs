@@ -218,6 +218,7 @@ test('root lifecycle uses fresh Android bridge requests and repeated native emis
     '@/store/auth': { useAuth: { getState: () => authState, subscribe: fn => { authListener = fn; return noop; } } },
     '@/lib/api': { api: { get: async () => {} } },
     '@/store/notifications': {}, '@/lib/queryClient': {}, '@/lib/sound': {}, '@/utils/format': {},
+    '@/services/waiterVoiceSettings': { waiterNotificationSoundEnabled: () => true },
     './registration': registrationModule, './token': tokenModule, './request': requestModule, './events': { notificationDeduper: { clear: noop } },
   }, { ...clock, console: { warn: (label, diagnostic) => { diagnostics.push({ ...diagnostic }); } } });
   push.usePushNotificationLifecycle();

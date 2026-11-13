@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, networkRetry } from '@/lib/api';
 import type {
   Category,
@@ -33,6 +33,22 @@ export function useWaiterCabinet(period: 'day' | 'week' | 'month' = 'week', enab
   return useQuery({
     queryKey: ['waiter', 'cabinet', period],
     queryFn: async () => (await api.get<WaiterCabinetData>(`/orders/cabinet?period=${period}`)).data,
+    enabled,
+  });
+}
+
+export function useWaiterOrderHistory(enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: ['orders', 'waiter-history'],
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam, signal }) => (await api.get<{
+      items: CabinetRecentOrder[];
+      nextCursor: string | null;
+    }>('/orders/history', {
+      params: pageParam ? { cursor: pageParam } : undefined,
+      signal,
+    })).data,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled,
   });
 }

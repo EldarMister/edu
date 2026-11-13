@@ -7,6 +7,7 @@ import { beep } from '@/lib/sound';
 import { useNotifications } from '@/store/notifications';
 import { useAuth } from '@/store/auth';
 import { waiterVoice } from '@/services/waiterVoice';
+import { waiterNotificationSoundEnabled } from '@/services/waiterVoiceSettings';
 import { waiterVoiceKey, waiterVoiceText, type WaiterVoicedOrder } from '@/services/realtimeVoice';
 import { isPttBackgroundRuntimeActive } from '@/features/ptt/backgroundFlag';
 import { notificationDeduper, isRemotePushRegistered } from '@/services/push';
@@ -72,6 +73,7 @@ export function useRealtimeSync() {
     };
     const invalidateSettings = () => {
       qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['prep-stations'] });
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['kitchen'] });
       qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
@@ -88,6 +90,7 @@ export function useRealtimeSync() {
       void qc.refetchQueries({ queryKey: ['dishes'], type: 'active' });
       void qc.refetchQueries({ queryKey: ['admin'], type: 'active' });
       void qc.refetchQueries({ queryKey: ['settings'], type: 'active' });
+      void qc.refetchQueries({ queryKey: ['prep-stations'], type: 'active' });
     };
     const onNotificationNew = (n: RealtimeNotification) => {
       if (AppState.currentState !== 'active' && isRemotePushRegistered()) return;
@@ -96,7 +99,7 @@ export function useRealtimeSync() {
       const orderNumber = n.orderNumber ? displayOrderNumber(n.orderNumber) : undefined;
       const message = n.orderNumber && orderNumber ? n.message.replace(n.orderNumber, orderNumber) : n.message;
       push({ message, type: n.type ?? 'info', orderId: n.orderId, orderNumber, at: n.at });
-      void beep('notify');
+      if (waiterNotificationSoundEnabled()) void beep('notify');
     };
     const onReceiptApproved = (req: ReceiptPrintRequest) => {
       invalidateOrders();
@@ -123,7 +126,7 @@ export function useRealtimeSync() {
         at: new Date().toISOString(),
       });
       st.dismiss();
-      if (shouldNotify) void beep('notify');
+      if (shouldNotify && waiterNotificationSoundEnabled()) void beep('notify');
     };
     const onReceiptRejected = (req: ReceiptPrintRequest) => {
       invalidateOrders();
@@ -142,7 +145,7 @@ export function useRealtimeSync() {
         });
         st.dismiss();
       }
-      if (shouldNotify) void beep('notify');
+      if (shouldNotify && waiterNotificationSoundEnabled()) void beep('notify');
     };
     const speakWaiterOrder = (order: WaiterVoicedOrder) => {
       if (!order.waiter?.id || order.waiter.id !== userId) return;

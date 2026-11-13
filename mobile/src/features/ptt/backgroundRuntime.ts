@@ -85,9 +85,15 @@ function shouldHandleBackgroundRealtime() {
 
 function currentStation(): PrepStation | null {
   const role = useAuth.getState().user?.role;
-  if (role === 'KITCHEN') return 'kitchen';
-  if (role === 'BAR') return 'bar';
+  if (role === 'KITCHEN' || role === 'BAR') {
+    return useAuth.getState().user?.prepStation ?? (role === 'KITCHEN' ? 'kitchen' : 'bar');
+  }
   return null;
+}
+
+function stationNotificationUrl(station: PrepStation) {
+  const path = useAuth.getState().user?.role === 'BAR' ? 'bar' : 'kitchen';
+  return `/${path}?station=${encodeURIComponent(station)}`;
 }
 
 function notificationBody(order: Pick<StationVoicedOrder, 'orderNumber' | 'table'>) {
@@ -130,7 +136,7 @@ function onBackgroundKitchenNewOrder(order: StationVoicedOrder) {
     void scheduleRealtimeLocalNotification({
       title: 'Новый заказ',
       body: notificationBody(order),
-      data: { kind: 'kitchen-new-order', orderId: order.id },
+      data: { kind: 'kitchen-new-order', orderId: order.id, url: stationNotificationUrl(station) },
     });
   }
   kitchenVoice.enqueue(text);
@@ -146,7 +152,7 @@ function onBackgroundKitchenStatusChanged(order: StationVoicedOrder) {
     void scheduleRealtimeLocalNotification({
       title: 'Обновление заказа',
       body: notificationBody(order),
-      data: { kind: 'kitchen-order-updated', orderId: order.id },
+      data: { kind: 'kitchen-order-updated', orderId: order.id, url: stationNotificationUrl(station) },
     });
   }
   kitchenVoice.enqueue(text);

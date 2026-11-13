@@ -1,4 +1,4 @@
-import type { Order, OrderItem, OrderItemStatus, OrderStatus, TableStatus } from '@/types';
+import type { Order, OrderItem, OrderItemStatus, OrderStatus, PrepStation, PrepStationEntry, TableStatus } from '@/types';
 import { colors } from './index';
 
 export interface StatusMeta {
@@ -39,10 +39,6 @@ export const ORDER_STATUS: Record<OrderStatus, StatusMeta> = {
   cancelled: { label: 'Отменён', bg: colors.slate100, fg: colors.textMuted, dot: colors.textLight },
 };
 
-type Station = 'kitchen' | 'bar';
-
-const STATION_LABEL: Record<Station, string> = { kitchen: 'Кухня', bar: 'Бар' };
-
 const STATION_ITEM_STATUS: Partial<Record<OrderItemStatus, StatusMeta>> = {
   new: { label: 'Отправлен', bg: colors.warningSoft, fg: colors.warning, dot: colors.warning },
   accepted: { label: 'Принят', bg: colors.orange100, fg: colors.orange600, dot: colors.orange500 },
@@ -64,27 +60,35 @@ function aggregateStationStatus(items: OrderItem[]): OrderItemStatus | null {
 }
 
 export interface StationStatusChip {
-  station: Station;
+  station: PrepStation;
   stationLabel: string;
   label: string;
   bg: string;
   fg: string;
 }
 
-export function orderStationStatuses(order: Pick<Order, 'items' | 'status'>): StationStatusChip[] {
+export function orderStationStatuses(order: Pick<Order, 'items' | 'status'>, stations: PrepStationEntry[]): StationStatusChip[] {
   if (['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status)) return [];
 
-  const kitchen = aggregateStationStatus(order.items.filter((item) => item.prepStation === 'kitchen'));
-  const bar = aggregateStationStatus(order.items.filter((item) => item.prepStation === 'bar'));
-  if (!kitchen || !bar || kitchen === bar) return [];
-
-  const chips: StationStatusChip[] = [];
-  for (const [station, status] of [['kitchen', kitchen], ['bar', bar]] as [Station, OrderItemStatus][]) {
-    const meta = STATION_ITEM_STATUS[status];
-    if (!meta) return [];
-    chips.push({ station, stationLabel: STATION_LABEL[station], label: meta.label, bg: meta.bg, fg: meta.fg });
+  const itemsByStation = new Map<PrepStation, OrderItem[]>();
+  for (const item of order.items) {
+    if (item.prepStation === 'none') continue;
+    const items = itemsByStation.get(item.prepStation);
+    if (items) items.push(item);
+    else itemsByStation.set(item.prepStation, [item]);
   }
-  return chips;
+  if (itemsByStation.size < 2) return [];
+  const chips: StationStatusChip[] = [];
+  const statuses = new Set<OrderItemStatus>();
+  for (const [station, items] of itemsByStation) {
+    const status = aggregateStationStatus(items);
+    if (!status) continue;
+    const meta = STATION_ITEM_STATUS[status];
+    if (!meta) continue;
+    statuses.add(status);
+    chips.push({ station, stationLabel: stations.find((entry) => entry.id === station)?.name ?? 'Станция', label: meta.label, bg: meta.bg, fg: meta.fg });
+  }
+  return statuses.size > 1 ? chips : [];
 }
 
 export const REJECT_REASONS = [

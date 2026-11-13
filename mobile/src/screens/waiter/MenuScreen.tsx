@@ -210,7 +210,8 @@ export function MenuScreen() {
     const { tableId, tableNumber, activeOrderId, editingOrderId, lines: cartLines, comment: orderComment, commentOpen: orderCommentOpen } = useCart.getState();
     if (!tableId) return;
     const selectedOrder = orders.data?.find((order) => order.id === activeOrderId);
-    const cartOnlyNone = !cartStations(cartLines, categories.data ?? []).hasPrep;
+    const destinations = cartStations(cartLines, categories.data ?? []);
+    const cartOnlyNone = !destinations.hasPrep;
     if (createOrder.isPending || addItems.isPending || editOrder.isPending || replaceRejected.isPending) return;
     if (!connected) {
       push({ message: 'Создание заказа недоступно без интернета.', type: 'error', at: new Date().toISOString() });
@@ -252,7 +253,10 @@ export function MenuScreen() {
     void request.then((updated) => {
       if (!stillOwns()) return;
       push({
-        message: editingOrderId ? 'Изменения сохранены' : cartOnlyNone ? (activeOrderId ? 'Позиции добавлены в заказ' : 'Заказ создан') : 'Заказ отправлен на кухню',
+        message: editingOrderId ? 'Изменения сохранены'
+          : cartOnlyNone ? (activeOrderId ? 'Позиции добавлены в заказ' : 'Заказ создан')
+          : destinations.multipleOrCustom ? 'Заказ отправлен на приготовление'
+          : destinations.kitchen ? 'Заказ отправлен на кухню' : 'Заказ отправлен в бар',
         type: 'success',
         at: new Date().toISOString(),
       });
@@ -266,6 +270,7 @@ export function MenuScreen() {
   const cartOnlyNone = cartLines.length > 0 && !stationInfo.hasPrep;
   const cartSendLabel = cartOnlyNone
     ? 'Добавить в заказ'
+    : stationInfo.multipleOrCustom ? 'Отправить на приготовление'
     : stationInfo.kitchen
       ? 'Отправить на кухню'
       : 'Отправить в бар';

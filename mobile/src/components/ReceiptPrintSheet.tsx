@@ -9,6 +9,7 @@ import { colors, fontSize, radius, spacing } from '@/theme';
 import { useReceiptPrint } from '@/store/receiptPrint';
 import { displayOrderNumber, money, orderItemDisplayName } from '@/utils/format';
 import { beep } from '@/lib/sound';
+import { waiterNotificationSoundEnabled } from '@/services/waiterVoiceSettings';
 
 export function ReceiptPrintSheet() {
   const { request, receipt, status, sheetOpen, closeSheet, dismiss } = useReceiptPrint();
@@ -29,7 +30,7 @@ export function ReceiptPrintSheet() {
     if (!open || status !== 'printed' || !request) return;
     if (lastAcceptedSoundRequestId.current === request.id) return;
     lastAcceptedSoundRequestId.current = request.id;
-    void beep('accept');
+    if (waiterNotificationSoundEnabled()) void beep('accept');
   }, [open, request, status]);
 
   if (!renderedRequest) return null;

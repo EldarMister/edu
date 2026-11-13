@@ -37,7 +37,7 @@ export function StopListSheet({
   onClose: () => void;
 }) {
   const stopListQ = useStopList(visible, station);
-  const save = useSaveStopList();
+  const save = useSaveStopList(station);
   const push = useNotifications((s) => s.push);
   const { width } = useWindowDimensions();
   const panelWidth = Math.min(420, width);

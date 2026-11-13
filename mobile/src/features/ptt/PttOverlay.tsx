@@ -17,7 +17,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { useBottomPanelHistory } from '@/components/bottom-panel/context';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
-import { colors, fontSize, radius, softShadow, spacing, waiterLayout } from '@/theme';
+import { colors, fontSize, softShadow, spacing, waiterLayout } from '@/theme';
 import { getSocket, useConnectionStatus } from '@/services/socket';
 import { useAuth } from '@/store/auth';
 import {
@@ -40,6 +40,10 @@ import {
 } from './types';
 
 const CIRCLE_SIZE = 122;
+const RADIO_BUTTON_SIZE = 56;
+const DOCKED_WIDTH = 24;
+const RADIO_IDLE_MS = 5000;
+const RADIO_EDGE_PADDING = spacing.lg;
 
 /** Кастомная PNG-иконка рации (белая) — как на PWA (/рация.png). */
 const RADIO_ICON = require('../../../assets/radio-icon.png');
@@ -112,11 +116,9 @@ function RadioChannelTabs({ channel, onChange }: {
 
 function RadioMetaRow({ onlineCount }: { onlineCount: number }) {
   return (
-    <View style={styles.metaRow}>
-      <View style={styles.metaOnline}>
-        <View style={styles.greenDot} />
-        <Text style={styles.metaOnlineText} translate>{onlineCount} онлайн</Text>
-      </View>
+    <View style={styles.metaOnline}>
+      <View style={styles.greenDot} />
+      <Text style={styles.metaOnlineText} translate>{onlineCount} онлайн</Text>
     </View>
   );
 }
@@ -228,6 +230,58 @@ function PttRipple({
   );
 }
 
+function FloatingRadioButton({ bottom, rightInset, startDocked, color, rippleColor, onOpen }: {
+  bottom: number;
+  rightInset: number;
+  startDocked: boolean;
+  color: string;
+  rippleColor?: string;
+  onOpen: () => void;
+}) {
+  const [docked, setDocked] = React.useState(startDocked);
+  const progress = useSharedValue(startDocked ? 1 : 0);
+  const restingInset = Math.max(0, spacing.sm - rightInset);
+  const dockDistance = RADIO_BUTTON_SIZE - DOCKED_WIDTH + restingInset;
+
+  React.useEffect(() => {
+    progress.value = withTiming(docked ? 1 : 0, { duration: 220 });
+    if (docked) return;
+    const timer = setTimeout(() => setDocked(true), RADIO_IDLE_MS);
+    return () => clearTimeout(timer);
+  }, [docked, progress]);
+
+  const position = useAnimatedStyle(() => ({
+    transform: [{ translateX: progress.value * dockDistance }],
+  }));
+  const icon = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: -(RADIO_BUTTON_SIZE - DOCKED_WIDTH) * progress.value / 2 },
+      { scale: 1 - 0.2 * progress.value },
+    ],
+  }));
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={[styles.floatButtonViewport, { bottom: bottom - RADIO_EDGE_PADDING, right: rightInset }]}
+    >
+      <Animated.View pointerEvents="box-none" style={[styles.floatButtonWrap, { right: restingInset }, position]}>
+        {!docked && rippleColor ? <PttRipple mode="soft" size={74} color={rippleColor} borderWidth={1} /> : null}
+        <FastPressable
+          accessibilityRole="button"
+          accessibilityLabel="Рация"
+          accessibilityState={{ expanded: !docked }}
+          pressRetentionOffset={32}
+          onPress={docked ? () => setDocked(false) : onOpen}
+          style={[styles.floatButton, { backgroundColor: color }]}
+        >
+          <Animated.Image source={RADIO_ICON} style={[styles.floatButtonIcon, icon]} resizeMode="contain" />
+        </FastPressable>
+      </Animated.View>
+    </View>
+  );
+}
+
 function RadioStatusText({
   state,
   title,
@@ -267,6 +321,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   // Прячем на «Меню», подробном заказе и в личном кабинете.
   const cabinetOpen = useRadioVisibility((s) => s.cabinetOpen);
   const shiftGateOpen = useRadioVisibility((s) => s.shiftGateOpen);
+  const adminTablesOpen = useRadioVisibility((s) => s.adminTablesOpen);
   const overlayOpen = useRadioVisibility((s) => s.blockingOverlays > 0);
   const { temporary } = useBottomPanelHistory();
   const waiterNav = React.useMemo(() => isWaiter ? readWaiterNav(navigationState) : null, [isWaiter, navigationState]);
@@ -423,21 +478,15 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   return (
     <View pointerEvents="box-none" style={styles.overlayHost} collapsable={false}>
       {screenAllowsRadio && !open && temporary === 0 && (
-        <View pointerEvents="box-none" style={[styles.floatButtonWrap, { bottom: floatingBottom, right: Math.max(insets.right, spacing.sm) }]}>
-          {outerSpeaking ? (
-            <PttRipple mode="soft" size={74} color={outerView.ring} borderWidth={1} />
-          ) : null}
-          <FastPressable
-            accessibilityRole="button"
-            accessibilityLabel="Рация"
-            hitSlop={12}
-            pressRetentionOffset={32}
-            onPress={() => setOpen(true)}
-            style={[styles.floatButton, { backgroundColor: outerView.circle }]}
-          >
-            <Image source={RADIO_ICON} style={styles.floatButtonIcon} resizeMode="contain" />
-          </FastPressable>
-        </View>
+        <FloatingRadioButton
+          key={adminTablesOpen ? 'admin-tables' : 'default'}
+          bottom={floatingBottom}
+          rightInset={insets.right}
+          startDocked={adminTablesOpen}
+          color={outerView.circle}
+          rippleColor={outerSpeaking ? outerView.ring : undefined}
+          onOpen={() => setOpen(true)}
+        />
       )}
 
       <BottomSheet
@@ -473,19 +522,25 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
 
 const styles = StyleSheet.create({
   overlayHost: { ...StyleSheet.absoluteFillObject, zIndex: 200, elevation: 20 },
+  floatButtonViewport: {
+    position: 'absolute',
+    width: RADIO_BUTTON_SIZE + RADIO_EDGE_PADDING * 2,
+    height: RADIO_BUTTON_SIZE + RADIO_EDGE_PADDING * 2,
+    overflow: 'hidden',
+  },
   floatButtonWrap: {
     position: 'absolute',
-    right: spacing.sm,
-    width: 56,
-    height: 56,
+    bottom: RADIO_EDGE_PADDING,
+    width: RADIO_BUTTON_SIZE,
+    height: RADIO_BUTTON_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 90,
   },
   floatButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: RADIO_BUTTON_SIZE,
+    height: RADIO_BUTTON_SIZE,
+    borderRadius: RADIO_BUTTON_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 90,
@@ -537,19 +592,13 @@ const styles = StyleSheet.create({
   },
   channelText: { fontSize: fontSize.sm, lineHeight: 20, fontWeight: '500', color: colors.textSecondary },
   channelTextActive: { color: colors.white },
-  metaRow: {
-    height: 40,
+  metaOnline: {
+    alignSelf: 'flex-end',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: 'rgba(248, 250, 252, 0.6)',
-    paddingHorizontal: spacing.lg,
+    gap: 6,
     marginBottom: spacing.md,
   },
-  metaOnline: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   metaOnlineText: { fontSize: fontSize.sm, color: colors.textMuted },
   greenDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success },
   circleWrap: {

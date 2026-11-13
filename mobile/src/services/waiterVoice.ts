@@ -2,7 +2,8 @@ import { Audio } from 'expo-av';
 import { api } from '@/lib/api';
 import { configureAudioPlayback } from '@/lib/sound';
 import { deleteTempFile, wavBufferToTempFile } from '@/lib/ttsFile';
-import { registerSessionCleanup } from '@/store/auth';
+import { registerSessionCleanup, useAuth } from '@/store/auth';
+import { useWaiterVoiceSettings } from './waiterVoiceSettings';
 
 /**
  * Голосовое уведомление актуально только «здесь и сейчас». Если TTS тормозит
@@ -24,6 +25,8 @@ class WaiterVoice {
   enqueue(text: string | null | undefined) {
     const value = (text ?? '').trim();
     if (!value) return;
+    const user = useAuth.getState().user;
+    if (user?.role === 'WAITER' && useWaiterVoiceSettings.getState().byUser[user.id]?.voiceEnabled === false) return;
     this.queue.push({ text: value, at: Date.now() });
     void this.pump();
   }
@@ -77,13 +80,18 @@ class WaiterVoice {
 
   private async playText(text: string, epoch: number) {
     if (epoch !== this.epoch) return;
+    const user = useAuth.getState().user;
+    const preference = user?.role === 'WAITER'
+      ? useWaiterVoiceSettings.getState().byUser[user.id]
+      : undefined;
+    if (preference?.voiceEnabled === false) return;
     const request = new AbortController();
     this.requests.add(request);
     let data: ArrayBuffer;
     try {
       const res = await api.post<ArrayBuffer>(
         '/tts/synthesize',
-        { text },
+        { text, speaker: preference?.speaker },
         { responseType: 'arraybuffer', timeout: 45_000, signal: request.signal },
       );
       data = res.data;
@@ -93,16 +101,16 @@ class WaiterVoice {
     if (epoch !== this.epoch) return;
     const path = await wavBufferToTempFile(data);
     try {
-      if (epoch === this.epoch) await this.playFile(path, epoch);
+      if (epoch === this.epoch) await this.playFile(path, preference?.speechRate ?? 1, epoch);
     } finally {
       await deleteTempFile(path);
     }
   }
 
-  private async playFile(uri: string, epoch: number) {
+  private async playFile(uri: string, rate: number, epoch: number) {
     await configureAudioPlayback();
     if (epoch !== this.epoch) return;
-    const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: false, volume: 1, rate: 1 });
+    const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: false, volume: 1, rate, shouldCorrectPitch: true });
     if (epoch !== this.epoch) {
       await this.releaseSound(sound);
       return;

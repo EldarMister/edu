@@ -86,9 +86,10 @@ async function main() {
 
   const calls = [];
   const queryClient = { invalidateQueries() {} };
+  const ok = async (url, body) => { calls.push({ url, body }); return { data: { id: 'order-1' } }; };
   const kitchen = load('src/services/api/kitchen.ts', {
     '@tanstack/react-query': { useMutation: (options) => options, useQueryClient: () => queryClient, useQuery: (options) => options },
-    '@/lib/api': { networkRetry: false, api: { post: async (url, body) => { calls.push({ url, body }); return { data: { id: 'order-1' } }; } } },
+    '@/lib/api': { networkRetry: false, api: { post: ok, get: ok, patch: ok } },
   });
   const payload = { orderId: 'order-1', itemIds: ['dish-1'], setComponentIds: ['set-1'], partial: [{ itemId: 'dish-1', quantity: 2 }] };
   await kitchen.useReadyItems('bar').mutationFn(payload);
@@ -100,7 +101,19 @@ async function main() {
     assert.deepEqual(call.body.itemIds, payload.itemIds);
     assert.deepEqual(call.body.setComponentIds, payload.setComponentIds);
   }
-  console.log('Order contracts passed: 240 policy comparisons across 8 stages/5 item states/3 configurations, 12 bill statuses, delivery identity, partial ready/reject API payloads.');
+  const customStation = 'd551792e-c4db-46ba-932c-ea5f1e9fc074';
+  await kitchen.useKitchenOrders('cancelled', customStation, { from: '2026-11-10', to: '2026-11-13' }).queryFn();
+  await kitchen.useSaveStopList(customStation).mutationFn([{ dishId: 'dish-1', isAvailable: false }]);
+  await kitchen.useReadyItems('bar').mutationFn({ ...payload, station: customStation });
+  assert.equal(calls[2].url, `/kitchen/orders?tab=cancelled&station=${customStation}&from=2026-11-10&to=2026-11-13`);
+  assert.equal(calls[3].url, `/kitchen/stop-list?station=${customStation}`);
+  assert.equal(calls[4].url, `/kitchen/orders/order-1/items/ready-batch?station=${customStation}`);
+  const { cartStations } = load('src/utils/prepStation.ts');
+  const routed = cartStations([{ dish: { categoryId: 'grill' } }], [{ id: 'grill', prepStation: customStation }]);
+  assert.equal(routed.hasPrep, true);
+  assert.equal(routed.multipleOrCustom, true);
+  assert.equal(cartStations([{ dish: { categoryId: 'grill', prepStation: 'none' } }], [{ id: 'grill', prepStation: customStation }]).hasPrep, false);
+  console.log('Order contracts passed: waiter policy matrix, receipt statuses, delivery identity, batch actions and custom station routing.');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

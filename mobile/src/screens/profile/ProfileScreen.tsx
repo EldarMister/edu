@@ -2,11 +2,11 @@ import React from 'react';
 import { BackHandler, Image, Linking, ScrollView, StyleSheet, View } from 'react-native';
 import { Text } from '@/components/typography';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card } from '@/components/ui';
-import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
+import { BottomSheet, SheetFlatList, SheetScrollView } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { ORDER_STATUS } from '@/theme/status';
@@ -16,8 +16,17 @@ import { useAuth } from '@/store/auth';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { useLocale, type Locale } from '@/store/locale';
 import { useNotifications } from '@/store/notifications';
-import { useCurrentShift, useEndShift, useOrderDetails, useStartShift, useWaiterCabinet, type CabinetRecentOrder } from '@/services/api/waiter';
+import {
+  useCurrentShift,
+  useEndShift,
+  useOrderDetails,
+  useStartShift,
+  useWaiterCabinet,
+  useWaiterOrderHistory,
+  type CabinetRecentOrder,
+} from '@/services/api/waiter';
 import { useRetryFiscal } from '@/services/api/admin';
+import { WaiterVoiceSettingsSheet } from '@/screens/kitchen/KitchenVoiceSettingsSheet';
 import { disconnectSocket } from '@/services/socket';
 import {
   playNotificationSoundTest,
@@ -147,6 +156,7 @@ export function ProfileScreen() {
   if (isWaiter && cabinetOpen) {
     return (
       <WaiterCabinetScreen
+        userId={user.id}
         onBack={() => setCabinetOpen(false)}
         onLogout={onLogout}
       />
@@ -347,27 +357,26 @@ function ShiftSummarySheet({
 }
 
 function WaiterCabinetScreen({
+  userId,
   onBack,
   onLogout,
 }: {
+  userId: string;
   onBack: () => void;
   onLogout: () => void;
 }) {
-  const navigation = useNavigation<any>();
   const locale = useLocale((s) => s.locale);
   const setLocale = useLocale((s) => s.setLocale);
   const [period, setPeriod] = React.useState<'day' | 'week' | 'month'>('week');
   const [periodOpen, setPeriodOpen] = React.useState(false);
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const [voiceOpen, setVoiceOpen] = React.useState(false);
   const [detailId, setDetailId] = React.useState<string | null>(null);
   const cabinet = useWaiterCabinet(period);
   const detail = useOrderDetails(detailId);
   const periodMeta = PERIODS.find((item) => item.key === period) ?? PERIODS[1];
   const groups = groupCabinetOrders(cabinet.data?.recentOrders ?? []);
 
-  const openOrders = () => {
-    onBack();
-    navigation.navigate('Orders');
-  };
   return (
     <>
       <SafeAreaView style={styles.safe} edges={[]}>
@@ -383,6 +392,7 @@ function WaiterCabinetScreen({
             <Text style={styles.languageLabel} translate>Язык</Text>
             <LanguageSwitch locale={locale} onChange={setLocale} />
           </Card>
+          <Button title="Настройки озвучки" variant="secondary" onPress={() => setVoiceOpen(true)} />
 
           <Card style={styles.cabinetSection}>
             <View style={styles.cabinetSectionHead}>
@@ -409,7 +419,7 @@ function WaiterCabinetScreen({
           <Card style={styles.cabinetSection}>
             <View style={styles.recentHead}>
               <Text style={styles.cabinetSectionTitle} translate>Последние заказы</Text>
-              <FastPressable onPress={openOrders}>
+              <FastPressable accessibilityRole="button" onPress={() => setHistoryOpen(true)}>
                 <Text style={styles.viewAll} translate>Смотреть все</Text>
               </FastPressable>
             </View>
@@ -447,6 +457,12 @@ function WaiterCabinetScreen({
           setPeriodOpen(false);
         }}
       />
+      <OrderHistorySheet
+        visible={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        onSelect={setDetailId}
+      />
+      <WaiterVoiceSettingsSheet visible={voiceOpen} onClose={() => setVoiceOpen(false)} userId={userId} />
       <OrderDetailsSheet
         visible={!!detailId}
         order={detail.data ?? null}
@@ -455,6 +471,64 @@ function WaiterCabinetScreen({
         onRetriedFiscal={() => void detail.refetch()}
       />
     </>
+  );
+}
+
+function OrderHistorySheet({
+  visible,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSelect: (id: string) => void;
+}) {
+  const history = useWaiterOrderHistory(visible);
+  const orders = React.useMemo(() => history.data?.pages.flatMap((page) => page.items) ?? [], [history.data]);
+
+  return (
+    <BottomSheet visible={visible} onClose={onClose} title="История заказов" inline expanded maxHeight="88%">
+      <SheetFlatList
+        data={orders}
+        keyExtractor={(order) => order.id}
+        showsVerticalScrollIndicator={false}
+        renderItem={({ item, index }) => {
+          const date = orderDate(item.createdAt);
+          const newDate = index === 0 || orderDate(orders[index - 1].createdAt) !== date;
+          return (
+            <View>
+              {newDate ? <Text style={[styles.orderGroupLabel, styles.historyDate]}>{date}</Text> : null}
+              <CabinetOrderRow order={item} onPress={() => onSelect(item.id)} />
+            </View>
+          );
+        }}
+        ListEmptyComponent={history.isLoading ? (
+          <Text style={styles.cabinetMuted} translate>Загрузка заказов...</Text>
+        ) : history.isError ? (
+          <View style={styles.historyAction}>
+            <Text style={styles.cabinetError} translate>Не удалось загрузить заказы</Text>
+            <Button title="Повторить" size="md" variant="secondary" onPress={() => void history.refetch()} />
+          </View>
+        ) : (
+          <Text style={styles.cabinetMuted} translate>Заказов пока нет</Text>
+        )}
+        ListFooterComponent={history.hasNextPage ? (
+          <View style={[styles.historyAction, styles.historyFooter]}>
+            {history.isFetchNextPageError ? (
+              <Text style={styles.cabinetError} translate>Не удалось загрузить заказы</Text>
+            ) : null}
+            <Button
+              title={history.isFetchNextPageError ? 'Повторить' : 'Показать ещё'}
+              size="md"
+              variant="secondary"
+              loading={history.isFetchingNextPage}
+              disabled={history.isFetching}
+              onPress={() => void history.fetchNextPage({ cancelRefetch: false })}
+            />
+          </View>
+        ) : null}
+      />
+    </BottomSheet>
   );
 }
 
@@ -512,7 +586,7 @@ function StatRow({
 
 function CabinetOrderRow({ order, onPress }: { order: CabinetRecentOrder; onPress: () => void }) {
   return (
-    <FastPressable onPress={onPress} style={styles.cabinetOrderRow}>
+    <FastPressable accessibilityRole="button" onPress={onPress} style={styles.cabinetOrderRow}>
       <Text style={styles.cabinetOrderNo} numberOfLines={1}>
         {displayOrderNumber(order.orderNumber)}
       </Text>
@@ -568,12 +642,21 @@ function OrderDetailsSheet({
           <View>
             <Text style={styles.detailSectionTitle} translate>Информация</Text>
             <View style={styles.detailInfoBox}>
-              <DetailRow label="Статус" value={ORDER_STATUS[order.status]?.label ?? order.status} />
-              <DetailRow label="Официант" value={order.waiter?.name ?? 'QR menu'} />
-              <DetailRow label="Дата" value={`${new Date(order.createdAt).toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}`} />
-              <DetailRow label="Сумма" value={money(order.finalAmount)} strong />
-              <DetailRow label="Стол" value={`Стол ${order.table.number}${hallSuffix(order.table)}`} />
-              <DetailRow label="Оплата" value={order.paymentMethod ? detailPaymentLabel(order) : '—'} />
+              <View style={styles.detailInfoPair}>
+                <DetailRow label="Статус" value={ORDER_STATUS[order.status]?.label ?? order.status} column />
+                <View style={styles.detailInfoDivider} />
+                <DetailRow label="Официант" value={order.waiter?.name ?? 'QR menu'} column />
+              </View>
+              <View style={styles.detailInfoPair}>
+                <DetailRow label="Дата" value={`${orderDate(order.createdAt)} ${timeHM(order.createdAt)}`} column />
+                <View style={styles.detailInfoDivider} />
+                <DetailRow label="Стол" value={`Стол ${order.table.number}${hallSuffix(order.table)}`} column />
+              </View>
+              <View style={styles.detailInfoPair}>
+                <DetailRow label="Сумма" value={money(order.finalAmount)} strong column />
+                <View style={styles.detailInfoDivider} />
+                <DetailRow label="Оплата" value={order.paymentMethod ? detailPaymentLabel(order) : '—'} column />
+              </View>
               {showMixedBreakdown ? (
                 <>
                   <DetailRow label="Наличными" value={money(mixedSumBy(order, 'cash'))} />
@@ -716,11 +799,21 @@ function FiscalBlock({ order, onRetried }: { order: Order; onRetried: () => void
   );
 }
 
-function DetailRow({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+function DetailRow({
+  label,
+  value,
+  strong = false,
+  column = false,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+  column?: boolean;
+}) {
   return (
-    <View style={styles.detailInfoRow}>
-      <Text style={styles.detailInfoLabel} translate>{label}</Text>
-      <Text style={[styles.detailInfoValue, strong && styles.detailInfoValueStrong]} numberOfLines={2}>
+    <View style={column ? styles.detailInfoCell : styles.detailInfoRow}>
+      <Text style={[styles.detailInfoLabel, column && styles.detailInfoCellText]} translate>{label}</Text>
+      <Text style={[styles.detailInfoValue, column && styles.detailInfoCellText, strong && styles.detailInfoValueStrong]} numberOfLines={2}>
         {value}
       </Text>
     </View>
@@ -803,6 +896,10 @@ function groupCabinetOrders(orders: CabinetRecentOrder[]) {
     { key: 'yesterday', label: 'ВЧЕРА', orders: buckets.yesterday },
     { key: 'earlier', label: 'РАНЕЕ', orders: buckets.earlier },
   ].filter((group) => group.orders.length > 0);
+}
+
+function orderDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('ru-RU');
 }
 
 function dateTime(iso: string): string {
@@ -957,6 +1054,9 @@ const styles = StyleSheet.create({
   orderGroups: { gap: spacing.md },
   orderGroup: { gap: 4 },
   orderGroupLabel: { fontSize: fontSize.xs, fontWeight: '500', color: colors.textLight, textTransform: 'uppercase' },
+  historyDate: { paddingTop: spacing.md, paddingBottom: spacing.xs },
+  historyAction: { gap: spacing.sm },
+  historyFooter: { paddingTop: spacing.md },
   cabinetOrdersList: { borderTopWidth: 1, borderTopColor: colors.border },
   cabinetOrderRow: {
     minHeight: 42,
@@ -985,6 +1085,16 @@ const styles = StyleSheet.create({
   detailSectionTitle: { marginBottom: spacing.sm, fontSize: fontSize.sm, fontWeight: '800', color: colors.textPrimary },
   detailItemsCount: { fontSize: fontSize.xs, color: colors.textMuted },
   detailInfoBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, overflow: 'hidden' },
+  detailInfoPair: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: colors.border },
+  detailInfoCell: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  detailInfoCellText: { flex: 0, textAlign: 'left' },
+  detailInfoDivider: { width: 1, backgroundColor: colors.border },
   detailInfoRow: {
     minHeight: 46,
     flexDirection: 'row',

@@ -1,8 +1,8 @@
 type Data = Record<string, unknown>;
 export type NotificationTarget =
   | { kind: 'waiter-order'; orderId?: string }
-  | { kind: 'kitchen' }
-  | { kind: 'bar' }
+  | { kind: 'kitchen'; station?: string }
+  | { kind: 'bar'; station?: string }
   | { kind: 'admin-orders'; orderId?: string }
   | { kind: 'admin-receipts'; orderId?: string };
 
@@ -29,8 +29,14 @@ export function notificationTarget(data: Data, userId: string, role: string): No
   const path = url.split(/[?#]/)[0];
   const orderId = typeof data.orderId === 'string' && SAFE_ID.test(data.orderId) ? data.orderId : undefined;
   if (role === 'WAITER' && (!path || /^\/waiter(?:\/|$)/.test(path))) return { kind: 'waiter-order', orderId };
-  if (role === 'KITCHEN' && (!path || path === '/kitchen')) return { kind: 'kitchen' };
-  if (role === 'BAR' && (!path || path === '/bar')) return { kind: 'bar' };
+  if ((role === 'KITCHEN' || role === 'BAR') && (!path || path === `/${role.toLowerCase()}`)) {
+    const kind = role === 'KITCHEN' ? 'kitchen' : 'bar';
+    const query = url.split('#')[0].split('?')[1];
+    const match = query?.split('&').find((part) => part.startsWith('station='))?.slice('station='.length);
+    const station = match && SAFE_ID.test(match) && match !== 'none' &&
+      (match === kind || (match !== 'kitchen' && match !== 'bar')) ? match : undefined;
+    return station ? { kind, station } : { kind };
+  }
   if (role === 'ADMIN' || role === 'OWNER') {
     if (path === '/admin/receipts' || path === '/admin/checks') return { kind: 'admin-receipts', orderId };
     if (!path || path === '/admin' || path === '/admin/orders') return { kind: 'admin-orders', orderId };

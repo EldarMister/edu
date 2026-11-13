@@ -8,7 +8,6 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { colors, fontSize, waiterLayout } from '@/theme';
 import { WaiterHeader } from '@/components/WaiterHeader';
-import { OfflineBanner } from '@/components/ConnectionStatus';
 import { ShiftRequiredScreen } from '@/components/ShiftRequiredScreen';
 import { FastPressable } from '@/components/FastPressable';
 import { Loading } from '@/components/ui';
@@ -69,7 +68,7 @@ export function WaiterNavigator() {
   return (
     <SheetPortalProvider>
     <SafeAreaView style={styles.workSafe} edges={['top']}>
-      <PanelScreenBoundary mode="inline" style={{ flex: 1 }}><OfflineBanner reserveSpace />
+      <PanelScreenBoundary mode="inline" style={{ flex: 1 }}>
       <WaiterHeader />
       <View style={styles.tabsHost}>
         <Tab.Navigator

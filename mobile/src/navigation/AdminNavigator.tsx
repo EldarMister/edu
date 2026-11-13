@@ -2,6 +2,7 @@ import React from 'react';
 import { AppState, BackHandler, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { cancelAnimation, Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { sheetTiming } from '@/components/motion';
 import Constants from 'expo-constants';
 import { Text } from '@/components/typography';
 import { useNavigation, useRoute, type NavigationProp, type RouteProp } from '@react-navigation/native';
@@ -270,7 +271,7 @@ function AdminDrawer({
       offset.value = 0;
     } else if (visible) {
       setRender(true);
-      offset.value = withTiming(0, DRAWER_TIMING);
+      offset.value = withTiming(0, { duration: sheetTiming.enterMs, easing: sheetTiming.easing });
     } else {
       offset.value = withTiming(-DRAWER_WIDTH, DRAWER_TIMING, finished => {
         if (finished) runOnJS(setRender)(false);

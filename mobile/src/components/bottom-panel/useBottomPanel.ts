@@ -4,7 +4,7 @@ import { Gesture } from 'react-native-gesture-handler';
 import { cancelAnimation, Easing, runOnJS, useReducedMotion, useSharedValue, withSpring, withTiming, type SharedValue } from 'react-native-reanimated';
 import { panelHistory } from './history';
 import { useBottomPanelHistory } from './context';
-import { panelDragOrigin, PANEL_DURATION, PanelCompletion, resistPanelOffset, shouldDismissPanel } from './geometry';
+import { panelDragOrigin, PANEL_DURATION, PANEL_OPEN_MS, PanelCompletion, resistPanelOffset, shouldDismissPanel } from './geometry';
 
 export const panelEasing = Easing.bezier(0.32, 0.72, 0, 1);
 type Exit = 'close' | 'suspend';
@@ -23,7 +23,7 @@ export function useBottomPanel({ id, parent, visible, persistent, inline, dragga
   ownerKey?: string;
 }) {
   const stack = useBottomPanelHistory();
-  const active = stack.active === id && stack.desired === id;
+  const active = stack.active === id;
   const [rendered, setRendered] = React.useState(visible);
   const [interactive, setInteractive] = React.useState(false);
   const offset = useSharedValue(100000);
@@ -41,7 +41,7 @@ export function useBottomPanel({ id, parent, visible, persistent, inline, dragga
   const finish = React.useCallback((seq: number, mode: Exit) => {
     const current = state.current;
     if (!current.mounted || seq !== current.seq) return;
-    if (mode === 'suspend') { current.phase = 'suspended'; panelHistory.yield(id); return; }
+    if (mode === 'suspend') { current.phase = 'suspended'; return; }
     if (!completion.current.finish(current.token)) return;
     current.phase = 'hidden'; current.rendered = false;
     setRendered(false); panelHistory.remove(id);
@@ -87,11 +87,13 @@ export function useBottomPanel({ id, parent, visible, persistent, inline, dragga
   const enter = React.useCallback(() => {
     const current = state.current;
     if (!current.mounted || !current.visible || !current.active || !current.height || current.phase === 'closing' || current.phase === 'open') return;
+    const returning = current.phase === 'suspended';
     ++current.seq; current.phase = 'open'; closing.value = false; enabled.value = draggable;
     interaction.value += 1;
     setInteractive(true);
     cancelAnimation(offset);
-    offset.value = reduceMotion ? 0 : withTiming(0, { duration: PANEL_DURATION, easing: panelEasing });
+    if (returning) offset.value = current.height;
+    offset.value = reduceMotion ? 0 : withTiming(0, { duration: PANEL_OPEN_MS, easing: panelEasing });
   }, [closing, draggable, enabled, interaction, offset, reduceMotion]);
 
   const measure = React.useCallback((height: number) => {
@@ -103,7 +105,7 @@ export function useBottomPanel({ id, parent, visible, persistent, inline, dragga
     current.height = height;
     const distance = height + 24;
     travel.value = distance;
-    if (first) { offset.value = distance; measured.value = true; enter(); }
+    if (first) { offset.value = height; measured.value = true; enter(); }
     else if (current.phase === 'suspended') offset.value = distance;
     else if (current.phase === 'closing' || current.phase === 'suspending') {
       const seq = current.seq;
@@ -140,12 +142,12 @@ export function useBottomPanel({ id, parent, visible, persistent, inline, dragga
     }
   }, [visible, id, parent, persistent, inline, exit, interaction, measured, offset, ownerKey]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!rendered || !visible || state.current.phase === 'closing') return;
     if (active) enter();
-    else if (stack.active === id && stack.desired !== id) exit('suspend');
+    else if (state.current.phase === 'open') exit('suspend');
     else enabled.value = false;
-  }, [active, enabled, enter, exit, id, rendered, stack.active, stack.desired, visible, ownerKey]);
+  }, [active, enabled, enter, exit, rendered, visible, ownerKey]);
 
   React.useEffect(() => {
     if (!rendered || !active || persistent) return;

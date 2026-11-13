@@ -11,10 +11,14 @@ import {
   KITCHEN_SPEAKERS,
   KITCHEN_SPEECH_RATES,
   KITCHEN_VOICE_TEST_SCENARIOS,
+  WAITER_VOICE_TEST_SCENARIOS,
   getKitchenVoiceSettings,
   useKitchenVoiceSettings,
   type KitchenSpeechRate,
+  type KitchenVoiceSettings,
 } from '@/services/kitchenVoiceSettings';
+import { defaultWaiterVoice, useWaiterVoiceSettings } from '@/services/waiterVoiceSettings';
+import { waiterVoice } from '@/services/waiterVoice';
 
 /** Настройки озвучки кухни — как PWA KitchenVoiceSettings (попап → нижний лист). */
 export function KitchenVoiceSettingsSheet({
@@ -25,21 +29,70 @@ export function KitchenVoiceSettingsSheet({
   onClose: () => void;
 }) {
   const settings = useKitchenVoiceSettings();
+  return (
+    <VoiceSettingsSheet
+      visible={visible}
+      onClose={onClose}
+      settings={settings}
+      patchSettings={settings.patch}
+      getPreviewSettings={getKitchenVoiceSettings}
+    />
+  );
+}
+
+export function WaiterVoiceSettingsSheet({ visible, onClose, userId }: {
+  visible: boolean;
+  onClose: () => void;
+  userId: string;
+}) {
+  const preference = useWaiterVoiceSettings((state) => state.byUser[userId] ?? defaultWaiterVoice);
+  const patch = useWaiterVoiceSettings((state) => state.patch);
+  return (
+    <VoiceSettingsSheet
+      visible={visible}
+      onClose={onClose}
+      settings={{ ...defaultWaiterVoice, ...preference }}
+      patchSettings={(next) => {
+        patch(userId, next);
+        if (next.voiceEnabled === false) void waiterVoice.clear();
+      }}
+      getPreviewSettings={() => ({
+        ...defaultWaiterVoice,
+        ...useWaiterVoiceSettings.getState().byUser[userId],
+        preferredModel: 'v5_2_ru',
+        fallbackModel: 'v4_ru',
+      })}
+      waiter
+    />
+  );
+}
+
+function VoiceSettingsSheet({ visible, onClose, settings, patchSettings, getPreviewSettings, waiter = false }: {
+  visible: boolean;
+  onClose: () => void;
+  settings: Pick<KitchenVoiceSettings, 'speaker' | 'speechRate'> & Partial<Pick<KitchenVoiceSettings, 'notificationsEnabled' | 'voiceEnabled'>>;
+  patchSettings: (next: Partial<KitchenVoiceSettings>) => void;
+  getPreviewSettings: () => KitchenVoiceSettings;
+  waiter?: boolean;
+}) {
   const [testing, setTesting] = useState(false);
+  const [waiterScenarioIndex, setWaiterScenarioIndex] = useState(0);
   const [testMessage, setTestMessage] = useState('');
 
-  const patch = (next: Parameters<typeof settings.patch>[0]) => {
-    settings.patch(next);
+  const patch = (next: Partial<KitchenVoiceSettings>) => {
+    patchSettings(next);
     setTestMessage('');
   };
 
   const testVoice = async () => {
     setTesting(true);
     setTestMessage('');
-    const scenario =
-      KITCHEN_VOICE_TEST_SCENARIOS[Math.floor(Math.random() * KITCHEN_VOICE_TEST_SCENARIOS.length)];
+    const scenario = waiter
+      ? WAITER_VOICE_TEST_SCENARIOS[waiterScenarioIndex]
+      : KITCHEN_VOICE_TEST_SCENARIOS[Math.floor(Math.random() * KITCHEN_VOICE_TEST_SCENARIOS.length)];
     try {
-      await kitchenVoice.testScenario(scenario, getKitchenVoiceSettings());
+      await kitchenVoice.testScenario(scenario, getPreviewSettings());
+      if (waiter) setWaiterScenarioIndex((index) => (index + 1) % WAITER_VOICE_TEST_SCENARIOS.length);
       setTestMessage('Тест озвучки завершён');
     } catch (err) {
       console.error('[kitchen-tts] тест озвучки не удался:', err);
@@ -50,7 +103,7 @@ export function KitchenVoiceSettingsSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Настройки озвучки кухни" maxHeight="88%" footer={<View style={[styles.section, { paddingBottom: spacing.md }]}>
+    <BottomSheet visible={visible} onClose={onClose} title={waiter ? 'Настройки озвучки' : 'Настройки озвучки кухни'} maxHeight="88%" footer={<View style={[styles.section, { paddingBottom: spacing.md }]}>
         <Button title={testing ? 'Тестируем...' : 'Тестировать'} loading={testing} onPress={() => void testVoice()} />
         {testMessage ? (
           <Text
@@ -93,15 +146,16 @@ export function KitchenVoiceSettingsSheet({
 
       <View style={styles.section}>
         <View style={styles.settingRow}>
-          <Text style={styles.settingLabel} translate>Уведомления</Text>
+          <Text style={styles.settingLabel} translate>{waiter ? 'Звук уведомлений' : 'Уведомления'}</Text>
           <Toggle
-            checked={settings.notificationsEnabled}
+            checked={!!settings.notificationsEnabled}
             onChange={(value) => patch({ notificationsEnabled: value })}
+            accessibilityLabel={waiter ? 'Звук уведомлений' : 'Уведомления'}
           />
         </View>
         <View style={styles.settingRow}>
           <Text style={styles.settingLabel} translate>Голосовая озвучка</Text>
-          <Toggle checked={settings.voiceEnabled} onChange={(value) => patch({ voiceEnabled: value })} />
+          <Toggle checked={!!settings.voiceEnabled} onChange={(value) => patch({ voiceEnabled: value })} accessibilityLabel="Голосовая озвучка" />
         </View>
       </View>
 
@@ -115,7 +169,7 @@ export function KitchenVoiceSettingsSheet({
       </View>
 
 
-      <KitchenHandControlSetting />
+      {!waiter && <KitchenHandControlSetting />}
     </BottomSheet>
   );
 }

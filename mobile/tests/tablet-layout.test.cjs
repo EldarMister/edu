@@ -32,10 +32,11 @@ test('compact 8.7 inch kitchen uses readable columns through rotation',()=>{
  }
 });
 
-test('9 and 14 tables have the same large cards in three columns on phones', () => {
-  for (const width of [304, 368, 378, 414]) {
-    const nine = tableGridLayout(9, width, 530, 12);
-    const fourteen = tableGridLayout(14, width, 530, 12);
+test('9 and 14 tables keep the same squares on the reference phone layouts', () => {
+  const gap = 12;
+  for (const [width, height] of [[368, 580], [384, 620], [414, 650]]) {
+    const nine = tableGridLayout(9, width, height, gap);
+    const fourteen = tableGridLayout(14, width, height, gap);
     assert.equal(nine.columns, 3);
     assert.equal(fourteen.columns, 3);
     assert.equal(fourteen.side, nine.side);
@@ -43,25 +44,47 @@ test('9 and 14 tables have the same large cards in three columns on phones', () 
   }
 });
 
-test('shorter viewports scroll rather than reducing the cards or changing columns', () => {
-  for (const count of [8, 14, 32]) {
-    const layout = tableGridLayout(count, 378, 400, 12);
-    const tall = tableGridLayout(count, 378, 650, 12);
-    assert.equal(layout.columns, 3);
-    assert.equal(layout.side, tall.side);
-    assert.equal(layout.gap, 12);
-    assert.ok(layout.gridWidth <= 378);
-    const rows = Math.ceil(count / layout.columns);
-    assert.equal(rows * layout.side + (rows - 1) * layout.gap > 400, count >= 14);
+test('eight tables keep two columns as the grid shrinks', () => {
+  const gap = 12;
+  const width = 368;
+  const tall = tableGridLayout(8, width, 748, gap);
+  assert.equal(tall.columns, 2);
+  assert.equal(tall.gridWidth, width);
+  assert.equal(4 * tall.side + 3 * gap, 748);
+  for (const height of [380, 580, 747]) {
+    const eight = tableGridLayout(8, width, height, gap);
+    assert.equal(eight.columns, 2);
+    assert.ok(eight.side < tall.side);
+    assert.ok(eight.gridWidth <= width);
+    assert.ok(4 * eight.side + 3 * gap <= height);
   }
+  const crowded = tableGridLayout(32, 368, 580, gap);
+  assert.equal(crowded.columns, 3);
+  assert.equal(crowded.side, tableGridLayout(9, 368, 580, gap).side);
 });
 
-test('all six squares stay visible in two columns on the reference phone', () => {
-  for (const height of [400, 530, 650]) {
-    const layout = tableGridLayout(6, 378, height, 12);
-    assert.equal(layout.columns, 2);
-    assert.equal(layout.gap, 12);
-    assert.ok(layout.side > 0 && layout.gridWidth <= 378);
-    assert.ok(3 * layout.side + 2 * layout.gap <= height);
+test('six tables fill the reference phone width in three rows', () => {
+  const width = 378;
+  const height = 574;
+  const { columns, side, gap, gridWidth } = tableGridLayout(6, width, height, 12);
+  assert.equal(columns, 2);
+  assert.equal(gridWidth, width);
+  assert.equal(gap, 12);
+  assert.ok(3 * side + 2 * gap <= height);
+});
+
+test('each hall keeps its column count in narrow, portrait and wide windows', () => {
+  const gap = 12;
+  const stacked = tableGridLayout(2, 368, 580, gap);
+  assert.equal(stacked.columns, 2);
+  const wide = tableGridLayout(2, 620, 240, gap);
+  assert.equal(wide.columns, 2);
+  assert.ok(wide.side <= 240);
+  for (const [width, height] of [[220, 560], [368, 580], [980, 560]]) {
+    for (let count = 1; count <= 40; count++) {
+      const layout = tableGridLayout(count, width, height, gap);
+      assert.equal(layout.columns, tableGridLayout(count, 368, 580, gap).columns);
+      assert.ok(layout.side > 0 && layout.gridWidth <= width);
+    }
   }
 });

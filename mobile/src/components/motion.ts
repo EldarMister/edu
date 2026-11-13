@@ -1,7 +1,8 @@
 import { Easing } from 'react-native-reanimated';
+import { PANEL_OPEN_MS } from './bottom-panel/geometry';
 
 export const sheetTiming = {
-  enterMs: 240,
+  enterMs: PANEL_OPEN_MS,
   exitMs: 220,
   easing: Easing.bezier(0.4, 0, 0.2, 1),
 } as const;
@@ -27,7 +28,7 @@ export const sheetPresets = {
 export type SheetAnimationPreset = keyof typeof sheetPresets;
 
 export const popTiming = {
-  enterMs: 160,
+  enterMs: 500,
   exitMs: 120,
   easing: Easing.bezier(0.16, 1, 0.3, 1),
 } as const;

@@ -5,18 +5,14 @@ export function gridLayout(width: number, padding: number, gap: number, minimum:
   return { columns, itemWidth: Math.max(0, (available - gap * (columns - 1)) / columns) };
 }
 
-/** Size squares by the available width and let extra rows scroll. */
+/** Keep the hall's column count stable when the viewport changes. */
 export function tableGridLayout(count: number, width: number, height: number, gap: number) {
-  const fewTables = count <= 2;
-  const stack = count <= 1 || (count === 2 && height >= width);
-  const phoneColumns = stack ? 1 : count <= 6 || width < 240 ? 2 : 3;
-  const maxColumns = fewTables ? phoneColumns : Math.min(count, 6);
-  const { columns, itemWidth } = gridLayout(width, 0, gap, 168, maxColumns, phoneColumns);
-  const rows = Math.max(1, Math.ceil(count / columns));
-  const heightPerRow = (height - gap * (rows - 1)) / rows;
-  const maxSide = fewTables ? Math.min(420, Math.max(96, heightPerRow)) : 240;
-  const fittedSide = count >= 3 && count <= 6 ? Math.min(maxSide, Math.max(0, heightPerRow)) : maxSide;
-  const side = Math.floor(Math.min(itemWidth, fittedSide));
+  const columns = Math.min(Math.max(1, count), count <= 6 || count === 8 ? 2 : 3);
+  const rowsToFit = Math.max(1, Math.ceil(Math.min(count, 9) / columns));
+  const maxSide = count <= 2 ? 420 : 240;
+  const sideAtWidth = Math.max(0, Math.floor((width - gap * (columns - 1)) / columns));
+  const sideAtHeight = Math.floor((height - gap * (rowsToFit - 1)) / rowsToFit);
+  const side = Math.min(maxSide, sideAtWidth, Math.max(64, sideAtHeight));
   return { columns, side, gap, gridWidth: side * columns + gap * (columns - 1) };
 }
 

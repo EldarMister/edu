@@ -46,7 +46,7 @@ function authHarness() {
   });
 }
 
-function voiceHarness(kind, { writing, creating, configuring, sample } = {}) {
+function voiceHarness(kind, { writing, creating, configuring, sample, byUser = {} } = {}) {
   const auth = authHarness();
   const requests = [], sounds = [], written = [], deleted = [];
   const settings = { voiceEnabled: true, speaker: 'baya', speechRate: 1, preferredModel: 'v5_2_ru', fallbackModel: 'v4_ru' };
@@ -55,7 +55,7 @@ function voiceHarness(kind, { writing, creating, configuring, sample } = {}) {
     '@/lib/api': { api: { post: (route, data, config) => {
       assert.equal(route, '/tts/synthesize');
       const response = deferred();
-      requests.push({ ...response, text: data.text, signal: config.signal });
+      requests.push({ ...response, text: data.text, speaker: data.speaker, signal: config.signal });
       // Deliberately ignore cancellation: a late adapter/native response must still be harmless.
       return response.promise;
     } } },
@@ -72,7 +72,7 @@ function voiceHarness(kind, { writing, creating, configuring, sample } = {}) {
       assert.equal(initial.shouldPlay, false);
       if (creating) await creating.promise;
       const sound = {
-        uri: source.uri, plays: 0, stops: 0, unloads: 0, status: null,
+        uri: source.uri, rate: initial.rate, plays: 0, stops: 0, unloads: 0, status: null,
         setOnPlaybackStatusUpdate(callback) { this.status = callback; },
         async playAsync() { this.plays += 1; },
         async stopAsync() { this.stops += 1; },
@@ -83,6 +83,7 @@ function voiceHarness(kind, { writing, creating, configuring, sample } = {}) {
       return { sound };
     } } } },
     './kitchenVoiceSettings': { getKitchenVoiceSettings: () => settings },
+    './waiterVoiceSettings': { useWaiterVoiceSettings: { getState: () => ({ byUser }) } },
     './kitchenVoiceSamples': { kitchenVoiceSample: () => sample },
   };
   const voice = loadSource(`src/services/${kind}Voice.ts`, modules)[`${kind}Voice`];
@@ -90,6 +91,37 @@ function voiceHarness(kind, { writing, creating, configuring, sample } = {}) {
   const respond = index => requests[index].resolve({ data: requests[index].text });
   return { auth: auth.useAuth, voice, requests, sounds, written, deleted, respond };
 }
+
+test('waiter notifications use the signed-in waiter’s speaker and playback speed', async () => {
+  const env = voiceHarness('waiter', { byUser: { first: { speaker: 'aidar', speechRate: 1.2 } } });
+  const waiter = session('first');
+  waiter.user.role = 'WAITER';
+  env.auth.getState().setSession(waiter);
+  env.voice.enqueue('Заказ готов');
+  assert.equal(env.requests[0].speaker, 'aidar');
+  env.respond(0);
+  await settle();
+  assert.equal(env.sounds[0].rate, 1.2);
+  env.sounds[0].finish();
+  await settle();
+});
+
+test('waiter can mute speech without changing the notification sound preference', async () => {
+  const preferences = { first: { notificationsEnabled: true, voiceEnabled: false } };
+  const env = voiceHarness('waiter', { byUser: preferences });
+  const waiter = session('first');
+  waiter.user.role = 'WAITER';
+  env.auth.getState().setSession(waiter);
+  env.voice.enqueue('muted');
+  assert.equal(env.requests.length, 0);
+  preferences.first = { notificationsEnabled: false, voiceEnabled: true };
+  env.voice.enqueue('voice only');
+  assert.equal(env.requests.length, 1);
+  await env.voice.clear();
+  env.respond(0);
+  await settle();
+  assert.equal(env.sounds.length, 0);
+});
 
 for (const kind of ['kitchen', 'waiter']) {
   test(`${kind}: logout stops active audio, clears pending speech, and lets the next account speak`, async () => {

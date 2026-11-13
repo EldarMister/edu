@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { Alert, Text, TextInput } from '@/components/typography';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
@@ -8,6 +9,7 @@ import { Button, Toggle } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
+import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import {
   useAdminHalls,
   useHallMutations,
@@ -21,6 +23,7 @@ import { TableQrModal } from './TableQrModal';
 
 /** Столы и залы (порт PWA TablesPage): аккордеон залов + CRUD. */
 export function TablesScreen() {
+  const focused = useIsFocused();
   const overview = useTablesOverview();
   const hallsQ = useAdminHalls();
   const { remove: removeHall } = useHallMutations();
@@ -35,6 +38,12 @@ export function TablesScreen() {
 
   const o = overview.data;
   const halls = hallsQ.data ?? [];
+
+  React.useLayoutEffect(() => {
+    if (!focused) return;
+    useRadioVisibility.setState({ adminTablesOpen: true });
+    return () => useRadioVisibility.setState({ adminTablesOpen: false });
+  }, [focused]);
 
   useEffect(() => {
     if (accordionReady || halls.length === 0) return;

@@ -9,6 +9,7 @@ import { create } from 'zustand';
 type RadioVisibilityState = {
   cabinetOpen: boolean;
   shiftGateOpen: boolean;
+  adminTablesOpen: boolean;
   blockingOverlays: number;
   setCabinetOpen: (open: boolean) => void;
   setShiftGateOpen: (open: boolean) => void;
@@ -17,6 +18,7 @@ type RadioVisibilityState = {
 export const useRadioVisibility = create<RadioVisibilityState>((set) => ({
   cabinetOpen: false,
   shiftGateOpen: false,
+  adminTablesOpen: false,
   blockingOverlays: 0,
   setCabinetOpen: (cabinetOpen) => set({ cabinetOpen }),
   setShiftGateOpen: (shiftGateOpen) => set({ shiftGateOpen }),

@@ -17,16 +17,14 @@ export function dishStation(
 export function cartStations(
   lines: CartLine[],
   categories: Category[],
-): { kitchen: boolean; bar: boolean; none: boolean; hasPrep: boolean } {
+): { kitchen: boolean; bar: boolean; none: boolean; hasPrep: boolean; multipleOrCustom: boolean } {
   const byCategory = stationByCategory(categories);
-  let kitchen = false;
-  let bar = false;
-  let none = false;
+  const stations = new Set<PrepStation>();
   for (const line of lines) {
-    const station = dishStation(line.dish, byCategory);
-    if (station === 'kitchen') kitchen = true;
-    else if (station === 'bar') bar = true;
-    else none = true;
+    stations.add(dishStation(line.dish, byCategory));
   }
-  return { kitchen, bar, none, hasPrep: kitchen || bar };
+  const none = stations.delete('none');
+  const kitchen = stations.has('kitchen');
+  const bar = stations.has('bar');
+  return { kitchen, bar, none, hasPrep: stations.size > 0, multipleOrCustom: stations.size > 1 || (stations.size > 0 && !kitchen && !bar) };
 }

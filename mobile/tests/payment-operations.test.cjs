@@ -213,6 +213,7 @@ test('printed realtime updates and the visible receipt sheet play exactly one ac
     '@/store/notifications': { useNotifications: selector => selector({ push: noop }) },
     '@/store/auth': { useAuth: selector => selector({ user: { id: 'staff' } }) },
     '@/services/waiterVoice': {}, '@/services/realtimeVoice': {},
+    '@/services/waiterVoiceSettings': { waiterNotificationSoundEnabled: () => true },
     '@/features/ptt/backgroundFlag': {},
     '@/services/push': { isRemotePushRegistered: () => false, notificationDeduper: { claim: () => true } },
     '@/store/receiptPrint': { useReceiptPrint: { getState: () => state } },
@@ -229,6 +230,7 @@ test('printed realtime updates and the visible receipt sheet play exactly one ac
     '@/components/PwaIcon': { PwaIcon: 'PwaIcon' }, '@/theme': loadSource('src/theme/index.ts', {}),
     '@/store/receiptPrint': { useReceiptPrint: () => state }, '@/utils/format': {},
     '@/lib/sound': { beep: value => sounds.push(value) },
+    '@/services/waiterVoiceSettings': { waiterNotificationSoundEnabled: () => true },
   });
   ReceiptPrintSheet(); refCursor = 0; ReceiptPrintSheet();
   assert.deepEqual(sounds, ['accept']);

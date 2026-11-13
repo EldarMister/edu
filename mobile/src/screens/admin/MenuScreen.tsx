@@ -10,6 +10,8 @@ import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
 import { API_BASE } from '@/config/env';
 import { useNotifications } from '@/store/notifications';
+import { useAuth } from '@/store/auth';
+import { prepStationOptions, usePrepStations } from '@/services/api/prepStations';
 import { minDishUnitPrice, money, variantNamesLine } from '@/utils/format';
 import { normalizeUnitLabel, unitLabelOptions } from '@/utils/units';
 import {
@@ -25,6 +27,7 @@ import {
 } from '@/services/api/admin';
 import type { PrepStation } from '@/types';
 import { RecipeEditor } from './WarehouseEditors';
+import { PrepStationsSheet } from './PrepStationsSheet';
 import { dishInventoryPayload, initialDishPrice } from './dishDraft';
 import * as DocumentPicker from 'expo-document-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
@@ -34,13 +37,6 @@ function resolveApiImage(url: string | null | undefined): string | null {
   if (url.startsWith('data:') || url.startsWith('http')) return url;
   return `${API_BASE}${url.startsWith('/') ? url : `/${url}`}`;
 }
-
-const STATION_OPTIONS = [
-  { value: '', label: 'Из категории' },
-  { value: 'kitchen', label: 'Кухня' },
-  { value: 'bar', label: 'Бар' },
-  { value: 'none', label: 'Без отправки' },
-];
 
 function weightedBaseLabel(dish: Pick<AdminDish, 'weightedMeasure' | 'weightedPriceBase'>) {
   const small = dish.weightedMeasure === 'volume' ? 'мл' : 'г';
@@ -56,10 +52,13 @@ export function MenuScreen() {
   const [dishModal, setDishModal] = useState<AdminDish | null | 'new'>(null);
   const [setModal, setSetModal] = useState<AdminDish | null | 'new'>(null);
   const [catModal, setCatModal] = useState(false);
+  const [stationsOpen, setStationsOpen] = useState(false);
   const [recipeDish, setRecipeDish] = useState<AdminDish | null>(null);
 
   const overview = useMenuOverview();
   const categoriesQ = useAdminCategories();
+  const { stations } = usePrepStations();
+  const isOwner = useAuth((state) => state.user?.role === 'OWNER');
   const dishesQ = useAdminDishes(categoryId, search);
   const { remove } = useDishMutations();
   const push = useNotifications((s) => s.push);
@@ -67,6 +66,7 @@ export function MenuScreen() {
   const categories = categoriesQ.data ?? [];
 
   const stationByCat = new Map(categories.map((c) => [c.id, c.prepStation ?? 'kitchen']));
+  const stationNames = new Map(stations.map((station) => [station.id, station.name]));
   const dishStation = (d: AdminDish) => d.prepStation ?? stationByCat.get(d.categoryId) ?? 'kitchen';
 
   const onDelete = (d: AdminDish) =>
@@ -114,6 +114,7 @@ export function MenuScreen() {
       <SheetScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.headerBtns}>
         <MenuAction label="Категория" onPress={() => setCatModal(true)} />
         <MenuAction label="Сет" onPress={() => setSetModal('new')} />
+        {isOwner ? <MenuAction label="Станции" onPress={() => setStationsOpen(true)} /> : null}
         <MenuAction primary label="Добавить блюдо" onPress={() => setDishModal('new')} />
       </SheetScrollView>
 
@@ -134,7 +135,10 @@ export function MenuScreen() {
             <SheetScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ width: MENU_TABLE_WIDTH }}>
               <View style={{ width: MENU_TABLE_WIDTH }}>
                 <View style={styles.tableHead}>{MENU_COLUMNS.map(column => <Text key={column.label} style={[styles.tableHeading, { width: column.width, textAlign: column.right ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
-                {dishesQ.data.map(dish => <DishRow key={dish.id} dish={dish} station={dishStation(dish)} onEdit={() => openEdit(dish)} onDelete={() => onDelete(dish)} />)}
+                {dishesQ.data.map(dish => {
+                  const station = dishStation(dish);
+                  return <DishRow key={dish.id} dish={dish} station={station} stationName={stationNames.get(station)} onEdit={() => openEdit(dish)} onDelete={() => onDelete(dish)} />;
+                })}
               </View>
             </SheetScrollView>
           )
@@ -153,6 +157,7 @@ export function MenuScreen() {
       ) : null}
       {setModal !== null ? <SetModal set={setModal === 'new' ? null : setModal} onClose={() => setSetModal(null)} /> : null}
       {catModal ? <CategoryModal categories={categories} onClose={() => setCatModal(false)} /> : null}
+      {stationsOpen ? <PrepStationsSheet onClose={() => setStationsOpen(false)} /> : null}
       {recipeDish ? <RecipeEditor dish={recipeDish} onClose={() => setRecipeDish(null)} /> : null}
     </>
   );
@@ -168,11 +173,13 @@ function MenuAction({ label, primary, onPress }: { label: string; primary?: bool
 function DishRow({
   dish: d,
   station,
+  stationName,
   onEdit,
   onDelete,
 }: {
   dish: AdminDish;
   station: PrepStation;
+  stationName?: string;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -194,7 +201,7 @@ function DishRow({
           </Text>
           {d.isSet ? <MiniBadge label="Сет" bg={colors.warningSoft} fg={colors.warning} /> : null}
           {d.isWeighted ? <MiniBadge label="Весовое" bg={colors.primarySoft} fg={colors.primary} /> : null}
-          {station === 'bar' ? <MiniBadge label="Бар" bg={colors.primarySoft} fg={colors.primary} /> : null}
+          {station !== 'kitchen' && station !== 'none' && stationName ? <MiniBadge label={stationName} bg={colors.primarySoft} fg={colors.primary} /> : null}
           {station === 'none' ? <MiniBadge label="Без отправки" bg={colors.slate100} fg={colors.textMuted} /> : null}
         </View>
         {hasVar ? <Text style={styles.variantsLine}>{variantNamesLine(d.variants)}</Text> : null}
@@ -270,6 +277,7 @@ export function DishModal({
   presetInventory?: boolean;
 }) {
   const isEdit = !!dish;
+  const { stations } = usePrepStations();
   const { create, update } = useDishMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(dish?.name ?? '');
@@ -283,7 +291,7 @@ export function DishModal({
   const [isWeighted, setIsWeighted] = useState(dish?.isWeighted ?? false);
   const [weightedMeasure, setWeightedMeasure] = useState<'weight' | 'volume'>(dish?.weightedMeasure ?? 'weight');
   const [weightedPriceBase, setWeightedPriceBase] = useState(dish?.weightedPriceBase ?? 100);
-  const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar' | 'none'>(dish?.prepStation ?? '');
+  const [prepStation, setPrepStation] = useState<PrepStation>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<VariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [photoUrl, setPhotoUrl] = useState(dish?.imageUrl?.startsWith('http') ? dish.imageUrl : '');
   const [photoPayload, setPhotoPayload] = useState<string | undefined>(undefined);
@@ -399,7 +407,7 @@ export function DishModal({
           <Select value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ value: c.id, label: c.name , translate: false }))} title="Категория" />
         </Field>
         <Field label="Направление">
-          <Select value={prepStation} onChange={(v) => setPrepStation(v as typeof prepStation)} options={STATION_OPTIONS} title="Направление" />
+          <Select value={prepStation} onChange={setPrepStation} options={[{ value: '', label: 'Из категории' }, ...prepStationOptions(stations, prepStation)]} title="Направление" />
         </Field>
         <Field label="Цена">
           <TextInput style={styles.input} value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textLight} />
@@ -513,9 +521,11 @@ export function DishModal({
 function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void }) {
   const isEdit = !!set;
   const { create, update } = useSetMutations();
+  const { stations } = usePrepStations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(set?.name ?? '');
   const [price, setPrice] = useState(set ? String(Number(set.price)) : '');
+  const [prepStation, setPrepStation] = useState<PrepStation>(set?.prepStation ?? '');
   const [components, setComponents] = useState<SetCompDraft[]>(() =>
     (set?.setComponents ?? [])
       .map((component): SetCompDraft | null => {
@@ -593,6 +603,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
     const body = {
       name: name.trim(),
       price: priceNum,
+      prepStation: prepStation || null,
       components: components.map((component) => ({
         dishId: component.dishId,
         dishVariantId: component.dishVariantId,
@@ -645,6 +656,11 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
             />
           </Field>
         </View>
+
+        <Field label="Направление">
+          <Select value={prepStation} onChange={setPrepStation}
+            options={[{ value: '', label: 'Из категории' }, ...prepStationOptions(stations, prepStation)]} title="Направление" />
+        </Field>
 
         <View>
           <Text style={styles.setSectionTitle} translate>Состав сета</Text>
@@ -748,9 +764,12 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
 
 function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; onClose: () => void }) {
   const { create, update, reorder } = useCategoryMutations();
+  const { stations } = usePrepStations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState('');
-  const [prepStation, setPrepStation] = useState<'kitchen' | 'bar' | 'none'>('kitchen');
+  const defaultStation = stations.find((station) => station.isActive)?.id ?? 'none';
+  const [selectedStation, setPrepStation] = useState<PrepStation>();
+  const prepStation = selectedStation ?? defaultStation;
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -763,13 +782,13 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
     try {
       await create.mutateAsync({ name: name.trim(), prepStation });
       setName('');
-      setPrepStation('kitchen');
+      setPrepStation(undefined);
       push({ message: 'Категория добавлена', at: new Date().toISOString() });
     } catch (err) {
       setError(apiError(err));
     }
   };
-  const changeStation = (id: string, value: 'kitchen' | 'bar' | 'none') =>
+  const changeStation = (id: string, value: PrepStation) =>
     update.mutateAsync({ id, prepStation: value }).catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }));
   const saveRename = async (id: string) => {
     const newName = editName.trim();
@@ -791,12 +810,6 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
     reorder.mutateAsync(ids).catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }));
   };
 
-  const stationOpts = [
-    { value: 'kitchen', label: 'Кухня' },
-    { value: 'bar', label: 'Бар' },
-    { value: 'none', label: 'Без отправки' },
-  ];
-
   return (
     <BottomSheet visible onClose={onClose} title="Категории" maxHeight="88%">
       <View style={styles.catAddRow}>
@@ -804,7 +817,7 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
       </View>
       <View style={[styles.grid2, { marginTop: spacing.sm }]}>
         <View style={{ flex: 1 }}>
-          <Select value={prepStation} onChange={(v) => setPrepStation(v as 'kitchen' | 'bar' | 'none')} options={stationOpts} title="Направление" />
+          <Select value={prepStation} onChange={setPrepStation} options={prepStationOptions(stations, prepStation)} title="Направление" />
         </View>
         <Button title="Добавить" size="md" loading={create.isPending} onPress={add} />
       </View>
@@ -858,7 +871,7 @@ function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; o
               </FastPressable>
             )}
             <View style={{ width: 130 }}>
-              <Select value={c.prepStation ?? 'kitchen'} onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar' | 'none')} options={stationOpts} title="Направление" />
+              <Select value={c.prepStation ?? 'kitchen'} onChange={(v) => changeStation(c.id, v)} options={prepStationOptions(stations, c.prepStation)} title="Направление" />
             </View>
             <Text style={styles.catCount} translate>{c._count.dishes} бл.</Text>
             <FastPressable onPress={() => setDeleteTarget(c)} hitSlop={6} style={styles.iconBtn}>

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { InteractionManager, RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { Text } from '@/components/typography';
 import Animated, {
   interpolate,
@@ -111,9 +111,7 @@ export function TablesScreen() {
       push({ message: 'Сначала выберите стол', type: 'error', at: new Date().toISOString() });
       return;
     }
-    InteractionManager.runAfterInteractions(() => {
-      setTableModal(modal);
-    });
+    setTableModal(modal);
   };
 
   React.useEffect(() => {
@@ -245,7 +243,7 @@ export function TablesScreen() {
             items={halls.data.map((h) => ({ key: h.id, label: h.name , translate: false }))}
             value={currentHall?.id ?? ''}
             onChange={setHallId}
-            style={{ marginBottom: spacing.lg }}
+            style={styles.hallTabs}
           />
         ) : null}
 
@@ -532,8 +530,9 @@ function TransferTableSheet({
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
-  panel: { flex: 1, paddingHorizontal: spacing.sm, paddingTop: 10 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md },
+  panel: { flex: 1, paddingHorizontal: spacing.sm, paddingTop: spacing.sm },
+  titleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  hallTabs: { marginBottom: spacing.md },
   panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   actionsAnchor: { position: 'relative', zIndex: 30 },
   editBtn: {
@@ -553,7 +552,7 @@ const styles = StyleSheet.create({
   tableActionsMenu: {
     position: 'absolute',
     right: spacing.sm,
-    top: 10 + 38,
+    top: spacing.sm + 38,
     width: 192,
     borderWidth: 1,
     borderColor: colors.border,
@@ -585,7 +584,7 @@ const styles = StyleSheet.create({
   tableNumber: { fontWeight: '500', color: colors.textPrimary },
 
   legend: {
-    marginTop: spacing.md,
+    marginTop: spacing.sm,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     flexGrow: 0,

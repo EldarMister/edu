@@ -5,7 +5,14 @@
 export type Role = 'WAITER' | 'KITCHEN' | 'BAR' | 'ADMIN' | 'OWNER';
 
 /** Направление приготовления/выдачи позиции. `none` — без отправки (официант забирает сам). */
-export type PrepStation = 'kitchen' | 'bar' | 'none';
+export type PrepStation = string;
+
+export interface PrepStationEntry {
+  id: PrepStation;
+  name: string;
+  isActive: boolean;
+  isBuiltIn: boolean;
+}
 
 export type SectionKey =
   | 'statistics'
@@ -33,6 +40,7 @@ export interface EmployeePermissions {
 }
 
 export interface AuthUser {
+  prepStation?: string | null;
   id: string;
   cafeId?: string | null;
   name: string;
@@ -225,6 +233,7 @@ export interface Order {
   requiresWaiterDecision: boolean;
   createdAt: string;
   updatedAt?: string;
+  stationHistoryAt?: string | null;
   table: {
     id: string;
     number: number;

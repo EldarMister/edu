@@ -11,8 +11,8 @@ function load(file, modules = {}) {
  { module, exports: module.exports, require: id => { assert.ok(id in modules, id); return modules[id]; } });
  return module.exports;
 }
-function harness(reduced = false, deferSharedWrites = false) {
- const { PanelHistory } = load('history.ts'); const history = new PanelHistory();
+function harness(reduced = false, deferSharedWrites = false, { history: sharedHistory, id = 'panel', parent } = {}) {
+ const { PanelHistory } = load('history.ts'); const history = sharedHistory ?? new PanelHistory();
  const cells = [], animations = []; let cursor = 0, effects = [], dirty = false, value, closes = 0, dismisses = 0;
  const differs = (a, b) => !a || a.length !== b.length || b.some((v,i) => !Object.is(v,a[i]));
  const React = {
@@ -36,7 +36,7 @@ function harness(reduced = false, deferSharedWrites = false) {
    useSharedValue:value=>React.useRef(shared(value)).current,useReducedMotion:()=>reduced,withTiming:animate,withSpring:animate },
   './history':{panelHistory:history}, './context':{useBottomPanelHistory:()=>history.getSnapshot()}, './geometry':load('geometry.ts'),
  });
- const props={id:'panel',visible:true,persistent:false,inline:false,draggable:true,onClose:()=>closes++,onDismiss:()=>dismisses++};
+ const props={id,parent,visible:true,persistent:false,inline:false,draggable:true,onClose:()=>closes++,onDismiss:()=>dismisses++};
  function render() { let loops=0; do { assert.ok(++loops<20,'render loop');dirty=false;cursor=0;effects=[];const before=history.getSnapshot();value=useBottomPanel(props);effects.forEach(fn=>fn());if(before!==history.getSnapshot())dirty=true;}while(dirty);writes.splice(0).forEach(write=>write());return value; }
  render();value.measure(200);render();
  return {props,history,animations,get value(){return value;},render,get closes(){return closes;},get dismisses(){return dismisses;},unmount(){cells.forEach(cell=>cell?.cleanup?.());},finish(){animations.at(-1).done?.(true);render();}};
@@ -47,11 +47,13 @@ test('the first layout opens and enables drag even before shared writes reach th
  assert.equal(env.value.motion.enabled.value,true);
  assert.equal(env.value.motion.travel.value,224);
  assert.equal(env.value.motion.offset.value,0);
+ assert.equal(env.animations.at(-1).config.duration,550);
 });
 test('actual panel hook delays onClose until exit and consumes duplicate completions',()=>{
  const env=harness(); assert.equal(env.value.motion.travel.value,224);
  env.value.motion.close(920); env.value.motion.close(920);
  assert.equal(env.closes,0);assert.equal(env.animations.at(-1).config.velocity,920);
+ assert.equal(env.animations.at(-1).config.duration,300);
  const callback=env.animations.at(-1).done;env.finish();callback(true);
  assert.equal(env.closes,1);assert.equal(env.dismisses,1);assert.equal(env.value.rendered,false);
 });
@@ -64,11 +66,21 @@ test('unmount prevents animation callbacks from notifying a removed owner',()=>{
  const env=harness();env.value.motion.close();const callback=env.animations.at(-1).done;
  env.unmount();callback(true);assert.equal(env.closes,0);assert.equal(env.dismisses,0);
 });
-test('temporary panel suspension preserves the old hook and returns without invoking its close callback',()=>{
- const env=harness();env.history.add({id:'child',parent:'panel',persistent:false,inline:false});env.render();env.finish();
- assert.equal(env.history.getSnapshot().active,'child');assert.equal(env.value.rendered,true);
+test('the next panel starts opening before the previous one finishes its suspension',()=>{
+ const env=harness();
+ const child=harness(false,true,{history:env.history,id:'child',parent:'panel'});
+ env.render();
+ const outgoing=env.animations.at(-1);
+ assert.equal(outgoing.config.duration,300);
+ assert.equal(env.value.interactive,false);
+ assert.equal(child.value.interactive,true);
+ assert.equal(child.animations.at(-1).config.duration,550);
+ outgoing.done(true);
+ assert.equal(env.history.getSnapshot().active,'child');
+ assert.equal(env.value.rendered,true);
  assert.equal(env.closes,0);assert.equal(env.dismisses,0);
- env.history.remove('child');env.render();assert.equal(env.value.motion.offset.value,0);assert.equal(env.value.interactive,true);
+ child.unmount();
+ env.render();assert.equal(env.value.motion.offset.value,0);assert.equal(env.value.interactive,true);
 });
 test('Reduce Motion closes immediately without waiting for a spatial animation',()=>{
  const env=harness(true);env.value.motion.close();env.render();assert.equal(env.closes,1);assert.equal(env.dismisses,1);

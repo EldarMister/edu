@@ -190,7 +190,7 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  viewport: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', alignItems: 'center' },
+  viewport: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', alignItems: 'center', overflow: 'hidden' },
   centered: { justifyContent: 'center' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
   panel: { alignSelf: 'center', flexShrink: 1 },
