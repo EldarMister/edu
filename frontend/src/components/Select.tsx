@@ -18,6 +18,7 @@ export function Select({
   placeholder = 'Выберите',
   className = '',
   disabled = false,
+  ariaLabel,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -25,6 +26,7 @@ export function Select({
   placeholder?: string;
   className?: string;
   disabled?: boolean;
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -87,6 +89,7 @@ export function Select({
       <button
         type="button"
         ref={triggerRef}
+        aria-label={ariaLabel}
         disabled={disabled}
         onClick={() => setOpen((o) => !o)}
         className={`flex items-center justify-between gap-2 rounded-xl border bg-white px-3.5 text-left text-[15px] outline-none transition-colors ${

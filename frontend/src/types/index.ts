@@ -1,7 +1,7 @@
 export type Role = 'WAITER' | 'KITCHEN' | 'BAR' | 'ADMIN' | 'OWNER';
 
 /** Направление приготовления/выдачи позиции. `none` — без отправки (официант забирает сам). */
-export type PrepStation = 'kitchen' | 'bar' | 'none';
+export type PrepStation = string;
 
 export type SectionKey =
   | 'statistics'
@@ -217,6 +217,7 @@ export interface OrderItem {
 }
 
 export interface Order {
+  stationHistoryAt?: string;
   id: string;
   orderNumber: string;
   status: OrderStatus;

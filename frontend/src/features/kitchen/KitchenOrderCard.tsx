@@ -12,6 +12,7 @@ const FINAL_ITEM_STATUSES: OrderItemStatus[] = ['rejected', 'cancelled', 'ready'
 const QR_ORDER_COMMENT = 'Заказ из QR-меню';
 
 function kitchenCardBadgeStatus(order: Order, tab: KitchenTab): OrderStatus {
+  if (tab === 'cancelled' || tab === 'rejected') return tab;
   if (tab !== 'ready' || order.status === 'paid') return order.status;
 
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
@@ -70,6 +71,7 @@ export function KitchenOrderCard({
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
   const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
   const badgeStatus = kitchenCardBadgeStatus(order, tab);
+  const historyAt = order.stationHistoryAt ?? order.createdAt;
   const qrOrder = isQrOrder(order);
   const deliveryOrder = order.source === 'delivery';
   const visibleOrderComment = kitchenOrderComment(order.comment, qrOrder);
@@ -331,7 +333,7 @@ export function KitchenOrderCard({
             {/* Завершённые/отказанные показываем с датой — их смотрят позже. */}
             {tab === 'new' || tab === 'in_work'
               ? timeHM(order.createdAt)
-              : `${dateDM(order.createdAt)} ${timeHM(order.createdAt)}`}
+              : `${dateDM(historyAt)} ${timeHM(historyAt)}`}
           </p>
           {tab === 'new' || tab === 'in_work' ? (
             <p className={`text-[15px] font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
@@ -362,7 +364,7 @@ export function KitchenOrderCard({
         </div>
       )}
 
-      {stationRejected && (
+      {stationRejected && (tab === 'new' || tab === 'in_work') && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger">
             Частичный отказ
@@ -380,6 +382,7 @@ export function KitchenOrderCard({
         {order.items.map((it) => {
           const itemName = orderItemDisplayName(it);
           const itemComment = kitchenItemComment(it.comment, qrOrder);
+          const historyReason = (tab === 'cancelled' || tab === 'rejected') && it.rejectReason;
           const setParts = it.setComponents ?? [];
           const isSet = setParts.length > 0;
           const header = (
@@ -402,6 +405,7 @@ export function KitchenOrderCard({
             return (
               <li key={it.id} className="text-[15px]">
                 {renderLine(it.id, it.status, header)}
+                {historyReason && <p className="mt-1 text-sm text-text-muted">Причина: {historyReason}</p>}
                 {showStepper && (
                   <div className="mt-1.5 flex items-center gap-2 pl-9 text-[13px] text-text-secondary">
                     <span>Количество:</span>
@@ -494,11 +498,16 @@ export function KitchenOrderCard({
                       </li>
                     ) : (
                       // Каждое блюдо внутри сета — отдельная выбираемая позиция.
-                      <li key={sc.id}>{renderLine(sc.id, sc.status, componentLabel(sc))}</li>
+                      <li key={sc.id}>
+                        {renderLine(sc.id, sc.status, componentLabel(sc))}
+                        {(tab === 'rejected' || tab === 'cancelled') && sc.rejectReason &&
+                          <p className="mt-1 text-sm text-text-muted">Причина: {sc.rejectReason}</p>}
+                      </li>
                     ),
                   )}
                 </ul>
               )}
+              {historyReason && <p className="mt-1 text-sm text-text-muted">Причина: {historyReason}</p>}
             </li>
           );
         })}

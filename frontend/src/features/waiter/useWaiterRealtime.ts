@@ -226,6 +226,7 @@ export function useWaiterRealtime() {
   });
   // Владелец изменил QR, способы оплаты или другие публичные настройки.
   useSocketEvent('settings:updated', () => {
+    void qc.invalidateQueries({ queryKey: ['prep-stations'] });
     qc.invalidateQueries({ queryKey: ['settings'] });
   });
 

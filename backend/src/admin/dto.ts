@@ -15,7 +15,7 @@ import {
   IsIn,
   ValidateNested,
 } from 'class-validator';
-import { Role, DiscountType, TableStatus, PrepStation, OrderStatus } from '@prisma/client';
+import { Role, DiscountType, TableStatus, OrderStatus } from '@prisma/client';
 
 // ---------- Залы ----------
 export class CreateHallDto {
@@ -72,8 +72,8 @@ export class CreateCategoryDto {
   @IsOptional() @IsInt()
   sortOrder?: number;
 
-  @IsOptional() @IsEnum(PrepStation)
-  prepStation?: PrepStation;
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string;
 }
 export class UpdateCategoryDto {
   @IsOptional() @IsString() @MaxLength(60)
@@ -85,8 +85,8 @@ export class UpdateCategoryDto {
   @IsOptional() @IsInt()
   sortOrder?: number;
 
-  @IsOptional() @IsEnum(PrepStation)
-  prepStation?: PrepStation;
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string;
 }
 
 /** Удаление категории: что сделать с блюдами внутри. */
@@ -185,8 +185,8 @@ export class CreateDishDto {
   unit?: string;
 
   // null = брать направление из категории; задано — приоритет блюда.
-  @IsOptional() @IsEnum(PrepStation)
-  prepStation?: PrepStation | null;
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string | null;
 
   // Отдельное название для озвучки кухни (если задано — используется вместо name).
   @IsOptional() @IsString() @MaxLength(120)
@@ -248,8 +248,8 @@ export class UpdateDishDto {
   unit?: string;
 
   // null = брать направление из категории; задано — приоритет блюда.
-  @IsOptional() @IsEnum(PrepStation)
-  prepStation?: PrepStation | null;
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string | null;
 
   // Отдельное название для озвучки кухни.
   @IsOptional() @IsString() @MaxLength(120)
@@ -279,6 +279,9 @@ export class SetComponentDto {
 }
 
 export class CreateSetDto {
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string | null;
+
   @IsString() @IsNotEmpty() @MaxLength(120)
   name: string;
 
@@ -291,6 +294,9 @@ export class CreateSetDto {
 }
 
 export class UpdateSetDto {
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string | null;
+
   @IsOptional() @IsString() @MaxLength(120)
   name?: string;
 

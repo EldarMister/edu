@@ -7,6 +7,9 @@ import { apiError } from '@/lib/api';
 import { downscaleToDataUrl, resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
+import { useAuth } from '@/store/auth';
+import { routingOptions, usePreparationStations, usePreparationStationUpdates, type PreparationStation } from '@/features/kitchen/stations';
+import { PreparationStationsModal } from './PreparationStationsModal';
 import { IconEdit, IconTrash, IconPlus } from '../components/icons';
 import { RecipeEditor } from './warehouse/RecipeEditor';
 import { useRecipe } from './warehouse/api';
@@ -29,6 +32,10 @@ export function MenuPage() {
   const [dishModal, setDishModal] = useState<AdminDish | null | 'new'>(null);
   const [setModal, setSetModal] = useState<AdminDish | null | 'new'>(null);
   const [catModal, setCatModal] = useState(false);
+  const [stationsOpen, setStationsOpen] = useState(false);
+  const owner = useAuth((state) => state.user?.role === 'OWNER');
+  const stations = usePreparationStations().data ?? [];
+  usePreparationStationUpdates();
 
   const overview = useMenuOverview();
   const categoriesQ = useAdminCategories();
@@ -41,6 +48,8 @@ export function MenuPage() {
   // Эффективное направление блюда: своё, иначе — направление категории.
   const stationByCat = new Map((categoriesQ.data ?? []).map((c) => [c.id, c.prepStation ?? 'kitchen']));
   const dishStation = (d: AdminDish) => d.prepStation ?? stationByCat.get(d.categoryId) ?? 'kitchen';
+  const stationNames = new Map(routingOptions(stations).map((option) => [option.value, option.label]));
+  for (const station of stations) stationNames.set(station.id, station.name);
 
   async function onDelete(d: AdminDish) {
     if (!confirm(`Удалить блюдо «${d.name}»?`)) return;
@@ -72,7 +81,8 @@ export function MenuPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              {owner && <button className="btn-secondary btn-md" onClick={() => setStationsOpen(true)}>{tr('Станции')}</button>}
               <button className="btn-secondary btn-md" onClick={() => setCatModal(true)}>
                 <IconPlus className="h-4 w-4" /> {tr('Категория')}
               </button>
@@ -130,9 +140,9 @@ export function MenuPage() {
                             Весовое
                           </span>
                         )}
-                        {dishStation(d) === 'bar' && (
+                        {dishStation(d) !== 'none' && (
                           <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                            Бар
+                            {stationNames.get(dishStation(d)) ?? 'Станция'}
                           </span>
                         )}
                         {dishStation(d) === 'none' && (
@@ -203,16 +213,18 @@ export function MenuPage() {
         <DishModal
           dish={dishModal === 'new' ? null : dishModal}
           categories={categoriesQ.data ?? []}
+          stations={stations}
           defaultCategoryId={categoryId}
           onClose={() => setDishModal(null)}
         />
       )}
       {setModal !== null && (
-        <SetModal set={setModal === 'new' ? null : setModal} onClose={() => setSetModal(null)} />
+        <SetModal set={setModal === 'new' ? null : setModal} stations={stations} onClose={() => setSetModal(null)} />
       )}
       {catModal && (
-        <CategoryModal categories={categoriesQ.data ?? []} onClose={() => setCatModal(false)} />
+        <CategoryModal categories={categoriesQ.data ?? []} stations={stations} onClose={() => setCatModal(false)} />
       )}
+      {owner && stationsOpen && <PreparationStationsModal stations={stations} onClose={() => setStationsOpen(false)} />}
     </div>
   );
 }
@@ -252,11 +264,13 @@ function variantDraft(variant?: AdminDishVariant): DishVariantDraft {
 function DishModal({
   dish,
   categories,
+  stations,
   defaultCategoryId,
   onClose,
 }: {
   dish: AdminDish | null;
   categories: AdminCategory[];
+  stations: PreparationStation[];
   defaultCategoryId: string;
   onClose: () => void;
 }) {
@@ -279,7 +293,7 @@ function DishModal({
   const [weightedMeasure, setWeightedMeasure] = useState<'weight' | 'volume'>(dish?.weightedMeasure ?? 'weight');
   const [weightedPriceBase, setWeightedPriceBase] = useState(dish?.weightedPriceBase ?? 100);
   // '' = брать направление из категории; иначе приоритет блюда.
-  const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar' | 'none'>(dish?.prepStation ?? '');
+  const [prepStation, setPrepStation] = useState(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -532,7 +546,7 @@ function DishModal({
                 <Field label="Название"><input className="input h-11" value={name} onChange={(e) => setName(e.target.value)} /></Field>
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Категория"><Select className="h-11 w-full" value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ value: c.id, label: c.name }))} /></Field>
-                  <Field label="Куда отправлять"><Select className="h-11 w-full" value={prepStation} onChange={(v) => setPrepStation(v as '' | 'kitchen' | 'bar' | 'none')} options={[{ value: '', label: 'По категории' }, { value: 'kitchen', label: 'Кухня' }, { value: 'bar', label: 'Бар' }, { value: 'none', label: 'Без отправки' }]} /></Field>
+                  <Field label="Куда отправлять"><Select className="h-11 w-full" value={prepStation} onChange={setPrepStation} options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, prepStation)]} /></Field>
                 </div>
                 <Field label="Описание">
                   <div className="relative"><textarea className="input min-h-[84px] resize-none py-2.5 pr-12" maxLength={300} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Необязательно" /><span className="absolute bottom-2 right-3 text-[11px] text-text-muted">{description.length}/300</span></div>
@@ -703,15 +717,17 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (che
 
 function CategoryModal({
   categories,
+  stations,
   onClose,
 }: {
   categories: AdminCategory[];
+  stations: PreparationStation[];
   onClose: () => void;
 }) {
   const { create, update, reorder } = useCategoryMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState('');
-  const [prepStation, setPrepStation] = useState<'kitchen' | 'bar' | 'none'>('kitchen');
+  const [prepStation, setPrepStation] = useState('kitchen');
   const [error, setError] = useState('');
   // Инлайн-переименование.
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -734,7 +750,7 @@ function CategoryModal({
     }
   }
 
-  async function changeStation(id: string, value: 'kitchen' | 'bar' | 'none') {
+  async function changeStation(id: string, value: string) {
     try {
       await update.mutateAsync({ id, prepStation: value });
     } catch (err) {
@@ -779,12 +795,8 @@ function CategoryModal({
         <Select
           className="h-11 w-40 shrink-0"
           value={prepStation}
-          onChange={(v) => setPrepStation(v as 'kitchen' | 'bar' | 'none')}
-          options={[
-            { value: 'kitchen', label: 'Кухня' },
-            { value: 'bar', label: 'Бар' },
-            { value: 'none', label: 'Без отправки' },
-          ]}
+          onChange={setPrepStation}
+          options={routingOptions(stations, prepStation)}
         />
         <button className="btn-primary btn-md shrink-0" disabled={create.isPending} onClick={add}>
           {create.isPending ? <Spinner /> : 'Добавить'}
@@ -841,12 +853,8 @@ function CategoryModal({
               <Select
                 className="h-9 w-32"
                 value={c.prepStation ?? 'kitchen'}
-                onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar' | 'none')}
-                options={[
-                  { value: 'kitchen', label: 'Кухня' },
-                  { value: 'bar', label: 'Бар' },
-                  { value: 'none', label: 'Без отправки' },
-                ]}
+                onChange={(value) => changeStation(c.id, value)}
+                options={routingOptions(stations, c.prepStation)}
               />
               <span className="w-14 text-right text-xs text-text-muted">{c._count.dishes} бл.</span>
               <button
@@ -965,12 +973,13 @@ interface SetCompDraft {
   replaceable: boolean;
 }
 
-function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void }) {
+function SetModal({ set, stations, onClose }: { set: AdminDish | null; stations: PreparationStation[]; onClose: () => void }) {
   const isEdit = !!set;
   const { create, update } = useSetMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(set?.name ?? '');
   const [price, setPrice] = useState(set ? String(Number(set.price)) : '');
+  const [prepStation, setPrepStation] = useState(set?.prepStation ?? '');
   const [components, setComponents] = useState<SetCompDraft[]>(() =>
     (set?.setComponents ?? []).map((c) => ({
       uid: c.id,
@@ -1025,6 +1034,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
     const body = {
       name: name.trim(),
       price: priceNum,
+      prepStation: prepStation || null,
       components: components.map((c) => ({
         dishId: c.dishId,
         dishVariantId: c.dishVariantId,
@@ -1075,6 +1085,10 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
           </Field>
         </div>
 
+        <Field label="Куда отправлять сет">
+          <Select className="h-11 w-full" value={prepStation} onChange={setPrepStation}
+            options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, prepStation)]} />
+        </Field>
         <div>
           <p className="mb-1.5 text-sm font-medium text-text-secondary">Состав сета</p>
           {components.length === 0 ? (

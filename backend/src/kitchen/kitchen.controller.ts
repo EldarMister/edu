@@ -1,5 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { PrepStation, Role } from '@prisma/client';
+import { Role } from '@prisma/client';
+import { PrismaService } from '../prisma/prisma.service';
+import { resolveStation } from './preparation-stations';
 import { KitchenService, KitchenStatsPeriod, KitchenTab } from './kitchen.service';
 import { OrdersService } from '../orders/orders.service';
 import { RejectDto } from './dto/reject.dto';
@@ -14,107 +16,123 @@ export class KitchenController {
   constructor(
     private readonly kitchen: KitchenService,
     private readonly orders: OrdersService,
+    private readonly prisma: PrismaService,
   ) {}
 
-  /** Станция из query (?station=kitchen|bar); по умолчанию — кухня. */
-  private parseStation(value?: string): PrepStation {
-    return value === PrepStation.bar ? PrepStation.bar : PrepStation.kitchen;
-  }
-
   @Get('orders')
-  list(@Query('tab') tab: KitchenTab = 'new', @Query('station') station?: string) {
-    return this.kitchen.findByTab(tab, this.parseStation(station));
+  async list(
+    @CurrentUser() user: AuthUser,
+    @Query('tab') tab: KitchenTab = 'new',
+    @Query('station') station?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    const selected = await resolveStation(this.prisma, user, station);
+    return this.kitchen.findByTab(tab, selected.id, from, to);
   }
 
   @Get('statistics')
-  statistics(
+  async statistics(
+    @CurrentUser() user: AuthUser,
     @Query('period') period: KitchenStatsPeriod = 'today',
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('station') station?: string,
   ) {
-    return this.kitchen.statistics(period, from, to, this.parseStation(station));
+    const selected = await resolveStation(this.prisma, user, station);
+    return this.kitchen.statistics(period, from, to, selected.id);
   }
 
   @Get('stop-list')
-  stopList(@Query('station') station?: string) {
-    return this.kitchen.getStopList(this.parseStation(station));
+  async stopList(@CurrentUser() user: AuthUser, @Query('station') station?: string) {
+    const selected = await resolveStation(this.prisma, user, station);
+    return this.kitchen.getStopList(selected.id);
   }
 
   @Patch('stop-list')
-  updateStopList(@CurrentUser() user: AuthUser, @Body() dto: UpdateStopListDto) {
-    return this.kitchen.updateStopList(user, dto.items);
+  async updateStopList(@CurrentUser() user: AuthUser, @Body() dto: UpdateStopListDto, @Query('station') station?: string) {
+    const selected = await resolveStation(this.prisma, user, station);
+    return this.kitchen.updateStopList(user, dto.items, selected.id);
   }
 
   @Post('orders/:id/accept')
-  accept(@Param('id') id: string, @CurrentUser() user: AuthUser, @Query('station') station?: string) {
-    return this.orders.stationAccept(id, user.id, this.parseStation(station));
+  async accept(@Param('id') id: string, @CurrentUser() user: AuthUser, @Query('station') station?: string) {
+    const selected = await resolveStation(this.prisma, user, station);
+    return this.orders.stationAccept(id, user.id, selected.id, selected.name);
   }
 
   @Post('orders/:id/ready')
-  ready(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.orders.kitchenReady(id, user.id);
+  async ready(@Param('id') id: string, @CurrentUser() user: AuthUser, @Query('station') station?: string) {
+    const selected = await resolveStation(this.prisma, user, station);
+    return this.orders.kitchenReadyStation(id, user.id, selected.id);
   }
 
   @Post('orders/:id/reject')
-  rejectOrder(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: RejectDto) {
-    return this.orders.kitchenRejectOrder(id, user.id, dto.reason, dto.comment);
+  async rejectOrder(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: RejectDto, @Query('station') station?: string) {
+    const selected = await resolveStation(this.prisma, user, station);
+    return this.orders.kitchenRejectStation(id, user.id, selected.id, dto.reason, dto.comment, selected.name);
   }
 
   @Post('orders/:id/items/:itemId/reject')
-  rejectItem(
+  async rejectItem(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @CurrentUser() user: AuthUser,
     @Body() dto: RejectDto,
+    @Query('station') station?: string,
   ) {
-    return this.orders.kitchenRejectItem(id, itemId, user.id, dto.reason, dto.comment);
+    const selected = await resolveStation(this.prisma, user, station);
+    return this.orders.kitchenRejectItems(id, [itemId], user.id, dto.reason, dto.comment, selected.id, [], [], selected.name);
   }
 
   @Post('orders/:id/items/:itemId/ready')
-  readyItem(
+  async readyItem(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
     @CurrentUser() user: AuthUser,
+    @Query('station') station?: string,
   ) {
-    return this.orders.kitchenReadyItem(id, itemId, user.id);
+    const selected = await resolveStation(this.prisma, user, station);
+    return this.orders.kitchenReadyItems(id, [itemId], user.id, selected.id);
   }
 
   @Post('orders/:id/items/ready-batch')
-  readyItems(
+  async readyItems(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
     @Body() dto: ReadyItemsDto,
     @Query('station') station?: string,
   ) {
+    const selected = await resolveStation(this.prisma, user, station);
     return this.orders.kitchenReadyItems(
       id,
       dto.itemIds ?? [],
       user.id,
-      this.parseStation(station),
+      selected.id,
       dto.setComponentIds ?? [],
       dto.partial ?? [],
     );
   }
 
   @Post('orders/:id/items/reject-batch')
-  rejectItems(
+  async rejectItems(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
     @Body() dto: RejectItemsDto,
     @Query('station') station?: string,
   ) {
-    const st = this.parseStation(station);
-    const reason = dto.reason ?? (st === PrepStation.bar ? 'Отказ бара' : 'Отказ кухни');
+    const selected = await resolveStation(this.prisma, user, station);
+    const reason = dto.reason ?? `Отказ станции «${selected.name}»`;
     return this.orders.kitchenRejectItems(
       id,
       dto.itemIds ?? [],
       user.id,
       reason,
       dto.comment,
-      st,
+      selected.id,
       dto.setComponentIds ?? [],
       dto.partial ?? [],
+      selected.name,
     );
   }
 }

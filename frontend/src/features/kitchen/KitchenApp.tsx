@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { Spinner } from '@/components/Spinner';
+import { Select } from '@/components/Select';
 import { disconnectSocket } from '@/lib/socket';
 import { usePushNotifications } from '@/lib/push';
 import { useKitchenRealtime } from './useKitchenRealtime';
@@ -13,6 +15,7 @@ import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
 import { KitchenHandControl } from './hand-control/KitchenHandControl';
 import { KitchenStats } from './KitchenStats';
+import { usePreparationStations, usePreparationStationUpdates } from './stations';
 
 const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'new', label: 'Новые' },
@@ -46,12 +49,24 @@ function pluralPositions(n: number): string {
 }
 
 export function KitchenApp({
-  station = 'kitchen',
+  station: defaultStation = 'kitchen',
 }: {
   station?: PrepStation;
 } = {}) {
-  useKitchenRealtime(station);
   const { user, logout } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const stationKey = `edu-pos-prep-station:${user?.id ?? ''}:${defaultStation}`;
+  const [selectedStation, setSelectedStation] = useState(() => {
+    try { return localStorage.getItem(stationKey) ?? defaultStation; }
+    catch { return defaultStation; }
+  });
+  const stations = usePreparationStations();
+  usePreparationStationUpdates();
+  const canAccessBoth = user?.role === 'OWNER' || user?.role === 'ADMIN';
+  const availableStations = (stations.data ?? []).filter((item) => canAccessBoth || !item.isBuiltIn || item.id === defaultStation);
+  const requestedStation = searchParams.get('station') ?? selectedStation;
+  const station = availableStations.some((item) => item.id === requestedStation) ? requestedStation : defaultStation;
+  useKitchenRealtime(station);
   const push = useNotifications((s) => s.push);
   const pushNotifications = usePushNotifications(user?.role === 'KITCHEN' || user?.role === 'BAR');
 
@@ -61,8 +76,10 @@ export function KitchenApp({
   const [actingId, setActingId] = useState<string | null>(null);
   const [stopListOpen, setStopListOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const [historyRange, setHistoryRange] = useState({ from: '', to: '' });
+  const historyTab = tab === 'ready' || tab === 'rejected' || tab === 'cancelled';
 
-  const ordersQ = useKitchenOrders(tab, station);
+  const ordersQ = useKitchenOrders(tab, station, historyTab && historyRange.from && historyRange.to ? historyRange : undefined);
   const accept = useAccept(station);
   const readyItems = useReadyItems(station);
   const rejectItems = useRejectItems(station);
@@ -157,6 +174,22 @@ export function KitchenApp({
       {/* Шапка */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
         <div className="flex items-baseline gap-3">
+          <Select
+            ariaLabel="Станция приготовления"
+            className="h-10 max-w-[45vw]"
+            value={station}
+            options={availableStations.map((item) => ({ value: item.id, label: item.isActive ? item.name : `${item.name} (архив)` }))}
+            onChange={(value) => {
+              setSelectedStation(value);
+              if (searchParams.has('station')) {
+                const next = new URLSearchParams(searchParams);
+                next.delete('station');
+                setSearchParams(next, { replace: true });
+              }
+              try { localStorage.setItem(stationKey, value); } catch { /* Storage can be disabled. */ }
+            }}
+            disabled={!!pending || actingId !== null || stopListOpen}
+          />
           <span className="text-[26px] font-medium tracking-tight text-text-primary">
             {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
           </span>
@@ -218,6 +251,26 @@ export function KitchenApp({
         </div>
       </div>
 
+      {!showStats && historyTab && (
+        <div className="flex shrink-0 flex-wrap items-end gap-3 border-b border-border bg-white px-5 py-2 text-sm">
+          <label className="text-text-secondary">С даты
+            <input type="date" className="input ml-2" value={historyRange.from} max={historyRange.to || undefined}
+              onChange={(event) => {
+                const from = event.target.value;
+                setHistoryRange((range) => ({ from, to: !from ? '' : !range.to || from > range.to ? from : range.to }));
+              }} />
+          </label>
+          <label className="text-text-secondary">По дату
+            <input type="date" className="input ml-2" value={historyRange.to} min={historyRange.from || undefined}
+              onChange={(event) => {
+                const to = event.target.value;
+                setHistoryRange((range) => ({ to, from: !to ? '' : !range.from || to < range.from ? to : range.from }));
+              }} />
+          </label>
+          <button className="btn-secondary btn-md" onClick={() => setHistoryRange({ from: '', to: '' })}>Сегодня</button>
+        </div>
+      )}
+
       {/* Статистика кухни */}
       {showStats ? (
         <main className="flex-1 overflow-y-auto">
@@ -229,6 +282,11 @@ export function KitchenApp({
         {ordersQ.isLoading ? (
           <div className="flex justify-center py-16 text-primary">
             <Spinner className="h-7 w-7" />
+          </div>
+        ) : ordersQ.isError ? (
+          <div role="alert" className="py-12 text-center text-danger">
+            <p>{apiError(ordersQ.error)}</p>
+            <button className="btn-secondary btn-md mt-3" onClick={() => void ordersQ.refetch()}>Повторить</button>
           </div>
         ) : orders.length === 0 ? (
           <p className="py-16 text-center text-text-muted">

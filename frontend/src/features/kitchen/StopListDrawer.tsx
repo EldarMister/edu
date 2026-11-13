@@ -21,7 +21,7 @@ export function StopListDrawer({
   onClose: () => void;
 }) {
   const stopListQ = useStopList(open, station);
-  const save = useSaveStopList();
+  const save = useSaveStopList(station);
   const push = useNotifications((s) => s.push);
 
   const [search, setSearch] = useState('');

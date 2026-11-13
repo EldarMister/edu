@@ -1,5 +1,6 @@
-import { Injectable } from '@nestjs/common';
-import { KitchenEventType, OrderItemStatus, OrderStatus, PrepStation } from '@prisma/client';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import { KitchenEventType, OrderItemStatus, OrderStatus, Prisma } from '@prisma/client';
+import { PrepStation } from './preparation-stations';
 import { PrismaService } from '../prisma/prisma.service';
 import { orderInclude } from '../orders/order.helpers';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -66,6 +67,39 @@ type HistoryOrder = {
   closedAt: Date | null;
 };
 
+const HISTORY_ITEM_STATUS: Record<'ready' | 'rejected' | 'cancelled', OrderItemStatus[]> = {
+  ready: [OrderItemStatus.ready, OrderItemStatus.served],
+  rejected: [OrderItemStatus.rejected],
+  cancelled: [OrderItemStatus.cancelled],
+};
+
+const HISTORY_EVENT_TYPES = [
+  KitchenEventType.ready_item, KitchenEventType.ready_order,
+  KitchenEventType.reject_item, KitchenEventType.reject_order, KitchenEventType.cancel,
+];
+
+function historyRange(from?: string, to?: string) {
+  // The service is used in Kyrgyzstan, where the business day is UTC+06:00.
+  const today = new Date(Date.now() + 6 * 3_600_000).toISOString().slice(0, 10);
+  const start = parseHistoryDate(from ?? to ?? today);
+  const end = new Date(parseHistoryDate(to ?? from ?? today).getTime() + 86_400_000);
+  if (end <= start || end.getTime() - start.getTime() > 31 * 86_400_000) {
+    throw new BadRequestException('Выберите период истории не больше 31 дня');
+  }
+  return { gte: start, lt: end };
+}
+
+function parseHistoryDate(value: string) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new BadRequestException('Укажите дату в формате ГГГГ-ММ-ДД');
+  }
+  const utc = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isFinite(utc.getTime()) || utc.toISOString().slice(0, 10) !== value) {
+    throw new BadRequestException('Укажите действительную дату');
+  }
+  return new Date(utc.getTime() - 6 * 3_600_000);
+}
+
 /**
  * Вкладка станции вычисляется по её собственным позициям — независимо от другой
  * станции. Пусто (нет активных позиций станции) → null (заказ не показываем).
@@ -94,10 +128,6 @@ function kitchenHistoryAt(order: HistoryOrder): Date {
     : order.updatedAt;
 }
 
-function isRecentKitchenHistory(order: HistoryOrder, cutoff: Date) {
-  return kitchenHistoryAt(order) >= cutoff;
-}
-
 @Injectable()
 export class KitchenService {
   constructor(
@@ -106,34 +136,14 @@ export class KitchenService {
     private audit: AuditService,
   ) {}
 
-  async findByTab(tab: KitchenTab, station: PrepStation = PrepStation.kitchen) {
-    const todayStart = startOfToday();
-
-    if (tab === 'rejected' || tab === 'cancelled') {
-      // История станции за сегодня, недавние сверху.
-      const orders = await this.prisma.order.findMany({
-        where: { status: tab, items: { some: { prepStation: station } } },
-        include: orderInclude,
-      });
-      return orders
-        .filter((o) => isRecentKitchenHistory(o, todayStart))
-        .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }))
-        .sort((a, b) => kitchenHistoryAt(b).getTime() - kitchenHistoryAt(a).getTime());
+  async findByTab(tab: KitchenTab, station: PrepStation = PrepStation.kitchen, from?: string, to?: string) {
+    if (tab === 'ready' || tab === 'rejected' || tab === 'cancelled') {
+      return this.stationHistory(tab, station, from, to);
     }
-
-    const statusWhere =
-      tab === 'ready'
-        ? {
-            OR: [
-              { status: { in: ACTIVE_TAB_STATUSES } },
-              { status: { in: COMPLETED_ORDER_STATUSES } },
-            ],
-          }
-        : { status: { in: ACTIVE_TAB_STATUSES } };
-
+    if (tab !== 'new' && tab !== 'in_work') throw new BadRequestException('Неизвестная вкладка станции');
     const orders = await this.prisma.order.findMany({
       where: {
-        ...statusWhere,
+        status: { in: ACTIVE_TAB_STATUSES },
         items: {
           some: {
             prepStation: station,
@@ -145,18 +155,70 @@ export class KitchenService {
       include: orderInclude,
     });
 
-    // Оставляем только позиции станции и раскладываем по вкладке станции.
-    // Поданные, ожидающие оплаты и оплаченные заказы остаются в «Завершённых».
-    // Завершённые показываем только за сегодня и сортируем: недавние сверху, старые снизу.
-    const list = orders
+    return orders
       .map((o) => ({ ...o, items: o.items.filter((i) => i.prepStation === station) }))
-      .filter((o) => COMPLETED_ORDER_STATUSES.includes(o.status) ? tab === 'ready' : stationTabOf(o.items) === tab)
-      .filter((o) => tab === 'ready' ? isRecentKitchenHistory(o, todayStart) : true);
+      .filter((o) => stationTabOf(o.items) === tab);
+  }
 
-    if (tab === 'ready') {
-      list.sort((a, b) => kitchenHistoryAt(b).getTime() - kitchenHistoryAt(a).getTime());
-    }
-    return list;
+  private async stationHistory(tab: keyof typeof HISTORY_ITEM_STATUS, station: PrepStation, from?: string, to?: string) {
+    const range = historyRange(from, to);
+    const itemStatuses = HISTORY_ITEM_STATUS[tab];
+    const itemWhere: Prisma.OrderItemWhereInput = { prepStation: station, status: { in: itemStatuses } };
+    const legacyTerminalStatus = tab === 'ready' ? undefined : tab;
+    const orders = await this.prisma.order.findMany({
+      where: {
+        OR: [
+          { items: { some: { ...itemWhere, updatedAt: range } } },
+          { items: { some: itemWhere }, kitchenEvents: { some: { type: { in: HISTORY_EVENT_TYPES }, createdAt: range } } },
+          { items: { some: itemWhere }, updatedAt: range },
+          ...(legacyTerminalStatus ? [{ status: legacyTerminalStatus, items: { some: { prepStation: station } }, OR: [{ closedAt: range }, { closedAt: null, updatedAt: range }] }] : []),
+        ],
+      },
+      include: {
+        ...orderInclude,
+        items: { ...orderInclude.items, where: { prepStation: station }, select: { ...orderInclude.items.select, updatedAt: true } },
+        kitchenEvents: {
+          where: { type: { in: HISTORY_EVENT_TYPES } },
+          select: { type: true, orderItemId: true, prepStation: true, createdAt: true, reason: true },
+        },
+      },
+    });
+
+    return orders.flatMap(({ kitchenEvents, ...order }) => {
+      const stationItems = order.items.filter((item) => item.prepStation === station);
+      const matching = stationItems.filter((item) => itemStatuses.includes(item.status));
+      const legacy = !matching.length && order.status === legacyTerminalStatus;
+      if (!matching.length && !legacy) return [];
+      if (tab === 'ready' && !COMPLETED_ORDER_STATUSES.includes(order.status) && stationTabOf(stationItems) !== 'ready') return [];
+
+      const eventsByItem = new Map<string, typeof kitchenEvents[number]>();
+      const eventType = tab === 'ready' ? KitchenEventType.ready_item : tab === 'rejected' ? KitchenEventType.reject_item : KitchenEventType.cancel;
+      const orderEventType = tab === 'ready' ? KitchenEventType.ready_order : tab === 'rejected' ? KitchenEventType.reject_order : null;
+      let orderEvent: typeof kitchenEvents[number] | undefined;
+      for (const event of kitchenEvents) {
+        if (event.prepStation && event.prepStation !== station) continue;
+        if (event.type === orderEventType && (!orderEvent || event.createdAt > orderEvent.createdAt)) orderEvent = event;
+        if (event.type !== eventType || !event.orderItemId) continue;
+        const previous = eventsByItem.get(event.orderItemId);
+        if (!previous || event.createdAt > previous.createdAt) eventsByItem.set(event.orderItemId, event);
+      }
+
+      const items = legacy ? stationItems : matching;
+      const at = (item: typeof items[number]) => (eventsByItem.get(item.id) ?? orderEvent)?.createdAt
+        ?? (legacy || order.status === legacyTerminalStatus ? kitchenHistoryAt(order) : item.updatedAt ?? kitchenHistoryAt(order));
+      const visible = tab === 'ready' ? items : items.filter((item) => at(item) >= range.gte && at(item) < range.lt);
+      if (!visible.length) return [];
+      const stationHistoryAt = new Date(Math.max(...visible.map((item) => at(item).getTime())));
+      if (stationHistoryAt < range.gte || stationHistoryAt >= range.lt) return [];
+      return [{
+        ...order,
+        items: visible.map((item) => ({
+          ...item,
+          rejectReason: (eventsByItem.get(item.id) ?? orderEvent)?.reason ?? item.rejectReason ?? null,
+        })),
+        stationHistoryAt,
+      }];
+    }).sort((a, b) => b.stationHistoryAt.getTime() - a.stationHistoryAt.getTime() || a.id.localeCompare(b.id));
   }
 
   /**
@@ -190,12 +252,13 @@ export class KitchenService {
   }
 
   /** Сохраняет доступность блюд. Меняет только изменившиеся, пишет аудит, шлёт realtime. */
-  async updateStopList(actor: AuditActor, items: StopListItemDto[]) {
+  async updateStopList(actor: AuditActor, items: StopListItemDto[], station: PrepStation = PrepStation.kitchen) {
     const ids = [...new Set(items.map((i) => i.dishId))];
     const dishes = await this.prisma.dish.findMany({
-      where: { id: { in: ids }, isActive: true },
+      where: { id: { in: ids }, isActive: true, OR: [{ prepStation: station }, { prepStation: null, category: { prepStation: station } }] },
       select: { id: true, name: true, isAvailable: true },
     });
+    if (dishes.length !== ids.length) throw new BadRequestException('Одно из блюд не относится к этой станции');
     const byId = new Map(dishes.map((d) => [d.id, d]));
 
     // Применяем только реальные изменения, чтобы не плодить лишний аудит.
@@ -233,7 +296,7 @@ export class KitchenService {
       }
     }
 
-    return this.getStopList();
+    return this.getStopList(station);
   }
 
   /** Диапазон периода статистики кухни. Для «всё время» нижней границы нет. */
@@ -291,7 +354,7 @@ export class KitchenService {
     // Момент принятия заказа станцией — первое событие accept по заказу.
     const acceptEvents = orderIds.size
       ? await this.prisma.kitchenEvent.findMany({
-          where: { type: KitchenEventType.accept, orderId: { in: [...orderIds] } },
+          where: { type: KitchenEventType.accept, orderId: { in: [...orderIds] }, OR: [{ prepStation: station }, { prepStation: null }] },
           select: { orderId: true, createdAt: true },
         })
       : [];

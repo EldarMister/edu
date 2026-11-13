@@ -15,7 +15,7 @@ import {
   type KitchenSpeechRate,
   type KitchenVoiceSettings as KitchenVoiceSettingsType,
 } from '@/services/kitchenVoiceSettings';
-import { KITCHEN_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
+import { KITCHEN_VOICE_TEST_SCENARIOS, WAITER_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
 
 export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode }) {
   return <VoiceSettings handControl={handControl} />;
@@ -32,6 +32,7 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
     waiterId ? getWaiterVoiceSettings(waiterId) : getKitchenVoiceSettings(),
   );
   const [testing, setTesting] = useState(false);
+  const [waiterScenarioIndex, setWaiterScenarioIndex] = useState(0);
   const [testMessage, setTestMessage] = useState('');
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -65,11 +66,12 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
   async function testVoice() {
     setTesting(true);
     setTestMessage('');
-    const scenario = waiterId ? { id: 'waiter-ready', text: 'Заказ номер четыре. Стол шесть. Заказ готов.' } : KITCHEN_VOICE_TEST_SCENARIOS[
+    const scenario = waiterId ? WAITER_VOICE_TEST_SCENARIOS[waiterScenarioIndex] : KITCHEN_VOICE_TEST_SCENARIOS[
       Math.floor(Math.random() * KITCHEN_VOICE_TEST_SCENARIOS.length)
     ];
     try {
       await kitchenVoice.testScenario(scenario, settings);
+      if (waiterId) setWaiterScenarioIndex((index) => (index + 1) % WAITER_VOICE_TEST_SCENARIOS.length);
       setTestMessage('Тест озвучки завершён');
     } catch (err) {
       console.error('[kitchen-tts] тест озвучки не удался:', err);

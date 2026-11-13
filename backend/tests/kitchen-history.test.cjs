@@ -1,36 +1,70 @@
 require('ts-node/register/transpile-only');
-const test=require('node:test');const assert=require('node:assert/strict');
-const {KitchenService}=require('../src/kitchen/kitchen.service.ts');
-function fixture(){
- const now=new Date();const old=new Date(now);old.setDate(old.getDate()-2);
- const make=(id,status,itemStatus='served',prepStation='kitchen',at=now)=>({id,status,createdAt:at,updatedAt:at,closedAt:status==='paid'?at:null,items:[{id:id+'-item',prepStation,status:itemStatus}]});
- const rows=[make('ready','ready','ready'),make('served','served'),make('waiting','waiting_payment'),make('paid','paid'),make('bar-waiting','waiting_payment','served','bar'),make('cooking','cooking','cooking'),make('old','waiting_payment','served','kitchen',old),make('cancelled','cancelled','cancelled'),make('rejected','rejected','rejected')];
- const statusMatch=(status,where)=>where.OR?where.OR.some(w=>statusMatch(status,w)):typeof where.status==='string'?status===where.status:where.status.in.includes(status);
- const service=new KitchenService({order:{findMany:async({where})=>rows.filter(o=>statusMatch(o.status,where)&&o.items.some(i=>i.prepStation===where.items.some.prepStation&&(!where.items.some.status||!where.items.some.status.notIn.includes(i.status))))}}, {}, {});
- return {service,rows};
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { KitchenService } = require('../src/kitchen/kitchen.service.ts');
+
+const day = '2026-11-10';
+const at = (hour) => new Date(`${day}T${String(hour).padStart(2, '0')}:00:00+06:00`);
+const item = (id, prepStation, status, updatedAt = at(10)) => ({ id, prepStation, status, updatedAt });
+const order = (id, status, items, kitchenEvents = [], updatedAt = at(10)) => ({
+  id, status, items, kitchenEvents, updatedAt, closedAt: null,
+});
+const event = (type, entry, createdAt, reason = null) => ({
+  type, orderItemId: entry.id, prepStation: entry.prepStation, createdAt, reason,
+});
+
+function fixture(rows) {
+  const requests = [];
+  const service = new KitchenService({
+    order: { findMany: async (query) => { requests.push(query); return rows; } },
+  }, {}, {});
+  return { service, requests };
 }
-test('served -> waiting payment -> paid stays in kitchen completed history',async()=>{
- const {service}=fixture();const ids=(await service.findByTab('ready','kitchen')).map(o=>o.id).sort();assert.deepEqual(ids,['paid','ready','served','waiting']);
- for(const tab of ['new','in_work']){const ids=(await service.findByTab(tab,'kitchen')).map(o=>o.id);assert.ok(!ids.includes('served'));assert.ok(!ids.includes('waiting'));assert.ok(!ids.includes('paid'));}
-});
-test('completed histories stay isolated by preparation station and keep today only',async()=>{
- const {service}=fixture();assert.deepEqual((await service.findByTab('ready','bar')).map(o=>o.id),['bar-waiting']);assert.deepEqual((await service.findByTab('in_work','kitchen')).map(o=>o.id),['cooking']);assert.deepEqual((await service.findByTab('rejected','kitchen')).map(o=>o.id),['rejected']);
+
+test('bar completes independently while the kitchen is still cooking', async () => {
+  const drink = item('drink', 'bar', 'ready', at(12));
+  const hot = item('hot', 'kitchen', 'cooking');
+  const { service, requests } = fixture([order('split', 'cooking', [drink, hot], [event('ready_item', drink, at(11))])]);
+  const [entry] = await service.findByTab('ready', 'bar', day, day);
+  assert.equal(entry.stationHistoryAt.toISOString(), at(11).toISOString());
+  assert.deepEqual(entry.items.map(({ id }) => id), ['drink']);
+  assert.equal(requests[0].include.items.where.prepStation, 'bar');
+  assert.equal(requests[0].where.OR[0].items.some.prepStation, 'bar');
+  assert.deepEqual(await service.findByTab('ready', 'kitchen', day, day), []);
+  assert.deepEqual((await service.findByTab('in_work', 'kitchen')).map(({ id }) => id), ['split']);
 });
 
-test('cancelled history includes recent bar orders and only the requested station items', async () => {
- const {service, rows} = fixture();
- const now = new Date();
- const old = new Date(now);
- old.setDate(old.getDate() - 1);
- const barItem = {id: 'drink', prepStation: 'bar', status: 'cancelled'};
- const mixed = rows.find(order => order.id === 'cancelled');
- mixed.items.push(barItem);
- rows.push({...mixed, id: 'old-bar-cancellation', closedAt: old, items: [barItem]});
+test('partial bar cancellation appears by its event date with the recorded reason', async () => {
+  const drink = item('cancelled-drink', 'bar', 'cancelled', at(15));
+  const ready = item('ready-drink', 'bar', 'ready', at(12));
+  const hot = item('hot', 'kitchen', 'cooking', at(15));
+  const { service } = fixture([order('split', 'cooking', [drink, ready, hot], [
+    event('cancel', drink, at(11), 'Гость передумал'),
+    event('ready_item', ready, at(12)),
+  ], at(15))]);
+  const [entry] = await service.findByTab('cancelled', 'bar', day, day);
+  assert.equal(entry.stationHistoryAt.toISOString(), at(11).toISOString());
+  assert.deepEqual(entry.items.map(({ id, rejectReason }) => [id, rejectReason]), [['cancelled-drink', 'Гость передумал']]);
+  assert.deepEqual((await service.findByTab('ready', 'bar', day, day))[0].items.map(({ id }) => id), ['ready-drink']);
+  assert.deepEqual(await service.findByTab('cancelled', 'kitchen', day, day), []);
+  assert.deepEqual(await service.findByTab('cancelled', 'bar', '2026-11-11', '2026-11-11'), []);
+});
 
- const bar = await service.findByTab('cancelled', 'bar');
- assert.deepEqual(bar.map(order => order.id), ['cancelled']);
- assert.deepEqual(bar[0].items, [barItem]);
- const kitchen = await service.findByTab('cancelled', 'kitchen');
- assert.deepEqual(kitchen[0].items.map(item => item.prepStation), ['kitchen']);
- assert.deepEqual(await service.findByTab('rejected', 'bar'), []);
+test('served, waiting-payment and paid orders retain station completion time', async () => {
+  const stations = ['kitchen', 'dessert'];
+  const states = ['served', 'waiting_payment', 'paid'];
+  const { service } = fixture(stations.flatMap((station) => states.map((status) => {
+    const entry = item(`${station}-${status}`, station, 'served', at(15));
+    return order(entry.id, status, [entry], [event('ready_item', entry, at(11))], at(15));
+  })));
+  const entries = await service.findByTab('ready', 'dessert', day, day);
+  assert.deepEqual(entries.map(({ id }) => id), ['dessert-paid', 'dessert-served', 'dessert-waiting_payment']);
+  assert.ok(entries.every((entry) => entry.stationHistoryAt.getTime() === at(11).getTime()));
+});
+
+test('history rejects invalid dates and caps the date range', async () => {
+  const { service, requests } = fixture([]);
+  await assert.rejects(service.findByTab('ready', 'bar', '2026-02-30'), { status: 400 });
+  await assert.rejects(service.findByTab('ready', 'bar', '2026-10-01', '2026-11-05'), { status: 400 });
+  assert.equal(requests.length, 0);
 });

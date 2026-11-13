@@ -8,6 +8,7 @@ import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { normalizeDishImage, withDishImageRef } from '../dishes/dish-image';
 import { normalizeUnit, unitLabel } from '../warehouse/units';
+import { assertAssignableStation, lockStationRouting } from '../kitchen/preparation-stations';
 import {
   CreateCategoryDto,
   CreateDishDto,
@@ -213,8 +214,12 @@ export class CatalogService {
   }
 
   async createCategory(dto: CreateCategoryDto, actor: AuditActor) {
-    const category = await this.prisma.category.create({
-      data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation: dto.prepStation },
+    const category = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
+      return tx.category.create({
+        data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation: dto.prepStation ?? undefined },
+      });
     });
     await this.audit.log({
       actor,
@@ -230,7 +235,11 @@ export class CatalogService {
 
   async updateCategory(id: string, dto: UpdateCategoryDto, actor: AuditActor) {
     const before = await this.ensureCategory(id);
-    const updated = await this.prisma.category.update({ where: { id }, data: dto });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
+      return tx.category.update({ where: { id }, data: { ...dto, prepStation: dto.prepStation ?? undefined } });
+    });
     await this.audit.log({
       actor,
       actionType: AuditAction.CATEGORY_UPDATED,
@@ -406,40 +415,45 @@ export class CatalogService {
     await this.ensureCategory(dto.categoryId);
     const variants = this.normalizeVariants(dto.variants);
     const price = this.resolveDishPrice(dto.price, variants);
-    const dish = await this.prisma.dish.create({
-      data: {
-        name: dto.name,
-        categoryId: dto.categoryId,
-        price: new Prisma.Decimal(price),
-        description: dto.description,
-        imageUrl: await normalizeDishImage(dto.imageUrl),
-        discountType: dto.discountType ?? 'none',
-        discountValue: new Prisma.Decimal(dto.discountValue ?? 0),
-        cookingTime: dto.cookingTime,
-        isAvailable: dto.isAvailable ?? true,
-        isWeighted: dto.isWeighted ?? false,
-        weightedMeasure: dto.weightedMeasure ?? 'weight',
-        weightedPriceBase: dto.weightedPriceBase ?? 100,
-        trackInventory: dto.trackInventory ?? false,
-        stock: dto.stock,
-        initialStock: dto.initialStock,
-        unit: this.normalizeInventoryUnit(dto.unit),
-        prepStation: dto.prepStation ?? null,
-        voiceName: dto.voiceName?.trim() || null,
-        variants: variants.length
-          ? {
-              create: variants.map((variant) => ({
-                name: variant.name,
-                price: new Prisma.Decimal(variant.price),
-                sortOrder: variant.sortOrder,
-                stock: variant.stock,
-                initialStock: variant.initialStock,
-                unit: variant.unit,
-              })),
-            }
-          : undefined,
-      },
-      include: this.dishInclude(),
+    const imageUrl = await normalizeDishImage(dto.imageUrl);
+    const dish = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
+      return tx.dish.create({
+        data: {
+          name: dto.name,
+          categoryId: dto.categoryId,
+          price: new Prisma.Decimal(price),
+          description: dto.description,
+          imageUrl,
+          discountType: dto.discountType ?? 'none',
+          discountValue: new Prisma.Decimal(dto.discountValue ?? 0),
+          cookingTime: dto.cookingTime,
+          isAvailable: dto.isAvailable ?? true,
+          isWeighted: dto.isWeighted ?? false,
+          weightedMeasure: dto.weightedMeasure ?? 'weight',
+          weightedPriceBase: dto.weightedPriceBase ?? 100,
+          trackInventory: dto.trackInventory ?? false,
+          stock: dto.stock,
+          initialStock: dto.initialStock,
+          unit: this.normalizeInventoryUnit(dto.unit),
+          prepStation: dto.prepStation ?? null,
+          voiceName: dto.voiceName?.trim() || null,
+          variants: variants.length
+            ? {
+                create: variants.map((variant) => ({
+                  name: variant.name,
+                  price: new Prisma.Decimal(variant.price),
+                  sortOrder: variant.sortOrder,
+                  stock: variant.stock,
+                  initialStock: variant.initialStock,
+                  unit: variant.unit,
+                })),
+              }
+            : undefined,
+        },
+        include: this.dishInclude(),
+      });
     });
     await this.audit.log({
       actor,
@@ -479,6 +493,8 @@ export class CatalogService {
     if (dto.unit !== undefined) data.unit = this.normalizeInventoryUnit(dto.unit);
     if (dto.categoryId) await this.ensureCategory(dto.categoryId);
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
       if (variants !== undefined) {
         const incomingIds = variants.map((variant) => variant.id).filter((variantId): variantId is string => !!variantId);
         if (incomingIds.length > 0) {
@@ -606,16 +622,21 @@ export class CatalogService {
   async createSet(dto: CreateSetDto, actor: AuditActor) {
     await this.validateSetComponents(dto.components);
     const categoryId = await this.ensureSetsCategory();
-    const set = await this.prisma.dish.create({
-      data: {
-        name: dto.name,
-        categoryId,
-        price: new Prisma.Decimal(dto.price),
-        isSet: true,
-        trackInventory: false,
-        setComponents: { create: this.mapSetComponents(dto.components) },
-      },
-      include: this.dishInclude(),
+    const set = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
+      return tx.dish.create({
+        data: {
+          name: dto.name,
+          categoryId,
+          price: new Prisma.Decimal(dto.price),
+          isSet: true,
+          prepStation: dto.prepStation,
+          trackInventory: false,
+          setComponents: { create: this.mapSetComponents(dto.components) },
+        },
+        include: this.dishInclude(),
+      });
     });
     await this.audit.log({
       actor,
@@ -635,6 +656,8 @@ export class CatalogService {
     if (dto.components) await this.validateSetComponents(dto.components);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
       if (dto.components) {
         await tx.setComponent.deleteMany({ where: { setId: id } });
         await tx.setComponent.createMany({
@@ -647,6 +670,7 @@ export class CatalogService {
           ...(dto.name !== undefined ? { name: dto.name } : {}),
           ...(dto.price !== undefined ? { price: new Prisma.Decimal(dto.price) } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+          prepStation: dto.prepStation,
         },
         include: this.dishInclude(),
       });

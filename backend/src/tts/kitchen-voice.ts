@@ -34,7 +34,7 @@ type VoiceOrder = {
   items: VoiceItem[];
 };
 
-type VoiceStation = 'kitchen' | 'bar';
+type VoiceStation = string;
 
 const QR_ORDER_COMMENT = 'Заказ из QR-меню';
 

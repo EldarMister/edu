@@ -14,7 +14,6 @@ import {
   PaymentSource,
   PaymentStatus,
   Prisma,
-  PrepStation,
   RejectionDecision,
   Role,
   TableStatus,
@@ -32,6 +31,7 @@ import { DishPopularityService } from '../dishes/dish-popularity.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { IngredientStockService } from '../warehouse/ingredient-stock.service';
+import { PrepStation } from '../kitchen/preparation-stations';
 import { CreateOrderDto, CreateOrderItemDto } from './dto/create-order.dto';
 import { orderInclude, unitPricing, round2 } from './order.helpers';
 import { lockOrder } from './order-lock';
@@ -96,14 +96,32 @@ function stationHasWork(order: StationOrder, station: PrepStation) {
 }
 
 function completedStationSuppressions(order: StationOrder) {
-  const suppressions: { kitchen?: boolean; bar?: boolean } = {};
-  for (const station of [PrepStation.kitchen, PrepStation.bar]) {
+  const suppressions: Record<PrepStation, boolean> = {};
+  for (const station of stationIds(order.items)) {
     const items = order.items.filter((item) => item.prepStation === station);
     if (items.length > 0 && items.every((item) => STATION_FINAL_ITEM_STATUSES.has(item.status))) {
       suppressions[station] = true;
     }
   }
   return suppressions;
+}
+
+function stationIds(items: { prepStation: PrepStation }[]) {
+  return [...new Set(items.map((item) => item.prepStation))].filter((station) => station !== PrepStation.none);
+}
+
+function stationVoices(items: { prepStation: PrepStation }[], message: (station: PrepStation) => string | null) {
+  return Object.fromEntries(stationIds(items).map((station) => [station, message(station)]));
+}
+
+function stationPushTargets(stations: Set<PrepStation>) {
+  const custom = [...stations].find((station) => station !== PrepStation.kitchen && station !== PrepStation.bar);
+  return ([[PrepStation.kitchen, Role.KITCHEN], [PrepStation.bar, Role.BAR]] as const).flatMap(([builtin, role]) => {
+    const station = stations.has(builtin) ? builtin : custom;
+    if (!station) return [];
+    const url = station === builtin ? `/${builtin}` : `/${builtin}?station=${encodeURIComponent(station)}`;
+    return [{ role, station, url }];
+  });
 }
 
 function tableNumberVoice(value: number): string {
@@ -344,10 +362,7 @@ export class OrdersService {
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
         ...order,
         voice: {
-          byStation: {
-            kitchen: buildNewOrderText(order, PrepStation.kitchen),
-            bar: buildNewOrderText(order, PrepStation.bar),
-          },
+          byStation: stationVoices(order.items, (station) => buildNewOrderText(order, station)),
         },
       });
       this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
@@ -455,10 +470,7 @@ export class OrdersService {
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
         ...order,
         voice: {
-          byStation: {
-            kitchen: buildNewOrderText(order, PrepStation.kitchen),
-            bar: buildNewOrderText(order, PrepStation.bar),
-          },
+          byStation: stationVoices(order.items, (station) => buildNewOrderText(order, station)),
         },
       });
       this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
@@ -584,10 +596,7 @@ export class OrdersService {
       this.events.emitToKitchen(SERVER_EVENTS.KITCHEN_NEW_ORDER, {
         ...order,
         voice: {
-          byStation: {
-            kitchen: buildNewOrderText(order, PrepStation.kitchen),
-            bar: buildNewOrderText(order, PrepStation.bar),
-          },
+          byStation: stationVoices(order.items, (station) => buildNewOrderText(order, station)),
         },
       });
       this.events.emitToKitchen(SERVER_EVENTS.ORDER_NEW, order);
@@ -758,12 +767,12 @@ export class OrdersService {
     return normalizeWaiterOrderPermissions(settings?.waiterOrderPermissions);
   }
 
-  private async cancelLine(tx: Prisma.TransactionClient, orderId: string, item: { id: string; dishId: string | null; dishVariantId: string | null; quantity: number; status: OrderItemStatus }, actor: AuditActor, reason: string) {
+  private async cancelLine(tx: Prisma.TransactionClient, orderId: string, item: { id: string; dishId: string | null; dishVariantId: string | null; quantity: number; status: OrderItemStatus; prepStation: PrepStation }, actor: AuditActor, reason: string) {
     await this.restoreInventory(tx, [item]);
     await this.ingredientStock.restoreDishSale(tx, orderId, [item]);
     await tx.orderItem.update({ where: { id: item.id }, data: { status: OrderItemStatus.cancelled, rejectReason: reason } });
     await tx.orderItemSetComponent.updateMany({ where: { orderItemId: item.id, status: { notIn: [OrderItemStatus.cancelled, OrderItemStatus.rejected] } }, data: { status: OrderItemStatus.cancelled } });
-    await tx.kitchenEvent.create({ data: { orderId, orderItemId: item.id, type: KitchenEventType.cancel, createdById: actor.id, reason,
+    await tx.kitchenEvent.create({ data: { orderId, orderItemId: item.id, prepStation: item.prepStation, type: KitchenEventType.cancel, createdById: actor.id, reason,
       comment: JSON.stringify({ previousStatus: item.status, quantity: item.quantity, actorName: actor.name ?? null }) } });
   }
 
@@ -939,7 +948,7 @@ export class OrdersService {
             await tx.orderItem.update({ where: { id: old.id }, data: { quantity: input.quantity,
               discountAmount: new Prisma.Decimal(round2(Number(old.discountAmount) * input.quantity / old.quantity)),
               finalPrice: new Prisma.Decimal(round2(Number(old.finalPrice) * input.quantity / old.quantity)), comment: input.comment ?? null, takeaway: input.takeaway ?? false } });
-            await tx.kitchenEvent.create({ data: { orderId, orderItemId: cancelled.id, type: KitchenEventType.cancel, createdById: actor.id, reason: cleanReason,
+            await tx.kitchenEvent.create({ data: { orderId, orderItemId: cancelled.id, prepStation: cancelled.prepStation, type: KitchenEventType.cancel, createdById: actor.id, reason: cleanReason,
               comment: JSON.stringify({ originalItemId: old.id, removedQuantity: removedQty, actorName: actor.name ?? null }) } });
           }
         } else {
@@ -1156,10 +1165,7 @@ export class OrdersService {
           ...updated,
           items: addedItems,
           voice: {
-            byStation: {
-              kitchen: buildEditVoiceText(updated.orderNumber, order.items, updated.items, PrepStation.kitchen),
-              bar: buildEditVoiceText(updated.orderNumber, order.items, updated.items, PrepStation.bar),
-            },
+            byStation: stationVoices(addedItems, (station) => buildEditVoiceText(updated.orderNumber, order.items, updated.items, station)),
           },
         });
         void this.notifyKitchenNewOrder({ ...updated, items: addedItems });
@@ -1190,7 +1196,7 @@ export class OrdersService {
    * своей станции (кухня/бар). Глобальный статус заказа пересчитывается по всем
    * активным позициям, поэтому заказ «готов» только когда готовы обе станции.
    */
-  async stationAccept(orderId: string, kitchenUserId: string, station: PrepStation) {
+  async stationAccept(orderId: string, kitchenUserId: string, station: PrepStation, stationName?: string) {
     const order = await this.getMutableOrder(orderId);
     this.ensureStationDecision(order, station);
 
@@ -1216,7 +1222,7 @@ export class OrdersService {
         data: { status: OrderItemStatus.cooking },
       });
       await tx.kitchenEvent.create({
-        data: { orderId, type: KitchenEventType.accept, createdById: kitchenUserId },
+        data: { orderId, prepStation: station, type: KitchenEventType.accept, createdById: kitchenUserId },
       });
       await this.recalcSetParents(tx, orderId);
       const nextStatus = await this.statusFromActiveItems(tx, orderId);
@@ -1234,7 +1240,8 @@ export class OrdersService {
     });
 
     if (applied) {
-      const acceptedText = station === PrepStation.bar ? 'Бар принял ваш заказ' : 'Кухня приняла ваш заказ';
+      const acceptedText = station === PrepStation.bar ? 'Бар принял ваш заказ'
+        : station === PrepStation.kitchen ? 'Кухня приняла ваш заказ' : `Станция ${stationName ?? station} приняла ваш заказ`;
       this.emitStatusChanged(updated, {
         waiterText: `${acceptedText}. Стол номер ${tableNumberVoice(updated.table.number)}.`,
       });
@@ -1246,12 +1253,22 @@ export class OrdersService {
       }
       this.notifyWaiter(
         updated.waiterId,
-        `Стол №${updated.table.number}: ${station === PrepStation.bar ? 'бар' : 'кухня'} принял заказ`,
+        `Стол №${updated.table.number}: ${acceptedText}`,
         updated,
         'success',
       );
     }
     return updated;
+  }
+
+  async kitchenReadyStation(orderId: string, userId: string, station: PrepStation) {
+    const order = await this.getMutableOrder(orderId);
+    return this.kitchenReadyItems(orderId, order.items.filter((item) => item.prepStation === station).map((item) => item.id), userId, station);
+  }
+
+  async kitchenRejectStation(orderId: string, userId: string, station: PrepStation, reason: string, comment?: string, stationName?: string) {
+    const order = await this.getMutableOrder(orderId);
+    return this.kitchenRejectItems(orderId, order.items.filter((item) => item.prepStation === station).map((item) => item.id), userId, reason, comment, station, [], [], stationName);
   }
 
   async kitchenReady(orderId: string, kitchenUserId: string) {
@@ -1508,7 +1525,7 @@ export class OrdersService {
 
     const items = order.items.filter(
       (it) =>
-        itemIds.includes(it.id) &&
+        itemIds.includes(it.id) && it.prepStation === station &&
         ![OrderItemStatus.rejected, OrderItemStatus.cancelled, OrderItemStatus.ready, OrderItemStatus.served].includes(
           it.status as any,
         ),
@@ -1540,7 +1557,7 @@ export class OrdersService {
       OrderItemStatus.cancelled,
       OrderItemStatus.ready,
       OrderItemStatus.served,
-    ]);
+    ], station);
 
     const doneCount = targetIds.length + partialItems.length + targetComponents.length;
     if (doneCount === 0) {
@@ -1626,7 +1643,7 @@ export class OrdersService {
           ...targetIds.map((id) => ({ orderId, orderItemId: id })),
           ...partialReadyIds.map((id) => ({ orderId, orderItemId: id })),
           ...targetComponents.map((c) => ({ orderId, orderItemId: c.orderItemId })),
-        ].map((e) => ({ ...e, type: KitchenEventType.ready_item, createdById: kitchenUserId })),
+        ].map((e) => ({ ...e, prepStation: station, type: KitchenEventType.ready_item, createdById: kitchenUserId })),
       });
 
       // Статус сета выводим из его состава (готов только когда готовы все блюда).
@@ -1686,13 +1703,14 @@ export class OrdersService {
     orderId: string,
     componentIds: string[],
     excludeStatuses: OrderItemStatus[],
+    station: PrepStation,
   ) {
     if (!componentIds?.length) return [];
     return this.prisma.orderItemSetComponent.findMany({
       where: {
         id: { in: componentIds },
         status: { notIn: excludeStatuses },
-        orderItem: { orderId },
+        orderItem: { orderId, prepStation: station },
       },
       select: {
         id: true,
@@ -1718,20 +1736,21 @@ export class OrdersService {
     station: PrepStation = PrepStation.kitchen,
     setComponentIds: string[] = [],
     partial: { itemId: string; quantity: number }[] = [],
+    stationName?: string,
   ) {
     const order = await this.getMutableOrder(orderId);
     this.ensureStationDecision(order, station);
 
     const items = order.items.filter(
       (it) =>
-        itemIds.includes(it.id) &&
+        itemIds.includes(it.id) && it.prepStation === station &&
         ![OrderItemStatus.rejected, OrderItemStatus.cancelled].includes(it.status as any),
     );
     // Блюда внутри сетов — отдельные позиции для кухни.
     const components = await this.resolveSetComponents(orderId, setComponentIds, [
       OrderItemStatus.rejected,
       OrderItemStatus.cancelled,
-    ]);
+    ], station);
     if (items.length === 0 && components.length === 0) {
       throw new BadRequestException('Нет блюд, которые можно отказать');
     }
@@ -1779,6 +1798,7 @@ export class OrdersService {
       }
       // Частичный отказ: уменьшаем количество исходной позиции и заводим
       // отдельную отказанную позицию на отказанное количество.
+      const partialRejectedIds: string[] = [];
       for (const it of partialItems) {
         const rejectQty = partialMap.get(it.id)!;
         const keepQty = it.quantity - rejectQty;
@@ -1792,7 +1812,7 @@ export class OrdersService {
             finalPrice: new Prisma.Decimal(round2(unitFinal * keepQty)),
           },
         });
-        await tx.orderItem.create({
+        const rejected = await tx.orderItem.create({
           data: {
             orderId,
             dishId: it.dishId,
@@ -1812,6 +1832,7 @@ export class OrdersService {
             rejectionDecision: RejectionDecision.pending,
           },
         });
+        partialRejectedIds.push(rejected.id);
       }
       if (components.length > 0) {
         await tx.orderItemSetComponent.updateMany({
@@ -1822,9 +1843,9 @@ export class OrdersService {
       await tx.kitchenEvent.createMany({
         data: [
           ...fullIds.map((id) => ({ orderId, orderItemId: id })),
-          ...partialItems.map((it) => ({ orderId, orderItemId: it.id })),
+          ...partialRejectedIds.map((id) => ({ orderId, orderItemId: id })),
           ...components.map((c) => ({ orderId, orderItemId: c.orderItemId })),
-        ].map((e) => ({ ...e, type: KitchenEventType.reject_item, reason, comment, createdById: kitchenUserId })),
+        ].map((e) => ({ ...e, prepStation: station, type: KitchenEventType.reject_item, reason, comment, createdById: kitchenUserId })),
       });
 
       // Статус сета выводим из состава; сет, отказанный целиком, возвращает остатки.
@@ -1871,14 +1892,14 @@ export class OrdersService {
       ...partialItems.map((it) => `${this.orderItemName(it)} (${partialMap.get(it.id)} шт.)`),
       ...componentNames,
     ].join(', ');
-    const stationLabel = station === PrepStation.bar ? 'Бар' : 'Кухня';
+    const stationLabel = stationName ?? (station === PrepStation.bar ? 'Бар' : 'Кухня');
     const partialText =
       updated.status === OrderStatus.partially_rejected
         ? ' Уточните у клиента: продолжить заказ, заменить блюдо или отменить заказ?'
         : '';
     this.notifyWaiter(
       updated.waiterId,
-      `Стол №${updated.table.number}. ${stationLabel} отказал: ${names}. Причина: ${reason}.${partialText}`,
+      `Стол №${updated.table.number}. Отказ, станция «${stationLabel}»: ${names}. Причина: ${reason}.${partialText}`,
       updated,
       'error',
     );
@@ -2034,10 +2055,7 @@ export class OrdersService {
         ...updated,
         items: replacementItems,
         voice: {
-          byStation: {
-            kitchen: replacementStation === PrepStation.kitchen ? buildReplacementText(updated.orderNumber, oldName, replacementName) : null,
-            bar: replacementStation === PrepStation.bar ? buildReplacementText(updated.orderNumber, oldName, replacementName) : null,
-          },
+          byStation: { [replacementStation]: buildReplacementText(updated.orderNumber, oldName, replacementName) },
         },
       });
       void this.notifyKitchenNewOrder({ ...updated, items: replacementItems });
@@ -2339,7 +2357,7 @@ export class OrdersService {
       if (toClosedCancelled) {
         await tx.kitchenEvent.createMany({ data: order.items
           .filter(item => item.status !== OrderItemStatus.cancelled && item.status !== OrderItemStatus.rejected)
-          .map(item => ({ orderId, orderItemId: item.id, type: KitchenEventType.cancel, reason: cleanReason,
+          .map(item => ({ orderId, orderItemId: item.id, prepStation: item.prepStation, type: KitchenEventType.cancel, reason: cleanReason,
             createdById: actor.id, comment: JSON.stringify({ previousStatus: item.status, quantity: item.quantity, actorName: actor.name ?? null, administrative: true }) })) });
       }
 
@@ -2952,16 +2970,16 @@ export class OrdersService {
     const result: any[] = cafeId
       ? await tx.$queryRaw`
           SELECT COALESCE(MAX(CAST(REGEXP_REPLACE(order_number, '[^0-9]', '', 'g') AS INTEGER)), 0) as max_num
-          FROM orders WHERE business_date = ${businessDate} AND cafe_id = ${cafeId}`
+          FROM orders WHERE business_date = (${businessDate}::timestamptz AT TIME ZONE 'UTC') AND cafe_id = ${cafeId}`
       : await tx.$queryRaw`
           SELECT COALESCE(MAX(CAST(REGEXP_REPLACE(order_number, '[^0-9]', '', 'g') AS INTEGER)), 0) as max_num
-          FROM orders WHERE business_date = ${businessDate}`;
+          FROM orders WHERE business_date = (${businessDate}::timestamptz AT TIME ZONE 'UTC')`;
     const max = Number(result[0]?.max_num || 0);
     return `№${max + 1}`;
   }
 
   private async getMutableOrder(orderId: string) {
-    const order = await this.prisma.order.findUnique({ where: { id: orderId }, include: { items: true, table: true } });
+    const order = await this.prisma.order.findFirst({ where: { id: orderId }, include: { items: true, table: true } });
     if (!order) throw new NotFoundException('Заказ не найден');
     if (([OrderStatus.paid, OrderStatus.cancelled] as OrderStatus[]).includes(order.status)) {
       throw new BadRequestException('Заказ уже закрыт');
@@ -3190,8 +3208,8 @@ export class OrdersService {
     voice?: {
       waiterText?: string;
       suppressWaiter?: boolean;
-      byStation?: { kitchen?: string | null; bar?: string | null };
-      suppressStations?: { kitchen?: boolean; bar?: boolean };
+      byStation?: Record<PrepStation, string | null>;
+      suppressStations?: Record<PrepStation, boolean>;
     },
   ) {
     // Полная отмена/отказ — добавляем озвучку «Заказ номер … отменён» (ТЗ §4).
@@ -3217,18 +3235,20 @@ export class OrdersService {
     // Station announcements (including item/order cancellation) must also arrive
     // while native JS is suspended. Match the same station suppression as PWA voice.
     const stationVoice = payload.voice as {
-      text?: string; byStation?: { kitchen?: string | null; bar?: string | null };
-      suppressStations?: { kitchen?: boolean; bar?: boolean };
+      text?: string; byStation?: Record<PrepStation, string | null>;
+      suppressStations?: Record<PrepStation, boolean>;
     } | undefined;
     const changedAt = order.updatedAt instanceof Date ? order.updatedAt.toISOString() : String(order.updatedAt ?? '');
-    for (const [station, role] of [[PrepStation.kitchen, Role.KITCHEN], [PrepStation.bar, Role.BAR]] as const) {
-      const matchesStation = !Array.isArray(order.items) || order.items.some(item => item?.prepStation === station);
-      const text = stationVoice?.byStation ? stationVoice.byStation[station] : matchesStation ? stationVoice?.text : undefined;
-      if (!text || stationVoice?.suppressStations?.[station]) continue;
+    const candidateStations = Array.isArray(order.items) ? stationIds(order.items) : [PrepStation.kitchen, PrepStation.bar];
+    const updates = new Map(candidateStations.flatMap((station) => {
+      const message = stationVoice?.byStation ? stationVoice.byStation[station] : stationVoice?.text;
+      return message && !stationVoice?.suppressStations?.[station] ? [[station, message] as const] : [];
+    }));
+    for (const { role, station, url } of stationPushTargets(new Set(updates.keys()))) {
       void this.push.notifyRole(role, {
-        title: 'Обновление заказа', body: text, type: 'info', channel: 'kitchen',
+        title: 'Обновление заказа', body: updates.get(station)!, type: 'info', channel: 'kitchen',
         notificationId: `kitchen-status:${String(order.id)}:${changedAt}:${station}`,
-        orderId: String(order.id), orderNumber: String(order.orderNumber), url: `/${station}`,
+        orderId: String(order.id), orderNumber: String(order.orderNumber), url,
       }, typeof order.cafeId === 'string' ? order.cafeId : undefined);
     }
     // Гости QR-меню стола видят смену статуса своего заказа.
@@ -3286,8 +3306,7 @@ export class OrdersService {
     table: { number: number };
     items?: { prepStation: PrepStation }[];
   }) {
-    const stations = new Set(order.items?.map((item) => item.prepStation) ?? []);
-    if (stations.size === 0) stations.add(PrepStation.kitchen);
+    const stations = new Set(order.items ? stationIds(order.items) : [PrepStation.kitchen]);
     const payload = {
       title: 'EDU POS',
       notificationId: `kitchen:${order.id}:${order.updatedAt?.toISOString() ?? randomUUID()}`,
@@ -3300,13 +3319,8 @@ export class OrdersService {
       orderNumber: order.orderNumber,
       channel: 'kitchen' as const,
     };
-    return Promise.all([
-      stations.has(PrepStation.kitchen)
-        ? this.push.notifyRole(Role.KITCHEN, { ...payload, url: '/kitchen' }, order.cafeId)
-        : Promise.resolve(),
-      stations.has(PrepStation.bar)
-        ? this.push.notifyRole(Role.BAR, { ...payload, url: '/bar' }, order.cafeId)
-        : Promise.resolve(),
-    ]);
+    return Promise.all(stationPushTargets(stations).map(({ role, url }) =>
+      this.push.notifyRole(role, { ...payload, url }, order.cafeId),
+    ));
   }
 }

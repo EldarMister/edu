@@ -30,14 +30,6 @@ enum PushProvider {
   FCM
 }
 
-// Направление приготовления/выдачи позиции: кухня или бар.
-enum PrepStation {
-  kitchen
-  bar
-  // «Без отправки» — официант забирает сам: позиция не уходит на кухню/бар.
-  none
-}
-
 enum TableStatus {
   free // свободен
   occupied // занят
@@ -190,6 +182,8 @@ model Cafe {
   createdAt       DateTime   @default(now()) @map("created_at")
   updatedAt       DateTime   @updatedAt @map("updated_at")
 
+  preparationStations PreparationStation[]
+
   @@map("cafes")
 }
 
@@ -276,13 +270,24 @@ model Table {
   @@map("tables")
 }
 
+model PreparationStation {
+  id       String  @id @default(uuid())
+  cafeId   String  @map("cafe_id")
+  name     String
+  isActive Boolean @default(true) @map("is_active")
+  cafe     Cafe    @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, name])
+  @@map("preparation_stations")
+}
+
 model Category {
   cafeId      String?     @map("cafe_id")
   id          String      @id @default(uuid())
   name        String
   sortOrder   Int         @default(0) @map("sort_order")
   isActive    Boolean     @default(true) @map("is_active")
-  prepStation PrepStation @default(kitchen) @map("prep_station")
+  prepStation String @default("kitchen") @map("prep_station")
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @updatedAt @map("updated_at")
 
@@ -310,7 +315,7 @@ model Dish {
   initialStock      Int?         @map("initial_stock")
   unit              String       @default("шт")
   // null = наследовать направление от категории; задано — приоритет над категорией.
-  prepStation       PrepStation? @map("prep_station")
+  prepStation       String? @map("prep_station")
   // true — это «шапка» сета (состав в SetComponent), а не обычное блюдо.
   isSet             Boolean      @default(false) @map("is_set")
   // Весовое блюдо открывает у официанта отдельный выбор граммов вместо обычных вариантов.
@@ -519,7 +524,7 @@ model OrderItem {
   discountAmount          Decimal            @default(0) @map("discount_amount") @db.Decimal(10, 2)
   finalPrice              Decimal            @map("final_price") @db.Decimal(10, 2)
   status                  OrderItemStatus    @default(new)
-  prepStation             PrepStation        @default(kitchen) @map("prep_station")
+  prepStation             String             @default("kitchen") @map("prep_station")
   comment                 String?
   // «С собой» (навынос) — кухня видит, что позицию нужно упаковать.
   takeaway                Boolean            @default(false)
@@ -536,6 +541,7 @@ model OrderItem {
   setComponents OrderItemSetComponent[]
 
   @@index([orderId])
+  @@index([cafeId, prepStation, status, updatedAt])
   @@index([dishVariantId])
   @@map("order_items")
 }
@@ -608,6 +614,7 @@ model KitchenEvent {
   orderId     String           @map("order_id")
   orderItemId String?          @map("order_item_id")
   type        KitchenEventType
+  prepStation String?          @map("prep_station")
   reason      String?
   comment     String?
   createdById String           @map("created_by")

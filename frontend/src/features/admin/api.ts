@@ -614,6 +614,7 @@ export interface SetComponentInput {
 export interface SetInput {
   name: string;
   price: number;
+  prepStation?: PrepStation | null;
   components: SetComponentInput[];
 }
 export function useAdminSets() {
