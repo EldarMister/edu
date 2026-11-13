@@ -2,14 +2,16 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, StockMovementSource, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { MovementsQueryDto } from './dto';
+import { resolveWarehouse, warehouseDocumentFilter } from './warehouse-location';
 import { costFromBase, fromBase, unitLabel, type UnitCode } from './units';
 
 @Injectable()
 export class MovementsService {
   constructor(private prisma: PrismaService) {}
 
-  private buildWhere(query: MovementsQueryDto): Prisma.StockMovementWhereInput {
-    const where: Prisma.StockMovementWhereInput = {};
+  private async buildWhere(query: MovementsQueryDto): Promise<Prisma.StockMovementWhereInput> {
+    const warehouse = query.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, query.warehouseId);
+    const where: Prisma.StockMovementWhereInput = warehouseDocumentFilter(warehouse);
     if (query.type && this.isType(query.type)) where.type = query.type;
     if (query.sourceType && this.isSource(query.sourceType)) where.sourceType = query.sourceType;
     if (query.ingredientId) where.ingredientId = query.ingredientId;
@@ -26,7 +28,7 @@ export class MovementsService {
 
   async findAll(query: MovementsQueryDto) {
     const movements = await this.prisma.stockMovement.findMany({
-      where: this.buildWhere(query),
+      where: await this.buildWhere(query),
       orderBy: { createdAt: 'desc' },
       take: 500,
       include: { ingredient: { select: { name: true, displayUnit: true } } },
@@ -58,11 +60,16 @@ export class MovementsService {
       } else if (m.sourceType === 'order' && m.sourceId) {
         const num = orderMap.get(m.sourceId);
         documentLabel = num != null ? `Заказ №${num}` : 'Заказ';
+      } else if (m.sourceType === 'inventory') {
+        documentLabel = 'Инвентаризация';
+      } else if (m.sourceType === 'writeoff') {
+        documentLabel = 'Акт списания';
       }
       const display = m.ingredient.displayUnit as UnitCode;
       return {
         id: m.id,
         ingredientId: m.ingredientId,
+        warehouseId: m.warehouseId,
         orderItemId: m.orderItemId,
         ingredientName: m.ingredient.name,
         unit: unitLabel(display),
@@ -83,7 +90,7 @@ export class MovementsService {
 
   /** Сводка по периоду: приход / списание / возвраты (суммы по модулю изменения). */
   async summary(query: MovementsQueryDto) {
-    const where = this.buildWhere(query);
+    const where = await this.buildWhere(query);
     const movements = await this.prisma.stockMovement.findMany({
       where,
       select: { type: true, change: true },
@@ -94,17 +101,17 @@ export class MovementsService {
     for (const m of movements) {
       const change = Number(m.change);
       if (m.type === 'purchase') income += change;
-      else if (m.type === 'sale') writeoff += Math.abs(change);
+      else if (m.type === 'sale' || m.type === 'writeoff') writeoff += Math.abs(change);
       else if (m.type === 'return') returns += change;
     }
     return { income, writeoff, returns };
   }
 
   private isType(v: string): v is StockMovementType {
-    return ['purchase', 'sale', 'return', 'correction', 'cancel'].includes(v);
+    return ['purchase', 'sale', 'return', 'correction', 'cancel', 'inventory', 'writeoff'].includes(v);
   }
   private isSource(v: string): v is StockMovementSource {
-    return ['purchase', 'order', 'manual'].includes(v);
+    return ['purchase', 'order', 'manual', 'inventory', 'writeoff'].includes(v);
   }
 }
 

@@ -1,25 +1,45 @@
 import { DatePicker } from '@/components/DatePicker';
+import { Select } from '@/components/Select';
+import { Spinner } from '@/components/Spinner';
+import { apiError } from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useMemo, useState } from 'react';
 import { WarehousePage } from '../WarehousePage';
 import { IngredientsTab } from './IngredientsTab';
 import { PurchasesTab } from './PurchasesTab';
 import { MovementsTab } from './MovementsTab';
 import { WarehouseOverviewTab } from './WarehouseOverviewTab';
+import { PreparationTab } from './PreparationTab';
+import { StockDocumentsTab } from './StockDocumentsTab';
+import { WarehouseLocationsModal } from './WarehouseLocationsModal';
+import { useWarehouseLocations } from './api';
 
-type Tab = 'overview' | 'dishes' | 'ingredients' | 'purchases' | 'movements';
+type Tab = 'overview' | 'dishes' | 'ingredients' | 'preparation' | 'purchases' | 'inventory' | 'writeoff' | 'movements';
 type PeriodPreset = 'today' | 'week' | 'month' | 'custom';
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Обзор' },
   { key: 'dishes', label: 'Блюда' },
   { key: 'ingredients', label: 'Сырьё' },
+  { key: 'preparation', label: 'Полуфабрикаты' },
   { key: 'purchases', label: 'Закупки' },
+  { key: 'inventory', label: 'Инвентаризация' },
+  { key: 'writeoff', label: 'Списания' },
   { key: 'movements', label: 'Движения' },
 ];
 
 /** Раздел «Склад»: верхние табы Блюда / Сырьё / Закупки / Движения. */
 export function WarehouseSection() {
   const [tab, setTab] = useState<Tab>('overview');
+  const [warehouseId, setWarehouseId] = useState('');
+  const [manageOpen, setManageOpen] = useState(false);
+  const { isOwner } = usePermissions();
+  const locationsQuery = useWarehouseLocations();
+  const locations = locationsQuery.data?.locations ?? [];
+  const defaultWarehouse = locations.find((location) => location.isDefault);
+  const selectedWarehouse = locations.find((location) => location.id === warehouseId);
+  const stockWarehouse = selectedWarehouse ?? defaultWarehouse;
+  const needsWarehouse = tab === 'ingredients' || tab === 'preparation' || tab === 'inventory' || tab === 'writeoff';
   const [preset, setPreset] = useState<PeriodPreset>('week');
   const [customFrom, setCustomFrom] = useState(localDate(addDays(new Date(), -6)));
   const [customTo, setCustomTo] = useState(localDate(new Date()));
@@ -41,8 +61,32 @@ export function WarehouseSection() {
 
   return (
     <div className="space-y-4">
+      {tab !== 'dishes' && (
+        <div className="flex flex-wrap items-center gap-2">
+          {locations.length > 1 ? (
+            <Select
+              ariaLabel="Склад"
+              value={(needsWarehouse ? stockWarehouse : selectedWarehouse)?.id ?? ''}
+              options={[
+                ...(needsWarehouse ? [] : [{ value: '', label: 'Все склады' }]),
+                ...locations.map(({ id, name }) => ({ value: id, label: name })),
+              ]}
+              onChange={setWarehouseId}
+              className="h-10 min-w-44"
+            />
+          ) : (
+            <span className="text-sm font-medium text-text-primary">{defaultWarehouse?.name}</span>
+          )}
+          {isOwner && locationsQuery.data && (
+            <button type="button" className="btn-secondary btn-md" onClick={() => setManageOpen(true)}>Склады и станции</button>
+          )}
+          {locationsQuery.isError && (
+            <p role="alert" className="text-sm text-danger">{apiError(locationsQuery.error)}</p>
+          )}
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-border pb-px">
-        <div className="flex flex-nowrap gap-0.5">
+        <div className="flex max-w-full flex-nowrap gap-0.5 overflow-x-auto">
           {TABS.map((t) => (
             <Tab key={t.key} active={tab === t.key} onClick={() => setTab(t.key)}>
               {t.label}
@@ -63,11 +107,21 @@ export function WarehouseSection() {
         )}
       </div>
 
-      {tab === 'overview' && <WarehouseOverviewTab range={range} />}
+      {locationsQuery.isPending && (needsWarehouse || tab === 'purchases') && (
+        <div className="flex justify-center py-8 text-primary"><Spinner /></div>
+      )}
+      {tab === 'overview' && <WarehouseOverviewTab range={range} warehouseId={selectedWarehouse?.id} />}
       {tab === 'dishes' && <WarehousePage />}
-      {tab === 'ingredients' && <IngredientsTab />}
-      {tab === 'purchases' && <PurchasesTab />}
-      {tab === 'movements' && <MovementsTab />}
+      {tab === 'ingredients' && stockWarehouse && <IngredientsTab key={stockWarehouse.id} warehouse={stockWarehouse} locations={locations} />}
+      {tab === 'preparation' && stockWarehouse && <PreparationTab key={stockWarehouse.id} warehouse={stockWarehouse} />}
+      {tab === 'purchases' && defaultWarehouse && <PurchasesTab warehouseId={selectedWarehouse?.id} locations={locations} />}
+      {(tab === 'inventory' || tab === 'writeoff') && stockWarehouse && (
+        <StockDocumentsTab key={`${tab}:${stockWarehouse.id}`} kind={tab} warehouse={stockWarehouse} isOwner={isOwner} />
+      )}
+      {tab === 'movements' && <MovementsTab warehouseId={selectedWarehouse?.id} locations={locations} />}
+      {manageOpen && locationsQuery.data && (
+        <WarehouseLocationsModal data={locationsQuery.data} onClose={() => setManageOpen(false)} />
+      )}
     </div>
   );
 }

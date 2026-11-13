@@ -125,8 +125,11 @@ export class PlatformService {
     const where = { cafeId };
     await tx.purchaseItem.deleteMany({ where });
     await tx.stockMovement.deleteMany({ where });
+    await tx.warehouseDocument.deleteMany({ where });
     await tx.purchase.deleteMany({ where });
     await tx.recipeItem.deleteMany({ where });
+    await tx.preparationRecipeItem.deleteMany({ where });
+    await tx.preparationRecipe.deleteMany({ where });
     await tx.ingredient.deleteMany({ where });
   }
 

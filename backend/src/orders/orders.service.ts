@@ -947,7 +947,7 @@ export class OrdersService {
               status: OrderItemStatus.cancelled, rejectReason: cleanReason,
               setComponents: { create: setComponents.map(({ id, orderItemId, createdAt, ...c }) => ({ ...c, status: OrderItemStatus.cancelled })) } } });
             await this.restoreInventory(tx, [cancelled]);
-            await this.ingredientStock.restoreDishSale(tx, orderId, [cancelled]);
+            await this.ingredientStock.restoreDishSale(tx, orderId, [{ ...cancelled, sourceLineId: old.id, sourceLineQuantity: old.quantity }]);
             await tx.orderItem.update({ where: { id: old.id }, data: { quantity: input.quantity,
               discountAmount: new Prisma.Decimal(round2(Number(old.discountAmount) * input.quantity / old.quantity)),
               finalPrice: new Prisma.Decimal(round2(Number(old.finalPrice) * input.quantity / old.quantity)), comment: input.comment ?? null, takeaway: input.takeaway ?? false } });
@@ -1445,7 +1445,6 @@ export class OrdersService {
       await this.lockKitchenSnapshot(tx, orderId, order);
       if (item.status !== OrderItemStatus.served) {
         await this.restoreInventory(tx, [item]);
-        await this.ingredientStock.restoreDishSale(tx, orderId, [item]);
       }
       await tx.orderItem.update({
         where: { id: itemId },
@@ -1786,7 +1785,7 @@ export class OrdersService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await this.lockKitchenSnapshot(tx, orderId, order);
       await this.restoreInventory(tx, inventoryToRestore);
-      await this.ingredientStock.restoreDishSale(tx, orderId, inventoryToRestore);
+      await this.ingredientStock.restoreDishSale(tx, orderId, fullItems);
       if (fullIds.length > 0) {
         await tx.orderItem.updateMany({
           where: { id: { in: fullIds }, orderId },
@@ -1837,6 +1836,7 @@ export class OrdersService {
             rejectionDecision: RejectionDecision.pending,
           },
         });
+        await this.ingredientStock.restoreDishSale(tx, orderId, [{ ...rejected, sourceLineId: it.id, sourceLineQuantity: it.quantity }]);
         partialRejectedIds.push(rejected.id);
       }
       if (components.length > 0) {
@@ -2332,7 +2332,7 @@ export class OrdersService {
       if (latest.updatedAt.getTime() !== order.updatedAt.getTime()) throw new ConflictException('Заказ изменился. Обновите его и повторите действие');
       if (fromClosedCancelled && targetIsActive) {
         await this.deductExistingInventory(tx, order.items);
-        await this.ingredientStock.applyDishSale(tx, order.id, order.items);
+        await this.ingredientStock.applyDishSale(tx, order.id, order.items, true);
       }
 
       if (!fromClosedCancelled && toClosedCancelled) {

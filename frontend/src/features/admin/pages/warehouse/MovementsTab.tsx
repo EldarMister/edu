@@ -12,11 +12,14 @@ import {
   type MovementsFilter,
   type StockMovement,
   type StockMovementType,
+  type WarehouseLocation,
 } from './api';
 
 const TYPE_BADGE: Record<StockMovementType, { label: string; tone: 'success' | 'danger' | 'primary' | 'muted' }> = {
   purchase: { label: 'Приход', tone: 'success' },
-  sale: { label: 'Списание', tone: 'danger' },
+  sale: { label: 'Продажа', tone: 'danger' },
+  inventory: { label: 'Инвентаризация', tone: 'muted' },
+  writeoff: { label: 'Акт списания', tone: 'danger' },
   return: { label: 'Возврат', tone: 'primary' },
   correction: { label: 'Коррекция', tone: 'muted' },
   cancel: { label: 'Отмена', tone: 'muted' },
@@ -26,6 +29,8 @@ const SOURCE_LABEL: Record<string, string> = {
   purchase: 'Закупка',
   order: 'Заказ',
   manual: 'Вручную',
+  inventory: 'Инвентаризация',
+  writeoff: 'Акт списания',
 };
 
 const emptyFilter: MovementsFilter = {
@@ -36,11 +41,13 @@ const emptyFilter: MovementsFilter = {
   search: '',
 };
 
-export function MovementsTab() {
+export function MovementsTab({ warehouseId, locations }: { warehouseId?: string; locations: WarehouseLocation[] }) {
   const [filter, setFilter] = useState<MovementsFilter>(emptyFilter);
 
-  const movementsQ = useMovements(filter);
-  const summaryQ = useMovementsSummary(filter);
+  const movementsQ = useMovements({ ...filter, warehouseId });
+  const summaryQ = useMovementsSummary({ ...filter, warehouseId });
+  const warehouseNames = new Map(locations.map(({ id, name }) => [id, name]));
+  const defaultName = locations.find((location) => location.isDefault)?.name;
   const s = summaryQ.data;
 
   function patch(p: Partial<MovementsFilter>) {
@@ -73,7 +80,9 @@ export function MovementsTab() {
           options={[
             { value: '', label: 'Все типы' },
             { value: 'purchase', label: 'Приход' },
-            { value: 'sale', label: 'Списание' },
+            { value: 'sale', label: 'Продажа' },
+            { value: 'inventory', label: 'Инвентаризация' },
+            { value: 'writeoff', label: 'Акт списания' },
             { value: 'return', label: 'Возврат' },
             { value: 'correction', label: 'Коррекция' },
           ]}
@@ -87,6 +96,8 @@ export function MovementsTab() {
             { value: 'purchase', label: 'Закупка' },
             { value: 'order', label: 'Заказ' },
             { value: 'manual', label: 'Вручную' },
+            { value: 'inventory', label: 'Инвентаризация' },
+            { value: 'writeoff', label: 'Акт списания' },
           ]}
         />
         <button className="btn-secondary btn-md" onClick={() => setFilter(emptyFilter)}>
@@ -122,6 +133,7 @@ export function MovementsTab() {
                 <tr className="border-b border-border bg-background/50 text-left text-xs text-text-muted">
                   <th className="px-3 py-2.5 font-medium">Дата и время</th>
                   <th className="px-3 py-2.5 font-medium">Ингредиент</th>
+                  <th className="px-3 py-2.5 font-medium">Склад</th>
                   <th className="px-3 py-2.5 font-medium">Тип</th>
                   <th className="px-3 py-2.5 font-medium">Источник</th>
                   <th className="px-3 py-2.5 font-medium">Документ</th>
@@ -134,11 +146,11 @@ export function MovementsTab() {
               </thead>
               <tbody>
                 {movementsQ.data?.map((m) => (
-                  <MovementRow key={m.id} m={m} />
+                  <MovementRow key={m.id} m={m} warehouseName={m.warehouseId ? warehouseNames.get(m.warehouseId) : defaultName} />
                 ))}
                 {movementsQ.data?.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-3 py-10 text-center text-text-muted">
+                    <td colSpan={11} className="px-3 py-10 text-center text-text-muted">
                       Движений не найдено
                     </td>
                   </tr>
@@ -162,13 +174,14 @@ export function MovementsTab() {
   );
 }
 
-function MovementRow({ m }: { m: StockMovement }) {
+function MovementRow({ m, warehouseName }: { m: StockMovement; warehouseName?: string }) {
   const badge = TYPE_BADGE[m.type];
   const positive = m.change > 0;
   return (
     <tr className="border-b border-border last:border-0 hover:bg-background/60">
       <td className="px-3 py-2.5 text-text-secondary">{formatDateTime(m.createdAt)}</td>
       <td className="px-3 py-2.5 font-medium text-text-primary">{m.ingredientName}</td>
+      <td className="px-3 py-2.5 text-text-secondary">{warehouseName ?? '—'}</td>
       <td className="px-3 py-2.5">
         <Badge tone={badge.tone}>{badge.label}</Badge>
       </td>

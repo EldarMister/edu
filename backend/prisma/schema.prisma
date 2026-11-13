@@ -138,12 +138,40 @@ enum StockMovementType {
   return // возврат при отмене/отказе
   correction // ручная корректировка
   cancel // отмена операции
+  inventory
+  writeoff
 }
 
 enum StockMovementSource {
   purchase // источник — закупка
   order // источник — заказ
   manual // ручная операция
+  inventory
+  writeoff
+}
+
+enum WarehouseDocumentKind {
+  inventory
+  writeoff
+}
+
+enum WarehouseInventoryMode {
+  full
+  partial
+}
+
+enum WarehouseDocumentStatus {
+  draft
+  submitted
+  posted
+}
+
+enum WarehouseWriteoffReason {
+  spoilage
+  expired
+  damage
+  staff_meal
+  other
 }
 
 enum PurchaseStatus {
@@ -183,6 +211,7 @@ model Cafe {
   updatedAt       DateTime   @updatedAt @map("updated_at")
 
   preparationStations PreparationStation[]
+  warehouses Warehouse[]
 
   @@map("cafes")
 }
@@ -904,9 +933,14 @@ model Ingredient {
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
 
+  isPrepared    Boolean @default(false) @map("is_prepared")
   recipeItems   RecipeItem[]
   purchaseItems PurchaseItem[]
   movements     StockMovement[]
+  warehouseStock WarehouseStock[]
+  preparationRecipe PreparationRecipe? @relation("PreparedIngredient")
+  preparationInputs PreparationRecipeItem[]
+  warehouseDocumentItems WarehouseDocumentItem[]
 
   @@map("ingredients")
 }
@@ -919,6 +953,7 @@ model RecipeItem {
   ingredientId String   @map("ingredient_id")
   amount       Decimal  @db.Decimal(14, 3) // количество на 1 порцию в БАЗОВЫХ единицах
   amountUnit   String   @default("pcs") @map("amount_unit") // display-единица, выбранная при вводе
+  fromCommonWarehouse Boolean @default(false) @map("from_common_warehouse")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -929,6 +964,119 @@ model RecipeItem {
   @@index([dishId])
   @@index([ingredientId])
   @@map("recipe_items")
+}
+
+model Warehouse {
+  id String @id @default(uuid())
+  cafeId String @map("cafe_id")
+  name String
+  isDefault Boolean @default(false) @map("is_default")
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  stock WarehouseStock[]
+  stationRoutes StationWarehouse[]
+  purchases Purchase[]
+  movements StockMovement[]
+  documents WarehouseDocument[]
+
+  @@unique([cafeId, name])
+  @@unique([cafeId, id])
+  @@map("warehouses")
+}
+
+model WarehouseStock {
+  cafeId String @map("cafe_id")
+  warehouseId String @map("warehouse_id")
+  ingredientId String @map("ingredient_id")
+  stock Decimal @default(0) @db.Decimal(14, 3)
+  avgCost Decimal @default(0) @map("avg_cost") @db.Decimal(20, 8)
+  warehouse Warehouse @relation(fields: [cafeId, warehouseId], references: [cafeId, id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@id([warehouseId, ingredientId])
+  @@index([cafeId, ingredientId])
+  @@map("warehouse_stock")
+}
+
+model WarehouseDocument {
+  id              String                  @id @default(uuid())
+  cafeId          String                  @map("cafe_id")
+  warehouseId     String                  @map("warehouse_id")
+  kind            WarehouseDocumentKind
+  mode            WarehouseInventoryMode?
+  reason          WarehouseWriteoffReason?
+  note            String?
+  status          WarehouseDocumentStatus @default(draft)
+  revision        Int                     @default(0)
+  createdAt       DateTime                @default(now()) @map("created_at")
+  submittedAt     DateTime?               @map("submitted_at")
+  postedAt        DateTime?               @map("posted_at")
+  createdById     String                  @map("created_by_id")
+  createdByName   String                  @map("created_by_name")
+  submittedById   String?                 @map("submitted_by_id")
+  submittedByName String?                 @map("submitted_by_name")
+  postedById      String?                 @map("posted_by_id")
+  postedByName    String?                 @map("posted_by_name")
+  warehouse       Warehouse               @relation(fields: [cafeId, warehouseId], references: [cafeId, id], onDelete: Cascade, map: "warehouse_documents_warehouse_fk")
+  items           WarehouseDocumentItem[]
+
+  @@unique([cafeId, id])
+  @@index([cafeId, warehouseId, kind, createdAt], map: "warehouse_documents_cafe_id_warehouse_id_kind_created_at_idx")
+  @@map("warehouse_documents")
+}
+
+model WarehouseDocumentItem {
+  cafeId              String            @map("cafe_id")
+  documentId          String            @map("document_id")
+  ingredientId        String            @map("ingredient_id")
+  name                String
+  unit                String
+  expected            Decimal?          @db.Decimal(14, 3)
+  quantity            Decimal?          @db.Decimal(14, 3)
+  difference          Decimal?          @db.Decimal(14, 3)
+  unitCost            Decimal?          @map("unit_cost") @db.Decimal(20, 8)
+  inventoryGeneration Int?              @map("inventory_generation")
+  document            WarehouseDocument @relation(fields: [cafeId, documentId], references: [cafeId, id], onDelete: Cascade, map: "warehouse_document_items_document_fk")
+  ingredient          Ingredient        @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([documentId, ingredientId])
+  @@index([cafeId, ingredientId])
+  @@map("warehouse_document_items")
+}
+
+model StationWarehouse {
+  cafeId String @map("cafe_id")
+  stationId String @map("station_id")
+  warehouseId String @map("warehouse_id")
+  warehouse Warehouse @relation(fields: [cafeId, warehouseId], references: [cafeId, id], onDelete: Cascade)
+
+  @@id([cafeId, stationId])
+  @@map("station_warehouses")
+}
+
+model PreparationRecipe {
+  cafeId String @map("cafe_id")
+  ingredientId String @id @map("ingredient_id")
+  outputAmount Decimal @map("output_amount") @db.Decimal(14, 3)
+  outputUnit String @map("output_unit")
+  ingredient Ingredient @relation("PreparedIngredient", fields: [ingredientId], references: [id], onDelete: Cascade)
+  items PreparationRecipeItem[]
+
+  @@index([cafeId])
+  @@map("preparation_recipes")
+}
+
+model PreparationRecipeItem {
+  cafeId String @map("cafe_id")
+  recipeId String @map("recipe_id")
+  ingredientId String @map("ingredient_id")
+  amount Decimal @db.Decimal(14, 3)
+  unit String
+  recipe PreparationRecipe @relation(fields: [recipeId], references: [ingredientId], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([recipeId, ingredientId])
+  @@index([cafeId, ingredientId])
+  @@map("preparation_recipe_items")
 }
 
 // Закупка. number — автоинкремент, на фронте показываем как «ЗКП-000142».
@@ -944,7 +1092,10 @@ model Purchase {
   updatedAt   DateTime       @updatedAt @map("updated_at")
 
   items PurchaseItem[]
+  warehouseId String? @map("warehouse_id")
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
+  @@index([cafeId, warehouseId])
   @@index([status])
   @@index([createdAt])
   @@map("purchases")
@@ -993,9 +1144,17 @@ model StockMovement {
 
   ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
 
-  @@unique([type, sourceType, sourceId, orderItemId, ingredientId], map: "stock_movements_order_item_once_key")
+  warehouseId String? @map("warehouse_id")
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  saleQuantity Int? @map("sale_quantity")
+  saleCycle Int @default(0) @map("sale_cycle")
+  saleLineId String? @map("sale_line_id")
+
+  @@unique([type, sourceType, sourceId, orderItemId, ingredientId, saleCycle], map: "stock_movements_order_item_cycle_key")
+  @@index([cafeId, warehouseId, createdAt])
   @@index([ingredientId])
   @@index([orderItemId])
+  @@index([sourceId, saleLineId])
   @@index([createdAt])
   @@index([type])
   @@index([sourceType])

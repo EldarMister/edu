@@ -14,6 +14,9 @@ const { lockOrder } = require('../src/orders/order-lock.ts');
 const { KitchenService } = require('../src/kitchen/kitchen.service.ts');
 const { PreparationStationsController } = require('../src/kitchen/preparation-stations.controller.ts');
 const { CatalogService } = require('../src/admin/catalog.service.ts');
+const { WarehouseLocationsService } = require('../src/warehouse/locations.service.ts');
+const { PreparationProductionService } = require('../src/warehouse/preparation-production.ts');
+const { RecipesService } = require('../src/warehouse/recipes.service.ts');
 const { StaffService } = require('../src/admin/staff.service.ts');
 const { resolveStation } = require('../src/kitchen/preparation-stations.ts');
 
@@ -199,6 +202,67 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
           await stationApi.update(stationOwner, 'kitchen', { isActive: false });
           await stationApi.update(stationOwner, 'bar', { isActive: false });
           assert.equal((await catalog.createCategory({ name: 'No preparation' }, stationOwner)).prepStation, 'none');
+        });
+      });
+
+      await t.test('station sale, shared ingredients, historical returns and preparation batches', async () => {
+        const warehouseApi = new WarehouseLocationsService(db, events);
+        const recipes = new RecipesService(db);
+        const preparation = new PreparationProductionService(db);
+        const barWarehouse = await warehouseApi.save(cafe.id, 'Склад бара');
+        const { locations } = await warehouseApi.list(cafe.id);
+        const common = locations.find(({ isDefault }) => isDefault);
+        const createIngredient = (name, stock, avgCost) => db.ingredient.create({ data: {
+          name, unitType: 'count', displayUnit: 'pcs', stock, avgCost,
+        } });
+        const soda = await createIngredient('Кола', 20, 5);
+        const commonCup = await createIngredient('Стакан', 20, 2);
+        const routeCategory = await db.category.create({ data: { name: 'Drinks', prepStation: 'bar' } });
+        const drink = await db.dish.create({ data: { name: 'Напиток', categoryId: routeCategory.id, price: 50 } });
+        await warehouseApi.transfer({ ingredientId: soda.id, fromWarehouseId: common.id, toWarehouseId: barWarehouse.id, quantity: 10, unit: 'pcs' });
+        await warehouseApi.route(owner, 'bar', barWarehouse.id);
+        await recipes.addItem(drink.id, { ingredientId: soda.id, amount: 1 });
+        await recipes.addItem(drink.id, { ingredientId: commonCup.id, amount: 1, fromCommonWarehouse: true });
+        assert.equal((await recipes.getByDish(drink.id)).foodCost, 7);
+        await settings.update({ allowNegativeIngredientStock: false }, owner);
+        await assert.rejects(newOrder([{ dishId: drink.id, quantity: 11 }]), /Недостаточно сырья/);
+        await settings.update({ allowNegativeIngredientStock: true }, owner);
+        const commonStock = async (id) => Number((await db.ingredient.findUniqueOrThrow({ where: { id } })).stock);
+        const routedStock = async (id) => Number((await db.warehouseStock.findUniqueOrThrow({
+          where: { warehouseId_ingredientId: { warehouseId: barWarehouse.id, ingredientId: id } },
+        })).stock);
+        const order = await newOrder([{ dishId: drink.id, quantity: 3 }]);
+        assert.deepEqual([await routedStock(soda.id), await commonStock(soda.id), await commonStock(commonCup.id)], [7, 10, 17]);
+        await warehouseApi.route(owner, 'bar', null);
+        const sodaRow = (await recipes.getByDish(drink.id)).items.find(({ ingredientId }) => ingredientId === soda.id);
+        await recipes.updateItem(sodaRow.id, { amount: 2, unit: 'pcs' });
+        const reduced = await orders.editOrder(order.id, owner, [{ id: order.items[0].id, dishId: drink.id, quantity: 2 }], undefined, 'Одна порция отменена');
+        assert.deepEqual([await routedStock(soda.id), await commonStock(commonCup.id)], [8, 18]);
+        const remaining = reduced.items.find(({ status }) => status !== 'cancelled');
+        await orders.cancelReadyItem(order.id, remaining.id, owner, 'Заказ отменён');
+        assert.deepEqual([await routedStock(soda.id), await commonStock(soda.id), await commonStock(commonCup.id)], [10, 10, 20]);
+        await recipes.removeItem(sodaRow.id);
+        await orders.adminUpdateStatus(order.id, owner, 'sent_to_kitchen');
+        assert.equal(await commonStock(commonCup.id), 17);
+        await orders.adminUpdateStatus(order.id, owner, 'cancelled', 'Повторная отмена');
+        assert.equal(await commonStock(commonCup.id), 20);
+        const prepared = await preparation.create({ name: 'Сироп', unit: 'l' });
+        await preparation.saveRecipe(prepared.id, {
+          outputQuantity: 1, outputUnit: 'l', items: [{ ingredientId: soda.id, quantity: 2, unit: 'pcs' }],
+        });
+        const batch = await preparation.produce(prepared.id, { quantity: 0.5, unit: 'l', warehouseId: barWarehouse.id });
+        assert.equal(batch.totalCost, 5);
+        assert.equal(await routedStock(soda.id), 9);
+        assert.equal(await routedStock(prepared.id), 500);
+        assert.equal(await commonStock(prepared.id), 0);
+        assert.equal((await preparation.list(barWarehouse.id)).find(({ id }) => id === prepared.id).avgCost, 10);
+        await assert.rejects(preparation.produce(prepared.id, { quantity: 100, unit: 'l', warehouseId: barWarehouse.id }), /Недостаточно сырья/);
+        assert.equal(await routedStock(soda.id), 9);
+        assert.equal(await routedStock(prepared.id), 500);
+        const outside = await db.cafe.create({ data: { name: 'Outside preparation' } });
+        await runWithTenant({ cafeId: outside.id }, async () => {
+          assert.deepEqual(await preparation.list(), []);
+          await assert.rejects(preparation.getRecipe(prepared.id), /не найден/);
         });
       });
 

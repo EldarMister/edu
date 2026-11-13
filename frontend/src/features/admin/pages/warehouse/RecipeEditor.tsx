@@ -18,6 +18,7 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
   const [newIngredientId, setNewIngredientId] = useState('');
   const [newAmount, setNewAmount] = useState('');
   const [newUnit, setNewUnit] = useState<UnitCode | ''>('');
+  const [fromCommonWarehouse, setFromCommonWarehouse] = useState(false);
   const [error, setError] = useState('');
 
   const recipe = recipeQ.data;
@@ -48,10 +49,12 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
         ingredientId: newIngredientId,
         amount,
         unit: effectiveNewUnit || undefined,
+        fromCommonWarehouse,
       });
       setNewIngredientId('');
       setNewAmount('');
       setNewUnit('');
+      setFromCommonWarehouse(false);
     } catch (err) {
       setError(apiError(err));
     }
@@ -100,6 +103,7 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
                 <th className="px-3 py-2 text-right font-medium">Ср. себест. ед.</th>
                 <th className="px-3 py-2 text-right font-medium">Себест. в порции</th>
                 <th className="px-3 py-2 text-center font-medium">Остаток</th>
+                <th className="px-3 py-2 font-medium">Списание</th>
                 <th className="px-3 py-2 font-medium">Статус</th>
                 <th className="px-3 py-2 text-right font-medium">Действия</th>
               </tr>
@@ -109,13 +113,13 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
                 <RecipeRow
                   key={item.id}
                   item={item}
-                  onSave={(amount, unit) => updateItem.mutateAsync({ id: item.id, amount, unit })}
+                  onSave={(amount, unit, fromCommonWarehouse) => updateItem.mutateAsync({ id: item.id, amount, unit, fromCommonWarehouse })}
                   onRemove={() => onRemove(item)}
                 />
               ))}
               {recipe?.items.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-3 py-6 text-center text-text-muted">
+                  <td colSpan={9} className="px-3 py-6 text-center text-text-muted">
                     Техкарта пуста — добавьте ингредиенты
                   </td>
                 </tr>
@@ -127,7 +131,7 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
                   Итого себестоимость порции
                 </td>
                 <td className="px-3 py-2.5 text-right font-semibold text-text-primary">{money(foodCost)}</td>
-                <td colSpan={3} />
+                <td colSpan={4} />
               </tr>
             </tfoot>
           </table>
@@ -146,7 +150,7 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
               setNewUnit(''); // сбрасываем — подставится единица нового ингредиента
             }}
             placeholder="Выберите…"
-            options={available.map((i) => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
+            options={available.map((i) => ({ value: i.id, label: `${i.name} (${i.isPrepared ? 'полуфабрикат, ' : ''}${i.unit})` }))}
           />
         </div>
         <div className="w-24">
@@ -169,6 +173,9 @@ export function RecipeEditor({ dishId, price }: { dishId: string; price: number 
             options={newUnitOptions}
           />
         </div>
+        <label className="flex min-h-9 items-center gap-2 text-sm text-text-secondary">
+          <input type="checkbox" checked={fromCommonWarehouse} onChange={(e) => setFromCommonWarehouse(e.target.checked)} /> Общий склад
+        </label>
         <button type="button" className="btn-primary btn-md" onClick={onAdd} disabled={addItem.isPending}>
           {addItem.isPending ? <Spinner /> : <><IconPlus className="h-4 w-4" /> Добавить ингредиент</>}
         </button>
@@ -193,12 +200,14 @@ function RecipeRow({
   onRemove,
 }: {
   item: RecipeItem;
-  onSave: (amount: number, unit: string) => Promise<unknown>;
+  onSave: (amount: number, unit: string, fromCommonWarehouse: boolean) => Promise<unknown>;
   onRemove: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState(String(item.amount));
   const [unit, setUnit] = useState<UnitCode>(item.amountUnit);
+  const [fromCommonWarehouse, setFromCommonWarehouse] = useState(!!item.fromCommonWarehouse);
+  const push = useNotifications((s) => s.push);
   const [busy, setBusy] = useState(false);
   const unitOptions = unitsForType(unitTypeOf(item.amountUnit));
 
@@ -207,8 +216,10 @@ function RecipeRow({
     if (!value || value <= 0) return;
     setBusy(true);
     try {
-      await onSave(value, unit);
+      await onSave(value, unit, fromCommonWarehouse);
       setEditing(false);
+    } catch (err) {
+      push({ message: apiError(err), at: new Date().toISOString() });
     } finally {
       setBusy(false);
     }
@@ -216,7 +227,10 @@ function RecipeRow({
 
   return (
     <tr className="border-b border-border last:border-0">
-      <td className="px-3 py-2 font-medium text-text-primary">{item.name}</td>
+      <td className="px-3 py-2 font-medium text-text-primary">
+        {item.name}
+        {item.isPrepared && <span className="block text-xs font-normal text-text-muted">Полуфабрикат</span>}
+      </td>
       <td className="px-3 py-2 text-center text-text-secondary">
         {editing ? (
           <Select
@@ -245,6 +259,13 @@ function RecipeRow({
       <td className="px-3 py-2 text-right text-text-secondary">{money(item.avgCost)}</td>
       <td className="px-3 py-2 text-right font-medium text-text-primary">{money(item.lineCost)}</td>
       <td className="px-3 py-2 text-center text-text-secondary">{qty(item.stock, item.unit)}</td>
+      <td className="px-3 py-2 text-text-secondary">
+        {editing ? (
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={fromCommonWarehouse} onChange={(e) => setFromCommonWarehouse(e.target.checked)} /> Общий склад
+          </label>
+        ) : item.fromCommonWarehouse ? 'Общий склад' : 'Склад станции'}
+      </td>
       <td className="px-3 py-2">
         <span
           className={`inline-flex rounded-lg px-2 py-0.5 text-xs font-medium ${
@@ -267,9 +288,14 @@ function RecipeRow({
             </button>
           ) : (
             <button
-              onClick={() => setEditing(true)}
+              onClick={() => {
+                setAmount(String(item.amount));
+                setUnit(item.amountUnit);
+                setFromCommonWarehouse(!!item.fromCommonWarehouse);
+                setEditing(true);
+              }}
               className="p-1.5 text-text-light transition-colors hover:text-primary"
-              title="Изменить количество"
+              title="Изменить строку техкарты"
             >
               <IconEdit className="h-4 w-4" />
             </button>

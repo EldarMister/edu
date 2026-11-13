@@ -17,6 +17,7 @@ import {
   purchaseNumber,
   qty,
   type Purchase,
+  type WarehouseLocation,
   type PurchaseStatus,
   type UpdatePurchaseInput,
   type Ingredient,
@@ -31,14 +32,16 @@ const STATUS_LABEL: Record<PurchaseStatus, { label: string; tone: 'success' | 'w
   cancelled: { label: 'Отменена', tone: 'muted' },
 };
 
-export function PurchasesTab() {
+export function PurchasesTab({ warehouseId, locations }: { warehouseId?: string; locations: WarehouseLocation[] }) {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('');
   const [detailsId, setDetailsId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
 
-  const overview = usePurchasesOverview();
-  const purchasesQ = usePurchases({ status, search });
+  const overview = usePurchasesOverview(warehouseId);
+  const purchasesQ = usePurchases({ status, search, warehouseId });
+  const defaultWarehouse = locations.find((location) => location.isDefault);
+  const warehouseNames = new Map(locations.map(({ id, name }) => [id, name]));
   const { complete, cancel } = usePurchaseMutations();
   const push = useNotifications((s) => s.push);
   const o = overview.data;
@@ -108,6 +111,7 @@ export function PurchasesTab() {
                     <th className="px-3 py-2.5 font-medium">№</th>
                     <th className="px-3 py-2.5 font-medium">Дата</th>
                     <th className="px-3 py-2.5 font-medium">Поставщик</th>
+                    {locations.length > 1 && <th className="px-3 py-2.5 font-medium">Склад</th>}
                     <th className="px-3 py-2.5 text-center font-medium">Позиций</th>
                     <th className="px-3 py-2.5 text-right font-medium">Сумма</th>
                     <th className="px-3 py-2.5 font-medium">Статус</th>
@@ -126,6 +130,7 @@ export function PurchasesTab() {
                         <td className="px-3 py-2.5 font-medium text-text-primary">{purchaseNumber(p.number)}</td>
                         <td className="px-3 py-2.5 text-text-secondary">{formatDate(p.date)}</td>
                         <td className="px-3 py-2.5 text-text-secondary">{p.supplier}</td>
+                        {locations.length > 1 && <td className="px-3 py-2.5 text-text-secondary">{warehouseNames.get(p.warehouseId ?? defaultWarehouse?.id ?? '') ?? '—'}</td>}
                         <td className="px-3 py-2.5 text-center text-text-secondary">{p.itemsCount}</td>
                         <td className="px-3 py-2.5 text-right font-medium text-text-primary">{money(p.totalAmount)}</td>
                         <td className="px-3 py-2.5">
@@ -165,7 +170,7 @@ export function PurchasesTab() {
                   })}
                   {purchasesQ.data?.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-3 py-10 text-center text-text-muted">
+                      <td colSpan={locations.length > 1 ? 8 : 7} className="px-3 py-10 text-center text-text-muted">
                         Закупки не найдены
                       </td>
                     </tr>
@@ -177,7 +182,7 @@ export function PurchasesTab() {
         </div>
 
         {/* Новая закупка */}
-        <NewPurchaseForm />
+        <NewPurchaseForm key={warehouseId ?? 'all'} warehouseId={warehouseId ?? defaultWarehouse?.id} locations={locations} />
       </div>
 
       <div className="card flex items-start gap-3 p-4 text-sm text-text-secondary">
@@ -192,7 +197,7 @@ export function PurchasesTab() {
         </div>
       </div>
 
-      {detailsId && <PurchaseDetailsModal id={detailsId} onClose={() => setDetailsId(null)} />}
+      {detailsId && <PurchaseDetailsModal id={detailsId} locations={locations} onClose={() => setDetailsId(null)} />}
       {editId && <PurchaseEditModal id={editId} onClose={() => setEditId(null)} />}
     </div>
   );
@@ -377,7 +382,7 @@ function PurchaseEditModal({ id, onClose }: { id: string; onClose: () => void })
   );
 }
 
-function PurchaseDetailsModal({ id, onClose }: { id: string; onClose: () => void }) {
+function PurchaseDetailsModal({ id, locations, onClose }: { id: string; locations: WarehouseLocation[]; onClose: () => void }) {
   const purchaseQ = usePurchase(id);
   const p = purchaseQ.data;
   const st = p ? STATUS_LABEL[p.status] : null;
@@ -393,6 +398,7 @@ function PurchaseDetailsModal({ id, onClose }: { id: string; onClose: () => void
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Info label="Дата">{formatDate(p.date)}</Info>
             <Info label="Поставщик">{p.supplier}</Info>
+            <Info label="Склад">{(p.warehouseId ? locations.find((location) => location.id === p.warehouseId) : locations.find((location) => location.isDefault))?.name ?? '—'}</Info>
             <Info label="Статус">{st && <Badge tone={st.tone}>{st.label}</Badge>}</Info>
             <Info label="Позиций">{p.itemsCount}</Info>
           </div>
@@ -442,13 +448,14 @@ function Info({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function NewPurchaseForm() {
+function NewPurchaseForm({ warehouseId, locations }: { warehouseId?: string; locations: WarehouseLocation[] }) {
   const today = new Date().toISOString().slice(0, 10);
   const ingredientsQ = useIngredients('');
   const { create } = usePurchaseMutations();
   const push = useNotifications((s) => s.push);
 
   const [date, setDate] = useState(today);
+  const [destinationId, setDestinationId] = useState(warehouseId ?? '');
   const [supplier, setSupplier] = useState('');
   const [rows, setRows] = useState<Row[]>([emptyRow()]);
   const [error, setError] = useState('');
@@ -527,7 +534,7 @@ function NewPurchaseForm() {
       return;
     }
     try {
-      await create.mutateAsync({ date, supplier: supplier.trim(), items, complete: true });
+      await create.mutateAsync({ date, supplier: supplier.trim(), warehouseId: destinationId || undefined, items, complete: true });
       push({ message: 'Закупка проведена', at: new Date().toISOString() });
       reset();
     } catch (err) {
@@ -538,6 +545,14 @@ function NewPurchaseForm() {
   return (
     <div className="card flex flex-col p-4">
       <h3 className="mb-3 text-[15px] font-semibold text-text-primary">Новая закупка</h3>
+      {locations.length > 1 && (
+        <div className="mb-3">
+          <Field label="Склад поступления">
+            <Select ariaLabel="Склад поступления" className="h-10 w-full" value={destinationId} onChange={setDestinationId}
+              options={locations.map(({ id, name }) => ({ value: id, label: name }))} />
+          </Field>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-3">
         <Field label="Дата">
           <DatePicker className="input h-9" value={date} onChange={(value) => setDate(value)} />

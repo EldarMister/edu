@@ -25,6 +25,7 @@ export const SERVER_EVENTS = {
   TABLES_UPDATED: 'tables:updated',
   MENU_UPDATED: 'menu:updated',
   SETTINGS_UPDATED: 'settings:updated',
+  WAREHOUSE_UPDATED: 'warehouse:updated',
   NOTIFICATION_NEW: 'notification:new',
   ADMINISTRATOR_CALLED: 'administrator:called',
   // Печать чека: официант ⇄ администратор.

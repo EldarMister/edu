@@ -1,233 +1,254 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
-import { Prisma, StockMovementType } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import { getCafeId } from '../tenant/tenant-context';
+import { lockIngredients } from './stock-lock';
 import { fromBase, unitLabel, type UnitCode } from './units';
+import { getWarehouseBalance, setWarehouseBalance } from './warehouse-location';
 
-type OrderLine = { id?: string | null; dishId?: string | null; quantity?: number | null };
+type OrderLine = {
+  id?: string | null;
+  sourceLineId?: string;
+  sourceLineQuantity?: number;
+  dishId?: string | null;
+  prepStation?: string;
+  quantity?: number | null;
+};
+type Ingredient = { id: string; name: string; displayUnit: string; stock: Prisma.Decimal; avgCost: Prisma.Decimal };
+type Warehouse = { id: string; cafeId: string; name: string; isDefault: boolean };
+type Movement = {
+  ingredient: Ingredient;
+  warehouse: Warehouse | null;
+  lineId: string | null;
+  quantity: number;
+  cycle: number;
+  sourceLineId?: string;
+  change: Prisma.Decimal;
+  cost?: Prisma.Decimal;
+  comment: string;
+};
 
 export type IngredientStockWarning = {
   ingredientId: string;
   ingredient: string;
+  warehouseId: string | null;
+  warehouseName?: string;
   unit: string;
   needed: number;
   available: number;
   missing: number;
 };
 
-/**
- * Списание/возврат сырья по техкарте при продаже/отмене блюд.
- *
- * Вызывается ИЗ транзакций заказа (`orders.service.ts`) рядом с существующей
- * логикой остатков блюд (`deductInventory`/`restoreInventory`). Работает
- * независимо от `trackInventory`: списываются ингредиенты любого блюда, у
- * которого есть техкарта (RecipeItem). Блюда без техкарты пропускаются —
- * заказ при этом не ломается.
- *
- * Идемпотентность держится на StockMovement: одна позиция заказа
- * (orderItemId) может списать/вернуть конкретный ингредиент только один раз.
- */
 @Injectable()
 export class IngredientStockService {
-  /** Списание ингредиентов при продаже блюд. */
-  async applyDishSale(
-    tx: Prisma.TransactionClient,
-    orderId: string,
-    lines: OrderLine[],
-  ): Promise<IngredientStockWarning[]> {
-    return this.applyMovement(tx, orderId, lines, 'sale');
-  }
+  async applyDishSale(tx: Prisma.TransactionClient, orderId: string, lines: OrderLine[], reopen = false) {
+    const dishIds = [...new Set(lines.flatMap((line) => line.dishId ? [line.dishId] : []))];
+    if (!dishIds.length) return [];
 
-  /** Возврат ингредиентов при отмене заказа / отказе позиции. */
-  async restoreDishSale(
-    tx: Prisma.TransactionClient,
-    orderId: string,
-    lines: OrderLine[],
-  ): Promise<IngredientStockWarning[]> {
-    return this.applyMovement(tx, orderId, lines, 'return');
-  }
-
-  private async applyMovement(
-    tx: Prisma.TransactionClient,
-    orderId: string,
-    lines: OrderLine[],
-    direction: 'sale' | 'return',
-  ): Promise<IngredientStockWarning[]> {
-    const normalizedLines = lines.filter((line) => line.dishId && line.quantity && line.quantity > 0);
-    if (normalizedLines.length === 0) return [];
-
-    const dishIds = [...new Set(normalizedLines.map((line) => line.dishId).filter((id): id is string => !!id))];
-    const recipeItems = await tx.recipeItem.findMany({
-      where: { dishId: { in: dishIds } },
-      include: {
-        dish: { select: { name: true } },
-        ingredient: { select: { id: true, name: true, displayUnit: true, stock: true, avgCost: true } },
-      },
-    });
-    if (recipeItems.length === 0) return [];
-
-    const recipeByDish = new Map<string, typeof recipeItems>();
-    for (const ri of recipeItems) {
-      const list = recipeByDish.get(ri.dishId) ?? [];
-      list.push(ri);
-      recipeByDish.set(ri.dishId, list);
+    const cafeId = getCafeId();
+    const stationIds = [...new Set(lines.flatMap((line) => line.prepStation ? [line.prepStation] : []))];
+    const [recipe, routes] = await Promise.all([
+      tx.recipeItem.findMany({
+        where: { dishId: { in: dishIds } },
+        include: { dish: { select: { name: true } }, ingredient: true },
+      }),
+      cafeId && stationIds.length ? tx.stationWarehouse.findMany({
+        where: { cafeId, stationId: { in: stationIds } },
+        include: { warehouse: true },
+      }) : [],
+    ]);
+    if (!recipe.length) return [];
+    await lockIngredients(tx, recipe.map((row) => row.ingredientId));
+    const cycles = await this.latestSaleCycles(tx, orderId, lines);
+    const lastCycle = reopen ? await tx.stockMovement.aggregate({
+      where: { sourceType: 'order', sourceId: orderId },
+      _max: { saleCycle: true },
+    }) : null;
+    const cycle = lastCycle ? (lastCycle._max.saleCycle ?? 0) + 1 : 0;
+    const routeByStation = new Map(routes.map((route) => [route.stationId, route.warehouse]));
+    const recipeByDish = new Map<string, typeof recipe>();
+    for (const row of recipe) {
+      const items = recipeByDish.get(row.dishId) ?? [];
+      items.push(row);
+      recipeByDish.set(row.dishId, items);
     }
 
-    const type: StockMovementType = direction === 'sale' ? 'sale' : 'return';
-    const lineIds = normalizedLines.map((line) => line.id).filter((id): id is string => !!id);
-    const existingKeys = new Set<string>();
-    if (lineIds.length > 0) {
-      const existing = await tx.stockMovement.findMany({
-        where: {
+    const plan: Movement[] = [];
+    for (const line of lines) {
+      if (!line.dishId || !line.quantity || line.quantity <= 0) continue;
+      const previousCycle = line.id ? cycles.get(line.id) : undefined;
+      if (previousCycle !== undefined && !reopen) continue;
+      for (const row of recipeByDish.get(line.dishId) ?? []) {
+        const change = row.amount.mul(line.quantity).negated().toDecimalPlaces(3);
+        if (change.isZero()) continue;
+        const routed = line.prepStation && !row.fromCommonWarehouse ? routeByStation.get(line.prepStation) : undefined;
+        plan.push({
+          ingredient: row.ingredient,
+          warehouse: routed && !routed.isDefault ? routed : null,
+          lineId: line.id ?? null,
+          quantity: line.quantity,
+          cycle,
+          change,
+          comment: `Списание по техкарте: ${row.dish.name} × ${line.quantity}`,
+        });
+      }
+    }
+    return this.post(tx, orderId, plan, 'sale');
+  }
+
+  async restoreDishSale(tx: Prisma.TransactionClient, orderId: string, lines: OrderLine[]) {
+    const sourceIds = [...new Set(lines.flatMap((line) => line.sourceLineId ?? line.id ?? []))];
+    if (!sourceIds.length) return [];
+    const sales = await tx.stockMovement.findMany({
+      where: { sourceType: 'order', sourceId: orderId, type: 'sale', orderItemId: { in: sourceIds } },
+      include: { ingredient: true, warehouse: true },
+    });
+    if (!sales.length) return [];
+
+    await lockIngredients(tx, sales.map((sale) => sale.ingredientId));
+    const lineIds = lines.flatMap((line) => line.id ? [line.id] : []);
+    const returns = await tx.stockMovement.findMany({
+      where: { sourceType: 'order', sourceId: orderId, type: 'return', OR: [
+        { orderItemId: { in: [...new Set([...sourceIds, ...lineIds])] } },
+        { saleLineId: { in: sourceIds } },
+      ] },
+      select: { orderItemId: true, ingredientId: true, saleCycle: true, saleLineId: true, change: true },
+    });
+    const recorded = new Set(returns.map((row) => `${row.orderItemId}:${row.ingredientId}:${row.saleCycle}`));
+    const refunded = new Map<string, Prisma.Decimal>();
+    for (const row of returns) {
+      const key = `${row.saleLineId ?? row.orderItemId}:${row.ingredientId}:${row.saleCycle}`;
+      refunded.set(key, (refunded.get(key) ?? new Prisma.Decimal(0)).add(row.change));
+    }
+    const legacyIds = sales.flatMap((sale) => sale.saleQuantity == null && sale.orderItemId ? [sale.orderItemId] : []);
+    const originals = legacyIds.length ? await tx.orderItem.findMany({
+      where: { orderId, id: { in: legacyIds } },
+      select: { id: true, quantity: true },
+    }) : [];
+    const originalQuantity = new Map(originals.map((line) => [line.id, line.quantity]));
+    const salesByLine = new Map<string, typeof sales>();
+    for (const sale of sales) {
+      const key = sale.orderItemId!;
+      const entries = salesByLine.get(key) ?? [];
+      entries.push(sale);
+      salesByLine.set(key, entries);
+    }
+    const plan: Movement[] = [];
+    for (const line of lines) {
+      if (!line.id || !line.quantity || line.quantity <= 0) continue;
+      const sourceId = line.sourceLineId ?? line.id;
+      const sourceSales = salesByLine.get(sourceId) ?? [];
+      const latestCycle = Math.max(...sourceSales.map((sale) => sale.saleCycle));
+      for (const sale of sourceSales) {
+        const key = `${sourceId}:${sale.ingredientId}:${sale.saleCycle}`;
+        if (sale.saleCycle !== latestCycle || recorded.has(`${line.id}:${sale.ingredientId}:${sale.saleCycle}`)) continue;
+        const quantity = sale.saleQuantity ?? line.sourceLineQuantity ?? originalQuantity.get(sourceId) ?? line.quantity;
+        if (sale.saleQuantity == null && quantity > 0) {
+          await tx.stockMovement.update({ where: { id: sale.id }, data: { saleQuantity: quantity } });
+        }
+        const remaining = sale.change.abs().sub(refunded.get(key) ?? 0);
+        const change = sourceId === line.id ? remaining
+          : Prisma.Decimal.min(remaining, sale.change.abs().mul(line.quantity).div(quantity).toDecimalPlaces(3));
+        if (change.lte(0)) continue;
+        refunded.set(key, (refunded.get(key) ?? new Prisma.Decimal(0)).add(change));
+        plan.push({
+          ingredient: sale.ingredient,
+          warehouse: sale.warehouse,
+          lineId: line.id,
+          quantity: line.quantity,
+          cycle: sale.saleCycle,
+          sourceLineId: sourceId,
+          change,
+          cost: sale.costAtMoment,
+          comment: 'Возврат по отмене или отказу',
+        });
+      }
+    }
+    return this.post(tx, orderId, plan, 'return');
+  }
+
+  private async latestSaleCycles(tx: Prisma.TransactionClient, orderId: string, lines: OrderLine[]) {
+    const ids = lines.flatMap((line) => line.id ? [line.id] : []);
+    const rows = ids.length ? await tx.stockMovement.groupBy({
+      by: ['orderItemId'],
+      where: { type: 'sale', sourceType: 'order', sourceId: orderId, orderItemId: { in: ids } },
+      _max: { saleCycle: true },
+    }) : [];
+    return new Map(rows.map((row) => [row.orderItemId, row._max.saleCycle ?? 0]));
+  }
+
+  private async post(tx: Prisma.TransactionClient, orderId: string, plan: Movement[], type: 'sale' | 'return') {
+    if (!plan.length) return [];
+    const ingredientIds = [...new Set(plan.map((row) => row.ingredient.id))];
+    const fresh = await tx.ingredient.findMany({ where: { id: { in: ingredientIds } } });
+    const ingredients = new Map(fresh.map((ingredient) => [ingredient.id, ingredient]));
+    const grouped = new Map<string, Movement[]>();
+    for (const row of plan) {
+      const key = `${row.warehouse?.isDefault ? '' : row.warehouse?.id ?? ''}:${row.ingredient.id}`;
+      const entries = grouped.get(key) ?? [];
+      entries.push(row);
+      grouped.set(key, entries);
+    }
+    const warnings: IngredientStockWarning[] = [];
+    const balances = await Promise.all([...grouped.values()].map(async (rows) => {
+      const { warehouse, ingredient } = rows[0];
+      const current = ingredients.get(ingredient.id);
+      if (!current) throw new BadRequestException('Сырьё техкарты не найдено');
+      const balance = await getWarehouseBalance(tx, warehouse, current);
+      const total = rows.reduce((sum, row) => sum.add(row.change), new Prisma.Decimal(0));
+      if (type === 'sale' && balance.stock.add(total).isNegative()) {
+        const unit = ingredient.displayUnit as UnitCode;
+        const display = (amount: Prisma.Decimal) => Math.round(fromBase(Number(amount), unit) * 1000) / 1000;
+        warnings.push({
+          ingredientId: ingredient.id,
+          ingredient: ingredient.name,
+          warehouseId: warehouse?.id ?? null,
+          warehouseName: warehouse?.name,
+          unit: unitLabel(unit),
+          needed: display(total.abs()),
+          available: display(balance.stock),
+          missing: display(balance.stock.add(total).abs()),
+        });
+      }
+      return { rows, warehouse, ingredient, balance };
+    }));
+
+    if (warnings.length) {
+      const settings = await tx.settings.findFirst({ select: { allowNegativeIngredientStock: true } });
+      if (settings?.allowNegativeIngredientStock === false) {
+        throw new BadRequestException({ message: 'Недостаточно сырья', shortages: warnings });
+      }
+    }
+
+    for (const { rows, warehouse, ingredient, balance } of balances) {
+      let stock = balance.stock;
+      let avgCost = balance.avgCost;
+      for (const row of rows) {
+        const before = stock;
+        stock = before.add(row.change);
+        const cost = row.cost ?? avgCost;
+        if (type === 'return' && stock.gt(0)) {
+          avgCost = Prisma.Decimal.max(before, 0).mul(avgCost).add(row.change.mul(cost))
+            .div(Prisma.Decimal.max(before, 0).add(row.change));
+        }
+        await tx.stockMovement.create({ data: {
+          ingredientId: ingredient.id,
+          orderItemId: row.lineId,
+          warehouseId: warehouse?.id ?? null,
+          saleQuantity: type === 'sale' ? row.quantity : null,
+          saleCycle: row.cycle,
+          saleLineId: row.sourceLineId,
           type,
           sourceType: 'order',
           sourceId: orderId,
-          orderItemId: { in: lineIds },
-        },
-        select: { orderItemId: true, ingredientId: true },
-      });
-      for (const movement of existing) {
-        if (movement.orderItemId) {
-          existingKeys.add(`${movement.orderItemId}:${movement.ingredientId}`);
-        }
+          beforeStock: before,
+          change: row.change,
+          afterStock: stock,
+          costAtMoment: cost,
+          comment: row.comment,
+        } });
       }
-    }
-
-    const planned: Array<{
-      line: OrderLine;
-      recipeItem: (typeof recipeItems)[number];
-      qty: number;
-    }> = [];
-
-    for (const line of normalizedLines) {
-      if (!line.dishId || !line.quantity) continue;
-      for (const ri of recipeByDish.get(line.dishId) ?? []) {
-        if (line.id && existingKeys.has(`${line.id}:${ri.ingredientId}`)) continue;
-        const qty = Number(ri.amount) * line.quantity;
-        if (qty > 0) planned.push({ line, recipeItem: ri, qty });
-      }
-    }
-    if (planned.length === 0) return [];
-
-    if (direction === 'sale') {
-      const warnings = await this.shortages(tx, planned);
-      if (warnings.length > 0) {
-        const settings = await tx.settings.findFirst({
-          select: { allowNegativeIngredientStock: true },
-        });
-        if (settings?.allowNegativeIngredientStock === false) {
-          throw new BadRequestException({
-            message: 'Недостаточно сырья',
-            shortages: warnings,
-          });
-        }
-        await this.createMovements(tx, orderId, planned, direction);
-        return warnings;
-      }
-    }
-
-    await this.createMovements(tx, orderId, planned, direction);
-    return [];
-  }
-
-  private async shortages(
-    tx: Prisma.TransactionClient,
-    planned: Array<{
-      recipeItem: {
-        ingredientId: string;
-        ingredient: { name: string; displayUnit: string; stock: Prisma.Decimal };
-      };
-      qty: number;
-    }>,
-  ): Promise<IngredientStockWarning[]> {
-    // needed/available — в базовых единицах (qty и stock уже в базе).
-    const neededByIngredient = new Map<
-      string,
-      { ingredient: string; displayUnit: UnitCode; needed: number; available: number }
-    >();
-    for (const row of planned) {
-      const current = neededByIngredient.get(row.recipeItem.ingredientId) ?? {
-        ingredient: row.recipeItem.ingredient.name,
-        displayUnit: row.recipeItem.ingredient.displayUnit as UnitCode,
-        needed: 0,
-        available: Number(row.recipeItem.ingredient.stock),
-      };
-      current.needed += row.qty;
-      neededByIngredient.set(row.recipeItem.ingredientId, current);
-    }
-
-    const warnings: IngredientStockWarning[] = [];
-    for (const [ingredientId, row] of neededByIngredient.entries()) {
-      if (row.needed <= row.available) continue;
-      // В предупреждение отдаём display-единицу (понятнее официанту/админу).
-      warnings.push({
-        ingredientId,
-        ingredient: row.ingredient,
-        unit: unitLabel(row.displayUnit),
-        needed: round3(fromBase(row.needed, row.displayUnit)),
-        available: round3(fromBase(row.available, row.displayUnit)),
-        missing: round3(fromBase(row.needed - row.available, row.displayUnit)),
-      });
+      await setWarehouseBalance(tx, warehouse, ingredient.id, { stock, avgCost });
     }
     return warnings;
   }
-
-  private async createMovements(
-    tx: Prisma.TransactionClient,
-    orderId: string,
-    planned: Array<{
-      line: OrderLine;
-      recipeItem: {
-        ingredientId: string;
-        dish: { name: string };
-      };
-      qty: number;
-    }>,
-    direction: 'sale' | 'return',
-  ) {
-    for (const line of planned) {
-      const ri = line.recipeItem;
-      const qty = line.qty;
-
-      // Берём актуальный остаток/себестоимость внутри транзакции.
-      const ingredient = await tx.ingredient.findUnique({
-        where: { id: ri.ingredientId },
-        select: { stock: true, avgCost: true },
-      });
-      if (!ingredient) continue;
-
-      const before = Number(ingredient.stock);
-      const sign = direction === 'sale' ? -1 : 1;
-      const change = sign * qty;
-      const after = before + change;
-      const avgCost = Number(ingredient.avgCost);
-
-      await tx.ingredient.update({
-        where: { id: ri.ingredientId },
-        data: { stock: new Prisma.Decimal(after) },
-      });
-
-      const comment =
-        direction === 'sale'
-          ? `Списание по техкарте: ${ri.dish.name} × ${line.line.quantity}`
-          : `Возврат по отмене/отказу: ${ri.dish.name} × ${line.line.quantity}`;
-
-      await tx.stockMovement.create({
-        data: {
-          ingredientId: ri.ingredientId,
-          orderItemId: line.line.id ?? null,
-          type: direction === 'sale' ? 'sale' : 'return',
-          sourceType: 'order',
-          sourceId: orderId,
-          beforeStock: new Prisma.Decimal(before),
-          change: new Prisma.Decimal(change),
-          afterStock: new Prisma.Decimal(after),
-          costAtMoment: new Prisma.Decimal(avgCost),
-          comment,
-        },
-      });
-    }
-  }
-}
-
-function round3(n: number): number {
-  return Math.round(n * 1000) / 1000;
 }

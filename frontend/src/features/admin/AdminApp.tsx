@@ -168,8 +168,12 @@ export function AdminApp() {
     qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] });
     qc.invalidateQueries({ queryKey: ['audit'] });
   });
+  useSocketEvent('warehouse:updated', () => {
+    void qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] });
+  });
   useSocketEvent('settings:updated', () => {
     qc.invalidateQueries({ queryKey: ['settings'] });
+    qc.invalidateQueries({ queryKey: ['admin', 'warehouse', 'locations'] });
     qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
     qc.invalidateQueries({ queryKey: ['audit'] });
   });

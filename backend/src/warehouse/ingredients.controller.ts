@@ -2,25 +2,29 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestj
 import { Role } from '@prisma/client';
 import { IngredientsService } from './ingredients.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { AdjustIngredientDto, CreateIngredientDto, UpdateIngredientDto } from './dto';
 
 @Controller('admin/warehouse/ingredients')
 @Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.warehouse')
 export class IngredientsController {
   constructor(private readonly ingredients: IngredientsService) {}
 
   @Get('overview')
-  overview() {
-    return this.ingredients.overview();
+  overview(@Query('warehouseId') warehouseId?: string) {
+    return this.ingredients.overview(warehouseId);
   }
 
   @Get()
   findAll(
     @Query('search') search?: string,
     @Query('includeInactive') includeInactive?: string,
+    @Query('warehouseId') warehouseId?: string,
   ) {
     return this.ingredients.findAll({
       search,
+      warehouseId,
       includeInactive: includeInactive === 'true' || includeInactive === '1',
     });
   }

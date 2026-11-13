@@ -5,14 +5,16 @@ import { StockTrendChart } from './StockTrendChart';
 
 const TYPE_LABEL: Record<StockMovementType, string> = {
   purchase: 'Приход',
-  sale: 'Списание',
+  sale: 'Продажа',
+  inventory: 'Инвентаризация',
+  writeoff: 'Акт списания',
   return: 'Возврат',
   correction: 'Коррекция',
   cancel: 'Отмена',
 };
 
-export function WarehouseOverviewTab({ range }: { range: { dateFrom: string; dateTo: string } }) {
-  const overview = useWarehouseOverview(range);
+export function WarehouseOverviewTab({ range, warehouseId }: { range: { dateFrom: string; dateTo: string }; warehouseId?: string }) {
+  const overview = useWarehouseOverview({ ...range, warehouseId });
   const data = overview.data;
 
   return (
@@ -159,6 +161,8 @@ const TYPE_TONE: Record<StockMovementType, string> = {
   return: 'bg-success/10 text-success',
   sale: 'bg-danger/10 text-danger',
   correction: 'bg-warning/10 text-warning',
+  inventory: 'bg-warning/10 text-warning',
+  writeoff: 'bg-danger/10 text-danger',
   cancel: 'bg-background text-text-muted',
 };
 

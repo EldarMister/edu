@@ -2,10 +2,12 @@ import { Body, Controller, Delete, Get, Param, Patch, Post } from '@nestjs/commo
 import { Role } from '@prisma/client';
 import { RecipesService } from './recipes.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CreateRecipeItemDto, UpdateRecipeItemDto } from './dto';
 
 @Controller('admin/warehouse')
 @Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.warehouse')
 export class RecipesController {
   constructor(private readonly recipes: RecipesService) {}
 

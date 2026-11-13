@@ -18,6 +18,9 @@ import { PurchaseStatus } from '@prisma/client';
 // ---------- Сырьё (ингредиенты) ----------
 
 export class CreateIngredientDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsString() @IsNotEmpty() @MaxLength(120)
   name: string;
 
@@ -37,6 +40,9 @@ export class CreateIngredientDto {
 }
 
 export class UpdateIngredientDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsOptional() @IsString() @MaxLength(120)
   name?: string;
 
@@ -58,6 +64,9 @@ export class UpdateIngredientDto {
 
 // Ручная корректировка остатка (ТЗ §8): добавить / списать / установить.
 export class AdjustIngredientDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsIn(['add', 'writeoff', 'set'])
   mode: 'add' | 'writeoff' | 'set';
 
@@ -72,6 +81,9 @@ export class AdjustIngredientDto {
 // ---------- Техкарта ----------
 
 export class CreateRecipeItemDto {
+  @IsOptional() @IsBoolean()
+  fromCommonWarehouse?: boolean;
+
   @IsString() @IsNotEmpty()
   ingredientId: string;
 
@@ -85,6 +97,9 @@ export class CreateRecipeItemDto {
 }
 
 export class UpdateRecipeItemDto {
+  @IsOptional() @IsBoolean()
+  fromCommonWarehouse?: boolean;
+
   @IsNumber() @Min(0)
   amount: number;
 
@@ -115,6 +130,9 @@ export class PurchaseItemInputDto {
 }
 
 export class CreatePurchaseDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsOptional() @IsString()
   date?: string;
 
@@ -131,6 +149,9 @@ export class CreatePurchaseDto {
 }
 
 export class UpdatePurchaseDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsOptional() @IsString()
   date?: string;
 
@@ -145,6 +166,9 @@ export class UpdatePurchaseDto {
 // ---------- Фильтры движений ----------
 
 export class MovementsQueryDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsOptional() @IsString()
   from?: string;
 

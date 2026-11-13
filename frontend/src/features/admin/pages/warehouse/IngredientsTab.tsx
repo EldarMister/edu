@@ -14,15 +14,18 @@ import {
   qty,
   type Ingredient,
   type IngredientInput,
+  type WarehouseLocation,
+  useWarehouseLocationMutations,
 } from './api';
 import { UNIT_OPTIONS, costUnitLabel, unitsForType, unitTypeOf, type UnitCode } from './units';
 
-export function IngredientsTab() {
+export function IngredientsTab({ warehouse, locations }: { warehouse: WarehouseLocation; locations: WarehouseLocation[] }) {
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<Ingredient | null | 'new'>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
 
-  const overview = useIngredientsOverview();
-  const itemsQ = useIngredients(search);
+  const overview = useIngredientsOverview(warehouse.id);
+  const itemsQ = useIngredients(search, warehouse.id);
   const { remove } = useIngredientMutations();
   const push = useNotifications((s) => s.push);
   const o = overview.data;
@@ -61,9 +64,14 @@ export function IngredientsTab() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
-          <button className="btn-primary btn-md font-medium" onClick={() => setModal('new')}>
-            <IconPlus className="h-4 w-4" /> Добавить сырьё
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {locations.length > 1 && (
+              <button type="button" className="btn-secondary btn-md" onClick={() => setTransferOpen(true)}>Переместить</button>
+            )}
+            <button type="button" className="btn-primary btn-md font-medium" onClick={() => setModal('new')}>
+              <IconPlus className="h-4 w-4" /> Добавить сырьё
+            </button>
+          </div>
         </div>
 
         {itemsQ.isLoading ? (
@@ -145,13 +153,14 @@ export function IngredientsTab() {
       </div>
 
       {modal !== null && (
-        <IngredientModal item={modal === 'new' ? null : modal} onClose={() => setModal(null)} />
+        <IngredientModal item={modal === 'new' ? null : modal} warehouse={warehouse} onClose={() => setModal(null)} />
       )}
+      {transferOpen && <TransferModal warehouse={warehouse} locations={locations} onClose={() => setTransferOpen(false)} />}
     </div>
   );
 }
 
-function IngredientModal({ item, onClose }: { item: Ingredient | null; onClose: () => void }) {
+function IngredientModal({ item, warehouse, onClose }: { item: Ingredient | null; warehouse: WarehouseLocation; onClose: () => void }) {
   const isEdit = !!item;
   const { create, update } = useIngredientMutations();
   const push = useNotifications((s) => s.push);
@@ -172,9 +181,10 @@ function IngredientModal({ item, onClose }: { item: Ingredient | null; onClose: 
     }
     const body: IngredientInput = {
       name: name.trim(),
+      warehouseId: warehouse.id,
       unit,
-      stock: Number(stock) || 0,
-      avgCost: Number(avgCost) || 0,
+      stock: isEdit ? undefined : Number(stock) || 0,
+      avgCost: !item || Number(avgCost) !== item.avgCost ? Number(avgCost) || 0 : undefined,
       lowStockThreshold: Number(threshold) || 0,
     };
     try {
@@ -195,7 +205,7 @@ function IngredientModal({ item, onClose }: { item: Ingredient | null; onClose: 
     <Modal
       open
       onClose={onClose}
-      title={isEdit ? 'Редактировать сырьё' : 'Добавить сырьё'}
+      title={`${isEdit ? 'Редактировать сырьё' : 'Добавить сырьё'} · ${warehouse.name}`}
       panelClassName="max-w-lg"
       footer={
         <button className="btn-primary btn-lg w-full font-semibold" disabled={pending} onClick={onSubmit}>
@@ -216,9 +226,11 @@ function IngredientModal({ item, onClose }: { item: Ingredient | null; onClose: 
               options={UNIT_OPTIONS}
             />
           </Field>
-          <Field label="Текущий остаток">
-            <input className="input" type="number" step="0.001" value={stock} onChange={(e) => setStock(e.target.value)} />
-          </Field>
+          {!isEdit && (
+            <Field label="Начальный остаток">
+              <input className="input" type="number" min="0" step="0.001" value={stock} onChange={(e) => setStock(e.target.value)} />
+            </Field>
+          )}
           <Field label={`Ср. себестоимость (${costUnitLabel(unit)})`}>
             <input className="input" type="number" step="0.01" value={avgCost} onChange={(e) => setAvgCost(e.target.value)} />
           </Field>
@@ -233,14 +245,14 @@ function IngredientModal({ item, onClose }: { item: Ingredient | null; onClose: 
           </Field>
         </div>
         {error && <p className="text-sm text-danger">{error}</p>}
-        {isEdit && item && <AdjustBlock ingredient={item} />}
+        {isEdit && item && <AdjustBlock ingredient={item} warehouseId={warehouse.id} />}
       </div>
     </Modal>
   );
 }
 
 /** Блок ручной корректировки остатка: добавить / списать / установить (ТЗ §8). */
-function AdjustBlock({ ingredient }: { ingredient: Ingredient }) {
+function AdjustBlock({ ingredient, warehouseId }: { ingredient: Ingredient; warehouseId: string }) {
   const { adjust } = useIngredientMutations();
   const push = useNotifications((s) => s.push);
   const [mode, setMode] = useState<'add' | 'writeoff' | 'set'>('add');
@@ -254,12 +266,12 @@ function AdjustBlock({ ingredient }: { ingredient: Ingredient }) {
   async function onApply() {
     setError('');
     const q = Number(quantity);
-    if (!Number.isFinite(q) || q < 0) {
+    if (!quantity.trim() || !Number.isFinite(q) || q < 0 || (mode !== 'set' && q === 0)) {
       setError('Укажите количество');
       return;
     }
     try {
-      await adjust.mutateAsync({ id: ingredient.id, mode, quantity: q, unit });
+      await adjust.mutateAsync({ id: ingredient.id, mode, quantity: q, unit, warehouseId });
       setQuantity('');
       push({ message: `${MODE_LABEL[mode]}: ${q} ${unitOptions.find((u) => u.value === unit)?.label ?? ''}`, at: new Date().toISOString() });
     } catch (err) {
@@ -306,6 +318,73 @@ function AdjustBlock({ ingredient }: { ingredient: Ingredient }) {
       </div>
       {error && <p className="mt-2 text-sm text-danger">{error}</p>}
     </div>
+  );
+}
+
+function TransferModal({ warehouse, locations, onClose }: {
+  warehouse: WarehouseLocation;
+  locations: WarehouseLocation[];
+  onClose: () => void;
+}) {
+  const ingredients = useIngredients('', warehouse.id);
+  const { transfer } = useWarehouseLocationMutations();
+  const [ingredientId, setIngredientId] = useState('');
+  const [targetId, setTargetId] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [unit, setUnit] = useState<UnitCode>();
+  const [error, setError] = useState('');
+  const push = useNotifications((s) => s.push);
+  const available = ingredients.data?.filter((ingredient) => ingredient.stock > 0) ?? [];
+  const selected = available.find((ingredient) => ingredient.id === ingredientId);
+  const selectedUnit = unit ?? selected?.displayUnit;
+  const targets = locations.filter((location) => location.id !== warehouse.id);
+  const amount = Number(quantity);
+  const canTransfer = selected && selectedUnit && targets.some(({ id }) => id === targetId) && Number.isFinite(amount) && amount > 0;
+
+  async function submit() {
+    if (!selected || !selectedUnit || !canTransfer || transfer.isPending) return;
+    setError('');
+    try {
+      await transfer.mutateAsync({
+        ingredientId: selected.id,
+        fromWarehouseId: warehouse.id,
+        toWarehouseId: targetId,
+        quantity: amount,
+        unit: selectedUnit,
+      });
+      push({ message: 'Сырьё перемещено', at: new Date().toISOString() });
+      onClose();
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  return (
+    <Modal open onClose={onClose} title={`Переместить сырьё · ${warehouse.name}`} footer={
+      <button type="button" className="btn-primary btn-lg w-full" disabled={!canTransfer || transfer.isPending} onClick={submit}>Переместить</button>
+    }>
+      <div className="space-y-3">
+        <Field label="Сырьё">
+          <Select ariaLabel="Сырьё" className="h-10 w-full" value={ingredientId} options={available.map(({ id, name }) => ({ value: id, label: name }))}
+            onChange={(id) => { setIngredientId(id); setUnit(undefined); }} />
+        </Field>
+        {selected && <p className="text-sm text-text-secondary">Доступно {qty(selected.stock, selected.unit)}</p>}
+        {ingredients.isSuccess && !available.length && <p className="text-sm text-text-muted">На этом складе нет сырья для перемещения</p>}
+        <Field label="На склад">
+          <Select ariaLabel="На склад" className="h-10 w-full" value={targetId} onChange={setTargetId} options={targets.map(({ id, name }) => ({ value: id, label: name }))} />
+        </Field>
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Количество">
+            <input className="input" aria-label="Количество" type="number" min="0" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} />
+          </Field>
+          <Field label="Единица измерения">
+            <Select ariaLabel="Единица измерения" className="h-10 w-full" value={selectedUnit ?? ''} disabled={!selected}
+              options={selected ? unitsForType(selected.unitType) : []} onChange={(value) => setUnit(value as UnitCode)} />
+          </Field>
+        </div>
+        {(error || ingredients.isError) && <p role="alert" className="text-sm text-danger">{error || apiError(ingredients.error)}</p>}
+      </div>
+    </Modal>
   );
 }
 

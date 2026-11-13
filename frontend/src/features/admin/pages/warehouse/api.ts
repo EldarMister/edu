@@ -9,6 +9,7 @@ import type { UnitCode, UnitType } from './units';
 
 export interface Ingredient {
   id: string;
+  isPrepared?: boolean;
   name: string;
   unitType: UnitType;
   baseUnit: UnitCode;
@@ -32,6 +33,8 @@ export interface IngredientsOverview {
 
 export interface RecipeItem {
   id: string;
+  isPrepared?: boolean;
+  fromCommonWarehouse?: boolean;
   ingredientId: string;
   name: string;
   unit: string; // кириллица amountUnit
@@ -71,6 +74,7 @@ export interface PurchaseItem {
 
 export interface Purchase {
   id: string;
+  warehouseId?: string | null;
   number: number;
   date: string;
   supplier: string;
@@ -87,11 +91,12 @@ export interface PurchasesOverview {
   sum: number;
 }
 
-export type StockMovementType = 'purchase' | 'sale' | 'return' | 'correction' | 'cancel';
-export type StockMovementSource = 'purchase' | 'order' | 'manual';
+export type StockMovementType = 'purchase' | 'sale' | 'return' | 'correction' | 'cancel' | 'inventory' | 'writeoff';
+export type StockMovementSource = 'purchase' | 'order' | 'manual' | 'inventory' | 'writeoff';
 
 export interface StockMovement {
   id: string;
+  warehouseId?: string | null;
   ingredientId: string;
   orderItemId?: string | null;
   ingredientName: string;
@@ -147,9 +152,58 @@ export interface WarehouseOverview {
 }
 
 const KEY = ['admin', 'warehouse'] as const;
+const warehouseLocationsKey = [...KEY, 'locations'] as const;
 
-export function useWarehouseOverview(params: { dateFrom: string; dateTo: string }) {
-  const q = new URLSearchParams();
+export interface WarehouseLocation {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export interface WarehouseLocations {
+  locations: WarehouseLocation[];
+  stationRoutes: { stationId: string; stationName: string; warehouseId: string | null }[];
+}
+
+export function useWarehouseLocations() {
+  return useQuery({
+    queryKey: warehouseLocationsKey,
+    queryFn: () => get<WarehouseLocations>('/admin/warehouse/locations'),
+  });
+}
+
+export function useWarehouseLocationMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: KEY });
+  const save = useMutation({
+    mutationFn: ({ id, name }: { id?: string; name: string }) => (
+      id
+        ? api.patch<WarehouseLocation>(`/admin/warehouse/locations/${encodeURIComponent(id)}`, { name })
+        : api.post<WarehouseLocation>('/admin/warehouse/locations', { name })
+    ).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const setRoute = useMutation({
+    mutationFn: ({ stationId, warehouseId }: { stationId: string; warehouseId: string | null }) =>
+      api.patch(`/admin/warehouse/locations/stations/${encodeURIComponent(stationId)}`, { warehouseId }),
+    onSuccess: invalidate,
+  });
+  const transfer = useMutation({
+    mutationFn: (body: { ingredientId: string; fromWarehouseId: string; toWarehouseId: string; quantity: number; unit: string }) =>
+      api.post('/admin/warehouse/locations/transfer', body),
+    onSuccess: invalidate,
+  });
+  return { save, setRoute, transfer };
+}
+
+function warehouseQuery(warehouseId?: string) {
+  const query = new URLSearchParams();
+  if (warehouseId) query.set('warehouseId', warehouseId);
+  return query;
+}
+
+export function useWarehouseOverview(params: { dateFrom: string; dateTo: string; warehouseId?: string }) {
+  const q = warehouseQuery(params.warehouseId);
   q.set('dateFrom', params.dateFrom);
   q.set('dateTo', params.dateTo);
   const qs = q.toString();
@@ -161,24 +215,25 @@ export function useWarehouseOverview(params: { dateFrom: string; dateTo: string 
 
 // ---------- Сырьё ----------
 
-export function useIngredients(search: string) {
-  const q = new URLSearchParams();
+export function useIngredients(search: string, warehouseId?: string) {
+  const q = warehouseQuery(warehouseId);
   if (search) q.set('search', search);
   return useQuery({
-    queryKey: [...KEY, 'ingredients', search],
+    queryKey: [...KEY, 'ingredients', { search, warehouseId }],
     queryFn: () => get<Ingredient[]>(`/admin/warehouse/ingredients?${q.toString()}`),
   });
 }
 
-export function useIngredientsOverview() {
+export function useIngredientsOverview(warehouseId?: string) {
   return useQuery({
-    queryKey: [...KEY, 'ingredients', 'overview'],
-    queryFn: () => get<IngredientsOverview>('/admin/warehouse/ingredients/overview'),
+    queryKey: [...KEY, 'ingredients', 'overview', warehouseId],
+    queryFn: () => get<IngredientsOverview>(`/admin/warehouse/ingredients/overview?${warehouseQuery(warehouseId)}`),
   });
 }
 
 export interface IngredientInput {
   name: string;
+  warehouseId?: string;
   unit: string;
   stock?: number;
   avgCost?: number;
@@ -205,7 +260,7 @@ export function useIngredientMutations() {
     onSuccess: invalidate,
   });
   const adjust = useMutation({
-    mutationFn: ({ id, ...body }: { id: string; mode: 'add' | 'writeoff' | 'set'; quantity: number; unit: string }) =>
+    mutationFn: ({ id, ...body }: { id: string; mode: 'add' | 'writeoff' | 'set'; quantity: number; unit: string; warehouseId?: string }) =>
       api.post<Ingredient>(`/admin/warehouse/ingredients/${id}/adjust`, body).then((r) => r.data),
     onSuccess: invalidate,
   });
@@ -229,13 +284,13 @@ export function useRecipeMutations(dishId: string | null) {
     qc.invalidateQueries({ queryKey: KEY });
   };
   const addItem = useMutation({
-    mutationFn: (body: { ingredientId: string; amount: number; unit?: string }) =>
+    mutationFn: (body: { ingredientId: string; amount: number; unit?: string; fromCommonWarehouse?: boolean }) =>
       api.post<Recipe>(`/admin/warehouse/dishes/${dishId}/recipe`, body).then((r) => r.data),
     onSuccess: invalidate,
   });
   const updateItem = useMutation({
-    mutationFn: ({ id, amount, unit }: { id: string; amount: number; unit?: string }) =>
-      api.patch<Recipe>(`/admin/warehouse/recipe/${id}`, { amount, unit }).then((r) => r.data),
+    mutationFn: ({ id, ...body }: { id: string; amount: number; unit?: string; fromCommonWarehouse?: boolean }) =>
+      api.patch<Recipe>(`/admin/warehouse/recipe/${id}`, body).then((r) => r.data),
     onSuccess: invalidate,
   });
   const removeItem = useMutation({
@@ -246,14 +301,79 @@ export function useRecipeMutations(dishId: string | null) {
   return { addItem, updateItem, removeItem };
 }
 
+// ---------- Полуфабрикаты ----------
+
+interface PreparedIngredient {
+  id: string;
+  name: string;
+  unit: string;
+  displayUnit: UnitCode;
+  unitType: UnitType;
+  stock: number;
+  avgCost: number;
+}
+
+interface PreparationRecipeInput {
+  outputQuantity: number;
+  outputUnit: UnitCode;
+  items: { ingredientId: string; quantity: number; unit: UnitCode }[];
+}
+
+export interface PreparationRecipe extends Omit<PreparationRecipeInput, 'items'> {
+  id: string;
+  name: string;
+  displayUnit: UnitCode;
+  unitType: UnitType;
+  items: (PreparationRecipeInput['items'][number] & { name: string })[];
+}
+
+const PREPARATION_URL = '/admin/warehouse/preparation';
+
+export function usePreparedIngredients(warehouseId: string) {
+  return useQuery({
+    queryKey: [...KEY, 'preparation', warehouseId],
+    queryFn: () => get<PreparedIngredient[]>(`${PREPARATION_URL}?${warehouseQuery(warehouseId)}`),
+  });
+}
+
+export function usePreparationRecipe(id: string) {
+  return useQuery({
+    queryKey: [...KEY, 'preparation', id, 'recipe'],
+    queryFn: () => get<PreparationRecipe>(`${PREPARATION_URL}/${id}/recipe`),
+  });
+}
+
+export function usePreparationMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: KEY });
+  const create = useMutation({
+    mutationFn: (body: { name: string; unit: UnitCode }) =>
+      api.post<PreparedIngredient>(PREPARATION_URL, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const saveRecipe = useMutation({
+    mutationFn: ({ id, ...body }: PreparationRecipeInput & { id: string }) =>
+      api.put<PreparationRecipe>(`${PREPARATION_URL}/${id}/recipe`, body).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  const produce = useMutation({
+    mutationFn: ({ id, ...body }: { id: string; warehouseId: string; quantity: number; unit: UnitCode }) =>
+      api.post<{ batchId: string; quantity: number; unit: string; warehouseId: string | null; totalCost: number }>(
+        `${PREPARATION_URL}/${id}/batches`, body,
+      ).then((r) => r.data),
+    onSuccess: invalidate,
+  });
+  return { create, saveRecipe, produce };
+}
+
 // ---------- Закупки ----------
 
-export function usePurchases(params: { status: string; search: string }) {
-  const q = new URLSearchParams();
+export function usePurchases(params: { status: string; search: string; warehouseId?: string }) {
+  const q = warehouseQuery(params.warehouseId);
   if (params.status) q.set('status', params.status);
   if (params.search) q.set('search', params.search);
   return useQuery({
-    queryKey: [...KEY, 'purchases', params.status, params.search],
+    queryKey: [...KEY, 'purchases', params],
     queryFn: () => get<Purchase[]>(`/admin/warehouse/purchases?${q.toString()}`),
   });
 }
@@ -266,15 +386,16 @@ export function usePurchase(id: string | null) {
   });
 }
 
-export function usePurchasesOverview() {
+export function usePurchasesOverview(warehouseId?: string) {
   return useQuery({
-    queryKey: [...KEY, 'purchases', 'overview'],
-    queryFn: () => get<PurchasesOverview>('/admin/warehouse/purchases/overview'),
+    queryKey: [...KEY, 'purchases', 'overview', warehouseId],
+    queryFn: () => get<PurchasesOverview>(`/admin/warehouse/purchases/overview?${warehouseQuery(warehouseId)}`),
   });
 }
 
 export interface CreatePurchaseInput {
   date?: string;
+  warehouseId?: string;
   supplier: string;
   items: { ingredientId: string; quantity: number; unit?: string; purchasePrice?: number; total?: number }[];
   complete?: boolean;
@@ -316,6 +437,7 @@ export function usePurchaseMutations() {
 // ---------- Движения ----------
 
 export interface MovementsFilter {
+  warehouseId?: string;
   from?: string;
   to?: string;
   ingredientId?: string;
@@ -325,7 +447,7 @@ export interface MovementsFilter {
 }
 
 function movementsQuery(f: MovementsFilter) {
-  const q = new URLSearchParams();
+  const q = warehouseQuery(f.warehouseId);
   if (f.from) q.set('from', f.from);
   if (f.to) q.set('to', f.to);
   if (f.ingredientId) q.set('ingredientId', f.ingredientId);

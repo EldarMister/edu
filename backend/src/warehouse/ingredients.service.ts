@@ -2,6 +2,8 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { IngredientUnitType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AdjustIngredientDto, CreateIngredientDto, UpdateIngredientDto } from './dto';
+import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
+import { getWarehouseBalance, resolveWarehouse, setWarehouseBalance, warehouseBalances } from './warehouse-location';
 import {
   assertUnitMatchesType,
   baseUnitForType,
@@ -25,6 +27,7 @@ type IngredientRow = {
   avgCost: Prisma.Decimal;
   lowStockThreshold: Prisma.Decimal;
   isActive: boolean;
+  isPrepared: boolean;
 };
 
 /**
@@ -57,31 +60,37 @@ export class IngredientsService {
       stockBase: round3(stockBase),
       avgCostBase,
       isActive: i.isActive,
+      isPrepared: i.isPrepared,
       isLow: stockBase <= thresholdBase,
     };
   }
 
-  async findAll(params: { search?: string; includeInactive?: boolean }) {
+  async findAll(params: { search?: string; includeInactive?: boolean; warehouseId?: string }) {
     const where: Prisma.IngredientWhereInput = {
       ...(params.includeInactive ? {} : { isActive: true }),
       ...(params.search ? { name: { contains: params.search, mode: 'insensitive' } } : {}),
     };
+    const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, params.warehouseId);
     const items = await this.prisma.ingredient.findMany({ where, orderBy: { name: 'asc' } });
-    return items.map((i) => this.serialize(i));
+    const balances = await warehouseBalances(this.prisma, warehouse, items);
+    return items.map((item) => this.serialize({ ...item, ...balances.get(item.id)! }));
   }
 
-  async overview() {
+  async overview(warehouseId?: string) {
+    const warehouse = warehouseId === undefined ? null : await resolveWarehouse(this.prisma, warehouseId);
     const active = await this.prisma.ingredient.findMany({
       where: { isActive: true },
-      select: { displayUnit: true, stock: true, avgCost: true, lowStockThreshold: true },
+      select: { id: true, displayUnit: true, stock: true, avgCost: true, lowStockThreshold: true },
     });
+    const balances = await warehouseBalances(this.prisma, warehouse, active);
     const totalIngredients = active.length;
     let lowStockCount = 0;
     let costSum = 0;
     for (const i of active) {
-      if (Number(i.stock) <= Number(i.lowStockThreshold)) lowStockCount++;
+      const balance = balances.get(i.id)!;
+      if (balance.stock.lte(i.lowStockThreshold)) lowStockCount++;
       // Себестоимость приводим к display-единице, чтобы среднее было в человеко-масштабе.
-      costSum += costFromBase(Number(i.avgCost), i.displayUnit as UnitCode);
+      costSum += costFromBase(Number(balance.avgCost), i.displayUnit as UnitCode);
     }
     const avgCost = totalIngredients > 0 ? round2(costSum / totalIngredients) : 0;
     return { totalIngredients, lowStockCount, avgCost };
@@ -90,116 +99,120 @@ export class IngredientsService {
   async create(dto: CreateIngredientDto) {
     const unit = normalizeUnit(dto.unit);
     const type = unitTypeOf(unit);
-    const ingredient = await this.prisma.ingredient.create({
-      data: {
-        name: dto.name.trim(),
-        unitType: type as IngredientUnitType,
-        displayUnit: unit,
-        stock: new Prisma.Decimal(toBase(dto.stock ?? 0, unit)),
-        avgCost: new Prisma.Decimal(costToBase(dto.avgCost ?? 0, unit)),
-        lowStockThreshold: new Prisma.Decimal(toBase(dto.lowStockThreshold ?? 0, unit)),
-      },
+    const warehouse = await resolveWarehouse(this.prisma, dto.warehouseId);
+    const balance = {
+      stock: new Prisma.Decimal(toBase(dto.stock ?? 0, unit)).toDecimalPlaces(3),
+      avgCost: new Prisma.Decimal(costToBase(dto.avgCost ?? 0, unit)).toDecimalPlaces(8),
+    };
+    const ingredient = await this.prisma.$transaction(async (tx) => {
+      await lockWarehouseCatalog(tx);
+      const created = await tx.ingredient.create({
+        data: {
+          name: dto.name.trim(),
+          unitType: type as IngredientUnitType,
+          displayUnit: unit,
+          ...(!warehouse || warehouse.isDefault ? balance : {}),
+          lowStockThreshold: new Prisma.Decimal(toBase(dto.lowStockThreshold ?? 0, unit)),
+        },
+      });
+      if (warehouse && !warehouse.isDefault && (!balance.stock.isZero() || !balance.avgCost.isZero())) {
+        await setWarehouseBalance(tx, warehouse, created.id, balance);
+      }
+      return created;
     });
-    return this.serialize(ingredient);
+    return this.serialize({ ...ingredient, ...balance });
   }
 
   async update(id: string, dto: UpdateIngredientDto) {
-    const current = await this.ensure(id);
-    // Единица, в которой админ прислал значения (новая, если меняет; иначе текущая).
-    const unit = dto.unit !== undefined ? normalizeUnit(dto.unit) : (current.displayUnit as UnitCode);
-    const type = unitTypeOf(unit);
+    const warehouse = await resolveWarehouse(this.prisma, dto.warehouseId);
+    return this.prisma.$transaction(async (tx) => {
+      await lockIngredients(tx, [id]);
+      const current = await this.ensure(id, tx);
+      const unit = dto.unit !== undefined ? normalizeUnit(dto.unit) : current.displayUnit as UnitCode;
+      const type = unitTypeOf(unit);
+      const data: Prisma.IngredientUpdateInput = {};
+      if (dto.name !== undefined) data.name = dto.name.trim();
+      if (dto.unit !== undefined) {
+        data.displayUnit = unit;
+        data.unitType = type as IngredientUnitType;
+      }
+      if (dto.lowStockThreshold !== undefined)
+        data.lowStockThreshold = new Prisma.Decimal(toBase(dto.lowStockThreshold, unit));
+      if (dto.isActive !== undefined) data.isActive = dto.isActive;
 
-    const data: Prisma.IngredientUpdateInput = {};
-    if (dto.name !== undefined) data.name = dto.name.trim();
-    if (dto.unit !== undefined) {
-      data.displayUnit = unit;
-      data.unitType = type as IngredientUnitType;
-    }
-    if (dto.stock !== undefined) data.stock = new Prisma.Decimal(toBase(dto.stock, unit));
-    if (dto.avgCost !== undefined) data.avgCost = new Prisma.Decimal(costToBase(dto.avgCost, unit));
-    if (dto.lowStockThreshold !== undefined)
-      data.lowStockThreshold = new Prisma.Decimal(toBase(dto.lowStockThreshold, unit));
-    if (dto.isActive !== undefined) data.isActive = dto.isActive;
-
-    const beforeStockBase = Number(current.stock);
-    const afterStockBase = dto.stock !== undefined ? toBase(dto.stock, unit) : beforeStockBase;
-    const beforeCostBase = Number(current.avgCost);
-    const afterCostBase = dto.avgCost !== undefined ? costToBase(dto.avgCost, unit) : beforeCostBase;
-    const stockChanged = dto.stock !== undefined && beforeStockBase !== afterStockBase;
-    const costChanged = dto.avgCost !== undefined && beforeCostBase !== afterCostBase;
-
-    const ingredient = await this.prisma.$transaction(async (tx) => {
+      const before = await getWarehouseBalance(tx, warehouse, current);
+      const after = {
+        stock: dto.stock === undefined ? before.stock : new Prisma.Decimal(toBase(dto.stock, unit)).toDecimalPlaces(3),
+        avgCost: dto.avgCost === undefined ? before.avgCost : new Prisma.Decimal(costToBase(dto.avgCost, unit)).toDecimalPlaces(8),
+      };
+      const stockChanged = !before.stock.eq(after.stock);
+      const costChanged = !before.avgCost.eq(after.avgCost);
       const updated = await tx.ingredient.update({ where: { id }, data });
       if (stockChanged || costChanged) {
+        await setWarehouseBalance(tx, warehouse, id, after);
         const comments: string[] = [];
         if (stockChanged)
-          comments.push(`остаток: ${fmt(fromBase(beforeStockBase, unit))} -> ${fmt(fromBase(afterStockBase, unit))} ${unitLabel(unit)}`);
+          comments.push(`остаток: ${fmt(fromBase(Number(before.stock), unit))} → ${fmt(fromBase(Number(after.stock), unit))} ${unitLabel(unit)}`);
         if (costChanged)
-          comments.push(`себестоимость: ${fmt(costFromBase(beforeCostBase, unit))} -> ${fmt(costFromBase(afterCostBase, unit))} ${costUnitLabel(unit)}`);
+          comments.push(`себестоимость: ${fmt(costFromBase(Number(before.avgCost), unit))} → ${fmt(costFromBase(Number(after.avgCost), unit))} ${costUnitLabel(unit)}`);
         await tx.stockMovement.create({
           data: {
             ingredientId: id,
+            warehouseId: warehouse?.id ?? null,
             type: 'correction',
             sourceType: 'manual',
-            sourceId: null,
-            beforeStock: new Prisma.Decimal(beforeStockBase),
-            change: new Prisma.Decimal(afterStockBase - beforeStockBase),
-            afterStock: new Prisma.Decimal(afterStockBase),
-            costAtMoment: new Prisma.Decimal(afterCostBase),
+            beforeStock: before.stock,
+            change: after.stock.sub(before.stock),
+            afterStock: after.stock,
+            costAtMoment: after.avgCost,
             comment: `Ручная корректировка (${comments.join(', ')})`,
           },
         });
       }
-      return updated;
+      return this.serialize({ ...updated, ...after });
     });
-    return this.serialize(ingredient);
   }
 
   /** Ручная корректировка остатка: добавить / списать / установить (ТЗ §8). */
   async adjust(id: string, dto: AdjustIngredientDto) {
-    const current = await this.ensure(id);
+    const warehouse = await resolveWarehouse(this.prisma, dto.warehouseId);
     const unit = normalizeUnit(dto.unit);
-    assertUnitMatchesType(unit, current.unitType as 'mass' | 'volume' | 'count');
-    const qtyBase = toBase(dto.quantity, unit);
-    const beforeBase = Number(current.stock);
-
-    let afterBase: number;
-    let comment: string;
-    if (dto.mode === 'add') {
-      afterBase = beforeBase + qtyBase;
-      comment = `Ручное поступление: +${fmt(dto.quantity)} ${unitLabel(unit)}`;
-    } else if (dto.mode === 'writeoff') {
-      afterBase = beforeBase - qtyBase;
-      if (afterBase < 0) {
-        throw new BadRequestException('Нельзя списать больше текущего остатка');
+    const quantity = new Prisma.Decimal(toBase(dto.quantity, unit)).toDecimalPlaces(3);
+    return this.prisma.$transaction(async (tx) => {
+      await lockIngredients(tx, [id]);
+      const ingredient = await this.ensure(id, tx);
+      assertUnitMatchesType(unit, ingredient.unitType);
+      const before = await getWarehouseBalance(tx, warehouse, ingredient);
+      let stock: Prisma.Decimal;
+      let comment: string;
+      if (dto.mode === 'add') {
+        stock = before.stock.add(quantity);
+        comment = `Ручное поступление: +${fmt(dto.quantity)} ${unitLabel(unit)}`;
+      } else if (dto.mode === 'writeoff') {
+        stock = before.stock.sub(quantity);
+        if (stock.lt(0)) throw new BadRequestException('Нельзя списать больше текущего остатка');
+        comment = `Ручное списание: -${fmt(dto.quantity)} ${unitLabel(unit)}`;
+      } else {
+        stock = quantity;
+        comment = `Установлен остаток: ${fmt(dto.quantity)} ${unitLabel(unit)}`;
       }
-      comment = `Ручное списание: -${fmt(dto.quantity)} ${unitLabel(unit)}`;
-    } else {
-      afterBase = qtyBase;
-      comment = `Установлен остаток: ${fmt(dto.quantity)} ${unitLabel(unit)}`;
-    }
 
-    const ingredient = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.ingredient.update({
-        where: { id },
-        data: { stock: new Prisma.Decimal(afterBase) },
-      });
+      await setWarehouseBalance(tx, warehouse, id, { stock, avgCost: before.avgCost });
       await tx.stockMovement.create({
         data: {
           ingredientId: id,
+          warehouseId: warehouse?.id ?? null,
           type: 'correction',
           sourceType: 'manual',
-          sourceId: null,
-          beforeStock: new Prisma.Decimal(beforeBase),
-          change: new Prisma.Decimal(afterBase - beforeBase),
-          afterStock: new Prisma.Decimal(afterBase),
-          costAtMoment: current.avgCost,
+          beforeStock: before.stock,
+          change: stock.sub(before.stock),
+          afterStock: stock,
+          costAtMoment: before.avgCost,
           comment,
         },
       });
-      return updated;
+      return this.serialize({ ...ingredient, stock, avgCost: before.avgCost });
     });
-    return this.serialize(ingredient);
   }
 
   /**
@@ -207,22 +220,31 @@ export class IngredientsService {
    * чтобы не сломать историю. Иначе удаляем физически.
    */
   async remove(id: string) {
-    await this.ensure(id);
-    const used = await this.prisma.recipeItem.count({ where: { ingredientId: id } });
-    const purchased = await this.prisma.purchaseItem.count({ where: { ingredientId: id } });
-    if (used > 0 || purchased > 0) {
-      const ingredient = await this.prisma.ingredient.update({
-        where: { id },
-        data: { isActive: false },
-      });
-      return { ok: true, deactivated: true, ingredient: this.serialize(ingredient) };
-    }
-    await this.prisma.ingredient.delete({ where: { id } });
-    return { ok: true, deactivated: false };
+    return this.prisma.$transaction(async (tx) => {
+      await lockIngredients(tx, [id]);
+      const current = await this.ensure(id, tx);
+      const [used, preparationInputs, purchased, movements, balances, documents] = await Promise.all([
+        tx.recipeItem.count({ where: { ingredientId: id } }),
+        tx.preparationRecipeItem.count({ where: { ingredientId: id } }),
+        tx.purchaseItem.count({ where: { ingredientId: id } }),
+        tx.stockMovement.count({ where: { ingredientId: id } }),
+        tx.warehouseStock.count({ where: { ingredientId: id, stock: { not: 0 } } }),
+        tx.warehouseDocumentItem.count({ where: { ingredientId: id } }),
+      ]);
+      if (used || preparationInputs || purchased || movements || balances || documents || current.isPrepared || !current.stock.isZero()) {
+        const ingredient = await tx.ingredient.update({
+          where: { id },
+          data: { isActive: false },
+        });
+        return { ok: true, deactivated: true, ingredient: this.serialize(ingredient) };
+      }
+      await tx.ingredient.delete({ where: { id } });
+      return { ok: true, deactivated: false };
+    });
   }
 
-  private async ensure(id: string) {
-    const ingredient = await this.prisma.ingredient.findUnique({ where: { id } });
+  private async ensure(id: string, db: Prisma.TransactionClient = this.prisma) {
+    const ingredient = await db.ingredient.findUnique({ where: { id } });
     if (!ingredient) throw new NotFoundException('Сырьё не найдено');
     return ingredient;
   }

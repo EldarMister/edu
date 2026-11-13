@@ -10,6 +10,10 @@ import { MovementsService } from './movements.service';
 import { IngredientStockService } from './ingredient-stock.service';
 import { WarehouseOverviewController } from './overview.controller';
 import { WarehouseOverviewService } from './overview.service';
+import { WarehouseLocationsController } from './locations.controller';
+import { WarehouseLocationsService } from './locations.service';
+import { WarehouseDocumentsController } from './documents.controller';
+import { WarehouseDocumentsService } from './documents.service';
 
 /** Склад: сырьё, техкарты, закупки, движения. */
 @Module({
@@ -19,6 +23,8 @@ import { WarehouseOverviewService } from './overview.service';
     PurchasesController,
     MovementsController,
     WarehouseOverviewController,
+    WarehouseLocationsController,
+    WarehouseDocumentsController,
   ],
   providers: [
     IngredientsService,
@@ -26,6 +32,8 @@ import { WarehouseOverviewService } from './overview.service';
     PurchasesService,
     MovementsService,
     WarehouseOverviewService,
+    WarehouseLocationsService,
+    WarehouseDocumentsService,
     IngredientStockService,
   ],
   // IngredientStockService используется заказами для списания/возврата сырья.

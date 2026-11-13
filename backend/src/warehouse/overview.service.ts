@@ -1,43 +1,46 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveWarehouse, warehouseBalances, warehouseDocumentFilter } from './warehouse-location';
 import { fromBase, unitLabel, type UnitCode } from './units';
 
 @Injectable()
 export class WarehouseOverviewService {
   constructor(private prisma: PrismaService) {}
 
-  async getOverview(params: { dateFrom?: string; dateTo?: string }) {
+  async getOverview(params: { dateFrom?: string; dateTo?: string; warehouseId?: string }) {
+    const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, params.warehouseId);
+    const location = warehouseDocumentFilter(warehouse);
     const range = this.dateRange(params.dateFrom, params.dateTo);
     const days = this.daysBetween(range.from, range.to);
 
-    const [ingredients, purchases, saleMovements, recentMovements] = await Promise.all([
+    const [ingredients, purchases, consumptionMovements, recentMovements] = await Promise.all([
       this.prisma.ingredient.findMany({
         where: { isActive: true },
         select: { id: true, name: true, displayUnit: true, stock: true, avgCost: true, lowStockThreshold: true },
         orderBy: { name: 'asc' },
       }),
       this.prisma.purchase.findMany({
-        where: { status: 'completed', date: { gte: range.from, lte: range.to } },
+        where: { ...location, status: 'completed', date: { gte: range.from, lte: range.to } },
         select: { supplier: true, totalAmount: true },
       }),
       this.prisma.stockMovement.findMany({
-        where: { type: StockMovementType.sale, createdAt: { gte: range.from, lte: range.to } },
+        where: { ...location, type: { in: [StockMovementType.sale, StockMovementType.return, StockMovementType.writeoff] }, createdAt: { gte: range.from, lte: range.to } },
         include: { ingredient: { select: { name: true, displayUnit: true } } },
       }),
       this.prisma.stockMovement.findMany({
+        where: location,
         orderBy: { createdAt: 'desc' },
         take: 7,
         include: { ingredient: { select: { name: true, displayUnit: true } } },
       }),
     ]);
 
-    // stockBase × avgCostBase = корректная стоимость в валюте (единицы согласованы).
-    const stockValue = round2(
-      ingredients.reduce((sum, item) => sum + Number(item.stock) * Number(item.avgCost), 0),
-    );
+    const balances = await warehouseBalances(this.prisma, warehouse, ingredients);
+    const stockValue = round2(ingredients.reduce((sum, item) => sum + Number(balances.get(item.id)!.stockValue), 0));
     const lowStockItems = ingredients
-      .filter((item) => Number(item.stock) <= Number(item.lowStockThreshold))
+      .map((item) => ({ ...item, stock: balances.get(item.id)!.stock }))
+      .filter((item) => item.stock.lte(item.lowStockThreshold))
       .map((item) => {
         const display = item.displayUnit as UnitCode;
         return {
@@ -51,14 +54,14 @@ export class WarehouseOverviewService {
 
     const purchasesTotal = round2(purchases.reduce((sum, p) => sum + Number(p.totalAmount), 0));
     const ingredientWriteOffTotal = round2(
-      saleMovements.reduce((sum, movement) => {
-        return sum + Math.abs(Number(movement.change)) * Number(movement.costAtMoment);
+      consumptionMovements.reduce((sum, movement) => {
+        return sum - Number(movement.change) * Number(movement.costAtMoment);
       }, 0),
     );
 
-    const topConsumedIngredients = this.topConsumed(saleMovements);
+    const topConsumedIngredients = this.topConsumed(consumptionMovements);
     const suppliersTop = this.suppliersTop(purchases);
-    const stockValueTrend = await this.stockValueTrend(days, stockValue);
+    const stockValueTrend = await this.stockValueTrend(days, stockValue, location);
 
     return {
       stockValue,
@@ -72,6 +75,7 @@ export class WarehouseOverviewService {
         const display = m.ingredient.displayUnit as UnitCode;
         return {
           id: m.id,
+          warehouseId: m.warehouseId,
           createdAt: m.createdAt,
           type: m.type,
           ingredientName: m.ingredient.name,
@@ -105,12 +109,13 @@ export class WarehouseOverviewService {
         quantityBase: 0,
         cost: 0,
       };
-      const quantityBase = Math.abs(Number(movement.change));
+      const quantityBase = -Number(movement.change);
       current.quantityBase += quantityBase;
       current.cost += quantityBase * Number(movement.costAtMoment);
       byIngredient.set(movement.ingredientId, current);
     }
     return [...byIngredient.values()]
+      .filter((item) => item.quantityBase > 0)
       .sort((a, b) => b.cost - a.cost)
       .slice(0, 5)
       .map((item) => ({
@@ -134,11 +139,11 @@ export class WarehouseOverviewService {
       .slice(0, 5);
   }
 
-  private async stockValueTrend(days: Date[], currentValue: number) {
+  private async stockValueTrend(days: Date[], currentValue: number, location: Prisma.StockMovementWhereInput) {
     if (days.length === 0) return [];
     const first = startOfDay(days[0]);
     const movements = await this.prisma.stockMovement.findMany({
-      where: { createdAt: { gte: first } },
+      where: { ...location, createdAt: { gte: first } },
       select: { createdAt: true, change: true, costAtMoment: true },
     });
 

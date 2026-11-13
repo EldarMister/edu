@@ -1,5 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { getCafeId } from '../tenant/tenant-context';
+import { getWarehouseBalance } from './warehouse-location';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRecipeItemDto, UpdateRecipeItemDto } from './dto';
 import {
@@ -25,7 +27,7 @@ export class RecipesService {
   async getByDish(dishId: string) {
     const dish = await this.prisma.dish.findUnique({
       where: { id: dishId },
-      select: { id: true, name: true, price: true },
+      select: { id: true, name: true, price: true, prepStation: true, category: { select: { prepStation: true } } },
     });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
 
@@ -43,23 +45,33 @@ export class RecipesService {
             stock: true,
             lowStockThreshold: true,
             isActive: true,
+            isPrepared: true,
           },
         },
       },
     });
 
+    const cafeId = getCafeId();
+    const stationId = dish.prepStation ?? dish.category.prepStation;
+    const route = cafeId ? await this.prisma.stationWarehouse.findUnique({
+      where: { cafeId_stationId: { cafeId, stationId } },
+      include: { warehouse: true },
+    }) : null;
     let foodCost = 0;
-    const items = recipeItems.map((ri) => {
+    const items = await Promise.all(recipeItems.map(async (ri) => {
+      const balance = await getWarehouseBalance(this.prisma, ri.fromCommonWarehouse ? null : route?.warehouse ?? null, ri.ingredient);
       const amountUnit = ri.amountUnit as UnitCode;
       const amountBase = Number(ri.amount);
-      const avgCostBase = Number(ri.ingredient.avgCost);
+      const avgCostBase = Number(balance.avgCost);
       const lineCost = amountBase * avgCostBase; // в базе → корректная сумма
       foodCost += lineCost;
-      const stockBase = Number(ri.ingredient.stock);
+      const stockBase = Number(balance.stock);
       const thresholdBase = Number(ri.ingredient.lowStockThreshold);
       return {
         id: ri.id,
         ingredientId: ri.ingredientId,
+        fromCommonWarehouse: ri.fromCommonWarehouse,
+        isPrepared: ri.ingredient.isPrepared,
         name: ri.ingredient.name,
         // Вся строка — в единице amountUnit, чтобы числа были согласованы.
         unit: unitLabel(amountUnit),
@@ -74,7 +86,7 @@ export class RecipesService {
         isLow: stockBase <= thresholdBase,
         isActive: ri.ingredient.isActive,
       };
-    });
+    }));
 
     const price = Number(dish.price);
     const marginPercent = price > 0 ? ((price - foodCost) / price) * 100 : 0;
@@ -114,6 +126,7 @@ export class RecipesService {
         ingredientId: dto.ingredientId,
         amount: new Prisma.Decimal(toBase(dto.amount, unit)),
         amountUnit: unit,
+        fromCommonWarehouse: dto.fromCommonWarehouse,
       },
     });
     return this.getByDish(dishId);
@@ -131,7 +144,7 @@ export class RecipesService {
 
     await this.prisma.recipeItem.update({
       where: { id },
-      data: { amount: new Prisma.Decimal(toBase(dto.amount, unit)), amountUnit: unit },
+      data: { amount: new Prisma.Decimal(toBase(dto.amount, unit)), amountUnit: unit, fromCommonWarehouse: dto.fromCommonWarehouse },
     });
     return this.getByDish(item.dishId);
   }

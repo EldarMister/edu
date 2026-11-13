@@ -7,6 +7,9 @@ import {
 import { Prisma, PurchaseStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePurchaseDto, PurchaseItemInputDto, UpdatePurchaseDto } from './dto';
+import { getCafeId } from '../tenant/tenant-context';
+import { lockIngredients } from './stock-lock';
+import { getWarehouseBalance, resolveWarehouse, setWarehouseBalance, warehouseDocumentFilter } from './warehouse-location';
 import { assertUnitMatchesType, costToBase, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 
 // Нормализованная позиция закупки: введённые (display) + базовые значения.
@@ -51,6 +54,7 @@ export class PurchasesService {
       number: p.number,
       date: p.date,
       supplier: p.supplier,
+      warehouseId: p.warehouseId,
       totalAmount: Number(p.totalAmount),
       status: p.status as PurchaseStatus,
       itemsCount: p._count?.items ?? p.items?.length ?? 0,
@@ -59,8 +63,10 @@ export class PurchasesService {
     };
   }
 
-  async findAll(params: { status?: PurchaseStatus; search?: string; from?: string; to?: string }) {
+  async findAll(params: { status?: PurchaseStatus; search?: string; from?: string; to?: string; warehouseId?: string }) {
+    const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, params.warehouseId);
     const where: Prisma.PurchaseWhereInput = {
+      ...warehouseDocumentFilter(warehouse),
       ...(params.status ? { status: params.status } : {}),
       ...(params.search
         ? { supplier: { contains: params.search, mode: 'insensitive' } }
@@ -75,8 +81,10 @@ export class PurchasesService {
     return purchases.map((p) => this.serialize(p));
   }
 
-  async overview(params: { from?: string; to?: string }) {
+  async overview(params: { from?: string; to?: string; warehouseId?: string }) {
+    const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, params.warehouseId);
     const where: Prisma.PurchaseWhereInput = {
+      ...warehouseDocumentFilter(warehouse),
       status: PurchaseStatus.completed,
       ...(this.dateRange(params.from, params.to)),
     };
@@ -100,145 +108,133 @@ export class PurchasesService {
 
   async create(dto: CreatePurchaseDto) {
     const items = await this.normalizeItems(dto.items);
-    const total = items.reduce((acc, i) => acc + i.total, 0);
-
-    const purchase = await this.prisma.purchase.create({
-      data: {
-        date: dto.date ? new Date(dto.date) : new Date(),
-        supplier: dto.supplier.trim(),
-        totalAmount: new Prisma.Decimal(total),
-        items: { create: items.map((i) => this.itemCreateData(i)) },
-      },
+    const total = items.reduce((acc, item) => acc + item.total, 0);
+    const warehouse = await resolveWarehouse(this.prisma, dto.warehouseId);
+    const purchaseId = await this.prisma.$transaction(async (tx) => {
+      if (dto.complete) await lockIngredients(tx, items.map((item) => item.ingredientId));
+      const purchase = await tx.purchase.create({
+        data: {
+          date: dto.date ? new Date(dto.date) : new Date(),
+          supplier: dto.supplier.trim(),
+          warehouseId: warehouse?.id ?? null,
+          totalAmount: new Prisma.Decimal(total),
+          items: { create: items.map((item) => this.itemCreateData(item)) },
+        },
+        include: { items: true },
+      });
+      if (dto.complete) await this.completePurchase(tx, purchase);
+      return purchase.id;
     });
-
-    if (dto.complete) {
-      return this.complete(purchase.id);
-    }
-    return this.findOne(purchase.id);
+    return this.findOne(purchaseId);
   }
 
   async update(id: string, dto: UpdatePurchaseDto) {
-    const purchase = await this.prisma.purchase.findUnique({ where: { id } });
-    if (!purchase) throw new NotFoundException('Закупка не найдена');
-    if (purchase.status === PurchaseStatus.cancelled) {
-      throw new BadRequestException('Отменённую закупку нельзя редактировать');
-    }
-    // У проведённой закупки можно менять только поставщика и дату — состав
-    // трогать нельзя, иначе разъедутся остатки и средневзвешенная себестоимость.
-    if (purchase.status === PurchaseStatus.completed && dto.items !== undefined) {
-      throw new BadRequestException(
-        'Состав проведённой закупки изменить нельзя. Можно изменить поставщика и дату.',
-      );
-    }
-
     const items = dto.items ? await this.normalizeItems(dto.items) : undefined;
-    const total = items ? items.reduce((acc, i) => acc + i.total, 0) : undefined;
+    const total = items?.reduce((acc, item) => acc + item.total, 0);
+    const warehouse = dto.warehouseId === undefined ? undefined : await resolveWarehouse(this.prisma, dto.warehouseId);
 
     await this.prisma.$transaction(async (tx) => {
+      await this.lockPurchase(tx, id);
+      const purchase = await tx.purchase.findUnique({ where: { id } });
+      if (!purchase) throw new NotFoundException('Закупка не найдена');
+      if (purchase.status === PurchaseStatus.cancelled) throw new BadRequestException('Отменённую закупку нельзя редактировать');
+      if (purchase.status === PurchaseStatus.completed) {
+        const changedWarehouse = warehouse !== undefined && purchase.warehouseId !== (warehouse?.id ?? null)
+          && !(purchase.warehouseId === null && warehouse?.isDefault);
+        if (dto.items !== undefined || changedWarehouse) {
+          throw new BadRequestException('В проведённой закупке можно изменить только поставщика и дату');
+        }
+      }
       if (items) {
         await tx.purchaseItem.deleteMany({ where: { purchaseId: id } });
-        for (const i of items) {
-          await tx.purchaseItem.create({ data: { purchaseId: id, ...this.itemCreateData(i) } });
+        for (const item of items) {
+          await tx.purchaseItem.create({ data: { purchaseId: id, ...this.itemCreateData(item) } });
         }
       }
       await tx.purchase.update({
         where: { id },
         data: {
-          ...(dto.date !== undefined ? { date: new Date(dto.date) } : {}),
-          ...(dto.supplier !== undefined ? { supplier: dto.supplier.trim() } : {}),
-          ...(total !== undefined ? { totalAmount: new Prisma.Decimal(total) } : {}),
+          date: dto.date !== undefined ? new Date(dto.date) : undefined,
+          supplier: dto.supplier?.trim(),
+          warehouseId: warehouse !== undefined && purchase.status !== PurchaseStatus.completed ? warehouse?.id ?? null : undefined,
+          totalAmount: total !== undefined ? new Prisma.Decimal(total) : undefined,
         },
       });
     });
     return this.findOne(id);
   }
 
-  /**
-   * Проведение закупки: увеличиваем остатки и пересчитываем средневзвешенную
-   * себестоимость, пишем движения. Идемпотентно — повторное проведение
-   * уже проведённой закупки запрещено.
-   *
-   *   newAvg = (oldStock × oldAvg + qty × purchasePrice) / (oldStock + qty)
-   */
   async complete(id: string) {
     await this.prisma.$transaction(async (tx) => {
-      const purchase = await tx.purchase.findUnique({
-        where: { id },
-        include: { items: true },
-      });
+      await this.lockPurchase(tx, id);
+      const purchase = await tx.purchase.findUnique({ where: { id }, include: { items: true } });
       if (!purchase) throw new NotFoundException('Закупка не найдена');
-      if (purchase.status === PurchaseStatus.completed) {
-        throw new ConflictException('Закупка уже проведена');
-      }
-      if (purchase.status === PurchaseStatus.cancelled) {
-        throw new BadRequestException('Отменённую закупку нельзя провести');
-      }
-      if (purchase.items.length === 0) {
-        throw new BadRequestException('В закупке нет позиций');
-      }
-
-      let total = 0;
-      for (const item of purchase.items) {
-        const ingredient = await tx.ingredient.findUnique({
-          where: { id: item.ingredientId },
-          select: { stock: true, avgCost: true },
-        });
-        if (!ingredient) {
-          throw new NotFoundException('Сырьё закупки не найдено');
-        }
-
-        // Всё в базовых единицах: остаток, количество и себестоимость за базу.
-        const before = Number(ingredient.stock);
-        const qtyBase = Number(item.quantityBase);
-        // Авторитетная сумма позиции (фактически уплаченная) — основа себестоимости.
-        const lineTotal = Number(item.total);
-        const after = before + qtyBase;
-        const newAvgBase =
-          after > 0 ? (before * Number(ingredient.avgCost) + lineTotal) / after : Number(ingredient.avgCost);
-        total += lineTotal;
-
-        await tx.ingredient.update({
-          where: { id: item.ingredientId },
-          data: {
-            stock: new Prisma.Decimal(after),
-            avgCost: new Prisma.Decimal(newAvgBase),
-          },
-        });
-
-        await tx.stockMovement.create({
-          data: {
-            ingredientId: item.ingredientId,
-            type: 'purchase',
-            sourceType: 'purchase',
-            sourceId: purchase.id,
-            beforeStock: new Prisma.Decimal(before),
-            change: new Prisma.Decimal(qtyBase),
-            afterStock: new Prisma.Decimal(after),
-            costAtMoment: new Prisma.Decimal(newAvgBase),
-            comment: `Закупка от ${purchase.supplier}`,
-          },
-        });
-      }
-
-      await tx.purchase.update({
-        where: { id },
-        data: { status: PurchaseStatus.completed, totalAmount: new Prisma.Decimal(total) },
-      });
+      await this.completePurchase(tx, purchase);
     });
     return this.findOne(id);
   }
 
   async cancel(id: string) {
-    const purchase = await this.prisma.purchase.findUnique({ where: { id } });
-    if (!purchase) throw new NotFoundException('Закупка не найдена');
-    if (purchase.status === PurchaseStatus.completed) {
-      throw new BadRequestException('Проведённую закупку нельзя отменить');
-    }
-    await this.prisma.purchase.update({
-      where: { id },
-      data: { status: PurchaseStatus.cancelled },
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockPurchase(tx, id);
+      const purchase = await tx.purchase.findUnique({ where: { id } });
+      if (!purchase) throw new NotFoundException('Закупка не найдена');
+      if (purchase.status === PurchaseStatus.completed) {
+        throw new BadRequestException('Проведённую закупку нельзя отменить');
+      }
+      await tx.purchase.update({ where: { id }, data: { status: PurchaseStatus.cancelled } });
     });
     return this.findOne(id);
+  }
+
+  private async lockPurchase(tx: Prisma.TransactionClient, id: string) {
+    const cafeId = getCafeId();
+    const tenant = cafeId ? Prisma.sql` AND cafe_id = ${cafeId}` : Prisma.empty;
+    await tx.$queryRaw`SELECT id FROM purchases WHERE id = ${id}${tenant} FOR UPDATE`;
+  }
+
+  private async completePurchase(tx: Prisma.TransactionClient, purchase: Prisma.PurchaseGetPayload<{ include: { items: true } }>) {
+    if (purchase.status === PurchaseStatus.completed) throw new ConflictException('Закупка уже проведена');
+    if (purchase.status === PurchaseStatus.cancelled) throw new BadRequestException('Отменённую закупку нельзя провести');
+    if (!purchase.items.length) throw new BadRequestException('В закупке нет позиций');
+
+    const warehouse = await resolveWarehouse(tx, purchase.warehouseId);
+    await lockIngredients(tx, purchase.items.map((item) => item.ingredientId));
+    let total = new Prisma.Decimal(0);
+    for (const item of purchase.items) {
+      const ingredient = await tx.ingredient.findUnique({
+        where: { id: item.ingredientId },
+        select: { id: true, stock: true, avgCost: true },
+      });
+      if (!ingredient) throw new NotFoundException('Сырьё закупки не найдено');
+
+      const before = await getWarehouseBalance(tx, warehouse, ingredient);
+      const stock = before.stock.add(item.quantityBase);
+      const avgCost = (before.stock.gt(0)
+        ? before.stock.mul(before.avgCost).add(item.total).div(stock)
+        : item.total.div(item.quantityBase)).toDecimalPlaces(8);
+      total = total.add(item.total);
+      await setWarehouseBalance(tx, warehouse, item.ingredientId, { stock, avgCost });
+      await tx.stockMovement.create({
+        data: {
+          ingredientId: item.ingredientId,
+          warehouseId: warehouse?.id ?? null,
+          type: 'purchase',
+          sourceType: 'purchase',
+          sourceId: purchase.id,
+          beforeStock: before.stock,
+          change: item.quantityBase,
+          afterStock: stock,
+          costAtMoment: item.total.div(item.quantityBase),
+          comment: `Закупка от ${purchase.supplier}`,
+        },
+      });
+    }
+
+    await tx.purchase.update({
+      where: { id: purchase.id },
+      data: { status: PurchaseStatus.completed, totalAmount: total, warehouseId: warehouse?.id ?? null },
+    });
   }
 
   private itemCreateData(i: NormalizedItem) {
@@ -297,13 +293,16 @@ export class PurchasesService {
         total = Math.round(quantity * purchasePrice * 100) / 100;
       }
 
+      const quantityBase = Number(new Prisma.Decimal(toBase(quantity, unit)).toDecimalPlaces(3));
+      if (quantityBase <= 0) throw new BadRequestException('Количество в базовой единице должно быть не меньше 0,001');
+
       return {
         ingredientId: i.ingredientId,
         unit,
         quantity,
         purchasePrice: Math.round(purchasePrice * 10000) / 10000,
         total,
-        quantityBase: toBase(quantity, unit),
+        quantityBase,
         unitPriceBase: costToBase(purchasePrice, unit),
       };
     });

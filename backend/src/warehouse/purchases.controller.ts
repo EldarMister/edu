@@ -2,16 +2,18 @@ import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common
 import { PurchaseStatus, Role } from '@prisma/client';
 import { PurchasesService } from './purchases.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CreatePurchaseDto, UpdatePurchaseDto } from './dto';
 
 @Controller('admin/warehouse/purchases')
 @Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.warehouse')
 export class PurchasesController {
   constructor(private readonly purchases: PurchasesService) {}
 
   @Get('overview')
-  overview(@Query('from') from?: string, @Query('to') to?: string) {
-    return this.purchases.overview({ from, to });
+  overview(@Query('from') from?: string, @Query('to') to?: string, @Query('warehouseId') warehouseId?: string) {
+    return this.purchases.overview({ from, to, warehouseId });
   }
 
   @Get()
@@ -20,8 +22,9 @@ export class PurchasesController {
     @Query('search') search?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('warehouseId') warehouseId?: string,
   ) {
-    return this.purchases.findAll({ status, search, from, to });
+    return this.purchases.findAll({ status, search, from, to, warehouseId });
   }
 
   @Get(':id')
