@@ -375,7 +375,7 @@ export function AdminApp() {
                   aria-hidden={!expanded}
                 >
                   <div className="min-h-0 overflow-hidden">
-                    <div className="workspace-nav-children mb-1">
+                    <div className="workspace-nav-children mb-2 mt-1.5 space-y-0.5">
                       {children.map((item) => {
                         const selected = active && (s.key === 'warehouse' ? warehouseView : menuView) === item.key;
                         return (
@@ -389,7 +389,7 @@ export function AdminApp() {
                               else setMenuView(item.key as MenuView);
                               setMobileNav(false);
                             }}
-                            className={`workspace-nav-child block w-full rounded-lg py-1 pl-[34px] pr-2 text-left text-sm leading-[21px] transition-colors ${selected ? 'bg-primary/[.09] font-medium text-text-primary' : 'text-primary hover:bg-background'}`}
+                            className={`workspace-nav-child block w-full rounded-lg py-2 pl-[34px] pr-2 text-left text-sm leading-[21px] transition-colors ${selected ? 'bg-primary/[.09] font-medium text-text-primary' : 'text-primary hover:bg-background'}`}
                           >
                             {t(item.label)}
                           </button>
