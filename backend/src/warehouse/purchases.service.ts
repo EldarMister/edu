@@ -82,12 +82,19 @@ export class PurchasesService {
 
   async findAll(params: { status?: PurchaseStatus; search?: string; from?: string; to?: string; warehouseId?: string }) {
     const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, params.warehouseId);
+    const search = params.search?.trim();
+    const numberMatch = search?.match(/^(?:ЗКП-)?(\d+)$/i);
+    const number = numberMatch ? Number(numberMatch[1]) : NaN;
+    const searchConditions: Prisma.PurchaseWhereInput[] = search ? [
+      { supplier: { contains: search, mode: 'insensitive' } },
+      { note: { contains: search, mode: 'insensitive' } },
+      ...(Number.isInteger(number) && number > 0 && number <= 2147483647 ? [{ number }] : []),
+    ] : [];
     const where: Prisma.PurchaseWhereInput = {
       ...warehouseDocumentFilter(warehouse),
       ...(params.status ? { status: params.status } : {}),
-      ...(params.search
-        ? { supplier: { contains: params.search, mode: 'insensitive' } }
-        : {}),
+      // The default warehouse already has an OR for legacy records without a warehouseId.
+      ...(searchConditions.length ? { AND: [{ OR: searchConditions }] } : {}),
       ...(this.dateRange(params.from, params.to)),
     };
     const purchases = await this.prisma.purchase.findMany({
@@ -183,7 +190,7 @@ export class PurchasesService {
     });
   }
 
-  async update(id: string, dto: UpdatePurchaseDto) {
+  async update(id: string, dto: UpdatePurchaseDto, actor?: AuthUser) {
     const rawItems = dto.items ? await this.normalizeItems(dto.items) : undefined;
     this.validateDate(dto.date);
     this.validateAttachments(dto.attachments);
@@ -206,7 +213,7 @@ export class PurchasesService {
           await tx.purchaseItem.create({ data: { purchaseId: id, ...this.itemCreateData(item) } });
         }
       }
-      await tx.purchase.update({
+      const updated = await tx.purchase.update({
         where: { id },
         data: {
           date: dto.date !== undefined ? new Date(dto.date) : undefined,
@@ -215,7 +222,9 @@ export class PurchasesService {
           warehouseId: warehouse !== undefined ? warehouse?.id ?? null : undefined,
           totalAmount: total !== undefined ? new Prisma.Decimal(total) : undefined,
         },
+        include: { items: true },
       });
+      if (dto.complete) await this.completePurchase(tx, updated, actor);
     });
     return this.findOne(id);
   }

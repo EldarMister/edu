@@ -94,3 +94,71 @@ test('PostgreSQL: warehouse receipts and transfers are scoped and consistent', {
     await db.$disconnect();
   }
 });
+
+test('PostgreSQL: purchase search matches visible fields while preserving warehouse, status and date filters', { skip: !url }, async (t) => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafes = [];
+  try {
+    const cafe = await db.cafe.create({ data: { name: `Purchase search ${randomUUID()}` } });
+    cafes.push(cafe.id);
+    const foreign = await db.cafe.create({ data: { name: `Purchase search foreign ${randomUUID()}` } });
+    cafes.push(foreign.id);
+    await runWithTenant({ cafeId: foreign.id }, async () => await db.purchase.create({ data: {
+      number: 205, supplier: 'Milk Farm', note: 'Доставка без сахара',
+      status: 'completed', date: new Date('2026-11-14T12:00:00Z'),
+    } }));
+
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
+      const main = (await locations.list(cafe.id)).locations[0];
+      const bar = await locations.save(cafe.id, 'Бар');
+      const make = (number, overrides = {}) => db.purchase.create({ data: {
+        number, supplier: 'Milk Farm', note: 'Доставка без сахара',
+        warehouseId: main.id, status: 'completed', date: new Date('2026-11-14T12:00:00Z'), ...overrides,
+      } });
+      const receipt = await make(205);
+      const legacy = await make(207, { warehouseId: null });
+      await make(206, { warehouseId: bar.id });
+      await make(208, { status: 'draft' });
+      await make(209, { date: new Date('2026-11-13T12:00:00Z') });
+      await make(210, { date: new Date('2026-11-15T12:00:00Z') });
+      await make(1205, { supplier: 'Вода', note: null });
+      const supplierNumber = await make(900, { supplier: 'Поставщик 205', note: null });
+      const purchases = new PurchasesService(db);
+      const filters = { warehouseId: main.id, status: 'completed', from: '2026-11-14', to: '2026-11-14' };
+      const ids = async (search, overrides = {}) => (await purchases.findAll({ ...filters, search, ...overrides })).map(({ id }) => id).sort();
+
+      await t.test('supplier and note use case-insensitive contains and trim surrounding spaces', async () => {
+        const expected = [receipt.id, legacy.id].sort();
+        assert.deepEqual(await ids('FaRm'), expected);
+        assert.deepEqual(await ids('  без сахара  '), expected);
+      });
+      await t.test('raw and formatted numbers match exactly, retaining text matches in the same query', async () => {
+        assert.deepEqual(await ids('205'), [receipt.id, supplierNumber.id].sort());
+        assert.deepEqual(await ids('000205'), [receipt.id]);
+        assert.deepEqual(await ids('ЗКП-000205'), [receipt.id]);
+        assert.deepEqual(await ids('  зкп-000205  '), [receipt.id]);
+        assert.deepEqual(await ids('20'), [supplierNumber.id], 'numeric search must not match a portion of a document number');
+      });
+      await t.test('number search cannot bypass status, date, warehouse or tenant scope', async () => {
+        for (const search of ['ЗКП-000206', 'ЗКП-000208', 'ЗКП-000209', 'ЗКП-000210']) {
+          assert.deepEqual(await ids(search), [], search);
+        }
+        assert.deepEqual(await ids('ЗКП-000205', { warehouseId: bar.id }), []);
+        assert.deepEqual(await ids('ЗКП-000205', { status: 'draft' }), []);
+        assert.deepEqual(await ids('ЗКП-000205', { warehouseId: undefined }), [receipt.id]);
+      });
+      await t.test('empty and out-of-range numeric searches remain valid queries', async () => {
+        assert.deepEqual(await ids('   '), await ids(undefined));
+        assert.deepEqual(await ids('999999999999999999999999999999'), []);
+      });
+    });
+  } finally {
+    for (const cafeId of cafes) {
+      await db.purchase.deleteMany({ where: { cafeId } });
+      await db.cafe.delete({ where: { id: cafeId } });
+    }
+    await db.$disconnect();
+  }
+});

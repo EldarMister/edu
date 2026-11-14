@@ -3,7 +3,7 @@ import { Ingredient, IngredientKind, IngredientUnitType, Prisma } from '@prisma/
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateIngredientDto, UpdateIngredientDto } from './dto';
 import { syncIngredientPackages } from './packages';
-import { lockRecipeGraph } from './recipe-resolution';
+import { lockRecipeGraph, RecipeResolver, type ResolvedRecipePart } from './recipe-resolution';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { resolveWarehouseSupplier } from './suppliers';
 import { purchaseUnitsFor, validatePurchaseUnits } from './purchase-units';
@@ -34,6 +34,21 @@ type IngredientRow = Ingredient & { supplierRecord?: { name: string } | null };
 @Injectable()
 export class IngredientsService {
   constructor(private prisma: PrismaService) {}
+
+  async renameCategory(from: string, to: string) {
+    const name = to.trim();
+    if (!from.trim() || !name) throw new BadRequestException('Укажите название категории');
+    return this.prisma.$transaction(async (tx) => {
+      await lockWarehouseCatalog(tx);
+      const scope: Prisma.IngredientWhereInput = { isPrepared: false, kind: { notIn: ['goods', 'beverage'] } };
+      if (from !== name && await tx.ingredient.count({ where: { ...scope, category: name } })) {
+        throw new BadRequestException('Категория с таким названием уже существует');
+      }
+      const result = await tx.ingredient.updateMany({ where: { ...scope, category: from }, data: { category: name } });
+      if (!result.count) throw new NotFoundException('Категория не найдена');
+      return { name, count: result.count };
+    });
+  }
 
   private serialize(i: IngredientRow) {
     const display = i.displayUnit as UnitCode;
@@ -75,8 +90,43 @@ export class IngredientsService {
       };
       const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(db, params.warehouseId);
       const items = await db.ingredient.findMany({ where, include: { supplierRecord: { select: { name: true } } }, orderBy: { name: 'asc' } });
-      const balances = await warehouseBalances(db, warehouse, items);
-      return items.map((item) => this.serialize({ ...item, ...balances.get(item.id)! }));
+      // Recipe costing is separate from stock valuation. Expand preparations with the
+      // same resolver used for sales, then load all leaf balances in one batch.
+      const resolver = new RecipeResolver(db, { allowInactive: true });
+      const preparedIds = items.filter((item) => item.isPrepared).map((item) => item.id);
+      const recipes = preparedIds.length ? await db.preparationRecipe.findMany({ where: { ingredientId: { in: preparedIds } }, include: { items: true } }) : [];
+      const recipesById = new Map(recipes.map((recipe) => [recipe.ingredientId, recipe]));
+      const expanded = new Map<string, ResolvedRecipePart[] | null>();
+      const costingItems = new Map(items.map((item) => [item.id, item as Ingredient]));
+      for (const item of items) if (item.isPrepared) {
+        try {
+          const recipe = recipesById.get(item.id);
+          if (!recipe?.items.length || recipe.outputAmount.lte(0)) { expanded.set(item.id, null); continue; }
+          const factor = new Prisma.Decimal(toBase(1, normalizeUnit(item.displayUnit))).div(recipe.outputAmount);
+          const parts: ResolvedRecipePart[] = [];
+          for (const row of recipe.items) parts.push(...await resolver.expand(row.ingredientId, row.amount.mul(factor), warehouse, [item.id]));
+          expanded.set(item.id, parts);
+          for (const part of parts) costingItems.set(part.ingredient.id, part.ingredient);
+        } catch (error) {
+          // Old empty/incomplete recipes must remain visible and editable.
+          if (!(error instanceof BadRequestException)) throw error;
+          expanded.set(item.id, null);
+        }
+      }
+      const balances = await warehouseBalances(db, warehouse, [...costingItems.values()]);
+      return items.map((item) => {
+        const parts = expanded.get(item.id);
+        const recipe = recipesById.get(item.id);
+        let recipeUnitCost: number | null = null;
+        let recipeTotalCost: number | null = null;
+        if (parts?.length && parts.every((part) => balances.get(part.ingredient.id)?.valuationKnown)) {
+          const cost = parts.reduce((sum, part) => sum.add(part.amount.mul(balances.get(part.ingredient.id)!.avgCost)), new Prisma.Decimal(0));
+          recipeUnitCost = Number(cost.toDecimalPlaces(8));
+          if (recipe) recipeTotalCost = Number(cost.mul(recipe.outputAmount).div(toBase(1, normalizeUnit(item.displayUnit))).toDecimalPlaces(2));
+        }
+        return { ...this.serialize({ ...item, ...balances.get(item.id)! }), recipeUnitCost, recipeTotalCost,
+          recipeOutputQuantity: recipe ? fromBase(Number(recipe.outputAmount), normalizeUnit(recipe.outputUnit)) : null, recipeOutputUnit: recipe?.outputUnit ?? null };
+      });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 

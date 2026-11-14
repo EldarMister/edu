@@ -44,8 +44,8 @@ export class PurchasesController {
 
   @Patch(':id')
   @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
-  update(@Param('id') id: string, @Body() dto: UpdatePurchaseDto) {
-    return this.purchases.update(id, dto);
+  update(@Param('id') id: string, @Body() dto: UpdatePurchaseDto, @CurrentUser() user: AuthUser) {
+    return this.purchases.update(id, dto, user);
   }
 
   @Post(':id/complete')

@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { Modal } from '@/components/Modal';
+import { useEditorRoute, usePageFilter } from './workspace-route';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
 import { useIngredients, useWarehouseDishes, type Ingredient } from './api';
-import { RecipeEditor } from './RecipeEditor';
+import { StaffRecipePage } from './StaffRecipePage';
 export function RecipesTab({
   onPreparation,
   dishesOnly = false,
@@ -12,12 +12,21 @@ export function RecipesTab({
   onPreparation: (item: Ingredient) => void;
   dishesOnly?: boolean;
 }) {
-  const [search, setSearch] = useState('');
-  const [kind, setKind] = useState('');
-  const [dish, setDish] = useState<{ id: string; name: string; price: string } | null>(null);
+  const [search, setSearch] = usePageFilter('search');
+  const [kind, setKind] = usePageFilter('kind');
+  const { editor, openEditor, closeEditor } = useEditorRoute();
+  const { can } = usePermissions();
   const dishes = useWarehouseDishes(search);
   const ingredients = useIngredients(search);
   const prepared = (ingredients.data ?? []).filter((i) => i.isPrepared);
+  if (editor?.type === 'recipe' && editor.id)
+    return (
+      <StaffRecipePage
+        dishId={editor.id}
+        onClose={closeEditor}
+        onOpenDish={(id) => openEditor({ type: 'recipe', id })}
+      />
+    );
   return (
     <div className="card overflow-hidden">
       <div className="flex flex-wrap gap-2 border-b border-border p-4">
@@ -55,13 +64,13 @@ export function RecipesTab({
       <div className="divide-y divide-border">
         {kind !== 'preparation' &&
           (dishes.data ?? [])
-            .filter((d) => !d.hasDirectStock)
+            .filter((d) => (d.catalogKind ? d.catalogKind === 'recipe' : !d.hasDirectStock))
             .map((d) => (
               <button
                 type="button"
                 className="flex w-full items-center justify-between gap-2 p-4 text-left text-sm hover:bg-background"
                 key={d.id}
-                onClick={() => setDish(d)}
+                onClick={() => openEditor({ type: 'recipe', id: d.id })}
               >
                 <span>
                   <span className="block font-medium text-text-primary">{d.name}</span>
@@ -69,7 +78,9 @@ export function RecipesTab({
                     {d.category?.name ?? (d.isSet ? 'Сет' : 'Блюдо')} · меню
                   </span>
                 </span>
-                <span className="text-primary">Состав и себестоимость →</span>
+                <span className="text-primary">
+                  {can('actions.warehouseCosts') ? 'Состав и себестоимость →' : 'Состав →'}
+                </span>
               </button>
             ))}
         {!dishesOnly &&
@@ -85,7 +96,9 @@ export function RecipesTab({
                 <span className="block font-medium text-text-primary">{item.name}</span>
                 <span className="text-xs text-text-muted">
                   Заготовка ·{' '}
-                  {item.preparationMode === 'virtual' ? 'состав при продаже' : 'производство партиями'}
+                  {item.preparationMode === 'virtual'
+                    ? 'состав при продаже'
+                    : 'производство партиями'}
                 </span>
               </span>
               <span className="text-primary">Рецептура и выход →</span>
@@ -93,15 +106,7 @@ export function RecipesTab({
           ))}
       </div>
       {dishes.isSuccess && ingredients.isSuccess && !dishes.data?.length && !prepared.length && (
-        <p className="p-8 text-sm text-text-muted">
-          Создайте блюдо в меню или добавьте полуфабрикат в «Товары и остатки», затем заполните его состав
-          здесь.
-        </p>
-      )}
-      {dish && (
-        <Modal open title={dish.name} onClose={() => setDish(null)} panelClassName="max-w-4xl">
-          <RecipeEditor dishId={dish.id} price={Number(dish.price)} />
-        </Modal>
+        <p className="p-8 text-sm text-text-muted">Здесь появятся техкарты, добавленные в меню.</p>
       )}
     </div>
   );

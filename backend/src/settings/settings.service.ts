@@ -26,6 +26,8 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   payCash: 'оплата наличными',
   payCard: 'оплата картой',
   allowNegativeIngredientStock: 'минусовой остаток сырья',
+  warehouseProductionEnabled: 'производство полуфабрикатов',
+  warehouseProcessingEnabled: 'переработки',
   deliveryEnabled: 'интеграция доставки',
   queueDisplayEnabled: 'экран очереди заказов',
   queueDisplayMode: 'режим экрана очереди',

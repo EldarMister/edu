@@ -23,6 +23,8 @@ import {
 import { OrderPermissionsSettings } from './OrderPermissionsSettings';
 import { DEFAULT_WAITER_PERMISSIONS, type WaiterOrderPermissions } from '@/lib/order-permissions';
 import { QrPaymentCard } from './QrPaymentCard';
+import { AccountingSettings } from '../admin/pages/warehouse/WarehouseSettingsPanels';
+import { usePermissions } from '@/hooks/usePermissions';
 
 type FiscalProvider = '' | 'ekassa' | 'yakassa' | 'mock';
 
@@ -58,6 +60,7 @@ interface Form {
 const RECEIPT_LIMIT = 120;
 
 export function SettingsPage() {
+  const permissions = usePermissions();
   const { data, isLoading, isError, error } = useAdminSettings();
   const update = useUpdateSettings();
   const testFiscal = useTestFiscalConnection();
@@ -244,6 +247,11 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-4">
+      {permissions.can('sections.warehouse') && permissions.can('actions.warehouseSettings') && (
+        <details className="card p-5"><summary className="cursor-pointer font-semibold">Складской учёт</summary>
+          <div className="mt-4"><AccountingSettings /></div>
+        </details>
+      )}
       <OrderPermissionsSettings permissions={form.waiterOrderPermissions}
         disabled={update.isPending} onPermissions={(value) => set('waiterOrderPermissions', value)} />
       <div className="grid gap-4 lg:grid-cols-3">

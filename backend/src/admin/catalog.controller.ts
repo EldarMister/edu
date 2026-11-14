@@ -1,4 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { hasPermission, resolvePermissions } from '../common/permissions';
+import { MenuEntryService } from './menu-entry.service';
+import { MenuEntryDto } from './menu-entry.dto';
 import { Role } from '@prisma/client';
 import { CatalogService } from './catalog.service';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -23,7 +26,20 @@ import {
 @Controller('admin')
 @Roles(Role.ADMIN, Role.OWNER)
 export class CatalogController {
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(private readonly catalog: CatalogService, private readonly entries: MenuEntryService) {}
+
+  @Get('menu/entries/:id') @RequirePermission('sections.menu')
+  menuEntry(@Param('id') id: string) { return this.entries.get(id); }
+
+  @Post('menu/entries') @RequirePermission('sections.menu', 'actions.editMenu')
+  createMenuEntry(@Body() dto: MenuEntryDto, @CurrentUser() user: AuthUser) { this.assertRecipePermission(dto, user); return this.entries.save(null, dto, user); }
+
+  @Put('menu/entries/:id') @RequirePermission('sections.menu', 'actions.editMenu')
+  updateMenuEntry(@Param('id') id: string, @Body() dto: MenuEntryDto, @CurrentUser() user: AuthUser) { this.assertRecipePermission(dto, user); return this.entries.save(id, dto, user); }
+
+  private assertRecipePermission(dto: MenuEntryDto, user: AuthUser) {
+    if ((dto.recipe || dto.modifiers) && user.role !== Role.OWNER && !hasPermission(user.permissions ?? resolvePermissions(user.role as Role, null), 'actions.warehouseRecipes')) throw new ForbiddenException('Нет права изменять состав техкарты');
+  }
 
   // ---- Залы и столы (раздел «Столы») ----
   @Get('tables/overview')

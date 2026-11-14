@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Modal } from '@/components/Modal';
+import { EditorPage } from '../pages/warehouse/EditorPage';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
 import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel } from '@/lib/format';
@@ -24,13 +25,16 @@ export function OrderDetailsModal({
   onOrderChange,
   allowItemCancellation = false,
   waiterLayout = false,
+  presentation = 'modal',
 }: {
   order: Order | null;
   onClose: () => void;
   onOrderChange?: (order: Order) => void;
   allowItemCancellation?: boolean;
   waiterLayout?: boolean;
+  presentation?: 'modal' | 'page';
 }) {
+  const Container = presentation === 'page' ? EditorPage : Modal;
   const [cancelItem, setCancelItem] = useState<Order['items'][number] | null>(null);
   const cancelOrderItem = useCancelOrderItem();
   const push = useNotifications((s) => s.push);
@@ -101,7 +105,7 @@ export function OrderDetailsModal({
   }
 
   return (
-    <Modal
+    <Container
       open={!!order}
       onClose={onClose}
       title={`Заказ ${displayOrderNumber(order.orderNumber)}`}
@@ -228,7 +232,7 @@ export function OrderDetailsModal({
         title="Отменить блюдо?"
         confirmLabel="Отменить блюдо"
       />
-    </Modal>
+    </Container>
   );
 }
 

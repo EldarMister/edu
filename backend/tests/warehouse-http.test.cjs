@@ -22,6 +22,7 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     const keeper = await createUser('ADMIN', { sections: { warehouse: true }, actions: {
       warehouseCosts: false, warehouseReceive: false, warehouseApprove: false, warehouseSettings: false,
     } });
+    const counter = await createUser('ADMIN', { sections: { warehouse: true }, actions: { warehouseCount: true, warehouseWriteoff: true, warehouseApprove: false, warehouseCosts: false } });
     const chef = await createUser('KITCHEN', { sections: { warehouse: true }, actions: { warehouseProduce: true, warehouseRecipes: false, warehouseReports: false, warehouseCosts: false } });
     const reader = await createUser('KITCHEN', { sections: { warehouse: true }, actions: { warehouseProduce: false, warehouseRecipes: true, warehouseReports: false, warehouseCosts: false } });
     const outsider = await createUser('WAITER', { sections: { warehouse: true }, actions: { warehouseApprove: true } });
@@ -31,7 +32,7 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
       return (await response.json()).accessToken;
     };
     const ownerToken = await login(owner), keeperToken = await login(keeper), outsiderToken = await login(outsider);
-    const chefToken = await login(chef), readerToken = await login(reader);
+    const chefToken = await login(chef), readerToken = await login(reader), counterToken = await login(counter);
     const request = (token, path, method = 'GET', body) => fetch(`${api}/api${path}`, {
       method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -53,6 +54,25 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     assert.equal((await request(outsiderToken, '/admin/warehouse/ingredients')).status, 403);
     const check = await db.ingredient.findUnique({ where: { id: ingredient.id } });
     assert.equal(check.stock.toNumber(), 5, 'denied requests cannot change stock');
+
+    // Final-save endpoints enforce the same approval boundary as the separate legacy transition.
+    const receiptWarehouse = await db.warehouse.findFirstOrThrow({ where: { cafeId: cafe.id, isDefault: true } });
+    const atomicIngredient = await (await request(ownerToken, '/admin/warehouse/ingredients', 'POST', {
+      name: 'Atomic save item', unit: 'pcs', stock: 3, avgCost: 7,
+    })).json();
+    const documentBody = { warehouseId: receiptWarehouse.id, kind: 'writeoff', reason: 'damage',
+      items: [{ ingredientId: atomicIngredient.id, quantity: 1 }] };
+    const beforeDocuments = await db.warehouseDocument.count({ where: { cafeId: cafe.id } });
+    assert.equal((await request(counterToken, '/admin/warehouse/documents', 'POST', { ...documentBody, finalize: 'post' })).status, 403);
+    assert.equal(await db.warehouseDocument.count({ where: { cafeId: cafe.id } }), beforeDocuments);
+    const draftResponse = await request(counterToken, '/admin/warehouse/documents', 'POST', documentBody);
+    assert.equal(draftResponse.status, 201); const draft = await draftResponse.json();
+    assert.equal((await request(counterToken, `/admin/warehouse/documents/${draft.id}`, 'PATCH', { revision: draft.revision, finalize: 'post' })).status, 403);
+    const finalResponse = await request(ownerToken, `/admin/warehouse/documents/${draft.id}`, 'PATCH', { revision: draft.revision, finalize: 'post' });
+    assert.equal(finalResponse.status, 200); assert.equal((await finalResponse.json()).status, 'posted');
+    const forApprovalResponse = await request(counterToken, '/admin/warehouse/documents', 'POST', { ...documentBody, finalize: 'submit' });
+    assert.equal(forApprovalResponse.status, 201); assert.equal((await forApprovalResponse.json()).status, 'submitted');
+    assert.equal(Number((await db.ingredient.findUniqueOrThrow({ where: { id: atomicIngredient.id } })).stock), 2);
 
     // A cook with production permission can post and read batches without gaining reports or costs.
     const main = await db.warehouse.findFirstOrThrow({ where: { cafeId: cafe.id, isDefault: true } });
@@ -85,6 +105,7 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
   } finally {
     await db.stockMovement.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.preparationBatch.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
+    await db.warehouseDocument.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.preparationRecipe.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.ingredient.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.settings.deleteMany({ where: { cafeId: cafe.id } });

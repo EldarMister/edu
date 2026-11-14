@@ -47,6 +47,12 @@ export class UpdateSettingsDto {
   @IsOptional() @IsBoolean()
   allowNegativeIngredientStock?: boolean;
 
+  @IsOptional() @IsBoolean()
+  warehouseProductionEnabled?: boolean;
+
+  @IsOptional() @IsBoolean()
+  warehouseProcessingEnabled?: boolean;
+
   // ---- Экран очереди заказов (табло в зале) ----
   @IsOptional() @IsBoolean()
   queueDisplayEnabled?: boolean;

@@ -1,5 +1,10 @@
 import { useState, type ReactNode } from 'react';
-import { Modal } from '@/components/Modal';
+import { EditorPage } from './EditorPage';
+import { DocumentProductPicker } from './DocumentProductPicker';
+import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
+import { WorkspaceSearch } from '../WorkspaceSearch';
+import { formatDocumentListDate } from './WarehouseDocumentLists';
+import { usePageFilter } from './workspace-route';
 import { Select } from '@/components/Select';
 import { DateTimePicker } from '@/components/DatePicker';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -19,60 +24,95 @@ import { formatDocumentDate } from './stock-document-format';
 
 export function ProcessingPage({
   warehouseId,
+  filters,
   onOpen,
   onCreate,
 }: {
   warehouseId?: string;
+  filters?: ReactNode;
   onOpen: (id: string) => void;
   onCreate: () => void;
 }) {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = usePageFilter('processingSearch');
   const q = useProcessing({ warehouseId, search });
   return (
-    <div className="card overflow-hidden">
-      <div className="flex flex-wrap gap-2 border-b border-border p-4">
-        <input
-          className="input h-10 flex-1 sm:max-w-xs"
-          placeholder="Поиск переработок"
-          aria-label="Поиск переработок"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <button className="btn-primary btn-md ml-auto" onClick={onCreate}>
-          + Добавить
-        </button>
-      </div>
-      <QueryState pending={q.isPending} error={q.error} empty={q.isSuccess && !q.data.length}>
-        <div className="hidden grid-cols-[150px_1fr_1fr_120px] gap-3 border-b border-border bg-background/50 px-4 py-3 text-xs text-text-muted md:grid">
-          <span>Дата</span>
-          <span>Исходные продукты</span>
-          <span>Полученные продукты</span>
-          <span>Статус</span>
-        </div>
-        {q.data?.map((d) => (
-          <button
-            key={d.id}
-            className="grid w-full gap-2 border-b border-border p-4 text-left text-sm last:border-0 hover:bg-background/50 md:grid-cols-[150px_1fr_1fr_120px] md:gap-3"
-            onClick={() => onOpen(d.id)}
-          >
-            <span className="text-text-muted">{formatDocumentDate(d.date)}</span>
-            <span>
-              {d.inputs
-                .map(
-                  (r) => `${r.ingredientName ?? r.name ?? 'Продукт'} · ${qty(r.quantity, unitLabel(r.unit))}`,
-                )
-                .join(', ')}
-            </span>
-            <span>
-              {d.outputs
-                .map(
-                  (r) => `${r.ingredientName ?? r.name ?? 'Продукт'} · ${qty(r.quantity, unitLabel(r.unit))}`,
-                )
-                .join(', ')}
-            </span>
-            <span>{status(d.status)}</span>
+    <div className="min-w-0">
+      <WorkspaceHeaderCount count={q.data?.length} />
+      <div className="poster-toolbar">
+        <WorkspaceSearch label="Поиск переработок" value={search} onChange={setSearch} />
+        {filters}
+        <WorkspaceHeaderActions>
+          <button className="btn-primary btn-md" onClick={onCreate}>
+            Добавить
           </button>
-        ))}
+        </WorkspaceHeaderActions>
+      </div>
+      <QueryState pending={q.isPending} error={q.error}>
+        <div className="overflow-x-auto">
+          <table className="poster-table w-full min-w-[800px] text-left text-sm">
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Исходные продукты</th>
+                <th>Полученные продукты</th>
+                <th>Статус</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {!q.data?.length && (
+                <tr>
+                  <td colSpan={5} className="py-12 text-center text-text-muted">
+                    {search
+                      ? 'Переработки не найдены. Измените поиск.'
+                      : 'Переработок пока нет. Добавьте первую переработку.'}
+                  </td>
+                </tr>
+              )}
+              {q.data?.map((d) => (
+                <tr key={d.id}>
+                  <td className="whitespace-nowrap">
+                    <button
+                      className="text-primary"
+                      onClick={() => onOpen(d.id)}
+                      title={formatDocumentDate(d.date)}
+                    >
+                      {formatDocumentListDate(d.date)}
+                    </button>
+                  </td>
+                  <td>
+                    {d.inputs
+                      .map(
+                        (r) =>
+                          `${r.ingredientName ?? r.name ?? 'Продукт'} · ${qty(r.quantity, unitLabel(r.unit))}`,
+                      )
+                      .join(', ')}
+                  </td>
+                  <td>
+                    {d.outputs
+                      .map(
+                        (r) =>
+                          `${r.ingredientName ?? r.name ?? 'Продукт'} · ${qty(r.quantity, unitLabel(r.unit))}`,
+                      )
+                      .join(', ')}
+                  </td>
+                  <td>
+                    <span className="document-status" data-status={d.status}>
+                      {status(d.status)}
+                    </span>
+                  </td>
+                  <td>
+                    <div className="poster-row-actions">
+                      <button onClick={() => onOpen(d.id)}>
+                        {d.status === 'draft' ? 'Ред.' : 'Открыть'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </QueryState>
     </div>
   );
@@ -90,7 +130,12 @@ export function ProcessingModal({
 }) {
   const q = useProcessingDocument(id);
   return (
-    <Modal open onClose={onClose} title={id ? 'Переработка' : 'Новая переработка'} panelClassName="max-w-6xl">
+    <EditorPage
+      open
+      onClose={onClose}
+      title={id ? 'Переработка' : 'Новая переработка'}
+      panelClassName="max-w-6xl"
+    >
       <QueryState pending={!!id && q.isPending} error={q.error}>
         {(!id || q.data) && (
           <ProcessingForm
@@ -102,7 +147,7 @@ export function ProcessingModal({
           />
         )}
       </QueryState>
-    </Modal>
+    </EditorPage>
   );
 }
 type DraftRow = ProcessingRow & { key: string };
@@ -123,22 +168,38 @@ function ProcessingForm({
   const [requestKey] = useState(() => crypto.randomUUID());
   const [date, setDate] = useState(localTime(document?.date));
   const [note, setNote] = useState(document?.note ?? '');
+  const emptyRow = (output: boolean): DraftRow => ({
+    key: crypto.randomUUID(),
+    ingredientId: '',
+    warehouseId,
+    quantity: 0,
+    unit: 'kg',
+    ...(output ? { costSharePercent: 100 } : {}),
+  });
   const [inputs, setInputs] = useState<DraftRow[]>(() =>
-    (document?.inputs ?? []).map((r) => ({ ...r, key: crypto.randomUUID() })),
+    document?.inputs.length
+      ? document.inputs.map((r) => ({ ...r, key: crypto.randomUUID() }))
+      : [emptyRow(false)],
   );
   const [outputs, setOutputs] = useState<DraftRow[]>(() =>
-    (document?.outputs ?? []).map((r) => ({ ...r, key: crypto.randomUUID() })),
+    document?.outputs.length
+      ? document.outputs.map((r) => ({ ...r, key: crypto.randomUUID() }))
+      : [emptyRow(true)],
   );
   const [error, setError] = useState('');
   const editable = (!document || document.status === 'draft') && can('actions.warehouseProduce');
   const busy = mutations.save.isPending || mutations.reverse.isPending;
+  const enteredInputs = inputs.filter((row) => row.ingredientId || row.quantity);
+  const enteredOutputs = outputs.filter((row) => row.ingredientId || row.quantity);
   async function save(complete: boolean) {
     if (busy) return;
     if (
-      !inputs.length ||
-      !outputs.length ||
-      [...inputs, ...outputs].some((r) => !r.ingredientId || !r.warehouseId || !(r.quantity > 0)) ||
-      (complete && Math.abs(outputs.reduce((s, r) => s + (r.costSharePercent ?? 0), 0) - 100) > 0.001)
+      !enteredInputs.length ||
+      !enteredOutputs.length ||
+      [...enteredInputs, ...enteredOutputs].some(
+        (r) => !r.ingredientId || !r.warehouseId || !(r.quantity > 0),
+      ) ||
+      (complete && Math.abs(enteredOutputs.reduce((s, r) => s + (r.costSharePercent ?? 0), 0) - 100) > 0.001)
     ) {
       setError(
         'Добавьте исходные и полученные продукты, положительное количество и склады. Для проведения распределите 100% стоимости между полученными продуктами.',
@@ -154,13 +215,13 @@ function ProcessingForm({
         complete,
         date: new Date(date).toISOString(),
         note,
-        inputs: inputs.map(({ ingredientId, warehouseId, quantity, unit }) => ({
+        inputs: enteredInputs.map(({ ingredientId, warehouseId, quantity, unit }) => ({
           ingredientId,
           warehouseId,
           quantity,
           unit,
         })),
-        outputs: outputs.map(({ ingredientId, warehouseId, quantity, unit, costSharePercent }) => ({
+        outputs: enteredOutputs.map(({ ingredientId, warehouseId, quantity, unit, costSharePercent }) => ({
           ingredientId,
           warehouseId,
           quantity,
@@ -174,7 +235,7 @@ function ProcessingForm({
     }
   }
   async function reverse() {
-    const reason = prompt('Причина сторнирования переработки');
+    const reason = prompt('Причина отмены проведения переработки');
     if (!document || !reason?.trim()) return;
     try {
       await mutations.reverse.mutateAsync({
@@ -188,167 +249,220 @@ function ProcessingForm({
     }
   }
   const renderRows = (rows: DraftRow[], setRows: (rows: DraftRow[]) => void, output: boolean) => (
-    <section className="rounded-xl border border-border">
-      <h3 className="border-b border-border px-4 py-3 font-semibold">
-        {output ? 'Полученные продукты' : 'Исходные продукты'}
-      </h3>
-      <div className="hidden grid-cols-[minmax(160px,1.5fr)_minmax(120px,1fr)_85px_70px_85px_85px_85px_28px] gap-2 px-4 py-3 text-xs text-text-muted lg:grid">
-        <span>Продукт</span>
-        <span>Склад</span>
-        <span>Количество</span>
-        <span>Единица</span>
-        <span>Себестоимость</span>
-        <span>Доля стоимости</span>
-        <span>Сумма</span>
-        <span />
-      </div>
-      {rows.map((r) => {
-        const ingredient = ingredients.data?.find((i) => i.id === r.ingredientId);
-        const change = (patch: Partial<DraftRow>) =>
-          setRows(rows.map((v) => (v.key === r.key ? { ...v, ...patch } : v)));
-        return (
-          <div
-            key={r.key}
-            className="grid gap-2 border-t border-border px-4 py-3 sm:grid-cols-2 lg:grid-cols-[minmax(160px,1.5fr)_minmax(120px,1fr)_85px_70px_85px_85px_85px_28px] lg:items-center"
+    <section className="space-y-3">
+      <h3 className="text-lg font-medium">{output ? 'Полученные продукты' : 'Исходные продукты'}</h3>
+      <div className="overflow-x-auto">
+        <table className="poster-table w-full min-w-[950px] table-fixed text-sm">
+          <colgroup>
+            <col style={{ width: '30%' }} />
+            <col style={{ width: '18%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '11%' }} />
+            <col style={{ width: '11%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '3%' }} />
+          </colgroup>
+          <thead>
+            <tr className="border-b border-border text-left text-xs font-normal text-text-muted">
+              <th className="pb-3 pr-3 font-normal">Продукты</th>
+              <th className="px-2 pb-3 font-normal">Склад</th>
+              <th className="px-2 pb-3 text-right font-normal">Количество</th>
+              <th className="px-2 pb-3 font-normal">Ед.</th>
+              <th className="px-2 pb-3 text-right font-normal">Себестоимость</th>
+              <th className="px-2 pb-3 text-right font-normal">Доля стоимости</th>
+              <th className="px-2 pb-3 text-right font-normal">Итого</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const ingredient = ingredients.data?.find((i) => i.id === r.ingredientId);
+              const change = (patch: Partial<DraftRow>) =>
+                setRows(rows.map((value) => (value.key === r.key ? { ...value, ...patch } : value)));
+              return (
+                <tr key={r.key} className="border-b border-border">
+                  <td className="py-2 pr-3">
+                    {editable ? (
+                      <DocumentProductPicker
+                        value={r.ingredientId}
+                        disabled={!editable}
+                        label="Продукт переработки"
+                        options={(ingredients.data ?? []).filter(
+                          (item) => item.preparationMode !== 'virtual',
+                        )}
+                        fallbackName={r.ingredientName ?? r.name}
+                        onChange={(id) => {
+                          const selected = ingredients.data?.find((item) => item.id === id);
+                          change({
+                            ingredientId: id,
+                            unit: selected?.displayUnit ?? 'kg',
+                            unitCost: undefined,
+                            lineCost: undefined,
+                          });
+                        }}
+                      />
+                    ) : (
+                      <span>{ingredient?.name ?? r.ingredientName ?? r.name ?? 'Продукт'}</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2">
+                    {editable ? (
+                      <Select
+                        ariaLabel="Склад продукта"
+                        disabled={!editable}
+                        className="h-9 w-full"
+                        value={r.warehouseId}
+                        onChange={(id) =>
+                          change({ warehouseId: id, unitCost: undefined, lineCost: undefined })
+                        }
+                        options={locations.map((item) => ({ value: item.id, label: item.name }))}
+                      />
+                    ) : (
+                      <span>{locations.find((entry) => entry.id === r.warehouseId)?.name ?? '—'}</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2">
+                    {editable ? (
+                      <input
+                        className="input h-9 min-w-0 w-full text-right"
+                        type="number"
+                        min="0"
+                        step="any"
+                        aria-label="Количество продукта"
+                        disabled={!editable || !r.ingredientId}
+                        value={r.quantity || ''}
+                        onChange={(e) =>
+                          change({
+                            quantity: Number(e.target.value),
+                            unitCost: undefined,
+                            lineCost: undefined,
+                          })
+                        }
+                      />
+                    ) : (
+                      <span className="block text-right tabular-nums">
+                        {r.quantity.toLocaleString('ru-RU')}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2">
+                    {editable ? (
+                      <Select
+                        ariaLabel="Единица количества"
+                        disabled={!editable || !r.ingredientId}
+                        className="h-9 w-full"
+                        value={r.unit}
+                        onChange={(unit) => change({ unit: unit as UnitCode })}
+                        options={unitsForType(ingredient?.unitType ?? 'mass')}
+                      />
+                    ) : (
+                      <span>{unitLabel(r.unit)}</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-right text-text-secondary">
+                    {r.unitCost == null
+                      ? r.ingredientId && editable
+                        ? 'По остатку'
+                        : '—'
+                      : money(r.unitCost)}
+                  </td>
+                  <td className="px-2 py-2 text-right">
+                    {output && editable ? (
+                      <label className="poster-number-unit flex items-center gap-1">
+                        <input
+                          className="input h-9 min-w-0 w-full text-right"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="any"
+                          aria-label="Доля себестоимости"
+                          disabled={!editable || !r.ingredientId}
+                          value={r.costSharePercent ?? ''}
+                          onChange={(e) => change({ costSharePercent: Number(e.target.value) })}
+                        />
+                        <span>%</span>
+                      </label>
+                    ) : r.costSharePercent == null ? (
+                      '—'
+                    ) : (
+                      `${r.costSharePercent}%`
+                    )}
+                  </td>
+                  <td className="px-2 py-2 text-right">{r.lineCost == null ? '—' : money(r.lineCost)}</td>
+                  <td className="py-2">
+                    {editable && (
+                      <button
+                        type="button"
+                        className="btn-ghost h-8 w-8 text-text-muted hover:text-danger"
+                        aria-label="Удалить строку"
+                        onClick={() =>
+                          setRows(
+                            rows.length > 1
+                              ? rows.filter((value) => value.key !== r.key)
+                              : [emptyRow(output)],
+                          )
+                        }
+                      >
+                        ×
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {editable && (
+          <button
+            type="button"
+            className="py-3 text-sm text-primary"
+            onClick={() =>
+              setRows([
+                ...rows,
+                { ...emptyRow(output), ...(output ? { costSharePercent: rows.length ? 0 : 100 } : {}) },
+              ])
+            }
           >
-            <ProcessingCell label="Продукт">
-              <Select
-                ariaLabel="Продукт переработки"
-                disabled={!editable}
-                className="h-10 w-full"
-                value={r.ingredientId}
-                onChange={(v) => {
-                  const selected = ingredients.data?.find((i) => i.id === v);
-                  change({
-                    ingredientId: v,
-                    unit: selected?.displayUnit ?? 'kg',
-                    unitCost: undefined,
-                    lineCost: undefined,
-                  });
-                }}
-                options={[
-                  { value: '', label: 'Выберите продукт' },
-                  ...(ingredients.data ?? []).map((i) => ({ value: i.id, label: i.name })),
-                ]}
-              />
-            </ProcessingCell>
-            <ProcessingCell label="Склад">
-              <Select
-                ariaLabel="Склад продукта"
-                disabled={!editable}
-                className="h-10 w-full"
-                value={r.warehouseId}
-                onChange={(v) => change({ warehouseId: v })}
-                options={locations.map((l) => ({ value: l.id, label: l.name }))}
-              />
-            </ProcessingCell>
-            <ProcessingCell label="Количество">
-              <input
-                className="input h-10"
-                type="number"
-                min="0"
-                step="any"
-                aria-label="Количество продукта"
-                disabled={!editable}
-                value={r.quantity || ''}
-                onChange={(e) =>
-                  change({ quantity: Number(e.target.value), unitCost: undefined, lineCost: undefined })
-                }
-              />
-            </ProcessingCell>
-            <ProcessingCell label="Единица">
-              <Select
-                ariaLabel="Единица количества"
-                disabled={!editable}
-                className="h-10 w-full"
-                value={r.unit}
-                onChange={(v) => change({ unit: v as UnitCode })}
-                options={unitsForType(ingredient?.unitType ?? 'mass')}
-              />
-            </ProcessingCell>
-            <ProcessingCell label="Себестоимость">
-              <span className="text-sm text-text-secondary">
-                {r.unitCost == null ? (editable ? 'По остатку' : 'Неизвестно') : money(r.unitCost)}
-              </span>
-            </ProcessingCell>
-            <ProcessingCell label="Доля стоимости">
-              {output ? (
-                <label className="flex items-center gap-1 text-sm">
-                  <input
-                    className="input h-10"
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="any"
-                    aria-label="Доля себестоимости"
-                    disabled={!editable}
-                    value={r.costSharePercent ?? ''}
-                    onChange={(e) => change({ costSharePercent: Number(e.target.value) })}
-                  />
-                  %
-                </label>
-              ) : (
-                <span className="text-sm">{r.costSharePercent == null ? '—' : `${r.costSharePercent}%`}</span>
-              )}
-            </ProcessingCell>
-            <ProcessingCell label="Сумма">
-              <span className="text-sm">{r.lineCost == null ? '—' : money(r.lineCost)}</span>
-            </ProcessingCell>
-            {editable && (
-              <button
-                className="text-text-muted hover:text-danger"
-                aria-label="Удалить строку"
-                onClick={() => setRows(rows.filter((v) => v.key !== r.key))}
-              >
-                ×
-              </button>
-            )}
-          </div>
-        );
-      })}
-      {editable && (
-        <button
-          className="px-4 py-3 text-sm text-primary"
-          onClick={() =>
-            setRows([
-              ...rows,
-              {
-                key: crypto.randomUUID(),
-                ingredientId: '',
-                warehouseId,
-                unit: 'kg',
-                quantity: 0,
-                ...(output ? { costSharePercent: rows.length ? 0 : 100 } : {}),
-              },
-            ])
-          }
-        >
-          + Добавить продукт
-        </button>
-      )}
+            + Добавить
+          </button>
+        )}
+      </div>
     </section>
   );
   return (
-    <div className="space-y-4">
-      <div className="space-y-3 py-2">
+    <div className="poster-form poster-form--document space-y-7">
+      <div className="space-y-3">
         <DocumentField label="Дата и время">
-          <DateTimePicker className="input" value={date} onChange={setDate} disabled={!editable} />
+          {editable ? (
+            <div className="w-[250px] max-w-full">
+              <DateTimePicker className="input h-9" value={date} onChange={setDate} />
+            </div>
+          ) : (
+            <span className="poster-readonly">{formatDocumentDate(document?.date ?? date)}</span>
+          )}
         </DocumentField>
         <DocumentField label="Комментарий">
-          <textarea
-            className="input h-20 py-2"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            disabled={!editable}
-          />
+          {editable ? (
+            <textarea
+              className="input h-14 w-full py-2"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              disabled={!editable}
+            />
+          ) : (
+            <span className="poster-readonly whitespace-pre-wrap">{note || '—'}</span>
+          )}
         </DocumentField>
       </div>
       {renderRows(inputs, setInputs, false)}
       {renderRows(outputs, setOutputs, true)}
-      <p className="text-xs text-text-muted">
-        Стоимость исходных продуктов определяется по выбранным складам при проведении. Распределите её между
-        полученными продуктами.
-      </p>
+      {editable && (
+        <p className="text-xs text-text-muted">
+          Стоимость исходных продуктов определяется по выбранным складам при проведении. Распределите её между
+          полученными продуктами.
+        </p>
+      )}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -366,7 +480,7 @@ function ProcessingForm({
         {editable ? (
           <>
             <button className="btn-primary btn-md" disabled={busy} onClick={() => void save(true)}>
-              Провести
+              Сохранить
             </button>
             <button className="btn-secondary btn-md" disabled={busy} onClick={() => void save(false)}>
               Сохранить черновик
@@ -374,34 +488,29 @@ function ProcessingForm({
           </>
         ) : (
           <>
-            <span className="self-center text-sm">{status(document?.status ?? 'draft')}</span>
+            <span className="document-status self-center" data-status={document?.status}>
+              {status(document?.status ?? 'draft')}
+            </span>
             {document?.status === 'posted' && can('actions.warehouseApprove') && (
               <button className="btn-secondary btn-md" disabled={busy} onClick={() => void reverse()}>
-                Сторнировать
+                Отменить проведение
               </button>
             )}
           </>
         )}
-        <button className="btn-ghost btn-md" onClick={onClose}>
-          Закрыть
-        </button>
+        {editable && (
+          <button className="btn-ghost btn-md" onClick={onClose}>
+            Отмена
+          </button>
+        )}
       </DocumentFooter>
     </div>
   );
 }
 function status(value: string) {
-  return value === 'posted' ? 'Проведена' : value === 'reversed' ? 'Сторнирована' : 'Черновик';
+  return value === 'posted' ? 'Проведена' : value === 'reversed' ? 'Проведение отменено' : 'Черновик';
 }
 function localTime(value?: string) {
   const d = value ? new Date(value) : new Date();
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-}
-
-function ProcessingCell({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="min-w-0">
-      <span className="mb-1 block text-xs text-text-muted lg:hidden">{label}</span>
-      {children}
-    </div>
-  );
 }

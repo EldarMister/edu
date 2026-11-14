@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { Modal } from '@/components/Modal';
+import { EditorPage } from './EditorPage';
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
+import { DocumentProductPicker } from './DocumentProductPicker';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
-import { DocumentFooter } from './WarehouseUi';
-import { qty, useIngredients, useWarehouseLocations, type WarehouseLocation } from './api';
+import { DocumentField, DocumentFooter } from './WarehouseUi';
+import { qty, useIngredients, useWarehouseLocations, type Ingredient, type WarehouseLocation } from './api';
 import {
   useStockDocument,
   useStockDocumentMutations,
@@ -46,7 +49,7 @@ export function StockDocumentModal({
         ? can('actions.warehouseReceive') && can('actions.warehouseCosts')
         : isOwner;
   return (
-    <Modal
+    <EditorPage
       open
       title={document ? documentLabel(document) : 'Складской документ'}
       panelClassName="max-w-4xl"
@@ -67,12 +70,13 @@ export function StockDocumentModal({
           document={document}
           warehouse={documentWarehouse}
           onReload={() => query.refetch()}
+          canApprove={canApprove}
         />
       )}
       {document && document.status !== 'draft' && (
         <StockDocumentReview document={document} warehouse={documentWarehouse} isOwner={canApprove} />
       )}
-    </Modal>
+    </EditorPage>
   );
 }
 
@@ -89,12 +93,14 @@ function StockDocumentDraft({
   document,
   warehouse,
   onReload,
+  canApprove,
 }: {
   document: StockDocumentDetails;
   warehouse: WarehouseLocation;
   onReload: () => Promise<{ data?: StockDocumentDetails }>;
+  canApprove: boolean;
 }) {
-  const { update, transition } = useStockDocumentMutations();
+  const { update } = useStockDocumentMutations();
   const { can } = usePermissions();
   const editable = can(
     `actions.${document.kind === 'inventory' ? 'warehouseCount' : document.kind === 'writeoff' ? 'warehouseWriteoff' : document.kind === 'transfer' ? 'warehouseTransfer' : 'warehouseReceive'}`,
@@ -112,10 +118,12 @@ function StockDocumentDraft({
   const needsReason = document.kind === 'writeoff';
   const full = document.mode === 'full';
   const stale = baseRevision !== document.revision;
-  const pending = update.isPending || transition.isPending || reloading || !editable;
+  const pending = update.isPending || reloading || !editable;
   const usedIds = new Set(items.map(({ item }) => item.ingredientId));
   const byId = new Map(ingredients.data?.map((ingredient) => [ingredient.id, ingredient]));
-  const available = (ingredients.data ?? []).filter(({ id }) => !usedIds.has(id));
+  const available = (ingredients.data ?? []).filter(
+    ({ id, preparationMode }) => !usedIds.has(id) && preparationMode !== 'virtual',
+  );
   const counted = items.filter(({ input }) => input.trim() !== '');
   const invalidCount = counted.some(({ input }) => {
     const quantity = Number(input);
@@ -161,6 +169,7 @@ function StockDocumentDraft({
       const saved = await update.mutateAsync({
         id: document.id,
         revision: baseRevision,
+        finalize: action === 'submit' ? (canApprove ? 'post' : 'submit') : undefined,
         reason: needsReason ? reason || null : undefined,
         note: note.trim(),
         recount: action === 'recount' || undefined,
@@ -172,8 +181,10 @@ function StockDocumentDraft({
       adopt(saved);
       setRecountOpen(false);
       if (action === 'submit') {
-        await transition.mutateAsync({ id: saved.id, action: 'submit', revision: saved.revision });
-        push({ message: 'Документ отправлен на утверждение', at: new Date().toISOString() });
+        push({
+          message: canApprove ? 'Документ проведён' : 'Документ отправлен на утверждение',
+          at: new Date().toISOString(),
+        });
       } else {
         push({ message: 'Черновик сохранён', at: new Date().toISOString() });
       }
@@ -223,12 +234,11 @@ function StockDocumentDraft({
   const total = totals.length ? totals.reduce((sum, row) => sum + (row.value ?? 0), 0) : null;
 
   return (
-    <div className="space-y-4">
+    <div className="poster-form poster-form--document space-y-6">
       <DocumentHeader document={document} warehouse={warehouse} />
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-3">
         {needsReason && (
-          <div>
-            <div className="mb-1 text-xs font-medium text-text-secondary">Причина списания</div>
+          <DocumentField label="Причина списания">
             <Select
               ariaLabel="Причина списания"
               className="h-10 w-full"
@@ -236,29 +246,17 @@ function StockDocumentDraft({
               onChange={(value) => setReason(value as WriteoffReason)}
               options={WRITEOFF_REASONS}
             />
-          </div>
+          </DocumentField>
         )}
-        <label className="block text-xs font-medium text-text-secondary">
-          {reason === 'other' ? 'Уточните причину' : 'Комментарий'}
-          <input
-            className="input mt-1 h-10 w-full"
+        <DocumentField label={reason === 'other' ? 'Уточните причину' : 'Комментарий'}>
+          <textarea
+            className="input h-14 w-full"
             value={note}
             maxLength={1000}
             onChange={(event) => setNote(event.target.value)}
           />
-        </label>
+        </DocumentField>
       </div>
-      {!full && (
-        <Select
-          ariaLabel="Добавить товары"
-          placeholder="Добавить товары"
-          value=""
-          className="h-10 w-full sm:max-w-xs"
-          options={available.map(({ id, name }) => ({ value: id, label: name }))}
-          disabled={pending || !available.length}
-          onChange={addIngredient}
-        />
-      )}
       {ingredients.isError && (
         <p role="alert" className="text-sm text-danger">
           {apiError(ingredients.error)}
@@ -268,6 +266,7 @@ function StockDocumentDraft({
         writeoff={writeoff}
         rows={rows}
         total={total}
+        addProducts={!full ? { options: available, onSelect: addIngredient } : undefined}
         editable={{
           onChange: (ingredientId, input) =>
             setItems((current) =>
@@ -315,16 +314,18 @@ function StockDocumentDraft({
         </div>
       )}
       <DocumentFooter>
-        {!writeoff && counted.length > 0 && (
-          <button
-            type="button"
-            className="btn-secondary btn-md mr-auto"
-            disabled={pending || stale || invalidCount}
-            onClick={() => setRecountOpen(true)}
-          >
-            Повторный пересчёт
-          </button>
-        )}
+        <button
+          type="button"
+          className="btn-primary btn-md"
+          disabled={pending || stale || invalidCount || !canSubmit}
+          onClick={() => void save('submit')}
+        >
+          {canApprove
+            ? document.kind === 'inventory'
+              ? 'Завершить инвентаризацию'
+              : 'Сохранить'
+            : 'Отправить на утверждение'}
+        </button>
         <button
           type="button"
           className="btn-secondary btn-md"
@@ -333,14 +334,16 @@ function StockDocumentDraft({
         >
           Сохранить черновик
         </button>
-        <button
-          type="button"
-          className="btn-primary btn-md"
-          disabled={pending || stale || invalidCount || !canSubmit}
-          onClick={() => void save('submit')}
-        >
-          Отправить на утверждение
-        </button>
+        {!writeoff && counted.length > 0 && (
+          <button
+            type="button"
+            className="btn-ghost btn-md"
+            disabled={pending || stale || invalidCount}
+            onClick={() => setRecountOpen(true)}
+          >
+            Повторный пересчёт
+          </button>
+        )}
       </DocumentFooter>
       {recountOpen && (
         <Modal open title="Повторный пересчёт" onClose={() => setRecountOpen(false)}>
@@ -382,7 +385,8 @@ function StockDocumentReview({
   const reason = WRITEOFF_REASONS.find(({ value }) => value === document.reason)?.label;
 
   async function change(action: 'approve' | 'reopen' | 'reverse') {
-    const note = action === 'reverse' ? window.prompt('Укажите причину сторнирования')?.trim() : undefined;
+    const note =
+      action === 'reverse' ? window.prompt('Укажите причину отмены проведения')?.trim() : undefined;
     if (action === 'reverse' && !note) return;
     setError('');
     try {
@@ -392,7 +396,7 @@ function StockDocumentReview({
           action === 'approve'
             ? 'Документ проведён'
             : action === 'reverse'
-              ? 'Документ сторнирован'
+              ? 'Проведение отменено'
               : 'Документ возвращён в черновик',
         at: new Date().toISOString(),
       });
@@ -402,7 +406,7 @@ function StockDocumentReview({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="poster-form poster-form--document space-y-6">
       <DocumentHeader document={document} warehouse={warehouse} />
       {(reason || document.note) && (
         <p className="whitespace-pre-wrap break-words text-sm text-text-secondary">
@@ -419,38 +423,48 @@ function StockDocumentReview({
           {error}
         </p>
       )}
-      {document.status === 'posted' && can('actions.warehouseApprove') && (
+      <WorkspaceHeaderActions>
         <button
           type="button"
-          className="btn-secondary btn-md"
-          disabled={pending}
-          onClick={() => void change('reverse')}
+          className="btn-ghost btn-md print:hidden text-primary"
+          onClick={() => window.print()}
         >
-          Сторнировать с причиной
+          Печать
         </button>
-      )}
-      <button type="button" className="btn-secondary btn-md print:hidden" onClick={() => window.print()}>
-        Печать документа
-      </button>
-      {needsApproval && isOwner && (
-        <div className="flex flex-wrap justify-end gap-2">
-          <button
-            type="button"
-            className="btn-secondary btn-md"
-            disabled={pending}
-            onClick={() => void change('reopen')}
-          >
-            Вернуть в черновик
-          </button>
-          <button
-            type="button"
-            className="btn-primary btn-md"
-            disabled={pending}
-            onClick={() => void change('approve')}
-          >
-            Утвердить и провести
-          </button>
-        </div>
+      </WorkspaceHeaderActions>
+      {((needsApproval && isOwner) || (document.status === 'posted' && can('actions.warehouseApprove'))) && (
+        <DocumentFooter>
+          {needsApproval && isOwner && (
+            <>
+              <button
+                type="button"
+                className="btn-primary btn-md"
+                disabled={pending}
+                onClick={() => void change('approve')}
+              >
+                Утвердить и провести
+              </button>
+              <button
+                type="button"
+                className="btn-secondary btn-md"
+                disabled={pending}
+                onClick={() => void change('reopen')}
+              >
+                Вернуть в черновик
+              </button>
+            </>
+          )}
+          {document.status === 'posted' && can('actions.warehouseApprove') && (
+            <button
+              type="button"
+              className="btn-secondary btn-md"
+              disabled={pending}
+              onClick={() => void change('reverse')}
+            >
+              Отменить проведение
+            </button>
+          )}
+        </DocumentFooter>
       )}
     </div>
   );
@@ -466,10 +480,14 @@ function DocumentHeader({
   const locations = useWarehouseLocations();
   const destination = locations.data?.locations.find((l) => l.id === document.destinationWarehouseId);
   return (
-    <dl className="grid grid-cols-2 gap-3 rounded-lg bg-background/50 p-3 text-sm sm:grid-cols-4">
+    <dl className="space-y-3 text-sm">
       <Meta label="Склад">{warehouse.name}</Meta>
-      {destination && <Meta label="Куда перемещаем">{destination.name}</Meta>}
-      <Meta label="Статус">{documentStatus(document.status)}</Meta>
+      {destination && <Meta label="На склад">{destination.name}</Meta>}
+      <Meta label="Статус">
+        <span className="document-status" data-status={document.status}>
+          {documentStatus(document.status)}
+        </span>
+      </Meta>
       <Meta label="Создан">
         {formatDocumentDate(document.createdAt)}
         {document.createdByName && ` · ${document.createdByName}`}
@@ -488,9 +506,9 @@ function DocumentHeader({
 
 function Meta({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <dt className="text-xs text-text-muted">{label}</dt>
-      <dd className="break-words font-medium text-text-primary">{children}</dd>
+    <div className="poster-document-meta grid min-h-9 items-center gap-1 md:grid-cols-[min(334px,27%)_minmax(0,470px)] md:gap-0">
+      <dt className="text-text-secondary">{label}</dt>
+      <dd className="break-words text-text-primary">{children}</dd>
     </div>
   );
 }
@@ -500,6 +518,7 @@ function DocumentItems({
   total,
   writeoff,
   editable,
+  addProducts,
 }: {
   rows: (StockDocumentItem & { input?: string })[];
   total: number | null;
@@ -509,95 +528,128 @@ function DocumentItems({
     onRemove?: (id: string) => void;
     disabled: boolean;
   };
+  addProducts?: { options: Ingredient[]; onSelect: (id: string) => void };
 }) {
   const { can } = usePermissions();
   const costs = can('actions.warehouseCosts');
-  if (!rows.length)
-    return (
-      <p className="rounded-lg border border-border p-3 text-sm text-text-muted">В документе нет позиций</p>
-    );
+  const columns = writeoff ? 4 : 6;
   return (
-    <div className="overflow-hidden rounded-lg border border-border">
-      <div className="hidden grid-cols-[1.35fr_0.8fr_1fr_0.8fr_0.8fr] gap-3 bg-background/60 p-3 text-xs font-medium text-text-muted sm:grid">
-        <span>Товар</span>
-        <span>По учёту</span>
-        <span>{writeoff ? 'Количество' : 'Фактически'}</span>
-        <span>Разница</span>
-        <span className="text-right">{costs ? 'Сумма' : ''}</span>
-      </div>
-      <div className="divide-y divide-border">
-        {rows.map((row) => (
-          <div
-            key={row.ingredientId}
-            className="grid grid-cols-2 items-center gap-2 p-3 text-sm sm:grid-cols-[1.35fr_0.8fr_1fr_0.8fr_0.8fr] sm:gap-3"
-          >
-            <div className="col-span-2 min-w-0 break-words font-medium text-text-primary sm:col-span-1">
-              {row.name}
-              {editable?.onRemove && (
-                <button
-                  type="button"
-                  className="ml-2 text-xs text-danger"
-                  disabled={editable.disabled}
-                  aria-label={`Убрать ${row.name}`}
-                  onClick={() => editable.onRemove?.(row.ingredientId)}
-                >
-                  Убрать
-                </button>
+    <div className="overflow-x-auto">
+      <table className="poster-table w-full min-w-[700px] table-fixed text-sm">
+        <colgroup>
+          {writeoff ? (
+            <>
+              <col style={{ width: '54%' }} />
+              <col style={{ width: '24%' }} />
+              <col style={{ width: '18%' }} />
+              <col style={{ width: '4%' }} />
+            </>
+          ) : (
+            <>
+              <col style={{ width: '34%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '20%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '4%' }} />
+            </>
+          )}
+        </colgroup>
+        <thead>
+          <tr className="border-b border-border text-left text-xs text-text-muted">
+            <th className="py-3 pr-3 font-normal">Наименование</th>
+            {!writeoff && <th className="px-3 py-3 text-right font-normal">По учёту</th>}
+            <th className="px-3 py-3 text-right font-normal">{writeoff ? 'Количество' : 'Фактически'}</th>
+            {!writeoff && <th className="px-3 py-3 text-right font-normal">Разница</th>}
+            <th className="px-3 py-3 text-right font-normal">{costs ? 'Сумма' : ''}</th>
+            <th />
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.ingredientId} className="border-b border-border">
+              <td className="py-3 pr-3 font-medium">{row.name}</td>
+              {!writeoff && (
+                <td className="px-3 py-3 text-right text-text-secondary">
+                  {row.expected === null ? '—' : qty(row.expected, row.unit)}
+                </td>
               )}
-            </div>
-            <Cell label="По учёту">{row.expected === null ? '—' : qty(row.expected, row.unit)}</Cell>
-            <Cell label={writeoff ? 'Количество' : 'Фактически'}>
-              {editable ? (
-                <div className="flex items-center gap-1">
-                  <input
-                    className="input h-9 min-w-0 text-sm"
-                    type="number"
-                    min="0"
-                    step="any"
-                    inputMode="decimal"
-                    aria-label={`Количество · ${row.name}`}
+              <td className="px-3 py-2 text-right">
+                {editable ? (
+                  <label className="poster-number-unit flex items-center gap-2">
+                    <input
+                      className="input h-9 min-w-0 w-full text-right"
+                      type="number"
+                      min="0"
+                      step="any"
+                      inputMode="decimal"
+                      aria-label={`Количество · ${row.name}`}
+                      disabled={editable.disabled}
+                      value={row.input ?? ''}
+                      onChange={(event) => editable.onChange(row.ingredientId, event.target.value)}
+                    />
+                    <span className="whitespace-nowrap text-text-muted">{row.unit}</span>
+                  </label>
+                ) : row.quantity === null ? (
+                  '—'
+                ) : (
+                  qty(row.quantity, row.unit)
+                )}
+              </td>
+              {!writeoff && (
+                <td className="px-3 py-3 text-right text-text-secondary">
+                  {row.difference === null ? '—' : signedQuantity(row.difference, row.unit)}
+                </td>
+              )}
+              <td className="px-3 py-3 text-right">{costs ? formatVariance(row.value) : ''}</td>
+              <td>
+                {editable?.onRemove && (
+                  <button
+                    type="button"
+                    className="btn-ghost h-8 w-8 text-text-muted hover:text-danger"
                     disabled={editable.disabled}
-                    value={row.input ?? ''}
-                    onChange={(event) => editable.onChange(row.ingredientId, event.target.value)}
-                  />
-                  <span>{row.unit}</span>
-                </div>
-              ) : row.quantity === null ? (
-                '—'
-              ) : (
-                qty(row.quantity, row.unit)
-              )}
-            </Cell>
-            <Cell label="Разница">
-              {row.difference === null ? '—' : signedQuantity(row.difference, row.unit)}
-            </Cell>
-            <Cell label={costs ? 'Сумма' : ''} className="sm:text-right">
-              {costs ? formatVariance(row.value) : ''}
-            </Cell>
-          </div>
-        ))}
-      </div>
-      <div className="flex items-center justify-between gap-2 border-t border-border bg-background/60 px-3 py-2 text-sm font-medium text-text-primary">
-        <span>{writeoff ? 'Итого изменение на складе' : 'Итого расхождение'}</span>
-        <span>{costs ? formatVariance(total) : 'Сумма доступна с правом просмотра себестоимости'}</span>
-      </div>
-    </div>
-  );
-}
-
-function Cell({
-  label,
-  children,
-  className = '',
-}: {
-  label: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={`min-w-0 text-text-secondary ${className}`}>
-      <span className="block text-xs text-text-muted sm:hidden">{label}</span>
-      {children}
+                    aria-label={`Убрать ${row.name}`}
+                    onClick={() => editable.onRemove?.(row.ingredientId)}
+                  >
+                    ×
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+          {addProducts && (
+            <tr className="border-b border-border">
+              <td className="py-2 pr-3">
+                <DocumentProductPicker
+                  key={rows.length}
+                  value=""
+                  label="Добавить продукт"
+                  options={addProducts.options}
+                  disabled={editable?.disabled || !addProducts.options.length}
+                  onChange={addProducts.onSelect}
+                />
+              </td>
+              <td colSpan={columns - 1} />
+            </tr>
+          )}
+          {!rows.length && !addProducts && (
+            <tr>
+              <td colSpan={columns} className="py-12 text-center text-text-muted">
+                В документе нет позиций
+              </td>
+            </tr>
+          )}
+        </tbody>
+        <tfoot>
+          <tr className="border-t border-border bg-background/30">
+            <td colSpan={columns - 2} className="py-3 pr-3 font-medium">
+              {writeoff ? 'Итого' : 'Итого расхождение'}
+            </td>
+            <td className="px-3 py-3 text-right font-medium">{costs ? formatVariance(total) : ''}</td>
+            <td />
+          </tr>
+        </tfoot>
+      </table>
     </div>
   );
 }

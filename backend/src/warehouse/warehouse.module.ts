@@ -50,6 +50,6 @@ import { MenuModifiersController, MenuModifiersService } from './menu-modifiers'
     MenuModifiersService,
   ],
   // IngredientStockService используется заказами для списания/возврата сырья.
-  exports: [IngredientStockService],
+  exports: [IngredientStockService, RecipesService, MenuModifiersService],
 })
 export class WarehouseModule {}

@@ -179,6 +179,9 @@ export class CreatePurchaseDto extends PurchaseMetadataDto {
 }
 
 export class UpdatePurchaseDto extends PurchaseMetadataDto {
+  @IsOptional() @IsBoolean()
+  complete?: boolean;
+
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
   warehouseId?: string;
 

@@ -86,9 +86,15 @@ export class MenuModifiersService {
   async save(dishId: string, dto: MenuModifiersDto) {
     await this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx);
+      await this.saveInTransaction(tx, dishId, dto);
+    });
+    this.events?.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId });
+    return this.get(dishId);
+  }
+  async saveInTransaction(tx: Prisma.TransactionClient, dishId: string, dto: MenuModifiersDto, archive = true) {
       const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { recipeItems: true, variants: true, modifierGroups: { include: { options: true } } } });
       if (!dish) throw new NotFoundException('Блюдо не найдено');
-      await tx.recipeRevision.upsert({ where: { dishId_version: { dishId, version: dish.recipeVersion } }, update: {}, create: { dishId, version: dish.recipeVersion, snapshot: JSON.parse(JSON.stringify({ modifierGroups: dish.modifierGroups, allowIngredientExclusions: dish.allowIngredientExclusions, metadata: dish.recipeMetadata, stockIngredientId: dish.stockIngredientId, stockAmount: dish.stockAmount, items: dish.recipeItems, variants: dish.variants })) } });
+      if (archive) await tx.recipeRevision.upsert({ where: { dishId_version: { dishId, version: dish.recipeVersion } }, update: {}, create: { dishId, version: dish.recipeVersion, snapshot: JSON.parse(JSON.stringify({ modifierGroups: dish.modifierGroups, allowIngredientExclusions: dish.allowIngredientExclusions, metadata: dish.recipeMetadata, stockIngredientId: dish.stockIngredientId, stockAmount: dish.stockAmount, items: dish.recipeItems, variants: dish.variants })) } });
       const groupIds = new Set(dish.modifierGroups.map((group) => group.id)), optionIds = new Set(dish.modifierGroups.flatMap((group) => group.options.map((option) => option.id)));
       const keptGroups: string[] = [], seenOptions = new Set<string>();
       for (const [groupIndex, input] of dto.groups.entries()) {
@@ -120,10 +126,7 @@ export class MenuModifiersService {
         await tx.menuModifierOption.deleteMany({ where: { groupId: group.id, id: { notIn: keptOptions } } });
       }
       await tx.menuModifierGroup.deleteMany({ where: { dishId, id: { notIn: keptGroups } } });
-      await tx.dish.update({ where: { id: dishId }, data: { allowIngredientExclusions: dto.allowIngredientExclusions, recipeVersion: { increment: 1 } } });
-    });
-    this.events?.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId });
-    return this.get(dishId);
+      await tx.dish.update({ where: { id: dishId }, data: { allowIngredientExclusions: dto.allowIngredientExclusions, ...(archive ? { recipeVersion: { increment: 1 } } : {}) } });
   }
 }
 

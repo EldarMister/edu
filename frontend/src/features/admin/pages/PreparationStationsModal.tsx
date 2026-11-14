@@ -1,11 +1,12 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { Modal } from '@/components/Modal';
 import { apiError } from '@/lib/api';
 import { useSavePreparationStation, type PreparationStation } from '@/features/kitchen/stations';
 
-export function PreparationStationsModal({ stations, onClose }: {
+export function PreparationStationsModal({ stations, onClose, page = false }: {
   stations: PreparationStation[];
   onClose: () => void;
+  page?: boolean;
 }) {
   const [editingId, setEditingId] = useState<string>();
   const [name, setName] = useState('');
@@ -34,10 +35,10 @@ export function PreparationStationsModal({ stations, onClose }: {
   }
 
   return (
-    <Modal open onClose={onClose} title="Станции приготовления">
+    <StationFrame page={page} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
         <label className="min-w-36 flex-1 text-sm text-text-secondary">
-          Название станции
+          Название цеха
           <input className="input mt-1 w-full" required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} />
         </label>
         <button className="btn-primary btn-md" type="submit" disabled={!name.trim() || save.isPending}>
@@ -59,6 +60,11 @@ export function PreparationStationsModal({ stations, onClose }: {
           </li>
         ))}
       </ul>
-    </Modal>
+    </StationFrame>
   );
+}
+
+function StationFrame({ page, onClose, children }: { page: boolean; onClose: () => void; children: ReactNode }) {
+  return page ? <section className="max-w-4xl space-y-4">{children}</section>
+    : <Modal open onClose={onClose} title="Цехи">{children}</Modal>;
 }

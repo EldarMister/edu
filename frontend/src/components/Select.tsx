@@ -31,7 +31,7 @@ export function Select({
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxHeight: number; workspace: boolean } | null>(null);
 
   const selected = options.find((o) => o.value === value);
 
@@ -41,13 +41,14 @@ export function Select({
     const r = el.getBoundingClientRect();
     const gap = 6;
     const edge = 8;
-    const desiredHeight = Math.min(256, options.length * 40 + 8);
+    const workspace = !!el.closest('.poster-workspace');
+    const desiredHeight = Math.min(256, options.length * (workspace ? 34 : 40) + 8);
     const spaceBelow = window.innerHeight - r.bottom - edge;
     const spaceAbove = r.top - edge;
     const openUp = spaceBelow < desiredHeight && spaceAbove > spaceBelow;
     const maxHeight = Math.max(80, Math.min(256, (openUp ? spaceAbove : spaceBelow) - gap));
     const top = openUp ? Math.max(edge, r.top - gap - Math.min(desiredHeight, maxHeight)) : r.bottom + gap;
-    setPos({ top, left: r.left, width: r.width, maxHeight });
+    setPos({ top, left: r.left, width: r.width, maxHeight, workspace });
   }
 
   useLayoutEffect(() => {
@@ -118,7 +119,7 @@ export function Select({
           <div
             ref={menuRef}
             data-radio-blocking
-            className="fixed z-[70] overflow-y-auto rounded-xl border border-border bg-white p-1 shadow-soft"
+            className={`fixed z-[70] overflow-y-auto rounded-xl border border-border bg-white p-1 shadow-soft ${pos.workspace ? 'poster-select-menu' : ''}`}
             style={{ top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
           >
             {options.map((o) => {

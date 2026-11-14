@@ -44,6 +44,7 @@ export interface StockDocumentDetails extends StockDocument {
 }
 
 export interface DocumentInput {
+  finalize?: 'submit' | 'post';
   requestKey?: string;
   destinationWarehouseId?: string;
   sourcePurchaseId?: string;
@@ -77,6 +78,8 @@ export function useStockDocumentMutations() {
   const saved = (document: StockDocumentDetails) => {
     qc.setQueryData([...DOCUMENTS_KEY, 'detail', document.id], document);
     void qc.invalidateQueries({ queryKey: [...DOCUMENTS_KEY, 'list'] });
+    if (document.status === 'posted' || document.status === 'reversed')
+      void qc.invalidateQueries({ queryKey: WAREHOUSE_KEY });
   };
   const create = useMutation({
     mutationFn: async (

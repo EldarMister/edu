@@ -1,11 +1,12 @@
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
-import { BadRequestException, Injectable, Optional, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, Optional, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { getCafeId } from '../tenant/tenant-context';
 import { getWarehouseBalance } from './warehouse-location';
 import { PrismaService } from '../prisma/prisma.service';
-import { RecipeItemInputDto, RecipeItemUpdateDto, RecipeSettingsDto } from './recipes.dto';
+import { RecipeDraftDto, RecipeItemInputDto, RecipeItemUpdateDto, RecipeSettingsDto } from './recipes.dto';
+import { MenuModifiersService } from './menu-modifiers';
 import { RecipeResolver, recipeAmount, lockRecipeGraph } from './recipe-resolution';
 import { assertUnitMatchesType, costFromBase, costUnitLabel, fromBase, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
 
@@ -13,9 +14,49 @@ import { assertUnitMatchesType, costFromBase, costUnitLabel, fromBase, normalize
 export class RecipesService {
   constructor(private prisma: PrismaService, @Optional() private events?: EventsGateway) {}
 
+  async getDraft(dishId: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const dish = await tx.dish.findUnique({ where: { id: dishId }, select: { isSet: true, catalogKind: true } });
+      if (!dish) throw new NotFoundException('Блюдо не найдено');
+      return {
+        recipe: { ...await new RecipesService(tx as PrismaService).getByDish(dishId), ...dish },
+        modifiers: await new MenuModifiersService(tx as PrismaService).get(dishId),
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async saveDraft(dishId: string, dto: RecipeDraftDto) {
+    await this.prisma.$transaction(async (tx) => {
+      await lockRecipeGraph(tx);
+      const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { recipeItems: true } });
+      if (!dish) throw new NotFoundException('Блюдо не найдено');
+      if (dish.catalogKind === 'goods' || dish.stockIngredientId || dish.isSet) throw new BadRequestException('Состав этой позиции изменяется в меню');
+      if (dto.expectedVersion !== dish.recipeVersion) throw new ConflictException('Техкарта уже изменена. Обновите страницу перед сохранением.');
+      const ids = dto.items.map((row) => row.ingredientId);
+      if (new Set(ids).size !== ids.length) throw new BadRequestException('Ингредиент указан дважды');
+      await this.archiveRevision(tx, dishId);
+      for (const row of dto.items) {
+        const ingredient = await tx.ingredient.findUnique({ where: { id: row.ingredientId } });
+        const previous = dish.recipeItems.find((item) => item.ingredientId === row.ingredientId);
+        if (!ingredient || (!ingredient.isActive && !previous)) throw new BadRequestException('Ингредиент недоступен');
+        const data = await this.rowData(tx, dishId, ingredient.unitType, ingredient.displayUnit, row, previous, ingredient.processingLosses);
+        await tx.recipeItem.upsert({ where: { dishId_ingredientId: { dishId, ingredientId: row.ingredientId } },
+          create: { dishId, ingredientId: row.ingredientId, ...data }, update: data });
+      }
+      await tx.recipeItem.deleteMany({ where: { dishId, ingredientId: { notIn: ids } } });
+      if (dto.modifiers) await new MenuModifiersService(tx as PrismaService).saveInTransaction(tx, dishId, dto.modifiers, false);
+      await tx.dish.update({ where: { id: dishId }, data: {
+        recipeVersion: { increment: 1 },
+        ...(dto.metadata === undefined ? {} : { recipeMetadata: dto.metadata as Prisma.InputJsonValue }),
+      } });
+    });
+    this.events?.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { dishId });
+    return this.getDraft(dishId);
+  }
+
   async listDishes(search?: string) {
     const dishes = await this.prisma.dish.findMany({ where: { isActive: true, ...(search?.trim() ? { name: { contains: search.trim(), mode: 'insensitive' as const } } : {}) },
-      select: { id: true, name: true, price: true, isSet: true, imageUrl: true, stockIngredientId: true, variants: { select: { stockIngredientId: true } }, _count: { select: { recipeItems: true } }, category: { select: { id: true, name: true } } },
+      select: { id: true, name: true, price: true, catalogKind: true, isSet: true, imageUrl: true, stockIngredientId: true, variants: { select: { stockIngredientId: true } }, _count: { select: { recipeItems: true } }, category: { select: { id: true, name: true } } },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
     });
     return dishes.map(({ _count, variants, ...dish }) => ({ ...dish, hasRecipe: _count.recipeItems > 0, hasDirectStock: !!dish.stockIngredientId || variants.some((variant) => !!variant.stockIngredientId) }));
@@ -197,7 +238,7 @@ export class RecipesService {
     return this.prisma.recipeRevision.findMany({ where: { dishId }, orderBy: { version: 'desc' }, take: 100 });
   }
 
-  private async archiveRevision(tx: Prisma.TransactionClient, dishId: string) {
+  async archiveRevision(tx: Prisma.TransactionClient, dishId: string) {
     const dish = await tx.dish.findUniqueOrThrow({ where: { id: dishId }, include: { recipeItems: true, variants: true, modifierGroups: { include: { options: true } } } });
     await tx.recipeRevision.upsert({
       where: { dishId_version: { dishId, version: dish.recipeVersion } },
@@ -217,7 +258,7 @@ export class RecipesService {
     return amount;
   }
 
-  private async rowData(tx: Prisma.TransactionClient, dishId: string, unitType: 'mass' | 'volume' | 'count', defaultUnit: string, dto: RecipeItemUpdateDto, previous?: Prisma.RecipeItemGetPayload<{}>, processingLosses?: Prisma.JsonValue | null) {
+  async rowData(tx: Prisma.TransactionClient, dishId: string, unitType: 'mass' | 'volume' | 'count', defaultUnit: string, dto: RecipeItemUpdateDto, previous?: Prisma.RecipeItemGetPayload<{}>, processingLosses?: Prisma.JsonValue | null) {
     const unit = normalizeUnit(dto.unit ?? defaultUnit);
     assertUnitMatchesType(unit, unitType);
     const amount = this.quantity(dto.amount, unit);

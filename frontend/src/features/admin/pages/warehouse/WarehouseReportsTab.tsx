@@ -3,10 +3,11 @@ import { useQuery } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { api, apiError } from '@/lib/api';
-import {costLabel} from './cost-format';
+import { costLabel } from './cost-format';
 import { money } from '@/lib/format';
 import { useStaff } from '../../api';
 import { qty, useIngredients } from './api';
+import { usePageFilter } from './workspace-route';
 
 interface ReportRow {
   id: string;
@@ -17,9 +18,9 @@ interface ReportRow {
   warehouseName: string;
   quantity: number;
   unit: string;
-  unitCost: number|null;
-  costKnown?:boolean;
-  totalCost: number|null;
+  unitCost: number | null;
+  costKnown?: boolean;
+  totalCost: number | null;
   valuationAdjustment?: number;
   sourceType: string | null;
   sourceId: string | null;
@@ -44,7 +45,7 @@ interface Report {
   totalValuationAdjustment?: number;
   rows: ReportRow[];
   totalRows: number;
-  totalCost: number|null;
+  totalCost: number | null;
   page: number;
   pageSize: number;
 }
@@ -55,6 +56,7 @@ export function WarehouseReportsTab({
   onView,
   ingredientId,
   onOpen,
+  contextOnly = false,
 }: {
   warehouseId?: string;
   range: { dateFrom: string; dateTo: string };
@@ -62,13 +64,14 @@ export function WarehouseReportsTab({
   onView: (v: string) => void;
   ingredientId?: string;
   onOpen: (type: string, id: string) => void;
+  contextOnly?: boolean;
 }) {
-  const [item, setItem] = useState(ingredientId ?? '');
-  const [search, setSearch] = useState('');
-  const [employee, setEmployee] = useState('');
+  const [item, setItem] = usePageFilter('historyItem', ingredientId ?? '');
+  const [search, setSearch] = usePageFilter('historySearch');
+  const [employee, setEmployee] = usePageFilter('historyEmployee');
   const staff = useStaff('', '');
-  const [category, setCategory] = useState('');
-  const [type, setType] = useState('');
+  const [category, setCategory] = usePageFilter('historyCategory');
+  const [type, setType] = usePageFilter('historyType');
   const [page, setPage] = useState(1);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
@@ -78,7 +81,7 @@ export function WarehouseReportsTab({
     warehouseId,
     from: range.dateFrom,
     to: range.dateTo,
-    ingredientId: item || undefined,
+    ingredientId: (contextOnly && ingredientId ? ingredientId : item) || undefined,
     search: search || undefined,
     employeeId: employee || undefined,
     category: category || undefined,
@@ -112,33 +115,37 @@ export function WarehouseReportsTab({
     <div className="card overflow-hidden">
       <div className="space-y-3 border-b border-border p-4 print:hidden">
         <div className="flex flex-wrap gap-2">
-          <Select
-            ariaLabel="Вид отчёта"
-            className="h-10 min-w-48"
-            value={view}
-            onChange={(v) => {
-              onView(v);
-              setPage(1);
-            }}
-            options={[
-              { value: 'balances', label: 'Остатки' },
-              { value: 'movements', label: 'Движение товаров' },
-              { value: 'purchases', label: 'Закупки' },
-              { value: 'losses', label: 'Списания и потери' },
-              { value: 'sales', label: 'Себестоимость продаж' },
-              { value: 'variances', label: 'Расхождения' },
-            ]}
-          />
-          <input
-            className="input h-10 flex-1 sm:max-w-xs"
-            aria-label="Поиск в отчёте"
-            placeholder="Поиск по товару"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-          />
+          {!contextOnly && (
+            <Select
+              ariaLabel="Вид отчёта"
+              className="h-10 min-w-48"
+              value={view}
+              onChange={(v) => {
+                onView(v);
+                setPage(1);
+              }}
+              options={[
+                { value: 'balances', label: 'Остатки' },
+                { value: 'movements', label: 'Движение товаров' },
+                { value: 'purchases', label: 'Закупки' },
+                { value: 'losses', label: 'Списания и потери' },
+                { value: 'sales', label: 'Себестоимость продаж' },
+                { value: 'variances', label: 'Расхождения' },
+              ]}
+            />
+          )}
+          {!(contextOnly && ingredientId) && (
+            <input
+              className="input h-10 flex-1 sm:max-w-xs"
+              aria-label="Поиск в отчёте"
+              placeholder="Поиск по товару"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+          )}
           <button
             type="button"
             className="btn-secondary btn-md"
@@ -152,32 +159,36 @@ export function WarehouseReportsTab({
           </button>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Select
-            ariaLabel="Товар отчёта"
-            className="h-9 min-w-44"
-            value={item}
-            onChange={(v) => {
-              setItem(v);
-              setPage(1);
-            }}
-            options={[
-              { value: '', label: 'Все товары' },
-              ...(ingredients.data ?? []).map((i) => ({ value: i.id, label: i.name })),
-            ]}
-          />
-          <Select
-            ariaLabel="Категория отчёта"
-            className="h-9 min-w-40"
-            value={category}
-            onChange={(v) => {
-              setCategory(v);
-              setPage(1);
-            }}
-            options={[
-              { value: '', label: 'Все категории' },
-              ...categories.map((c) => ({ value: c, label: c })),
-            ]}
-          />
+          {!(contextOnly && ingredientId) && (
+            <>
+              <Select
+                ariaLabel="Товар отчёта"
+                className="h-9 min-w-44"
+                value={item}
+                onChange={(v) => {
+                  setItem(v);
+                  setPage(1);
+                }}
+                options={[
+                  { value: '', label: 'Все товары' },
+                  ...(ingredients.data ?? []).map((i) => ({ value: i.id, label: i.name })),
+                ]}
+              />
+              <Select
+                ariaLabel="Категория отчёта"
+                className="h-9 min-w-40"
+                value={category}
+                onChange={(v) => {
+                  setCategory(v);
+                  setPage(1);
+                }}
+                options={[
+                  { value: '', label: 'Все категории' },
+                  ...categories.map((c) => ({ value: c, label: c })),
+                ]}
+              />
+            </>
+          )}
           {view !== 'balances' && (
             <Select
               ariaLabel="Сотрудник отчёта"

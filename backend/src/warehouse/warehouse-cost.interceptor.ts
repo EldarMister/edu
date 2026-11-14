@@ -3,7 +3,7 @@ import { Role } from '@prisma/client';
 import { map } from 'rxjs/operators';
 import { hasPermission, resolvePermissions } from '../common/permissions';
 
-const costFields = new Set(['avgCost', 'avgCostBase', 'costAtMoment', 'stockValue', 'foodCost', 'totalCost',
+const costFields = new Set(['recipeTotalCost', 'recipeUnitCost', 'avgCost', 'avgCostBase', 'costAtMoment', 'stockValue', 'foodCost', 'totalCost',
   'lineCost', 'cost', 'margin', 'marginAmount', 'marginPercent', 'foodCostPercent', 'directCost', 'ingredientCost', 'packagingCost',
   'netRevenue', 'actualCost', 'grossMargin',
   'valuationAdjustment', 'totalValuationAdjustment',
@@ -21,7 +21,7 @@ export class WarehouseCostInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler) {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
-    if (!user || !/\/admin\/warehouse(?:\/|$)/.test(request.url ?? '')
+    if (!user || !/\/admin\/(?:warehouse|menu\/entries)(?:\/|\?|$)/.test(request.url ?? '')
       || hasPermission(resolvePermissions(user.role as Role, user.permissions), 'actions.warehouseCosts')) return next.handle();
     return next.handle().pipe(map(redactWarehouseCosts));
   }

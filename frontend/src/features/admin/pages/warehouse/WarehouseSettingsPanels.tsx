@@ -17,6 +17,23 @@ export function AccountingSettings() {
   return (
     <div className="space-y-4">
       <section>
+        <h4 className="mb-3 font-semibold">Операции склада</h4>
+        {query.data && ([
+          { key: 'warehouseProductionEnabled' as const, label: 'Производство полуфабрикатов', inUse: query.data.productionInUse },
+          { key: 'warehouseProcessingEnabled' as const, label: 'Переработки и разделка', inUse: query.data.processingInUse },
+        ]).map((option) => <div key={option.key} className="mb-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={query.data![option.key] || option.inUse} disabled={update.isPending || option.inUse}
+              onChange={async (event) => {
+                try { setError(''); await update.mutateAsync({ [option.key]: event.target.checked }); }
+                catch (err) { setError(apiError(err)); }
+              }} />
+            {option.label}
+          </label>
+          {option.inUse && <p className="ml-6 mt-1 text-xs text-text-muted">Раздел доступен для существующих рецептур и документов.</p>}
+        </div>)}
+      </section>
+      <section>
         <h4 className="mb-2 font-semibold">Отрицательные остатки</h4>
         {query.isPending && <Spinner />}
         {query.data && (
@@ -31,8 +48,7 @@ export function AccountingSettings() {
               />
               <span>Разрешить продажи при нехватке товара</span>
             </label>
-            <p className="mt-2 rounded-lg bg-warning/10 p-3 text-sm">{query.data.warning}</p>
-            <p className="mt-2 text-xs text-text-muted">{query.data.valuationRule}</p>
+            {query.data.allowNegativeIngredientStock && <p className="mt-2 text-sm text-text-secondary">При отрицательном остатке себестоимость будет предварительной. Оформляйте поставки вовремя.</p>}
           </>
         )}
         {(error || query.isError) && (
@@ -40,23 +56,6 @@ export function AccountingSettings() {
             {error || apiError(query.error)}
           </p>
         )}
-      </section>
-      <section className="border-t border-border pt-3">
-        <h4 className="font-semibold">Единицы измерения</h4>
-        <p className="mt-2 text-sm text-text-secondary">
-          Масса: г и кг (1 кг = 1000 г). Объём: мл и л (1 л = 1000 мл). Поштучный учёт: шт. Фасовки
-          настраиваются в разделе «Склад → Фасовки».
-        </p>
-        <p className="mt-1 text-xs text-text-muted">
-          Масса и объём автоматически друг в друга не переводятся.
-        </p>
-      </section>
-      <section className="border-t border-border pt-3">
-        <h4 className="font-semibold">Доступ сотрудников</h4>
-        <p className="mt-2 text-sm text-text-secondary">
-          Используйте «Персонал → Права сотрудника». Там отдельно разрешаются приходы, перемещения, списания,
-          подсчёт, утверждение, рецептуры, производство, себестоимость, отчёты и настройки склада.
-        </p>
       </section>
     </div>
   );

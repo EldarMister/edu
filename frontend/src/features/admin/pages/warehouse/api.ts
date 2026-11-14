@@ -25,6 +25,10 @@ export const ITEM_KINDS: { value: ItemKind; label: string }[] = [
   { value: 'consumable', label: 'Расходники' },
 ];
 export interface Ingredient {
+  recipeOutputQuantity?: number | null;
+  recipeOutputUnit?: UnitCode | null;
+  recipeTotalCost?: number | null;
+  recipeUnitCost?: number | null; // cost per display unit for virtual preparations
   valuationKnown?: boolean;
   processingLosses?: Partial<Record<ProcessingMethod, number>>;
   kind?: ItemKind;
@@ -262,8 +266,9 @@ export interface WarehouseLocations {
   stationRoutes: { stationId: string; stationName: string; warehouseId: string | null }[];
 }
 
-export function useWarehouseLocations() {
+export function useWarehouseLocations(enabled = true) {
   return useQuery({
+    enabled,
     queryKey: warehouseLocationsKey,
     queryFn: () => get<WarehouseLocations>('/admin/warehouse/locations'),
   });
@@ -634,6 +639,7 @@ export interface CreatePurchaseInput {
 }
 
 export interface UpdatePurchaseInput {
+  complete?: boolean;
   supplierId?: string;
   note?: string;
   attachments?: string[];
@@ -748,6 +754,7 @@ export function useWarehouseDishes(search: string) {
           isSet?: boolean;
           hasDirectStock?: boolean;
           hasRecipe?: boolean;
+          catalogKind?: 'goods' | 'recipe';
           stockIngredientId?: string | null;
         }[]
       >(`/admin/warehouse/dishes?${new URLSearchParams({ search })}`),

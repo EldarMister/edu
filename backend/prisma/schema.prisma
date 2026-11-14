@@ -401,6 +401,8 @@ model Dish {
   stockIngredientId String? @map("stock_ingredient_id")
   stockAmount Decimal @default(1) @db.Decimal(14, 3) @map("stock_amount")
   recipeVersion Int @default(1) @map("recipe_version")
+  catalogKind String @default("recipe") @map("catalog_kind")
+  menuCreateKey String? @unique @map("menu_create_key")
   recipeMetadata Json? @map("recipe_metadata")
   stockIngredient Ingredient? @relation("DirectStockIngredient", fields: [stockIngredientId], references: [id], onDelete: Restrict)
   allowIngredientExclusions Boolean @default(false) @map("allow_ingredient_exclusions")
@@ -786,6 +788,8 @@ model Settings {
   qrImageUrl                   String? @map("qr_image_url") // data URL загруженного QR-кода (один на заведение)
   printerConnected             Boolean @default(false) @map("printer_connected")
   allowNegativeIngredientStock Boolean @default(false) @map("allow_negative_ingredient_stock")
+  warehouseProductionEnabled Boolean @default(false) @map("warehouse_production_enabled")
+  warehouseProcessingEnabled Boolean @default(false) @map("warehouse_processing_enabled")
 
   // Интеграция внешнего сайта/приложения доставки. Полный API-ключ не хранится:
   // только SHA-256 и безопасный префикс для отображения владельцу.

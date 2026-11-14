@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import type { TouchEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/store/auth';
@@ -36,7 +37,14 @@ import { AuditPage } from './pages/AuditPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
 import { ReceiptPrintsPage } from './pages/ReceiptPrintsPage';
 import { WarehouseSection } from './pages/warehouse/WarehouseSection';
-import { WAREHOUSE_NAV, MENU_NAV, type WarehouseView, type MenuView } from './pages/warehouse/navigation';
+import { WAREHOUSE_NAV, MENU_NAV, warehouseViewInUse, type WarehouseView, type MenuView } from './pages/warehouse/navigation';
+import { useWarehousePolicy } from './pages/warehouse/settings-api';
+import { useWarehouseLocations } from './pages/warehouse/api';
+import { useWorkspaceScroll } from './pages/warehouse/workspace-route';
+import { StationsPage } from './pages/StationsPage';
+import { IngredientCategoriesPage } from './pages/IngredientCategoriesPage';
+import { WorkspaceHeaderProvider, WorkspaceTitleSlot, WorkspaceActionsSlot } from './pages/WorkspaceHeader';
+import './pages/warehouse/poster-workspace.css';
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -158,10 +166,20 @@ export function AdminApp() {
     if (s.adminOnly && !isAdmin) return false;
     return canSection(s.perm);
   });
-  const [section, setSection] = useState<Section>(isOwner ? 'stats' : 'orders');
+  const [route, setRoute] = useSearchParams();
+  useWorkspaceScroll();
+  const section = (route.get('section') || (isOwner ? 'stats' : 'orders')) as Section;
+  const warehousePolicy = useWarehousePolicy(canSection('warehouse'));
+  const warehouseLocations = useWarehouseLocations(canSection('warehouse'));
+  function setSection(next: Section) {
+    setRoute({ section: next, ...(next === 'menu' ? { view: 'goods' } : next === 'warehouse' ? { view: 'balances' } : {}) });
+  }
   const [mobileNav, setMobileNav] = useState(false);
-  const [warehouseView, setWarehouseView] = useState<WarehouseView>('balances');
-  const [menuView, setMenuView] = useState<MenuView>('all');
+  const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
+  const menuView = (MENU_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'goods') as MenuView;
+  const posterWorkspace = section === 'menu' || section === 'warehouse';
+  function setWarehouseView(view: WarehouseView) { setRoute({ section: 'warehouse', view }); }
+  function setMenuView(view: MenuView) { setRoute({ section: 'menu', view }); }
   const edgeSwipe = useRef<{ x: number; y: number } | null>(null);
   const drawerPull = useRef<{ x: number; y: number } | null>(null);
 
@@ -304,11 +322,11 @@ export function AdminApp() {
   const current = sections.find((s) => s.key === section) ?? sections[0];
 
   const renderSidebar = () => (
-    <aside className="flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
+    <aside className="workspace-sidebar flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
       <div className="flex h-16 items-center px-5">
         <BrandLogo />
       </div>
-      <nav className="app-scrollbar-subtle min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
+      <nav className="workspace-nav app-scrollbar-subtle min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
         {sections.map((s) => {
           const Icon = s.icon;
           const active = s.key === section;
@@ -317,17 +335,18 @@ export function AdminApp() {
               ? WAREHOUSE_NAV.filter(
                   (item) =>
                     (!item.permission || can(`actions.${item.permission}`)) &&
+                    warehouseViewInUse(item.key, warehouseLocations.data?.locations.length ?? 0, warehousePolicy.data) &&
                     (!item.costs || can('actions.warehouseCosts')),
                 )
               : s.key === 'menu'
-                ? MENU_NAV
+                ? MENU_NAV.filter((item) => !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
                 : [];
           return (
             <div key={s.key}>
               <button
                 onClick={() => go(s.key)}
                 aria-expanded={children.length ? active : undefined}
-                className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${active ? 'bg-primary/10 text-primary' : 'text-text-secondary hover:bg-background'}`}
+                className={`workspace-nav-section flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${active ? 'bg-primary/10 text-primary' : 'text-text-secondary hover:bg-background'}`}
               >
                 <Icon />
                 {t(s.label)}
@@ -338,7 +357,7 @@ export function AdminApp() {
                 )}
               </button>
               {active && children.length > 0 && (
-                <div className="mb-2 ml-5 space-y-0.5 border-l border-border pl-2">
+                <div className="workspace-nav-children mb-2 ml-5 space-y-0.5 border-l border-border pl-2">
                   {children.map((item) => (
                     <button
                       key={item.key}
@@ -351,7 +370,7 @@ export function AdminApp() {
                         else setMenuView(item.key as MenuView);
                         setMobileNav(false);
                       }}
-                      className={`block w-full rounded-lg px-3 py-2 text-left text-[13px] transition-colors ${(s.key === 'warehouse' ? warehouseView : menuView) === item.key ? 'bg-primary text-white font-medium' : 'text-text-secondary hover:bg-background'}`}
+                      className={`workspace-nav-child block w-full rounded-lg px-3 py-2 text-left text-[13px] transition-colors ${(s.key === 'warehouse' ? warehouseView : menuView) === item.key ? 'bg-primary text-white font-medium' : 'text-text-secondary hover:bg-background'}`}
                     >
                       {t(item.label)}
                     </button>
@@ -376,8 +395,9 @@ export function AdminApp() {
   );
 
   return (
+    <WorkspaceHeaderProvider>
     <div
-      className="flex h-full bg-background"
+      className={`flex h-full bg-background ${posterWorkspace ? 'poster-workspace' : ''}`}
       onTouchStart={handleAppTouchStart}
       onTouchMove={handleAppTouchMove}
       onTouchEnd={handleAppTouchEnd}
@@ -409,10 +429,10 @@ export function AdminApp() {
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         <OfflineBanner />
-        <header className="flex h-16 shrink-0 items-center justify-between border-b border-border bg-white px-4 lg:px-6">
-          <div className="flex items-center gap-3">
+        <header className="workspace-header flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-white px-4 py-3 lg:px-6">
+          <div className="flex min-w-0 items-center gap-3">
             <button
-              className="-ml-1 rounded-lg p-1.5 text-text-secondary hover:bg-background lg:hidden"
+              className="-ml-1 shrink-0 rounded-lg p-1.5 text-text-secondary hover:bg-background lg:hidden"
               onClick={() => setMobileNav(true)}
               aria-label="Меню"
             >
@@ -427,7 +447,7 @@ export function AdminApp() {
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <h1 className="text-xl font-semibold text-text-primary lg:text-2xl">
+            <WorkspaceTitleSlot><h1 className="text-xl font-semibold text-text-primary lg:text-2xl">
               {current
                 ? t(
                     section === 'warehouse'
@@ -437,15 +457,16 @@ export function AdminApp() {
                         : current.label,
                   )
                 : ''}
-            </h1>
+            </h1></WorkspaceTitleSlot>
           </div>
           <div className="flex items-center gap-3">
+            <WorkspaceActionsSlot />
             <ConnectionStatus />
           </div>
         </header>
 
         <main
-          className={`app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
+          className={`workspace-main app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
         >
           {!current ? (
             <NoAccessScreen />
@@ -455,14 +476,13 @@ export function AdminApp() {
               {section === 'orders' && canSection('orders') && <OrdersPage />}
               {section === 'receipts' && isAdmin && canSection('checks') && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
-              {section === 'menu' && canSection('menu') && <MenuPage view={menuView} onView={setMenuView} />}
+              {section === 'menu' && canSection('menu') && (menuView === 'stations' ? <StationsPage /> : menuView === 'ingredientCategories' ? (canSection('warehouse') && <IngredientCategoriesPage />) : <MenuPage view={menuView} onView={setMenuView} />)}
               {section === 'warehouse' && canSection('warehouse') && (
                 <WarehouseSection
                   view={warehouseView}
                   onView={setWarehouseView}
                   onMenu={(view) => {
                     setMenuView(view);
-                    setSection('menu');
                   }}
                 />
               )}
@@ -475,6 +495,7 @@ export function AdminApp() {
         </main>
       </div>
     </div>
+    </WorkspaceHeaderProvider>
   );
 }
 

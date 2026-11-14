@@ -1,4 +1,6 @@
-import { Modal } from '@/components/Modal';
+import { EditorPage } from './EditorPage';
+import { useEditorRoute } from './workspace-route';
+import { StartDocumentModal } from './StockDocumentsTab';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useWarehouseLocations } from './api';
 import { useAdminOrderDetails } from '../../api';
@@ -18,15 +20,27 @@ export function SourceDocumentModal({
   onClose: () => void;
 }) {
   const locations = useWarehouseLocations();
+  const { editor, openEditor } = useEditorRoute();
   const { can } = usePermissions();
   const warehouse = locations.data?.locations.find((l) => l.isDefault) ?? locations.data?.locations[0];
   if (type === 'order') return <OrderSource id={id} onClose={onClose} />;
   if (type === 'production') return <ProductionBatchModal id={id} onClose={onClose} />;
   if (!warehouse)
     return (
-      <Modal open title="Документ" onClose={onClose}>
+      <EditorPage open title="Документ" onClose={onClose}>
         <QueryState pending={locations.isPending} error={locations.error} />
-      </Modal>
+      </EditorPage>
+    );
+  if (type === 'supplier_return_new')
+    return (
+      <StartDocumentModal
+        kind="supplier_return"
+        warehouseId={editor?.warehouseId ?? warehouse.id}
+        locations={locations.data?.locations ?? []}
+        sourcePurchaseId={id}
+        onClose={onClose}
+        onCreated={(documentId) => openEditor({ type: 'source', action: 'document', id: documentId }, true)}
+      />
     );
   if (type === 'purchase')
     return (
@@ -35,6 +49,9 @@ export function SourceDocumentModal({
         warehouseId={warehouse.id}
         locations={locations.data?.locations ?? []}
         onClose={onClose}
+        onReturn={(purchaseId, warehouseId) =>
+          openEditor({ type: 'source', action: 'supplier_return_new', id: purchaseId, warehouseId })
+        }
       />
     );
   if (type === 'processing')
@@ -58,10 +75,10 @@ export function SourceDocumentModal({
 function OrderSource({ id, onClose }: { id: string; onClose: () => void }) {
   const q = useAdminOrderDetails(id);
   return q.data ? (
-    <OrderDetailsModal order={q.data} onClose={onClose} />
+    <OrderDetailsModal order={q.data} onClose={onClose} presentation="page" />
   ) : (
-    <Modal open title="Заказ" onClose={onClose}>
+    <EditorPage open title="Заказ" onClose={onClose}>
       <QueryState pending={q.isPending} error={q.error} />
-    </Modal>
+    </EditorPage>
   );
 }

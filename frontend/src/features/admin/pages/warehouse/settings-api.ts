@@ -9,8 +9,6 @@ export interface Supplier {
   isActive: boolean;
   address?: string | null;
   taxId?: string | null;
-  purchasesCount?: number;
-  purchasesTotal?: number;
 }
 const KEY = ['admin', 'warehouse'] as const;
 export function useSuppliers(enabled = true) {
@@ -49,12 +47,17 @@ export function useSupplierMutations() {
   return { save, archive };
 }
 export interface WarehousePolicy {
+  warehouseProductionEnabled: boolean;
+  warehouseProcessingEnabled: boolean;
+  productionInUse: boolean;
+  processingInUse: boolean;
   allowNegativeIngredientStock: boolean;
   warning: string;
   valuationRule: string;
 }
-export function useWarehousePolicy() {
+export function useWarehousePolicy(enabled = true) {
   return useQuery({
+    enabled,
     queryKey: [...KEY, 'policy'],
     queryFn: async () => (await api.get<WarehousePolicy>('/admin/warehouse/policy')).data,
   });
@@ -62,7 +65,7 @@ export function useWarehousePolicy() {
 export function useUpdateWarehousePolicy() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { allowNegativeIngredientStock: boolean }) =>
+    mutationFn: (body: Partial<Pick<WarehousePolicy, 'allowNegativeIngredientStock' | 'warehouseProductionEnabled' | 'warehouseProcessingEnabled'>>) =>
       api.patch('/admin/warehouse/policy', body),
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });

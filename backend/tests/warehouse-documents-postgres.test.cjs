@@ -118,6 +118,51 @@ test('PostgreSQL: count discrepancies preserve later movement and owner approval
       if (excessiveSubmitted) await assert.rejects(docs.approve(owner, excessive.id, excessiveSubmitted.revision));
       assert.equal(await stock(cola, bar.id), 16);
       assert.equal((await movements.findAll({ warehouseId: bar.id, type: 'writeoff' })).length, 1);
+      // Page forms save and post in one request. A failed post must roll back even the draft edits.
+      const beforeCount = await db.warehouseDocument.count();
+      const body = { warehouseId: bar.id, kind: 'writeoff', reason: 'damage', finalize: 'post',
+        requestKey: randomUUID(), items: [{ ingredientId: cola.id, quantity: 1 }] };
+      await assert.rejects(docs.create(admin, body), /владельцу/);
+      assert.equal(await db.warehouseDocument.count(), beforeCount);
+      await assert.rejects(docs.create(owner, { ...body, items: [{ ingredientId: cola.id, quantity: 999 }] }));
+      assert.equal(await db.warehouseDocument.count(), beforeCount);
+      const direct = await docs.create(owner, body);
+      assert.equal(direct.status, 'posted');
+      assert.equal(await stock(cola, bar.id), 15);
+      assert.equal((await docs.create(owner, body)).id, direct.id, 'retry must return the same posted document');
+      assert.equal(await stock(cola, bar.id), 15, 'retry must not post twice');
+      const editable = await docs.create(admin, { warehouseId: bar.id, kind: 'writeoff', reason: 'damage',
+        items: [{ ingredientId: cola.id, quantity: 1 }], note: 'Original' });
+      await assert.rejects(docs.update(owner, editable.id, { revision: editable.revision, finalize: 'post',
+        items: [{ ingredientId: cola.id, quantity: 999 }], note: 'Failed edit' }));
+      assert.deepEqual(await docs.get(editable.id), editable, 'failed final save must preserve the entire draft');
+      const final = await docs.update(owner, editable.id, { revision: editable.revision, finalize: 'post',
+        items: [{ ingredientId: cola.id, quantity: 2 }], note: 'Posted edit' });
+      assert.equal(final.status, 'posted'); assert.equal(await stock(cola, bar.id), 13);
+      await assert.rejects(docs.update(owner, editable.id, { revision: editable.revision, finalize: 'post' }));
+      const countedOnce = await docs.create(admin, { warehouseId: bar.id, kind: 'inventory', mode: 'partial' });
+      const finishedCount = await docs.update(owner, countedOnce.id, { revision: countedOnce.revision,
+        finalize: 'post', items: [{ ingredientId: cola.id, quantity: 12 }] });
+      assert.equal(finishedCount.status, 'posted'); assert.equal(await stock(cola, bar.id), 12);
+      const forApproval = await docs.create(admin, { warehouseId: bar.id, kind: 'writeoff', reason: 'damage',
+        finalize: 'submit', items: [{ ingredientId: cola.id, quantity: 1 }] });
+      assert.equal(forApproval.status, 'submitted'); assert.equal(await stock(cola, bar.id), 12);
+      const directTransfer = await docs.create(admin, { warehouseId: bar.id, destinationWarehouseId: common.id,
+        kind: 'transfer', finalize: 'post', items: [{ ingredientId: cola.id, quantity: 1 }] });
+      assert.equal(directTransfer.status, 'posted');
+      assert.deepEqual([await stock(cola, bar.id), await stock(cola, common.id)], [11, 6]);
+      const purchases = new PurchasesService(db);
+      const receipt = await purchases.create({ supplier: 'Final save', warehouseId: bar.id,
+        items: [{ ingredientId: cola.id, quantity: 1, unit: 'pcs', purchasePrice: 12 }] }, owner);
+      const finalReceipt = await purchases.update(receipt.id, { complete: true,
+        items: [{ ingredientId: cola.id, quantity: 3, unit: 'pcs', purchasePrice: 12 }] }, owner);
+      assert.equal(finalReceipt.status, 'completed'); assert.equal(await stock(cola, bar.id), 14);
+      const returned = await docs.create(owner, { warehouseId: bar.id, kind: 'supplier_return',
+        sourcePurchaseId: receipt.id, finalize: 'post', items: [{ ingredientId: cola.id, quantity: 1 }] });
+      assert.equal(returned.status, 'posted'); assert.equal(await stock(cola, bar.id), 13);
+      await assert.rejects(docs.create(owner, { warehouseId: bar.id, kind: 'supplier_return',
+        sourcePurchaseId: receipt.id, finalize: 'post', items: [{ ingredientId: cola.id, quantity: 3 }] }));
+      assert.equal(await stock(cola, bar.id), 13);
       return { warehouseId: bar.id, documentId: full.id };
     });
 

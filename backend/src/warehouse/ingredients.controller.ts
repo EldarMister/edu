@@ -6,12 +6,27 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CreateIngredientDto, UpdateIngredientDto } from './dto';
 import { assertWarehousePermission } from './warehouse-permissions';
+import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+
+class RenameIngredientCategoryDto {
+  @IsString() @IsNotEmpty() @MaxLength(120)
+  from: string;
+  @IsString() @IsNotEmpty() @MaxLength(120)
+  to: string;
+}
 
 @Controller('admin/warehouse/ingredients')
 @Roles(Role.ADMIN, Role.OWNER, Role.KITCHEN, Role.BAR)
 @RequirePermission('sections.warehouse')
 export class IngredientsController {
   constructor(private readonly ingredients: IngredientsService) {}
+
+  @Post('categories/rename')
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('actions.warehouseSettings')
+  renameCategory(@Body() dto: RenameIngredientCategoryDto) {
+    return this.ingredients.renameCategory(dto.from, dto.to);
+  }
 
   @Get('overview')
   overview(@Query('warehouseId') warehouseId?: string) {

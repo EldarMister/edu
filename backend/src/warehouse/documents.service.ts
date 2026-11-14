@@ -70,7 +70,7 @@ export class WarehouseDocumentsService {
             const saved = existing.items.find((item) => item.ingredientId === line.ingredientId);
             return !saved?.quantity?.eq(new Prisma.Decimal(toBase(line.quantity, normalizeUnit(saved.unit))).toDecimalPlaces(3));
           }))) throw new ConflictException('Ключ повторного запроса уже использован с другими позициями');
-          return this.serialize(existing);
+          return this.finalize(tx, actor, existing.id, dto.finalize);
         }
       }
       const warehouse = await this.warehouse(tx, dto.warehouseId);
@@ -92,7 +92,7 @@ export class WarehouseDocumentsService {
         include: documentInclude,
       });
       await this.saveLines(tx, warehouse, document, dto.items ?? [], false);
-      return this.serialize(await this.load(tx, document.id));
+      return this.finalize(tx, actor, document.id, dto.finalize);
     }, transactionOptions);
   }
 
@@ -109,7 +109,7 @@ export class WarehouseDocumentsService {
         }]);
         await this.saveLines(tx, warehouse, document, items, dto.recount === true);
       }
-      return this.serialize(await tx.warehouseDocument.update({
+      await tx.warehouseDocument.update({
         where: { id, cafeId: document.cafeId },
         data: {
           revision: { increment: 1 },
@@ -117,28 +117,31 @@ export class WarehouseDocumentsService {
           reason: dto.reason === undefined ? undefined : this.reason(document.kind, dto.reason),
         },
         include: documentInclude,
-      }));
+      });
+      return this.finalize(tx, actor, id, dto.finalize);
     }, transactionOptions);
   }
 
   async submit(actor: Actor, id: string, revision?: number) {
     this.assertActor(actor);
-    return this.prisma.$transaction(async (tx) => {
-      const document = await this.lockDocument(tx, id, revision, 'draft');
-      await this.validateLines(tx, document);
-      if (document.kind === 'writeoff') {
-        if (!document.reason) throw new BadRequestException('Укажите причину списания');
-        if (document.reason === 'other' && !document.note) throw new BadRequestException('Опишите причину списания в комментарии');
-      }
-      return this.serialize(await tx.warehouseDocument.update({
-        where: { id, cafeId: document.cafeId },
-        data: {
-          status: 'submitted', revision: { increment: 1 }, submittedAt: new Date(),
-          submittedById: actor.id, submittedByName: actor.name,
-        },
-        include: documentInclude,
-      }));
-    }, transactionOptions);
+    return this.prisma.$transaction((tx) => this.submitInTransaction(tx, actor, id, revision), transactionOptions);
+  }
+
+  private async submitInTransaction(tx: Prisma.TransactionClient, actor: Actor, id: string, revision?: number) {
+    const document = await this.lockDocument(tx, id, revision, 'draft');
+    await this.validateLines(tx, document);
+    if (document.kind === 'writeoff') {
+      if (!document.reason) throw new BadRequestException('Укажите причину списания');
+      if (document.reason === 'other' && !document.note) throw new BadRequestException('Опишите причину списания в комментарии');
+    }
+    return this.serialize(await tx.warehouseDocument.update({
+      where: { id, cafeId: document.cafeId },
+      data: {
+        status: 'submitted', revision: { increment: 1 }, submittedAt: new Date(),
+        submittedById: actor.id, submittedByName: actor.name,
+      },
+      include: documentInclude,
+    }));
   }
 
   async reopen(actor: Actor, id: string, revision?: number) {
@@ -155,40 +158,42 @@ export class WarehouseDocumentsService {
 
   async approve(actor: Actor, id: string, revision?: number) {
     this.assertActor(actor);
-    return this.prisma.$transaction(async (tx) => {
-      const document = await this.lockDocument(tx, id, revision, 'submitted');
-      if (document.kind === 'inventory' || document.kind === 'writeoff') this.assertActor(actor, true);
-      if (document.kind === 'supplier_return') await this.validateReturn(tx, document, await this.warehouse(tx, document.warehouseId));
-      const { warehouse, ingredients } = await this.validateLines(tx, document);
-      const kind = document.kind;
-      const destination = kind === 'transfer' ? await this.warehouse(tx, document.destinationWarehouseId!) : null;
-      for (const item of document.items) {
-        const ingredient = ingredients.get(item.ingredientId)!;
-        const balance = await getWarehouseBalance(tx, warehouse, ingredient);
-        const difference = kind === 'inventory' ? item.difference! : item.quantity!.negated();
-        await tx.warehouseDocumentItem.update({
-          where: { documentId_ingredientId: { documentId: id, ingredientId: item.ingredientId }, cafeId: document.cafeId },
-          data: { ...(kind !== 'inventory' ? { expected: balance.stock, difference } : {}), unitCost: balance.avgCost,
-            costKnown: balance.valuationKnown && (difference.gte(0) || balance.stock.gte(difference.abs())) },
-        });
-        if (difference.isZero()) continue;
-        const comment = kind === 'writeoff' ? [warehouseWriteoffReasons[document.reason!], document.note].filter(Boolean).join(' · ') : document.note;
-        const source = await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse, change: difference,
-          costKnown: difference.gt(0) ? balance.valuationKnown : undefined,
-          movement: { type: kind, sourceType: kind, sourceId: id, actorId: actor.id, actorName: actor.name, reason: document.reason, comment } });
-        if (destination) await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse: destination,
-          change: difference.negated(), cost: balance.avgCost, costKnown: source.movement.costKnown, valuation: 'average',
-          movement: { type: 'transfer', sourceType: 'transfer', sourceId: id, actorId: actor.id, actorName: actor.name, comment } });
-      }
-      return this.serialize(await tx.warehouseDocument.update({
-        where: { id, cafeId: document.cafeId },
-        data: {
-          status: 'posted', revision: { increment: 1 }, postedAt: new Date(),
-          postedById: actor.id, postedByName: actor.name,
-        },
-        include: documentInclude,
-      }));
-    }, transactionOptions);
+    return this.prisma.$transaction((tx) => this.approveInTransaction(tx, actor, id, revision), transactionOptions);
+  }
+
+  private async approveInTransaction(tx: Prisma.TransactionClient, actor: Actor, id: string, revision?: number) {
+    const document = await this.lockDocument(tx, id, revision, 'submitted');
+    if (document.kind === 'inventory' || document.kind === 'writeoff') this.assertActor(actor, true);
+    if (document.kind === 'supplier_return') await this.validateReturn(tx, document, await this.warehouse(tx, document.warehouseId));
+    const { warehouse, ingredients } = await this.validateLines(tx, document);
+    const kind = document.kind;
+    const destination = kind === 'transfer' ? await this.warehouse(tx, document.destinationWarehouseId!) : null;
+    for (const item of document.items) {
+      const ingredient = ingredients.get(item.ingredientId)!;
+      const balance = await getWarehouseBalance(tx, warehouse, ingredient);
+      const difference = kind === 'inventory' ? item.difference! : item.quantity!.negated();
+      await tx.warehouseDocumentItem.update({
+        where: { documentId_ingredientId: { documentId: id, ingredientId: item.ingredientId }, cafeId: document.cafeId },
+        data: { ...(kind !== 'inventory' ? { expected: balance.stock, difference } : {}), unitCost: balance.avgCost,
+          costKnown: balance.valuationKnown && (difference.gte(0) || balance.stock.gte(difference.abs())) },
+      });
+      if (difference.isZero()) continue;
+      const comment = kind === 'writeoff' ? [warehouseWriteoffReasons[document.reason!], document.note].filter(Boolean).join(' · ') : document.note;
+      const source = await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse, change: difference,
+        costKnown: difference.gt(0) ? balance.valuationKnown : undefined,
+        movement: { type: kind, sourceType: kind, sourceId: id, actorId: actor.id, actorName: actor.name, reason: document.reason, comment } });
+      if (destination) await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse: destination,
+        change: difference.negated(), cost: balance.avgCost, costKnown: source.movement.costKnown, valuation: 'average',
+        movement: { type: 'transfer', sourceType: 'transfer', sourceId: id, actorId: actor.id, actorName: actor.name, comment } });
+    }
+    return this.serialize(await tx.warehouseDocument.update({
+      where: { id, cafeId: document.cafeId },
+      data: {
+        status: 'posted', revision: { increment: 1 }, postedAt: new Date(),
+        postedById: actor.id, postedByName: actor.name,
+      },
+      include: documentInclude,
+    }));
   }
 
   async reverse(actor: Actor, id: string, note: string, revision?: number) {
@@ -210,6 +215,15 @@ export class WarehouseDocumentsService {
         data: { status: 'reversed', revision: { increment: 1 }, reversedAt: new Date(), reversedById: actor.id,
           reversedByName: actor.name, reversalReason: note.trim() }, include: documentInclude }));
     }, transactionOptions);
+  }
+
+  private async finalize(tx: Prisma.TransactionClient, actor: Actor, id: string, action?: 'submit' | 'post') {
+    let document = this.serialize(await this.load(tx, id));
+    if (!action || document.status === 'posted') return document;
+    if (document.status === 'reversed') throw new ConflictException('Проведение документа уже отменено');
+    if (document.status === 'draft') document = await this.submitInTransaction(tx, actor, id, document.revision);
+    if (action === 'post') document = await this.approveInTransaction(tx, actor, id, document.revision);
+    return document;
   }
 
   private async sourcePurchase(tx: Prisma.TransactionClient, id: string, warehouse: WarehouseLocation) {

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { DatePicker } from '@/components/DatePicker';
-import { Modal } from '@/components/Modal';
+import { EditorPage } from './EditorPage';
+import { useEditorRoute, usePageFilter, usePageFilters } from './workspace-route';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
@@ -13,31 +14,19 @@ import { WarehouseMovementSummary } from './WarehouseMovementSummary';
 import { PreparationModal, ProductionBatchModal } from './PreparationTab';
 import { StartDocumentModal } from './StockDocumentsTab';
 import { StockDocumentModal } from './StockDocumentModal';
-import { AccountingSettings } from './WarehouseSettingsPanels';
 import { SupplyList, DocumentList, ProductionList } from './WarehouseDocumentLists';
 import { ProcessingPage, ProcessingModal } from './ProcessingPage';
 import { LocationsPage, SuppliersPage, PackagesPage } from './WarehouseDirectories';
 import { QueryState } from './WarehouseUi';
-import { WAREHOUSE_NAV, type WarehouseView, type MenuView } from './navigation';
+import { WAREHOUSE_NAV, warehouseViewInUse, type WarehouseView, type MenuView } from './navigation';
 import { useAdminOrderDetails } from '../../api';
 import { OrderDetailsModal } from '../../components/OrderDetailsModal';
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { ItemCard } from './ItemCard';
 import { useWarehouseLocations, useIngredients, type Ingredient } from './api';
+import { useWarehousePolicy } from './settings-api';
 
 type PeriodPreset = 'today' | 'week' | 'month' | 'custom';
-type Active =
-  | { kind: 'item'; id?: string }
-  | { kind: 'purchase'; id?: string }
-  | { kind: 'processing'; id?: string }
-  | { kind: 'start'; action: StockDocumentKind }
-  | { kind: 'document'; id: string }
-  | { kind: 'preparation'; action: 'recipe' | 'produce'; item: Ingredient }
-  | { kind: 'chooseProduction' }
-  | { kind: 'batch'; id: string }
-  | { kind: 'order'; id: string }
-  | { kind: 'history'; itemId?: string; warehouseId?: string }
-  | null;
-
 export function WarehouseSection({
   view = 'balances',
   onView,
@@ -49,19 +38,38 @@ export function WarehouseSection({
   onMenu?: (v: MenuView) => void;
   staffMode?: boolean;
 } = {}) {
-  const [warehouseId, setWarehouseId] = useState('');
-  const [settings, setSettings] = useState(false);
-  const [active, setActive] = useState<Active>(null);
-  const [stockFilter, setStockFilter] = useState<StockFilter>('');
-  const [report, setReport] = useState('movements');
+  const [conditions, updateConditions] = usePageFilters({
+    warehouse: '',
+    stockPeriod: 'today',
+    stockFrom: localDate(addDays(new Date(), -6)),
+    stockTo: localDate(new Date()),
+    movementPage: '1',
+    movementRange: '',
+  });
+  const {
+    warehouse: warehouseId,
+    stockPeriod: presetValue,
+    stockFrom: customFrom,
+    stockTo: customTo,
+  } = conditions;
+  function setReportConditions(
+    patch: Partial<Pick<typeof conditions, 'warehouse' | 'stockPeriod' | 'stockFrom' | 'stockTo'>>,
+  ) {
+    updateConditions({ ...patch, movementPage: '1', movementRange: '' });
+  }
+  const setWarehouseId = (value: string) => setReportConditions({ warehouse: value });
+  const setPreset = (value: PeriodPreset) => setReportConditions({ stockPeriod: value });
+  const setCustomFrom = (value: string) => setReportConditions({ stockFrom: value });
+  const setCustomTo = (value: string) => setReportConditions({ stockTo: value });
+  const { editor: active, openEditor: setActive, closeEditor: close } = useEditorRoute();
+  const [stockFilter, setStockFilter] = usePageFilter('stockFilter');
+  const policy = useWarehousePolicy();
   const permissions = usePermissions();
   const locationsQ = useWarehouseLocations();
   const locations = locationsQ.data?.locations ?? [];
   const warehouse =
     locations.find((l) => l.id === warehouseId) ?? locations.find((l) => l.isDefault) ?? locations[0];
-  const [preset, setPreset] = useState<PeriodPreset>('today');
-  const [customFrom, setCustomFrom] = useState(localDate(addDays(new Date(), -6)));
-  const [customTo, setCustomTo] = useState(localDate(new Date()));
+  const preset = presetValue as PeriodPreset;
   const range = useMemo(
     () => ({
       dateFrom:
@@ -74,233 +82,247 @@ export function WarehouseSection({
   );
   const allowedViews = WAREHOUSE_NAV.filter(
     (v) =>
+      warehouseViewInUse(v.key, locations.length, policy.data) &&
       (!v.permission || permissions.can(`actions.${v.permission}`)) &&
       (!v.costs || permissions.can('actions.warehouseCosts')),
   );
   const allowed = allowedViews.some((v) => v.key === view);
   const aggregate = ['balances', 'movement', 'supplies', 'processing'].includes(view);
   const scopedWarehouse = aggregate ? warehouseId || undefined : warehouse?.id;
-  const close = () => setActive(null);
+  const warehouseFilter = <Select ariaLabel="Склад" className="poster-filter h-9 min-w-44"
+    value={aggregate ? warehouseId : (warehouse?.id ?? '')} onChange={setWarehouseId}
+    options={[...(aggregate ? [{ value: '', label: 'Все склады' }] : []), ...locations.map((location) => ({ value: location.id, label: location.name }))]} />;
   function history(itemId?: string, sourceWarehouseId?: string) {
-    setReport('movements');
-    setActive({ kind: 'history', itemId, warehouseId: sourceWarehouseId ?? scopedWarehouse });
+    setActive({ type: 'history', itemId, warehouseId: sourceWarehouseId ?? scopedWarehouse });
   }
   function openSource(type: string, id: string) {
-    if (type === 'order') setActive({ kind: 'order', id });
-    else if (type === 'production') setActive({ kind: 'batch', id });
-    else if (type === 'processing') setActive({ kind: 'processing', id });
-    else if (type === 'purchase') setActive({ kind: 'purchase', id });
+    if (type === 'order') setActive({ type: 'order', id });
+    else if (type === 'production') setActive({ type: 'batch', id });
+    else if (type === 'processing') setActive({ type: 'processing', id });
+    else if (type === 'purchase') setActive({ type: 'purchase', id });
     else if (['inventory', 'writeoff', 'transfer', 'supplier_return', 'document'].includes(type))
-      setActive({ kind: 'document', id });
+      setActive({ type: 'document', id });
   }
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        {staffMode && onView && (
-          <Select
-            ariaLabel="Раздел склада"
-            className="h-10 min-w-44"
-            value={view}
-            onChange={(v) => onView(v as WarehouseView)}
-            options={allowedViews.map((v) => ({ value: v.key, label: v.label }))}
-          />
-        )}
-        {!['suppliers', 'locations', 'packages'].includes(view) && (
-          <Select
-            ariaLabel="Склад"
-            className="h-10 min-w-44"
-            value={aggregate ? warehouseId : (warehouse?.id ?? '')}
-            onChange={setWarehouseId}
-            options={[
-              ...(aggregate ? [{ value: '', label: 'Все склады' }] : []),
-              ...locations.map((l) => ({ value: l.id, label: l.name })),
-            ]}
-          />
-        )}
-        {view === 'movement' && (
-          <PeriodFilter
-            preset={preset}
-            setPreset={setPreset}
-            customFrom={customFrom}
-            customTo={customTo}
-            setCustomFrom={setCustomFrom}
-            setCustomTo={setCustomTo}
-          />
-        )}
-        <div className="ml-auto flex flex-wrap gap-2">
-          {view === 'movement' && (
-            <button className="btn-secondary btn-md" onClick={() => history()}>
-              Журнал и другие отчёты
-            </button>
-          )}
-          {permissions.can('actions.warehouseSettings') && (
-            <button className="btn-ghost btn-md" onClick={() => setSettings(true)}>
-              Настройки учёта
-            </button>
-          )}
-        </div>
-      </div>
-      {!allowed ? (
-        <p className="card p-8 text-center text-text-muted">Нет доступа к этому разделу.</p>
-      ) : (
-        <QueryState pending={locationsQ.isPending} error={locationsQ.error}>
-          {warehouse && (
-            <>
-              {view === 'balances' && (
-                <IngredientsTab
-                  warehouseId={scopedWarehouse}
-                  filter={stockFilter}
-                  onFilter={setStockFilter}
-                  onOpen={(item) => setActive({ kind: 'item', id: item.id })}
-                  onCreate={() => (onMenu ? onMenu('ingredients') : setActive({ kind: 'item' }))}
-                  onHistory={(id) => history(id)}
-                  onProduce={(item) => setActive({ kind: 'preparation', action: 'produce', item })}
-                  catalogue={false}
-                />
-              )}
-              {view === 'supplies' && (
-                <SupplyList
-                  warehouseId={scopedWarehouse}
-                  onOpen={(id) => setActive({ kind: 'purchase', id })}
-                  onCreate={() => setActive({ kind: 'purchase' })}
-                  onReturn={() => setActive({ kind: 'start', action: 'supplier_return' })}
-                />
-              )}
-              {view === 'processing' && (
-                <ProcessingPage
-                  warehouseId={scopedWarehouse}
-                  onOpen={(id) => setActive({ kind: 'processing', id })}
-                  onCreate={() => setActive({ kind: 'processing' })}
-                />
-              )}
-              {['transfers', 'writeoffs', 'inventory'].includes(view) && (
-                <DocumentList
-                  kind={view === 'transfers' ? 'transfer' : view === 'writeoffs' ? 'writeoff' : 'inventory'}
-                  warehouseId={warehouse.id}
-                  locations={locations}
-                  onOpen={(id) => setActive({ kind: 'document', id })}
-                  onCreate={() =>
-                    setActive({
-                      kind: 'start',
-                      action:
-                        view === 'transfers' ? 'transfer' : view === 'writeoffs' ? 'writeoff' : 'inventory',
-                    })
-                  }
-                />
-              )}
-              {view === 'production' && (
-                <ProductionList
-                  warehouseId={warehouse.id}
-                  onOpen={(id) => setActive({ kind: 'batch', id })}
-                  onCreate={() => setActive({ kind: 'chooseProduction' })}
-                />
-              )}
-              {view === 'movement' && (
-                <WarehouseMovementSummary
-                  warehouseId={scopedWarehouse}
-                  range={range}
-                  onOpen={openSource}
-                  onHistory={history}
-                />
-              )}
-              {view === 'suppliers' && <SuppliersPage />}
-              {view === 'locations' && locationsQ.data && <LocationsPage data={locationsQ.data} />}
-              {view === 'packages' && <PackagesPage />}
-            </>
-          )}
-        </QueryState>
-      )}
-      {active?.kind === 'item' && (
-        <ItemCard
-          id={active.id}
-          onClose={close}
-          onHistory={(id) => history(id)}
-          onRecipe={(item) => setActive({ kind: 'preparation', action: 'recipe', item })}
-        />
-      )}
-      {active?.kind === 'order' && <SourceOrder id={active.id} onClose={close} />}
-      {active?.kind === 'batch' && <ProductionBatchModal id={active.id} onClose={close} />}
-      {active?.kind === 'history' && (
-        <Modal open onClose={close} title="Движение товара и отчёты" panelClassName="max-w-6xl">
-          <div className="space-y-3">
-            <PeriodFilter
-              preset={preset}
-              setPreset={setPreset}
-              customFrom={customFrom}
-              customTo={customTo}
-              setCustomFrom={setCustomFrom}
-              setCustomTo={setCustomTo}
-            />
-            <WarehouseReportsTab
-              warehouseId={active.warehouseId}
-              range={range}
-              view={report}
-              onView={setReport}
-              ingredientId={active.itemId}
-              onOpen={openSource}
-            />
-          </div>
-        </Modal>
-      )}
-      {warehouse && (
+      {!active && (
         <>
-          {active?.kind === 'purchase' && (
-            <PurchaseModal id={active.id} warehouseId={warehouse.id} locations={locations} onClose={close} />
-          )}
-          {active?.kind === 'processing' && (
-            <ProcessingModal
-              id={active.id}
-              warehouseId={warehouse.id}
-              locations={locations}
-              onClose={close}
-            />
-          )}
-          {active?.kind === 'start' && (
-            <StartDocumentModal
-              kind={active.action}
-              warehouseId={warehouse.id}
-              locations={locations}
-              onClose={close}
-              onCreated={(id) => setActive({ kind: 'document', id })}
-            />
-          )}
-          {active?.kind === 'document' && (
-            <StockDocumentModal
-              id={active.id}
-              warehouse={warehouse}
-              isOwner={permissions.can('actions.warehouseApprove')}
-              onClose={close}
-            />
-          )}
-          {active?.kind === 'preparation' && (
-            <PreparationModal
-              action={{ kind: active.action, id: active.item.id, name: active.item.name }}
-              warehouse={warehouse}
-              onClose={close}
-            />
-          )}
-          {active?.kind === 'chooseProduction' && (
-            <ChooseProduction
-              warehouseId={warehouse.id}
-              onClose={close}
-              onSelect={(item) => setActive({ kind: 'preparation', action: 'produce', item })}
-            />
+          <>
+            {staffMode && onView && (
+              <Select
+                ariaLabel="Раздел склада"
+                className="h-10 min-w-44"
+                value={view}
+                onChange={(v) => onView(v as WarehouseView)}
+                options={allowedViews.map((v) => ({ value: v.key, label: v.label }))}
+              />
+            )}
+            {view === 'movement' && (
+              <WorkspaceHeaderActions>
+              <PeriodFilter
+                preset={preset}
+                setPreset={setPreset}
+                customFrom={customFrom}
+                customTo={customTo}
+                setCustomFrom={setCustomFrom}
+                setCustomTo={setCustomTo}
+              />
+              </WorkspaceHeaderActions>
+            )}
+          </>
+          {!allowed ? (
+            <p className="card p-8 text-center text-text-muted">Нет доступа к этому разделу.</p>
+          ) : (
+            <QueryState pending={locationsQ.isPending} error={locationsQ.error}>
+              {warehouse && (
+                <>
+                  {view === 'balances' && (
+                    <IngredientsTab
+                      filters={warehouseFilter}
+                      warehouseId={scopedWarehouse}
+                      filter={stockFilter as StockFilter}
+                      onFilter={setStockFilter}
+                      onOpen={(item) => setActive({ type: 'item', id: item.id })}
+                      onCreate={() => (onMenu ? onMenu('ingredients') : setActive({ type: 'item' }))}
+                      onHistory={(id) => history(id)}
+                      onProduce={(item) => setActive({ type: 'preparation', action: 'produce', id: item.id })}
+                      catalogue={false}
+                    />
+                  )}
+                  {view === 'supplies' && (
+                    <SupplyList
+                      filters={warehouseFilter}
+                      warehouseId={scopedWarehouse}
+                      onOpen={(id) => setActive({ type: 'purchase', id })}
+                      onCreate={() => setActive({ type: 'purchase' })}
+                    />
+                  )}
+                  {view === 'processing' && (
+                    <ProcessingPage
+                      filters={warehouseFilter}
+                      warehouseId={scopedWarehouse}
+                      onOpen={(id) => setActive({ type: 'processing', id })}
+                      onCreate={() => setActive({ type: 'processing' })}
+                    />
+                  )}
+                  {['transfers', 'writeoffs', 'inventory'].includes(view) && (
+                    <DocumentList
+                      filters={warehouseFilter}
+                      kind={
+                        view === 'transfers' ? 'transfer' : view === 'writeoffs' ? 'writeoff' : 'inventory'
+                      }
+                      warehouseId={warehouse.id}
+                      locations={locations}
+                      onOpen={(id) => setActive({ type: 'document', id })}
+                      onCreate={() =>
+                        setActive({
+                          type: 'start',
+                          action:
+                            view === 'transfers'
+                              ? 'transfer'
+                              : view === 'writeoffs'
+                                ? 'writeoff'
+                                : 'inventory',
+                        })
+                      }
+                    />
+                  )}
+                  {view === 'production' && (
+                    <ProductionList
+                      filters={warehouseFilter}
+                      warehouseId={warehouse.id}
+                      onOpen={(id) => setActive({ type: 'batch', id })}
+                      onCreate={() => setActive({ type: 'chooseProduction' })}
+                    />
+                  )}
+                  {view === 'movement' && (
+                    <WarehouseMovementSummary
+                      filters={warehouseFilter}
+                      warehouseId={scopedWarehouse}
+                      range={range}
+                      onOpen={openSource}
+                      onHistory={history}
+                    />
+                  )}
+                  {view === 'suppliers' && <SuppliersPage />}
+                  {view === 'locations' && locationsQ.data && <LocationsPage data={locationsQ.data} />}
+                  {view === 'packages' && <PackagesPage />}
+                </>
+              )}
+            </QueryState>
           )}
         </>
       )}
-      {settings && (
-        <Modal open title="Настройки учёта" panelClassName="max-w-2xl" onClose={() => setSettings(false)}>
-          <AccountingSettings />
-        </Modal>
-      )}
+      <div key={`${active?.type}:${active?.id ?? 'new'}:${active?.action ?? ''}`}>
+        {active && ['supplier', 'location', 'package'].includes(active.type) && !permissions.can('actions.warehouseSettings') &&
+          <EditorPage title="Справочник склада" onClose={close}><p role="alert" className="text-text-muted">Нет доступа к настройкам склада.</p></EditorPage>}
+        {active?.type === 'supplier' && permissions.can('actions.warehouseSettings') && <SuppliersPage />}
+        {active?.type === 'location' && permissions.can('actions.warehouseSettings') && locationsQ.data && <LocationsPage data={locationsQ.data} />}
+        {active?.type === 'package' && permissions.can('actions.warehouseSettings') && <PackagesPage />}
+        {active?.type === 'item' && (
+          <ItemCard
+            id={active.id}
+            onClose={close}
+            onHistory={(id) => history(id)}
+            onRecipe={(item) => setActive({ type: 'preparation', action: 'recipe', id: item.id })}
+          />
+        )}
+        {active?.type === 'order' && active.id && <SourceOrder id={active.id} onClose={close} />}
+        {(active?.type === 'batch' || active?.type === 'productionBatch') && active.id && (
+          <ProductionBatchModal id={active.id} onClose={close} />
+        )}
+        {active?.type === 'history' && (
+          <EditorPage open onClose={close} title="Движение товара" panelClassName="max-w-6xl">
+            <div className="space-y-3">
+              <PeriodFilter
+                preset={preset}
+                setPreset={setPreset}
+                customFrom={customFrom}
+                customTo={customTo}
+                setCustomFrom={setCustomFrom}
+                setCustomTo={setCustomTo}
+              />
+              <WarehouseReportsTab
+                warehouseId={active.warehouseId}
+                range={range}
+                view="movements"
+                onView={() => {}}
+                contextOnly
+                ingredientId={active.itemId}
+                onOpen={openSource}
+              />
+            </div>
+          </EditorPage>
+        )}
+        {warehouse && (
+          <>
+            {active?.type === 'purchase' && (
+              <PurchaseModal
+                id={active.id}
+                warehouseId={warehouse.id}
+                locations={locations}
+                onClose={close}
+                onReturn={(id, warehouseId) =>
+                  setActive({ type: 'start', action: 'supplier_return', id, warehouseId })
+                }
+              />
+            )}
+            {active?.type === 'processing' && (
+              <ProcessingModal
+                id={active.id}
+                warehouseId={warehouse.id}
+                locations={locations}
+                onClose={close}
+              />
+            )}
+            {active?.type === 'start' && (
+              <StartDocumentModal
+                kind={active.action as StockDocumentKind}
+                warehouseId={active.warehouseId ?? warehouse.id}
+                locations={locations}
+                onClose={close}
+                sourcePurchaseId={active.id}
+                onCreated={(id) => setActive({ type: 'document', id }, true)}
+              />
+            )}
+            {active?.type === 'document' && active.id && (
+              <StockDocumentModal
+                id={active.id}
+                warehouse={warehouse}
+                isOwner={permissions.can('actions.warehouseApprove')}
+                onClose={close}
+              />
+            )}
+            {active?.type === 'preparation' && active.id && (
+              <PreparationModal
+                action={{
+                  kind: active.action === 'recipe' ? 'recipe' : 'produce',
+                  id: active.id,
+                  name: 'Заготовка',
+                }}
+                onBatch={(id) => setActive({ type: 'batch', id })}
+                warehouse={warehouse}
+                onClose={close}
+              />
+            )}
+            {active?.type === 'chooseProduction' && (
+              <ChooseProduction
+                warehouseId={warehouse.id}
+                onClose={close}
+                onSelect={(item) => setActive({ type: 'preparation', action: 'produce', id: item.id })}
+              />
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
 function SourceOrder({ id, onClose }: { id: string; onClose: () => void }) {
   const query = useAdminOrderDetails(id);
-  if (query.data) return <OrderDetailsModal order={query.data} onClose={onClose} />;
+  if (query.data) return <OrderDetailsModal order={query.data} onClose={onClose} presentation="page" />;
   return (
-    <Modal open title="Заказ" onClose={onClose}>
+    <EditorPage open title="Заказ" onClose={onClose}>
       {query.isError ? (
         <p role="alert" className="text-danger">
           {apiError(query.error)}
@@ -310,7 +332,7 @@ function SourceOrder({ id, onClose }: { id: string; onClose: () => void }) {
           <Spinner />
         </div>
       )}
-    </Modal>
+    </EditorPage>
   );
 }
 function ChooseProduction({
@@ -326,7 +348,7 @@ function ChooseProduction({
   const query = useIngredients(search, warehouseId);
   const rows = (query.data ?? []).filter((i) => i.isPrepared && i.preparationMode !== 'virtual');
   return (
-    <Modal open title="Приготовить заготовку" onClose={onClose}>
+    <EditorPage open title="Приготовить заготовку" onClose={onClose}>
       <div className="space-y-3">
         <input
           className="input w-full"
@@ -357,7 +379,7 @@ function ChooseProduction({
           </p>
         )}
       </div>
-    </Modal>
+    </EditorPage>
   );
 }
 

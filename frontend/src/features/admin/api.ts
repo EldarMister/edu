@@ -29,6 +29,7 @@ export interface AdminCategory {
   _count: { dishes: number };
 }
 export interface AdminDish {
+  catalogKind?: 'goods' | 'recipe';
   stockIngredientId?: string | null;
   hasDirectStock?: boolean;
   hasRecipe?: boolean;

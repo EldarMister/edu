@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Injectable, Module, NotFoundException, Param, Post, Put, Query } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { ArrayMinSize, IsArray, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
@@ -8,8 +8,8 @@ import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorat
 import { Roles } from '../common/decorators/roles.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 import { getCafeId } from '../tenant/tenant-context';
-import { lockIngredients } from './stock-lock';
-import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
+import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
+import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, unitLabel, unitType as unitTypeOf, type UnitCode } from './units';
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances } from './warehouse-location';
 import { IngredientsService } from './ingredients.service';
 import { lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
@@ -33,6 +33,13 @@ class PreparationRecipeDto {
   @IsOptional() @IsString() @MaxLength(12000) instructions?: string;
   @IsOptional() @IsIn(['virtual', 'stocked']) mode?: 'virtual' | 'stocked';
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true }) @Type(() => PreparationInputDto) items: PreparationInputDto[];
+}
+class PreparationCardDto extends PreparationRecipeDto {
+  @IsOptional() @IsString() @MaxLength(40) expectedUpdatedAt?: string;
+  @IsString() @IsNotEmpty() @MaxLength(120) name: string;
+  @IsString() @MaxLength(16) unit: string;
+  @IsOptional() @IsString() @MaxLength(120) category?: string | null;
+  @IsOptional() @IsString() @MaxLength(100) requestKey?: string;
 }
 class ProducePreparationDto {
   @IsNumber() @Min(0.000001) quantity: number;
@@ -89,56 +96,110 @@ export class PreparationProductionService {
       }
       totalCost = totalCost.add(rowCost); itemCosts.set(item.ingredientId, { cost: rowCost, known: rowKnown });
     }
-    return { id, name: ingredient.name, displayUnit: ingredient.displayUnit, unitType: ingredient.unitType, mode: ingredient.preparationMode,
+    return { id, updatedAt: ingredient.updatedAt.toISOString(), name: ingredient.name, category: ingredient.category, displayUnit: ingredient.displayUnit, unitType: ingredient.unitType, mode: ingredient.preparationMode,
       instructions: recipe?.instructions ?? '', outputQuantity: recipe ? fromBase(Number(recipe.outputAmount), outputUnit) : 1, outputUnit, totalCost: missingCosts.size || !recipe?.items.length ? null : Number(totalCost.toDecimalPlaces(2)), costKnown: !missingCosts.size && !!recipe?.items.length, missingCosts: [...missingCosts],
       items: recipe?.items.map((item) => ({ ingredientId: item.ingredientId, name: item.ingredient.name, lineCost: itemCosts.get(item.ingredientId)?.known ? Number(itemCosts.get(item.ingredientId)!.cost.toDecimalPlaces(2)) : null, costKnown: itemCosts.get(item.ingredientId)?.known ?? false, quantity: fromBase(Number(item.amount), item.unit as UnitCode), netAmount: item.netAmount == null ? null : fromBase(Number(item.netAmount), item.unit as UnitCode), lossPercent: Number(item.lossPercent), processingMethod: item.processingMethod, unit: item.unit })) ?? [] };
   }
 
   async saveRecipe(id: string, dto: PreparationRecipeDto) {
-    const cafeId = this.cafeId();
-    const ids = dto.items.map((item) => item.ingredientId);
-    if (!ids.length || ids.includes(id) || new Set(ids).size !== ids.length) throw new BadRequestException('Укажите разные ингредиенты, исключив сам полуфабрикат');
     await this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx);
       await lockIngredients(tx, [id]);
-      const output = await this.prepared(tx, id);
-      const { unit: outputUnit, amount: outputAmount } = this.amount(dto.outputQuantity, dto.outputUnit, output.unitType);
-      const mode = dto.mode ?? output.preparationMode;
-      if (!['virtual', 'stocked'].includes(mode)) throw new BadRequestException('Неизвестный режим заготовки');
-      if (mode === 'virtual' && output.preparationMode !== mode) {
-        const balances = await tx.warehouseStock.findMany({ where: { ingredientId: id } });
-        if (!output.stock.isZero() || balances.some((balance) => !balance.stock.isZero())) throw new BadRequestException('Сначала израсходуйте или спишите остаток заготовки перед переходом в режим без остатка');
-        if (await tx.dish.count({ where: { stockIngredientId: id } }) || await tx.dishVariant.count({ where: { stockIngredientId: id } })) throw new BadRequestException('Сначала отключите прямую продажу этой заготовки');
-      }
-      const ingredients = await tx.ingredient.findMany({ where: { cafeId, isActive: true, id: { in: ids } } });
-      const byId = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
-      const items = dto.items.map((item) => {
-        const ingredient = byId.get(item.ingredientId);
-        if (!ingredient) throw new NotFoundException('Ингредиент техкарты не найден');
-        const gross = this.amount(item.quantity, item.unit, ingredient.unitType);
-        const lossPercent = item.lossPercent ?? Number((ingredient.processingLosses as Record<string, number> | null)?.[item.processingMethod ?? ''] ?? 0);
-        if (!Number.isFinite(lossPercent) || lossPercent < 0 || lossPercent > 100) throw new BadRequestException('Проверьте процент потерь');
-        const netAmount = item.netAmount === undefined ? gross.amount.mul(100 - lossPercent).div(100).toDecimalPlaces(3) : new Prisma.Decimal(item.netAmount).mul(toBase(1, gross.unit)).toDecimalPlaces(3);
-        if (netAmount.lt(0) || netAmount.gt(gross.amount)) throw new BadRequestException('Нетто должно быть от нуля до брутто');
-        return { cafeId, recipeId: id, ingredientId: item.ingredientId, ...gross, netAmount, lossPercent: item.netAmount !== undefined ? new Prisma.Decimal(100).sub(netAmount.mul(100).div(gross.amount)).toDecimalPlaces(2) : lossPercent, processingMethod: item.processingMethod };
-      });
-      const edges = await tx.preparationRecipeItem.findMany({ where: { cafeId }, select: { recipeId: true, ingredientId: true } });
-      const graph = new Map<string, string[]>();
-      for (const edge of edges) if (edge.recipeId !== id) graph.set(edge.recipeId, [...(graph.get(edge.recipeId) ?? []), edge.ingredientId]);
-      graph.set(id, ids);
-      const visit = (node: string, path: Set<string>) => {
-        if (path.has(node)) throw new BadRequestException('Рецептура создаёт циклическую зависимость заготовок');
-        if (path.size > 32) throw new BadRequestException('Слишком много уровней рецептуры');
-        const next = new Set([...path, node]);
-        for (const child of graph.get(node) ?? []) visit(child, next);
-      };
-      visit(id, new Set());
-      await tx.ingredient.update({ where: { id }, data: { preparationMode: mode } });
-      await tx.preparationRecipe.upsert({ where: { ingredientId: id }, create: { cafeId, ingredientId: id, outputUnit, outputAmount, instructions: dto.instructions }, update: { outputUnit, outputAmount, instructions: dto.instructions } });
-      await tx.preparationRecipeItem.deleteMany({ where: { recipeId: id } });
-      await tx.preparationRecipeItem.createMany({ data: items });
+      await this.writeRecipe(tx, id, dto);
     });
     return this.getRecipe(id);
+  }
+
+  async saveCard(dto: PreparationCardDto, id?: string) {
+    const cafeId = this.cafeId();
+    if (!dto.name?.trim()) throw new BadRequestException('Укажите название полуфабриката');
+    const unit = normalizeUnit(dto.unit);
+    const targetId = id ?? (dto.requestKey
+      ? 'preparation:' + createHash('sha256').update(cafeId + ':' + dto.requestKey).digest('hex')
+      : randomUUID());
+    await this.prisma.$transaction(async (tx) => {
+      await lockWarehouseCatalog(tx);
+      await lockRecipeGraph(tx);
+      await lockIngredients(tx, [targetId]);
+      const existing = await tx.ingredient.findFirst({ where: { id: targetId, cafeId } });
+      if (id) {
+        if (!existing?.isPrepared || !existing.isActive) throw new NotFoundException('Полуфабрикат не найден');
+        if (dto.expectedUpdatedAt !== existing.updatedAt.toISOString()) throw new ConflictException('Полуфабрикат уже изменён. Обновите страницу перед сохранением.');
+        if (existing.displayUnit !== unit) throw new BadRequestException('Единица измерения существующего полуфабриката не меняется');
+        await tx.ingredient.update({ where: { id, cafeId }, data: { name: dto.name.trim(), category: dto.category?.trim() || null } });
+      } else if (existing) {
+        // The same create request may arrive after a response was lost. It must
+        // return its original record rather than create another preparation.
+        await this.assertSameCard(tx, targetId, dto);
+        return;
+      } else {
+        await tx.ingredient.create({ data: { id: targetId, cafeId, name: dto.name.trim(), category: dto.category?.trim() || null,
+          unitType: unitTypeOf(unit), displayUnit: unit, kind: 'preparation', isPrepared: true, preparationMode: dto.mode ?? 'virtual' } });
+      }
+      await this.writeRecipe(tx, targetId, dto);
+    });
+    return this.getRecipe(targetId);
+  }
+
+  private async assertSameCard(tx: Prisma.TransactionClient, id: string, dto: PreparationCardDto) {
+    const ingredient = await this.prepared(tx, id);
+    const recipe = await tx.preparationRecipe.findUnique({ where: { ingredientId: id }, include: { items: { include: { ingredient: true } } } });
+    const amount = (quantity: number, unit: string) => new Prisma.Decimal(quantity).mul(toBase(1, normalizeUnit(unit))).toDecimalPlaces(3);
+    let matches = ingredient.name === dto.name.trim() && ingredient.category === (dto.category?.trim() || null) &&
+      ingredient.displayUnit === normalizeUnit(dto.unit) && ingredient.preparationMode === (dto.mode ?? 'virtual') &&
+      recipe?.outputUnit === normalizeUnit(dto.outputUnit) && recipe.outputAmount.eq(amount(dto.outputQuantity, dto.outputUnit)) &&
+      (recipe.instructions ?? '') === (dto.instructions ?? '') && recipe.items.length === dto.items.length;
+    for (const input of dto.items) {
+      const saved = recipe?.items.find((item) => item.ingredientId === input.ingredientId);
+      const gross = amount(input.quantity, input.unit);
+      const loss = input.lossPercent ?? Number((saved?.ingredient.processingLosses as Record<string, number> | null)?.[input.processingMethod ?? ''] ?? 0);
+      const net = input.netAmount === undefined ? gross.mul(100 - loss).div(100).toDecimalPlaces(3) : amount(input.netAmount, input.unit);
+      matches = matches && !!saved && saved.unit === normalizeUnit(input.unit) && saved.amount.eq(gross) &&
+        !!saved.netAmount?.eq(net) && (saved.processingMethod ?? null) === (input.processingMethod ?? null);
+    }
+    if (!matches) throw new BadRequestException('Ключ создания уже использован с другим названием или составом полуфабриката');
+  }
+
+  private async writeRecipe(tx: Prisma.TransactionClient, id: string, dto: PreparationRecipeDto) {
+    const cafeId = this.cafeId();
+    const ids = dto.items.map((item) => item.ingredientId);
+    if (!ids.length || ids.includes(id) || new Set(ids).size !== ids.length) throw new BadRequestException('Укажите разные ингредиенты, исключив сам полуфабрикат');
+    const output = await this.prepared(tx, id);
+    const { unit: outputUnit, amount: outputAmount } = this.amount(dto.outputQuantity, dto.outputUnit, output.unitType);
+    const mode = dto.mode ?? output.preparationMode;
+    if (!['virtual', 'stocked'].includes(mode)) throw new BadRequestException('Неизвестный режим заготовки');
+    if (mode === 'virtual' && output.preparationMode !== mode) {
+      const balances = await tx.warehouseStock.findMany({ where: { ingredientId: id } });
+      if (!output.stock.isZero() || balances.some((balance) => !balance.stock.isZero())) throw new BadRequestException('Сначала израсходуйте или спишите остаток заготовки перед переходом в режим без остатка');
+      if (await tx.dish.count({ where: { stockIngredientId: id } }) || await tx.dishVariant.count({ where: { stockIngredientId: id } })) throw new BadRequestException('Сначала отключите прямую продажу этой заготовки');
+    }
+    const ingredients = await tx.ingredient.findMany({ where: { cafeId, isActive: true, id: { in: ids } } });
+    const byId = new Map(ingredients.map((ingredient) => [ingredient.id, ingredient]));
+    const items = dto.items.map((item) => {
+      const ingredient = byId.get(item.ingredientId);
+      if (!ingredient) throw new NotFoundException('Ингредиент техкарты не найден');
+      const gross = this.amount(item.quantity, item.unit, ingredient.unitType);
+      const lossPercent = item.lossPercent ?? Number((ingredient.processingLosses as Record<string, number> | null)?.[item.processingMethod ?? ''] ?? 0);
+      if (!Number.isFinite(lossPercent) || lossPercent < 0 || lossPercent > 100) throw new BadRequestException('Проверьте процент потерь');
+      const netAmount = item.netAmount === undefined ? gross.amount.mul(100 - lossPercent).div(100).toDecimalPlaces(3) : new Prisma.Decimal(item.netAmount).mul(toBase(1, gross.unit)).toDecimalPlaces(3);
+      if (netAmount.lt(0) || netAmount.gt(gross.amount)) throw new BadRequestException('Нетто должно быть от нуля до брутто');
+      return { cafeId, recipeId: id, ingredientId: item.ingredientId, ...gross, netAmount, lossPercent: item.netAmount !== undefined ? new Prisma.Decimal(100).sub(netAmount.mul(100).div(gross.amount)).toDecimalPlaces(2) : lossPercent, processingMethod: item.processingMethod };
+    });
+    const edges = await tx.preparationRecipeItem.findMany({ where: { cafeId }, select: { recipeId: true, ingredientId: true } });
+    const graph = new Map<string, string[]>();
+    for (const edge of edges) if (edge.recipeId !== id) graph.set(edge.recipeId, [...(graph.get(edge.recipeId) ?? []), edge.ingredientId]);
+    graph.set(id, ids);
+    const visit = (node: string, path: Set<string>) => {
+      if (path.has(node)) throw new BadRequestException('Рецептура создаёт циклическую зависимость заготовок');
+      if (path.size > 32) throw new BadRequestException('Слишком много уровней рецептуры');
+      const next = new Set([...path, node]);
+      for (const child of graph.get(node) ?? []) visit(child, next);
+    };
+    visit(id, new Set());
+    await tx.ingredient.update({ where: { id }, data: { preparationMode: mode } });
+    await tx.preparationRecipe.upsert({ where: { ingredientId: id }, create: { cafeId, ingredientId: id, outputUnit, outputAmount, instructions: dto.instructions }, update: { outputUnit, outputAmount, instructions: dto.instructions } });
+    await tx.preparationRecipeItem.deleteMany({ where: { recipeId: id } });
+    await tx.preparationRecipeItem.createMany({ data: items });
   }
 
   async produce(id: string, dto: ProducePreparationDto, actor?: Pick<AuthUser, 'id' | 'name'>) {
@@ -313,6 +374,10 @@ class PreparationProductionController {
   @Get() list(@Query('warehouseId') warehouseId?: string) { return this.preparation.list(warehouseId); }
   @Post() @RequirePermission('actions.warehouseRecipes')
   create(@Body() dto: CreatePreparationDto) { return this.preparation.create(dto); }
+  @Post('card') @RequirePermission('actions.warehouseRecipes')
+  createCard(@Body() dto: PreparationCardDto) { return this.preparation.saveCard(dto); }
+  @Put(':id/card') @RequirePermission('actions.warehouseRecipes')
+  updateCard(@Param('id') id: string, @Body() dto: PreparationCardDto) { return this.preparation.saveCard(dto, id); }
   @Get('batches') @RequirePermission('actions.warehouseProduce')
   journal(@Query('warehouseId') warehouseId?: string) { return this.preparation.journal(warehouseId); }
   @Get('batches/:batchId') batch(@Param('batchId') id: string) { return this.preparation.batch(id); }

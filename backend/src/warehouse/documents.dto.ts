@@ -1,6 +1,6 @@
 import { WarehouseDocumentKind, WarehouseInventoryMode, WarehouseWriteoffReason } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
 
 export const warehouseWriteoffReasons = {
   spoilage: 'Порча',
@@ -26,6 +26,9 @@ export class WarehouseDocumentRevisionDto {
 }
 
 export class UpdateWarehouseDocumentDto extends WarehouseDocumentRevisionDto {
+  @IsOptional() @IsIn(['submit', 'post'])
+  finalize?: 'submit' | 'post';
+
   @IsOptional() @IsEnum(WarehouseWriteoffReason)
   reason?: WarehouseWriteoffReason | null;
 

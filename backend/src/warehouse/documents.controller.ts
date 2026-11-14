@@ -34,15 +34,22 @@ export class WarehouseDocumentsController {
   }
 
   @Post()
-  create(@CurrentUser() user: AuthUser, @Body() dto: CreateWarehouseDocumentDto) {
+  async create(@CurrentUser() user: AuthUser, @Body() dto: CreateWarehouseDocumentDto) {
     this.assertDocumentPermission(user, dto.kind);
-    return this.documents.create(user, dto);
+    this.assertFinalizePermission(user, dto.kind, dto.finalize);
+    const document = await this.documents.create(user, dto);
+    if (dto.finalize) this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
+    return document;
   }
 
   @Patch(':id')
   async update(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateWarehouseDocumentDto) {
-    this.assertDocumentPermission(user, (await this.documents.get(id)).kind);
-    return this.documents.update(user, id, dto);
+    const kind = (await this.documents.get(id)).kind;
+    this.assertDocumentPermission(user, kind);
+    this.assertFinalizePermission(user, kind, dto.finalize);
+    const document = await this.documents.update(user, id, dto);
+    if (dto.finalize) this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
+    return document;
   }
 
   @Post(':id/submit')
@@ -77,6 +84,13 @@ export class WarehouseDocumentsController {
     const document = await this.documents.reopen(user, id, dto?.revision);
     this.events.emitToCafeAdmins(user.cafeId, SERVER_EVENTS.WAREHOUSE_UPDATED, {});
     return document;
+  }
+
+  private assertFinalizePermission(user: AuthUser, kind: string, finalize?: 'submit' | 'post') {
+    if (finalize === 'post' && (kind === 'inventory' || kind === 'writeoff')) {
+      assertWarehousePermission(user, 'warehouseApprove');
+    }
+    if (kind === 'supplier_return') assertWarehousePermission(user, 'warehouseCosts');
   }
 
   private assertDocumentPermission(user: AuthUser, kind: string) {

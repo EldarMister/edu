@@ -10,7 +10,7 @@ export type WarehouseView =
   | 'locations'
   | 'packages'
   | 'production';
-export type MenuView = 'all' | 'goods' | 'recipes' | 'preparations' | 'ingredients';
+export type MenuView = 'goods' | 'recipes' | 'preparations' | 'ingredients' | 'categories' | 'ingredientCategories' | 'stations';
 export const WAREHOUSE_NAV: { key: WarehouseView; label: string; permission?: string; costs?: boolean }[] = [
   { key: 'balances', label: 'Остатки' },
   { key: 'supplies', label: 'Поставки', permission: 'warehouseReceive', costs: true },
@@ -25,9 +25,21 @@ export const WAREHOUSE_NAV: { key: WarehouseView; label: string; permission?: st
   { key: 'production', label: 'Производство', permission: 'warehouseProduce' },
 ];
 export const MENU_NAV: { key: MenuView; label: string }[] = [
-  { key: 'all', label: 'Все позиции' },
   { key: 'goods', label: 'Товары' },
   { key: 'recipes', label: 'Техкарты' },
   { key: 'preparations', label: 'Полуфабрикаты' },
   { key: 'ingredients', label: 'Ингредиенты' },
+  { key: 'categories', label: 'Категории товаров и техкарт' },
+  { key: 'ingredientCategories', label: 'Категории ингредиентов' },
+  { key: 'stations', label: 'Цехи' },
 ];
+
+export function warehouseViewInUse(view: WarehouseView, warehouseCount: number, policy?: {
+  warehouseProductionEnabled: boolean; warehouseProcessingEnabled: boolean;
+  productionInUse: boolean; processingInUse: boolean;
+}) {
+  if (view === 'transfers') return warehouseCount > 1;
+  if (view === 'production') return !!(policy?.warehouseProductionEnabled || policy?.productionInUse);
+  if (view === 'processing') return !!(policy?.warehouseProcessingEnabled || policy?.processingInUse);
+  return true;
+}

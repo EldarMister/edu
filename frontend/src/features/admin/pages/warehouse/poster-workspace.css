@@ -1,0 +1,116 @@
+/* The warehouse follows the measured Poster layout; colours remain EDU tokens.
+   Dish dialogs live in a body portal and keep the familiar EDU form. */
+.workspace-title-slot:has(> *) + .workspace-default-title { display: none; }
+.workspace-header-count { font-size: 13px; font-weight: 400; color: #94a3b8; }
+.poster-search { position: relative; width: 200px; max-width: 100%; flex-shrink: 0; }
+.poster-search .input { padding-left: 30px; padding-right: 28px; }
+.poster-search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
+.poster-search-clear { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 26px; height: 28px; color: #94a3b8; }
+.poster-search-clear:hover { color: #005bff; }
+.poster-search input::-webkit-search-cancel-button { display: none; }
+.poster-select-menu { border-radius: 3px; padding: 3px; box-shadow: 0 3px 10px rgb(15 23 42 / .12); }
+.poster-select-menu > button { border-radius: 2px; padding: 7px 9px; font-size: 14px; line-height: 20px; }
+.workspace-back { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 36px; }
+.poster-workspace { background: white; font-size: 14px; }
+.poster-workspace .workspace-sidebar { width: 220px; background: #f7f8fa; }
+.poster-workspace .workspace-nav { padding: 8px 0; }
+.poster-workspace .workspace-nav > * + * { margin-top: 0; }
+.poster-workspace .workspace-nav-section { border-radius: 0; padding: 9px 18px; font-size: 14px; font-weight: 400; }
+.poster-workspace .workspace-nav-section[aria-expanded='true'] { background: transparent; color: #1e293b; font-weight: 600; }
+.poster-workspace .workspace-nav-children { margin: 2px 0 12px; padding: 0; border: 0; }
+.poster-workspace .workspace-nav-child { margin-top: 0; border-radius: 0; padding: 7px 18px 7px 48px; font-size: 14px; line-height: 18px; }
+.poster-workspace .workspace-nav-child[aria-current='page'] { background: rgb(0 91 255 / .09); color: #0f172a; font-weight: 600; }
+.poster-workspace .workspace-header { min-height: 64px; padding: 12px 20px; }
+.poster-workspace .workspace-default-title h1 { font-size: 20px; font-weight: 500; }
+.poster-workspace .workspace-title-slot h1 { font-size: 24px; line-height: 30px; }
+.poster-workspace .workspace-main { padding: 16px 20px 0; background: white; }
+.poster-workspace .card { border: 0; border-radius: 0; box-shadow: none; background: white; }
+.poster-workspace .input,
+.poster-workspace button.rounded-xl.border,
+.poster-workspace select.input { height: 36px; min-height: 36px; padding-left: 10px; padding-right: 10px; border-radius: 3px; font-size: 14px; }
+.poster-workspace textarea.input { min-height: 56px; height: auto; padding-top: 8px; padding-bottom: 8px; }
+.poster-workspace :is(.btn, .btn-primary, .btn-secondary, .btn-ghost, .btn-danger) { border-radius: 4px; }
+.poster-workspace .btn-md { height: 36px; padding-left: 14px; padding-right: 14px; font-size: 14px; }
+.poster-workspace .btn-lg { height: 40px; border-radius: 4px; font-size: 14px; }
+.poster-workspace [data-editor-page] { display: flex; flex-direction: column; min-height: calc(100dvh - 80px); }
+.poster-workspace .editor-content { flex: 1; }
+.editor-footer:empty { display: none; }
+.poster-workspace .editor-footer { margin: 0 -20px; padding: 18px 20px max(18px, env(safe-area-inset-bottom)); box-shadow: none; }
+.poster-workspace .document-footer { margin-left: -20px; margin-right: -20px; padding: 18px 20px max(18px, env(safe-area-inset-bottom)); }
+.poster-workspace .document-field { grid-template-columns: minmax(150px, 314px) minmax(0, 470px); gap: 20px; }
+.poster-workspace .document-field-control { max-width: 470px; }
+.poster-workspace .document-field-label { padding-top: 8px; }
+.poster-workspace .poster-form--ingredient .document-field { grid-template-columns: 230px minmax(0, 470px); }
+.poster-workspace .poster-form--preparation .document-field { grid-template-columns: 146px minmax(0, 470px); }
+.poster-workspace .poster-form--directory .document-field { grid-template-columns: 230px minmax(0, 470px); }
+.poster-workspace .poster-form { padding: 0 8px; }
+.poster-workspace .poster-form > .document-field + .document-field { margin-top: 16px; }
+.poster-workspace .poster-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 0 0 16px; border: 0; }
+.poster-workspace .poster-toolbar .input { max-width: 220px; }
+.poster-workspace .poster-toolbar .poster-search .input { height: 32px; min-height: 32px; padding-left: 30px; padding-right: 28px; font-size: 13px; }
+.poster-workspace .poster-toolbar button.rounded-xl.border { min-height: 32px; height: 32px; border-color: transparent; background: transparent; padding: 0 6px; color: #005bff; }
+.poster-workspace .poster-toolbar button.rounded-xl.border > span { color: inherit; }
+.poster-workspace .poster-toolbar button.rounded-xl.border > svg { width: 12px; color: currentColor; }
+.poster-workspace .poster-toolbar button.rounded-xl.border:hover { background: #f8fafc; }
+.poster-workspace .poster-toolbar button.rounded-xl.border:focus-visible { outline: 2px solid #005bff; outline-offset: 2px; }
+.poster-workspace .poster-value-unit { display: flex; align-items: stretch; min-width: 0; }
+.poster-workspace .poster-value-unit .input { min-width: 0; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.poster-workspace .poster-value-unit__suffix { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; min-width: 32px; padding: 0 7px; border: 1px solid #e2e8f0; border-left: 0; border-radius: 0 3px 3px 0; color: #64748b; background: #f1f5f9; font-size: 13px; }
+.poster-workspace .poster-readonly { display: block; min-height: 36px; padding: 8px 0; font-size: 14px; }
+.poster-workspace .document-status { display: inline-flex; align-items: center; border: 1px solid #e2e8f0; border-radius: 2px; padding: 1px 6px; color: #64748b; font-size: 12px; white-space: nowrap; }
+.poster-workspace .document-status:is([data-status='completed'],[data-status='posted']) { color: #16a34a; border-color: rgb(22 163 74 / .25); }
+.poster-workspace .document-status[data-status='cancelled'] { color: #94a3b8; }
+.poster-workspace table { border-collapse: collapse; font-size: 14px; }
+.poster-workspace table thead { background: white; font-size: 12px; font-weight: 400; color: #64748b; }
+.poster-workspace table th { font-weight: 400; padding: 12px 10px; border-bottom: 1px solid #e5e7eb; }
+.poster-workspace table th:not(.text-right):not(.text-center) { text-align: left; }
+.poster-workspace table td { padding: 8px 10px; }
+.poster-workspace table tbody tr { border-bottom: 1px solid #f0f1f3; }
+.poster-workspace table tbody tr:hover { background: #fafbfc; }
+.poster-workspace table tfoot { background: #f8fafc; }
+.poster-workspace table tfoot td { padding-top: 14px; padding-bottom: 14px; }
+.poster-workspace .poster-row-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; white-space: nowrap; }
+.poster-workspace .poster-row-actions button { min-height: 32px; color: #005bff; font-size: 13px; }
+.poster-workspace table .btn-ghost { height: 30px; min-height: 30px; }
+.poster-workspace .poster-advanced { border: 0; border-radius: 0; background: transparent; padding: 0; }
+.poster-workspace .poster-advanced > summary { color: #005bff; cursor: pointer; font-weight: 500; padding: 8px 0; }
+.poster-workspace .poster-recipe-panel { margin: 24px -28px 0; padding: 20px 28px; background: #f8fafc; }
+.poster-workspace .poster-recipe-panel > h3 { font-size: 18px; font-weight: 600; margin-bottom: 6px; }
+.poster-workspace .poster-recipe-panel table thead,
+.poster-workspace .poster-recipe-panel table tfoot { background: transparent; }
+.poster-workspace .poster-number-unit { display: inline-flex; align-items: center; gap: 0; }
+.poster-workspace .poster-number-unit .input { width: 100px; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.poster-workspace .poster-number-unit > span { display: flex; align-items: center; justify-content: center; height: 36px; min-width: 36px; border: 1px solid #e2e8f0; border-left: 0; background: #f1f5f9; border-radius: 0 3px 3px 0; }
+.poster-workspace .poster-recipe-panel tfoot .poster-row-actions { justify-content: flex-start; }
+.poster-workspace .poster-filter { min-height: 32px; border-color: transparent; background: transparent; color: #005bff; }
+.poster-workspace [data-editor-page]:has(.poster-form--ingredient) > .editor-footer { padding-left: 278px; }
+.poster-workspace .poster-unit-select { border: 0; background: transparent; min-width: 40px; font-size: 14px; color: #475569; }
+.poster-workspace .poster-remove { width: 28px; height: 32px; color: #94a3b8; font-size: 22px; }
+.poster-workspace .poster-remove:hover { color: #ef4444; }
+@media (max-width: 1023px) {
+  .poster-workspace .document-field { grid-template-columns: minmax(140px, 27%) minmax(0, 470px); }
+  .poster-workspace .workspace-title-slot h1 { font-size: 21px; line-height: 26px; }
+}
+@media (max-width: 639px) {
+  .poster-workspace [data-editor-page]:has(.poster-form--ingredient) > .editor-footer { padding-left: 12px; }
+  .poster-workspace .workspace-header { padding: 10px 12px; gap: 8px; }
+  .poster-workspace .workspace-header { flex-wrap: wrap; }
+  .poster-workspace .workspace-header > div:first-child { flex: 1; min-width: 0; }
+  .poster-workspace .workspace-header > div:last-child { display: contents; }
+  .poster-workspace .workspace-actions-slot { order: 3; width: 100%; }
+  .poster-workspace .workspace-actions-slot:empty { display: none; }
+  .poster-workspace .workspace-header > div { gap: 6px; }
+  .poster-workspace .workspace-title-slot h1 { font-size: 18px; line-height: 24px; }
+  .poster-workspace .workspace-main { padding: 16px 12px 0; }
+  .poster-workspace .document-field,
+  .poster-workspace .poster-form--ingredient .document-field,
+  .poster-workspace .poster-form--preparation .document-field,
+  .poster-workspace .poster-form--directory .document-field { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .poster-workspace .document-field-label { padding-top: 0; }
+  .poster-workspace .input,
+  .poster-workspace button.rounded-xl.border { min-height: 40px; height: 40px; }
+  .poster-workspace .poster-form { padding: 0; }
+  .poster-workspace .poster-recipe-panel { margin-left: -12px; margin-right: -12px; padding: 16px 12px; }
+  .poster-workspace .editor-footer,
+  .poster-workspace .document-footer { margin-left: -12px; margin-right: -12px; padding: 14px 12px max(14px, env(safe-area-inset-bottom)); }
+}

@@ -1,4 +1,7 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
+import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
+import { WorkspaceSearch } from '../WorkspaceSearch';
+import { usePageFilters } from './workspace-route';
 import { useQuery } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -33,6 +36,7 @@ interface Summary {
   totalValuationAdjustment: number | null;
 }
 interface Props {
+  filters?: ReactNode;
   warehouseId?: string;
   range: { dateFrom: string; dateTo: string };
   onOpen: (type: string, id: string) => void;
@@ -54,12 +58,12 @@ export function WarehouseMovementSummary(props: Props) {
   return <MovementSummaryBody key={`${props.warehouseId ?? ''}:${props.range.dateFrom}:${props.range.dateTo}`} {...props} />;
 }
 
-function MovementSummaryBody({ warehouseId, range, onOpen, onHistory }: Props) {
-  const [search, setSearch] = useState('');
-  const [kind, setKind] = useState('');
-  const [category, setCategory] = useState('');
-  const [onlyWithMovement, setOnlyWithMovement] = useState('false');
-  const [page, setPage] = useState(1);
+function MovementSummaryBody({ warehouseId, range, onOpen, onHistory, filters }: Props) {
+  const [conditions, updateConditions] = usePageFilters({ movementSearch: '', movementKind: '', movementCategory: '', movementOnly: 'false', movementPage: '1', movementRange: '' });
+  const { movementSearch: search, movementKind: kind, movementCategory: category, movementOnly: onlyWithMovement } = conditions;
+  const rangeKey = `${warehouseId ?? ''}:${range.dateFrom}:${range.dateTo}`;
+  const parsedPage = Number(conditions.movementPage);
+  const page = conditions.movementRange === rangeKey && Number.isInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
   const [expanded, setExpanded] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
@@ -70,7 +74,8 @@ function MovementSummaryBody({ warehouseId, range, onOpen, onHistory }: Props) {
     onlyWithMovement, page, pageSize: 50 };
   const query = useQuery({ queryKey: ['admin', 'warehouse', 'reports', params],
     queryFn: async () => (await api.get<Summary>('/admin/warehouse/reports', { params })).data });
-  function filter(update: () => void) { update(); setPage(1); setExpanded(null); }
+  function filter(patch: Partial<typeof conditions>) { updateConditions({ ...patch, movementPage: '1', movementRange: '' }); setExpanded(null); }
+  function setPage(value: number) { updateConditions({ movementPage: String(value), movementRange: rangeKey }); setExpanded(null); }
   async function download() {
     setExporting(true); setError('');
     try {
@@ -87,19 +92,20 @@ function MovementSummaryBody({ warehouseId, range, onOpen, onHistory }: Props) {
   const rows = query.data?.rows ?? [];
   return (
     <section className="card overflow-hidden" aria-label="Отчёт по движению продуктов">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border p-4 print:hidden">
-        <input className="input h-10 w-full sm:w-60" aria-label="Поиск продукта в движении" placeholder="Поиск продукта"
-          value={search} onChange={(event) => filter(() => setSearch(event.target.value))} />
-        <Select ariaLabel="Тип продукта" className="h-10 min-w-40" value={kind} options={kinds} onChange={(value) => filter(() => setKind(value))} />
+      <WorkspaceHeaderCount count={query.data?.totalRows} />
+      <div className="poster-toolbar print:hidden">
+        <WorkspaceSearch label="Поиск продукта в движении" value={search} onChange={(value) => filter({ movementSearch: value })} />
+        {filters}
+        <Select ariaLabel="Тип продукта" className="h-10 min-w-32" value={kind} options={kinds} onChange={(value) => filter({ movementKind: value })} />
         <Select ariaLabel="Категория продукта" className="h-10 min-w-40" value={category}
           options={[{ value: '', label: 'Все категории' }, ...categories.map((value) => ({ value, label: value }))]}
-          onChange={(value) => filter(() => setCategory(value))} />
+          onChange={(value) => filter({ movementCategory: value })} />
         <Select ariaLabel="Наличие движения" className="h-10 min-w-48" value={onlyWithMovement}
           options={[{ value: 'false', label: 'Все продукты' }, { value: 'true', label: 'Только с движением' }]}
-          onChange={(value) => filter(() => setOnlyWithMovement(value))} />
-        <button type="button" className="btn-secondary btn-md sm:ml-auto" disabled={exporting} onClick={() => void download()}>
+          onChange={(value) => filter({ movementOnly: value })} />
+        <WorkspaceHeaderActions><button type="button" className="btn-ghost btn-md text-primary" disabled={exporting} onClick={() => void download()}>
           {exporting ? 'Экспорт…' : 'Экспорт'}
-        </button>
+        </button></WorkspaceHeaderActions>
       </div>
       {query.isPending && <div className="flex justify-center p-8"><Spinner /></div>}
       {(query.isError || error) && <p role="alert" className="p-4 text-danger">{error || apiError(query.error)}</p>}
@@ -165,9 +171,9 @@ function MovementSummaryBody({ warehouseId, range, onOpen, onHistory }: Props) {
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-border p-3 print:hidden">
           <span className="mr-auto text-xs text-text-muted">{query.data.totalRows} строк</span>
-          <button type="button" className="btn-secondary btn-md" disabled={page === 1} onClick={() => { setPage((value) => value - 1); setExpanded(null); }}>Назад</button>
+          <button type="button" className="btn-secondary btn-md" disabled={page === 1} onClick={() => setPage(page - 1)}>Назад</button>
           <span className="text-sm">{page} / {Math.max(1, Math.ceil(query.data.totalRows / 50))}</span>
-          <button type="button" className="btn-secondary btn-md" disabled={page * 50 >= query.data.totalRows} onClick={() => { setPage((value) => value + 1); setExpanded(null); }}>Далее</button>
+          <button type="button" className="btn-secondary btn-md" disabled={page * 50 >= query.data.totalRows} onClick={() => setPage(page + 1)}>Далее</button>
         </div>
       </>}
     </section>
