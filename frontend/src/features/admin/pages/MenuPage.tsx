@@ -6,6 +6,7 @@ import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { minDishUnitPrice, variantNamesLine } from '@/lib/format';
 import { resolveApiImage } from '@/lib/image';
+import { useT } from '@/lib/i18n';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { DocumentField } from './warehouse/WarehouseUi';
@@ -47,6 +48,7 @@ export function MenuPage({
   return <MenuDishList key={view} view={view} />;
 }
 function MenuDishList({ view }: { view: MenuView }) {
+  const t = useT();
   const [categoryId, setCategoryId] = usePageFilter('category');
   const [search, setSearch] = usePageFilter('search');
   const [availability, setAvailability] = usePageFilter('availability');
@@ -119,11 +121,11 @@ function MenuDishList({ view }: { view: MenuView }) {
             />
           )}
           <button
-            aria-label={isGoods ? 'Добавить товар' : 'Добавить техкарту'}
+            aria-label={isGoods ? 'Добавить товар' : undefined}
             className="btn-primary btn-md"
             onClick={() => openEditor({ type: 'entry' })}
           >
-            Добавить
+            {isGoods ? 'Добавить' : t('Добавить блюдо')}
           </button>
         </WorkspaceHeaderActions>
       )}
@@ -138,7 +140,7 @@ function MenuDishList({ view }: { view: MenuView }) {
       )}
       <div className="poster-toolbar">
         <WorkspaceSearch
-          label={isGoods ? 'Поиск товаров' : 'Поиск техкарт'}
+          label={isGoods ? 'Поиск товаров' : t('Поиск блюда')}
           value={search}
           onChange={setSearch}
         />
@@ -306,8 +308,8 @@ function MenuDishList({ view }: { view: MenuView }) {
                       ? 'Добавьте первый товар для продажи'
                       : 'Товаров пока нет'
                     : editable
-                      ? 'Добавьте первую техкарту'
-                      : 'Техкарт пока нет'}
+                      ? 'Добавьте первое блюдо'
+                      : 'Блюд пока нет'}
               </p>
               {(search || categoryId || availability || stationId) && (
                 <button

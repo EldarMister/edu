@@ -403,8 +403,7 @@ export function AdminApp() {
           );
         })}
       </nav>
-      <div className="workspace-sidebar-footer border-t border-border p-3">
-        <div className="flex items-center justify-between">
+      <div className="border-t border-border p-3">
         <button
           onClick={onLogout}
           className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium text-text-secondary hover:bg-background"
@@ -412,8 +411,6 @@ export function AdminApp() {
           <IconLogout />
           {t('Выйти')}
         </button>
-        {posterWorkspace && <ConnectionStatus compact />}
-        </div>
         <AppVersion className="mt-2" />
       </div>
     </aside>
@@ -422,7 +419,7 @@ export function AdminApp() {
   return (
     <WorkspaceHeaderProvider>
     <div
-      className={`flex h-full bg-background ${posterWorkspace ? 'poster-workspace' : ''}`}
+      className="flex h-full bg-background"
       onTouchStart={handleAppTouchStart}
       onTouchMove={handleAppTouchMove}
       onTouchEnd={handleAppTouchEnd}
@@ -454,8 +451,8 @@ export function AdminApp() {
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         <OfflineBanner />
-        <header className="workspace-header flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-white px-4 py-3 lg:px-6">
-          <div className="flex min-w-0 items-center gap-3">
+        <header className="workspace-header flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 sm:flex-nowrap border-b border-border bg-white px-4 py-3 lg:px-6">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <button
               className="-ml-1 shrink-0 rounded-lg p-1.5 text-text-secondary hover:bg-background lg:hidden"
               onClick={() => setMobileNav(true)}
@@ -484,14 +481,14 @@ export function AdminApp() {
                 : ''}
             </h1></WorkspaceTitleSlot>
           </div>
-          <div className="flex items-center gap-3">
-            <WorkspaceActionsSlot />
-            {!posterWorkspace && <ConnectionStatus />}
+          <div className="contents sm:flex sm:items-center sm:gap-3">
+            <WorkspaceActionsSlot className="order-last basis-full empty:hidden sm:order-none sm:basis-auto" />
+            <ConnectionStatus />
           </div>
         </header>
 
         <main
-          className={`workspace-main app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
+          className={`workspace-main app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${posterWorkspace ? 'poster-workspace' : ''} ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
         >
           {!current ? (
             <NoAccessScreen />

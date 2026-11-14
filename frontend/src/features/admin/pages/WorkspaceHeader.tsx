@@ -27,9 +27,9 @@ export function WorkspaceTitleSlot({ children }: { children: ReactNode }) {
   </div>;
 }
 
-export function WorkspaceActionsSlot() {
+export function WorkspaceActionsSlot({ className = '' }: { className?: string } = {}) {
   const slots = useContext(HeaderContext);
-  return <div ref={slots?.setActions} className="workspace-actions-slot flex flex-wrap items-center gap-2" />;
+  return <div ref={slots?.setActions} className={`workspace-actions-slot flex flex-wrap items-center gap-2 ${className}`} />;
 }
 
 export function WorkspaceHeaderTitle({ children }: { children: ReactNode }) {

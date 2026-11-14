@@ -14,13 +14,6 @@ div.poster-select-menu { border-radius: 4px; padding: 3px; box-shadow: 0 3px 10p
 .poster-select-menu > button[aria-selected='true'] { font-weight: 500; }
 .workspace-back { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 36px; }
 .poster-workspace { background: white; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 14px; }
-.poster-workspace .workspace-sidebar { width: 220px; background: #f7f8fa; }
-.poster-workspace .workspace-brand { height: 48px; flex-shrink: 0; padding: 0 16px; }
-.poster-workspace .workspace-nav { padding: 8px; scrollbar-gutter: auto; }
-.poster-workspace .workspace-nav > :not([hidden]) ~ :not([hidden]) { margin-top: 0; }
-.poster-workspace .workspace-nav-section { min-height: 38px; border-radius: 8px; padding: 8px; gap: 8px; font-size: 14px; line-height: 22px; font-weight: 600; }
-.poster-workspace .workspace-nav-section > svg { width: 18px; height: 18px; color: #7b8796; }
-.poster-workspace .workspace-nav-section[aria-expanded='true'] { background: transparent; color: #1e293b; font-weight: 600; }
 .workspace-nav-collapse {
   display: grid;
   grid-template-rows: 0fr;
@@ -31,17 +24,10 @@ div.poster-select-menu { border-radius: 4px; padding: 3px; box-shadow: 0 3px 10p
 @media (prefers-reduced-motion: reduce) {
   .workspace-nav-collapse { transition: none; }
 }
-.poster-workspace .workspace-nav-children { margin: 0 0 4px; padding: 0; border: 0; }
-.poster-workspace .workspace-nav-children > :not([hidden]) ~ :not([hidden]) { margin-top: 0; }
-.poster-workspace .workspace-nav-child { margin-top: 0; border-radius: 8px; padding: 4px 8px 4px 34px; font-size: 14px; line-height: 21px; color: #005bff; }
-.poster-workspace .workspace-nav-child[aria-current='page'] { background: rgb(0 91 255 / .09); color: #0f172a; font-weight: 500; }
-.poster-workspace .workspace-sidebar-footer { padding: 8px 16px; }
-.poster-workspace .workspace-sidebar-footer button { font-family: inherit; font-size: 14px; }
-.poster-workspace .workspace-sidebar-footer > div > button { width: auto; padding-left: 0; }
 .poster-workspace .workspace-header { min-height: 64px; padding: 12px 20px; }
 .poster-workspace .workspace-default-title h1 { font-size: 20px; font-weight: 500; }
 .poster-workspace .workspace-title-slot h1 { font-size: 24px; font-weight: 500; line-height: 30px; }
-.poster-workspace .workspace-main { padding: 16px 20px 0; background: white; }
+:is(.poster-workspace.workspace-main, .poster-workspace .workspace-main) { padding: 16px 20px 0; background: white; }
 .poster-workspace .card { border: 0; border-radius: 0; box-shadow: none; background: white; }
 .poster-workspace .input,
 .poster-workspace button.rounded-xl.border,
@@ -112,12 +98,12 @@ div.poster-select-menu { border-radius: 4px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace .poster-remove:hover { color: #ef4444; }
 /* Current Poster registers share a rounded surface; menu and supplies retain their flat layout. */
 .poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface),
-.poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-main,
+:is(.poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface).workspace-main, .poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-main),
 .poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-header {
   background: #f3f5f7;
 }
 .poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-header { min-height: 56px; padding: 10px 24px; border-bottom: 0; }
-.poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-main { padding: 8px 16px 20px; }
+:is(.poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface).workspace-main, .poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-main) { padding: 8px 16px 20px; }
 .poster-workspace :is(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) {
   min-width: 0;
   background: white;
@@ -208,7 +194,7 @@ div.poster-select-menu { border-radius: 4px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace:has(.poster-document--modern) :is(.workspace-main, .workspace-header, [data-editor-page]) { background: #f3f5f7; }
 .poster-workspace:has(.poster-document--modern) .workspace-header { min-height: 56px; padding: 10px 24px; border-bottom: 0; }
 .poster-workspace:has(.poster-document--modern) .workspace-title-slot h1 { font-size: 20px; line-height: 24px; font-weight: 500; }
-.poster-workspace:has(.poster-document--modern) .workspace-main { padding: 8px 24px 0; }
+:is(.poster-workspace:has(.poster-document--modern).workspace-main, .poster-workspace:has(.poster-document--modern) .workspace-main) { padding: 8px 24px 0; }
 .poster-workspace:has(.poster-document--modern) [data-editor-page] { min-height: calc(100dvh - 64px); }
 .poster-workspace:has(.poster-document--modern) .editor-footer { margin-left: -24px; margin-right: -24px; padding: 16px 24px max(16px, env(safe-area-inset-bottom)); }
 .poster-workspace:has(.poster-document--modern) .editor-footer .btn-primary { min-height: 48px; height: auto; padding: 8px 16px; font-size: 20px; line-height: 30px; font-weight: 400; border-radius: 6px; }
@@ -286,7 +272,7 @@ div.poster-select-menu { border-radius: 4px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace .poster-directory-table { table-layout: fixed; }
 .poster-workspace .poster-directory-surface > .poster-advanced { margin: 16px; }
 @media (max-width: 639px) {
-  .poster-workspace:has(.poster-document--modern) .workspace-main { padding: 8px 12px 0; }
+  :is(.poster-workspace:has(.poster-document--modern).workspace-main, .poster-workspace:has(.poster-document--modern) .workspace-main) { padding: 8px 12px 0; }
   .poster-workspace:has(.poster-document--modern) .workspace-header,
   .poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-header { padding: 10px 12px; }
   .poster-workspace:has(.poster-document--modern) .editor-footer { margin-left: -12px; margin-right: -12px; padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
@@ -317,7 +303,7 @@ div.poster-select-menu { border-radius: 4px; padding: 3px; box-shadow: 0 3px 10p
   .poster-workspace .workspace-actions-slot:empty { display: none; }
   .poster-workspace .workspace-header > div { gap: 6px; }
   .poster-workspace .workspace-title-slot h1 { font-size: 18px; line-height: 24px; }
-  .poster-workspace .workspace-main { padding: 16px 12px 0; }
+  :is(.poster-workspace.workspace-main, .poster-workspace .workspace-main) { padding: 16px 12px 0; }
   .poster-workspace .document-field,
   .poster-workspace .poster-form--ingredient .document-field,
   .poster-workspace .poster-form--preparation .document-field,
