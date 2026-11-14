@@ -67,6 +67,7 @@ export function ItemCard({
             onSaved={onSaved}
             onHistory={onHistory}
             onRecipe={onRecipe}
+            compact={compact}
           />
         )}
       </Container>
@@ -81,6 +82,7 @@ function ItemForm({
   onSaved,
   onHistory,
   onRecipe,
+  compact,
 }: {
   item?: IngredientDetails;
   defaultKind?: ItemKind;
@@ -88,6 +90,7 @@ function ItemForm({
   onSaved?: (item: Ingredient) => void;
   onHistory?: (id: string) => void;
   onRecipe?: (item: Ingredient) => void;
+  compact: boolean;
 }) {
   const formId = useId();
   const mutations = useIngredientMutations();
@@ -166,12 +169,10 @@ function ItemForm({
         </DocumentField>
         <DocumentField label="Ед. измерения">
           {item ? (
-            <span
-              className="block py-2.5 text-sm"
-              title="Единица измерения сохраняется при создании ингредиента"
-            >
-              {unitLabel(unit)}
-            </span>
+            <div>
+              <span className="block py-2.5 text-sm">{unitLabel(unit)}</span>
+              <p className="text-xs text-text-muted">Единица измерения задана при создании ингредиента.</p>
+            </div>
           ) : (
             <Select
               ariaLabel="Единица измерения"
@@ -340,9 +341,9 @@ function ItemForm({
           >
             {pending ? <Spinner /> : 'Сохранить'}
           </button>
-          <button type="button" className="btn-ghost btn-md" onClick={onClose}>
+          {compact && <button type="button" className="btn-ghost btn-md" onClick={onClose}>
             Отмена
-          </button>
+          </button>}
         </DocumentFooter>
       )}
     </form>

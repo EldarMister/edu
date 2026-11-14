@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { DatePicker } from '@/components/DatePicker';
 import { EditorPage } from './EditorPage';
 import { useEditorRoute, usePageFilter, usePageFilters } from './workspace-route';
@@ -21,7 +21,6 @@ import { QueryState } from './WarehouseUi';
 import { WAREHOUSE_NAV, warehouseViewInUse, type WarehouseView, type MenuView } from './navigation';
 import { useAdminOrderDetails } from '../../api';
 import { OrderDetailsModal } from '../../components/OrderDetailsModal';
-import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { ItemCard } from './ItemCard';
 import { useWarehouseLocations, useIngredients, type Ingredient } from './api';
 import { useWarehousePolicy } from './settings-api';
@@ -40,25 +39,31 @@ export function WarehouseSection({
 } = {}) {
   const [conditions, updateConditions] = usePageFilters({
     warehouse: '',
-    stockPeriod: 'today',
-    stockFrom: localDate(addDays(new Date(), -6)),
-    stockTo: localDate(new Date()),
+    stockPeriod: 'week',
+    stockFrom: '',
+    stockTo: '',
     movementPage: '1',
     movementRange: '',
+    movementExpanded: '',
+    movementDocuments: '',
   });
   const {
     warehouse: warehouseId,
     stockPeriod: presetValue,
-    stockFrom: customFrom,
-    stockTo: customTo,
+    stockFrom,
+    stockTo,
   } = conditions;
+  const today = localDate(new Date());
+  const customFrom = stockFrom || localDate(addDays(new Date(), -6));
+  const customTo = stockTo || today;
   function setReportConditions(
     patch: Partial<Pick<typeof conditions, 'warehouse' | 'stockPeriod' | 'stockFrom' | 'stockTo'>>,
   ) {
-    updateConditions({ ...patch, movementPage: '1', movementRange: '' });
+    updateConditions({ ...patch, movementPage: '1', movementRange: '', movementExpanded: '', movementDocuments: '' });
   }
   const setWarehouseId = (value: string) => setReportConditions({ warehouse: value });
-  const setPreset = (value: PeriodPreset) => setReportConditions({ stockPeriod: value });
+  const setPreset = (value: PeriodPreset) => setReportConditions({ stockPeriod: value,
+    ...(value === 'custom' ? { stockFrom: customFrom, stockTo: customTo } : {}) });
   const setCustomFrom = (value: string) => setReportConditions({ stockFrom: value });
   const setCustomTo = (value: string) => setReportConditions({ stockTo: value });
   const { editor: active, openEditor: setActive, closeEditor: close } = useEditorRoute();
@@ -70,16 +75,13 @@ export function WarehouseSection({
   const warehouse =
     locations.find((l) => l.id === warehouseId) ?? locations.find((l) => l.isDefault) ?? locations[0];
   const preset = presetValue as PeriodPreset;
-  const range = useMemo(
-    () => ({
+  const range = {
       dateFrom:
         preset === 'custom'
           ? customFrom
           : localDate(addDays(new Date(), preset === 'today' ? 0 : preset === 'month' ? -29 : -6)),
-      dateTo: preset === 'custom' ? customTo : localDate(new Date()),
-    }),
-    [preset, customFrom, customTo],
-  );
+      dateTo: preset === 'custom' ? customTo : today,
+  };
   const allowedViews = WAREHOUSE_NAV.filter(
     (v) =>
       warehouseViewInUse(v.key, locations.length, policy.data) &&
@@ -87,11 +89,11 @@ export function WarehouseSection({
       (!v.costs || permissions.can('actions.warehouseCosts')),
   );
   const allowed = allowedViews.some((v) => v.key === view);
-  const aggregate = ['balances', 'movement', 'supplies', 'processing'].includes(view);
+  const aggregate = ['balances', 'movement', 'supplies', 'processing', 'transfers', 'writeoffs', 'inventory'].includes(view);
   const scopedWarehouse = aggregate ? warehouseId || undefined : warehouse?.id;
   const warehouseFilter = <Select ariaLabel="Склад" className="poster-filter h-9 min-w-44"
     value={aggregate ? warehouseId : (warehouse?.id ?? '')} onChange={setWarehouseId}
-    options={[...(aggregate ? [{ value: '', label: 'Все склады' }] : []), ...locations.map((location) => ({ value: location.id, label: location.name }))]} />;
+    options={[...(aggregate ? [{ value: '', label: view === 'balances' || view === 'movement' ? 'Склад' : 'Все склады' }] : []), ...locations.map((location) => ({ value: location.id, label: location.name }))]} />;
   function history(itemId?: string, sourceWarehouseId?: string) {
     setActive({ type: 'history', itemId, warehouseId: sourceWarehouseId ?? scopedWarehouse });
   }
@@ -116,18 +118,6 @@ export function WarehouseSection({
                 onChange={(v) => onView(v as WarehouseView)}
                 options={allowedViews.map((v) => ({ value: v.key, label: v.label }))}
               />
-            )}
-            {view === 'movement' && (
-              <WorkspaceHeaderActions>
-              <PeriodFilter
-                preset={preset}
-                setPreset={setPreset}
-                customFrom={customFrom}
-                customTo={customTo}
-                setCustomFrom={setCustomFrom}
-                setCustomTo={setCustomTo}
-              />
-              </WorkspaceHeaderActions>
             )}
           </>
           {!allowed ? (
@@ -171,7 +161,7 @@ export function WarehouseSection({
                       kind={
                         view === 'transfers' ? 'transfer' : view === 'writeoffs' ? 'writeoff' : 'inventory'
                       }
-                      warehouseId={warehouse.id}
+                      warehouseId={scopedWarehouse}
                       locations={locations}
                       onOpen={(id) => setActive({ type: 'document', id })}
                       onCreate={() =>
@@ -198,6 +188,9 @@ export function WarehouseSection({
                   {view === 'movement' && (
                     <WarehouseMovementSummary
                       filters={warehouseFilter}
+                      periodFilter={<PeriodFilter preset={preset} setPreset={setPreset}
+                        customFrom={customFrom} customTo={customTo}
+                        setCustomFrom={setCustomFrom} setCustomTo={setCustomTo} />}
                       warehouseId={scopedWarehouse}
                       range={range}
                       onOpen={openSource}
@@ -265,6 +258,7 @@ export function WarehouseSection({
                 onReturn={(id, warehouseId) =>
                   setActive({ type: 'start', action: 'supplier_return', id, warehouseId })
                 }
+                onOpenDocument={(id) => setActive({ type: 'document', id })}
               />
             )}
             {active?.type === 'processing' && (
@@ -400,37 +394,30 @@ export function PeriodFilter({
 }) {
   const items: { key: PeriodPreset; label: string }[] = [
     { key: 'today', label: 'Сегодня' },
-    { key: 'week', label: 'Неделя' },
-    { key: 'month', label: 'Месяц' },
+    { key: 'week', label: 'Последние 7 дней' },
+    { key: 'month', label: 'Последние 30 дней' },
     { key: 'custom', label: 'Период' },
   ];
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      <div className="inline-flex rounded-lg border border-border bg-white p-1">
-        {items.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-              preset === item.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-            }`}
-            onClick={() => setPreset(item.key)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
+      <Select ariaLabel="Период отчёта" className="h-9 min-w-40" value={preset}
+        onChange={(value) => setPreset(value as PeriodPreset)}
+        options={items.map((item) => ({ value: item.key, label: item.label }))} />
       {preset === 'custom' && (
         <div className="flex items-center gap-2">
           <DatePicker
+            aria-label="Начало периода отчёта"
             className="input h-10 w-[145px] text-sm"
             value={customFrom}
+            max={customTo || undefined}
             onChange={(value) => setCustomFrom(value)}
           />
           <span className="text-text-muted">-</span>
           <DatePicker
+            aria-label="Конец периода отчёта"
             className="input h-10 w-[145px] text-sm"
             value={customTo}
+            min={customFrom || undefined}
             onChange={(value) => setCustomTo(value)}
           />
         </div>

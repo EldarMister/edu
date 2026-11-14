@@ -1,10 +1,10 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
-import { minDishUnitPrice, money, variantNamesLine } from '@/lib/format';
+import { minDishUnitPrice, variantNamesLine } from '@/lib/format';
 import { resolveApiImage } from '@/lib/image';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
@@ -21,6 +21,9 @@ import {
 import { IconTrash, IconPlus } from '../components/icons';
 import type { MenuView } from './warehouse/navigation';
 import { MenuStockCatalogue } from './warehouse/MenuStockCatalogue';
+import { DishComposition } from './warehouse/CatalogueDetails';
+import { balanceMoney, balanceQuantity } from './warehouse/balance-format';
+import { normalizeUnitLabel } from './warehouse/units';
 import { EditorPage } from './warehouse/EditorPage';
 import { useEditorRoute, usePageFilter } from './warehouse/workspace-route';
 import { MenuEntryPage } from './MenuEntryPage';
@@ -46,9 +49,14 @@ export function MenuPage({
 function MenuDishList({ view }: { view: MenuView }) {
   const [categoryId, setCategoryId] = usePageFilter('category');
   const [search, setSearch] = usePageFilter('search');
+  const [availability, setAvailability] = usePageFilter('availability');
+  const [stationId, setStationId] = usePageFilter('station');
+  const [nameSort, setNameSort] = usePageFilter('nameSort', 'asc');
+  const [compositionId, setCompositionId] = useState<string | null>(null);
   const [, setParams] = useSearchParams();
   const location = useLocation();
   const { editor, openEditor, closeEditor } = useEditorRoute();
+  const compositionPanelId = useId();
   const stations = usePreparationStations().data ?? [];
   usePreparationStationUpdates();
   const categoriesQ = useAdminCategories();
@@ -64,16 +72,22 @@ function MenuDishList({ view }: { view: MenuView }) {
         const next = new URLSearchParams(previous);
         next.delete('search');
         next.delete('category');
+        next.delete('availability');
+        next.delete('station');
         return next;
       },
       { replace: true, state: location.state },
     );
   }
+  const categoryStations = new Map((categoriesQ.data ?? []).map((category) => [category.id, category.prepStation]));
+  const dishStation = (dish: AdminDish) => dish.prepStation ?? categoryStations.get(dish.categoryId) ?? 'none';
   const rows = (dishesQ.data ?? []).filter(
     (dish) =>
       (dish.catalogKind ?? (dish.hasDirectStock ? 'goods' : 'recipe')) ===
-      (isGoods ? 'goods' : 'recipe'),
-  );
+      (isGoods ? 'goods' : 'recipe') &&
+      (!stationId || dishStation(dish) === stationId) &&
+      (!availability || (availability === 'visible' ? dish.isAvailable && dish.isActive : !dish.isAvailable || !dish.isActive)),
+  ).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (nameSort === 'desc' ? -1 : 1));
   async function onDelete(dish: AdminDish) {
     if (!confirm(`Удалить «${dish.name}» из меню?`)) return;
     try {
@@ -130,17 +144,36 @@ function MenuDishList({ view }: { view: MenuView }) {
         />
         <Select
           ariaLabel="Категория"
-          className="h-9 w-48 border-0 bg-transparent text-primary"
+          className="poster-filter w-48"
           value={categoryId}
           onChange={setCategoryId}
           options={[
-            { value: '', label: 'Все категории' },
+            { value: '', label: 'Категория' },
             ...(categoriesQ.data ?? []).map((category) => ({
               value: category.id,
               label: category.name,
             })),
           ]}
         />
+        {stations.length > 0 && <Select
+          ariaLabel="Цех"
+          className="poster-filter w-40"
+          value={stationId}
+          onChange={setStationId}
+          options={[
+            { value: '', label: 'Цех' },
+            ...stations.filter((station) => station.isActive || station.id === stationId)
+              .map((station) => ({ value: station.id, label: station.name })),
+            { value: 'none', label: 'Без цеха' },
+          ]}
+        />}
+        <details className="relative">
+          <summary className="cursor-pointer list-none text-sm text-primary">+ Фильтр{availability ? ' •' : ''}</summary>
+          <div className="absolute left-0 top-full z-30 mt-2 w-60 border border-border bg-white p-3 shadow-md">
+            <Select ariaLabel="Доступность в меню" className="w-full" value={availability} onChange={setAvailability}
+              options={[{ value: '', label: 'Все позиции' }, { value: 'visible', label: 'Доступные в меню' }, { value: 'hidden', label: 'Скрытые' }]} />
+          </div>
+        </details>
       </div>
       {categoriesQ.isError && (
         <ListLoadError
@@ -161,14 +194,17 @@ function MenuDishList({ view }: { view: MenuView }) {
         />
       ) : (
         <div className="min-w-0 overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="poster-table poster-menu-table poster-catalogue-table w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b border-border text-left text-xs text-text-muted">
-                <th className="py-3 pr-4 font-normal">Название</th>
+                <th className="py-3 pr-4 font-normal" aria-sort={nameSort === 'desc' ? 'descending' : 'ascending'}>
+                  <button type="button" className="flex items-center gap-2" onClick={() => setNameSort(nameSort === 'desc' ? 'asc' : 'desc')}>
+                    Название <span aria-hidden>{nameSort === 'desc' ? '↓' : '↑'}</span>
+                  </button>
+                </th>
                 <th className="px-4 py-3 font-normal">Категория</th>
-                {!isGoods && <th className="px-4 py-3 font-normal">Выход</th>}
+                {!isGoods && <th className="px-4 py-3 text-right font-normal">Выход</th>}
                 <th className="px-4 py-3 text-right font-normal">Цена</th>
-                <th className="px-4 py-3 font-normal">Статус</th>
                 <th>
                   <span className="sr-only">Действия</span>
                 </th>
@@ -176,9 +212,11 @@ function MenuDishList({ view }: { view: MenuView }) {
             </thead>
             <tbody>
               {rows.map((dish) => (
-                <tr key={dish.id} className="border-b border-border hover:bg-background/40">
+                <Fragment key={dish.id}>
+                <tr className="border-b border-border hover:bg-background/40" data-expanded={compositionId === dish.id ? 'true' : undefined}>
                   <td className="py-3 pr-4">
                     <button
+                      type="button"
                       className="flex items-center gap-3 text-left"
                       onClick={() =>
                         openEditor({ type: dish.isSet ? 'set' : 'entry', id: dish.id })
@@ -196,6 +234,7 @@ function MenuDishList({ view }: { view: MenuView }) {
                       <span>
                         <span className="font-medium text-text-primary">{dish.name}</span>
                         {dish.isSet && <span className="ml-2 text-xs text-text-muted">Сет</span>}
+                        {(!dish.isAvailable || !dish.isActive) && <span className="ml-2 text-xs text-text-muted">Скрыт</span>}
                         {dish.variants.length > 0 && (
                           <span className="mt-0.5 block text-xs text-text-muted">
                             {variantNamesLine(dish.variants)}
@@ -206,29 +245,28 @@ function MenuDishList({ view }: { view: MenuView }) {
                   </td>
                   <td className="px-4 py-3 text-text-secondary">{dish.category.name}</td>
                   {!isGoods && (
-                    <td className="px-4 py-3 text-text-secondary">{dishOutput(dish)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-text-secondary">{dishOutput(dish)}</td>
                   )}
                   <td className="whitespace-nowrap px-4 py-3 text-right">
                     {dish.variants.length
-                      ? `от ${money(minDishUnitPrice(dish))}`
-                      : money(dish.price)}
-                  </td>
-                  <td className="px-4 py-3 text-text-secondary">
-                    {dish.isAvailable && dish.isActive ? 'Доступен' : 'Скрыт'}
+                      ? `от ${balanceMoney(minDishUnitPrice(dish))}`
+                      : balanceMoney(Number(dish.price))}
                   </td>
                   <td className="w-px px-3 py-3 text-right">
                     <div className="poster-row-actions">
-                      {!isGoods && !dish.isSet && can('actions.warehouseRecipes') && (
+                      {!isGoods && !dish.isSet && can('sections.warehouse') && (
                         <button
+                          type="button"
                           className="text-xs text-primary hover:underline"
-                          onClick={() =>
-                            openEditor({ type: 'entry', id: dish.id, action: 'recipe' })
-                          }
+                          aria-expanded={compositionId === dish.id}
+                          aria-controls={compositionId === dish.id ? `${compositionPanelId}-${dish.id}` : undefined}
+                          onClick={() => setCompositionId(compositionId === dish.id ? null : dish.id)}
                         >
                           Состав
                         </button>
                       )}
                       <button
+                        type="button"
                         className="text-xs text-primary hover:underline"
                         onClick={() =>
                           openEditor({ type: dish.isSet ? 'set' : 'entry', id: dish.id })
@@ -249,13 +287,19 @@ function MenuDishList({ view }: { view: MenuView }) {
                     </div>
                   </td>
                 </tr>
+                {compositionId === dish.id && (
+                  <tr className="poster-catalogue-detail-row"><td colSpan={isGoods ? 4 : 5}>
+                    <div id={`${compositionPanelId}-${dish.id}`} className="poster-catalogue-detail" aria-label={`Состав: ${dish.name}`}><DishComposition dish={dish} /></div>
+                  </td></tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>
           {!rows.length && (
             <div className="space-y-3 py-12 text-center text-sm text-text-muted" role="status">
               <p>
-                {search || categoryId
+                {search || categoryId || availability || stationId
                   ? 'Нет позиций по выбранным условиям'
                   : isGoods
                     ? editable
@@ -265,13 +309,13 @@ function MenuDishList({ view }: { view: MenuView }) {
                       ? 'Добавьте первую техкарту'
                       : 'Техкарт пока нет'}
               </p>
-              {(search || categoryId) && (
+              {(search || categoryId || availability || stationId) && (
                 <button
                   type="button"
                   className="text-primary hover:underline"
                   onClick={clearFilters}
                 >
-                  Сбросить поиск и категорию
+                  Сбросить фильтры
                 </button>
               )}
             </div>
@@ -286,7 +330,7 @@ function dishOutput(dish: AdminDish) {
     dish as AdminDish & { recipeMetadata?: { outputQuantity?: number; outputUnit?: string } | null }
   ).recipeMetadata;
   return metadata?.outputQuantity != null
-    ? `${metadata.outputQuantity} ${metadata.outputUnit ?? ''}`.trim()
+    ? balanceQuantity(metadata.outputQuantity, metadata.outputUnit ? normalizeUnitLabel(metadata.outputUnit) : '')
     : '—';
 }
 function ListLoadError({

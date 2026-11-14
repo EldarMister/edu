@@ -125,6 +125,10 @@ export class UpdateRecipeItemDto {
 // ---------- Закупки ----------
 
 export class PurchaseItemInputDto {
+  // Only PATCH may reuse the package snapshot of this exact saved purchase line.
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  purchaseItemId?: string;
+
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
   packageId?: string;
   @IsString() @IsNotEmpty()
@@ -179,6 +183,12 @@ export class CreatePurchaseDto extends PurchaseMetadataDto {
 }
 
 export class UpdatePurchaseDto extends PurchaseMetadataDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(40)
+  expectedUpdatedAt?: string;
+
+  @IsOptional() @IsString() @MaxLength(500)
+  correctionReason?: string;
+
   @IsOptional() @IsBoolean()
   complete?: boolean;
 

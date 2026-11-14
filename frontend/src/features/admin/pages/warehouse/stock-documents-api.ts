@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import type { WriteoffSourceInput, WriteoffSourceLine } from './writeoff-api';
 
 export type StockDocumentKind = 'inventory' | 'writeoff' | 'transfer' | 'supplier_return';
 export type InventoryMode = 'full' | 'partial';
@@ -36,11 +37,14 @@ export interface StockDocument {
   createdByName: string | null;
   postedByName: string | null;
   itemsCount: number;
+  productNames?: string[];
   varianceValue: number | null;
 }
 
 export interface StockDocumentDetails extends StockDocument {
   items: StockDocumentItem[];
+  sourceLines?: WriteoffSourceLine[];
+  sourceTotal?: number | null;
 }
 
 export interface DocumentInput {
@@ -52,17 +56,18 @@ export interface DocumentInput {
   recount?: boolean;
   reason?: WriteoffReason | null;
   note?: string;
-  items?: { ingredientId: string; quantity: number }[];
+  items?: { ingredientId: string; quantity: number | null }[];
+  sourceLines?: WriteoffSourceInput[];
 }
 
 const BASE_URL = '/admin/warehouse/documents';
 const WAREHOUSE_KEY = ['admin', 'warehouse'] as const;
 const DOCUMENTS_KEY = [...WAREHOUSE_KEY, 'documents'] as const;
 
-export function useStockDocuments(warehouseId: string, kind?: StockDocumentKind) {
+export function useStockDocuments(warehouseId?: string, kind?: StockDocumentKind, search?: string) {
   return useQuery({
-    queryKey: [...DOCUMENTS_KEY, 'list', warehouseId, kind],
-    queryFn: async () => (await api.get<StockDocument[]>(BASE_URL, { params: { warehouseId, kind } })).data,
+    queryKey: [...DOCUMENTS_KEY, 'list', warehouseId, kind, search],
+    queryFn: async () => (await api.get<StockDocument[]>(BASE_URL, { params: { warehouseId, kind, search } })).data,
   });
 }
 

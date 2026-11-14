@@ -7,7 +7,7 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import {
   ReverseWarehouseDocumentDto, CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WarehouseDocumentRevisionDto,
-  WarehouseDocumentsQueryDto, warehouseWriteoffReasons,
+  WarehouseDocumentsQueryDto, WriteoffPreviewDto, warehouseWriteoffReasons,
 } from './documents.dto';
 import { WarehouseDocumentsService } from './documents.service';
 import { assertWarehousePermission } from './warehouse-permissions';
@@ -20,13 +20,21 @@ export class WarehouseDocumentsController {
 
   @Get()
   list(@Query() query: WarehouseDocumentsQueryDto) {
-    return this.documents.list(query.warehouseId, query.kind);
+    return this.documents.list(query.warehouseId, query.kind, query.search);
   }
 
   @Get('reasons')
   reasons() {
     return Object.entries(warehouseWriteoffReasons).map(([id, label]) => ({ id, label }));
   }
+
+  @Get('writeoff-options')
+  @RequirePermission('actions.warehouseWriteoff')
+  writeoffOptions() { return this.documents.writeoffOptions(); }
+
+  @Post('writeoff-preview')
+  @RequirePermission('actions.warehouseWriteoff')
+  writeoffPreview(@Body() dto: WriteoffPreviewDto) { return this.documents.writeoffPreview(dto); }
 
   @Get(':id')
   get(@Param('id') id: string) {

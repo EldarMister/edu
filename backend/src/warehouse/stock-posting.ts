@@ -55,7 +55,9 @@ export async function postStockMovement(tx: Prisma.TransactionClient, input: {
   const valuationAdjustment = stock.mul(avgCost).sub(before.stock.mul(before.avgCost)).sub(change.mul(cost)).toDecimalPlaces(8);
   await setWarehouseBalance(tx, input.warehouse, ingredient.id, { stock, avgCost, valuationKnown });
   const movement = await tx.stockMovement.create({ data: {
-    ...input.movement, cafeId: ingredient.cafeId, ingredientId: ingredient.id,
+    // PostgreSQL now() is the transaction start, which may precede a long lock
+    // wait. Record the actual posting time so dependent operations stay ordered.
+    ...input.movement, createdAt: input.movement.createdAt ?? new Date(), cafeId: ingredient.cafeId, ingredientId: ingredient.id,
     warehouseId: input.warehouse?.id ?? null,
     warehouseKey: input.warehouse?.isDefault ? 'default' : input.warehouse?.id ?? 'default',
     beforeStock: before.stock, change, afterStock: stock, costAtMoment: cost, valuationAdjustment,

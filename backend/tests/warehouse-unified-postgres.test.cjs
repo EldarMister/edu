@@ -48,7 +48,7 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
         assert.equal(card.lastPurchasePrice, 100);
         assert.equal(card.balances.length, 2);
         await assert.rejects(items.update(rice.id, { unit: 'l' }), /Нельзя менять/);
-        await assert.rejects(purchases.update(receipt.id, { supplier: 'Незаметная правка' }), /неизменяем/);
+        await assert.rejects(purchases.update(receipt.id, { supplier: 'Незаметная правка' }), /изменилась/);
       });
       const cola = await items.create({ name: 'Кола', unit: 'pcs', kind: 'beverage', purchaseUnit: 'коробка', purchaseFactor: 24 });
       await t.test('individual package factors and exact supplier discounts', async () => {
@@ -90,30 +90,33 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
         await docs.reverse(owner, returned.id, 'Поставщик заменил товар на месте');
         assert.deepEqual([(await stock(rice.id)).stock, (await stock(rice.id)).avgCost], [20, 90]);
       });
-      await t.test('inventory rejects a negative outcome after concurrent consumption', async () => {
-        const count = await docs.create(owner, { warehouseId: main.id, kind: 'inventory', mode: 'partial', items: [{ ingredientId: cola.id, quantity: 0 }] });
-        await post({ kind: 'writeoff', reason: 'damage', items: [{ ingredientId: cola.id, quantity: 1 }] });
+      await t.test('zero physical count is applied to current stock after concurrent consumption', async () => {
+        const counted = await items.create({ name: 'Проверка нулевого факта', unit: 'pcs', stock: 24 });
+        const count = await docs.create(owner, { warehouseId: main.id, kind: 'inventory', mode: 'partial', items: [{ ingredientId: counted.id, quantity: 0 }] });
+        await post({ kind: 'writeoff', reason: 'damage', items: [{ ingredientId: counted.id, quantity: 1 }] });
         const submitted = await docs.submit(owner, count.id, count.revision);
-        await assert.rejects(docs.approve(owner, count.id, submitted.revision), /недостаточно/);
-        assert.equal((await stock(cola.id)).stock, 23);
+        const posted = await docs.approve(owner, count.id, submitted.revision);
+        assert.equal(posted.items[0].expected, 23);
+        assert.equal(posted.items[0].difference, -23);
+        assert.equal((await stock(counted.id)).stock, 0);
       });
-      await t.test('inventory keeps its start snapshot before first entry and through later edits', async () => {
+      await t.test('inventory preview and approval use current book stock without changing entered counts', async () => {
         const water = await items.create({ name: 'Вода для пересчёта', unit: 'pcs', stock: 24, kind: 'beverage' });
         const draft = await docs.create(owner, { warehouseId: main.id, kind: 'inventory', mode: 'full' });
         await post({ kind: 'writeoff', reason: 'damage', items: [{ ingredientId: water.id, quantity: 2 }] });
         const lines = draft.items.map((line) => ({ ingredientId: line.ingredientId, quantity: line.ingredientId === water.id ? 21 : line.expected }));
         const entered = await docs.update(owner, draft.id, { revision: draft.revision, items: lines });
-        assert.equal(entered.items.find((line) => line.ingredientId === water.id).expected, 24);
+        assert.equal(entered.items.find((line) => line.ingredientId === water.id).expected, 22);
         const submitted = await docs.submit(owner, draft.id, entered.revision);
         await docs.approve(owner, draft.id, submitted.revision);
-        assert.equal((await stock(water.id)).stock, 19);
+        assert.equal((await stock(water.id)).stock, 21);
         const next = await docs.create(owner, { warehouseId: main.id, kind: 'inventory', mode: 'partial', items: [{ ingredientId: water.id, quantity: 18 }] });
         await post({ kind: 'writeoff', reason: 'damage', items: [{ ingredientId: water.id, quantity: 1 }] });
         const changed = await docs.update(owner, next.id, { revision: next.revision, items: [{ ingredientId: water.id, quantity: 17 }] });
-        assert.equal(changed.items[0].expected, 19);
+        assert.equal(changed.items[0].expected, 20);
         const pending = await docs.submit(owner, next.id, changed.revision);
         await docs.approve(owner, next.id, pending.revision);
-        assert.equal((await stock(water.id)).stock, 16);
+        assert.equal((await stock(water.id)).stock, 17);
       });
       await t.test('catalog cannot resurrect a separate stock system and item cards cannot bypass documents', async () => {
         const catalog = new CatalogService(db, { emitBroadcast() {} }, { async log() {} });
@@ -124,7 +127,7 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
         await assert.rejects(catalog.createDish({ name: 'Второй учёт', categoryId: category.id, price: 10, trackInventory: true, stock: 5 }, owner), /Складской учёт/);
         await assert.rejects(items.update(cola.id, { avgCost: 1 }), /документом/);
         await assert.rejects(items.update(cola.id, { stock: 999 }), /документом/);
-        assert.equal((await stock(cola.id)).stock, 23);
+        assert.equal((await stock(cola.id)).stock, 24);
         await db.dish.delete({ where: { id: dish.id } });
         await db.category.delete({ where: { id: category.id } });
       });

@@ -9,7 +9,8 @@ import { resolveWarehouseSupplier } from './suppliers';
 import { purchaseUnitsFor, validatePurchaseUnits } from './purchase-units';
 import { postStockMovement } from './stock-posting';
 import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
-import { getWarehouseBalance, resolveWarehouse, setWarehouseBalance, warehouseBalances } from './warehouse-location';
+import { getWarehouseBalance, resolveWarehouse, setWarehouseBalance, warehouseBalances, warehouseDocumentFilter } from './warehouse-location';
+import { getCafeId } from '../tenant/tenant-context';
 import {
   assertUnitMatchesType,
   baseUnitForType,
@@ -149,6 +150,56 @@ export class IngredientsService {
       return { ...this.serialize({ ...ingredient, ...aggregate }), balances,
         usedInDishes: [...new Map([...recipes.map(({ dish }) => dish), ...direct].map((dish) => [dish.id, dish])).values()],
         lastPurchasePrice: latest ? costFromBase(Number(latest.unitPriceBase), unit) : null };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async supplies(id: string, params: { warehouseId?: string; page?: number; pageSize?: number }) {
+    const page = params.page ?? 1;
+    const pageSize = params.pageSize ?? 20;
+    return this.prisma.$transaction(async (db) => {
+      const ingredient = await this.ensure(id, db);
+      const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(db, params.warehouseId);
+      const defaultWarehouse = await db.warehouse.findFirst({ where: { isDefault: true } });
+      const cafeId = getCafeId();
+      const where: Prisma.PurchaseWhereInput = {
+        cafeId,
+        status: 'completed',
+        ...warehouseDocumentFilter(warehouse),
+        items: { some: { ingredientId: id, cafeId } },
+      };
+      const total = await db.purchase.count({ where });
+      const purchases = await db.purchase.findMany({
+        where,
+        orderBy: [{ date: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true, number: true, date: true, supplier: true,
+          warehouse: { select: { id: true, name: true } },
+          items: {
+            where: { ingredientId: id, cafeId },
+            select: { quantityBase: true, total: true },
+          },
+        },
+      });
+      const unit = normalizeUnit(ingredient.displayUnit);
+      const factor = toBase(1, unit);
+      const rows = purchases.map((purchase) => {
+        const quantityBase = purchase.items.reduce((sum, item) => sum.add(item.quantityBase), new Prisma.Decimal(0));
+        const quantity = quantityBase.div(factor);
+        // Line totals already contain the allocated purchase discount.
+        const value = purchase.items.reduce((sum, item) => sum.add(item.total), new Prisma.Decimal(0));
+        const location = purchase.warehouse ?? defaultWarehouse;
+        return {
+          purchaseId: purchase.id, number: purchase.number, date: purchase.date,
+          warehouseId: location?.id ?? null, warehouseName: location?.name ?? 'Основной склад',
+          supplier: purchase.supplier, quantity: Number(quantity),
+          unitCode: unit, unit: unitLabel(unit),
+          unitPrice: quantity.isZero() ? null : Number(value.div(quantity).toDecimalPlaces(8)),
+          total: Number(value),
+        };
+      });
+      return { rows, total, page, pageSize };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 

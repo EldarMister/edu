@@ -16,7 +16,7 @@ type ReportRow = {
   sourceType: string | null; sourceId: string | null; documentLabel: string | null;
   employeeId: string | null; employeeName: string | null; reason: string | null; type: string;
 };
-type InternalRow = ReportRow & { exactCost: Prisma.Decimal; exactAdjustment: Prisma.Decimal };
+type InternalRow = ReportRow & { exactQuantity: Prisma.Decimal; exactCost: Prisma.Decimal; exactAdjustment: Prisma.Decimal };
 const zero = new Prisma.Decimal(0);
 
 @Injectable()
@@ -47,7 +47,9 @@ export class WarehouseReportsService {
       totalCost: rows.every((row) => row.costKnown) ? Number(totalCost.toDecimalPlaces(2)) : null,
       totalValuationAdjustment: Number(rows.reduce((sum, row) => sum.add(row.exactAdjustment), zero).toDecimalPlaces(2)),
       salesPerformance,
-      rows: rows.slice((page - 1) * pageSize, page * pageSize).map(({ exactCost, exactAdjustment, ...row }) => row),
+      ...((query.view ?? 'movements') === 'movements' && query.ingredientId
+        ? { movementGroups: groupMovements(rows) } : {}),
+      rows: rows.slice((page - 1) * pageSize, page * pageSize).map(({ exactQuantity, exactCost, exactAdjustment, ...row }) => row),
     };
   }
 
@@ -167,6 +169,7 @@ export class WarehouseReportsService {
             id: `${location.id}:${ingredient.id}`, createdAt: null, ingredientId: ingredient.id,
             ingredientName: ingredient.name, category: ingredient.category, warehouseId: location.id,
             warehouseName: location.name, quantity: Number(balance.stock.div(unitDef(unit).factor)), unit: unitLabel(unit),
+            exactQuantity: balance.stock.div(unitDef(unit).factor),
             unitCost: balance.valuationKnown ? Number(balance.avgCost.mul(unitDef(unit).factor).toDecimalPlaces(8)) : null,
             totalCost: balance.valuationKnown || balance.stock.isZero() ? Number(balance.stockValue.toDecimalPlaces(2)) : null, exactCost: balance.stockValue,
             costKnown: balance.valuationKnown || balance.stock.isZero(),
@@ -215,6 +218,7 @@ export class WarehouseReportsService {
         warehouseId: movement.warehouseId ?? defaultWarehouse?.id ?? null,
         warehouseName: names.get(movement.warehouseId ?? '') ?? defaultWarehouse?.name ?? 'Основной склад',
         quantity: Number(movement.change.div(unitDef(unit).factor)), unit: unitLabel(unit),
+        exactQuantity: movement.change.div(unitDef(unit).factor),
         unitCost: movement.costKnown ? Number(movement.costAtMoment.mul(unitDef(unit).factor).toDecimalPlaces(8)) : null,
         totalCost: movement.costKnown ? Number(exactCost.toDecimalPlaces(2)) : null, exactCost, sourceType: movement.sourceType,
         costKnown: movement.costKnown,
@@ -242,6 +246,48 @@ function viewFilter(view: WarehouseReportView): Prisma.StockMovementWhereInput {
 
 function documentName(kind: string) {
   return ({ inventory: 'Инвентаризация', writeoff: 'Списание', transfer: 'Перемещение', supplier_return: 'Возврат поставщику' } as Record<string, string>)[kind] ?? 'Складской документ';
+}
+
+function groupMovements(rows: InternalRow[]) {
+  // Quantities from different ingredients cannot form a meaningful unit price.
+  if (new Set(rows.map((row) => row.ingredientId)).size > 1) return undefined;
+  type Group = {
+    direction: 'incoming' | 'outgoing'; sourceType: string; label: string; unit: string;
+    quantity: Prisma.Decimal; cost: Prisma.Decimal; costKnown: boolean; count: number;
+  };
+  const groups = new Map<string, Group>();
+  for (const row of rows) {
+    // Pure valuation and prepared-loss evidence does not move physical quantity.
+    if (row.exactQuantity.isZero()) continue;
+    const direction = row.exactQuantity.gt(0) ? 'incoming' : 'outgoing';
+    const sourceType = row.sourceType ?? 'manual';
+    const key = JSON.stringify([direction, sourceType, row.unit]);
+    const group = groups.get(key) ?? {
+      direction, sourceType, label: movementGroupLabel(sourceType, direction), unit: row.unit,
+      quantity: zero, cost: zero, costKnown: true, count: 0,
+    };
+    group.quantity = group.quantity.add(row.exactQuantity.abs());
+    group.cost = group.cost.add(row.exactCost.abs());
+    group.costKnown &&= row.costKnown;
+    group.count++;
+    groups.set(key, group);
+  }
+  return [...groups.values()]
+    .sort((a, b) => a.direction.localeCompare(b.direction) || a.label.localeCompare(b.label, 'ru') || a.unit.localeCompare(b.unit))
+    .map((group) => ({
+      direction: group.direction, sourceType: group.sourceType, label: group.label,
+      quantity: Number(group.quantity), unit: group.unit,
+      averageCost: group.costKnown ? Number(group.cost.div(group.quantity).toDecimalPlaces(8)) : null,
+      count: group.count,
+    }));
+}
+
+function movementGroupLabel(sourceType: string, direction: 'incoming' | 'outgoing') {
+  if (['inventory', 'writeoff', 'transfer', 'supplier_return'].includes(sourceType)) return documentName(sourceType);
+  return ({
+    purchase: 'Поставки', order: direction === 'incoming' ? 'Возвраты продаж' : 'Продажи',
+    processing: 'Переработки', production: 'Производство', manual: 'Корректировки',
+  } as Record<string, string>)[sourceType] ?? 'Движения склада';
 }
 
 export function csvCell(value: string) {

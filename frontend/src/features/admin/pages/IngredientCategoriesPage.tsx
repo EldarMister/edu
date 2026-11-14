@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { EditorPage } from './warehouse/EditorPage';
@@ -8,6 +8,8 @@ import { api, apiError } from '@/lib/api';
 import { useIngredients } from './warehouse/api';
 import { QueryState } from './warehouse/WarehouseUi';
 import { useEditorRoute, usePageFilter } from './warehouse/workspace-route';
+import { WorkspaceHeaderCount } from './WorkspaceHeader';
+import { WorkspaceSearch } from './WorkspaceSearch';
 
 export function IngredientCategoriesPage() {
   const query = useIngredients('');
@@ -15,6 +17,8 @@ export function IngredientCategoriesPage() {
   const { can } = usePermissions();
   const [, setRoute] = useSearchParams();
   const [search, setSearch] = usePageFilter('search');
+  const [sort, setSort] = usePageFilter('sort', 'asc');
+  const formId = useId();
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const editing = editor?.type === 'ingredientCategory' ? editor.id : undefined;
   const [name, setName] = useState('');
@@ -25,10 +29,10 @@ export function IngredientCategoriesPage() {
       groups.set(item.category, (groups.get(item.category) ?? 0) + 1);
     }
   }
-  const rows = [...groups].sort(([a], [b]) => a.localeCompare(b, 'ru'))
-    .filter(([category]) => category.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  const rows = [...groups].sort(([a], [b]) => a.localeCompare(b, 'ru') * (sort === 'desc' ? -1 : 1))
+    .filter(([category]) => category.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
   const rename = useMutation({
-    mutationFn: () => api.post('/admin/warehouse/ingredients/categories/rename', { from: editing, to: name }),
+    mutationFn: () => api.post('/admin/warehouse/ingredients/categories/rename', { from: editing, to: name.trim() }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] });
       closeEditor();
@@ -52,25 +56,39 @@ export function IngredientCategoriesPage() {
     }
   }
   return <>
-    {!editing && <div className="overflow-hidden">
+    {!editing && <div>
+      <WorkspaceHeaderCount count={query.isSuccess ? groups.size : undefined} />
       <div className="poster-toolbar">
-        <input aria-label="Поиск категории" className="input h-10 sm:max-w-xs" placeholder="Быстрый поиск" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <WorkspaceSearch label="Поиск категории" value={search} onChange={setSearch} />
       </div>
       <QueryState pending={query.isPending} error={query.error}>
-        {rows.length ? <div className="overflow-x-auto"><table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-background/40 text-xs text-text-muted"><tr><th className="p-4">Название</th><th className="p-4 text-right">Ингредиентов</th><th /></tr></thead>
-          <tbody className="divide-y divide-border">{rows.map(([category, count]) => <tr key={category}>
-            <td className="p-4"><button className="font-medium text-primary hover:underline" onClick={() => setRoute({ section: 'menu', view: 'ingredients', category })}>{category}</button></td>
-            <td className="p-4 text-right">{count}</td>
-            <td className="p-4 text-right">{can('actions.warehouseSettings') && <button className="text-primary" onClick={() => { rename.reset(); setName(category); openEditor({ type: 'ingredientCategory', id: category }); }}>Ред.</button>}</td>
-          </tr>)}</tbody>
-        </table></div> : <p className="p-8 text-center text-sm text-text-muted">Категории пока не добавлены. Укажите категорию в карточке ингредиента.</p>}
+        <div className="overflow-x-auto"><table className="poster-table poster-directory-table poster-directory-table--categories w-full min-w-[480px]">
+          <colgroup><col style={{ width: '46%' }} /><col /><col style={{ width: 96 }} /></colgroup>
+          <thead><tr>
+            <th aria-sort={sort === 'desc' ? 'descending' : 'ascending'}>
+              <button type="button" className="inline-flex items-center gap-2" onClick={() => setSort(sort === 'desc' ? 'asc' : 'desc')}
+                aria-label={`Сортировать категории: ${sort === 'desc' ? 'от А до Я' : 'от Я до А'}`}>
+                Категория <span aria-hidden="true">{sort === 'desc' ? '↓' : '↑'}</span>
+              </button>
+            </th>
+            <th>Кол-во ингредиентов</th><th><span className="sr-only">Действия</span></th>
+          </tr></thead>
+          <tbody>{rows.map(([category, count]) => <tr key={category}>
+            <td><button type="button" className="block max-w-full truncate text-left text-primary" title={category} onClick={() => setRoute({ section: 'menu', view: 'ingredients', category })}>{category}</button></td>
+            <td className="tabular-nums">{count}</td>
+            <td>{can('actions.warehouseSettings') && <div className="poster-row-actions"><button type="button" aria-label={`Редактировать категорию: ${category}`} onClick={() => { rename.reset(); setName(category); openEditor({ type: 'ingredientCategory', id: category }); }}>Ред.</button></div>}</td>
+          </tr>)}
+          {!rows.length && <tr><td colSpan={3} className="poster-directory-empty text-center text-text-muted">
+            {search ? 'Категории не найдены' : 'Категории пока не добавлены. Укажите категорию в карточке ингредиента.'}
+          </td></tr>}
+          </tbody>
+        </table></div>
       </QueryState>
     </div>}
     {editing && can('actions.warehouseSettings') && <EditorPage onClose={closeEditor} title="Редактирование категории ингредиентов"
-      footer={<button form="ingredient-category-editor" type="submit" className="btn-primary btn-md" disabled={!name.trim() || rename.isPending}>Сохранить</button>}>
-      <form id="ingredient-category-editor" onSubmit={(e) => { e.preventDefault(); rename.mutate(); }} className="poster-form poster-form--directory space-y-4">
-        <DocumentField label="Название"><input autoFocus aria-label="Название категории" className="input w-full" value={name} maxLength={120} onChange={(e) => setName(e.target.value)} /></DocumentField>
+      footer={<button form={formId} type="submit" className="btn-primary btn-md" disabled={!name.trim() || rename.isPending}>Сохранить</button>}>
+      <form id={formId} onSubmit={(e) => { e.preventDefault(); if (name.trim() && !rename.isPending) rename.mutate(); }} className="poster-form poster-form--directory space-y-4">
+        <DocumentField label="Название"><input aria-label="Название категории" className="input w-full" value={name} maxLength={120} required onChange={(e) => setName(e.target.value)} /></DocumentField>
         {rename.error && <p role="alert" className="text-sm text-danger">{apiError(rename.error)}</p>}
       </form>
     </EditorPage>}

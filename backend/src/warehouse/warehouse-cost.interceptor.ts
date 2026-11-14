@@ -8,7 +8,7 @@ const costFields = new Set(['recipeTotalCost', 'recipeUnitCost', 'avgCost', 'avg
   'netRevenue', 'actualCost', 'grossMargin',
   'valuationAdjustment', 'totalValuationAdjustment',
   'openingAvgCost', 'openingValue', 'closingAvgCost', 'closingValue',
-  'unitCost', 'varianceValue', 'value', 'ingredientWriteOffTotal', 'purchasesTotal', 'lossesTotal', 'lastPurchasePrice']);
+  'unitCost', 'varianceValue', 'value', 'total', 'sourceTotal', 'ingredientWriteOffTotal', 'purchasesTotal', 'lossesTotal', 'lastPurchasePrice']);
 
 export function redactWarehouseCosts(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(redactWarehouseCosts);

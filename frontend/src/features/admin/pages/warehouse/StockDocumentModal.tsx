@@ -1,15 +1,18 @@
-import { useState } from 'react';
-import { Modal } from '@/components/Modal';
-import { EditorPage } from './EditorPage';
+import { useEffect, useId, useRef, useState } from 'react';
+import { EditorPage, useEditorDirty } from './EditorPage';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
+import { WorkspaceSearch } from '../WorkspaceSearch';
 import { DocumentProductPicker } from './DocumentProductPicker';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
+import { balanceMoney, balanceQuantity } from './balance-format';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { DocumentField, DocumentFooter } from './WarehouseUi';
-import { qty, useIngredients, useWarehouseLocations, type Ingredient, type WarehouseLocation } from './api';
+import { qty, purchaseNumber, usePurchase, useIngredients, useWarehouseLocations, type Ingredient, type WarehouseLocation } from './api';
+import { documentQuantityError, documentQuantityValue, returnableQuantityInUnit } from './stock-document-form';
+import { WriteoffLines, useWriteoffLines } from './WriteoffLines';
 import {
   useStockDocument,
   useStockDocumentMutations,
@@ -71,6 +74,7 @@ export function StockDocumentModal({
           warehouse={documentWarehouse}
           onReload={() => query.refetch()}
           canApprove={canApprove}
+          onClose={onClose}
         />
       )}
       {document && document.status !== 'draft' && (
@@ -89,16 +93,22 @@ function draftItems(document: StockDocumentDetails): DraftItem[] {
   return document.items.map((item) => ({ item, input: item.quantity === null ? '' : String(item.quantity) }));
 }
 
+function draftValues(items: DraftItem[], reason: string, note: string) {
+  return JSON.stringify({ items: items.map(({ item, input }) => [item.ingredientId, input.trim() && !Number.isFinite(Number(input)) ? input : documentQuantityValue(input)]), reason, note: note.trim() });
+}
+
 function StockDocumentDraft({
   document,
   warehouse,
   onReload,
   canApprove,
+  onClose,
 }: {
   document: StockDocumentDetails;
   warehouse: WarehouseLocation;
   onReload: () => Promise<{ data?: StockDocumentDetails }>;
   canApprove: boolean;
+  onClose: () => void;
 }) {
   const { update } = useStockDocumentMutations();
   const { can } = usePermissions();
@@ -106,38 +116,59 @@ function StockDocumentDraft({
     `actions.${document.kind === 'inventory' ? 'warehouseCount' : document.kind === 'writeoff' ? 'warehouseWriteoff' : document.kind === 'transfer' ? 'warehouseTransfer' : 'warehouseReceive'}`,
   );
   const ingredients = useIngredients('', warehouse.id);
+  const writeoffLines = useWriteoffLines(document.kind === 'writeoff', warehouse.id, document);
+  const sourcePurchase = usePurchase(document.kind === 'supplier_return' ? document.sourcePurchaseId ?? null : null);
+  const returnable = new Map(sourcePurchase.data?.returnableItems?.map((item) => [item.ingredientId, item]));
   const push = useNotifications((state) => state.push);
   const [baseRevision, setBaseRevision] = useState(document.revision);
   const [items, setItems] = useState(() => draftItems(document));
   const [reason, setReason] = useState<WriteoffReason | ''>(document.reason ?? '');
   const [note, setNote] = useState(document.note ?? '');
+  const [savedValues, setSavedValues] = useState(() => draftValues(draftItems(document), document.reason ?? '', document.note ?? ''));
+  const { markSaved } = useEditorDirty(draftValues(items, reason, note) !== savedValues || (document.kind === 'writeoff' && writeoffLines.dirty));
   const [error, setError] = useState('');
-  const [recountOpen, setRecountOpen] = useState(false);
   const [reloading, setReloading] = useState(false);
+  const [validationAttempt, setValidationAttempt] = useState(0);
+  const [submitAttempt, setSubmitAttempt] = useState(false);
+  const formRef = useRef<HTMLDivElement>(null);
+  const formId = useId();
   const writeoff = document.kind !== 'inventory';
   const needsReason = document.kind === 'writeoff';
   const full = document.mode === 'full';
   const stale = baseRevision !== document.revision;
   const pending = update.isPending || reloading || !editable;
+  const sourceReady = document.kind !== 'supplier_return' || sourcePurchase.isSuccess;
   const usedIds = new Set(items.map(({ item }) => item.ingredientId));
   const byId = new Map(ingredients.data?.map((ingredient) => [ingredient.id, ingredient]));
   const available = (ingredients.data ?? []).filter(
-    ({ id, preparationMode }) => !usedIds.has(id) && preparationMode !== 'virtual',
+    ({ id, preparationMode }) => !usedIds.has(id) && preparationMode !== 'virtual' &&
+      (document.kind !== 'supplier_return' || (returnable.get(id)?.remainingQuantityBase ?? 0) > 0),
   );
+  function remainingFor(item: StockDocumentItem) {
+    return document.kind === 'supplier_return' && sourceReady
+      ? returnableQuantityInUnit(returnable.get(item.ingredientId)?.remainingQuantityBase ?? 0, item.unit)
+      : undefined;
+  }
   const counted = items.filter(({ input }) => input.trim() !== '');
-  const invalidCount = counted.some(({ input }) => {
-    const quantity = Number(input);
-    return !Number.isFinite(quantity) || quantity < 0 || (writeoff && quantity === 0);
-  });
-  const allCounted = !full || counted.length === items.length;
+  const quantityError = document.kind === 'writeoff' ? writeoffLines.firstError : items.map(({ item, input }) => documentQuantityError(input, !writeoff, remainingFor(item))).find(Boolean);
+  const invalidCount = !!quantityError;
+  const allCounted = counted.length === items.length;
   const canSubmit =
-    counted.length > 0 && allCounted && (!needsReason || (reason && (reason !== 'other' || note.trim())));
+    (document.kind === 'writeoff' ? writeoffLines.enteredCount > 0 && writeoffLines.ready : counted.length > 0 && allCounted) &&
+    (!needsReason || (reason && (reason !== 'other' || note.trim())));
+  const reasonError = validationAttempt && submitAttempt && needsReason && !reason ? 'Выберите причину списания.' : '';
+  const noteError = validationAttempt && submitAttempt && needsReason && reason === 'other' && !note.trim() ? 'Уточните причину списания.' : '';
+  useEffect(() => {
+    if (validationAttempt) formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [validationAttempt]);
 
   function adopt(saved: StockDocumentDetails) {
     setBaseRevision(saved.revision);
     setItems(draftItems(saved));
     setReason(saved.reason ?? '');
     setNote(saved.note ?? '');
+    setSavedValues(draftValues(draftItems(saved), saved.reason ?? '', saved.note ?? ''));
+    if (document.kind === 'writeoff') writeoffLines.adopt(saved);
   }
 
   function addIngredient(ingredientId: string) {
@@ -163,8 +194,15 @@ function StockDocumentDraft({
   }
 
   async function save(action: 'save' | 'submit' | 'recount') {
-    if (pending || invalidCount || stale || (action === 'submit' && !canSubmit)) return;
+    if (pending || stale || !sourceReady) return;
     setError('');
+    setValidationAttempt((attempt) => attempt + 1);
+    setSubmitAttempt(action === 'submit');
+    if (invalidCount || (action === 'submit' && !canSubmit)) return;
+    if (document.kind === 'writeoff' && !writeoffLines.ready) {
+      setError('Дождитесь расчёта состава или обновите предварительный расчёт.');
+      return;
+    }
     try {
       const saved = await update.mutateAsync({
         id: document.id,
@@ -173,13 +211,14 @@ function StockDocumentDraft({
         reason: needsReason ? reason || null : undefined,
         note: note.trim(),
         recount: action === 'recount' || undefined,
-        items: counted.map(({ item, input }) => ({
+        sourceLines: document.kind === 'writeoff' ? writeoffLines.input() : undefined,
+        items: document.kind === 'writeoff' ? undefined : items.map(({ item, input }) => ({
           ingredientId: item.ingredientId,
-          quantity: Number(input),
+          quantity: documentQuantityValue(input),
         })),
       });
       adopt(saved);
-      setRecountOpen(false);
+      markSaved();
       if (action === 'submit') {
         push({
           message: canApprove ? 'Документ проведён' : 'Документ отправлен на утверждение',
@@ -188,6 +227,7 @@ function StockDocumentDraft({
       } else {
         push({ message: 'Черновик сохранён', at: new Date().toISOString() });
       }
+      if (action === 'submit' || writeoff) onClose();
     } catch (err) {
       setError(apiError(err));
     }
@@ -206,11 +246,11 @@ function StockDocumentDraft({
 
   const rows = items.map(({ item, input }) => {
     const ingredient = byId.get(item.ingredientId);
+    const preview = document.items.find((row) => row.ingredientId === item.ingredientId) ?? item;
     const quantity = input.trim() === '' ? null : Number(input);
     const validQuantity = quantity !== null && Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
-    const changed = validQuantity !== item.quantity;
-    const expected = item.expected ?? ingredient?.stock ?? null;
-    const unitCost = item.costKnown === false ? null : (item.unitCost ?? ingredient?.avgCost ?? null);
+    const expected = preview.expected ?? ingredient?.stock ?? null;
+    const unitCost = preview.costKnown === false ? null : (preview.unitCost ?? ingredient?.avgCost ?? null);
     const difference =
       validQuantity === null
         ? null
@@ -225,36 +265,64 @@ function StockDocumentDraft({
       ...item,
       expected,
       quantity: validQuantity,
-      difference: changed ? difference : item.difference,
-      value: changed ? value : item.value,
+      difference,
+      value,
       input,
+      error: validationAttempt ? documentQuantityError(input, !writeoff, remainingFor(item)) : undefined,
+      remaining: remainingFor(item),
     };
   });
-  const totals = rows.filter((row) => row.quantity !== null && row.value !== null);
-  const total = totals.length ? totals.reduce((sum, row) => sum + (row.value ?? 0), 0) : null;
+  const totals = rows.filter((row) => row.quantity !== null);
+  const unknownValue = totals.some((row) => row.value === null && row.difference !== 0);
+  const total = totals.length && !unknownValue ? totals.reduce((sum, row) => sum + (row.value ?? 0), 0) : null;
+  const submitHint = quantityError
+    ? quantityError
+    : document.kind === 'writeoff' && !writeoffLines.enteredCount
+      ? 'Добавьте продукт или блюдо и укажите количество.'
+    : document.kind !== 'writeoff' && !counted.length
+      ? writeoff ? 'Добавьте продукт и укажите количество.' : 'Внесите фактический остаток хотя бы одного продукта.'
+      : !allCounted
+        ? `Осталось посчитать: ${items.length - counted.length}. Для отсутствующего продукта укажите 0.`
+        : needsReason && !reason
+          ? 'Выберите причину списания.'
+          : needsReason && reason === 'other' && !note.trim()
+            ? 'Уточните причину списания в комментарии.'
+            : '';
 
   return (
-    <div className="poster-form poster-form--document space-y-6">
-      <DocumentHeader document={document} warehouse={warehouse} />
-      <div className="space-y-3">
+    <div
+      ref={formRef}
+      className={`poster-form poster-form--document space-y-6 ${writeoff ? 'poster-document--modern' : 'poster-document--inventory'}`}
+    >
+      <div className="poster-document-panel poster-document-fields space-y-3">
+        <DocumentHeader document={document} warehouse={warehouse} />
         {needsReason && (
           <DocumentField label="Причина списания">
             <Select
               ariaLabel="Причина списания"
+              ariaInvalid={!!reasonError || undefined}
+              ariaDescribedBy={reasonError ? `${formId}-reason-error` : undefined}
+              disabled={pending || stale}
               className="h-10 w-full"
               value={reason}
               onChange={(value) => setReason(value as WriteoffReason)}
               options={WRITEOFF_REASONS}
             />
+            {reasonError && <p id={`${formId}-reason-error`} className="mt-1 text-xs text-danger">{reasonError}</p>}
           </DocumentField>
         )}
         <DocumentField label={reason === 'other' ? 'Уточните причину' : 'Комментарий'}>
           <textarea
             className="input h-14 w-full"
+            aria-label={reason === 'other' ? 'Уточните причину' : 'Комментарий'}
+            aria-invalid={!!noteError || undefined}
+            aria-describedby={noteError ? `${formId}-note-error` : undefined}
             value={note}
             maxLength={1000}
+            disabled={pending || stale}
             onChange={(event) => setNote(event.target.value)}
           />
+          {noteError && <p id={`${formId}-note-error`} className="mt-1 text-xs text-danger">{noteError}</p>}
         </DocumentField>
       </div>
       {ingredients.isError && (
@@ -262,11 +330,18 @@ function StockDocumentDraft({
           {apiError(ingredients.error)}
         </p>
       )}
-      <DocumentItems
+      {document.kind === 'writeoff' ? <WriteoffLines editor={writeoffLines} disabled={pending || stale} showErrors={!!validationAttempt} requireRows={submitAttempt} /> : <DocumentItems
         writeoff={writeoff}
         rows={rows}
         total={total}
-        addProducts={!full ? { options: available, onSelect: addIngredient } : undefined}
+        addProducts={!full ? {
+          options: available,
+          onSelect: addIngredient,
+          loading: ingredients.isPending || (document.kind === 'supplier_return' && sourcePurchase.isPending),
+          error: ingredients.isError || (document.kind === 'supplier_return' && sourcePurchase.isError) ? 'Не удалось загрузить продукты.' : undefined,
+          validationError: validationAttempt && submitAttempt && !items.length ? 'Добавьте хотя бы один продукт.' : undefined,
+          onRetry: () => { void ingredients.refetch(); if (document.kind === 'supplier_return') void sourcePurchase.refetch(); },
+        } : undefined}
         editable={{
           onChange: (ingredientId, input) =>
             setItems((current) =>
@@ -278,12 +353,15 @@ function StockDocumentDraft({
                 setItems((current) => current.filter(({ item }) => item.ingredientId !== ingredientId)),
           disabled: pending || stale,
         }}
-      />
-      {full && (
+      />}
+      {!writeoff && (
         <p className="text-xs text-text-muted">
-          Посчитано {counted.length} из {items.length}. Для отсутствующего товара укажите 0.
+          Посчитано {counted.length} из {items.length}.{' '}
+          Пустые поля сохраняются как «не посчитано». Для отсутствующего товара укажите 0.
         </p>
       )}
+      {document.kind !== 'writeoff' && unknownValue && can('actions.warehouseCosts') && <p className="text-xs text-text-muted">Стоимость части посчитанных позиций неизвестна, итоговая сумма пока не определена.</p>}
+      {submitHint && <p className="poster-document-validation text-sm text-text-muted" role={invalidCount ? 'alert' : 'status'}>{submitHint}</p>}
       {stale && (
         <div
           role="alert"
@@ -303,6 +381,9 @@ function StockDocumentDraft({
       {error && (
         <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">
           {error}
+          {document.kind === 'writeoff' && error.includes('Состав изменился') ? (
+            <button type="button" className="btn-secondary btn-md" disabled={pending} onClick={() => { setError(''); writeoffLines.refresh(); }}>Обновить расчёт</button>
+          ) : (
           <button
             type="button"
             className="btn-secondary btn-md"
@@ -311,13 +392,24 @@ function StockDocumentDraft({
           >
             Загрузить изменения
           </button>
+          )}
         </div>
       )}
-      <DocumentFooter>
+      <p className="text-sm text-text-muted">{writeoff
+        ? canApprove ? '«Сохранить» проведёт документ и изменит остатки. Черновик сохраняет данные без изменения остатков.' : 'Черновик не меняет остатки. Они изменятся после утверждения документа.'
+        : 'Черновик не меняет остатки. Учётные остатки показываются на текущий момент; перед завершением проверьте, что введённые фактические количества актуальны.'}</p>
+      {!writeoff && counted.length > 0 && (
+        <details className="poster-advanced">
+          <summary className="cursor-pointer text-sm text-primary">Повторный подсчёт после другой инвентаризации</summary>
+          <p className="mt-3 max-w-2xl text-sm text-text-secondary">Если эти продукты уже проверили другой инвентаризацией, пересчитайте их и внесите свежие фактические остатки. Затем сохраните повторный подсчёт. Это обновит черновик; остатки изменятся только при завершении.</p>
+          <button type="button" className="btn-secondary btn-md mt-3" disabled={pending || stale || invalidCount} onClick={() => void save('recount')}>Сохранить повторный подсчёт</button>
+        </details>
+      )}
+      <DocumentFooter total={document.kind === 'writeoff' && can('actions.warehouseCosts') ? writeoffLines.calculating ? 'Итого: расчёт…' : writeoffLines.total == null ? 'Итого: стоимость неполная' : `Итого: ${balanceMoney(writeoffLines.total)}` : undefined}>
         <button
           type="button"
           className="btn-primary btn-md"
-          disabled={pending || stale || invalidCount || !canSubmit}
+          disabled={pending || stale || !sourceReady || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess)) || (!writeoff && (invalidCount || !canSubmit))}
           onClick={() => void save('submit')}
         >
           {canApprove
@@ -329,40 +421,12 @@ function StockDocumentDraft({
         <button
           type="button"
           className="btn-secondary btn-md"
-          disabled={pending || stale || invalidCount}
+          disabled={pending || stale || !sourceReady || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess))}
           onClick={() => void save('save')}
         >
           Сохранить черновик
         </button>
-        {!writeoff && counted.length > 0 && (
-          <button
-            type="button"
-            className="btn-ghost btn-md"
-            disabled={pending || stale || invalidCount}
-            onClick={() => setRecountOpen(true)}
-          >
-            Повторный пересчёт
-          </button>
-        )}
       </DocumentFooter>
-      {recountOpen && (
-        <Modal open title="Повторный пересчёт" onClose={() => setRecountOpen(false)}>
-          <div className="space-y-3">
-            <p className="text-sm text-text-secondary">
-              Перед сохранением пересчитайте товары и внесите свежие фактические остатки. Система обновит
-              учётные остатки для внесённых позиций.
-            </p>
-            <button
-              type="button"
-              className="btn-primary btn-md w-full"
-              disabled={pending || stale || invalidCount}
-              onClick={() => void save('recount')}
-            >
-              Сохранить повторный пересчёт
-            </button>
-          </div>
-        </Modal>
-      )}
     </div>
   );
 }
@@ -406,18 +470,25 @@ function StockDocumentReview({
   }
 
   return (
-    <div className="poster-form poster-form--document space-y-6">
-      <DocumentHeader document={document} warehouse={warehouse} />
-      {(reason || document.note) && (
-        <p className="whitespace-pre-wrap break-words text-sm text-text-secondary">
-          {[reason, document.note].filter(Boolean).join(' · ')}
-        </p>
-      )}
-      <DocumentItems
+    <div
+      className={`poster-form poster-form--document space-y-6 ${document.kind === 'inventory' ? 'poster-document--inventory' : 'poster-document--modern'}`}
+    >
+      <div className="poster-document-panel poster-document-fields space-y-3">
+        <DocumentHeader document={document} warehouse={warehouse} />
+        {reason && (
+          <DocumentField label="Причина">
+            <span className="poster-readonly">{reason}</span>
+          </DocumentField>
+        )}
+        <DocumentField label="Комментарий">
+          <span className="poster-readonly whitespace-pre-wrap break-words">{document.note || '—'}</span>
+        </DocumentField>
+      </div>
+      {document.kind === 'writeoff' && !!document.sourceLines?.length ? <WriteoffLines sourceLines={document.sourceLines} total={document.sourceTotal} /> : <DocumentItems
         writeoff={document.kind !== 'inventory'}
         rows={document.items}
         total={document.varianceValue}
-      />
+      />}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -444,14 +515,14 @@ function StockDocumentReview({
               >
                 Утвердить и провести
               </button>
-              <button
+              {can('actions.warehouseApprove') && <button
                 type="button"
                 className="btn-secondary btn-md"
                 disabled={pending}
                 onClick={() => void change('reopen')}
               >
                 Вернуть в черновик
-              </button>
+              </button>}
             </>
           )}
           {document.status === 'posted' && can('actions.warehouseApprove') && (
@@ -478,24 +549,44 @@ function DocumentHeader({
   warehouse: WarehouseLocation;
 }) {
   const locations = useWarehouseLocations();
+  const sourcePurchase = usePurchase(document.kind === 'supplier_return' ? document.sourcePurchaseId ?? null : null);
   const destination = locations.data?.locations.find((l) => l.id === document.destinationWarehouseId);
+  const inventory = document.kind === 'inventory';
+  const operationDate = inventory ? document.createdAt : (document.postedAt ?? document.createdAt);
+  const operator = !inventory && document.postedAt ? document.postedByName : document.createdByName;
   return (
     <dl className="space-y-3 text-sm">
-      <Meta label="Склад">{warehouse.name}</Meta>
+      <Meta label={inventory ? 'Начало инвентаризации' : 'Дата и время'}>
+        {formatDocumentDate(operationDate)}
+        {operator && ` · ${operator}`}
+      </Meta>
+      <Meta label={document.kind === 'transfer' ? 'Со склада' : 'Склад'}>{warehouse.name}</Meta>
       {destination && <Meta label="На склад">{destination.name}</Meta>}
+      {document.kind === 'supplier_return' && (
+        <Meta label="Исходная поставка">
+          {sourcePurchase.data ? <>{purchaseNumber(sourcePurchase.data.number)} · {sourcePurchase.data.supplier} · {formatDocumentDate(sourcePurchase.data.date)}</>
+            : sourcePurchase.isPending ? <span role="status">Загрузка поставки…</span>
+              : <span role="alert" className="text-danger">Не удалось загрузить поставку. <button type="button" className="text-primary" onClick={() => void sourcePurchase.refetch()}>Повторить загрузку</button></span>}
+          {sourcePurchase.data && sourcePurchase.data.status !== 'completed' && <p className="mt-1 text-danger">Исходная поставка отменена. Возврат по ней провести нельзя.</p>}
+        </Meta>
+      )}
+      {inventory && (
+        <Meta label="Тип инвентаризации">{document.mode === 'full' ? 'Полная' : 'Частичная'}</Meta>
+      )}
       <Meta label="Статус">
         <span className="document-status" data-status={document.status}>
           {documentStatus(document.status)}
         </span>
       </Meta>
-      <Meta label="Создан">
-        {formatDocumentDate(document.createdAt)}
-        {document.createdByName && ` · ${document.createdByName}`}
-      </Meta>
-      {document.postedAt ? (
-        <Meta label="Проведён">
+      {document.postedAt && inventory ? (
+        <Meta label="Завершена">
           {formatDocumentDate(document.postedAt)}
           {document.postedByName && ` · ${document.postedByName}`}
+        </Meta>
+      ) : document.postedAt ? (
+        <Meta label="Создан">
+          {formatDocumentDate(document.createdAt)}
+          {document.createdByName && ` · ${document.createdByName}`}
         </Meta>
       ) : (
         document.submittedAt && <Meta label="Отправлен">{formatDocumentDate(document.submittedAt)}</Meta>
@@ -506,7 +597,7 @@ function DocumentHeader({
 
 function Meta({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="poster-document-meta grid min-h-9 items-center gap-1 md:grid-cols-[min(334px,27%)_minmax(0,470px)] md:gap-0">
+    <div className="document-field poster-document-meta grid min-h-9 items-center text-sm">
       <dt className="text-text-secondary">{label}</dt>
       <dd className="break-words text-text-primary">{children}</dd>
     </div>
@@ -520,7 +611,7 @@ function DocumentItems({
   editable,
   addProducts,
 }: {
-  rows: (StockDocumentItem & { input?: string })[];
+  rows: (StockDocumentItem & { input?: string; error?: string; remaining?: number })[];
   total: number | null;
   writeoff: boolean;
   editable?: {
@@ -528,30 +619,51 @@ function DocumentItems({
     onRemove?: (id: string) => void;
     disabled: boolean;
   };
-  addProducts?: { options: Ingredient[]; onSelect: (id: string) => void };
+  addProducts?: { options: Ingredient[]; onSelect: (id: string) => void; loading?: boolean; error?: string; validationError?: string; onRetry?: () => void };
 }) {
   const { can } = usePermissions();
   const costs = can('actions.warehouseCosts');
   const columns = writeoff ? 4 : 6;
+  const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState('');
+  const [countFilter, setCountFilter] = useState('');
+  const [focusedRow, setFocusedRow] = useState<string | null>(null);
+  const formId = useId();
+  const searchText = search.trim().toLocaleLowerCase();
+  const visibleRows = writeoff ? rows : rows.filter((row) =>
+    (!searchText || row.name.toLocaleLowerCase().includes(searchText)) &&
+    (!editable || countFilter !== 'uncounted' || row.quantity === null || focusedRow === row.ingredientId),
+  );
+  const amount = (value: number | null) =>
+    writeoff ? (value === null ? '—' : balanceMoney(Math.abs(value))) : formatVariance(value);
   return (
+    <section className="poster-document-panel poster-document-products">
+    {!writeoff && rows.length > 0 && (
+      <div className="poster-count-toolbar mb-4 flex flex-wrap items-center gap-3">
+        <WorkspaceSearch label="Поиск продуктов инвентаризации" value={search} onChange={setSearch} />
+        {editable && <Select ariaLabel="Позиции инвентаризации" value={countFilter} onChange={setCountFilter}
+          className="w-48" options={[{ value: '', label: 'Все продукты' }, { value: 'uncounted', label: 'Не посчитано' }]} />}
+        {(searchText || countFilter) && <span className="text-xs text-text-muted">Показано {visibleRows.length} из {rows.length}</span>}
+      </div>
+    )}
     <div className="overflow-x-auto">
-      <table className="poster-table w-full min-w-[700px] table-fixed text-sm">
+      <table className={`poster-table poster-document-table w-full table-fixed text-sm ${writeoff ? 'poster-document-table--compact min-w-[650px]' : 'min-w-[700px]'}`}>
         <colgroup>
           {writeoff ? (
             <>
-              <col style={{ width: '54%' }} />
-              <col style={{ width: '24%' }} />
-              <col style={{ width: '18%' }} />
-              <col style={{ width: '4%' }} />
+              <col className="poster-col-product" />
+              <col className="poster-col-quantity" style={{ width: 180 }} />
+              <col className="poster-col-amount" style={{ width: 150 }} />
+              <col className="poster-col-remove" style={{ width: 40 }} />
             </>
           ) : (
             <>
-              <col style={{ width: '34%' }} />
+              <col />
               <col style={{ width: '15%' }} />
               <col style={{ width: '20%' }} />
               <col style={{ width: '14%' }} />
               <col style={{ width: '13%' }} />
-              <col style={{ width: '4%' }} />
+              <col style={{ width: 48 }} />
             </>
           )}
         </colgroup>
@@ -565,10 +677,12 @@ function DocumentItems({
             <th />
           </tr>
         </thead>
-        <tbody>
-          {rows.map((row) => (
+        <tbody className={writeoff ? 'poster-document-rows' : undefined}>
+          {visibleRows.map((row) => (
             <tr key={row.ingredientId} className="border-b border-border">
-              <td className="py-3 pr-3 font-medium">{row.name}</td>
+              <td className={`py-3 pr-3 ${writeoff ? 'poster-product-cell' : ''}`}>
+                <span className="block truncate" title={row.name}>{row.name}</span>
+              </td>
               {!writeoff && (
                 <td className="px-3 py-3 text-right text-text-secondary">
                   {row.expected === null ? '—' : qty(row.expected, row.unit)}
@@ -576,24 +690,33 @@ function DocumentItems({
               )}
               <td className="px-3 py-2 text-right">
                 {editable ? (
-                  <label className="poster-number-unit flex items-center gap-2">
+                  <>
+                  <label className={`poster-number-unit ml-auto flex items-center justify-end gap-2 ${writeoff ? 'poster-inline-number' : ''}`}>
                     <input
-                      className="input h-9 min-w-0 w-full text-right"
+                      className={`input h-9 min-w-0 w-full text-right ${writeoff ? 'poster-document-number' : ''}`}
                       type="number"
                       min="0"
                       step="any"
                       inputMode="decimal"
                       aria-label={`Количество · ${row.name}`}
+                      aria-invalid={!!row.error || undefined}
+                      aria-describedby={row.error ? `${formId}-${row.ingredientId}-error` : row.remaining !== undefined ? `${formId}-${row.ingredientId}-limit` : undefined}
+                      max={row.remaining}
                       disabled={editable.disabled}
                       value={row.input ?? ''}
+                      onFocus={() => setFocusedRow(row.ingredientId)}
+                      onBlur={() => setFocusedRow(null)}
                       onChange={(event) => editable.onChange(row.ingredientId, event.target.value)}
                     />
                     <span className="whitespace-nowrap text-text-muted">{row.unit}</span>
                   </label>
+                  {row.remaining !== undefined && <p id={`${formId}-${row.ingredientId}-limit`} className="mt-1 text-left text-xs text-text-muted">К возврату: {qty(row.remaining, row.unit)}</p>}
+                  {row.error && <p id={`${formId}-${row.ingredientId}-error`} className="mt-1 text-left text-xs text-danger">{row.error}</p>}
+                  </>
                 ) : row.quantity === null ? (
                   '—'
                 ) : (
-                  qty(row.quantity, row.unit)
+                  writeoff ? balanceQuantity(row.quantity, row.unit) : qty(row.quantity, row.unit)
                 )}
               </td>
               {!writeoff && (
@@ -601,7 +724,7 @@ function DocumentItems({
                   {row.difference === null ? '—' : signedQuantity(row.difference, row.unit)}
                 </td>
               )}
-              <td className="px-3 py-3 text-right">{costs ? formatVariance(row.value) : ''}</td>
+              <td className={`px-3 py-3 text-right ${writeoff ? 'whitespace-nowrap tabular-nums' : ''}`}>{costs ? amount(row.value) : ''}</td>
               <td>
                 {editable?.onRemove && (
                   <button
@@ -617,40 +740,59 @@ function DocumentItems({
               </td>
             </tr>
           ))}
-          {addProducts && (
-            <tr className="border-b border-border">
-              <td className="py-2 pr-3">
-                <DocumentProductPicker
-                  key={rows.length}
-                  value=""
-                  label="Добавить продукт"
-                  options={addProducts.options}
-                  disabled={editable?.disabled || !addProducts.options.length}
-                  onChange={addProducts.onSelect}
-                />
-              </td>
-              <td colSpan={columns - 1} />
-            </tr>
-          )}
-          {!rows.length && !addProducts && (
+          {!visibleRows.length && (
             <tr>
               <td colSpan={columns} className="py-12 text-center text-text-muted">
-                В документе нет позиций
+                {rows.length
+                  ? countFilter === 'uncounted' && !searchText ? 'Все продукты посчитаны.' : 'Продукты не найдены. Измените поиск или фильтр.'
+                  : addProducts ? writeoff ? 'Добавьте продукт в документ.' : 'Выберите ниже продукты, которые нужно проверить.' : 'В документе нет позиций.'}
               </td>
             </tr>
           )}
         </tbody>
         <tfoot>
-          <tr className="border-t border-border bg-background/30">
+          <tr className={`border-t border-border bg-background/30 ${writeoff ? 'poster-document-table-total' : ''}`}>
             <td colSpan={columns - 2} className="py-3 pr-3 font-medium">
               {writeoff ? 'Итого' : 'Итого расхождение'}
             </td>
-            <td className="px-3 py-3 text-right font-medium">{costs ? formatVariance(total) : ''}</td>
+            <td className={`px-3 py-3 text-right font-medium ${writeoff ? 'whitespace-nowrap tabular-nums' : ''}`}>{costs ? amount(total) : ''}</td>
             <td />
           </tr>
         </tfoot>
       </table>
     </div>
+    {addProducts && (
+      <div className={`poster-document-add max-w-md py-3 ${writeoff ? 'poster-inline-product' : ''}`}>
+        {adding || !rows.length ? (
+          <DocumentProductPicker
+            key={rows.length}
+            value=""
+            label="Добавить продукт"
+            options={addProducts.options}
+            disabled={editable?.disabled}
+            loading={addProducts.loading}
+            loadError={addProducts.error}
+            error={addProducts.validationError}
+            onRetry={addProducts.onRetry}
+            onChange={(id) => {
+              addProducts.onSelect(id);
+              setAdding(false);
+              setSearch('');
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="text-sm text-primary"
+            disabled={editable?.disabled}
+            onClick={() => setAdding(true)}
+          >
+            + Добавить
+          </button>
+        )}
+      </div>
+    )}
+    </section>
   );
 }
 

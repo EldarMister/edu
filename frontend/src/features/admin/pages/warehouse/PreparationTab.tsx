@@ -1,4 +1,4 @@
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { EditorPage } from './EditorPage';
 import { ItemCard } from './ItemCard';
 import { DocumentProductPicker } from './DocumentProductPicker';
@@ -74,7 +74,7 @@ export function PreparationCardPage({
     displayUnit: 'kg',
     unitType: 'mass',
     mode: 'virtual',
-    outputQuantity: 1,
+    outputQuantity: 0,
     outputUnit: 'kg',
     items: [],
   };
@@ -151,6 +151,7 @@ const unitFactor = (unit: UnitCode) => (unit === 'kg' || unit === 'l' ? 1000 : 1
 
 function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () => void }) {
   const formId = useId();
+  const focusNewRow = useRef<string | null>(null);
   const ingredients = useIngredients('');
   const save = useSavePreparationCard();
   const { can } = usePermissions();
@@ -170,6 +171,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
   const [outputUnit, setOutputUnit] = useState(recipe.outputUnit);
   const [requestKey] = useState(() => crypto.randomUUID());
   const [quickIngredient, setQuickIngredient] = useState(false);
+  const [replacingIngredient, setReplacingIngredient] = useState<string | null>(null);
   const [rows, setRows] = useState<RecipeDraft[]>(() =>
     recipe.items.length
       ? recipe.items.map((item) => ({
@@ -305,9 +307,21 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                   const ingredient = byId.get(row.ingredientId);
                   const choices = options.filter(({ id }) => id === row.ingredientId || !selected.has(id));
                   return (
-                    <tr key={row.key}>
+                    <tr key={row.key} ref={(element) => {
+                      if (element && focusNewRow.current === row.key) {
+                        element.querySelector<HTMLInputElement>('input')?.focus();
+                        focusNewRow.current = null;
+                      }
+                    }}>
                       <td>
-                        <DocumentProductPicker
+                        {row.ingredientId && replacingIngredient !== row.key ? (
+                          <button type="button" className="poster-recipe-product text-left"
+                            title="Заменить ингредиент" disabled={!editable}
+                            onClick={() => setReplacingIngredient(row.key)}>
+                            {ingredient?.name ?? savedItems.get(row.ingredientId)?.name ?? 'Недоступный ингредиент'}
+                            {row.unit && <span className="text-text-muted">, {unitLabel(row.unit)}</span>}
+                          </button>
+                        ) : <DocumentProductPicker
                           label={`Ингредиент ${index + 1}`}
                           value={row.ingredientId}
                           options={choices}
@@ -317,6 +331,7 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                           }
                           disabled={!editable || ingredients.isPending}
                           onChange={(ingredientId) => {
+                            setReplacingIngredient(null);
                             if (ingredientId === row.ingredientId) return;
                             update(row.key, {
                               ingredientId,
@@ -326,15 +341,15 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                               netAmount: row.quantity,
                             });
                           }}
-                        />
+                        />}
                       </td>
                       <td>
                         <Select
                           ariaLabel={`Обработка ${index + 1}`}
-                          className="h-9 w-full"
+                          className="poster-processing-select h-9 w-full"
                           value={row.processingMethod}
                           disabled={!row.ingredientId}
-                          options={[{ value: '', label: 'Без обработки' }, ...PROCESSING_METHODS]}
+                          options={[{ value: '', label: '—' }, ...PROCESSING_METHODS]}
                           onChange={(v) => {
                             const loss = v ? (ingredient?.processingLosses?.[v as ProcessingMethod] ?? 0) : 0;
                             update(row.key, {
@@ -439,7 +454,11 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
                         <button
                           type="button"
                           disabled={ingredients.isPending}
-                          onClick={() => setRows((current) => [...current, blankRow()])}
+                          onClick={() => {
+                            const row = blankRow();
+                            focusNewRow.current = row.key;
+                            setRows((current) => [...current, row]);
+                          }}
                         >
                           Добавить ингредиент
                         </button>
@@ -539,9 +558,6 @@ function RecipeForm({ recipe, onClose }: { recipe: PreparationCard; onClose: () 
               disabled={!canSave || save.isPending}
             >
               {save.isPending ? 'Сохранение…' : 'Сохранить'}
-            </button>
-            <button type="button" className="btn-ghost btn-md" onClick={onClose}>
-              Отмена
             </button>
           </DocumentFooter>
         )}

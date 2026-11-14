@@ -30,6 +30,13 @@ export class PurchasesController {
     return this.purchases.findAll({ status, search, from, to, warehouseId });
   }
 
+  @Get('last-prices')
+  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
+  lastPrices(@Query('ingredientIds') ingredientIds?: string, @Query('warehouseId') warehouseId?: string,
+    @Query('excludePurchaseId') excludePurchaseId?: string) {
+    return this.purchases.lastPrices({ ingredientIds, warehouseId, excludePurchaseId });
+  }
+
   @Get(':id')
   @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
   findOne(@Param('id') id: string) {

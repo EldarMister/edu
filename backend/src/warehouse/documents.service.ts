@@ -3,11 +3,13 @@ import { Prisma, Role, WarehouseDocument, WarehouseDocumentItem, WarehouseDocume
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { getCafeId } from '../tenant/tenant-context';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, warehouseWriteoffReasons } from './documents.dto';
+import { CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WriteoffPreviewDto, warehouseWriteoffReasons } from './documents.dto';
 import { postStockMovement } from './stock-posting';
 import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, UnitCode, unitLabel } from './units';
-import { getWarehouseBalance, resolveWarehouse, warehouseBalances, WarehouseLocation } from './warehouse-location';
+import { getWarehouseBalance, resolveWarehouse, warehouseBalances, warehouseDocumentFilter, WarehouseLocation } from './warehouse-location';
+import { lockRecipeGraph } from './recipe-resolution';
+import { previewWriteoffSources, readWriteoffSnapshot, resolveWriteoffSources, serializeWriteoffSources, sourceInputs, writeoffStockLines } from './writeoff-resolution';
 
 type Actor = Pick<AuthUser, 'id' | 'role' | 'name' | 'cafeId'> & Partial<Pick<AuthUser, 'permissions'>>;
 type Document = WarehouseDocument & { items: WarehouseDocumentItem[] };
@@ -21,21 +23,47 @@ const transactionOptions = { timeout: 30_000 };
 export class WarehouseDocumentsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(warehouseId?: string, kind?: WarehouseDocumentKind) {
+  async list(warehouseId?: string, kind?: WarehouseDocumentKind, search?: string) {
     const cafeId = this.cafeId();
     if (warehouseId !== undefined) await this.warehouse(this.prisma, warehouseId);
+    const text = search?.trim();
+    const sourceMatches = text && (kind === undefined || kind === 'writeoff')
+      ? await this.prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT d.id FROM warehouse_documents d
+        WHERE d.cafe_id = ${cafeId} AND d.kind = 'writeoff'
+        ${warehouseId === undefined ? Prisma.empty : Prisma.sql`AND d.warehouse_id = ${warehouseId}`}
+        AND EXISTS (
+          SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(d.source_lines->'lines') = 'array'
+            THEN d.source_lines->'lines' ELSE '[]'::jsonb END) AS source_line
+          WHERE strpos(lower(source_line->>'name'), lower(${text})) > 0
+        )
+      ` : [];
+    const where: Prisma.WarehouseDocumentWhereInput = { cafeId, kind,
+      ...(kind === 'transfer' && warehouseId ? { OR: [{ warehouseId }, { destinationWarehouseId: warehouseId }] } : { warehouseId }),
+      ...(text ? { AND: [{ OR: [
+        { note: { contains: text, mode: 'insensitive' } },
+        { createdByName: { contains: text, mode: 'insensitive' } },
+        { postedByName: { contains: text, mode: 'insensitive' } },
+        { items: { some: { name: { contains: text, mode: 'insensitive' } } } },
+        ...(sourceMatches.length ? [{ id: { in: sourceMatches.map(({ id }) => id) } }] : []),
+      ] }] } : {}),
+    };
     const [documents, totals] = await this.prisma.$transaction([
       this.prisma.warehouseDocument.findMany({
-        where: { cafeId, warehouseId, kind },
+        where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        include: { items: { select: { name: true }, orderBy: [{ name: 'asc' }, { ingredientId: 'asc' }], take: 3 } },
       }),
       this.prisma.$queryRaw<Array<{ id: string; itemsCount: number; varianceValue: Prisma.Decimal | null }>>`
         SELECT d.id, COUNT(i.ingredient_id)::int AS "itemsCount",
-          CASE WHEN BOOL_AND(i.cost_known OR i.difference = 0) THEN ROUND(SUM(i.difference * i.unit_cost), 2) ELSE NULL END AS "varianceValue"
+          CASE WHEN d.kind = 'inventory' AND d.status IN ('draft', 'submitted') THEN NULL
+            WHEN BOOL_AND(i.cost_known OR i.difference = 0) THEN ROUND(SUM(i.difference * i.unit_cost), 2) ELSE NULL END AS "varianceValue"
         FROM warehouse_documents d
         LEFT JOIN warehouse_document_items i ON i.cafe_id = d.cafe_id AND i.document_id = d.id
         WHERE d.cafe_id = ${cafeId}
-        ${warehouseId === undefined ? Prisma.empty : Prisma.sql`AND d.warehouse_id = ${warehouseId}`}
+        ${warehouseId === undefined ? Prisma.empty : kind === 'transfer'
+          ? Prisma.sql`AND (d.warehouse_id = ${warehouseId} OR d.destination_warehouse_id = ${warehouseId})`
+          : Prisma.sql`AND d.warehouse_id = ${warehouseId}`}
         ${kind === undefined ? Prisma.empty : Prisma.sql`AND d.kind = ${kind}::"WarehouseDocumentKind"`}
         GROUP BY d.id
       `,
@@ -43,12 +71,36 @@ export class WarehouseDocumentsService {
     const byId = new Map(totals.map(({ id, ...summary }) => [id, summary]));
     return documents.map((document) => {
       const summary = byId.get(document.id);
-      return this.summary(document, summary?.itemsCount ?? 0, summary?.varianceValue ?? null);
+      const sources = readWriteoffSnapshot(document.sourceLines);
+      return { ...this.summary(document, sources?.lines.length ?? summary?.itemsCount ?? 0, summary?.varianceValue ?? null),
+        productNames: sources ? sources.lines.slice(0, 3).map((line) => line.name) : document.items.map((item) => item.name) };
     });
   }
 
+  async writeoffOptions() {
+    const cafeId = this.cafeId();
+    const [ingredients, dishes] = await Promise.all([
+      this.prisma.ingredient.findMany({ where: { cafeId, isActive: true }, orderBy: { name: 'asc' },
+        select: { id: true, name: true, category: true, displayUnit: true, kind: true, preparationMode: true } }),
+      this.prisma.dish.findMany({ where: { cafeId, isActive: true, isSet: false, catalogKind: { not: 'goods' } }, orderBy: { name: 'asc' },
+        select: { id: true, name: true, isWeighted: true, category: { select: { name: true } }, variants: { select: { id: true, name: true } } } }),
+    ]);
+    return { ingredients: ingredients.map(({ displayUnit, ...item }) => ({ ...item, unit: unitLabel(normalizeUnit(displayUnit)), unitCode: displayUnit })),
+      dishes: dishes.map(({ category, ...dish }) => ({ ...dish, category: category.name, unitCode: dish.isWeighted ? 'g' : 'pcs' })) };
+  }
+
+  async writeoffPreview(dto: WriteoffPreviewDto) {
+    return this.prisma.$transaction(async (tx) => {
+      await lockRecipeGraph(tx, true);
+      const warehouse = await this.warehouse(tx, dto.warehouseId);
+      const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, false, true);
+      return previewWriteoffSources(tx, warehouse, snapshot);
+    }, { ...transactionOptions, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
   async get(id: string) {
-    return this.serialize(await this.load(this.prisma, id));
+    return this.prisma.$transaction(async (tx) => this.preview(tx, await this.load(tx, id)),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
   async create(actor: Actor, dto: CreateWarehouseDocumentDto) {
@@ -58,6 +110,7 @@ export class WarehouseDocumentsService {
       throw new BadRequestException('Выберите вид инвентаризации');
     }
     if (dto.kind !== 'inventory' && dto.mode != null) throw new BadRequestException('Вид инвентаризации неприменим к списанию');
+    if (dto.sourceLines && (dto.kind !== 'writeoff' || dto.items)) throw new BadRequestException('Составные строки доступны только для списания и заменяют список ингредиентов');
     return this.prisma.$transaction(async (tx) => {
       if (dto.requestKey) {
         await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${`warehouse-request:${cafeId}:${dto.requestKey}`}))) AS request_lock`;
@@ -66,9 +119,20 @@ export class WarehouseDocumentsService {
           if (existing.kind !== dto.kind || existing.warehouseId !== dto.warehouseId || existing.destinationWarehouseId !== (dto.destinationWarehouseId ?? null) || existing.sourcePurchaseId !== (dto.sourcePurchaseId ?? null)) {
             throw new ConflictException('Ключ повторного запроса уже использован для другого документа');
           }
+          if (dto.sourceLines) {
+            const snapshot = readWriteoffSnapshot(existing.sourceLines);
+            if (!snapshot || snapshot.lines.length !== dto.sourceLines.length || dto.sourceLines.some((input) => {
+              const saved = snapshot.lines.find((line) => line.sourceLineId === input.sourceLineId);
+              return !saved || saved.kind !== input.kind || saved.sourceId !== input.sourceId || saved.variantId !== input.variantId
+                || saved.quantity !== input.quantity || saved.unit !== normalizeUnit(input.unit ?? saved.unit)
+                || (input.recipeSignature && saved.recipeSignature !== input.recipeSignature);
+            })) {
+              throw new ConflictException('Ключ повторного запроса уже использован для другого состава списания');
+            }
+          }
           if (dto.items && dto.kind !== 'inventory' && (dto.items.length !== existing.items.length || dto.items.some((line) => {
             const saved = existing.items.find((item) => item.ingredientId === line.ingredientId);
-            return !saved?.quantity?.eq(new Prisma.Decimal(toBase(line.quantity, normalizeUnit(saved.unit))).toDecimalPlaces(3));
+            return line.quantity === null || !saved?.quantity?.eq(new Prisma.Decimal(toBase(line.quantity, normalizeUnit(saved.unit))).toDecimalPlaces(3));
           }))) throw new ConflictException('Ключ повторного запроса уже использован с другими позициями');
           return this.finalize(tx, actor, existing.id, dto.finalize);
         }
@@ -91,7 +155,14 @@ export class WarehouseDocumentsService {
         },
         include: documentInclude,
       });
-      await this.saveLines(tx, warehouse, document, dto.items ?? [], false);
+      let inputs = dto.items ?? [];
+      if (dto.sourceLines) {
+        await lockRecipeGraph(tx, true);
+        const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, !!dto.finalize, !dto.finalize);
+        await tx.warehouseDocument.update({ where: { id: document.id }, data: { sourceLines: snapshot as unknown as Prisma.InputJsonValue } });
+        inputs = await writeoffStockLines(tx, snapshot);
+      }
+      await this.saveLines(tx, warehouse, document, inputs, false);
       return this.finalize(tx, actor, document.id, dto.finalize);
     }, transactionOptions);
   }
@@ -101,12 +172,20 @@ export class WarehouseDocumentsService {
     return this.prisma.$transaction(async (tx) => {
       const document = await this.lockDocument(tx, id, dto.revision, 'draft');
       const warehouse = await this.warehouse(tx, document.warehouseId);
+      if (dto.sourceLines && (document.kind !== 'writeoff' || dto.items)) throw new BadRequestException('Составные строки доступны только для списания и заменяют список ингредиентов');
+      if (document.sourceLines && dto.items) throw new BadRequestException('Сохраните исходные строки списания, а не рассчитанные ингредиенты');
       if (dto.recount && document.kind !== 'inventory') throw new BadRequestException('Пересчёт доступен только для инвентаризации');
-      if (dto.items || dto.recount) {
-        const items = dto.items ?? document.items.flatMap((item) => item.quantity == null ? [] : [{
+      if (dto.sourceLines) {
+        await lockRecipeGraph(tx, true);
+        const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, !!dto.finalize, !dto.finalize);
+        const items = await writeoffStockLines(tx, snapshot, document.items);
+        await this.saveLines(tx, warehouse, document, items, false);
+        await tx.warehouseDocument.update({ where: { id }, data: { sourceLines: snapshot as unknown as Prisma.InputJsonValue } });
+      } else if (dto.items || dto.recount) {
+        const items = dto.items ?? document.items.map((item) => ({
           ingredientId: item.ingredientId,
-          quantity: fromBase(Number(item.quantity), normalizeUnit(item.unit)),
-        }]);
+          quantity: item.quantity == null ? null : fromBase(Number(item.quantity), normalizeUnit(item.unit)),
+        }));
         await this.saveLines(tx, warehouse, document, items, dto.recount === true);
       }
       await tx.warehouseDocument.update({
@@ -129,12 +208,13 @@ export class WarehouseDocumentsService {
 
   private async submitInTransaction(tx: Prisma.TransactionClient, actor: Actor, id: string, revision?: number) {
     const document = await this.lockDocument(tx, id, revision, 'draft');
+    await this.validateSourceSnapshot(tx, document);
     await this.validateLines(tx, document);
     if (document.kind === 'writeoff') {
       if (!document.reason) throw new BadRequestException('Укажите причину списания');
       if (document.reason === 'other' && !document.note) throw new BadRequestException('Опишите причину списания в комментарии');
     }
-    return this.serialize(await tx.warehouseDocument.update({
+    return this.preview(tx, await tx.warehouseDocument.update({
       where: { id, cafeId: document.cafeId },
       data: {
         status: 'submitted', revision: { increment: 1 }, submittedAt: new Date(),
@@ -148,7 +228,7 @@ export class WarehouseDocumentsService {
     this.assertActor(actor, true);
     return this.prisma.$transaction(async (tx) => {
       const document = await this.lockDocument(tx, id, revision, 'submitted');
-      return this.serialize(await tx.warehouseDocument.update({
+      return this.preview(tx, await tx.warehouseDocument.update({
         where: { id, cafeId: document.cafeId },
         data: { status: 'draft', revision: { increment: 1 } },
         include: documentInclude,
@@ -163,6 +243,7 @@ export class WarehouseDocumentsService {
 
   private async approveInTransaction(tx: Prisma.TransactionClient, actor: Actor, id: string, revision?: number) {
     const document = await this.lockDocument(tx, id, revision, 'submitted');
+    await this.validateSourceSnapshot(tx, document);
     if (document.kind === 'inventory' || document.kind === 'writeoff') this.assertActor(actor, true);
     if (document.kind === 'supplier_return') await this.validateReturn(tx, document, await this.warehouse(tx, document.warehouseId));
     const { warehouse, ingredients } = await this.validateLines(tx, document);
@@ -171,17 +252,21 @@ export class WarehouseDocumentsService {
     for (const item of document.items) {
       const ingredient = ingredients.get(item.ingredientId)!;
       const balance = await getWarehouseBalance(tx, warehouse, ingredient);
-      const difference = kind === 'inventory' ? item.difference! : item.quantity!.negated();
+      // Counts describe the physical stock at confirmation, not at draft creation.
+      // Re-read under the ingredient lock so receipts/sales cannot be counted twice.
+      const difference = kind === 'inventory' ? item.quantity!.sub(balance.stock) : item.quantity!.negated();
+      if (difference.abs().gt(maxQuantity)) throw new BadRequestException('Расхождение вне допустимого диапазона');
       await tx.warehouseDocumentItem.update({
         where: { documentId_ingredientId: { documentId: id, ingredientId: item.ingredientId }, cafeId: document.cafeId },
-        data: { ...(kind !== 'inventory' ? { expected: balance.stock, difference } : {}), unitCost: balance.avgCost,
+        data: { expected: balance.stock, difference, unitCost: balance.avgCost,
           costKnown: balance.valuationKnown && (difference.gte(0) || balance.stock.gte(difference.abs())) },
       });
       if (difference.isZero()) continue;
       const comment = kind === 'writeoff' ? [warehouseWriteoffReasons[document.reason!], document.note].filter(Boolean).join(' · ') : document.note;
       const source = await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse, change: difference,
         costKnown: difference.gt(0) ? balance.valuationKnown : undefined,
-        movement: { type: kind, sourceType: kind, sourceId: id, actorId: actor.id, actorName: actor.name, reason: document.reason, comment } });
+        movement: { type: kind, sourceType: kind, sourceId: id, actorId: actor.id, actorName: actor.name, reason: document.reason, comment,
+          ...(document.sourceLines ? { recipeSnapshot: document.sourceLines as Prisma.InputJsonValue } : {}) } });
       if (destination) await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse: destination,
         change: difference.negated(), cost: balance.avgCost, costKnown: source.movement.costKnown, valuation: 'average',
         movement: { type: 'transfer', sourceType: 'transfer', sourceId: id, actorId: actor.id, actorName: actor.name, comment } });
@@ -209,7 +294,8 @@ export class WarehouseDocumentsService {
         await postStockMovement(tx, { ingredientId: movement.ingredientId, warehouse, change: movement.change.negated(),
           cost: movement.costAtMoment, costKnown: movement.costKnown, valuation: movement.change.lt(0) ? 'average' : 'value',
           movement: { type: 'cancel', sourceType: document.kind, sourceId: id, actorId: actor.id, actorName: actor.name,
-            comment: `Сторно: ${note.trim()}`, reason: 'reversal' } });
+            comment: `Сторно: ${note.trim()}`, reason: 'reversal',
+            ...(movement.recipeSnapshot ? { recipeSnapshot: movement.recipeSnapshot as Prisma.InputJsonValue } : {}) } });
       }
       return this.serialize(await tx.warehouseDocument.update({ where: { id, cafeId: document.cafeId },
         data: { status: 'reversed', revision: { increment: 1 }, reversedAt: new Date(), reversedById: actor.id,
@@ -218,7 +304,7 @@ export class WarehouseDocumentsService {
   }
 
   private async finalize(tx: Prisma.TransactionClient, actor: Actor, id: string, action?: 'submit' | 'post') {
-    let document = this.serialize(await this.load(tx, id));
+    let document = await this.preview(tx, await this.load(tx, id));
     if (!action || document.status === 'posted') return document;
     if (document.status === 'reversed') throw new ConflictException('Проведение документа уже отменено');
     if (document.status === 'draft') document = await this.submitInTransaction(tx, actor, id, document.revision);
@@ -250,7 +336,7 @@ export class WarehouseDocumentsService {
     tx: Prisma.TransactionClient,
     warehouse: WarehouseLocation,
     document: Document,
-    inputs: { ingredientId: string; quantity: number }[],
+    inputs: { ingredientId: string; quantity: number | null }[],
     recount: boolean,
   ) {
     const quantities = new Map(inputs.map(({ ingredientId, quantity }) => [ingredientId, quantity]));
@@ -263,6 +349,7 @@ export class WarehouseDocumentsService {
       if (!catalog.has(id)) throw new NotFoundException('Сырьё не найдено');
     }
     const balances = await warehouseBalances(tx, warehouse, ingredients);
+    const used = full ? await this.usedIngredientIds(tx, warehouse, ingredients.map(({ id }) => id)) : new Set<string>();
     const generations = document.kind === 'inventory' ? await this.generations(tx, warehouse, ingredients.map(({ id }) => id)) : new Map<string, number>();
     const rows: StockLine[] = [];
     for (const ingredient of ingredients) {
@@ -270,21 +357,22 @@ export class WarehouseDocumentsService {
       const input = quantities.get(ingredient.id);
       const balance = balances.get(ingredient.id)!;
       if (!full && input === undefined) continue;
-      if (full && !ingredient.isActive && balance.stock.isZero() && !old && input === undefined) continue;
+      if (full && balance.stock.isZero() && !used.has(ingredient.id) && !old && input === undefined) continue;
       const unit = normalizeUnit(old?.unit ?? ingredient.displayUnit);
       assertUnitMatchesType(unit, ingredient.unitType);
-      const quantity = input === undefined ? null : this.quantity(input, unit, document.kind);
+      if (input === null && document.kind !== 'inventory') throw new BadRequestException('Укажите количество для каждой позиции');
+      const quantity = input == null ? null : this.quantity(input, unit, document.kind);
       const generation = generations.get(ingredient.id) ?? 0;
       const snapshot = document.kind === 'inventory' && !recount ? old : null;
-      const expected = snapshot?.expected ?? balance.stock;
-      const unitCost = snapshot?.unitCost ?? balance.avgCost;
+      const expected = balance.stock;
+      const unitCost = balance.avgCost;
       const difference = quantity == null ? null : document.kind !== 'inventory'
         ? quantity.negated()
         : quantity.sub(expected);
       if (difference?.abs().gt(maxQuantity)) throw new BadRequestException('Расхождение вне допустимого диапазона');
       rows.push({
         ingredientId: ingredient.id, name: ingredient.name, unit, expected, quantity, difference, unitCost,
-        costKnown: snapshot?.costKnown ?? balance.valuationKnown,
+        costKnown: balance.valuationKnown,
         inventoryGeneration: document.kind === 'inventory'
           ? (snapshot?.inventoryGeneration ?? generation)
           : null,
@@ -315,10 +403,11 @@ export class WarehouseDocumentsService {
     }
     if (document.mode === 'full') {
       const current = await warehouseBalances(tx, warehouse, catalog);
+      const used = await this.usedIngredientIds(tx, warehouse, catalog.map(({ id }) => id));
       const hasNewLine = catalog.some((ingredient) =>
-        !itemIds.has(ingredient.id) && (ingredient.isActive || !current.get(ingredient.id)!.stock.isZero()),
+        !itemIds.has(ingredient.id) && (used.has(ingredient.id) || !current.get(ingredient.id)!.stock.isZero()),
       );
-      if (hasNewLine) throw new ConflictException('Список сырья изменился. Обновите черновик и пересчитайте новые позиции');
+      if (hasNewLine) throw new ConflictException('Состав склада изменился. Сохраните черновик и посчитайте новые продукты');
     }
     if (document.kind === 'inventory') {
       const generations = await this.generations(tx, warehouse, [...itemIds]);
@@ -327,6 +416,42 @@ export class WarehouseDocumentsService {
       }
     }
     return { warehouse, ingredients };
+  }
+
+  private async usedIngredientIds(tx: Prisma.TransactionClient, warehouse: WarehouseLocation, ingredientIds: string[]) {
+    if (!ingredientIds.length) return new Set<string>();
+    const movements = await tx.stockMovement.findMany({
+      where: { cafeId: warehouse.cafeId, ...warehouseDocumentFilter(warehouse), ingredientId: { in: ingredientIds }, change: { not: 0 } },
+      select: { ingredientId: true }, distinct: ['ingredientId'],
+    });
+    return new Set(movements.map(({ ingredientId }) => ingredientId));
+  }
+
+  /** Draft counts are preserved while the preview follows the current book stock.
+   * Posted/reversed documents keep the immutable values captured at approval. */
+  private async preview(tx: Prisma.TransactionClient, document: Document) {
+    const snapshot = readWriteoffSnapshot(document.sourceLines);
+    if (snapshot && ['draft', 'submitted'].includes(document.status)) {
+      const valuation = await previewWriteoffSources(tx, await this.warehouse(tx, document.warehouseId), snapshot);
+      return { ...this.serialize(document), sourceLines: valuation.sourceLines, sourceTotal: valuation.total };
+    }
+    if (document.kind !== 'inventory' || !['draft', 'submitted'].includes(document.status)) return this.serialize(document);
+    const warehouse = await this.warehouse(tx, document.warehouseId);
+    const ingredients = await tx.ingredient.findMany({ where: { cafeId: document.cafeId, id: { in: document.items.map(({ ingredientId }) => ingredientId) } } });
+    const balances = await warehouseBalances(tx, warehouse, ingredients);
+    return this.serialize({ ...document, items: document.items.map((item) => {
+      const balance = balances.get(item.ingredientId);
+      if (!balance) return item;
+      return { ...item, expected: balance.stock, difference: item.quantity?.sub(balance.stock) ?? null,
+        unitCost: balance.avgCost, costKnown: balance.valuationKnown };
+    }) });
+  }
+
+  private async validateSourceSnapshot(tx: Prisma.TransactionClient, document: Document) {
+    const snapshot = readWriteoffSnapshot(document.sourceLines);
+    if (!snapshot) return;
+    await lockRecipeGraph(tx, true);
+    await resolveWriteoffSources(tx, await this.warehouse(tx, document.warehouseId), sourceInputs(snapshot), true);
   }
 
   private async lockCatalog(tx: Prisma.TransactionClient, warehouse: WarehouseLocation, ids: string[], full: boolean) {
@@ -423,10 +548,15 @@ export class WarehouseDocumentsService {
 
   private serialize(document: Document) {
     const items = document.items;
+    const snapshot = readWriteoffSnapshot(document.sourceLines);
+    const sources = snapshot ? serializeWriteoffSources(snapshot, new Map(items.map((item) => [item.ingredientId, {
+      cost: item.costKnown ? item.unitCost : null,
+    }]))) : null;
     const variance = items.some((item) => !item.costKnown && item.difference && !item.difference.isZero()) ? null : items.reduce((sum: Prisma.Decimal | null, item) =>
       item.difference == null || item.unitCost == null ? sum : (sum ?? zero).add(item.difference.mul(item.unitCost)), null);
     return {
       ...this.summary(document, items.length, variance),
+      ...(sources ? { sourceLines: sources.sourceLines, sourceTotal: sources.total } : {}),
       items: items.map((item) => {
         const unit = normalizeUnit(item.unit);
         const display = (value: Prisma.Decimal | null) => value == null ? null : fromBase(Number(value), unit);

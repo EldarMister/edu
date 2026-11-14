@@ -29,7 +29,7 @@ export function documentLabel(document: StockDocument) {
   if (document.kind === 'supplier_return') return 'Возврат поставщику';
   if (document.kind === 'inventory')
     return document.mode === 'full' ? 'Полная инвентаризация' : 'Частичная инвентаризация';
-  return WRITEOFF_REASONS.find(({ value }) => value === document.reason)?.label ?? 'Списание';
+  return 'Списание';
 }
 
 export function formatDocumentDate(value: string) {

@@ -141,6 +141,13 @@ export interface PurchaseItem {
 }
 
 export interface Purchase {
+  updatedAt?: string;
+  postedAt?: string | null;
+  canCorrectStock?: boolean;
+  correctionBlockedReason?: string | null;
+  returnableItems?: { ingredientId: string; name: string; unit: string; unitCode: UnitCode; receivedQuantity: number; returnedQuantity: number; remainingQuantity: number; receivedQuantityBase: number; returnedQuantityBase: number; remainingQuantityBase: number; remainingBase: number }[];
+  corrections?: { id: string; createdAt: string; actorName: string | null; reason: string; before: { totalAmount: number }; after: { totalAmount: number } }[];
+  productNames?: string[];
   supplierId?: string | null;
   note?: string | null;
   attachments?: string[];
@@ -481,7 +488,7 @@ export interface PreparationRecipe extends Omit<PreparationRecipeInput, 'items'>
   name: string;
   displayUnit: UnitCode;
   unitType: UnitType;
-  items: (PreparationRecipeInput['items'][number] & { name: string })[];
+  items: (PreparationRecipeInput['items'][number] & { name: string; lineCost?: number | null; costKnown?: boolean })[];
 }
 
 const PREPARATION_URL = '/admin/warehouse/preparation';
@@ -639,6 +646,9 @@ export interface CreatePurchaseInput {
 }
 
 export interface UpdatePurchaseInput {
+  expectedUpdatedAt?: string;
+  correctionReason?: string;
+  warehouseId?: string;
   complete?: boolean;
   supplierId?: string;
   note?: string;
@@ -648,6 +658,7 @@ export interface UpdatePurchaseInput {
   date?: string;
   supplier?: string;
   items?: {
+    purchaseItemId?: string;
     ingredientId: string;
     packageId?: string;
     quantity: number;
@@ -680,12 +691,17 @@ export function usePurchaseMutations() {
       api.post<Purchase>(`/admin/warehouse/purchases/${id}/cancel`).then((r) => r.data),
     onSuccess: invalidate,
   });
-  const reverse = useMutation({
-    mutationFn: ({ id, note }: { id: string; note: string }) =>
-      api.post(`/admin/warehouse/purchases/${id}/reverse`, { note }),
-    onSuccess: invalidate,
+  return { create, update, complete, cancel };
+}
+
+export function useLastPurchasePrices(ingredientIds: string[], warehouseId?: string, excludePurchaseId?: string) {
+  const ids = [...new Set(ingredientIds.filter(Boolean))].sort().join(',');
+  return useQuery({
+    queryKey: [...KEY, 'last-purchase-prices', ids, warehouseId, excludePurchaseId],
+    enabled: !!ids,
+    queryFn: () => get<{ ingredientId: string; unit: string; unitCode: UnitCode; unitPrice: number; date: string; purchaseId: string; supplier: string }[]>(
+      `/admin/warehouse/purchases/last-prices?${new URLSearchParams({ ingredientIds: ids, ...(warehouseId ? { warehouseId } : {}), ...(excludePurchaseId ? { excludePurchaseId } : {}) })}`),
   });
-  return { create, update, complete, cancel, reverse };
 }
 
 // ---------- Движения ----------

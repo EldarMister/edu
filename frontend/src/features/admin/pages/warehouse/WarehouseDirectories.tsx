@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { usePageFilter, useEditorRoute } from './workspace-route';
 import { EditorPage } from './EditorPage';
-import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
+import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
@@ -11,6 +11,19 @@ import { useWarehouseLocationMutations, type WarehouseLocations, type WarehouseL
 import { usePackages, usePackageMutations, type PackageUnit } from './extended-api';
 import { UNIT_OPTIONS, unitLabel, type UnitCode } from './units';
 import { DocumentField, DocumentFooter, QueryState } from './WarehouseUi';
+
+function DirectoryNameHeader({ ascending, onToggle, children = 'Название' }: {
+  ascending: boolean;
+  onToggle: () => void;
+  children?: ReactNode;
+}) {
+  return <th aria-sort={ascending ? 'ascending' : 'descending'}>
+    <button type="button" className="inline-flex items-center gap-2 text-left" onClick={onToggle}
+      aria-label={`Сортировать по названию: ${ascending ? 'от Я до А' : 'от А до Я'}`}>
+      {children}<span aria-hidden="true">{ascending ? '↑' : '↓'}</span>
+    </button>
+  </th>;
+}
 
 function DirectoryActions({
   onEdit,
@@ -131,11 +144,12 @@ export function SuppliersPage() {
   const q = useSuppliers();
   const mutations = useSupplierMutations();
   const [search, setSearch] = usePageFilter('search');
+  const [sort, setSort] = usePageFilter('sort', 'asc');
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const [error, setError] = useState('');
   const rows = (q.data ?? []).filter((s) =>
-    `${s.name} ${s.phone ?? ''} ${s.address ?? ''}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
-  );
+    `${s.name} ${s.phone ?? ''} ${s.address ?? ''} ${s.note ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  ).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (sort === 'desc' ? -1 : 1));
   async function archive(supplier: Supplier) {
     if (!confirm(`Архивировать поставщика «${supplier.name}»? История поставок сохранится.`)) return;
     try {
@@ -159,15 +173,14 @@ export function SuppliersPage() {
     return <SupplierForm key={editor.id ?? 'new'} supplier={supplier} onClose={closeEditor} />;
   }
   return (
-    <div>
-      <WorkspaceHeaderCount count={q.data?.length} />
+    <div className="poster-directory-surface">
       <WorkspaceHeaderActions>
         <button className="btn-primary btn-md" onClick={() => openEditor({ type: 'supplier' })}>
           Добавить
         </button>
       </WorkspaceHeaderActions>
       <div className="poster-toolbar">
-        <WorkspaceSearch value={search} onChange={setSearch} label="Поиск поставщика" />
+        <WorkspaceSearch value={search} onChange={setSearch} label="Поиск поставщика" placeholder="Поиск..." />
       </div>
       {error && (
         <p role="alert" className="py-3 text-danger">
@@ -176,14 +189,15 @@ export function SuppliersPage() {
       )}
       <QueryState pending={q.isPending} error={q.error}>
         <div className="overflow-x-auto">
-          <table className="poster-table w-full min-w-[620px]">
+          <table className="poster-table poster-directory-table poster-directory-table--suppliers w-full min-w-[760px]">
+            <colgroup><col style={{ width: '26%' }} /><col style={{ width: '18%' }} /><col style={{ width: '25%' }} /><col /><col style={{ width: 110 }} /></colgroup>
             <thead>
               <tr>
-                <th>Имя</th>
+                <DirectoryNameHeader ascending={sort !== 'desc'} onToggle={() => setSort(sort === 'desc' ? 'asc' : 'desc')}>Имя</DirectoryNameHeader>
                 <th>Телефон</th>
                 <th>Адрес</th>
                 <th>Комментарий</th>
-                <th />
+                <th><span className="sr-only">Действия</span></th>
               </tr>
             </thead>
             <tbody>
@@ -192,15 +206,16 @@ export function SuppliersPage() {
                   <td>
                     <button
                       type="button"
-                      className="text-left text-primary"
+                      className="block max-w-full truncate text-left text-primary"
+                      title={supplier.name}
                       onClick={() => openEditor({ type: 'supplier', id: supplier.id })}
                     >
                       {supplier.name}
                     </button>
                   </td>
-                  <td>{supplier.phone || '—'}</td>
-                  <td>{supplier.address || '—'}</td>
-                  <td>{supplier.note || '—'}</td>
+                  <td><span className="block truncate" title={supplier.phone || undefined}>{supplier.phone || '—'}</span></td>
+                  <td><span className="block truncate" title={supplier.address || undefined}>{supplier.address || '—'}</span></td>
+                  <td><span className="block truncate" title={supplier.note || undefined}>{supplier.note || '—'}</span></td>
                   <td>
                     <DirectoryActions
                       label={supplier.name}
@@ -213,7 +228,7 @@ export function SuppliersPage() {
               ))}
               {!rows.length && (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-text-muted">
+                  <td colSpan={5} className="poster-directory-empty text-center text-text-muted">
                     {search ? 'Поставщики не найдены' : 'Здесь будут ваши поставщики'}
                   </td>
                 </tr>
@@ -239,9 +254,9 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
   const [error, setError] = useState('');
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (save.isPending) return;
+    if (save.isPending || !form.name.trim()) return;
     try {
-      await save.mutateAsync({ id: supplier?.id, ...form });
+      await save.mutateAsync({ id: supplier?.id, ...form, name: form.name.trim() });
       onClose();
     } catch (err) {
       setError(apiError(err));
@@ -252,9 +267,9 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
       open
       onClose={onClose}
       title={supplier ? 'Редактирование поставщика' : 'Новый поставщик'}
-      panelClassName="max-w-3xl"
     >
-      <form id={formId} className="poster-form poster-form--directory" onSubmit={submit}>
+      <form id={formId} className="poster-form poster-form--directory poster-document--modern" onSubmit={submit}>
+        <div className="poster-document-panel">
         {(
           [
             { key: 'name', label: 'Название' },
@@ -274,6 +289,7 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
             ) : (
               <input
                 className="input w-full"
+                type={key === 'phone' ? 'tel' : 'text'}
                 required={key === 'name'}
                 value={form[key]}
                 onChange={(e) => setForm({ ...form, [key]: e.target.value })}
@@ -299,6 +315,7 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
             {error}
           </p>
         )}
+        </div>
         <DocumentFooter>
           <button
             type="submit"
@@ -307,9 +324,6 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
             disabled={save.isPending || !form.name.trim()}
           >
             Сохранить
-          </button>
-          <button type="button" className="btn-ghost btn-md" onClick={onClose}>
-            Отмена
           </button>
         </DocumentFooter>
       </form>
@@ -320,11 +334,12 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
 export function LocationsPage({ data }: { data: WarehouseLocations }) {
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const [search, setSearch] = usePageFilter('search');
+  const [sort, setSort] = usePageFilter('sort', 'asc');
   const [error, setError] = useState('');
   const { setRoute } = useWarehouseLocationMutations();
   const rows = data.locations.filter((item) =>
-    item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
-  );
+    `${item.name} ${item.address ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  ).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (sort === 'desc' ? -1 : 1));
   async function assign(stationId: string, warehouseId: string) {
     try {
       await setRoute.mutateAsync({ stationId, warehouseId: warehouseId || null });
@@ -343,23 +358,24 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
     return <LocationForm key={editor.id ?? 'new'} location={location} onClose={closeEditor} />;
   }
   return (
-    <div>
-      <WorkspaceHeaderCount count={data.locations.length} />
+    <div className="poster-directory-surface">
       <WorkspaceHeaderActions>
         <button className="btn-primary btn-md" onClick={() => openEditor({ type: 'location' })}>
           Добавить
         </button>
       </WorkspaceHeaderActions>
       <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск склада" value={search} onChange={setSearch} />
+        <WorkspaceSearch label="Поиск склада" value={search} onChange={setSearch} placeholder="Поиск..." />
       </div>
-      <table className="poster-table w-full">
+      <div className="overflow-x-auto">
+      <table className="poster-table poster-directory-table poster-directory-table--locations w-full min-w-[580px]">
+        <colgroup><col style={{ width: 68 }} /><col style={{ width: '42%' }} /><col /><col style={{ width: 96 }} /></colgroup>
         <thead>
           <tr>
             <th className="w-16">№</th>
-            <th>Название</th>
+            <DirectoryNameHeader ascending={sort !== 'desc'} onToggle={() => setSort(sort === 'desc' ? 'asc' : 'desc')} />
             <th>Адрес</th>
-            <th />
+            <th><span className="sr-only">Действия</span></th>
           </tr>
         </thead>
         <tbody>
@@ -369,14 +385,15 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
               <td>
                 <button
                   type="button"
-                  className="text-primary"
+                  className="max-w-full truncate text-left text-primary"
+                  title={location.name}
                   onClick={() => openEditor({ type: 'location', id: location.id })}
                 >
                   {location.name}
                 </button>
                 {location.isDefault && <span className="ml-2 text-xs text-text-muted">По умолчанию</span>}
               </td>
-              <td>{location.address || '—'}</td>
+              <td><span className="block truncate" title={location.address || undefined}>{location.address || '—'}</span></td>
               <td>
                 <DirectoryActions
                   label={location.name}
@@ -387,13 +404,14 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
           ))}
           {!rows.length && (
             <tr>
-              <td colSpan={4} className="py-10 text-center text-text-muted">
+              <td colSpan={4} className="poster-directory-empty text-center text-text-muted">
                 Склады не найдены
               </td>
             </tr>
           )}
         </tbody>
       </table>
+      </div>
       <details className="poster-advanced mt-6">
         <summary>Склады для цехов</summary>
         <div className="poster-form poster-form--directory space-y-4 pt-5">
@@ -430,9 +448,9 @@ function LocationForm({ location, onClose }: { location?: WarehouseLocation; onC
   const { save } = useWarehouseLocationMutations();
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (save.isPending) return;
+    if (save.isPending || !name.trim()) return;
     try {
-      await save.mutateAsync({ id: location?.id, name, address });
+      await save.mutateAsync({ id: location?.id, name: name.trim(), address });
       onClose();
     } catch (err) {
       setError(apiError(err));
@@ -443,9 +461,9 @@ function LocationForm({ location, onClose }: { location?: WarehouseLocation; onC
       open
       onClose={onClose}
       title={location ? 'Редактирование склада' : 'Новый склад'}
-      panelClassName="max-w-3xl"
     >
-      <form id={formId} className="poster-form poster-form--directory" onSubmit={submit}>
+      <form id={formId} className="poster-form poster-form--directory poster-document--modern" onSubmit={submit}>
+        <div className="poster-document-panel">
         <DocumentField label="Название">
           <input className="input w-full" required value={name} onChange={(e) => setName(e.target.value)} />
         </DocumentField>
@@ -461,6 +479,7 @@ function LocationForm({ location, onClose }: { location?: WarehouseLocation; onC
             {error}
           </p>
         )}
+        </div>
         <DocumentFooter>
           <button
             type="submit"
@@ -469,9 +488,6 @@ function LocationForm({ location, onClose }: { location?: WarehouseLocation; onC
             disabled={save.isPending || !name.trim()}
           >
             Сохранить
-          </button>
-          <button className="btn-ghost btn-md" type="button" onClick={onClose}>
-            Отмена
           </button>
         </DocumentFooter>
       </form>
@@ -484,12 +500,13 @@ export function PackagesPage() {
   const mutations = usePackageMutations();
   const [search, setSearch] = usePageFilter('search');
   const [unit, setUnit] = usePageFilter('unit');
+  const [sort, setSort] = usePageFilter('sort', 'asc');
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const [error, setError] = useState('');
   const rows = (q.data ?? []).filter(
     (item) =>
-      (!unit || item.unit === unit) && item.name.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
-  );
+      (!unit || item.unit === unit) && item.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  ).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (sort === 'desc' ? -1 : 1));
   async function archive(item: PackageUnit) {
     if (!confirm(`Архивировать фасовку «${item.name}»? Сохранённые поставки не изменятся.`)) return;
     try {
@@ -513,15 +530,14 @@ export function PackagesPage() {
     return <PackageForm key={editor.id ?? 'new'} item={item} onClose={closeEditor} />;
   }
   return (
-    <div>
-      <WorkspaceHeaderCount count={q.data?.length} />
+    <div className="poster-directory-surface">
       <WorkspaceHeaderActions>
         <button className="btn-primary btn-md" onClick={() => openEditor({ type: 'package' })}>
           Добавить
         </button>
       </WorkspaceHeaderActions>
       <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск фасовок" value={search} onChange={setSearch} />
+        <WorkspaceSearch label="Поиск фасовок" value={search} onChange={setSearch} placeholder="Поиск..." />
         <Select
           ariaLabel="Единица фасовки"
           className="poster-filter w-44"
@@ -536,13 +552,15 @@ export function PackagesPage() {
         </p>
       )}
       <QueryState pending={q.isPending} error={q.error}>
-        <table className="poster-table w-full">
+        <div className="overflow-x-auto">
+        <table className="poster-table poster-directory-table poster-directory-table--packages w-full min-w-[540px]">
+          <colgroup><col style={{ width: '34%' }} /><col style={{ width: '28%' }} /><col /><col style={{ width: 110 }} /></colgroup>
           <thead>
             <tr>
-              <th>Название</th>
+              <DirectoryNameHeader ascending={sort !== 'desc'} onToggle={() => setSort(sort === 'desc' ? 'asc' : 'desc')} />
               <th>Ед. измерения</th>
               <th>Количество</th>
-              <th />
+              <th><span className="sr-only">Действия</span></th>
             </tr>
           </thead>
           <tbody>
@@ -550,14 +568,16 @@ export function PackagesPage() {
               <tr key={item.id}>
                 <td>
                   <button
-                    className="text-left text-primary"
+                    type="button"
+                    className="block max-w-full truncate text-left text-primary"
+                    title={item.name}
                     onClick={() => openEditor({ type: 'package', id: item.id })}
                   >
                     {item.name}
                   </button>
                 </td>
                 <td>{unitLabel(item.unit)}</td>
-                <td>{item.quantity}</td>
+                <td className="tabular-nums">{Number(item.quantity).toLocaleString('ru-RU', { maximumFractionDigits: 6 })}</td>
                 <td>
                   <DirectoryActions
                     label={item.name}
@@ -570,7 +590,7 @@ export function PackagesPage() {
             ))}
             {!rows.length && (
               <tr>
-                <td colSpan={4} className="py-12 text-center">
+                <td colSpan={4} className="poster-directory-empty text-center">
                   <p className="font-semibold">
                     {search || unit ? 'Фасовки не найдены' : 'Здесь будут ваши фасовки'}
                   </p>
@@ -584,6 +604,7 @@ export function PackagesPage() {
             )}
           </tbody>
         </table>
+        </div>
       </QueryState>
     </div>
   );
@@ -597,9 +618,9 @@ function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => voi
   const { save } = usePackageMutations();
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (save.isPending) return;
+    if (save.isPending || !name.trim() || !Number.isFinite(Number(quantity)) || !(Number(quantity) > 0)) return;
     try {
-      await save.mutateAsync({ id: item?.id, name, unit, quantity: Number(quantity) });
+      await save.mutateAsync({ id: item?.id, name: name.trim(), unit, quantity: Number(quantity) });
       onClose();
     } catch (err) {
       setError(apiError(err));
@@ -610,9 +631,9 @@ function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => voi
       open
       onClose={onClose}
       title={item ? 'Редактирование фасовки' : 'Новая фасовка'}
-      panelClassName="max-w-3xl"
     >
-      <form id={formId} className="poster-form poster-form--directory" onSubmit={submit}>
+      <form id={formId} className="poster-form poster-form--directory poster-document--modern" onSubmit={submit}>
+        <div className="poster-document-panel">
         <DocumentField label="Название">
           <input
             className="input w-full"
@@ -633,7 +654,7 @@ function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => voi
         </DocumentField>
         <DocumentField label="Количество">
           <input
-            className="input w-[220px]"
+            className="input w-[208px] max-w-full"
             required
             type="number"
             step="any"
@@ -647,6 +668,7 @@ function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => voi
             {error}
           </p>
         )}
+        </div>
         <DocumentFooter>
           <button
             type="submit"
@@ -655,9 +677,6 @@ function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => voi
             disabled={save.isPending || !name.trim() || !(Number(quantity) > 0)}
           >
             Сохранить
-          </button>
-          <button className="btn-ghost btn-md" type="button" onClick={onClose}>
-            Отмена
           </button>
         </DocumentFooter>
       </form>

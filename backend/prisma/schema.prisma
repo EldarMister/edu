@@ -1079,6 +1079,7 @@ model WarehouseDocument {
   mode            WarehouseInventoryMode?
   reason          WarehouseWriteoffReason?
   note            String?
+  sourceLines     Json?                   @map("source_lines")
   destinationWarehouseId String? @map("destination_warehouse_id")
   sourcePurchaseId String? @map("source_purchase_id")
   requestKey String? @map("request_key")

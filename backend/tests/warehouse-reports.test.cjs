@@ -107,6 +107,88 @@ if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new 
   throw new Error('Only a dedicated local test database is allowed');
 }
 
+test('PostgreSQL: movement detail groups all filtered rows before pagination with weighted historical costs', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafes = [];
+  try {
+    const cafe = await db.cafe.create({ data: { name: `Movement groups ${randomUUID()}` } });
+    const other = await db.cafe.create({ data: { name: `Other movement groups ${randomUUID()}` } });
+    cafes.push(cafe.id, other.id);
+    const reports = new WarehouseReportsService(db);
+    const fixture = await runWithTenant({ cafeId: cafe.id }, async () => {
+      const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
+      const main = (await locations.list(cafe.id)).locations[0];
+      const bar = await locations.save(cafe.id, 'Other group warehouse');
+      const ingredients = new IngredientsService(db);
+      const flour = await ingredients.create({ name: 'Group flour', unit: 'kg', category: 'Groups' });
+      const water = await ingredients.create({ name: 'Other group ingredient', unit: 'l' });
+      const base = {
+        cafeId: cafe.id, ingredientId: flour.id, warehouseId: main.id,
+        beforeStock: 0, afterStock: 0, actorId: 'group-actor', actorName: 'Group actor',
+        sourceId: randomUUID(), createdAt: new Date('2026-11-14T08:00:00Z'), costKnown: true,
+      };
+      const purchases = Array.from({ length: 25 }, (_, i) => ({
+        ...base, type: 'purchase', sourceType: 'purchase', change: i === 24 ? 3000 : 1000,
+        costAtMoment: i === 24 ? '0.03' : '0.01',
+        // Include a legacy default-warehouse row and a sub-cent valuation correction.
+        warehouseId: i === 0 ? null : main.id, valuationAdjustment: i === 0 ? '0.00123456' : 0,
+      }));
+      await db.stockMovement.createMany({ data: [
+        ...purchases,
+        { ...base, type: 'cancel', sourceType: 'purchase', change: -2000, costAtMoment: '0.025' },
+        { ...base, type: 'writeoff', sourceType: 'writeoff', change: -1000, costAtMoment: '0.02' },
+        { ...base, type: 'writeoff', sourceType: 'writeoff', change: -2000, costAtMoment: '0.03', costKnown: false },
+        { ...base, type: 'cancel', sourceType: 'writeoff', change: 500, costAtMoment: '0.02' },
+        { ...base, type: 'correction', sourceType: 'purchase', change: 0, costAtMoment: 0, valuationAdjustment: 999, costKnown: false },
+        { ...base, type: 'purchase', sourceType: 'purchase', change: 999000, costAtMoment: 99, warehouseId: bar.id },
+        { ...base, type: 'purchase', sourceType: 'purchase', change: 999000, costAtMoment: 99, ingredientId: water.id },
+        { ...base, type: 'purchase', sourceType: 'purchase', change: 999000, costAtMoment: 99, createdAt: new Date('2026-11-12T08:00:00Z') },
+        { ...base, type: 'purchase', sourceType: 'purchase', change: 999000, costAtMoment: 99, actorId: 'another-actor' },
+      ] });
+      const query = { view: 'movements', ingredientId: flour.id, warehouseId: main.id,
+        from: '2026-11-14', to: '2026-11-14', employeeId: 'group-actor', pageSize: 20 };
+      const result = await reports.report(query);
+      assert.equal(result.totalRows, 30);
+      assert.equal(result.rows.length, 20);
+      const group = (direction, sourceType) => result.movementGroups.find((entry) => entry.direction === direction && entry.sourceType === sourceType);
+      assert.equal(result.movementGroups.length, 4);
+      assert.deepEqual(group('incoming', 'purchase'), {
+        direction: 'incoming', sourceType: 'purchase', label: 'Поставки', quantity: 27,
+        unit: 'кг', averageCost: 12.22226795, count: 25,
+      });
+      assert.deepEqual(group('outgoing', 'purchase'), {
+        direction: 'outgoing', sourceType: 'purchase', label: 'Поставки', quantity: 2,
+        unit: 'кг', averageCost: 25, count: 1,
+      });
+      assert.equal(group('outgoing', 'writeoff').quantity, 3);
+      assert.equal(group('outgoing', 'writeoff').averageCost, null, 'one unknown movement makes the group cost unknown');
+      assert.equal(group('outgoing', 'writeoff').count, 2);
+      assert.equal(group('incoming', 'writeoff').quantity, 0.5, 'a reversal follows its physical sign');
+      assert.equal(group('incoming', 'writeoff').averageCost, 20);
+      const next = await reports.report({ ...query, page: 2 });
+      assert.equal(next.rows.length, 10);
+      assert.deepEqual(next.movementGroups, result.movementGroups, 'groups are independent of the visible page');
+      assert.ok(result.rows.every((row) => !('exactQuantity' in row) && !('exactCost' in row)));
+      assert.equal((await reports.report({ ...query, view: 'purchases' })).movementGroups, undefined);
+      assert.equal((await reports.report({ ...query, ingredientId: undefined })).movementGroups, undefined, 'never aggregate quantities across ingredients');
+      assert.deepEqual((await reports.report({ ...query, category: 'Unrelated category' })).movementGroups, []);
+      return { ingredientId: flour.id, warehouseId: main.id };
+    });
+    await runWithTenant({ cafeId: other.id }, async () => {
+      assert.deepEqual((await reports.report({ view: 'movements', ingredientId: fixture.ingredientId })).movementGroups, []);
+      await assert.rejects(reports.report({ view: 'movements', ingredientId: fixture.ingredientId, warehouseId: fixture.warehouseId }), /Склад не найден/);
+    });
+  } finally {
+    for (const cafeId of cafes) {
+      await db.stockMovement.deleteMany({ where: { cafeId } });
+      await db.ingredient.deleteMany({ where: { cafeId } });
+      await db.cafe.delete({ where: { id: cafeId } });
+    }
+    await db.$disconnect();
+  }
+});
+
 test('PostgreSQL: Poster movement summary preserves historical carry-in, warehouse isolation and unknown costs', { skip: !url }, async () => {
   const db = new PrismaClient({ datasourceUrl: url });
   db.$use(tenantPrismaMiddleware);

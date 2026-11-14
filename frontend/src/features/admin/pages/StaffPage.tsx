@@ -752,10 +752,14 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
   const push = useNotifications((s) => s.push);
   const [startedAt, setStartedAt] = useState(toDateTimeLocal(row.startedAt));
   const [endedAt, setEndedAt] = useState(toDateTimeLocal(row.endedAt));
+  const [startedAtValid, setStartedAtValid] = useState(true);
+  const [endedAtValid, setEndedAtValid] = useState(true);
   const [openShift, setOpenShift] = useState(!row.endedAt);
   const [error, setError] = useState('');
+  const datesValid = startedAtValid && !!startedAt && (openShift || (endedAtValid && !!endedAt));
 
   async function submit() {
+    if (!datesValid || actions.update.isPending) return;
     setError('');
     try {
       await actions.update.mutateAsync({
@@ -776,7 +780,7 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
       onClose={onClose}
       title="Редактировать время смены"
       footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={actions.update.isPending} onClick={submit}>
+        <button className="btn-primary btn-lg w-full font-semibold" disabled={actions.update.isPending || !datesValid} onClick={submit}>
           {actions.update.isPending ? <Spinner /> : 'Сохранить'}
         </button>
       }
@@ -788,6 +792,8 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
             className="input"
             value={startedAt}
             onChange={(value) => setStartedAt(value)}
+            onValidityChange={setStartedAtValid}
+            required
           />
         </Field>
         <label className="flex items-center gap-2.5 text-sm text-text-secondary">
@@ -800,6 +806,8 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
               className="input"
               value={endedAt}
               onChange={(value) => setEndedAt(value)}
+              onValidityChange={setEndedAtValid}
+              required
             />
           </Field>
         )}

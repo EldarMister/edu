@@ -1,7 +1,7 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-type ProductChoice = { id: string; name: string; unit?: string; barcode?: string | null };
+type ProductChoice = { id: string; name: string; unit?: string; barcode?: string | null; group?: string; detail?: string };
 type PopupPosition = { left: number; width: number; maxHeight: number; top?: number; bottom?: number };
 
 /** Keep the selected ID until the user explicitly chooses another product. */
@@ -12,6 +12,10 @@ export function DocumentProductPicker({
   disabled,
   label = 'Продукт',
   fallbackName,
+  loading = false,
+  loadError,
+  onRetry,
+  error,
 }: {
   value: string;
   options: ProductChoice[];
@@ -19,6 +23,10 @@ export function DocumentProductPicker({
   disabled?: boolean;
   label?: string;
   fallbackName?: string;
+  loading?: boolean;
+  loadError?: string;
+  onRetry?: () => void;
+  error?: string;
 }) {
   const listId = useId();
   const selecting = useRef(false);
@@ -31,8 +39,9 @@ export function DocumentProductPicker({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const [position, setPosition] = useState<PopupPosition>();
-  const matches = options.filter((option) =>
-    `${option.name} ${option.barcode ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  const unavailable = loading || !!loadError;
+  const matches = unavailable ? [] : options.filter((option) =>
+    `${option.name} ${option.barcode ?? ''} ${option.group ?? ''} ${option.detail ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
   );
   const activeIndex = Math.min(active, Math.max(0, matches.length - 1));
 
@@ -115,6 +124,7 @@ export function DocumentProductPicker({
 
   return (
     <div ref={field} className="relative min-w-0">
+      <div className="relative">
       <input
         ref={input}
         role="combobox"
@@ -122,11 +132,15 @@ export function DocumentProductPicker({
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         aria-activedescendant={open && matches.length ? `${listId}-${activeIndex}` : undefined}
+        aria-busy={loading || undefined}
+        aria-invalid={!!error || undefined}
+        aria-describedby={error ? `${listId}-error` : undefined}
         className="input h-9 w-full !pr-8"
         value={text}
         disabled={disabled}
+        readOnly={unavailable}
         aria-label={label}
-        placeholder="Выберите продукт…"
+        placeholder={loading ? 'Загрузка продуктов…' : loadError ? 'Не удалось загрузить продукты' : 'Выберите продукт…'}
         autoComplete="off"
         onFocus={(event) => {
           if (!selecting.current) {
@@ -138,6 +152,7 @@ export function DocumentProductPicker({
           if (!open) show();
         }}
         onChange={(event) => {
+          if (unavailable) return;
           setText(event.target.value);
           setSearch(event.target.value);
           setActive(0);
@@ -174,6 +189,8 @@ export function DocumentProductPicker({
       >
         <path d="m2 4 4 4 4-4" strokeWidth="1.5" />
       </svg>
+      </div>
+      {error && <p id={`${listId}-error`} className="mt-1 text-left text-xs text-danger">{error}</p>}
       {open &&
         position &&
         createPortal(
@@ -185,10 +202,18 @@ export function DocumentProductPicker({
             style={position}
             className="fixed z-[90] overflow-y-auto rounded-[3px] border border-border bg-white py-1 text-sm text-text-primary shadow-lg"
           >
-            {matches.length ? (
+            {loading ? (
+              <p role="status" className="px-3 py-3 text-text-muted">Загрузка продуктов…</p>
+            ) : loadError ? (
+              <div className="px-3 py-3">
+                <p role="alert" className="text-danger">{loadError}</p>
+                {onRetry && <button type="button" className="mt-2 text-primary" onClick={() => { onRetry(); input.current?.focus({ preventScroll: true }); }}>Повторить загрузку</button>}
+              </div>
+            ) : matches.length ? (
               matches.map((option, index) => (
+                <Fragment key={option.id}>
+                {option.group && (index === 0 || matches[index - 1].group !== option.group) && <div role="presentation" className="bg-background px-3 py-2 text-xs font-semibold text-text-secondary">{option.group}</div>}
                 <button
-                  key={option.id}
                   id={`${listId}-${index}`}
                   type="button"
                   role="option"
@@ -200,15 +225,16 @@ export function DocumentProductPicker({
                   onMouseEnter={() => setActive(index)}
                   onClick={() => choose(option)}
                 >
-                  <span className="min-w-0 break-words">{option.name}</span>
+                  <span className="min-w-0 break-words">{option.name}{option.detail && <span className="mt-0.5 block text-xs text-text-muted">{option.detail}</span>}</span>
                   <span className="shrink-0 text-xs text-text-muted">
                     {[option.unit, option.barcode].filter(Boolean).join(' · ')}
                     {option.id === value ? ' ✓' : ''}
                   </span>
                 </button>
+                </Fragment>
               ))
             ) : (
-              <p className="px-3 py-3 text-text-muted">Продукты не найдены</p>
+              <p role="status" className="px-3 py-3 text-text-muted">{search.trim() ? 'Продукты не найдены. Попробуйте другое название.' : 'Нет доступных продуктов'}</p>
             )}
           </div>,
           document.body,

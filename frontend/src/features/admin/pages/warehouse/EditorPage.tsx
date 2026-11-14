@@ -1,16 +1,20 @@
 import { createContext, useCallback, useState, type ReactNode } from 'react';
 import { WorkspaceHeaderTitle } from '../WorkspaceHeader';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
+export { useEditorDirty } from '@/components/EditorNavigationGuard';
 
 export const EditorFooterTarget = createContext<HTMLDivElement | null>(null);
 
-export function EditorPage({ title, onClose, children, footer, open = true }: {
+export function EditorPage({ title, onClose, children, footer, open = true, dirty = false }: {
   title?: string;
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
   open?: boolean;
   panelClassName?: string;
+  dirty?: boolean;
 }) {
+  useEditorDirty(open && dirty);
   const [footerTarget, setFooterTarget] = useState<HTMLDivElement | null>(null);
   const focusHeading = useCallback((heading: HTMLHeadingElement | null) => {
     if (open) heading?.focus({ preventScroll: true });

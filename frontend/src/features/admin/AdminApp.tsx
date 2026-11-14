@@ -175,6 +175,7 @@ export function AdminApp() {
     setRoute({ section: next, ...(next === 'menu' ? { view: 'goods' } : next === 'warehouse' ? { view: 'balances' } : {}) });
   }
   const [mobileNav, setMobileNav] = useState(false);
+  const [collapsedSection, setCollapsedSection] = useState<Section | null>(null);
   const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
   const menuView = (MENU_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'goods') as MenuView;
   const posterWorkspace = section === 'menu' || section === 'warehouse';
@@ -258,6 +259,7 @@ export function AdminApp() {
   }
 
   function go(s: Section) {
+    setCollapsedSection(null);
     setSection(s);
     setMobileNav(false);
   }
@@ -321,9 +323,9 @@ export function AdminApp() {
 
   const current = sections.find((s) => s.key === section) ?? sections[0];
 
-  const renderSidebar = () => (
+  const renderSidebar = (variant: 'desktop' | 'mobile') => (
     <aside className="workspace-sidebar flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
-      <div className="flex h-16 items-center px-5">
+      <div className="workspace-brand flex h-16 items-center px-5">
         <BrandLogo />
       </div>
       <nav className="workspace-nav app-scrollbar-subtle min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
@@ -341,47 +343,68 @@ export function AdminApp() {
               : s.key === 'menu'
                 ? MENU_NAV.filter((item) => !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
                 : [];
+          const hasChildren = children.length > 0;
+          const expanded = hasChildren && active && collapsedSection !== s.key;
+          const childrenId = `workspace-${variant}-${s.key}-children`;
           return (
             <div key={s.key}>
               <button
-                onClick={() => go(s.key)}
-                aria-expanded={children.length ? active : undefined}
+                type="button"
+                onClick={() => {
+                  if (!hasChildren) {
+                    go(s.key);
+                  } else if (!active) {
+                    setCollapsedSection(null);
+                    setSection(s.key);
+                  } else {
+                    setCollapsedSection(expanded ? s.key : null);
+                  }
+                }}
+                aria-expanded={hasChildren ? expanded : undefined}
+                aria-controls={hasChildren ? childrenId : undefined}
                 className={`workspace-nav-section flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${active ? 'bg-primary/10 text-primary' : 'text-text-secondary hover:bg-background'}`}
               >
                 <Icon />
                 {t(s.label)}
-                {children.length > 0 && (
-                  <span className="ml-auto text-xs" aria-hidden>
-                    {active ? '⌄' : '›'}
-                  </span>
-                )}
               </button>
-              {active && children.length > 0 && (
-                <div className="workspace-nav-children mb-2 ml-5 space-y-0.5 border-l border-border pl-2">
-                  {children.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      aria-current={
-                        (s.key === 'warehouse' ? warehouseView : menuView) === item.key ? 'page' : undefined
-                      }
-                      onClick={() => {
-                        if (s.key === 'warehouse') setWarehouseView(item.key as WarehouseView);
-                        else setMenuView(item.key as MenuView);
-                        setMobileNav(false);
-                      }}
-                      className={`workspace-nav-child block w-full rounded-lg px-3 py-2 text-left text-[13px] transition-colors ${(s.key === 'warehouse' ? warehouseView : menuView) === item.key ? 'bg-primary text-white font-medium' : 'text-text-secondary hover:bg-background'}`}
-                    >
-                      {t(item.label)}
-                    </button>
-                  ))}
+              {hasChildren && (
+                <div
+                  id={childrenId}
+                  className="workspace-nav-collapse"
+                  data-expanded={expanded}
+                  aria-hidden={!expanded}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    <div className="workspace-nav-children mb-2 ml-5 space-y-0.5 border-l border-border pl-2">
+                      {children.map((item) => {
+                        const selected = active && (s.key === 'warehouse' ? warehouseView : menuView) === item.key;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            tabIndex={expanded ? undefined : -1}
+                            aria-current={selected ? 'page' : undefined}
+                            onClick={() => {
+                              if (s.key === 'warehouse') setWarehouseView(item.key as WarehouseView);
+                              else setMenuView(item.key as MenuView);
+                              setMobileNav(false);
+                            }}
+                            className={`workspace-nav-child block w-full rounded-lg px-3 py-2 text-left text-[13px] transition-colors ${selected ? 'bg-primary text-white font-medium' : 'text-text-secondary hover:bg-background'}`}
+                          >
+                            {t(item.label)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
           );
         })}
       </nav>
-      <div className="border-t border-border p-3">
+      <div className="workspace-sidebar-footer border-t border-border p-3">
+        <div className="flex items-center justify-between">
         <button
           onClick={onLogout}
           className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium text-text-secondary hover:bg-background"
@@ -389,6 +412,8 @@ export function AdminApp() {
           <IconLogout />
           {t('Выйти')}
         </button>
+        {posterWorkspace && <ConnectionStatus compact />}
+        </div>
         <AppVersion className="mt-2" />
       </div>
     </aside>
@@ -404,7 +429,7 @@ export function AdminApp() {
       onTouchCancel={handleAppTouchEnd}
     >
       {/* Desktop sidebar */}
-      <div className="hidden lg:block">{renderSidebar()}</div>
+      <div className="hidden lg:block">{renderSidebar('desktop')}</div>
 
       {/* Mobile drawer */}
       {mobileNav && (
@@ -421,7 +446,7 @@ export function AdminApp() {
             onTouchEnd={handleDrawerTouchEnd}
             onTouchCancel={handleDrawerTouchEnd}
           >
-            {renderSidebar()}
+            {renderSidebar('mobile')}
           </div>
         </div>
       )}
@@ -461,7 +486,7 @@ export function AdminApp() {
           </div>
           <div className="flex items-center gap-3">
             <WorkspaceActionsSlot />
-            <ConnectionStatus />
+            {!posterWorkspace && <ConnectionStatus />}
           </div>
         </header>
 

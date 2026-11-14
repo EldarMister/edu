@@ -10,13 +10,26 @@ export interface EditorRoute {
 }
 const editorKeys = ['editor', 'id', 'action', 'itemId', 'editorWarehouse'];
 const scrollPositions = new Map<string, number>();
+function scrollKey(pathname: string, search: string) {
+  const params = new URLSearchParams(search);
+  // Disclosures change the URL for Back navigation without moving the current list.
+  ['balanceExpanded', 'catalogueExpanded', 'movementExpanded', 'movementDocuments'].forEach((key) => params.delete(key));
+  return `${pathname}?${params.toString()}`;
+}
 
 export function useWorkspaceScroll() {
   const location = useLocation();
-  const key = location.pathname + location.search;
+  const key = scrollKey(location.pathname, location.search);
   useLayoutEffect(() => {
     const main = document.querySelector('main');
-    if (main) main.scrollTop = scrollPositions.get(key) ?? 0;
+    if (!main) return;
+    main.scrollTop = scrollPositions.get(key) ?? 0;
+    const remember = () => {
+      if (scrollPositions.size > 100) scrollPositions.clear();
+      scrollPositions.set(key, main.scrollTop);
+    };
+    main.addEventListener('scroll', remember, { passive: true });
+    return () => main.removeEventListener('scroll', remember);
   }, [key]);
 }
 
@@ -40,7 +53,7 @@ export function useEditorRoute() {
     if (next.warehouseId) url.set('editorWarehouse', next.warehouseId);
     const from = location.pathname + location.search;
     if (scrollPositions.size > 100) scrollPositions.clear();
-    scrollPositions.set(from, document.querySelector('main')?.scrollTop ?? 0);
+    scrollPositions.set(scrollKey(location.pathname, location.search), document.querySelector('main')?.scrollTop ?? 0);
     navigate({ pathname: location.pathname, search: url.toString() }, {
       replace, state: replace ? location.state : { editorFrom: from },
     });

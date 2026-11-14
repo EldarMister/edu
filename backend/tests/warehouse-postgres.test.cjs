@@ -15,6 +15,134 @@ if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new 
   throw new Error('Only a dedicated local test database is allowed');
 }
 
+test('PostgreSQL: ingredient supplies report posted receipts in display units with discounts and warehouse scope', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafes = [];
+  try {
+    const cafe = await db.cafe.create({ data: { name: `Ingredient supplies ${randomUUID()}` } });
+    const foreign = await db.cafe.create({ data: { name: `Foreign supplies ${randomUUID()}` } });
+    cafes.push(cafe.id, foreign.id);
+    const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
+    const ingredients = new IngredientsService(db);
+    const purchases = new PurchasesService(db);
+    const fixture = await runWithTenant({ cafeId: cafe.id }, async () => {
+      const main = (await locations.list(cafe.id)).locations[0];
+      const bar = await locations.save(cafe.id, 'Supplies bar');
+      const flour = await ingredients.create({ name: 'Supplies flour', unit: 'kg' });
+      const water = await ingredients.create({ name: 'Unrelated water', unit: 'l' });
+      const create = (extra) => purchases.create({
+        supplier: 'Historical supplier', warehouseId: main.id, complete: true,
+        items: [{ ingredientId: flour.id, quantity: 1, unit: 'kg', purchasePrice: 100 }],
+        ...extra,
+      });
+      const receipt = await create({
+        date: '2026-11-12T10:00:00Z', discount: 30,
+        items: [
+          { ingredientId: flour.id, quantity: 2, unit: 'kg', purchasePrice: 100 },
+          { ingredientId: flour.id, quantity: 1000, unit: 'g', purchasePrice: 0.1 },
+        ],
+      });
+      const legacy = await create({ date: '2026-11-11T10:00:00Z' });
+      await db.purchase.update({ where: { id: legacy.id }, data: { warehouseId: null } });
+      const barReceipt = await create({ date: '2026-11-13T10:00:00Z', warehouseId: bar.id });
+      await create({ complete: false });
+      const cancelled = await create({ complete: false });
+      await purchases.cancel(cancelled.id);
+      await create({ items: [{ ingredientId: water.id, quantity: 1, unit: 'l', purchasePrice: 5 }] });
+      const report = await ingredients.supplies(flour.id, { warehouseId: main.id });
+      assert.equal(report.total, 2);
+      assert.deepEqual(report.rows.map((row) => row.purchaseId), [receipt.id, legacy.id]);
+      assert.deepEqual(
+        { quantity: report.rows[0].quantity, unitCode: report.rows[0].unitCode, unitPrice: report.rows[0].unitPrice, total: report.rows[0].total },
+        { quantity: 3, unitCode: 'kg', unitPrice: 90, total: 270 },
+      );
+      assert.equal(report.rows[0].supplier, 'Historical supplier');
+      const listedReceipt = (await purchases.findAll({ warehouseId: main.id })).find((row) => row.id === receipt.id);
+      assert.deepEqual(listedReceipt.productNames, ['Supplies flour']);
+      assert.equal(listedReceipt.itemsCount, 2);
+      assert.equal(listedReceipt.items, undefined, 'list previews do not load document quantity and price fields');
+      assert.equal((await purchases.findOne(receipt.id)).items.length, 2, 'document detail retains full lines');
+      assert.equal(report.rows[1].warehouseId, main.id);
+      assert.equal(report.rows[1].warehouseName, main.name);
+      assert.equal((await ingredients.supplies(flour.id, { warehouseId: bar.id })).rows[0].purchaseId, barReceipt.id);
+      const first = await ingredients.supplies(flour.id, { pageSize: 1 });
+      const second = await ingredients.supplies(flour.id, { page: 2, pageSize: 1 });
+      assert.equal(first.total, 3);
+      assert.equal(first.rows[0].purchaseId, barReceipt.id);
+      assert.equal(second.rows[0].purchaseId, receipt.id);
+      assert.deepEqual((await ingredients.supplies(flour.id, { page: 4, pageSize: 1 })).rows, []);
+      // The report uses the current display unit without changing historic document amounts.
+      await db.ingredient.update({ where: { id: flour.id }, data: { displayUnit: 'g' } });
+      const grams = await ingredients.supplies(flour.id, { warehouseId: main.id });
+      assert.equal(grams.rows[0].quantity, 3000);
+      assert.equal(grams.rows[0].unitPrice, 0.09);
+      assert.equal(grams.rows[0].total, 270);
+      return { ingredientId: flour.id, warehouseId: main.id };
+    });
+    await runWithTenant({ cafeId: foreign.id }, async () => {
+      const own = await ingredients.create({ name: 'Own item', unit: 'pcs' });
+      assert.deepEqual((await ingredients.supplies(own.id, {})).rows, []);
+      await assert.rejects(ingredients.supplies(fixture.ingredientId, {}), /не найден/);
+      await assert.rejects(ingredients.supplies(own.id, { warehouseId: fixture.warehouseId }), /Склад не найден/);
+    });
+  } finally {
+    for (const cafeId of cafes) {
+      await db.stockMovement.deleteMany({ where: { cafeId } });
+      await db.purchase.deleteMany({ where: { cafeId } });
+      await db.ingredient.deleteMany({ where: { cafeId } });
+      await db.cafe.delete({ where: { id: cafeId } });
+    }
+    await db.$disconnect();
+  }
+});
+
+test('PostgreSQL: draft package snapshots survive resizing and archival without accepting forged reuse', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  let cafe;
+  try {
+    cafe = await db.cafe.create({ data: { name: `Package snapshots ${randomUUID()}` } });
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const ingredients = new IngredientsService(db);
+      const purchases = new PurchasesService(db);
+      const rice = await ingredients.create({ name: 'Snapshot rice', unit: 'kg' });
+      const flour = await ingredients.create({ name: 'Snapshot flour', unit: 'kg' });
+      const pack = await db.warehousePackage.create({ data: { name: 'Two kg', unit: 'kg', unitType: 'mass', quantity: 2, quantityBase: 2000 } });
+      const item = { ingredientId: rice.id, packageId: pack.id, quantity: 2, purchasePrice: 60 };
+      let draft = await purchases.create({ supplier: 'Snapshot supplier', items: [item] });
+      const other = await purchases.create({ supplier: 'Snapshot supplier', items: [item] });
+      await db.warehousePackage.update({ where: { id: pack.id }, data: { name: 'Five kg', quantity: 5, quantityBase: 5000, isActive: false } });
+      const saved = { ...item, purchaseItemId: draft.items[0].id };
+      await assert.rejects(purchases.create({ supplier: 'Snapshot supplier', items: [saved] }), /Сохранённая строка/);
+      await assert.rejects(purchases.update(draft.id, { items: [item] }), /Фасовка не найдена/);
+      await assert.rejects(purchases.update(draft.id, { items: [{ ...saved, purchaseItemId: other.items[0].id }] }), /Сохранённая строка/);
+      await assert.rejects(purchases.update(draft.id, { items: [{ ...saved, ingredientId: flour.id }] }), /Сохранённая строка/);
+      await assert.rejects(purchases.update(draft.id, { items: [saved, saved] }), /несколько раз/);
+      draft = await purchases.update(draft.id, { items: [{ ...saved, quantity: 3, total: 180 }], discount: 30 });
+      assert.equal(draft.items[0].quantityBase, 6000);
+      assert.equal(draft.items[0].packageName, 'Two kg');
+      assert.equal(draft.items[0].packageQuantity, 2);
+      assert.equal(draft.items[0].packageFactor, 2000);
+      assert.equal(draft.totalAmount, 150);
+      const posted = await purchases.update(draft.id, { items: [{ ...item, purchaseItemId: draft.items[0].id, quantity: 3, total: 180 }], complete: true });
+      assert.equal(posted.status, 'completed');
+      assert.equal(posted.totalAmount, 150);
+      const balance = await ingredients.findOne(rice.id);
+      assert.equal(balance.stock, 6);
+      assert.equal(balance.avgCost, 25);
+    });
+  } finally {
+    if (cafe) {
+      await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
+      await db.purchase.deleteMany({ where: { cafeId: cafe.id } });
+      await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+      await db.cafe.delete({ where: { id: cafe.id } });
+    }
+    await db.$disconnect();
+  }
+});
+
 test('PostgreSQL: warehouse receipts and transfers are scoped and consistent', { skip: !url }, async () => {
   const db = new PrismaClient({ datasourceUrl: url });
   db.$use(tenantPrismaMiddleware);
@@ -51,7 +179,7 @@ test('PostgreSQL: warehouse receipts and transfers are scoped and consistent', {
       });
       const completions = await Promise.allSettled([purchases.complete(purchase.id), purchases.complete(purchase.id)]);
       assert.deepEqual(completions.map((entry) => entry.status).sort(), ['fulfilled', 'rejected']);
-      await assert.rejects(purchases.update(purchase.id, { warehouseId: main.id }), /Проведённый приход/);
+      await assert.rejects(purchases.update(purchase.id, { warehouseId: main.id }), /изменилась/);
 
       await Promise.all([
         purchases.create({ supplier: 'Поставщик', complete: true, warehouseId: bar.id, items: [{ ingredientId: cola.id, quantity: 1, unit: 'pcs', purchasePrice: 5 }] }),

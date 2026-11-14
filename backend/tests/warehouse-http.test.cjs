@@ -26,6 +26,9 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     const chef = await createUser('KITCHEN', { sections: { warehouse: true }, actions: { warehouseProduce: true, warehouseRecipes: false, warehouseReports: false, warehouseCosts: false } });
     const reader = await createUser('KITCHEN', { sections: { warehouse: true }, actions: { warehouseProduce: false, warehouseRecipes: true, warehouseReports: false, warehouseCosts: false } });
     const outsider = await createUser('WAITER', { sections: { warehouse: true }, actions: { warehouseApprove: true } });
+    const reportReader = await createUser('ADMIN', { sections: { warehouse: true }, actions: {
+      warehouseReports: true, warehouseCosts: true, warehouseReceive: false,
+    } });
     const login = async (user) => {
       const response = await fetch(`${api}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: user.phone, password }) });
       assert.equal(response.status, 200);
@@ -33,6 +36,7 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     };
     const ownerToken = await login(owner), keeperToken = await login(keeper), outsiderToken = await login(outsider);
     const chefToken = await login(chef), readerToken = await login(reader), counterToken = await login(counter);
+    const reportReaderToken = await login(reportReader);
     const request = (token, path, method = 'GET', body) => fetch(`${api}/api${path}`, {
       method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
@@ -49,6 +53,15 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     assert.equal(row.avgCost, null);
     assert.equal(row.avgCostBase, null);
     assert.equal((await request(keeperToken, '/admin/warehouse/purchases')).status, 403);
+    const supplyPath = `/admin/warehouse/ingredients/${ingredient.id}/supplies`;
+    assert.equal((await request(reportReaderToken, supplyPath)).status, 200, 'reading supplies does not require receiving permission');
+    assert.equal((await request(reportReaderToken, '/admin/warehouse/purchases')).status, 403);
+    for (const token of [keeperToken, chefToken, outsiderToken]) {
+      assert.equal((await request(token, supplyPath)).status, 403);
+    }
+    for (const query of ['page=0', 'page=1000001', 'pageSize=101', 'pageSize=-1', 'page=1.5']) {
+      assert.equal((await request(ownerToken, `${supplyPath}?${query}`)).status, 400);
+    }
     assert.equal((await request(keeperToken, '/admin/warehouse/reports/export.csv')).status, 403);
     for (const token of [keeperToken, ownerToken]) assert.equal((await request(token, `/admin/warehouse/ingredients/${ingredient.id}/adjust`, 'POST', { mode: 'set', quantity: 99, unit: 'pcs' })).status, 404);
     assert.equal((await request(outsiderToken, '/admin/warehouse/ingredients')).status, 403);
@@ -72,6 +85,45 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     assert.equal(finalResponse.status, 200); assert.equal((await finalResponse.json()).status, 'posted');
     const forApprovalResponse = await request(counterToken, '/admin/warehouse/documents', 'POST', { ...documentBody, finalize: 'submit' });
     assert.equal(forApprovalResponse.status, 201); assert.equal((await forApprovalResponse.json()).status, 'submitted');
+    assert.equal(Number((await db.ingredient.findUniqueOrThrow({ where: { id: atomicIngredient.id } })).stock), 2);
+
+    const uncountedResponse = await request(counterToken, '/admin/warehouse/documents', 'POST', {
+      warehouseId: receiptWarehouse.id, kind: 'inventory', mode: 'partial',
+      items: [{ ingredientId: atomicIngredient.id, quantity: null }],
+    });
+    assert.equal(uncountedResponse.status, 201, 'HTTP validation accepts an explicitly selected uncounted inventory position');
+    const uncounted = await uncountedResponse.json();
+    assert.equal(uncounted.items[0].quantity, null);
+    assert.equal((await request(counterToken, `/admin/warehouse/documents/${uncounted.id}/submit`, 'POST', {
+      revision: uncounted.revision,
+    })).status, 400, 'a partial inventory cannot silently skip selected uncounted positions');
+    assert.equal((await request(counterToken, `/admin/warehouse/documents/${uncounted.id}`, 'PATCH', {
+      revision: uncounted.revision, items: [{ ingredientId: atomicIngredient.id }],
+    })).status, 400, 'missing quantity must be explicit null, not silently accepted');
+    assert.equal((await request(counterToken, '/admin/warehouse/documents', 'POST', {
+      ...documentBody, items: [{ ingredientId: atomicIngredient.id, quantity: null }],
+    })).status, 400, 'uncounted quantities are only valid for inventory drafts');
+
+    const sourceLines = [{ sourceLineId: randomUUID(), kind: 'ingredient', sourceId: atomicIngredient.id, quantity: 1, unit: 'pcs' }];
+    assert.equal((await request(counterToken, '/admin/warehouse/documents/writeoff-options')).status, 200);
+    const hiddenPreviewResponse = await request(counterToken, '/admin/warehouse/documents/writeoff-preview', 'POST', {
+      warehouseId: receiptWarehouse.id, sourceLines,
+    });
+    assert.equal(hiddenPreviewResponse.status, 201);
+    const hiddenPreview = await hiddenPreviewResponse.json();
+    assert.equal(hiddenPreview.total, null); assert.equal(hiddenPreview.sourceLines[0].total, null);
+    assert.equal(hiddenPreview.sourceLines[0].parts[0].unitCost, null, 'recipe previews respect cost visibility');
+    const sourceResponse = await request(ownerToken, '/admin/warehouse/documents', 'POST', {
+      warehouseId: receiptWarehouse.id, kind: 'writeoff', reason: 'tasting', finalize: 'post',
+      sourceLines: sourceLines.map((line) => ({ ...line, recipeSignature: hiddenPreview.sourceLines[0].recipeSignature })),
+    });
+    assert.equal(sourceResponse.status, 201);
+    const sourceDocument = await sourceResponse.json();
+    assert.equal(sourceDocument.sourceLines[0].name, 'Atomic save item');
+    assert.equal(sourceDocument.sourceTotal, 7);
+    assert.equal((await request(ownerToken, `/admin/warehouse/documents/${sourceDocument.id}/reverse`, 'POST', {
+      revision: sourceDocument.revision, note: 'HTTP snapshot reversal',
+    })).status, 201);
     assert.equal(Number((await db.ingredient.findUniqueOrThrow({ where: { id: atomicIngredient.id } })).stock), 2);
 
     // A cook with production permission can post and read batches without gaining reports or costs.

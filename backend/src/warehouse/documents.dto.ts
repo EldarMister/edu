@@ -1,6 +1,6 @@
 import { WarehouseDocumentKind, WarehouseInventoryMode, WarehouseWriteoffReason } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 
 export const warehouseWriteoffReasons = {
   spoilage: 'Порча',
@@ -16,8 +16,34 @@ class WarehouseDocumentLineDto {
   @IsString() @IsNotEmpty() @MaxLength(160)
   ingredientId: string;
 
-  @IsNumber() @Min(0)
+  // A selected inventory position may remain uncounted in a draft.
+  // The service only permits null for inventory and rejects it on finalization.
+  @ValidateIf((_object, value) => value !== null) @IsNumber() @Min(0)
+  quantity: number | null;
+}
+
+export class WriteoffSourceLineDto {
+  @IsString() @IsNotEmpty() @MaxLength(160)
+  sourceLineId: string;
+  @IsIn(['ingredient', 'dish'])
+  kind: 'ingredient' | 'dish';
+  @IsString() @IsNotEmpty() @MaxLength(160)
+  sourceId: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  variantId?: string;
+  @IsNumber() @Min(0.000001)
   quantity: number;
+  @IsOptional() @IsString() @MaxLength(16)
+  unit?: string;
+  @IsOptional() @IsString() @MaxLength(64)
+  recipeSignature?: string;
+}
+
+export class WriteoffPreviewDto {
+  @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId: string;
+  @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => WriteoffSourceLineDto)
+  sourceLines: WriteoffSourceLineDto[];
 }
 
 export class WarehouseDocumentRevisionDto {
@@ -37,6 +63,9 @@ export class UpdateWarehouseDocumentDto extends WarehouseDocumentRevisionDto {
 
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => WarehouseDocumentLineDto)
   items?: WarehouseDocumentLineDto[];
+
+  @IsOptional() @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => WriteoffSourceLineDto)
+  sourceLines?: WriteoffSourceLineDto[];
 
   @IsOptional() @IsBoolean()
   recount?: boolean;
@@ -65,6 +94,9 @@ export class CreateWarehouseDocumentDto extends UpdateWarehouseDocumentDto {
 }
 
 export class WarehouseDocumentsQueryDto {
+  @IsOptional() @IsString() @MaxLength(200)
+  search?: string;
+
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
   warehouseId?: string;
 

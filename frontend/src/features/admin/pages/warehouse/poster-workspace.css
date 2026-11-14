@@ -3,26 +3,44 @@
 .workspace-title-slot:has(> *) + .workspace-default-title { display: none; }
 .workspace-header-count { font-size: 13px; font-weight: 400; color: #94a3b8; }
 .poster-search { position: relative; width: 200px; max-width: 100%; flex-shrink: 0; }
-.poster-search .input { padding-left: 30px; padding-right: 28px; }
+.poster-workspace .poster-search .input { padding-left: 30px; padding-right: 28px; }
 .poster-search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
 .poster-search-clear { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 26px; height: 28px; color: #94a3b8; }
 .poster-search-clear:hover { color: #005bff; }
 .poster-search input::-webkit-search-cancel-button { display: none; }
-.poster-select-menu { border-radius: 3px; padding: 3px; box-shadow: 0 3px 10px rgb(15 23 42 / .12); }
+div.poster-select-menu { border-radius: 4px; padding: 3px; box-shadow: 0 3px 10px rgb(15 23 42 / .12); }
 .poster-select-menu > button { border-radius: 2px; padding: 7px 9px; font-size: 14px; line-height: 20px; }
+.poster-select-menu > button[data-highlighted='true'] { background: #edf3ff; color: #005bff; }
+.poster-select-menu > button[aria-selected='true'] { font-weight: 500; }
 .workspace-back { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 36px; }
-.poster-workspace { background: white; font-size: 14px; }
+.poster-workspace { background: white; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 14px; }
 .poster-workspace .workspace-sidebar { width: 220px; background: #f7f8fa; }
-.poster-workspace .workspace-nav { padding: 8px 0; }
-.poster-workspace .workspace-nav > * + * { margin-top: 0; }
-.poster-workspace .workspace-nav-section { border-radius: 0; padding: 9px 18px; font-size: 14px; font-weight: 400; }
+.poster-workspace .workspace-brand { height: 48px; flex-shrink: 0; padding: 0 16px; }
+.poster-workspace .workspace-nav { padding: 8px; scrollbar-gutter: auto; }
+.poster-workspace .workspace-nav > :not([hidden]) ~ :not([hidden]) { margin-top: 0; }
+.poster-workspace .workspace-nav-section { min-height: 38px; border-radius: 8px; padding: 8px; gap: 8px; font-size: 14px; line-height: 22px; font-weight: 600; }
+.poster-workspace .workspace-nav-section > svg { width: 18px; height: 18px; color: #7b8796; }
 .poster-workspace .workspace-nav-section[aria-expanded='true'] { background: transparent; color: #1e293b; font-weight: 600; }
-.poster-workspace .workspace-nav-children { margin: 2px 0 12px; padding: 0; border: 0; }
-.poster-workspace .workspace-nav-child { margin-top: 0; border-radius: 0; padding: 7px 18px 7px 48px; font-size: 14px; line-height: 18px; }
-.poster-workspace .workspace-nav-child[aria-current='page'] { background: rgb(0 91 255 / .09); color: #0f172a; font-weight: 600; }
+.workspace-nav-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 220ms ease-in-out;
+}
+.workspace-nav-collapse[data-expanded='true'] { grid-template-rows: 1fr; }
+.workspace-nav-collapse[data-expanded='false'] { pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-nav-collapse { transition: none; }
+}
+.poster-workspace .workspace-nav-children { margin: 0 0 4px; padding: 0; border: 0; }
+.poster-workspace .workspace-nav-children > :not([hidden]) ~ :not([hidden]) { margin-top: 0; }
+.poster-workspace .workspace-nav-child { margin-top: 0; border-radius: 8px; padding: 4px 8px 4px 34px; font-size: 14px; line-height: 21px; color: #005bff; }
+.poster-workspace .workspace-nav-child[aria-current='page'] { background: rgb(0 91 255 / .09); color: #0f172a; font-weight: 500; }
+.poster-workspace .workspace-sidebar-footer { padding: 8px 16px; }
+.poster-workspace .workspace-sidebar-footer button { font-family: inherit; font-size: 14px; }
+.poster-workspace .workspace-sidebar-footer > div > button { width: auto; padding-left: 0; }
 .poster-workspace .workspace-header { min-height: 64px; padding: 12px 20px; }
 .poster-workspace .workspace-default-title h1 { font-size: 20px; font-weight: 500; }
-.poster-workspace .workspace-title-slot h1 { font-size: 24px; line-height: 30px; }
+.poster-workspace .workspace-title-slot h1 { font-size: 24px; font-weight: 500; line-height: 30px; }
 .poster-workspace .workspace-main { padding: 16px 20px 0; background: white; }
 .poster-workspace .card { border: 0; border-radius: 0; box-shadow: none; background: white; }
 .poster-workspace .input,
@@ -67,6 +85,11 @@
 .poster-workspace table td { padding: 8px 10px; }
 .poster-workspace table tbody tr { border-bottom: 1px solid #f0f1f3; }
 .poster-workspace table tbody tr:hover { background: #fafbfc; }
+.poster-workspace table tbody tr:focus-within { background: #f5f8ff; }
+.poster-workspace :is(button, summary, a):focus-visible { outline: 2px solid #005bff; outline-offset: 2px; border-radius: 4px; }
+.poster-workspace .input[aria-invalid='true'],
+.poster-workspace button.rounded-xl.border[aria-invalid='true'],
+.poster-workspace [data-invalid='true'] button.rounded-xl.border { border-color: #dc2626; background: #fffafa; }
 .poster-workspace table tfoot { background: #f8fafc; }
 .poster-workspace table tfoot td { padding-top: 14px; padding-bottom: 14px; }
 .poster-workspace .poster-row-actions { display: flex; justify-content: flex-end; align-items: center; gap: 16px; white-space: nowrap; }
@@ -87,6 +110,199 @@
 .poster-workspace .poster-unit-select { border: 0; background: transparent; min-width: 40px; font-size: 14px; color: #475569; }
 .poster-workspace .poster-remove { width: 28px; height: 32px; color: #94a3b8; font-size: 22px; }
 .poster-workspace .poster-remove:hover { color: #ef4444; }
+/* Current Poster registers share a rounded surface; menu and supplies retain their flat layout. */
+.poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface),
+.poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-main,
+.poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-header {
+  background: #f3f5f7;
+}
+.poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-header { min-height: 56px; padding: 10px 24px; border-bottom: 0; }
+.poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-main { padding: 8px 16px 20px; }
+.poster-workspace :is(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) {
+  min-width: 0;
+  background: white;
+  border-radius: 16px 16px 0 0;
+  padding: 0;
+}
+.poster-workspace :is(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) > .poster-toolbar {
+  min-height: 64px;
+  padding: 16px;
+  gap: 8px;
+}
+.poster-workspace :is(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .poster-search .input {
+  border-radius: 999px;
+  height: 32px;
+  min-height: 32px;
+  font-size: 14px;
+  background: white;
+}
+.poster-workspace :is(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .poster-toolbar button.rounded-xl.border,
+.poster-workspace :is(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .poster-toolbar summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: auto;
+  min-width: 0;
+  max-width: 240px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #d8dee6;
+  border-radius: 4px;
+  background: white;
+  color: #64748b;
+  font-size: 14px;
+}
+.poster-workspace :is(.poster-balance-table, .poster-movement-table, .poster-register-table, .poster-directory-table) { font-size: 15px; }
+.poster-workspace :is(.poster-balance-table, .poster-movement-table, .poster-register-table, .poster-directory-table) > thead > tr > th {
+  height: 48px;
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #64748b;
+  white-space: nowrap;
+}
+.poster-workspace .poster-movement-table > thead > tr > th {
+  height: 56px;
+  padding: 10px 12px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 13px;
+  line-height: 18px;
+  vertical-align: middle;
+}
+.poster-workspace .poster-movement-table > tbody > tr:not(.poster-movement-detail) > td { padding-left: 12px; padding-right: 12px; }
+.poster-workspace :is(.poster-balance-table, .poster-movement-table, .poster-register-table, .poster-directory-table) > tbody > tr > td {
+  height: 48px;
+  padding: 7px 16px;
+  border-bottom: 1px solid #edf0f3;
+}
+.poster-workspace .poster-balance-toggle { display: flex; align-items: center; gap: 12px; width: 100%; min-width: 0; text-align: left; color: #334155; }
+.poster-workspace .poster-balance-toggle > svg { flex-shrink: 0; width: 14px; height: 14px; }
+.poster-workspace .poster-balance-toggle > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.poster-workspace :is(.poster-balance-table, .poster-movement-table, .poster-register-table, .poster-directory-table) > tbody > :is(.poster-balance-detail-row, .poster-movement-detail) > td { padding: 18px 16px 20px; background: #edf1f5; }
+.poster-workspace :is(.poster-balance-detail, .poster-movement-details) h3 { font-size: 20px; font-weight: 500; line-height: 28px; }
+.poster-workspace :is(.poster-balance-supplies, .poster-movement-detail-table) { background: white; border-radius: 10px; overflow: hidden; }
+.poster-workspace :is(.poster-balance-detail, .poster-movement-details) table th { height: 48px; padding: 12px; font-size: 13px; font-weight: 500; }
+.poster-workspace :is(.poster-balance-detail, .poster-movement-details) table td { height: 52px; padding: 12px; }
+.poster-workspace .poster-balance-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 16px; }
+.poster-workspace .poster-balance-detail-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+.poster-workspace .poster-balance-detail-heading .poster-balance-actions { opacity: .65; }
+.poster-workspace .poster-balance-detail-heading:focus-within .poster-balance-actions,
+.poster-workspace .poster-balance-detail-heading:hover .poster-balance-actions { opacity: 1; }
+.poster-workspace .poster-balance-actions button { min-height: 32px; color: #005bff; font-size: 13px; }
+.poster-list-filter { position: relative; }
+.poster-list-filter > summary { display: flex; align-items: center; min-height: 32px; cursor: pointer; list-style: none; color: #005bff; font-size: 13px; }
+.poster-list-filter > summary::-webkit-details-marker { display: none; }
+.poster-list-filter > summary::after { content: ''; width: 0; height: 0; margin-left: 6px; border: 4px solid transparent; border-top-color: currentColor; transform: translateY(2px); }
+.poster-list-filter-content { position: absolute; top: calc(100% + 8px); left: 0; z-index: 35; min-width: 220px; padding: 12px; background: white; border: 1px solid #e2e8f0; border-radius: 6px; box-shadow: 0 5px 16px rgb(15 23 42 / .1); }
+.poster-workspace .poster-toolbar .poster-list-filter-content button.rounded-xl.border { width: 100%; border: 1px solid #d8dee6; }
+.poster-workspace .poster-register-footer { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 16px; background: #f3f5f7; color: #64748b; font-size: 13px; border-top: 1px solid #edf0f3; }
+.poster-workspace :is(.poster-list-empty, .poster-directory-empty) { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 210px; padding: 32px 16px; text-align: center; }
+.poster-workspace :is(.poster-list-empty, .poster-directory-empty) > svg { width: 56px; height: 56px; padding: 10px; margin-bottom: 16px; border-radius: 10px; background: #f1f4f7; color: #94a3b8; }
+.poster-workspace :is(.poster-list-empty, .poster-directory-empty) h3 { font-size: 18px; font-weight: 600; color: #334155; }
+.poster-workspace :is(.poster-list-empty, .poster-directory-empty) p { margin-top: 6px; color: #64748b; font-size: 14px; }
+.poster-workspace .poster-directory-table > tbody > tr > td.poster-directory-empty { display: table-cell; height: 210px; vertical-align: middle; text-align: center; }
+.poster-workspace:has(.poster-document--modern),
+.poster-workspace:has(.poster-document--modern) :is(.workspace-main, .workspace-header, [data-editor-page]) { background: #f3f5f7; }
+.poster-workspace:has(.poster-document--modern) .workspace-header { min-height: 56px; padding: 10px 24px; border-bottom: 0; }
+.poster-workspace:has(.poster-document--modern) .workspace-title-slot h1 { font-size: 20px; line-height: 24px; font-weight: 500; }
+.poster-workspace:has(.poster-document--modern) .workspace-main { padding: 8px 24px 0; }
+.poster-workspace:has(.poster-document--modern) [data-editor-page] { min-height: calc(100dvh - 64px); }
+.poster-workspace:has(.poster-document--modern) .editor-footer { margin-left: -24px; margin-right: -24px; padding: 16px 24px max(16px, env(safe-area-inset-bottom)); }
+.poster-workspace:has(.poster-document--modern) .editor-footer .btn-primary { min-height: 48px; height: auto; padding: 8px 16px; font-size: 20px; line-height: 30px; font-weight: 400; border-radius: 6px; }
+.poster-workspace .poster-form.poster-document--modern { padding: 0; }
+.poster-workspace .poster-document--modern > :not([hidden]) ~ :not([hidden]) { margin-top: 16px; }
+.poster-workspace .poster-document--modern :is(.poster-document-panel, .poster-document-products) { padding: 16px; border-radius: 16px; background: white; }
+.poster-workspace .poster-document--modern .document-field { grid-template-columns: minmax(180px, 255px) minmax(0, 525px); font-size: 16px; line-height: 24px; }
+.poster-workspace .poster-document--modern .document-field-label { font-size: 16px; color: #334155; padding-top: 7px; }
+.poster-workspace .poster-document--modern .document-field :where(.input, button.rounded-xl.border, .poster-readonly) { min-height: 38px; height: 38px; font-size: 16px; }
+.poster-workspace .poster-document--modern .document-field button.rounded-xl.border { min-height: 38px; height: 38px; font-size: 16px; }
+.poster-workspace .poster-document--modern .document-field textarea.input { min-height: 62px; height: 62px; }
+.poster-workspace .poster-document--modern .document-field-control { max-width: 525px; }
+.poster-workspace .poster-document--modern .poster-document-meta { grid-template-columns: minmax(180px, 255px) minmax(0, 525px); column-gap: 20px; min-height: 38px; font-size: 16px; line-height: 24px; }
+.poster-workspace .poster-document--modern .poster-document-meta > :first-child { font-size: 16px; color: #334155; }
+.poster-workspace .poster-document-products h3 { margin-bottom: 12px; font-size: 20px; font-weight: 500; }
+.poster-workspace .poster-document-products table { border-collapse: collapse; }
+.poster-workspace .poster-document-products table th { height: 48px; font-size: 13px; }
+.poster-workspace .poster-document-products table td { padding-top: 12px; padding-bottom: 12px; }
+.poster-workspace .poster-document-products table tr:last-child { border-bottom: 0; }
+.poster-workspace .poster-document-products > button { min-height: 40px; }
+.poster-workspace .poster-document--modern .poster-document-products:has(.poster-document-table--compact) { padding: 16px 0; }
+.poster-workspace .poster-document-products:has(.poster-document-table--compact) > :is(h3, button) { margin-left: 16px; margin-right: 16px; }
+.poster-workspace .poster-document-table--compact { font-size: 15px; }
+.poster-workspace .poster-document-products .poster-document-table--compact th { height: 48px; padding: 8px 16px; font-size: 14px; }
+.poster-workspace .poster-document-table--compact tbody td { height: 44px; padding: 3px 16px; }
+.poster-workspace .poster-document-table--compact tbody td:last-child:has(> button) { padding-left: 4px; padding-right: 4px; }
+.poster-workspace .poster-inline-product .input,
+.poster-workspace .poster-inline-number .input,
+.poster-workspace .poster-document-table--compact .poster-document-number,
+.poster-workspace .poster-document-table--compact button.poster-inline-select {
+  height: 36px; min-height: 36px; padding: 6px 8px; border: 1px solid transparent; border-radius: 4px;
+  background: transparent; box-shadow: none; font-size: 15px;
+}
+.poster-workspace .poster-inline-product { margin-left: -8px; }
+.poster-workspace .poster-inline-product .input:hover,
+.poster-workspace .poster-inline-number .input:hover,
+.poster-workspace .poster-document-table--compact .poster-document-number:hover,
+.poster-workspace .poster-document-table--compact button.poster-inline-select:hover { border-color: #d8dee6; }
+.poster-workspace .poster-inline-product .input:is(:focus, [aria-expanded='true']),
+.poster-workspace .poster-inline-number .input:focus,
+.poster-workspace .poster-document-table--compact .poster-document-number:focus,
+.poster-workspace .poster-document-table--compact button.poster-inline-select:focus { border-color: #005bff; outline: 2px solid rgb(0 91 255 / .14); background: white; }
+.poster-workspace .poster-inline-number { gap: 2px; }
+.poster-workspace .poster-inline-number > span { height: 36px; min-width: auto; padding: 0 2px; border: 0; border-radius: 0; background: transparent; font-size: 15px; }
+.poster-workspace .poster-document-table--compact .poster-document-table-total td { height: 40px; padding: 7px 16px; background: white; }
+.poster-workspace .poster-document-products:has(.poster-document-table--compact) > .poster-document-add { margin-left: 16px; margin-right: 16px; padding-top: 12px; padding-bottom: 0; }
+.poster-workspace .poster-document-products > .poster-document-add > button { min-height: 32px; }
+.poster-workspace .poster-document-products .input,
+.poster-workspace .poster-document-panel .input,
+.poster-workspace .poster-document--modern button.rounded-xl.border { border-radius: 6px; }
+.poster-workspace .poster-catalogue-detail-row > td { padding: 18px 16px; background: #f3f5f7; }
+.poster-workspace .poster-catalogue-detail h3 { margin-bottom: 12px; font-size: 16px; font-weight: 500; }
+.poster-workspace .poster-catalogue-detail table { background: white; }
+.poster-workspace .poster-catalogue-detail table td { padding-top: 10px; padding-bottom: 10px; }
+.poster-workspace .poster-catalogue-detail-table :is(th, td) { border: 1px solid #e2e8f0; }
+.poster-workspace .poster-catalogue-detail h3 { font-size: 14px; font-weight: 600; }
+.poster-workspace .poster-catalogue-detail-table tfoot { background: white; }
+.poster-workspace .poster-movement-groups th:first-child { width: 60%; }
+.poster-workspace .poster-movement-group-heading { background: #f8fafc; }
+.poster-workspace .poster-movement-group-heading button { min-height: 28px; }
+.poster-workspace .poster-count-toolbar .poster-search { width: 240px; }
+.poster-workspace .poster-count-toolbar .input { max-width: 100%; }
+.poster-workspace .poster-document-validation { padding: 10px 0; }
+.poster-workspace .poster-document-status-note { font-size: 14px; color: #64748b; }
+.poster-workspace .poster-supply-table > tbody > .poster-supply-detail-row > td { padding: 24px 20px; background: #f3f5f7; }
+.poster-workspace .poster-supply-details { background: white; }
+.poster-workspace .poster-supply-details td { height: 36px; }
+.poster-workspace .poster-supply-details tbody tr { border-bottom: 0; }
+.poster-workspace .poster-supply-table .poster-row-actions { gap: 10px; }
+.poster-workspace .poster-recipe-product { display: block; width: 100%; min-height: 36px; text-align: left; color: #005bff; }
+.poster-workspace .poster-processing-select { border: 0; background: transparent; min-width: 70px; }
+.poster-workspace .poster-processing-quantity { display: flex; align-items: center; gap: 6px; }
+.poster-workspace .poster-processing-quantity .input { min-width: 0; }
+.poster-workspace .poster-document-panel > .document-field + .document-field { margin-top: 16px; }
+.poster-workspace .poster-directory-table { table-layout: fixed; }
+.poster-workspace .poster-directory-surface > .poster-advanced { margin: 16px; }
+@media (max-width: 639px) {
+  .poster-workspace:has(.poster-document--modern) .workspace-main { padding: 8px 12px 0; }
+  .poster-workspace:has(.poster-document--modern) .workspace-header,
+  .poster-workspace:has(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .workspace-header { padding: 10px 12px; }
+  .poster-workspace:has(.poster-document--modern) .editor-footer { margin-left: -12px; margin-right: -12px; padding: 12px max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+  .poster-workspace:has(.poster-document--modern) .editor-footer .btn-primary { min-height: 44px; padding: 7px 12px; font-size: 16px; line-height: 28px; }
+  .poster-workspace .poster-document--modern .document-field { grid-template-columns: minmax(0, 1fr); }
+  .poster-workspace .poster-document--modern :is(.poster-document-panel, .poster-document-products) { padding: 12px; border-radius: 12px; }
+  .poster-workspace .poster-document--modern .poster-document-meta { grid-template-columns: minmax(0, 1fr); }
+  .poster-workspace .poster-document-products h3 { font-size: 18px; }
+  .poster-workspace :is(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) > .poster-toolbar { padding: 12px; }
+  .poster-workspace :is(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .poster-toolbar .poster-search { width: 100%; }
+  .poster-workspace :is(.poster-balance-surface, .poster-report-surface, .poster-register-surface, .poster-directory-surface) .poster-toolbar .poster-search .input { max-width: none; }
+  .poster-workspace .poster-balance-surface > .divide-y > article { padding: 14px 12px; }
+  .poster-workspace .poster-balance-surface > .divide-y > p { padding: 14px 12px; }
+  .poster-workspace .poster-balance-surface article .poster-balance-detail { margin: 12px -12px -14px; padding: 16px 12px; background: #edf1f5; }
+  .poster-workspace .poster-balance-surface article .poster-balance-detail h3 { font-size: 18px; }
+}
 @media (max-width: 1023px) {
   .poster-workspace .document-field { grid-template-columns: minmax(140px, 27%) minmax(0, 470px); }
   .poster-workspace .workspace-title-slot h1 { font-size: 21px; line-height: 26px; }

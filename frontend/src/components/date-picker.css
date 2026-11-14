@@ -1,3 +1,21 @@
+.date-picker-field {
+  display: inline-flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
+}
+.date-picker-error,
+.date-time-error {
+  display: block;
+  margin-top: 4px;
+  color: #dc2626;
+  font-size: 12px;
+  line-height: 18px;
+}
+.date-picker-field > .date-picker-error {
+  width: 0;
+  min-width: 100%;
+}
 :where(.date-picker) {
   width: 166px;
   height: 46px;
@@ -18,6 +36,9 @@ div.date-picker {
 .date-picker:focus-within, .date-picker.is-open {
   border-color: #397eff;
   box-shadow: 0 0 0 3px rgba(0, 91, 255, .11);
+}
+.date-picker.is-invalid {
+  border-color: #dc2626;
 }
 .date-picker-input {
   width: 100%;

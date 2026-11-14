@@ -6,13 +6,25 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CreateIngredientDto, UpdateIngredientDto } from './dto';
 import { assertWarehousePermission } from './warehouse-permissions';
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 
 class RenameIngredientCategoryDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
   from: string;
   @IsString() @IsNotEmpty() @MaxLength(120)
   to: string;
+}
+
+class IngredientSuppliesQuery {
+  @IsOptional() @IsString() @MaxLength(160)
+  warehouseId?: string;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(1000000)
+  page?: number;
+
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100)
+  pageSize?: number;
 }
 
 @Controller('admin/warehouse/ingredients')
@@ -48,6 +60,12 @@ export class IngredientsController {
 
   @Get(':id')
   findOne(@Param('id') id: string) { return this.ingredients.findOne(id); }
+
+  @Get(':id/supplies')
+  @RequirePermission('actions.warehouseReports', 'actions.warehouseCosts')
+  supplies(@Param('id') id: string, @Query() query: IngredientSuppliesQuery) {
+    return this.ingredients.supplies(id, query);
+  }
 
   @Post()
   @Roles(Role.ADMIN, Role.OWNER)
