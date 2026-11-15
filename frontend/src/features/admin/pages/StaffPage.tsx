@@ -9,7 +9,6 @@ import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useAuth } from '@/store/auth';
 import { usePreparationStations, usePreparationStationUpdates } from '@/features/kitchen/stations';
-import { PreparationStationsModal } from './PreparationStationsModal';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { IconPlus, IconEdit, IconTrash } from '../components/icons';
@@ -105,7 +104,6 @@ function fromDateTimeLocal(value: string) {
 }
 
 export function StaffPage() {
-  const [stationsOpen, setStationsOpen] = useState(false);
   const stations = usePreparationStations().data ?? [];
   usePreparationStationUpdates();
   const stationNames = new Map(stations.map(({ id, name }) => [id, name]));
@@ -256,7 +254,6 @@ export function StaffPage() {
               </button>
             </>
           )}
-          {isOwner && <button className="btn-secondary btn-md" onClick={() => setStationsOpen(true)}>{tr('Станции')}</button>}
           <button
             className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
             onClick={() => setEditing('new')}
@@ -402,7 +399,6 @@ export function StaffPage() {
         />
       )}
 
-      {isOwner && stationsOpen && <PreparationStationsModal stations={stations} onClose={() => setStationsOpen(false)} />}
       {editing !== null && (
         <StaffModal
           member={editing === 'new' ? null : editing}

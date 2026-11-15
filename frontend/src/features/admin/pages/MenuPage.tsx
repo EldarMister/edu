@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useLocation, useSearchParams } from 'react-router-dom';
+import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -39,12 +39,9 @@ import {
   type AdminCategory,
 } from '../api';
 
-export function MenuPage({
-  view = 'goods',
-}: { view?: MenuView; onView?: (v: MenuView) => void } = {}) {
+export function MenuPage({ view }: { view: Exclude<MenuView, 'categories' | 'ingredientCategories' | 'stations'> }) {
   if (view === 'ingredients' || view === 'preparations')
     return <MenuStockCatalogue key={view} view={view} />;
-  if (view === 'categories') return <MenuCategoriesPage />;
   return <MenuDishList key={view} view={view} />;
 }
 function MenuDishList({ view }: { view: MenuView }) {
@@ -99,7 +96,14 @@ function MenuDishList({ view }: { view: MenuView }) {
       push({ message: apiError(failure), at: new Date().toISOString() });
     }
   }
-  if (editor?.type === 'categories' || editor?.type === 'category') return <MenuCategoriesPage />;
+  if (editor?.type === 'categories' || editor?.type === 'category') {
+    const categoryRoute = new URLSearchParams({ section: 'menu', view: 'categories' });
+    if (editor.type === 'category') {
+      categoryRoute.set('editor', 'category');
+      if (editor.id) categoryRoute.set('id', editor.id);
+    }
+    return <Navigate replace to={{ pathname: location.pathname, search: categoryRoute.toString() }} />;
+  }
   if (editor?.type === 'set')
     return editor.id ? (
       <ExistingSetPage key={editor.id} id={editor.id} stations={stations} onClose={closeEditor} />
@@ -393,7 +397,7 @@ function ExistingSetPage({
     );
   return <SetModal key={id} set={set} stations={stations} onClose={onClose} />;
 }
-function MenuCategoriesPage() {
+export function MenuCategoriesPage() {
   const categoriesQ = useAdminCategories();
   const stations = usePreparationStations().data ?? [];
   usePreparationStationUpdates();
@@ -484,12 +488,12 @@ function MenuCategoriesPage() {
         />
       ) : (
         <div className="min-w-0 overflow-x-auto">
-          <table className="w-full min-w-[520px] text-sm">
+          <table className="poster-table poster-directory-table w-full min-w-[480px]">
             <thead>
-              <tr className="border-b border-border text-left text-xs text-text-muted">
-                <th className="py-3 pr-4 font-normal">Название</th>
-                <th className="px-4 py-3 font-normal">Цех</th>
-                <th className="px-4 py-3 text-right font-normal">Позиций меню</th>
+              <tr>
+                <th scope="col">Название</th>
+                <th scope="col">Станция</th>
+                <th scope="col" className="text-right">Позиций меню</th>
                 <th>
                   <span className="sr-only">Действия</span>
                 </th>
@@ -497,20 +501,21 @@ function MenuCategoriesPage() {
             </thead>
             <tbody>
               {rows.map((category) => (
-                <tr key={category.id} className="border-b border-border hover:bg-background/40">
-                  <td className="py-4 pr-4">
+                <tr key={category.id}>
+                  <td>
                     <button
-                      className="text-left text-text-primary"
+                      type="button"
+                      className="text-left text-primary"
                       onClick={() => openEditor({ type: 'category', id: category.id })}
                     >
                       {category.name}
                     </button>
                   </td>
-                  <td className="px-4 py-4 text-text-secondary">
+                  <td className="text-text-secondary">
                     {stationNames.get(category.prepStation) ?? category.prepStation}
                   </td>
-                  <td className="px-4 py-4 text-right">{category._count.dishes}</td>
-                  <td className="w-px px-3 py-4 text-right">
+                  <td className="text-right tabular-nums">{category._count.dishes}</td>
+                  <td className="w-px text-right">
                     <div className="poster-row-actions">
                       <button
                         className="text-xs text-primary hover:underline"
@@ -550,7 +555,7 @@ function MenuCategoriesPage() {
                 {search
                   ? 'Категории по этому запросу не найдены'
                   : editable
-                    ? 'Добавьте первую категорию товаров и техкарт'
+                    ? 'Добавьте первую категорию товаров и блюд'
                     : 'Категорий пока нет'}
               </p>
               {search && (
@@ -652,9 +657,9 @@ function MenuCategoryForm({
               autoFocus
             />
           </DocumentField>
-          <DocumentField label="Цех">
+          <DocumentField label="Станция">
             <Select
-              ariaLabel="Цех категории"
+              ariaLabel="Станция категории"
               className="h-11 w-full"
               value={prepStation}
               onChange={setPrepStation}

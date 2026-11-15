@@ -1,39 +1,42 @@
 import { Injectable } from '@nestjs/common';
-import { OrderStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { StatsQueryDto } from './dto';
 import { SettingsService } from '../settings/settings.service';
+import { warehouseDay } from '../warehouse/report-range';
+import { buildStatisticsReports, statisticsMovementSelect, statisticsOrderSelect } from './statistics-reports';
 
 type StatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
 
-function startOfDay(d = new Date()) {
-  const s = new Date(d);
-  s.setHours(0, 0, 0, 0);
-  return s;
-}
+const HOUR = 3_600_000;
+const BISHKEK_OFFSET = 6 * HOUR;
 
-function endExclusive(d: Date) {
-  const next = startOfDay(d);
-  next.setDate(next.getDate() + 1);
-  return next;
+function startOfDay(d = new Date()) {
+  return new Date(`${warehouseDay(d)}T00:00:00+06:00`);
 }
 
 function parseDate(value: string | undefined, fallback: Date) {
   if (!value) return fallback;
-  const parsed = new Date(value);
+  const parsed = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00+06:00` : value);
   return Number.isNaN(parsed.getTime()) ? fallback : parsed;
 }
 
 function addDays(d: Date, days: number) {
-  const next = new Date(d);
-  next.setDate(next.getDate() + days);
-  return next;
+  return new Date(d.getTime() + days * 24 * HOUR);
 }
 
 function addMonths(d: Date, months: number) {
-  const next = new Date(d);
-  next.setMonth(next.getMonth() + months);
-  return next;
+  const local = new Date(d.getTime() + BISHKEK_OFFSET);
+  local.setUTCMonth(local.getUTCMonth() + months);
+  return new Date(local.getTime() - BISHKEK_OFFSET);
+}
+
+function businessHour(date: Date) {
+  return new Date(date.getTime() + BISHKEK_OFFSET).getUTCHours();
+}
+
+function endExclusive(d: Date) {
+  return addDays(startOfDay(d), 1);
 }
 
 /** Статистика владельца. */
@@ -43,6 +46,29 @@ export class StatisticsService {
     private prisma: PrismaService,
     private settings: SettingsService,
   ) {}
+
+  async reports(query: StatsQueryDto, showCosts: boolean) {
+    const range = await this.resolveRange(query.period ?? 'today', query);
+    return this.prisma.$transaction(async (db) => {
+      const orders = await db.order.findMany({
+        where: { status: OrderStatus.paid, closedAt: { gte: range.from, lt: range.to } },
+        select: statisticsOrderSelect,
+      });
+      const movements: Prisma.StockMovementGetPayload<{ select: typeof statisticsMovementSelect }>[] = [];
+      if (showCosts) {
+        for (let offset = 0; offset < orders.length; offset += 5000) {
+          const batch = await db.stockMovement.findMany({
+            where: { sourceType: 'order', sourceId: { in: orders.slice(offset, offset + 5000).map(({ id }) => id) },
+              type: { in: ['sale', 'return', 'writeoff'] } },
+            select: statisticsMovementSelect,
+          });
+          for (const movement of batch) movements.push(movement);
+        }
+      }
+      return { range: { from: range.from.toISOString(), to: range.to.toISOString() },
+        ...buildStatisticsReports(orders, movements, showCosts) };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
 
   async dashboard(query: StatsQueryDto = {}) {
     const period = query.period ?? 'today';
@@ -151,7 +177,7 @@ export class StatisticsService {
 
       preparedTotal += it.quantity;
       if (it.order?.closedAt) {
-        const day = it.order.closedAt.toISOString().slice(0, 10);
+        const day = warehouseDay(it.order.closedAt);
         preparedPerDay.set(day, (preparedPerDay.get(day) ?? 0) + it.quantity);
       }
 
@@ -249,7 +275,7 @@ export class StatisticsService {
       }));
       for (const o of orders) {
         if (!o.closedAt) continue;
-        points[o.closedAt.getHours()].amount += Number(o.finalAmount);
+        points[businessHour(o.closedAt)].amount += Number(o.finalAmount);
       }
       return points;
     }
@@ -258,20 +284,20 @@ export class StatisticsService {
     const series = new Map<string, number>();
     if (monthMode) {
       for (let d = startOfMonth(from); d < to; d = addMonths(d, 1)) {
-        series.set(d.toISOString().slice(0, 7), 0);
+        series.set(warehouseDay(d).slice(0, 7), 0);
       }
       for (const o of orders) {
         if (!o.closedAt) continue;
-        const key = o.closedAt.toISOString().slice(0, 7);
+        const key = warehouseDay(o.closedAt).slice(0, 7);
         series.set(key, (series.get(key) ?? 0) + Number(o.finalAmount));
       }
     } else {
       for (let d = startOfDay(from); d < to; d = addDays(d, 1)) {
-        series.set(d.toISOString().slice(0, 10), 0);
+        series.set(warehouseDay(d), 0);
       }
       for (const o of orders) {
         if (!o.closedAt) continue;
-        const key = o.closedAt.toISOString().slice(0, 10);
+        const key = warehouseDay(o.closedAt);
         series.set(key, (series.get(key) ?? 0) + Number(o.finalAmount));
       }
     }
@@ -287,7 +313,7 @@ export class StatisticsService {
 
     for (const order of orders) {
       if (!order.closedAt) continue;
-      const label = `${String(order.closedAt.getHours()).padStart(2, '0')}:00`;
+      const label = `${String(businessHour(order.closedAt)).padStart(2, '0')}:00`;
       const current = hours.get(label);
       if (!current) continue;
       current.amount += Number(order.finalAmount);
@@ -302,10 +328,7 @@ export class StatisticsService {
 }
 
 function startOfMonth(d: Date) {
-  const next = new Date(d);
-  next.setDate(1);
-  next.setHours(0, 0, 0, 0);
-  return next;
+  return new Date(`${warehouseDay(d).slice(0, 7)}-01T00:00:00+06:00`);
 }
 
 function percentChange(current: number, previous: number) {

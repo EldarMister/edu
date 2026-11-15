@@ -29,9 +29,10 @@ import {
   IconLogout,
 } from './components/icons';
 import { StatisticsPage } from './pages/StatisticsPage';
+import { STATISTICS_NAV, statisticsView, type StatisticsView } from './pages/statisticsViews';
 import { OrdersPage } from './pages/OrdersPage';
 import { TablesPage } from './pages/TablesPage';
-import { MenuPage } from './pages/MenuPage';
+import { MenuCategoriesPage, MenuPage } from './pages/MenuPage';
 import { StaffPage } from './pages/StaffPage';
 import { AuditPage } from './pages/AuditPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
@@ -172,13 +173,17 @@ export function AdminApp() {
   const warehousePolicy = useWarehousePolicy(canSection('warehouse'));
   const warehouseLocations = useWarehouseLocations(canSection('warehouse'));
   function setSection(next: Section) {
-    setRoute({ section: next, ...(next === 'menu' ? { view: 'goods' } : next === 'warehouse' ? { view: 'balances' } : {}) });
+    const defaults: Partial<Record<Section, string>> = { stats: 'overview', menu: 'goods', warehouse: 'balances' };
+    const view = defaults[next];
+    setRoute(view ? { section: next, view } : { section: next });
   }
   const [mobileNav, setMobileNav] = useState(false);
   const [collapsedSection, setCollapsedSection] = useState<Section | null>(null);
+  const statsView = statisticsView(route.get('view'));
   const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
   const menuView = (MENU_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'goods') as MenuView;
   const posterWorkspace = section === 'menu' || section === 'warehouse';
+  function setStatsView(view: StatisticsView) { setRoute({ section: 'stats', view }); }
   function setWarehouseView(view: WarehouseView) { setRoute({ section: 'warehouse', view }); }
   function setMenuView(view: MenuView) { setRoute({ section: 'menu', view }); }
   const edgeSwipe = useRef<{ x: number; y: number } | null>(null);
@@ -322,6 +327,11 @@ export function AdminApp() {
   }
 
   const current = sections.find((s) => s.key === section) ?? sections[0];
+  const currentViewLabel = section === 'stats'
+    ? STATISTICS_NAV.find((item) => item.key === statsView)?.label
+    : section === 'warehouse'
+      ? WAREHOUSE_NAV.find((item) => item.key === warehouseView)?.label
+      : section === 'menu' ? MENU_NAV.find((item) => item.key === menuView)?.label : undefined;
 
   const renderSidebar = (variant: 'desktop' | 'mobile') => (
     <aside className="workspace-sidebar flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
@@ -342,7 +352,8 @@ export function AdminApp() {
                 )
               : s.key === 'menu'
                 ? MENU_NAV.filter((item) => !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
-                : [];
+                : s.key === 'stats' ? STATISTICS_NAV : [];
+          const currentView = s.key === 'warehouse' ? warehouseView : s.key === 'menu' ? menuView : statsView;
           const hasChildren = children.length > 0;
           const expanded = hasChildren && active && collapsedSection !== s.key;
           const selectedSection = active && !hasChildren;
@@ -379,7 +390,7 @@ export function AdminApp() {
                   <div className="min-h-0 overflow-hidden">
                     <div className="workspace-nav-children mb-2 mt-1.5 space-y-0.5">
                       {children.map((item) => {
-                        const selected = active && (s.key === 'warehouse' ? warehouseView : menuView) === item.key;
+                        const selected = active && currentView === item.key;
                         return (
                           <button
                             key={item.key}
@@ -388,7 +399,8 @@ export function AdminApp() {
                             aria-current={selected ? 'page' : undefined}
                             onClick={() => {
                               if (s.key === 'warehouse') setWarehouseView(item.key as WarehouseView);
-                              else setMenuView(item.key as MenuView);
+                              else if (s.key === 'menu') setMenuView(item.key as MenuView);
+                              else setStatsView(item.key as StatisticsView);
                               setMobileNav(false);
                             }}
                             className={`workspace-nav-child block w-full rounded-lg py-2 pl-[34px] pr-2 text-left text-sm leading-[21px] transition-colors ${selected ? 'bg-primary font-medium text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
@@ -472,15 +484,7 @@ export function AdminApp() {
               </svg>
             </button>
             <WorkspaceTitleSlot><h1 className="text-xl font-semibold text-text-primary lg:text-2xl">
-              {current
-                ? t(
-                    section === 'warehouse'
-                      ? (WAREHOUSE_NAV.find((item) => item.key === warehouseView)?.label ?? current.label)
-                      : section === 'menu'
-                        ? (MENU_NAV.find((item) => item.key === menuView)?.label ?? current.label)
-                        : current.label,
-                  )
-                : ''}
+              {current ? t(currentViewLabel ?? current.label) : ''}
             </h1></WorkspaceTitleSlot>
           </div>
           <div className="contents sm:flex sm:items-center sm:gap-3">
@@ -496,11 +500,16 @@ export function AdminApp() {
             <NoAccessScreen />
           ) : (
             <>
-              {section === 'stats' && canSection('statistics') && <StatisticsPage />}
+              {section === 'stats' && canSection('statistics') && <StatisticsPage view={statsView} />}
               {section === 'orders' && canSection('orders') && <OrdersPage />}
               {section === 'receipts' && isAdmin && canSection('checks') && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
-              {section === 'menu' && canSection('menu') && (menuView === 'stations' ? <StationsPage /> : menuView === 'ingredientCategories' ? (canSection('warehouse') && <IngredientCategoriesPage />) : <MenuPage view={menuView} onView={setMenuView} />)}
+              {section === 'menu' && canSection('menu') && <>
+                {menuView === 'stations' && <StationsPage />}
+                {menuView === 'categories' && <MenuCategoriesPage />}
+                {menuView === 'ingredientCategories' && canSection('warehouse') && <IngredientCategoriesPage />}
+                {menuView !== 'stations' && menuView !== 'categories' && menuView !== 'ingredientCategories' && <MenuPage view={menuView} />}
+              </>}
               {section === 'warehouse' && canSection('warehouse') && (
                 <WarehouseSection
                   view={warehouseView}

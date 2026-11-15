@@ -239,14 +239,43 @@ function useInvalidate(keys: string[][]) {
 // ========== СТАТИСТИКА ==========
 export type StatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
 
-export function useStatistics(params: { period: StatsPeriod; from?: string; to?: string }) {
+type StatsPeriodParams = { period: StatsPeriod; from?: string; to?: string };
+
+function statisticsQuery(params: StatsPeriodParams) {
   const q = new URLSearchParams();
   q.set('period', params.period);
   if (params.from) q.set('from', params.from);
   if (params.to) q.set('to', params.to);
+  return q;
+}
+
+export function useStatistics(params: StatsPeriodParams, enabled = true) {
   return useQuery({
     queryKey: ['admin', 'stats', params],
-    queryFn: () => get<StatsDashboard>(`/admin/statistics?${q.toString()}`),
+    queryFn: () => get<StatsDashboard>(`/admin/statistics?${statisticsQuery(params)}`),
+    enabled,
+  });
+}
+
+type ProductStats = {
+  id: string; name: string; categoryId: string; category: string; waiterId: string; waiter: string;
+  quantity: number; gross: number; discount: number; revenue: number; cost: number | null; profit: number | null;
+};
+
+export interface StatisticsReports {
+  range: { from: string | null; to: string };
+  sales: { date: string; revenue: number; orders: number; avgCheck: number; discount: number; serviceCharge: number }[];
+  products: ProductStats[];
+  categories: { id: string; name: string; quantity: number; revenue: number; cost: number | null; profit: number | null }[];
+  staff: { id: string; name: string; revenue: number; orders: number; avgCheck: number; avgSeconds: number | null; profit: number | null }[];
+  payments: { date: string; orders: number; cash: number; card: number; qr: number; other: number; total: number }[];
+}
+
+export function useStatisticsReports(params: StatsPeriodParams, enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'stats', 'reports', params],
+    queryFn: () => get<StatisticsReports>(`/admin/statistics/reports?${statisticsQuery(params)}`),
+    enabled,
   });
 }
 

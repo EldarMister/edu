@@ -62,18 +62,56 @@ const RECEIPT_LIMIT = 120;
 
 export function SettingsPage() {
   const { canSection } = usePermissions();
+  return canSection('settings') ? <CafeSettings /> : <AppearanceSettings />;
+}
+
+function AppearanceSettings() {
   const t = useT();
 
   return (
-    <div className="space-y-4">
-      <section className="card p-5" aria-labelledby="appearance-heading">
-        <h2 id="appearance-heading" className="mb-3 text-[17px] font-semibold text-text-primary">
-          {t('Внешний вид')}
-        </h2>
-        <ThemeSwitch />
-      </section>
-      {canSection('settings') && <CafeSettings />}
-    </div>
+    <section className="card p-5" aria-labelledby="appearance-heading">
+      <h2 id="appearance-heading" className="mb-3 text-[17px] font-semibold text-text-primary">
+        {t('Внешний вид')}
+      </h2>
+      <ThemeSwitch />
+    </section>
+  );
+}
+
+function PrinterSettings() {
+  const t = useT();
+  const [printError, setPrintError] = useState(false);
+
+  function testPrint() {
+    setPrintError(false);
+    const target = window.open('', '_blank', 'width=380,height=480');
+    if (!target) {
+      setPrintError(true);
+      return;
+    }
+    target.document.title = t('Пробная печать');
+    const sample = target.document.createElement('p');
+    sample.textContent = `EDU POS · ${t('Пробная печать')}`;
+    sample.style.cssText = 'width: 48mm; margin: 5mm; font: 14px sans-serif';
+    target.document.body.append(sample);
+    target.addEventListener('afterprint', () => target.close(), { once: true });
+    target.focus();
+    target.print();
+  }
+
+  return (
+    <section className="pt-2" aria-labelledby="printer-heading">
+      <div className="mb-3 flex items-center gap-2">
+        <IconPrinter className="h-5 w-5 text-text-secondary" />
+        <h3 id="printer-heading" className="text-[15px] font-semibold text-text-primary">{t('Принтер чеков')}</h3>
+      </div>
+      <div className="space-y-3 rounded-xl border border-border p-3">
+        <p className="text-sm text-text-muted">{t('Выберите принтер в системном окне печати.')}</p>
+        <button type="button" className="btn-secondary btn-md" onClick={testPrint}>{t('Пробная печать')}</button>
+        {printError && <p role="alert" className="text-sm text-danger">{t('Разрешите всплывающие окна и повторите печать.')}</p>}
+        <div className="border-t border-border pt-3"><ThemeSwitch /></div>
+      </div>
+    </section>
   );
 }
 
@@ -137,8 +175,11 @@ function CafeSettings() {
 
   if (isError || !form || !data) {
     return (
-      <div className="rounded-xl border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
-        {apiError(error)}
+      <div className="space-y-4">
+        <AppearanceSettings />
+        <div className="rounded-xl border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
+          {apiError(error)}
+        </div>
       </div>
     );
   }
@@ -341,36 +382,7 @@ function CafeSettings() {
               <p>EDU POS печатает предчек / внутренний товарный чек.</p>
               <p>Фискальный чек формируется только через подключенную ККМ или онлайн-кассу.</p>
             </div>
-            {/* Статус принтера */}
-            <div className="pt-2">
-              <div className="mb-3 flex items-center gap-2">
-                <IconPrinter className="h-5 w-5 text-text-secondary" />
-                <h3 className="text-[15px] font-semibold text-text-primary">{t('Статус принтера')}</h3>
-              </div>
-              <div className="flex items-center gap-3 rounded-xl border border-border p-3">
-                <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-                    data.printerConnected ? 'bg-success/10 text-success' : 'bg-slate-100 text-text-muted'
-                  }`}
-                >
-                  <IconPrinter className="h-5 w-5" />
-                </div>
-                <div className="min-w-0">
-                  <p
-                    className={`text-[15px] font-medium ${
-                      data.printerConnected ? 'text-success' : 'text-text-muted'
-                    }`}
-                  >
-                    {data.printerConnected ? t('Подключен') : t('Не подключен')}
-                  </p>
-                  <p className="text-xs text-text-muted">
-                    {data.printerConnected
-                      ? t('Принтер чеков подключен и готов к печати')
-                      : t('Принтер чеков не подключен')}
-                  </p>
-                </div>
-              </div>
-            </div>
+            <PrinterSettings />
 
             {/* Гео-проверка QR-заказа — рядом со статусом принтера */}
             <div className="pt-2">

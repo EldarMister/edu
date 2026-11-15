@@ -29,9 +29,9 @@ export const MENU_NAV: { key: MenuView; label: string }[] = [
   { key: 'recipes', label: 'Блюда' },
   { key: 'preparations', label: 'Полуфабрикаты' },
   { key: 'ingredients', label: 'Ингредиенты' },
-  { key: 'categories', label: 'Категории товаров и техкарт' },
+  { key: 'categories', label: 'Категории товаров и блюд' },
   { key: 'ingredientCategories', label: 'Категории ингредиентов' },
-  { key: 'stations', label: 'Цехи' },
+  { key: 'stations', label: 'Станции' },
 ];
 
 export function warehouseViewInUse(view: WarehouseView, warehouseCount: number, policy?: {
