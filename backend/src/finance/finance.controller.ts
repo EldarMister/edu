@@ -5,8 +5,10 @@ import { Roles } from '../common/decorators/roles.decorator';
 import {
   FinanceAccountCreateDto, FinanceAccountUpdateDto, FinanceCategoryCreateDto, FinanceCategoryUpdateDto,
   FinanceQueryDto, FinanceTransactionDto, SalaryAccrualDto, SalaryPaymentDto,
+  FinanceTransactionMetadataDto, FinanceTransactionReverseDto,
 } from './finance.dto';
 import { FinanceService } from './finance.service';
+import { PayrollReportDto } from './finance.dto';
 
 @Roles(Role.OWNER, Role.ADMIN)
 @Controller('admin/finance')
@@ -46,6 +48,26 @@ export class FinanceController {
   @Post('transactions')
   post(@CurrentUser() actor: AuthUser, @Body() input: FinanceTransactionDto) {
     return this.finance.post(actor, input);
+  }
+
+  @Patch('transactions/:id')
+  updateTransaction(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() input: FinanceTransactionMetadataDto) {
+    return this.finance.updateTransaction(actor, id, input);
+  }
+
+  @Post('transactions/:id/reverse')
+  reverseTransaction(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() input: FinanceTransactionReverseDto) {
+    return this.finance.reverseTransaction(actor, id, input.reason);
+  }
+
+  @Get('payroll')
+  payrollReport(@CurrentUser() actor: AuthUser, @Query() query: PayrollReportDto) {
+    return this.finance.payroll(actor, query.month);
+  }
+
+  @Post('payroll/calculated')
+  accrueCalculated(@CurrentUser() actor: AuthUser, @Body() input: SalaryAccrualDto) {
+    return this.finance.accrueCalculated(actor, input);
   }
 
   @Post('payroll')

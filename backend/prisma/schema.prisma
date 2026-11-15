@@ -320,6 +320,7 @@ model SalaryAccrual {
   month        String
   amount       Decimal        @db.Decimal(18, 2)
   note         String?
+  calculation  Json?
   actorId      String         @map("actor_id")
   requestKey   String         @map("request_key")
   createdAt    DateTime       @default(now()) @map("created_at")
@@ -409,10 +410,26 @@ model StaffPosition {
 
   cafe  Cafe   @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   users User[]
+  salaryRates StaffPositionSalaryRate[]
 
   @@unique([cafeId, id])
   @@unique([cafeId, name])
   @@map("staff_positions")
+}
+
+model StaffPositionSalaryRate {
+  cafeId          String   @map("cafe_id")
+  positionId      String   @map("position_id")
+  effectiveMonth  String   @map("effective_month")
+  hourly          Decimal  @default(0) @db.Decimal(14, 2)
+  perShift        Decimal  @default(0) @map("per_shift") @db.Decimal(14, 2)
+  monthly         Decimal  @default(0) @db.Decimal(14, 2)
+  personalPercent Decimal  @default(0) @map("personal_percent") @db.Decimal(5, 2)
+  shiftPercent    Decimal  @default(0) @map("shift_percent") @db.Decimal(5, 2)
+  position StaffPosition @relation(fields: [cafeId, positionId], references: [cafeId, id], onDelete: Cascade, map: "staff_position_salary_rates_position_fkey")
+
+  @@id([cafeId, positionId, effectiveMonth])
+  @@map("staff_position_salary_rates")
 }
 
 model Hall {

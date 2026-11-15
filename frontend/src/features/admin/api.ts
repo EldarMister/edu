@@ -754,12 +754,13 @@ export interface ShiftReportRow {
   cancellations: ShiftReportCancellation[];
 }
 
-export function useShiftReport(date: string) {
+export function useShiftReport(date: string, enabled = true) {
   const q = new URLSearchParams();
   if (date) q.set('date', date);
   return useQuery({
     queryKey: ['admin', 'staff', 'shift-report', date],
     queryFn: () => get<ShiftReportRow[]>(`/admin/staff/shift-report?${q.toString()}`),
+    enabled,
   });
 }
 
@@ -802,7 +803,7 @@ export interface ShiftHistoryResponse {
   range: { from: string; to: string };
 }
 
-export function useShiftHistory(filters: ShiftHistoryFilters) {
+export function useShiftHistory(filters: ShiftHistoryFilters, enabled = true) {
   const q = new URLSearchParams();
   q.set('period', filters.period);
   if (filters.from) q.set('from', filters.from);
@@ -812,6 +813,7 @@ export function useShiftHistory(filters: ShiftHistoryFilters) {
   return useQuery({
     queryKey: ['admin', 'staff', 'shift-history', filters],
     queryFn: () => get<ShiftHistoryResponse>(`/admin/staff/shift-history?${q.toString()}`),
+    enabled,
   });
 }
 

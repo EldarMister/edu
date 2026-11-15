@@ -51,8 +51,21 @@ export class FinanceTransactionDto extends MoneyPostDto {
   @IsOptional() @IsISO8601({ strict: true }) occurredAt?: string;
 }
 
+export class FinanceTransactionMetadataDto {
+  @IsOptional() @IsString() @Length(1, 120) categoryId?: string | null;
+  @IsOptional() @IsString() @Length(0, 500) note?: string | null;
+}
+
+export class FinanceTransactionReverseDto {
+  @IsString() @Length(1, 500) reason!: string;
+}
+
 export class SalaryAccrualDto extends MoneyPostDto {
   @IsString() @Length(1, 120) userId!: string;
+  @Matches(monthPattern) month!: string;
+}
+
+export class PayrollReportDto {
   @Matches(monthPattern) month!: string;
 }
 

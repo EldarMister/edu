@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
+import type { PositionSalary } from '../positions-api';
 
 export type AccountType = 'cash' | 'noncash';
 export type CategoryKind = 'income' | 'expense';
@@ -33,6 +34,10 @@ export interface FinanceEntry {
   actorName?: string;
   sourceKey?: string;
   cashShiftId?: string;
+  editable?: boolean;
+  reversible?: boolean;
+  reversedAt?: string | null;
+  reversalOf?: string | null;
 }
 export interface PayrollAccrual {
   id: string;
@@ -74,6 +79,7 @@ export interface CashShift {
   expectedAmount: number;
   actualAmount: number | null;
   difference: number | null;
+  collectionAmount: number;
 }
 interface CashShifts {
   enabled: boolean;
@@ -138,8 +144,18 @@ export function useFinanceWrites() {
     postTransaction: useMutation({
       mutationFn: (values: TransactionInput) => api.post(entrypoint + '/transactions', values), onSuccess,
     }),
+    editTransaction: useMutation({
+      mutationFn: ({ id, categoryId, note }: { id: string; categoryId: string | null; note: string }) =>
+        api.patch(entrypoint + '/transactions/' + id, { categoryId, note }), onSuccess,
+    }),
+    reverseTransaction: useMutation({
+      mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+        api.post(entrypoint + '/transactions/' + id + '/reverse', { reason }),
+      onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
+    }),
     accrue: useMutation({
-      mutationFn: (values: AccrualInput) => api.post(entrypoint + '/payroll', values), onSuccess,
+      mutationFn: ({ calculated, ...values }: AccrualInput & { calculated?: boolean }) =>
+        api.post(entrypoint + '/payroll' + (calculated ? '/calculated' : ''), values), onSuccess,
     }),
     payout: useMutation({
       mutationFn: ({ id, values }: { id: string; values: PayoutInput }) => api.post(entrypoint + '/payroll/' + id + '/pay', values),
@@ -148,10 +164,44 @@ export function useFinanceWrites() {
   };
 }
 
-export function useCashShifts(enabled = true, endpoint = shiftEndpoint) {
+export interface PayrollStaffRow {
+  userId: string;
+  name: string;
+  positionId: string | null;
+  position: string;
+  hours: number | null;
+  shifts: number | null;
+  days: number | null;
+  rateMonth: string | null;
+  rates: PositionSalary;
+  personalSales: number;
+  shiftSales: number;
+  estimate: number;
+  available: number;
+  accrued: number;
+  paid: number;
+  due: number;
+}
+
+export interface PayrollReport {
+  staff: PayrollStaffRow[];
+  records: (PayrollAccrual & {
+    calculation?: Pick<PayrollStaffRow, 'rates' | 'hours' | 'shifts' | 'days' | 'personalSales' | 'shiftSales' | 'rateMonth' | 'estimate'> | null;
+    createdAt: string;
+  })[];
+}
+
+export function usePayroll(month: string, enabled = true) {
   return useQuery({
-    queryKey: [...cashShiftKey, endpoint],
-    queryFn: async () => (await api.get<CashShifts>(endpoint)).data,
+    queryKey: [...financeKey, 'payroll', month], enabled: enabled && /^\d{4}-(0[1-9]|1[0-2])$/.test(month),
+    queryFn: async () => (await api.get<PayrollReport>(entrypoint + '/payroll', { params: { month } })).data,
+  });
+}
+
+export function useCashShifts(enabled = true, endpoint = shiftEndpoint, period?: { from: string; to: string }) {
+  return useQuery({
+    queryKey: [...cashShiftKey, endpoint, period],
+    queryFn: async () => (await api.get<CashShifts>(endpoint, { params: period })).data,
     enabled, retry: false,
   });
 }

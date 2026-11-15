@@ -15,6 +15,8 @@ import { useNotifications } from '@/store/notifications';
 import { IconPlus, IconEdit, IconTrash } from '../components/icons';
 import { EmployeePermissionsModal } from '../components/EmployeePermissionsModal';
 import { WaiterOrdersReport } from './WaiterOrdersReport';
+import { WorkspaceHeaderCount } from './WorkspaceHeader';
+import { WorkspaceSearch } from './WorkspaceSearch';
 import {
   useShiftReport,
   useSetCashHanded,
@@ -108,7 +110,10 @@ export function StaffPage() {
   const stations = usePreparationStations().data ?? [];
   usePreparationStationUpdates();
   const stationNames = new Map(stations.map(({ id, name }) => [id, name]));
-  const [tab, setTab] = useState<'current' | 'history' | 'waiter-orders'>('current');
+  const [tab, setTab] = useState<'employees' | 'current' | 'history' | 'waiter-orders'>('employees');
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [employeePosition, setEmployeePosition] = useState('');
+  const [employeeStatus, setEmployeeStatus] = useState('');
   const [showWaiterReportBadge, setShowWaiterReportBadge] = useState(
     () => Date.now() < WAITER_REPORT_BADGE_EXPIRES_AT,
   );
@@ -122,8 +127,8 @@ export function StaffPage() {
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null);
 
-  const reportQ = useShiftReport(date);
-  const historyQ = useShiftHistory(historyFilters);
+  const reportQ = useShiftReport(date, tab === 'current');
+  const historyQ = useShiftHistory(historyFilters, tab === 'history');
   const shiftActions = useShiftHistoryActions();
   const staffQ = useStaff('', '');
   const { remove } = useStaffMutations();
@@ -132,6 +137,15 @@ export function StaffPage() {
   const currentUser = useAuth((s) => s.user);
   const { isOwner, canAction } = usePermissions();
   const canManageStaff = isOwner || canAction('manageStaff');
+  const positionKey = (member: StaffMember) => member.positionId ?? member.role;
+  const positionLabel = (member: StaffMember) => member.positionName ?? tr(ROLE_LABEL[member.role]);
+  const positionChoices = new Map((staffQ.data ?? []).map((member) => [positionKey(member), positionLabel(member)]));
+  const employeeTerm = employeeSearch.trim().toLocaleLowerCase('ru');
+  const employees = (staffQ.data ?? []).filter((member) =>
+    (!employeePosition || positionKey(member) === employeePosition) &&
+    (!employeeStatus || member.isActive === (employeeStatus === 'active')) &&
+    (!employeeTerm || member.name.toLocaleLowerCase('ru').includes(employeeTerm) || member.phone.includes(employeeTerm)),
+  ).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
 
   useEffect(() => {
     if (!showWaiterReportBadge) return;
@@ -227,7 +241,47 @@ export function StaffPage() {
 
   return (
     <div className="space-y-3">
-      {tab !== 'waiter-orders' && <div className="flex flex-wrap items-center justify-between gap-3">
+      {tab === 'employees' && <>
+        <WorkspaceHeaderCount count={staffQ.isSuccess ? employees.length : undefined} />
+        <div className="poster-toolbar flex flex-wrap items-center gap-2">
+          <WorkspaceSearch className="[&_.input]:pl-8 [&_.input]:pr-8" label="Поиск сотрудников"
+            value={employeeSearch} onChange={setEmployeeSearch} />
+          <Select className="h-10" ariaLabel="Должность" value={employeePosition} onChange={setEmployeePosition} options={[
+            { value: '', label: 'Все должности' }, ...Array.from(positionChoices, ([value, label]) => ({ value, label })),
+          ]} />
+          <Select className="h-10" ariaLabel="Статус сотрудника" value={employeeStatus} onChange={setEmployeeStatus} options={[
+            { value: '', label: 'Все сотрудники' }, { value: 'active', label: 'Активные' }, { value: 'inactive', label: 'Неактивные' },
+          ]} />
+          <button type="button" className="btn-secondary btn-md" onClick={() => setTab('current')}>Отчёты по сменам</button>
+          {canManageStaff && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => setEditing('new')}>
+            <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
+          </button>}
+        </div>
+        {staffQ.isPending ? <Spinner /> : staffQ.isError ? <p role="alert" className="text-danger">{apiError(staffQ.error)}</p>
+          : <div className="card overflow-x-auto">
+            <table className="w-full min-w-[580px] text-left text-sm">
+              <thead className="border-b border-border text-text-muted"><tr>
+                {['Имя', 'Телефон', 'Должность', 'Статус', 'Действия'].map((label) =>
+                  <th key={label} scope="col" className="px-4 py-3 font-medium">{label}</th>)}
+              </tr></thead>
+              <tbody>{employees.map((member) => {
+                const canEdit = canManageStaff && (isOwner || (member.role !== 'ADMIN' && !member.positionId));
+                return <tr key={member.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3">{member.name}</td><td className="px-4 py-3">{member.phone || '—'}</td>
+                  <td className="px-4 py-3">{positionLabel(member)}</td>
+                  <td className="px-4 py-3">{member.isActive ? 'Активен' : 'Неактивен'}</td>
+                  <td className="px-4 py-3">{canEdit && <div className="flex justify-end gap-2">
+                    <IconBtn title={tr('Изменить')} onClick={() => setEditing(member)}><IconEdit className="h-4 w-4" /></IconBtn>
+                    {member.id !== currentUser?.id && <IconBtn title={tr('Удалить')} danger
+                      onClick={() => setPendingDelete({ id: member.id, name: member.name })}><IconTrash className="h-4 w-4" /></IconBtn>}
+                  </div>}</td>
+                </tr>;
+              })}
+              {!employees.length && <tr><td colSpan={5} className="p-8 text-center text-text-muted">Сотрудники не найдены</td></tr>}</tbody>
+            </table>
+          </div>}
+      </>}
+      {tab !== 'employees' && tab !== 'waiter-orders' && <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-text-primary">{tr('Персонал и отчет по сменам')}</h2>
         <div className="flex flex-wrap items-center justify-end gap-2">
           {tab === 'current' && (
@@ -263,7 +317,8 @@ export function StaffPage() {
         </div>
       </div>}
 
-      <div className="no-scrollbar flex items-center gap-5 overflow-x-auto border-b border-border">
+      {tab !== 'employees' && <div className="no-scrollbar flex items-center gap-5 overflow-x-auto border-b border-border">
+        <TabButton active={false} onClick={() => setTab('employees')}>Сотрудники</TabButton>
         <TabButton active={tab === 'current'} onClick={() => setTab('current')}>
           Текущая смена
         </TabButton>
@@ -280,7 +335,7 @@ export function StaffPage() {
             )}
           </span>
         </TabButton>
-      </div>
+      </div>}
 
       {tab === 'history' && (
         <HistoryFilters

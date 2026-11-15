@@ -86,6 +86,76 @@ test('delegated employee cannot post income or expense outside an explicitly gra
   await assert.rejects(service.post(admin, { ...input, kind: 'transfer', destinationAccountId: 'bank' }), (error) => error.getStatus() === 403);
 });
 
+test('only the author with category grants can edit her manual transaction metadata', async () => {
+  let write;
+  const trail = [];
+  const entry = { id: 'entry', cafeId: 'cafe', actorId: admin.id, kind: 'expense', sourceKey: 'manual:example',
+    amount: dec(-20), categoryId: 'old', note: 'Старый комментарий', cashShiftId: null };
+  const service = new FinanceService({ $transaction: (fn) => fn({
+    $queryRaw: async () => [],
+    financeEntry: {
+      findFirst: async ({ where }) => where.id === entry.id ? entry : null,
+      update: async ({ where, data }) => { write = { where, data }; return { ...entry, ...data }; },
+    },
+    financeCategory: {
+      findFirst: async ({ where }) => where.id === 'denied' || where.cafeId !== 'cafe' ? null : { kind: 'expense' },
+    },
+  }) }, { log: async (event) => { trail.push(event); } });
+  await assert.rejects(service.updateTransaction({ ...admin, id: 'other' }, 'entry', { categoryId: 'new' }), { status: 403 });
+  await assert.rejects(service.updateTransaction(admin, 'entry', { categoryId: 'denied' }), { status: 403 });
+  await assert.rejects(service.updateTransaction(admin, 'entry', { categoryId: null }), { status: 403 });
+  const next = await service.updateTransaction(admin, 'entry', { categoryId: 'new', note: '  Новый комментарий  ' });
+  assert.deepEqual(write, { where: { id: 'entry', cafeId: 'cafe' }, data: { categoryId: 'new', note: 'Новый комментарий' } });
+  assert.ok(next.amount.eq(entry.amount));
+  assert.equal(trail.length, 1);
+});
+
+test('transfer reversal undoes both legs on the original accounts and retries without a new movement', async () => {
+  const at = date('2026-11-16T02:00:00Z');
+  const rows = [
+    { id: 'out', cafeId: 'cafe', sourceKey: 'manual:pair', accountId: 'drawer', counterpartyAccountId: 'safe',
+      kind: 'transfer', amount: dec(-40), occurredAt: at, cashShiftId: null },
+    { id: 'in', cafeId: 'cafe', sourceKey: 'manual:pair:in', accountId: 'safe', counterpartyAccountId: 'drawer',
+      kind: 'transfer', amount: dec(40), occurredAt: at, cashShiftId: null },
+  ];
+  const service = new FinanceService({ $transaction: (fn) => fn({
+    $queryRaw: async () => [],
+    cashShift: { findMany: async () => [] },
+    financeEntry: {
+      findFirst: async ({ where }) => rows.find(({ id, cafeId }) => id === where.id && cafeId === where.cafeId),
+      findMany: async ({ where }) => rows.filter(({ cafeId, sourceKey }) => cafeId === where.cafeId && where.sourceKey.in.includes(sourceKey)),
+      createMany: async ({ data }) => rows.push(...data),
+    },
+  }) });
+  await assert.rejects(service.reverseTransaction(admin, 'out', 'Ошибка'), { status: 403 });
+  const reversed = await service.reverseTransaction(owner, 'in', 'Ошибка');
+  await service.reverseTransaction(owner, 'out', 'Ошибка');
+  await assert.rejects(service.reverseTransaction(owner, 'out', 'Иная причина'), { status: 409 });
+  assert.equal(rows.length, 4);
+  assert.deepEqual(rows.slice(2).map((row) => [row.sourceKey, row.accountId, Number(row.amount), row.occurredAt]), [
+    ['void:out', 'drawer', 40, at], ['void:in', 'safe', -40, at],
+  ]);
+  assert.equal(rows[2].createdAt, reversed.reversedAt);
+});
+
+test('automatic receipts and manual entries counted in a closed shift cannot be reversed in the general transaction list', async () => {
+  let entry;
+  const closed = { id: 'shift', accountId: 'drawer', openedAt: date('2026-11-16T00:00:00Z'), closedAt: date('2026-11-16T12:00:00Z') };
+  const service = new FinanceService({ $transaction: (fn) => fn({
+    $queryRaw: async () => [],
+    cashShift: { findMany: async () => [closed] },
+    financeEntry: {
+      findFirst: async () => entry,
+      findMany: async () => [],
+      createMany: () => assert.fail('the ledger must remain unchanged'),
+    },
+  }) });
+  entry = { kind: 'sale', sourceKey: 'sale:payment' };
+  await assert.rejects(service.reverseTransaction(owner, 'entry', 'Ошибка'), { status: 400 });
+  entry = { id: 'entry', accountId: 'drawer', cashShiftId: 'shift', kind: 'expense', sourceKey: 'manual:entry' };
+  await assert.rejects(service.reverseTransaction(owner, 'entry', 'Ошибка'), { status: 409 });
+});
+
 test('transfer appends equal and opposite entries and an identical retry does not append again', async () => {
   const entries = [];
   const service = new FinanceService({ $transaction: (fn) => fn({

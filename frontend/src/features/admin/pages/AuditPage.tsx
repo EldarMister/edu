@@ -31,6 +31,7 @@ const ACTION_LABELS: Record<string, string> = {
   POSITION_CREATED: 'Добавление должности',
   POSITION_UPDATED: 'Изменение должности',
   POSITION_DELETED: 'Удаление должности',
+  FINANCE_TRANSACTION_UPDATED: 'Изменение транзакции',
   SETTINGS_UPDATED: 'Изменение настроек',
 };
 

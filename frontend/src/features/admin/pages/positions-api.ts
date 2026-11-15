@@ -16,7 +16,11 @@ export interface StaffPosition {
   role: PositionRole;
   permissions: EmployeePermissions;
   employees: number;
+  salary?: PositionSalary;
+  salaryEffectiveMonth?: string | null;
 }
+
+export type PositionSalary = { hourly: number; perShift: number; monthly: number; personalPercent: number; shiftPercent: number };
 
 const key = ['admin', 'positions'];
 const endpoint = '/admin/positions';
@@ -28,11 +32,14 @@ export function useStaffPositions(enabled: boolean) {
 export function useStaffPositionMutations() {
   const qc = useQueryClient();
   async function refresh() {
-    await Promise.all([qc.invalidateQueries({ queryKey: key }), qc.invalidateQueries({ queryKey: ['admin', 'staff'] })]);
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: key }), qc.invalidateQueries({ queryKey: ['admin', 'staff'] }),
+      qc.invalidateQueries({ queryKey: ['admin', 'finance'] }),
+    ]);
   }
   const save = useMutation({
-    mutationFn: ({ id, name, role, permissions }: Pick<StaffPosition, 'name' | 'role' | 'permissions'> & { id?: string }) =>
-      id ? api.patch(endpoint + '/' + id, { name, permissions }) : api.post(endpoint, { name, role, permissions }),
+    mutationFn: ({ id, name, role, permissions, salary }: Pick<StaffPosition, 'name' | 'role' | 'permissions' | 'salary'> & { id?: string }) =>
+      id ? api.patch(endpoint + '/' + id, { name, permissions, salary }) : api.post(endpoint, { name, role, permissions, salary }),
     onSuccess: refresh,
   });
   const remove = useMutation({

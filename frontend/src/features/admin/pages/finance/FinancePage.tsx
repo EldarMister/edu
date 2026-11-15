@@ -1,21 +1,18 @@
 import { useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
 import { DatePicker } from '@/components/DatePicker';
 import { Select } from '@/components/Select';
 import { WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { EditorPage } from '../warehouse/EditorPage';
 import { QueryState } from '../warehouse/WarehouseUi';
-import { useEditorRoute } from '../warehouse/workspace-route';
-import { type EntryKind, type FinanceAccount, type FinanceCategory, type FinanceEntry, useFinance } from './api';
+import { useEditorRoute, usePageFilters } from '../warehouse/workspace-route';
+import { type FinanceAccount, type FinanceCategory, type FinanceEntry, useFinance, usePayroll } from './api';
 import { CashShiftsPage, FinanceTable } from './CashShiftsPage';
-import { AccountForm, AccrualForm, CategoryForm, PayoutForm, TransactionForm } from './FinanceForms';
-import { cashFlowHeaders, cashFlowSummary, exportCashFlow, financeDateTime, financeDay, financeMoney } from './finance-format';
+import { AccountForm, AccrualForm, CategoryForm, PayoutForm, TransactionDetail, TransactionForm } from './FinanceForms';
+import { cashFlowHeaders, cashFlowSummary, entryLabel, entryLabels, exportCashFlow, financeDateTime, financeDay, financeMoney } from './finance-format';
 import type { FinanceView } from './navigation';
 
-const entryLabels: Record<EntryKind, string> = {
-  income: 'Доход', expense: 'Расход', transfer: 'Перевод', sale: 'Продажа', refund: 'Возврат',
-  salary: 'Выплата зарплаты', adjustment: 'Корректировка',
-};
 const nameSort = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, 'ru');
 const filterByName = (value: string, term: string) => value.toLocaleLowerCase('ru').includes(term.trim().toLocaleLowerCase('ru'));
 
@@ -27,30 +24,33 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   const route = useEditorRoute();
   const { editor, openEditor, closeEditor } = route;
   const [today] = useState(() => financeDay());
-  const [from, setFrom] = useState(today.slice(0, 7) + '-01');
-  const [to, setTo] = useState(today);
+  const [{
+    financeFrom: from, financeTo: to, financeSearch: search, financeScope: scope,
+    financeKind: kind, financeCategory: categoryId, payrollPosition,
+  }, setFilters] = usePageFilters({
+    financeFrom: today.slice(0, 7) + '-01', financeTo: today, financeSearch: '',
+    financeScope: '', financeKind: '', financeCategory: '', payrollPosition: '',
+  });
   const [month, setMonth] = useState(today.slice(0, 7));
-  const [search, setSearch] = useState('');
-  const [scope, setScope] = useState('');
-  const [kind, setKind] = useState('');
-  const [categoryId, setCategory] = useState('');
+  const setSearch = (value: string) => setFilters({ financeSearch: value });
+  const setScope = (value: string) => setFilters({ financeScope: value });
   const hasDates = view === 'transactions' || view === 'cashFlow';
   const rangeValid = !hasDates || (!!from && !!to && from <= to);
   const finance = useFinance({
     from, to, month: view === 'payroll' ? month : undefined,
     accountId: view === 'cashFlow' ? scope || undefined : undefined,
   }, rangeValid);
+  const salary = usePayroll(month, view === 'payroll');
+  const [salaryHistoryId, setSalaryHistory] = useState<string | null>(null);
   const data = finance.data;
   const dateFilters = hasDates && <div className="flex flex-wrap items-center gap-2">
-    <DatePicker value={from} onChange={setFrom} max={to || today} className="input w-[125px]" aria-label="С даты" />
+    <DatePicker value={from} onChange={(value) => setFilters({ financeFrom: value })} max={to || today} className="input w-[125px]" aria-label="С даты" />
     <span className="text-text-muted">—</span>
-    <DatePicker value={to} onChange={setTo} min={from} max={today} className="input w-[125px]" aria-label="По дату" />
+    <DatePicker value={to} onChange={(value) => setFilters({ financeTo: value })} min={from} max={today} className="input w-[125px]" aria-label="По дату" />
   </div>;
 
-  if (data && editor) {
-    if (view === 'transactions' && editor.type === 'financeTransaction' && data.accounts.length) {
-      return <TransactionForm accounts={data.accounts} categories={data.categories} owner={data.canManage} onClose={closeEditor} />;
-    }
+  const transactionEditor = view === 'transactions' && editor?.type === 'financeTransaction' ? editor : null;
+  if (data && editor && !transactionEditor) {
     if (data.canManage) {
       if (view === 'accounts' && editor.type === 'financeAccount') {
         const account = data.accounts.find(({ id }) => id === editor.id);
@@ -62,7 +62,8 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
           employees={data.employees.filter(({ role }) => role === 'ADMIN')} positions={data.positions} onClose={closeEditor} />;
       }
       if (view === 'payroll' && editor.type === 'financeAccrual') {
-        return <AccrualForm employees={data.employees} initialMonth={month} onClose={closeEditor} />;
+        return <AccrualForm key={(editor.id ?? 'new') + (editor.action ?? '')} employees={data.employees}
+          initialMonth={month} initialUser={editor.id} calculated={editor.action === 'calculated'} onClose={closeEditor} />;
       }
       if (view === 'payroll' && editor.type === 'financePayout') {
         const accrual = data.payroll.find(({ id }) => id === editor.id);
@@ -102,12 +103,18 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
       {data.canManage && <p className="mb-3 px-3 text-sm text-text-secondary">
         Здесь учитываются операции с момента запуска «Финансов». Для нового счёта укажите начальный остаток, а для существующего — внесите разницу через «Транзакции».
       </p>}
-      <FinanceTable headers={['Название', 'Тип', 'Зачисление продаж', 'Баланс', '']} amounts={[3]}
+      <FinanceTable headers={['Название', 'Тип', 'Баланс', '']} amounts={[2]}
         totals={accounts.length > 0 && data.canManage ? [
-          'Итого', null, null, financeMoney(accounts.reduce((sum, account) => sum + (account.balance ?? 0), 0)), null,
+          'Итого', null, financeMoney(accounts.reduce((sum, account) => sum + (account.balance ?? 0), 0)), null,
         ] : undefined}
         rows={accounts.map((account) => ({ key: account.id, cells: [
-          account.name, account.type === 'cash' ? 'Наличные' : 'Безналичные', account.isDefault ? 'Да' : '—',
+          <div className="flex flex-wrap items-center gap-2">
+            <Link className="text-primary hover:underline" to={{ search: new URLSearchParams({
+              section: 'finance', view: 'cashFlow', financeScope: account.id,
+            }).toString() }}>{account.name}</Link>
+            {account.isDefault && <span className="text-xs text-text-muted">Для оплат</span>}
+          </div>,
+          account.type === 'cash' ? 'Наличные' : 'Безналичные',
           <span className={account.balance != null && account.balance < 0 ? 'text-danger' : undefined}>{financeMoney(account.balance)}</span>,
           data.canManage && <EditButton name={account.name} onClick={() => openEditor({ type: 'financeAccount', id: account.id })} />,
         ] }))} empty="Счета не найдены" />
@@ -123,7 +130,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
       {toolbar(<Select ariaLabel="Тип категории" value={scope} onChange={setScope} options={[
         { value: '', label: 'Все категории' }, { value: 'income', label: 'Доходы' }, { value: 'expense', label: 'Расходы' },
       ]} />, data.canManage ? { label: 'Добавить категорию', editor: 'financeCategory' } : undefined)}
-      <FinanceTable headers={['Название', 'Тип', 'Доступ', '']} rows={categories.map((category) => ({ key: category.id, cells: [
+      <FinanceTable headers={['Название', 'Допустимые транзакции', 'Доступ', '']} rows={categories.map((category) => ({ key: category.id, cells: [
         category.name, entryLabels[category.kind], ['Владелец',
           ...category.positionIds.map((id) => positionNames.get(id)).filter(Boolean),
           ...category.userIds.map((id) => employeeNames.get(id)).filter(Boolean),
@@ -134,19 +141,53 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   }
 
   if (view === 'payroll') {
-    const payroll = data.payroll.filter((entry) => filterByName(entry.employeeName, search));
+    const staff = salary.data?.staff ?? [];
+    const payroll = staff.filter((entry) => filterByName(entry.name, search) &&
+      (!payrollPosition || entry.position === payrollPosition));
+    const history = payroll.find(({ userId }) => userId === salaryHistoryId);
+    const records = history ? salary.data?.records.filter(({ userId }) => userId === history.userId) ?? [] : [];
+    const positions = [...new Set(staff.map((row) => row.position).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
+    const totals = payroll.reduce((sum, row) => ({
+      estimate: sum.estimate + row.estimate, accrued: sum.accrued + row.accrued, paid: sum.paid + row.paid, due: sum.due + row.due,
+    }), { estimate: 0, accrued: 0, paid: 0, due: 0 });
     return <>
       <WorkspaceHeaderCount count={payroll.length} />
-      {toolbar(<label className="flex items-center gap-2 text-text-secondary">Месяц
-        <input type="month" className="input" value={month} onChange={(event) => { if (event.target.value) setMonth(event.target.value); }} />
-      </label>, data.canManage && data.employees.length ? { label: 'Начислить зарплату', editor: 'financeAccrual' } : undefined)}
-      <FinanceTable headers={['Сотрудник', 'Месяц', 'Начислено', 'Выплачено', 'К выплате', 'Комментарий', '']} amounts={[2, 3, 4]}
-        rows={payroll.map((entry) => ({ key: entry.id, cells: [
-          entry.employeeName, entry.month, financeMoney(entry.amount), financeMoney(entry.paidAmount),
-          financeMoney(entry.amount - entry.paidAmount), entry.note || '—',
-          data.canManage && data.accounts.length > 0 && entry.amount > entry.paidAmount
-            ? <button type="button" className="text-primary" onClick={() => openEditor({ type: 'financePayout', id: entry.id })}>Выплатить</button> : null,
-        ] }))} empty="За этот месяц нет начислений" />
+      {toolbar(<>
+        <label className="flex items-center gap-2 text-text-secondary">Месяц
+          <input type="month" className="input" value={month} max={today.slice(0, 7)}
+            onChange={(event) => { if (event.target.value) { setMonth(event.target.value); setSalaryHistory(null); } }} />
+        </label>
+        <Select ariaLabel="Должность" value={payrollPosition} onChange={(value) => setFilters({ payrollPosition: value })}
+          options={[{ value: '', label: 'Все должности' }, ...positions.map((position) => ({ label: position, value: position }))]} />
+      </>, data.canManage && data.employees.length ? { label: 'Начислить зарплату', editor: 'financeAccrual' } : undefined)}
+      <p className="mb-3 px-3 text-sm text-text-secondary">
+        Расчёт по ставкам должности учитывает закрытые рабочие смены и оплаченные заказы. Деньги списываются при выплате.
+      </p>
+      <QueryState pending={salary.isPending} error={salary.error}>
+        <FinanceTable headers={['Сотрудник', 'Должность', 'Часы', 'Смены', 'По ставкам', 'Начислено', 'Выплачено', 'К выплате', '']}
+          amounts={[2, 3, 4, 5, 6, 7]}
+          totals={payroll.length ? ['Итого', null, null, null, financeMoney(totals.estimate), financeMoney(totals.accrued),
+            financeMoney(totals.paid), financeMoney(totals.due), null] : undefined}
+          rows={payroll.map((entry) => ({ key: entry.userId, cells: [
+            <button type="button" className="text-primary" aria-expanded={history?.userId === entry.userId}
+              onClick={() => setSalaryHistory(history?.userId === entry.userId ? null : entry.userId)}>{entry.name}</button>,
+            entry.position || '—', entry.hours ?? '—', entry.shifts ?? '—', entry.rateMonth ? financeMoney(entry.estimate) : '—',
+            financeMoney(entry.accrued), financeMoney(entry.paid), financeMoney(entry.due),
+            data.canManage && entry.available > 0 && <button type="button" className="text-primary"
+              onClick={() => openEditor({ type: 'financeAccrual', id: entry.userId, action: 'calculated' })}>Начислить по расчёту</button>,
+          ] }))} empty="Сотрудники не найдены" />
+      </QueryState>
+      {salary.isError && <button type="button" className="btn-secondary btn-md" onClick={() => void salary.refetch()}>Повторить</button>}
+      {history && <section className="mt-5" aria-label={'Начисления: ' + history.name}>
+        <h3 className="mb-3 px-3 font-semibold">Начисления — {history.name}</h3>
+        <FinanceTable headers={['Дата', 'Вид начисления', 'Начислено', 'Выплачено', 'К выплате', 'Комментарий', '']} amounts={[2, 3, 4]}
+          rows={records.map((entry) => ({ key: entry.id, cells: [
+            financeDateTime(entry.createdAt), entry.calculation ? 'По ставкам должности' : 'Вручную',
+            financeMoney(entry.amount), financeMoney(entry.paidAmount), financeMoney(entry.amount - entry.paidAmount), entry.note || '—',
+            data.canManage && data.accounts.length > 0 && entry.amount > entry.paidAmount
+              ? <button type="button" className="text-primary" onClick={() => openEditor({ type: 'financePayout', id: entry.id })}>Выплатить</button> : null,
+          ] }))} empty="За этот месяц нет начислений" />
+      </section>}
     </>;
   }
 
@@ -178,20 +219,25 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
 
   const accountNames = new Map(data.accounts.map(({ id, name }) => [id, name]));
   const categoryNames = new Map(data.categories.map(({ id, name }) => [id, name]));
-  const transactions = data.entries.filter((entry) => (!scope || entry.accountId === scope) && (!kind || entry.kind === kind) &&
+  const transactions = data.entries.filter((entry) => (!scope || entry.accountId === scope) &&
+    (!kind || (entry.reversalOf ? kind === 'reversal' : entry.kind === kind)) &&
     (!categoryId || entry.categoryId === categoryId) &&
     filterByName([entry.note, entry.actorName, accountNames.get(entry.accountId), entry.categoryId && categoryNames.get(entry.categoryId)].filter(Boolean).join(' '), search));
+  const selectedEntry = data.entries.find(({ id }) => id === transactionEditor?.id);
   return <>
     <WorkspaceHeaderCount count={transactions.length} />
     {toolbar(<>
       <Select ariaLabel="Счёт" value={scope} onChange={setScope}
         options={[{ value: '', label: 'Все счета' }, ...data.accounts.map(({ id, name }) => ({ value: id, label: name }))]} />
-      <Select ariaLabel="Тип транзакции" value={kind} onChange={setKind}
-        options={[{ value: '', label: 'Все операции' }, ...Object.entries(entryLabels).map(([value, label]) => ({ value, label }))]} />
-      {data.categories.length > 0 && <Select ariaLabel="Категория транзакции" value={categoryId} onChange={setCategory}
+      <Select ariaLabel="Тип транзакции" value={kind} onChange={(value) => setFilters({ financeKind: value })}
+        options={[{ value: '', label: 'Все операции' }, ...Object.entries(entryLabels).map(([value, label]) => ({ value, label })),
+          { value: 'reversal', label: 'Сторно' }]} />
+      {data.categories.length > 0 && <Select ariaLabel="Категория транзакции" value={categoryId} onChange={(value) => setFilters({ financeCategory: value })}
         options={[{ value: '', label: 'Все категории' }, ...data.categories.map(({ id, name }) => ({ value: id, label: name }))]} />}
+      {(scope || kind || categoryId || search) && <button type="button" className="btn-secondary btn-md"
+        onClick={() => setFilters({ financeScope: '', financeKind: '', financeCategory: '', financeSearch: '' })}>Сбросить фильтры</button>}
     </>, data.accounts.length && (data.canManage || data.categories.length) ? { label: 'Добавить транзакцию', editor: 'financeTransaction' } : undefined)}
-    <FinanceTable headers={['Дата', 'Категория', 'Комментарий', 'Сумма', 'Счёт', 'Тип', 'Сотрудник']} amounts={[3]}
+    <FinanceTable headers={['Дата', 'Категория', 'Комментарий', 'Сумма', 'Счёт', 'Тип', 'Сотрудник', '']} amounts={[3]}
       rows={transactions.map((entry) => ({ key: entry.id, cells: [
         financeDateTime(entry.occurredAt), entry.categoryId ? categoryNames.get(entry.categoryId) ?? '—' : '—',
         entry.note || '—',
@@ -199,8 +245,21 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
         entry.counterpartyAccountId
           ? [accountNames.get(entry.accountId) ?? '—', entry.amount < 0 ? '→' : '←', accountNames.get(entry.counterpartyAccountId) ?? '—'].join(' ')
           : accountNames.get(entry.accountId) ?? '—',
-        entryLabels[entry.kind] ?? entry.kind, entry.actorName || '—',
+        <span>{entryLabel(entry)}{entry.reversedAt && <span className="ml-2 text-xs text-text-muted">Сторнировано</span>}</span>,
+        entry.actorName || '—',
+        <button type="button" className="text-primary hover:underline"
+          aria-label={(entry.editable ? 'Редактировать транзакцию ' : 'Открыть транзакцию ') + financeDateTime(entry.occurredAt)}
+          onClick={() => openEditor({ type: 'financeTransaction', id: entry.id })}>
+          {entry.editable ? 'Ред.' : 'Открыть'}
+        </button>,
       ] }))} empty="За этот период нет транзакций по выбранным условиям" />
+    {transactionEditor && (selectedEntry ? <TransactionDetail key={selectedEntry.id} entry={selectedEntry} accounts={data.accounts}
+      categories={data.categories} owner={data.canManage} onClose={closeEditor} />
+      : !transactionEditor.id && data.accounts.length > 0 ? <TransactionForm accounts={data.accounts}
+        categories={data.categories} owner={data.canManage} initialAccountId={scope} initialCategoryId={categoryId} onClose={closeEditor} />
+      : <EditorPage title="Транзакция недоступна" onClose={closeEditor}>
+        <p role="alert" className="text-text-secondary">Проверьте период или права доступа к транзакции.</p>
+      </EditorPage>)}
   </>;
 }
 
@@ -225,9 +284,10 @@ function CashFlowDetails({ accounts, categories, entries, from, to, includeTrans
       group: 'opening', label: 'Начальный баланс', note: 'Начальный баланс счёта',
     }] : [];
   });
-  const motions = entries.filter((entry) => names.has(entry.accountId) && (includeTransfers || entry.kind !== 'transfer')).map((entry) => ({
+  const motions = entries.filter((entry) => !entry.reversedAt && !entry.reversalOf &&
+    names.has(entry.accountId) && (includeTransfers || entry.kind !== 'transfer')).map((entry) => ({
     ...entry, group: entry.categoryId ? 'category:' + entry.categoryId : entry.kind,
-    label: (entry.categoryId && categoryNames.get(entry.categoryId)) || entryLabels[entry.kind],
+    label: (entry.categoryId && categoryNames.get(entry.categoryId)) || entryLabel(entry),
   }));
   const all = [...initial, ...motions].sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
   if (!all.length) return null;

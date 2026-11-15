@@ -1,4 +1,13 @@
-import type { CashFlow } from './api';
+import type { CashFlow, EntryKind, FinanceEntry } from './api';
+
+export const entryLabels: Record<EntryKind, string> = {
+  income: 'Доход', expense: 'Расход', transfer: 'Перевод', sale: 'Продажа', refund: 'Возврат',
+  salary: 'Выплата зарплаты', adjustment: 'Корректировка',
+};
+
+export function entryLabel(entry: FinanceEntry) {
+  return entry.reversalOf ? 'Сторно' : entryLabels[entry.kind] ?? entry.kind;
+}
 
 const formatter = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateFormatter = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Bishkek', dateStyle: 'short', timeStyle: 'short' });

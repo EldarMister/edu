@@ -1,18 +1,22 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, Role, type FinanceAccount, type FinanceCategory, type FinanceEntry } from '@prisma/client';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { AuditAction, AuditEntity } from '../audit/audit.constants';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { warehouseDay } from '../warehouse/report-range';
 import {
   FinanceAccountCreateDto, FinanceAccountUpdateDto, FinanceCategoryCreateDto, FinanceCategoryUpdateDto,
   FinanceQueryDto, FinanceTransactionDto, SalaryAccrualDto, SalaryPaymentDto,
+  FinanceTransactionMetadataDto,
 } from './finance.dto';
 import { ensureFinanceAccounts, lockFinance } from './finance-ledger';
+import { currentPayrollMonth, payrollReport } from './payroll';
 
 type Db = Prisma.TransactionClient;
 const dayMs = 86_400_000;
 const zero = new Prisma.Decimal(0);
-const note = (value?: string) => value?.trim() || null;
+const note = (value?: string | null) => value?.trim() || null;
 const money = (value: number) => new Prisma.Decimal(value);
 const monthOf = (date: Date) => warehouseDay(date).slice(0, 7);
 
@@ -69,6 +73,39 @@ async function shiftForEntry(db: Db, cafeId: string, accountId: string, at: Date
   return shift?.id;
 }
 
+const manualKey = 'manual:';
+const reversalKey = 'void:';
+const isManualEntry = (entry: FinanceEntry) => entry.sourceKey?.startsWith(manualKey)
+  && ['income', 'expense', 'transfer'].includes(entry.kind);
+const isMetadataEntry = (entry: FinanceEntry) => isManualEntry(entry) && entry.kind !== 'transfer' && !entry.cashShiftId;
+const reversalTarget = (sourceKey: string | null) =>
+  sourceKey?.startsWith(reversalKey) ? sourceKey.slice(reversalKey.length) : null;
+
+type AccountShift = { id: string; accountId: string; openedAt: Date; closedAt: Date | null };
+async function latestAccountShifts(db: Db, cafeId: string, accountIds: string[]) {
+  const shifts = await db.cashShift.findMany({
+    where: { cafeId, accountId: { in: accountIds } }, orderBy: [{ openedAt: 'desc' }, { id: 'desc' }],
+    distinct: ['accountId'], select: { id: true, accountId: true, openedAt: true, closedAt: true },
+  });
+  return new Map(shifts.map((shift) => [shift.accountId, shift]));
+}
+
+function canReverseEntry(entry: FinanceEntry, latest?: AccountShift) {
+  if (!latest) return entry.cashShiftId == null;
+  if (entry.cashShiftId) return latest.id === entry.cashShiftId && latest.closedAt == null;
+  return latest.closedAt != null && entry.occurredAt >= latest.closedAt;
+}
+
+function canReverseCounterparty(entry: FinanceEntry, latest?: AccountShift) {
+  return !latest || entry.occurredAt >= (latest.closedAt ?? latest.openedAt);
+}
+
+async function findEntry(db: Db, cafeId: string, id: string) {
+  const entry = await db.financeEntry.findFirst({ where: { cafeId, id } });
+  if (!entry) throw new NotFoundException('Транзакция не найдена');
+  return entry;
+}
+
 export function buildCashFlow(
   accounts: Pick<FinanceAccount, 'createdAt' | 'openingBalance'>[],
   before: Prisma.Decimal,
@@ -107,7 +144,7 @@ export function buildCashFlow(
 
 @Injectable()
 export class FinanceService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
 
   async access(user: AuthUser) {
     if (!user.cafeId || (user.role !== Role.OWNER && user.role !== Role.ADMIN)) return { allowed: false };
@@ -141,7 +178,29 @@ export class FinanceService {
       const authors = await db.user.findMany({ where: { cafeId, id: { in: [...new Set(entries.flatMap(({ actorId }) => actorId ? [actorId] : []))] } },
         select: { id: true, name: true } });
       const authorNames = new Map(authors.map(({ id, name }) => [id, name]));
-      const entryRows = entries.map((entry) => ({ ...entry, amount: Number(entry.amount), actorName: entry.actorId ? authorNames.get(entry.actorId) : undefined }));
+      const reversals = canManage ? entries : await db.financeEntry.findMany({
+        where: { cafeId, sourceKey: { startsWith: reversalKey }, occurredAt: { gte: bounds.from, lt: bounds.to },
+          ...(query.accountId ? { accountId: query.accountId } : {}) },
+        select: { sourceKey: true, createdAt: true },
+      });
+      const reversedAt = new Map<string, Date>();
+      for (const { sourceKey, createdAt } of reversals) {
+        const target = reversalTarget(sourceKey);
+        if (target) reversedAt.set(target, createdAt);
+      }
+      const shifts = canManage ? await latestAccountShifts(db, cafeId, accounts.filter(({ type }) => type === 'cash').map(({ id }) => id))
+        : new Map<string, AccountShift>();
+      const entryRows = entries.map((entry) => {
+        const reversed = reversedAt.get(entry.id) ?? null;
+        return {
+          ...entry, amount: Number(entry.amount), actorName: entry.actorId ? authorNames.get(entry.actorId) : undefined,
+          reversedAt: reversed, reversalOf: reversalTarget(entry.sourceKey),
+          editable: !reversed && !!isMetadataEntry(entry),
+          reversible: canManage && !reversed && !!isManualEntry(entry)
+            && canReverseEntry(entry, shifts.get(entry.accountId))
+            && (!entry.counterpartyAccountId || canReverseCounterparty(entry, shifts.get(entry.counterpartyAccountId))),
+        };
+      });
       if (!canManage) return {
         canManage, accounts: accounts.map(({ id, name, type, isDefault, createdAt }) => ({ id, name, type, isDefault, createdAt, openingBalance: null, balance: null })),
         entries: entryRows, categories: categories.map(({ id, name, kind }) => ({ id, name, kind, userIds: [], positionIds: [] })),
@@ -170,7 +229,8 @@ export class FinanceService {
           ...line, amount: Number(line.amount), paidAmount: Number(payments.reduce((sum, payment) => sum.sub(payment.amount), zero)),
         })),
         flow: buildCashFlow(accounts.filter((account) => !query.accountId || account.id === query.accountId),
-          before._sum.amount ?? zero, entries, bounds.from, bounds.to, !!query.accountId),
+          before._sum.amount ?? zero, entries.filter(({ id, sourceKey }) => !reversedAt.has(id) && !reversalTarget(sourceKey)),
+          bounds.from, bounds.to, !!query.accountId),
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
@@ -249,6 +309,91 @@ export class FinanceService {
     });
   }
 
+  async updateTransaction(user: AuthUser, id: string, input: FinanceTransactionMetadataDto) {
+    const cafeId = tenant(user);
+    if (user.role !== Role.OWNER && user.role !== Role.ADMIN) throw new ForbiddenException();
+    const { before, updated } = await this.prisma.$transaction(async (db) => {
+      await lockFinance(db, cafeId);
+      const before = await findEntry(db, cafeId, id);
+      if (user.role !== Role.OWNER) {
+        if (before.actorId !== user.id || !before.categoryId || !await db.financeCategory.findFirst({
+          where: { ...grantWhere(user), id: before.categoryId }, select: { id: true },
+        })) throw new ForbiddenException('Транзакция недоступна');
+      }
+      if (!isMetadataEntry(before)) throw new BadRequestException('Можно изменить категорию и комментарий ручного дохода или расхода вне кассовой смены');
+      const reversed = await db.financeEntry.findFirst({ where: { cafeId, sourceKey: reversalKey + id }, select: { id: true } });
+      if (reversed) throw new ConflictException('Транзакция уже отменена');
+      const categoryId = input.categoryId === undefined ? before.categoryId : input.categoryId;
+      if (categoryId !== before.categoryId) {
+        if (!categoryId && user.role !== Role.OWNER) throw new ForbiddenException('Выберите разрешённую категорию');
+        if (categoryId) {
+          const category = await db.financeCategory.findFirst({ where: { ...grantWhere(user), id: categoryId } });
+          if (!category) throw new ForbiddenException('Категория недоступна');
+          if (category.kind !== before.kind) throw new BadRequestException('Категория не соответствует типу операции');
+        }
+      }
+      const comment = input.note === undefined ? before.note : note(input.note);
+      if (categoryId === before.categoryId && comment === before.note) return { before, updated: before };
+      const updated = await db.financeEntry.update({ where: { id, cafeId }, data: { categoryId, note: comment } });
+      return { before, updated };
+    });
+    if (before !== updated) {
+      await this.audit.log({
+        actor: user, actionType: AuditAction.FINANCE_TRANSACTION_UPDATED, entityType: AuditEntity.FINANCE_TRANSACTION,
+        entityId: id, description: 'Обновлены категория или комментарий транзакции',
+        oldValue: { categoryId: before.categoryId, note: before.note },
+        newValue: { categoryId: updated.categoryId, note: updated.note },
+      });
+    }
+    return updated;
+  }
+
+  async reverseTransaction(user: AuthUser, id: string, reason: string) {
+    const cafeId = ownerOnly(user);
+    const description = note(reason);
+    if (!description) throw new BadRequestException('Укажите причину отмены');
+    return this.prisma.$transaction(async (db) => {
+      await lockFinance(db, cafeId);
+      const entry = await findEntry(db, cafeId, id);
+      if (!isManualEntry(entry) || !entry.sourceKey) throw new BadRequestException('Можно отменить только ручную транзакцию');
+      const key = entry.sourceKey.endsWith(':in') ? entry.sourceKey.slice(0, -3) : entry.sourceKey;
+      const originals = entry.kind === 'transfer' ? await db.financeEntry.findMany({
+        where: { cafeId, sourceKey: { in: [key, key + ':in'] } },
+      }) : [entry];
+      if (entry.kind === 'transfer') {
+        const other = originals.find((item) => item.id !== entry.id);
+        if (originals.length !== 2 || other?.kind !== 'transfer' || other.accountId !== entry.counterpartyAccountId
+          || other.counterpartyAccountId !== entry.accountId || !other.amount.eq(entry.amount.negated())
+          || other.occurredAt.getTime() !== entry.occurredAt.getTime()) {
+          throw new ConflictException('Не удалось сверить обе стороны перевода');
+        }
+      }
+      const previous = await db.financeEntry.findMany({
+        where: { cafeId, sourceKey: { in: originals.map(({ id }) => reversalKey + id) } },
+        select: { createdAt: true, note: true },
+      });
+      if (previous.length) {
+        if (previous.length === originals.length && previous.every((row) => row.note === description)) {
+          return { id, reversedAt: previous[0].createdAt };
+        }
+        throw new ConflictException('Транзакция уже отменена');
+      }
+      const shifts = await latestAccountShifts(db, cafeId, [...new Set(originals.map(({ accountId }) => accountId))]);
+      if (originals.some((line) => !canReverseEntry(line, shifts.get(line.accountId)))) {
+        throw new ConflictException('Операция учтена в сверке кассы. Внесите отдельную корректировку текущего остатка');
+      }
+      const reversedAt = new Date();
+      await db.financeEntry.createMany({ data: originals.map((line) => ({
+        cafeId, accountId: line.accountId, actorId: user.id, categoryId: line.categoryId,
+        cashShiftId: line.cashShiftId, counterpartyAccountId: line.counterpartyAccountId,
+        kind: line.kind === 'transfer' ? 'transfer' as const : 'adjustment' as const,
+        sourceKey: reversalKey + line.id, amount: line.amount.negated(), note: description,
+        occurredAt: line.occurredAt, createdAt: reversedAt,
+      })) });
+      return { id, reversedAt };
+    });
+  }
+
   async post(user: AuthUser, input: FinanceTransactionDto) {
     const cafeId = tenant(user);
     if (user.role !== Role.OWNER && user.role !== Role.ADMIN) throw new ForbiddenException();
@@ -263,7 +408,7 @@ export class FinanceService {
       throw new BadRequestException('Выберите другой счёт для перевода');
     }
     if (!transfer && input.destinationAccountId) throw new BadRequestException('Счёт получателя нужен только для перевода');
-    const sourceKey = 'manual:' + input.requestKey;
+    const sourceKey = manualKey + input.requestKey;
     return this.prisma.$transaction(async (db) => {
       await lockFinance(db, cafeId);
       let category: FinanceCategory | null = null;
@@ -299,6 +444,42 @@ export class FinanceService {
     });
   }
 
+  async payroll(user: AuthUser, month: string) {
+    const cafeId = ownerOnly(user);
+    return this.prisma.$transaction((db) => payrollReport(db, cafeId, month), {
+      isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+    });
+  }
+
+  async accrueCalculated(user: AuthUser, input: SalaryAccrualDto) {
+    const cafeId = ownerOnly(user);
+    const description = note(input.note);
+    return this.prisma.$transaction(async (db) => {
+      await lockFinance(db, cafeId);
+      const existing = await db.salaryAccrual.findFirst({ where: { cafeId, requestKey: input.requestKey } });
+      if (existing) {
+        if (!existing.calculation || existing.userId !== input.userId || existing.month !== input.month ||
+          !existing.amount.eq(input.amount) || existing.note !== description) {
+          throw new ConflictException('Этот запрос уже использован для другого начисления');
+        }
+        return existing;
+      }
+      if (input.month > currentPayrollMonth()) throw new BadRequestException('Период начисления ещё не начался');
+      const { staff } = await payrollReport(db, cafeId, input.month, input.userId);
+      const row = staff.find(({ userId }) => userId === input.userId);
+      if (!row) throw new NotFoundException('Сотрудник не найден');
+      if (row.available <= 0 || row.available !== input.amount) {
+        throw new ConflictException('Сумма к начислению изменилась. Пересчитайте зарплату');
+      }
+      const { rates, hours, shifts, days, personalSales, shiftSales, rateMonth, estimate } = row;
+      return db.salaryAccrual.create({ data: {
+        cafeId, userId: row.userId, employeeName: row.name, month: input.month,
+        amount: row.available, note: description, actorId: user.id, requestKey: input.requestKey,
+        calculation: { rates, hours, shifts, days, personalSales, shiftSales, rateMonth, estimate },
+      } });
+    });
+  }
+
   async accrue(user: AuthUser, input: SalaryAccrualDto) {
     const cafeId = ownerOnly(user);
     const description = note(input.note);
@@ -306,7 +487,7 @@ export class FinanceService {
       await lockFinance(db, cafeId);
       const existing = await db.salaryAccrual.findFirst({ where: { cafeId, requestKey: input.requestKey } });
       if (existing) {
-        if (existing.userId !== input.userId || existing.month !== input.month ||
+        if (existing.calculation || existing.userId !== input.userId || existing.month !== input.month ||
           !existing.amount.eq(input.amount) || existing.note !== description) throw new ConflictException('Этот запрос уже использован для другого начисления');
         return existing;
       }

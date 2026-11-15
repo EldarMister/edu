@@ -1,10 +1,14 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { Modal } from '@/components/Modal';
-import { apiError } from '@/lib/api';
+import { DatePicker } from '@/components/DatePicker';
+import { useQuery } from '@tanstack/react-query';
+import { api, apiError } from '@/lib/api';
 import { WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { QueryState } from '../warehouse/WarehouseUi';
-import { type CashShift, useCashShiftMutation, useCashShifts } from './api';
-import { financeDateTime, financeMoney, parseMoney } from './finance-format';
+import { EditorPage } from '../warehouse/EditorPage';
+import { useEditorRoute, usePageFilter } from '../warehouse/workspace-route';
+import { cashShiftKey, type CashShift, type EntryKind, useCashShiftMutation, useCashShifts } from './api';
+import { financeDateTime, financeDay, financeMoney, parseMoney } from './finance-format';
 
 export function FinanceTable({ headers, rows, empty = 'Нет записей', amounts = [], totals }: {
   headers: string[];
@@ -29,15 +33,35 @@ export function FinanceTable({ headers, rows, empty = 'Нет записей', a
 }
 
 export function CashShiftsPage() {
-  const shifts = useCashShifts();
+  const today = financeDay();
+  const [from, setFrom] = usePageFilter('from', financeDay(new Date(Date.now() - 30 * 86_400_000)));
+  const [to, setTo] = usePageFilter('to', today);
+  const rangeValid = !!from && !!to && from <= to;
+  const shifts = useCashShifts(rangeValid, '/admin/cash-shifts', { from, to });
+  const { editor, openEditor, closeEditor } = useEditorRoute();
   const [editing, setEditing] = useState<'open' | CashShift | null>(null);
   const current = shifts.data?.current;
   const history = (shifts.data?.history ?? []).filter((shift) => shift.id !== current?.id);
   const rows = current ? [current, ...history] : history;
+  if (editor?.type === 'cashShiftHistory' && editor.id) {
+    const shift = rows.find(({ id }) => id === editor.id);
+    return <EditorPage title="Кассовая смена" onClose={closeEditor}>
+      <QueryState pending={shifts.isPending && rangeValid} error={shifts.error}>
+        {shift ? <CashShiftDetails shift={shift} /> : <p>Смена не найдена в выбранном периоде.</p>}
+      </QueryState>
+    </EditorPage>;
+  }
+  const period = <>
+    <DatePicker aria-label="С даты" className="input w-36" value={from} max={to} onChange={setFrom} />
+    <DatePicker aria-label="По дату" className="input w-36" value={to} min={from} max={today} onChange={setTo} />
+  </>;
+  if (!rangeValid) return <><div className="poster-toolbar">{period}</div>
+    <p role="alert" className="text-danger">Укажите начало и конец периода.</p></>;
   return <QueryState pending={shifts.isPending} error={shifts.error}>
     {shifts.data && <>
       <WorkspaceHeaderCount count={rows.length} />
       <div className="poster-toolbar">
+        {period}
         <span className="text-text-secondary">{current ? 'Кассовая смена открыта'
           : shifts.data.enabled ? 'Кассовая смена закрыта' : 'Кассовые смены выключены в настройках'}</span>
         {(current || shifts.data.enabled) && <button type="button" className="btn-primary btn-md ml-auto"
@@ -45,16 +69,54 @@ export function CashShiftsPage() {
           {current ? 'Закрыть смену' : 'Открыть смену'}
         </button>}
       </div>
-      <FinanceTable headers={['Открыта', 'Закрыта', 'Остаток при открытии', 'По учёту', 'Фактически', 'Расхождение']} amounts={[2, 3, 4, 5]}
+      <FinanceTable headers={['Смена открыта', 'Смена закрыта', 'Начало смены', 'Инкассация', 'По учёту', 'В кассе', 'Разница']} amounts={[2, 3, 4, 5, 6]}
         rows={rows.map((shift) => ({ key: shift.id, cells: [
-          <ShiftTime time={shift.openedAt} name={shift.openedByName} />,
+          <button type="button" className="text-left text-primary"
+            onClick={() => openEditor({ type: 'cashShiftHistory', id: shift.id })}>
+            <ShiftTime time={shift.openedAt} name={shift.openedByName} />
+          </button>,
           <ShiftTime time={shift.closedAt} name={shift.closedByName} />, financeMoney(shift.openingAmount),
+          financeMoney(shift.collectionAmount),
           financeMoney(shift.expectedAmount), financeMoney(shift.actualAmount),
           <span className={shift.difference ? 'text-danger' : undefined}>{financeMoney(shift.difference)}</span>,
         ] }))} empty="Кассовых смен пока нет" />
       {editing && <ShiftDialog current={editing === 'open' ? null : editing} onClose={() => setEditing(null)} onRefresh={shifts.refetch} />}
     </>}
   </QueryState>;
+}
+
+const shiftEntryLabel: Record<EntryKind, string> = {
+  income: 'Внесение', expense: 'Расход', transfer: 'Перевод', sale: 'Выручка', refund: 'Возврат',
+  salary: 'Выплата зарплаты', adjustment: 'Корректировка остатка',
+};
+
+function CashShiftDetails({ shift }: { shift: CashShift }) {
+  const entries = useQuery({
+    queryKey: [...cashShiftKey, 'movements', shift.id],
+    queryFn: async () => (await api.get<{
+      id: string; occurredAt: string; kind: EntryKind; category: string | null; note: string | null; amount: number;
+      reconciliation: 'open' | 'close' | null;
+    }[]>('/admin/cash-shifts/' + shift.id + '/movements')).data,
+  });
+  return <div className="space-y-4">
+    <dl className="grid gap-4 rounded-xl border border-border p-4 sm:grid-cols-3">
+      {([
+        ['Смена открыта', financeDateTime(shift.openedAt)], ['Смена закрыта', financeDateTime(shift.closedAt)],
+        ['Начало смены', financeMoney(shift.openingAmount)], ['По учёту', financeMoney(shift.expectedAmount)],
+        ['В кассе', financeMoney(shift.actualAmount)], ['Разница', financeMoney(shift.difference)],
+      ] as const).map(([label, value]) => <div key={label}>
+        <dt className="text-sm text-text-muted">{label}</dt><dd>{value}</dd>
+      </div>)}
+    </dl>
+    <QueryState pending={entries.isPending} error={entries.error}>
+      <FinanceTable headers={['Дата', 'Операция', 'Категория', 'Комментарий', 'Сумма']} amounts={[4]}
+        rows={(entries.data ?? []).map((entry) => ({ key: entry.id, cells: [
+          financeDateTime(entry.occurredAt), entry.reconciliation === 'open' ? 'Сверка при открытии'
+            : entry.reconciliation === 'close' ? 'Сверка при закрытии' : shiftEntryLabel[entry.kind],
+          entry.category ?? '—', entry.note ?? '—', financeMoney(entry.amount),
+        ] }))} empty="По этой смене нет операций" />
+    </QueryState>
+  </div>;
 }
 
 function ShiftTime({ time, name }: { time?: string | null; name?: string | null }) {
