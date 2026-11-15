@@ -10,7 +10,7 @@ export function BrandLogo({ className = '', size = 'header' }: BrandLogoProps) {
     <img
       src="/icon1.png?v=edu-pos"
       alt="EDU POS"
-      className={`${sizeClass} w-auto object-contain ${className}`}
+      className={`brand-logo ${sizeClass} w-auto object-contain ${className}`}
     />
   );
 }

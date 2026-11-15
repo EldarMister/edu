@@ -4,7 +4,11 @@ import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { getCafeId } from '../tenant/tenant-context';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateWarehouseDocumentDto, UpdateWarehouseDocumentDto, WriteoffPreviewDto, warehouseWriteoffReasons } from './documents.dto';
+import { assertInventoryCutoff, inventoryHistoricalPlan, parseInventoryCountedAt } from './inventory-historical-plan';
+import { inventoryPeriodContext } from './inventory-period-context';
 import { postStockMovement } from './stock-posting';
+import { parseStockEffectiveAt } from './stock-effective-time';
+import { replayHistoricalStock } from './historical-stock-replay';
 import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, UnitCode, unitLabel } from './units';
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances, warehouseDocumentFilter, WarehouseLocation } from './warehouse-location';
@@ -17,7 +21,15 @@ type StockLine = Omit<WarehouseDocumentItem, 'documentId' | 'cafeId'>;
 const documentInclude = { items: { orderBy: [{ name: 'asc' }, { ingredientId: 'asc' }] } } satisfies Prisma.WarehouseDocumentInclude;
 const maxQuantity = new Prisma.Decimal('99999999999.999');
 const zero = new Prisma.Decimal(0);
+const inventoryCostReset = 'inventory_zero_cost';
 const transactionOptions = { timeout: 30_000 };
+
+function documentEffectiveAt(kind: WarehouseDocumentKind, value: string | null | undefined) {
+  if (value != null && kind !== 'transfer' && kind !== 'writeoff') {
+    throw new BadRequestException('Складская дата доступна для перемещений и списаний');
+  }
+  return parseStockEffectiveAt(value);
+}
 
 @Injectable()
 export class WarehouseDocumentsService {
@@ -52,11 +64,11 @@ export class WarehouseDocumentsService {
       this.prisma.warehouseDocument.findMany({
         where,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-        include: { items: { select: { name: true }, orderBy: [{ name: 'asc' }, { ingredientId: 'asc' }], take: 3 } },
+        include: { items: { select: { name: true, ingredientId: true }, orderBy: [{ name: 'asc' }, { ingredientId: 'asc' }] } },
       }),
       this.prisma.$queryRaw<Array<{ id: string; itemsCount: number; varianceValue: Prisma.Decimal | null }>>`
         SELECT d.id, COUNT(i.ingredient_id)::int AS "itemsCount",
-          CASE WHEN d.kind = 'inventory' AND d.status IN ('draft', 'submitted') THEN NULL
+          CASE WHEN (d.kind = 'inventory' OR d.effective_at IS NOT NULL) AND d.status IN ('draft', 'submitted') THEN NULL
             WHEN BOOL_AND(i.cost_known OR i.difference = 0) THEN ROUND(SUM(i.difference * i.unit_cost), 2) ELSE NULL END AS "varianceValue"
         FROM warehouse_documents d
         LEFT JOIN warehouse_document_items i ON i.cafe_id = d.cafe_id AND i.document_id = d.id
@@ -68,12 +80,29 @@ export class WarehouseDocumentsService {
         GROUP BY d.id
       `,
     ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    const categorySources = documents.flatMap((document) => {
+      const sources = readWriteoffSnapshot(document.sourceLines);
+      return sources ? sources.lines.map(({ kind, sourceId }) => ({ kind, sourceId }))
+        : document.items.map(({ ingredientId }) => ({ kind: 'ingredient' as const, sourceId: ingredientId }));
+    });
+    const [categoryIngredients, categoryDishes] = await Promise.all([
+      this.prisma.ingredient.findMany({ where: { cafeId, id: { in: [...new Set(categorySources.filter(({ kind }) => kind === 'ingredient').map(({ sourceId }) => sourceId))] } },
+        select: { id: true, category: true } }),
+      this.prisma.dish.findMany({ where: { cafeId, id: { in: [...new Set(categorySources.filter(({ kind }) => kind === 'dish').map(({ sourceId }) => sourceId))] } },
+        select: { id: true, category: { select: { name: true } } } }),
+    ]);
+    const ingredientCategories = new Map(categoryIngredients.map(({ id, category }) => [id, category]));
+    const dishCategories = new Map(categoryDishes.map(({ id, category }) => [id, category.name]));
     const byId = new Map(totals.map(({ id, ...summary }) => [id, summary]));
     return documents.map((document) => {
       const summary = byId.get(document.id);
       const sources = readWriteoffSnapshot(document.sourceLines);
+      const categories = sources
+        ? sources.lines.map(({ kind, sourceId }) => (kind === 'dish' ? dishCategories : ingredientCategories).get(sourceId))
+        : document.items.map(({ ingredientId }) => ingredientCategories.get(ingredientId));
       return { ...this.summary(document, sources?.lines.length ?? summary?.itemsCount ?? 0, summary?.varianceValue ?? null),
-        productNames: sources ? sources.lines.slice(0, 3).map((line) => line.name) : document.items.map((item) => item.name) };
+        categories: [...new Set(categories.filter((category): category is string => !!category))].sort((a, b) => a.localeCompare(b, 'ru')),
+        productNames: sources ? sources.lines.slice(0, 3).map((line) => line.name) : document.items.slice(0, 3).map((item) => item.name) };
     });
   }
 
@@ -93,13 +122,16 @@ export class WarehouseDocumentsService {
     return this.prisma.$transaction(async (tx) => {
       await lockRecipeGraph(tx, true);
       const warehouse = await this.warehouse(tx, dto.warehouseId);
-      const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, false, true);
+      const saved = dto.documentId ? await this.load(tx, dto.documentId) : null;
+      if (saved && (saved.kind !== 'writeoff' || saved.warehouseId !== warehouse.id))
+        throw new BadRequestException('Черновик должен относиться к списанию на выбранном складе');
+      const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, false, true, readWriteoffSnapshot(saved?.sourceLines ?? null));
       return previewWriteoffSources(tx, warehouse, snapshot);
     }, { ...transactionOptions, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
-  async get(id: string) {
-    return this.prisma.$transaction(async (tx) => this.preview(tx, await this.load(tx, id)),
+  async get(id: string, includeInventoryContext = false) {
+    return this.prisma.$transaction(async (tx) => this.preview(tx, await this.load(tx, id), includeInventoryContext),
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
@@ -110,13 +142,17 @@ export class WarehouseDocumentsService {
       throw new BadRequestException('Выберите вид инвентаризации');
     }
     if (dto.kind !== 'inventory' && dto.mode != null) throw new BadRequestException('Вид инвентаризации неприменим к списанию');
+    const countedAt = parseInventoryCountedAt(dto.kind, dto.countedAt);
+    const effectiveAt = documentEffectiveAt(dto.kind, dto.effectiveAt);
     if (dto.sourceLines && (dto.kind !== 'writeoff' || dto.items)) throw new BadRequestException('Составные строки доступны только для списания и заменяют список ингредиентов');
     return this.prisma.$transaction(async (tx) => {
       if (dto.requestKey) {
         await tx.$queryRaw`SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext(${`warehouse-request:${cafeId}:${dto.requestKey}`}))) AS request_lock`;
         const existing = await tx.warehouseDocument.findUnique({ where: { cafeId_requestKey: { cafeId, requestKey: dto.requestKey } }, include: documentInclude });
         if (existing) {
-          if (existing.kind !== dto.kind || existing.warehouseId !== dto.warehouseId || existing.destinationWarehouseId !== (dto.destinationWarehouseId ?? null) || existing.sourcePurchaseId !== (dto.sourcePurchaseId ?? null)) {
+          if (existing.kind !== dto.kind || existing.warehouseId !== dto.warehouseId || existing.destinationWarehouseId !== (dto.destinationWarehouseId ?? null) || existing.sourcePurchaseId !== (dto.sourcePurchaseId ?? null)
+            || (countedAt !== undefined && existing.countedAt?.getTime() !== countedAt?.getTime())
+            || existing.effectiveAt?.getTime() !== effectiveAt?.getTime()) {
             throw new ConflictException('Ключ повторного запроса уже использован для другого документа');
           }
           if (dto.sourceLines) {
@@ -125,6 +161,7 @@ export class WarehouseDocumentsService {
               const saved = snapshot.lines.find((line) => line.sourceLineId === input.sourceLineId);
               return !saved || saved.kind !== input.kind || saved.sourceId !== input.sourceId || saved.variantId !== input.variantId
                 || saved.quantity !== input.quantity || saved.unit !== normalizeUnit(input.unit ?? saved.unit)
+                || saved.packageId !== input.packageId
                 || (input.recipeSignature && saved.recipeSignature !== input.recipeSignature);
             })) {
               throw new ConflictException('Ключ повторного запроса уже использован для другого состава списания');
@@ -148,7 +185,7 @@ export class WarehouseDocumentsService {
       } else if (dto.sourcePurchaseId) throw new BadRequestException('Исходный приход доступен только для возврата поставщику');
       const document = await tx.warehouseDocument.create({
         data: {
-          cafeId, warehouseId: warehouse.id, kind: dto.kind, mode: dto.mode ?? null,
+          cafeId, warehouseId: warehouse.id, kind: dto.kind, mode: dto.mode ?? null, countedAt, effectiveAt,
           reason: this.reason(dto.kind, dto.reason), note: dto.note?.trim() || null,
           destinationWarehouseId: dto.destinationWarehouseId, sourcePurchaseId: dto.sourcePurchaseId, requestKey: dto.requestKey,
           createdById: actor.id, createdByName: actor.name,
@@ -172,26 +209,30 @@ export class WarehouseDocumentsService {
     return this.prisma.$transaction(async (tx) => {
       const document = await this.lockDocument(tx, id, dto.revision, 'draft');
       const warehouse = await this.warehouse(tx, document.warehouseId);
+      const countedAt = parseInventoryCountedAt(document.kind, dto.countedAt);
+      const effectiveAt = documentEffectiveAt(document.kind, dto.effectiveAt);
       if (dto.sourceLines && (document.kind !== 'writeoff' || dto.items)) throw new BadRequestException('Составные строки доступны только для списания и заменяют список ингредиентов');
       if (document.sourceLines && dto.items) throw new BadRequestException('Сохраните исходные строки списания, а не рассчитанные ингредиенты');
       if (dto.recount && document.kind !== 'inventory') throw new BadRequestException('Пересчёт доступен только для инвентаризации');
       if (dto.sourceLines) {
         await lockRecipeGraph(tx, true);
-        const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, !!dto.finalize, !dto.finalize);
+        const snapshot = await resolveWriteoffSources(tx, warehouse, dto.sourceLines, !!dto.finalize, !dto.finalize, readWriteoffSnapshot(document.sourceLines));
         const items = await writeoffStockLines(tx, snapshot, document.items);
         await this.saveLines(tx, warehouse, document, items, false);
         await tx.warehouseDocument.update({ where: { id }, data: { sourceLines: snapshot as unknown as Prisma.InputJsonValue } });
-      } else if (dto.items || dto.recount) {
+      } else if (dto.items || dto.recount || countedAt !== undefined) {
         const items = dto.items ?? document.items.map((item) => ({
           ingredientId: item.ingredientId,
           quantity: item.quantity == null ? null : fromBase(Number(item.quantity), normalizeUnit(item.unit)),
         }));
-        await this.saveLines(tx, warehouse, document, items, dto.recount === true);
+        await this.saveLines(tx, warehouse, countedAt === undefined ? document : { ...document, countedAt }, items, dto.recount === true);
       }
       await tx.warehouseDocument.update({
         where: { id, cafeId: document.cafeId },
         data: {
           revision: { increment: 1 },
+          countedAt,
+          effectiveAt,
           note: dto.note === undefined ? undefined : dto.note?.trim() || null,
           reason: dto.reason === undefined ? undefined : this.reason(document.kind, dto.reason),
         },
@@ -246,35 +287,63 @@ export class WarehouseDocumentsService {
     await this.validateSourceSnapshot(tx, document);
     if (document.kind === 'inventory' || document.kind === 'writeoff') this.assertActor(actor, true);
     if (document.kind === 'supplier_return') await this.validateReturn(tx, document, await this.warehouse(tx, document.warehouseId));
-    const { warehouse, ingredients } = await this.validateLines(tx, document);
+    const { warehouse, ingredients, historicalPlan } = await this.validateLines(tx, document);
     const kind = document.kind;
     const destination = kind === 'transfer' ? await this.warehouse(tx, document.destinationWarehouseId!) : null;
+    const postedAt = new Date();
+    const effectiveAt = document.effectiveAt;
+    if (effectiveAt && effectiveAt > postedAt) throw new BadRequestException('Дата складской операции не может быть в будущем');
+    const dateEvidence = effectiveAt ? { createdAt: effectiveAt, recordedAt: postedAt }
+      : kind === 'transfer' ? { createdAt: postedAt } : {};
+    const insertedMovementIds: string[] = [];
     for (const item of document.items) {
       const ingredient = ingredients.get(item.ingredientId)!;
       const balance = await getWarehouseBalance(tx, warehouse, ingredient);
-      // Counts describe the physical stock at confirmation, not at draft creation.
-      // Re-read under the ingredient lock so receipts/sales cannot be counted twice.
-      const difference = kind === 'inventory' ? item.quantity!.sub(balance.stock) : item.quantity!.negated();
+      // The historical variance changes today's stock by the same amount; all
+      // receipts and withdrawals posted after the count remain in the book.
+      const expected = historicalPlan?.get(item.ingredientId) ?? balance.stock;
+      const difference = kind === 'inventory' ? item.quantity!.sub(expected) : item.quantity!.negated();
       if (difference.abs().gt(maxQuantity)) throw new BadRequestException('Расхождение вне допустимого диапазона');
+      const resetCost = kind === 'inventory' && item.quantity!.isZero() && balance.stock.add(difference).isZero()
+        && !balance.avgCost.isZero() && (!document.countedAt || !await tx.stockMovement.findFirst({
+          where: { cafeId: document.cafeId, ingredientId: item.ingredientId, ...warehouseDocumentFilter(warehouse),
+            createdAt: { gte: document.countedAt } }, select: { id: true },
+        }));
       await tx.warehouseDocumentItem.update({
         where: { documentId_ingredientId: { documentId: id, ingredientId: item.ingredientId }, cafeId: document.cafeId },
-        data: { expected: balance.stock, difference, unitCost: balance.avgCost,
+        data: { expected, difference, unitCost: balance.avgCost,
           costKnown: balance.valuationKnown && (difference.gte(0) || balance.stock.gte(difference.abs())) },
       });
-      if (difference.isZero()) continue;
+      if (difference.isZero() && !resetCost) continue;
       const comment = kind === 'writeoff' ? [warehouseWriteoffReasons[document.reason!], document.note].filter(Boolean).join(' · ') : document.note;
       const source = await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse, change: difference,
         costKnown: difference.gt(0) ? balance.valuationKnown : undefined,
-        movement: { type: kind, sourceType: kind, sourceId: id, actorId: actor.id, actorName: actor.name, reason: document.reason, comment,
-          ...(document.sourceLines ? { recipeSnapshot: document.sourceLines as Prisma.InputJsonValue } : {}) } });
-      if (destination) await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse: destination,
-        change: difference.negated(), cost: balance.avgCost, costKnown: source.movement.costKnown, valuation: 'average',
-        movement: { type: 'transfer', sourceType: 'transfer', sourceId: id, actorId: actor.id, actorName: actor.name, comment } });
+        carriedAverage: resetCost ? zero : undefined,
+        allowNegative: effectiveAt ? true : undefined,
+        movement: { ...dateEvidence, type: kind, sourceType: kind, sourceId: id, actorId: actor.id, actorName: actor.name,
+          reason: document.reason, comment,
+          ...(resetCost ? { recipeSnapshot: { kind: inventoryCostReset } }
+            : document.sourceLines ? { recipeSnapshot: document.sourceLines as Prisma.InputJsonValue } : {}) } });
+      if (effectiveAt) insertedMovementIds.push(source.movement.id);
+      if (destination) {
+        const received = await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse: destination,
+          change: difference.negated(), cost: balance.avgCost, costKnown: source.movement.costKnown, valuation: 'average',
+          allowNegative: effectiveAt ? true : undefined,
+          movement: { ...dateEvidence, type: 'transfer', sourceType: 'transfer', sourceId: id, actorId: actor.id, actorName: actor.name, comment } });
+        if (effectiveAt) insertedMovementIds.push(received.movement.id);
+      }
+    }
+    if (effectiveAt) {
+      await replayHistoricalStock(tx, { cafeId: document.cafeId, effectiveAt, insertedMovementIds });
+      await tx.auditLog.create({ data: { cafeId: document.cafeId, userId: actor.id, userName: actor.name, userRole: actor.role,
+        actionType: 'WAREHOUSE_DOCUMENT_POSTED_RETROSPECTIVELY', entityType: 'WAREHOUSE_DOCUMENT', entityId: document.id,
+        description: 'Складской документ проведён с пересчётом себестоимости',
+        metadata: { effectiveAt: effectiveAt.toISOString(), postedAt: postedAt.toISOString(), movementIds: insertedMovementIds } } });
     }
     return this.serialize(await tx.warehouseDocument.update({
       where: { id, cafeId: document.cafeId },
       data: {
-        status: 'posted', revision: { increment: 1 }, postedAt: new Date(),
+        status: 'posted', revision: { increment: 1 }, postedAt: effectiveAt || kind === 'transfer' ? postedAt : new Date(),
         postedById: actor.id, postedByName: actor.name,
       },
       include: documentInclude,
@@ -286,19 +355,36 @@ export class WarehouseDocumentsService {
     if (!note?.trim()) throw new BadRequestException('Укажите причину сторнирования');
     return this.prisma.$transaction(async (tx) => {
       const document = await this.lockDocument(tx, id, revision, 'posted');
-      const movements = await tx.stockMovement.findMany({ where: { cafeId: document.cafeId, sourceId: id, sourceType: document.kind }, orderBy: { createdAt: 'desc' } });
       await lockIngredients(tx, document.items.map((item) => item.ingredientId));
+      const movements = await tx.stockMovement.findMany({ where: { cafeId: document.cafeId, sourceId: id, sourceType: document.kind }, orderBy: { createdAt: 'desc' } });
+      const transferReversalAt = document.kind === 'transfer' ? new Date() : undefined;
       // Reverse withdrawals before receipts, so both sides of a transfer remain atomic.
       for (const movement of movements.sort((a, b) => Number(b.change) - Number(a.change))) {
         const warehouse = await this.warehouse(tx, movement.warehouseId!);
+        const snapshot = movement.recipeSnapshot;
+        const resetCost = movement.sourceType === 'inventory' && snapshot && typeof snapshot === 'object'
+          && !Array.isArray(snapshot) && snapshot.kind === inventoryCostReset;
+        const restoreCost = resetCost && !await tx.stockMovement.findFirst({
+          where: { cafeId: document.cafeId, ingredientId: movement.ingredientId, ...warehouseDocumentFilter(warehouse),
+            id: { not: movement.id }, createdAt: { gte: movement.createdAt } }, select: { id: true },
+        }) && !await tx.warehouseDocumentItem.findFirst({
+          where: { cafeId: document.cafeId, ingredientId: movement.ingredientId, documentId: { not: id }, quantity: { not: null },
+            document: { kind: 'inventory', status: 'posted', warehouseId: warehouse.id, postedAt: { gte: document.postedAt! } } },
+          select: { ingredientId: true },
+        });
+        // A cost-only count has no physical reversal. A newer operation
+        // already established the warehouse's own carrying average.
+        if (resetCost && movement.change.isZero() && !restoreCost) continue;
         await postStockMovement(tx, { ingredientId: movement.ingredientId, warehouse, change: movement.change.negated(),
-          cost: movement.costAtMoment, costKnown: movement.costKnown, valuation: movement.change.lt(0) ? 'average' : 'value',
-          movement: { type: 'cancel', sourceType: document.kind, sourceId: id, actorId: actor.id, actorName: actor.name,
+          carriedAverage: restoreCost ? movement.costAtMoment : undefined,
+          cost: movement.costAtMoment, costKnown: movement.costKnown,
+          valuation: movement.change.isZero() ? 'preserve' : movement.change.lt(0) ? 'average' : 'value',
+          movement: { createdAt: transferReversalAt, type: 'cancel', sourceType: document.kind, sourceId: id, actorId: actor.id, actorName: actor.name,
             comment: `Сторно: ${note.trim()}`, reason: 'reversal',
             ...(movement.recipeSnapshot ? { recipeSnapshot: movement.recipeSnapshot as Prisma.InputJsonValue } : {}) } });
       }
       return this.serialize(await tx.warehouseDocument.update({ where: { id, cafeId: document.cafeId },
-        data: { status: 'reversed', revision: { increment: 1 }, reversedAt: new Date(), reversedById: actor.id,
+        data: { status: 'reversed', revision: { increment: 1 }, reversedAt: transferReversalAt ?? new Date(), reversedById: actor.id,
           reversedByName: actor.name, reversalReason: note.trim() }, include: documentInclude }));
     }, transactionOptions);
   }
@@ -348,23 +434,29 @@ export class WarehouseDocumentsService {
     for (const id of quantities.keys()) {
       if (!catalog.has(id)) throw new NotFoundException('Сырьё не найдено');
     }
-    const balances = await warehouseBalances(tx, warehouse, ingredients);
-    const used = full ? await this.usedIngredientIds(tx, warehouse, ingredients.map(({ id }) => id)) : new Set<string>();
-    const generations = document.kind === 'inventory' ? await this.generations(tx, warehouse, ingredients.map(({ id }) => id)) : new Map<string, number>();
+    const countedAt = document.countedAt;
+    const positions = countedAt && full ? ingredients.filter(({ createdAt, id }) =>
+      createdAt <= countedAt || quantities.get(id) != null) : ingredients;
+    const balances = await warehouseBalances(tx, warehouse, positions);
+    const historicalPlan = countedAt ? await inventoryHistoricalPlan(tx, warehouse, positions, balances, countedAt) : null;
+    const positionIds = positions.map(({ id }) => id);
+    const used = full ? await this.usedIngredientIds(tx, warehouse, positionIds, countedAt) : new Set<string>();
+    const generations = document.kind === 'inventory' ? await this.generations(tx, warehouse, positionIds) : new Map<string, number>();
     const rows: StockLine[] = [];
-    for (const ingredient of ingredients) {
+    for (const ingredient of positions) {
       const old = existing.get(ingredient.id);
       const input = quantities.get(ingredient.id);
       const balance = balances.get(ingredient.id)!;
+      const expected = historicalPlan?.get(ingredient.id) ?? balance.stock;
       if (!full && input === undefined) continue;
-      if (full && balance.stock.isZero() && !used.has(ingredient.id) && !old && input === undefined) continue;
+      const keepEntered = countedAt ? input != null : old !== undefined || input !== undefined;
+      if (full && expected.isZero() && !used.has(ingredient.id) && !keepEntered) continue;
       const unit = normalizeUnit(old?.unit ?? ingredient.displayUnit);
       assertUnitMatchesType(unit, ingredient.unitType);
       if (input === null && document.kind !== 'inventory') throw new BadRequestException('Укажите количество для каждой позиции');
       const quantity = input == null ? null : this.quantity(input, unit, document.kind);
       const generation = generations.get(ingredient.id) ?? 0;
       const snapshot = document.kind === 'inventory' && !recount ? old : null;
-      const expected = balance.stock;
       const unitCost = balance.avgCost;
       const difference = quantity == null ? null : document.kind !== 'inventory'
         ? quantity.negated()
@@ -378,6 +470,7 @@ export class WarehouseDocumentsService {
           : null,
       });
     }
+    if (countedAt) await assertInventoryCutoff(tx, warehouse, document.id, rows.map(({ ingredientId }) => ingredientId), countedAt);
     await tx.warehouseDocumentItem.deleteMany({ where: { cafeId: document.cafeId, documentId: document.id } });
     if (rows.length) {
       await tx.warehouseDocumentItem.createMany({
@@ -401,11 +494,16 @@ export class WarehouseDocumentsService {
       if (!ingredient) throw new NotFoundException('Сырьё не найдено');
       assertUnitMatchesType(normalizeUnit(item.unit), ingredient.unitType);
     }
+    const countedAt = document.countedAt;
+    const positions = countedAt && document.mode === 'full' ? catalog.filter(({ id, createdAt }) =>
+      createdAt <= countedAt || itemIds.has(id)) : catalog;
+    if (countedAt) await assertInventoryCutoff(tx, warehouse, document.id, [...itemIds], countedAt);
+    const balances = countedAt || document.mode === 'full' ? await warehouseBalances(tx, warehouse, positions) : null;
+    const historicalPlan = countedAt && balances ? await inventoryHistoricalPlan(tx, warehouse, positions, balances, countedAt) : null;
     if (document.mode === 'full') {
-      const current = await warehouseBalances(tx, warehouse, catalog);
-      const used = await this.usedIngredientIds(tx, warehouse, catalog.map(({ id }) => id));
-      const hasNewLine = catalog.some((ingredient) =>
-        !itemIds.has(ingredient.id) && (used.has(ingredient.id) || !current.get(ingredient.id)!.stock.isZero()),
+      const used = await this.usedIngredientIds(tx, warehouse, positions.map(({ id }) => id), countedAt);
+      const hasNewLine = positions.some((ingredient) =>
+        !itemIds.has(ingredient.id) && (used.has(ingredient.id) || !(historicalPlan?.get(ingredient.id) ?? balances!.get(ingredient.id)!.stock).isZero()),
       );
       if (hasNewLine) throw new ConflictException('Состав склада изменился. Сохраните черновик и посчитайте новые продукты');
     }
@@ -415,13 +513,14 @@ export class WarehouseDocumentsService {
         throw new ConflictException('По этим позициям уже проведена другая инвентаризация. Пересчитайте остатки');
       }
     }
-    return { warehouse, ingredients };
+    return { warehouse, ingredients, historicalPlan };
   }
 
-  private async usedIngredientIds(tx: Prisma.TransactionClient, warehouse: WarehouseLocation, ingredientIds: string[]) {
+  private async usedIngredientIds(tx: Prisma.TransactionClient, warehouse: WarehouseLocation, ingredientIds: string[], cutoffAt?: Date | null) {
     if (!ingredientIds.length) return new Set<string>();
     const movements = await tx.stockMovement.findMany({
-      where: { cafeId: warehouse.cafeId, ...warehouseDocumentFilter(warehouse), ingredientId: { in: ingredientIds }, change: { not: 0 } },
+      where: { cafeId: warehouse.cafeId, ...warehouseDocumentFilter(warehouse), ingredientId: { in: ingredientIds },
+        change: { not: 0 }, ...(cutoffAt ? { createdAt: { lt: cutoffAt } } : {}) },
       select: { ingredientId: true }, distinct: ['ingredientId'],
     });
     return new Set(movements.map(({ ingredientId }) => ingredientId));
@@ -429,29 +528,39 @@ export class WarehouseDocumentsService {
 
   /** Draft counts are preserved while the preview follows the current book stock.
    * Posted/reversed documents keep the immutable values captured at approval. */
-  private async preview(tx: Prisma.TransactionClient, document: Document) {
+  private async preview(tx: Prisma.TransactionClient, document: Document, includeInventoryContext = false) {
     const snapshot = readWriteoffSnapshot(document.sourceLines);
     if (snapshot && ['draft', 'submitted'].includes(document.status)) {
       const valuation = await previewWriteoffSources(tx, await this.warehouse(tx, document.warehouseId), snapshot);
       return { ...this.serialize(document), sourceLines: valuation.sourceLines, sourceTotal: valuation.total };
     }
-    if (document.kind !== 'inventory' || !['draft', 'submitted'].includes(document.status)) return this.serialize(document);
+    if (document.kind !== 'inventory') return this.serialize(document);
+    const draft = document.status === 'draft' || document.status === 'submitted';
+    const cutoffAt = document.countedAt ?? (draft ? new Date() : document.postedAt);
+    if (!draft && (!includeInventoryContext || !cutoffAt)) return this.serialize(document);
     const warehouse = await this.warehouse(tx, document.warehouseId);
-    const ingredients = await tx.ingredient.findMany({ where: { cafeId: document.cafeId, id: { in: document.items.map(({ ingredientId }) => ingredientId) } } });
-    const balances = await warehouseBalances(tx, warehouse, ingredients);
-    return this.serialize({ ...document, items: document.items.map((item) => {
-      const balance = balances.get(item.ingredientId);
-      if (!balance) return item;
-      return { ...item, expected: balance.stock, difference: item.quantity?.sub(balance.stock) ?? null,
-        unitCost: balance.avgCost, costKnown: balance.valuationKnown };
-    }) });
+    if (draft) {
+      const ingredients = await tx.ingredient.findMany({ where: { cafeId: document.cafeId, id: { in: document.items.map(({ ingredientId }) => ingredientId) } } });
+      const balances = await warehouseBalances(tx, warehouse, ingredients);
+      const historicalPlan = document.countedAt ? await inventoryHistoricalPlan(tx, warehouse, ingredients, balances, document.countedAt) : null;
+      document = { ...document, items: document.items.map((item) => {
+        const balance = balances.get(item.ingredientId);
+        if (!balance) return item;
+        const expected = historicalPlan?.get(item.ingredientId) ?? balance.stock;
+        return { ...item, expected, difference: item.quantity?.sub(expected) ?? null,
+          unitCost: balance.avgCost, costKnown: balance.valuationKnown };
+      }) };
+    }
+    const serialized = this.serialize(document);
+    if (!includeInventoryContext || !cutoffAt) return serialized;
+    return { ...serialized, inventoryContext: await inventoryPeriodContext(tx, warehouse, document.id, document.items, cutoffAt) };
   }
 
   private async validateSourceSnapshot(tx: Prisma.TransactionClient, document: Document) {
     const snapshot = readWriteoffSnapshot(document.sourceLines);
     if (!snapshot) return;
     await lockRecipeGraph(tx, true);
-    await resolveWriteoffSources(tx, await this.warehouse(tx, document.warehouseId), sourceInputs(snapshot), true);
+    await resolveWriteoffSources(tx, await this.warehouse(tx, document.warehouseId), sourceInputs(snapshot), true, false, snapshot);
   }
 
   private async lockCatalog(tx: Prisma.TransactionClient, warehouse: WarehouseLocation, ids: string[], full: boolean) {
@@ -539,7 +648,7 @@ export class WarehouseDocumentsService {
       reason: document.reason, note: document.note, status: document.status, revision: document.revision,
       destinationWarehouseId: document.destinationWarehouseId, sourcePurchaseId: document.sourcePurchaseId,
       reversedAt: document.reversedAt, reversedByName: document.reversedByName, reversalReason: document.reversalReason,
-      createdAt: document.createdAt, submittedAt: document.submittedAt, postedAt: document.postedAt,
+      createdAt: document.createdAt, submittedAt: document.submittedAt, postedAt: document.postedAt, countedAt: document.countedAt, effectiveAt: document.effectiveAt,
       createdByName: document.createdByName, submittedByName: document.submittedByName, postedByName: document.postedByName,
       itemsCount,
       varianceValue: variance == null ? null : Number(variance.toDecimalPlaces(2)),

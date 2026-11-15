@@ -6,6 +6,7 @@ import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { ORDER_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { OrderDetailsModal } from '@/features/admin/components/OrderDetailsModal';
 import { WaiterVoiceSettings } from '@/features/kitchen/KitchenVoiceSettings';
 import { Select } from '@/components/Select';
@@ -60,6 +61,10 @@ export function WaiterCabinet({ onBack }: { onBack: () => void }) {
             {t('Русский')}
           </LangButton>
         </div>
+      </div>
+
+      <div className="card p-4">
+        <ThemeSwitch />
       </div>
 
       {userId && <div className="flex justify-end"><WaiterVoiceSettings userId={userId} /></div>}

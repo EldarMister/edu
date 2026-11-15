@@ -4,36 +4,22 @@ import { getCafeId } from '../tenant/tenant-context';
 import { getWarehouseBalance, setWarehouseBalance, WarehouseLocation } from './warehouse-location';
 
 type MovementData = Omit<Prisma.StockMovementUncheckedCreateInput,
-  'id' | 'ingredientId' | 'cafeId' | 'warehouseId' | 'warehouseKey' | 'beforeStock' | 'afterStock' | 'change' | 'costAtMoment' | 'valuationAdjustment' | 'costKnown' | 'beforeValuationKnown' | 'valuationKnown'>;
+  'id' | 'ingredientId' | 'cafeId' | 'warehouseId' | 'warehouseKey' | 'beforeStock' | 'afterStock' | 'change' | 'costAtMoment' | 'valuationAdjustment' | 'costKnown' | 'beforeValuationKnown' | 'valuationKnown' | 'receiptValue'>;
 
-/** The caller locks all affected ingredient rows in sorted order in its transaction.
- * Every posting writes the balance and immutable evidence together. Costs and
- * quantities remain Decimal until serialization at the API boundary. */
-export async function postStockMovement(tx: Prisma.TransactionClient, input: {
-  ingredientId: string;
-  warehouse: WarehouseLocation | null;
+type Balance = { stock: Prisma.Decimal; avgCost: Prisma.Decimal; valuationKnown: boolean };
+type ValuationInput = {
   change: Prisma.Decimal;
   cost?: Prisma.Decimal;
   costKnown?: boolean;
   value?: Prisma.Decimal;
   valuation?: 'preserve' | 'average' | 'value';
-  allowNegative?: boolean;
-  movement: MovementData;
-}) {
-  const cafeId = getCafeId();
-  const ingredient = await tx.ingredient.findFirst({ where: { id: input.ingredientId, ...(cafeId ? { cafeId } : {}) } });
-  if (!ingredient || (input.warehouse && ingredient.cafeId !== input.warehouse.cafeId)) {
-    throw new NotFoundException('Товар не найден');
-  }
-  const before = await getWarehouseBalance(tx, input.warehouse, ingredient);
+  carriedAverage?: Prisma.Decimal;
+};
+
+export function calculateStockValuation(before: Balance, input: ValuationInput) {
   const change = input.change.toDecimalPlaces(3);
-  if (ingredient.preparationMode === 'virtual' && !change.isZero()) throw new ConflictException('Заготовка без отдельного остатка раскрывается по рецептуре и не участвует в складских движениях');
   const stock = before.stock.add(change);
   if (!stock.isFinite() || stock.abs().gte('100000000000')) throw new ConflictException('Остаток вне допустимого диапазона');
-  if (stock.lt(0)) {
-    const allowNegative = input.allowNegative ?? (await tx.settings.findFirst({ where: cafeId ? { cafeId } : {}, select: { allowNegativeIngredientStock: true } }))?.allowNegativeIngredientStock ?? false;
-    if (!allowNegative) throw new ConflictException(`На выбранном складе недостаточно товара «${ingredient.name}»`);
-  }
   const cost = (input.cost ?? before.avgCost).toDecimalPlaces(8);
   const costKnown = input.costKnown ?? (change.lte(0) && before.valuationKnown && before.stock.gte(change.abs()));
   if (!cost.isFinite() || cost.lt(0)) throw new ConflictException('Себестоимость должна быть неотрицательной');
@@ -45,14 +31,40 @@ export async function postStockMovement(tx: Prisma.TransactionClient, input: {
     avgCost = before.stock.mul(before.avgCost).add(change.mul(cost)).div(stock);
     if (avgCost.lt(0)) throw new ConflictException('Корректировка создаёт отрицательную стоимость. Проверьте последующие операции');
   }
+  // A verified zero count or its direct reversal may change the carried
+  // average without revaluing positive stock.
+  if (stock.lte(0) && input.carriedAverage !== undefined) avgCost = input.carriedAverage;
   avgCost = avgCost.toDecimalPlaces(8);
-  // Unknown opening stock must not become a complete valuation merely because
-  // one known receipt makes its numerical weighted average positive.
+  // Partially unpriced stock stays unpriced after a receipt with a known cost.
   let valuationKnown = before.valuationKnown;
   if (change.gt(0)) valuationKnown = (before.stock.lte(0) || before.valuationKnown) && costKnown;
   else if (input.valuation === 'value') valuationKnown = before.valuationKnown && costKnown;
   if (stock.lte(0)) valuationKnown = false;
   const valuationAdjustment = stock.mul(avgCost).sub(before.stock.mul(before.avgCost)).sub(change.mul(cost)).toDecimalPlaces(8);
+  return { stock, avgCost, valuationKnown, change, cost, costKnown, valuationAdjustment };
+}
+
+/** The caller locks all affected ingredient rows in sorted order in its transaction.
+ * Every posting writes the balance and immutable evidence together. Costs and
+ * quantities remain Decimal until serialization at the API boundary. */
+export async function postStockMovement(tx: Prisma.TransactionClient, input: ValuationInput & {
+  ingredientId: string;
+  warehouse: WarehouseLocation | null;
+  allowNegative?: boolean;
+  movement: MovementData;
+}) {
+  const cafeId = getCafeId();
+  const ingredient = await tx.ingredient.findFirst({ where: { id: input.ingredientId, ...(cafeId ? { cafeId } : {}) } });
+  if (!ingredient || (input.warehouse && ingredient.cafeId !== input.warehouse.cafeId)) {
+    throw new NotFoundException('Товар не найден');
+  }
+  const before = await getWarehouseBalance(tx, input.warehouse, ingredient);
+  const { stock, avgCost, valuationKnown, change, cost, costKnown, valuationAdjustment } = calculateStockValuation(before, input);
+  if (ingredient.preparationMode === 'virtual' && !change.isZero()) throw new ConflictException('Заготовка без отдельного остатка раскрывается по рецептуре и не участвует в складских движениях');
+  if (stock.lt(0)) {
+    const allowNegative = input.allowNegative ?? (await tx.settings.findFirst({ where: cafeId ? { cafeId } : {}, select: { allowNegativeIngredientStock: true } }))?.allowNegativeIngredientStock ?? false;
+    if (!allowNegative) throw new ConflictException(`На выбранном складе недостаточно товара «${ingredient.name}»`);
+  }
   await setWarehouseBalance(tx, input.warehouse, ingredient.id, { stock, avgCost, valuationKnown });
   const movement = await tx.stockMovement.create({ data: {
     // PostgreSQL now() is the transaction start, which may precede a long lock
@@ -61,6 +73,7 @@ export async function postStockMovement(tx: Prisma.TransactionClient, input: {
     warehouseId: input.warehouse?.id ?? null,
     warehouseKey: input.warehouse?.isDefault ? 'default' : input.warehouse?.id ?? 'default',
     beforeStock: before.stock, change, afterStock: stock, costAtMoment: cost, valuationAdjustment,
+    receiptValue: input.movement.sourceType === 'purchase' && input.movement.type === 'purchase' ? input.value : undefined,
     costKnown, beforeValuationKnown: before.valuationKnown, valuationKnown,
   } });
   return { stock, avgCost, valuationKnown, before, cost, movement };

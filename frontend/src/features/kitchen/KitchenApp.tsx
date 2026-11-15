@@ -7,6 +7,8 @@ import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { Spinner } from '@/components/Spinner';
 import { Select } from '@/components/Select';
+import { Modal } from '@/components/Modal';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { disconnectSocket } from '@/lib/socket';
 import { usePushNotifications } from '@/lib/push';
 import { useKitchenRealtime } from './useKitchenRealtime';
@@ -78,6 +80,7 @@ export function KitchenApp({
 
   const [tab, setTab] = useState<KitchenTab>('new');
   const [showStats, setShowStats] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const [actingId, setActingId] = useState<string | null>(null);
   const [stopListOpen, setStopListOpen] = useState(false);
@@ -205,6 +208,11 @@ export function KitchenApp({
         <div className="flex items-center gap-4 text-sm">
           {canSection('warehouse')&&<Link to="/warehouse" className="text-primary">Склад и техкарты</Link>}
           <ConnectionStatus />
+          {user?.role === 'BAR' && (
+            <button type="button" onClick={() => setSettingsOpen(true)} className="text-text-muted hover:text-text-primary">
+              Настройки
+            </button>
+          )}
           {pushNotifications.status !== 'subscribed' &&
             pushNotifications.status !== 'unsupported' &&
             pushNotifications.status !== 'checking' && (
@@ -217,6 +225,11 @@ export function KitchenApp({
           </button>
         </div>
       </header>
+      {user?.role === 'BAR' && (
+        <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Настройки">
+          <ThemeSwitch />
+        </Modal>
+      )}
 
       {/* Вкладки + Стоп-лист */}
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-white px-5 py-2.5">
@@ -234,7 +247,7 @@ export function KitchenApp({
             >
               {t.label}
               {!showStats && tab === t.key && counts > 0 && (
-                <span className="ml-2 rounded-full bg-white/25 px-1.5 text-xs">{counts}</span>
+                <span className="ml-2 rounded-full bg-paper/25 px-1.5 text-xs">{counts}</span>
               )}
             </button>
           ))}

@@ -26,6 +26,10 @@ interface SuppliesPage {
   pageSize: number;
 }
 
+const supplyDate = (date: string) => new Date(date).toLocaleString('ru-RU', {
+  day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+});
+
 export function BalanceSupplies({
   ingredientId,
   warehouseId,
@@ -61,9 +65,9 @@ export function BalanceSupplies({
   const pages = Math.max(1, Math.ceil(query.data.total / query.data.pageSize));
   return (
     <>
-      <div className="overflow-x-auto">
+      <div className="poster-balance-supply-desktop overflow-x-auto">
         <table className="poster-balance-supplies w-full min-w-[760px] table-fixed text-left">
-          <colgroup><col style={{ width: 190 }} /><col /><col /><col /><col /><col /></colgroup>
+          <colgroup>{Array.from({ length: 6 }, (_, index) => <col key={index} style={{ width: `${100 / 6}%` }} />)}</colgroup>
           <thead>
             <tr>
               <th>Дата поставки</th>
@@ -78,10 +82,7 @@ export function BalanceSupplies({
             {query.data.rows.map((row) => (
               <tr key={row.purchaseId}>
                 <td className="whitespace-nowrap">
-                  {new Date(row.date).toLocaleString('ru-RU', {
-                    day: '2-digit', month: '2-digit', year: 'numeric',
-                    hour: '2-digit', minute: '2-digit',
-                  })}
+                  <time dateTime={row.date}>{supplyDate(row.date)}</time>
                 </td>
                 <td>{row.warehouseName}</td>
                 <td>{row.supplier || '—'}</td>
@@ -98,11 +99,25 @@ export function BalanceSupplies({
           </tbody>
         </table>
       </div>
+      <div className="poster-balance-supply-mobile">
+        {query.data.rows.map((row) => <article key={row.purchaseId}>
+          <time dateTime={row.date}>{supplyDate(row.date)}</time>
+          <dl>
+            <dt>Склад</dt><dd>{row.warehouseName}</dd>
+            <dt>Поставщик</dt><dd>{row.supplier || '—'}</dd>
+            <dt>Количество</dt><dd>{balanceQuantity(row.quantity, row.unit, unitType)}</dd>
+            <dt>Цена за единицу</dt><dd>{row.unitPrice == null ? '—' : balanceMoney(row.unitPrice)}</dd>
+            <dt>Сумма</dt><dd>{balanceMoney(row.total)}</dd>
+          </dl>
+        </article>)}
+        {!query.data.rows.length && <p className="p-5 text-center text-sm text-text-muted">Поставок пока нет</p>}
+      </div>
       {pages > 1 && (
-        <nav aria-label="Страницы поставок" className="mt-3 flex items-center justify-end gap-4 text-sm">
-          <button type="button" className="text-primary disabled:text-text-muted" disabled={page === 1} onClick={() => setPage(page - 1)}>Назад</button>
-          <span>{page} / {pages}</span>
-          <button type="button" className="text-primary disabled:text-text-muted" disabled={page >= pages} onClick={() => setPage(page + 1)}>Далее</button>
+        <nav aria-label="Страницы поставок" className="poster-balance-pagination">
+          <span>{(page - 1) * query.data.pageSize + 1}–{Math.min(page * query.data.pageSize, query.data.total)} из {query.data.total}</span>
+          <button type="button" disabled={page === 1} onClick={() => setPage(page - 1)}>Назад</button>
+          <span aria-current="page">{page} / {pages}</span>
+          <button type="button" disabled={page >= pages} onClick={() => setPage(page + 1)}>Далее</button>
         </nav>
       )}
     </>

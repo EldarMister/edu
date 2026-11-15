@@ -7,6 +7,7 @@ import { App } from './App';
 import { EditorNavigationGuard } from '@/components/EditorNavigationGuard';
 import { installAudioUnlock } from '@/lib/audio';
 import './index.css';
+import './theme.css';
 
 installAudioUnlock();
 

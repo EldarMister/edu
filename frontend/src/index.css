@@ -14,7 +14,7 @@
   html,
   body {
     height: 100%;
-    background: #f8fafc;
+    background: rgb(var(--edu-background));
   }
   /* Скролл живёт во внутренних контейнерах. Заблокированный скролл страницы
      не даёт мобильной адресной строке сворачиваться/разворачиваться и
@@ -25,11 +25,11 @@
   }
   #root {
     height: var(--app-height, 100dvh);
-    background: #f8fafc;
+    background: rgb(var(--edu-background));
   }
   html.modal-open,
   body.modal-open {
-    background: rgb(149 153 158);
+    background: var(--edu-modal-chrome);
   }
   body.modal-open {
     overflow: hidden;

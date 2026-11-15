@@ -2,7 +2,7 @@ require('ts-node/register/transpile-only');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient, Prisma } = require('@prisma/client');
 const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-context.ts');
 const { IngredientsService } = require('../src/warehouse/ingredients.service.ts');
 const { WarehouseLocationsService } = require('../src/warehouse/locations.service.ts');
@@ -11,6 +11,9 @@ const { IngredientStockService } = require('../src/warehouse/ingredient-stock.se
 const { MovementsService } = require('../src/warehouse/movements.service.ts');
 const { WarehouseOverviewService } = require('../src/warehouse/overview.service.ts');
 const { PurchasesService } = require('../src/warehouse/purchases.service.ts');
+const { postStockMovement } = require('../src/warehouse/stock-posting.ts');
+const { lockIngredients } = require('../src/warehouse/stock-lock.ts');
+const { resolveWarehouse } = require('../src/warehouse/warehouse-location.ts');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new URL(url).pathname.includes('test'))) {
@@ -211,6 +214,97 @@ test('PostgreSQL: inventory confirms current physical stock and owner approval i
   }
 });
 
+test('PostgreSQL: inventory context reconciles the counted warehouse and posting cutoff, including no-op counts', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafe = await db.cafe.create({ data: { name: `Inventory period ${randomUUID()}` } });
+  try {
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const owner = { id: randomUUID(), cafeId: cafe.id, name: 'Owner', role: 'OWNER' };
+      const ingredients = new IngredientsService(db);
+      const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
+      const docs = new WarehouseDocumentsService(db);
+      const [main] = (await locations.list(cafe.id)).locations;
+      const bar = await locations.save(cafe.id, 'Бар');
+      const milk = await ingredients.create({ name: 'Молоко', unit: 'l' });
+      const imported = await ingredients.create({ name: 'Остаток без проводки', unit: 'l' });
+      const empty = await ingredients.create({ name: 'Нет на складе', unit: 'pcs' });
+      const seeded = await ingredients.create({ name: 'Начальный остаток с проводкой', unit: 'l', stock: 3 });
+      await db.ingredient.update({ where: { id: milk.id }, data: { stock: 4000 } });
+      await db.ingredient.update({ where: { id: imported.id }, data: { stock: 8000 } });
+      const day = (n) => new Date(Date.UTC(2025, 0, n));
+      const move = (item, warehouse, quantity, sourceType, type, createdAt) => db.$transaction(async (tx) => {
+        await lockIngredients(tx, [item.id]);
+        const location = warehouse ? await resolveWarehouse(tx, warehouse.id) : null;
+        await postStockMovement(tx, { ingredientId: item.id, warehouse: location, change: new Prisma.Decimal(quantity * 1000),
+          movement: { sourceType, type, sourceId: randomUUID(), createdAt } });
+      });
+      const count = (warehouse, items, finalize) => docs.create(owner, {
+        warehouseId: warehouse.id, kind: 'inventory', mode: 'partial', items, finalize,
+      });
+
+      await move(milk, null, 6, 'purchase', 'purchase', day(3)); // Legacy default warehouse row.
+      const last = await count(main, [{ ingredientId: milk.id, quantity: 10 }, { ingredientId: empty.id, quantity: 0 }], 'post');
+      await db.warehouseDocument.update({ where: { id: last.id }, data: { postedAt: day(5) } });
+      assert.equal(await db.stockMovement.count({ where: { sourceId: last.id } }), 0);
+      const reversed = await count(main, [{ ingredientId: milk.id, quantity: 10 }], 'post');
+      await docs.reverse(owner, reversed.id, 'Recount aborted');
+      await db.warehouseDocument.update({ where: { id: reversed.id }, data: { postedAt: day(6), reversedAt: day(7) } });
+      const wrongWarehouse = await count(bar, [{ ingredientId: milk.id, quantity: 0 }], 'post');
+      await db.warehouseDocument.update({ where: { id: wrongWarehouse.id }, data: { postedAt: day(6) } });
+      await move(milk, bar, 50, 'purchase', 'purchase', day(7));
+      await move(milk, main, 20, 'purchase', 'purchase', day(8));
+      await move(milk, main, -18, 'order', 'sale', day(9));
+      await move(milk, main, -2, 'writeoff', 'writeoff', day(10));
+      await move(milk, main, 1, 'order', 'return', day(11));
+      await move(milk, main, 2, 'transfer', 'transfer', day(12));
+      await move(milk, main, -2, 'transfer', 'transfer', day(13));
+      await move(milk, main, -1, 'manual', 'correction', day(13));
+      await move(imported, main, 2, 'purchase', 'purchase', day(14));
+      const draft = await count(main, [
+        { ingredientId: milk.id, quantity: 7 }, { ingredientId: imported.id, quantity: 10 },
+        { ingredientId: empty.id, quantity: 0 }, { ingredientId: seeded.id, quantity: 3 },
+      ]);
+      const draftWithContext = await docs.get(draft.id, true);
+      const draftRows = new Map(draftWithContext.inventoryContext.rows.map((row) => [row.ingredientId, row]));
+      assert.deepEqual(draftRows.get(milk.id), {
+        ingredientId: milk.id, lastCountAt: day(5), openingQuantity: 10, incomingQuantity: 22,
+        consumptionQuantity: -17, writeoffQuantity: -2, otherQuantity: -3,
+      });
+      assert.deepEqual(draftRows.get(imported.id), {
+        ingredientId: imported.id, lastCountAt: null, openingQuantity: 8, incomingQuantity: 2,
+        consumptionQuantity: 0, writeoffQuantity: 0, otherQuantity: 0,
+      });
+      assert.deepEqual(draftRows.get(empty.id), {
+        ingredientId: empty.id, lastCountAt: day(5), openingQuantity: 0, incomingQuantity: 0,
+        consumptionQuantity: 0, writeoffQuantity: 0, otherQuantity: 0,
+      });
+      assert.equal(draftRows.get(seeded.id).openingQuantity, 3);
+      assert.equal(draftRows.get(seeded.id).otherQuantity, 0);
+      for (const line of draftWithContext.items) {
+        const { openingQuantity, incomingQuantity, consumptionQuantity, writeoffQuantity, otherQuantity } = draftRows.get(line.ingredientId);
+        assert.equal(openingQuantity + incomingQuantity + consumptionQuantity + writeoffQuantity + otherQuantity, line.expected);
+      }
+
+      const posted = await docs.update(owner, draft.id, { revision: draft.revision, finalize: 'post' });
+      assert.equal((await docs.get(posted.id)).inventoryContext, undefined);
+      assert.equal(await db.stockMovement.count({ where: { sourceId: posted.id, ingredientId: milk.id } }), 1);
+      await move(milk, main, 100, 'purchase', 'purchase', new Date(posted.postedAt.getTime() + 1));
+      await docs.reverse(owner, last.id, 'Review previous count');
+      const postedWithContext = await docs.get(posted.id, true);
+      assert.equal(postedWithContext.inventoryContext.cutoffAt.getTime(), posted.postedAt.getTime());
+      assert.deepEqual(postedWithContext.inventoryContext.rows, draftWithContext.inventoryContext.rows,
+        'later stock and reversals cannot change the closed period; own correction is never counted');
+    });
+  } finally {
+    await db.warehouseDocument.deleteMany({ where: { cafeId: cafe.id } });
+    await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
+    await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+    await db.cafe.delete({ where: { id: cafe.id } });
+    await db.$disconnect();
+  }
+});
+
 test('PostgreSQL: posting-time inventory keeps nullable scope and follows receipts without double counting', { skip: !url }, async () => {
   const db = new PrismaClient({ datasourceUrl: url });
   db.$use(tenantPrismaMiddleware);
@@ -299,6 +393,87 @@ test('PostgreSQL: posting-time inventory keeps nullable scope and follows receip
         items: [{ ingredientId: milk.id, quantity: 20 }] });
       assert.equal(refilled.status, 'posted');
       assert.equal((await ingredients.findOne(milk.id)).stock, 20);
+    });
+  } finally {
+    await db.warehouseDocument.deleteMany({ where: { cafeId: cafe.id } });
+    await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
+    await db.purchase.deleteMany({ where: { cafeId: cafe.id } });
+    await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+    await db.cafe.delete({ where: { id: cafe.id } });
+    await db.$disconnect();
+  }
+});
+
+test('PostgreSQL: historical inventory applies the cutoff variance once and refuses unverified or overlapping periods', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafe = await db.cafe.create({ data: { name: `Historical inventory ${randomUUID()}` } });
+  try {
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const owner = { id: randomUUID(), cafeId: cafe.id, name: 'Owner', role: 'OWNER' };
+      const ingredients = new IngredientsService(db);
+      const docs = new WarehouseDocumentsService(db);
+      const purchases = new PurchasesService(db);
+      const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
+      const [main] = (await locations.list(cafe.id)).locations;
+      const bar = await locations.save(cafe.id, 'Бар');
+      const item = await ingredients.create({ name: 'Milk', unit: 'pcs', stock: 10, avgCost: 2 });
+      const anchorAt = new Date(Date.now() - 120_000);
+      const countedAt = new Date(Date.now() - 60_000);
+      await db.ingredient.update({ where: { id: item.id }, data: { createdAt: anchorAt } });
+      await db.stockMovement.updateMany({ where: { ingredientId: item.id }, data: { createdAt: anchorAt } });
+
+      const body = { warehouseId: main.id, kind: 'inventory', mode: 'partial',
+        countedAt: countedAt.toISOString(), items: [{ ingredientId: item.id, quantity: 8 }] };
+      const draft = await docs.create(owner, body);
+      assert.equal(draft.countedAt.getTime(), countedAt.getTime());
+      assert.deepEqual(draft.items.map(({ expected, difference }) => [expected, difference]), [[10, -2]]);
+      const createReceipt = (warehouse) => purchases.create({
+        supplier: 'Later receipt', warehouseId: warehouse.id, complete: true,
+        items: [{ ingredientId: item.id, unit: 'pcs', quantity: 5, purchasePrice: 7 }],
+      }, owner);
+      const receipt = await createReceipt(main);
+      await createReceipt(bar);
+      const readReceipt = () => db.stockMovement.findFirstOrThrow({ where: { sourceId: receipt.id } });
+      const originalReceipt = await readReceipt();
+      const laterWriteoff = await docs.create(owner, { warehouseId: main.id, kind: 'writeoff', reason: 'damage',
+        finalize: 'post', items: [{ ingredientId: item.id, quantity: 2 }] });
+      const adjusted = await docs.get(draft.id, true);
+      assert.equal(adjusted.inventoryContext.cutoffAt.getTime(), countedAt.getTime());
+      assert.deepEqual(adjusted.items.map(({ expected, quantity, difference }) => [expected, quantity, difference]), [[10, 8, -2]]);
+      const posted = await docs.update(owner, draft.id, { revision: draft.revision, finalize: 'post' });
+      assert.equal(posted.countedAt.getTime(), countedAt.getTime());
+      assert.ok(posted.postedAt > countedAt);
+      assert.deepEqual(posted.items.map(({ expected, quantity, difference }) => [expected, quantity, difference]), [[10, 8, -2]]);
+      const balances = (await ingredients.findOne(item.id)).balances;
+      assert.equal(balances.find(({ warehouseId }) => warehouseId === main.id).stock, 11,
+        '10 opening + 5 received - 2 written off + (8 counted - 10 expected)');
+      assert.equal(balances.find(({ warehouseId }) => warehouseId === bar.id).stock, 5);
+      assert.deepEqual(await readReceipt(), originalReceipt, 'inventory does not rewrite immutable receipt valuation');
+      assert.equal((await db.stockMovement.findFirstOrThrow({ where: { sourceId: laterWriteoff.id } })).change.toNumber(), -2);
+      assert.deepEqual((await docs.get(posted.id, true)).inventoryContext.rows, adjusted.inventoryContext.rows);
+      await assert.rejects(docs.approve(owner, posted.id, posted.revision));
+      assert.equal(await db.stockMovement.count({ where: { sourceId: posted.id } }), 1);
+
+      const zero = await ingredients.create({ name: 'Empty', unit: 'pcs' });
+      await db.ingredient.update({ where: { id: zero.id }, data: { createdAt: anchorAt } });
+      const zeroBody = { ...body, items: [{ ingredientId: zero.id, quantity: 0 }] };
+      const noOp = await docs.create(owner, { ...zeroBody, countedAt: null, finalize: 'post' });
+      assert.equal(await db.stockMovement.count({ where: { sourceId: noOp.id } }), 0);
+      await assert.rejects(docs.create(owner, zeroBody), /позже проведения/);
+      const imported = await ingredients.create({ name: 'Unconfirmed stock', unit: 'pcs' });
+      await db.ingredient.update({ where: { id: imported.id }, data: { createdAt: anchorAt, stock: 3 } });
+      await assert.rejects(docs.create(owner, { ...zeroBody, items: [{ ingredientId: imported.id, quantity: 3 }] }), /Журнал .* не подтверждает/);
+      await assert.rejects(docs.create(owner, { ...body, countedAt: new Date(Date.now() + 60_000).toISOString() }), /в будущем/);
+      await assert.rejects(docs.create(owner, { ...body, countedAt: '2026-02-30T12:00:00Z' }), /часовым поясом/);
+
+      const lateProduct = await ingredients.create({ name: 'Later product', unit: 'pcs', stock: 2, warehouseId: bar.id });
+      const full = await docs.create(owner, { warehouseId: bar.id, kind: 'inventory', mode: 'full' });
+      assert.equal(full.items.find(({ ingredientId }) => ingredientId === lateProduct.id).quantity, null);
+      await assert.rejects(docs.update(owner, full.id, { revision: full.revision, countedAt: countedAt.toISOString(),
+        items: [{ ingredientId: lateProduct.id, quantity: 2 }] }), /создана после даты/);
+      const movedFull = await docs.update(owner, full.id, { revision: full.revision, countedAt: countedAt.toISOString() });
+      assert.ok(!movedFull.items.some(({ ingredientId }) => ingredientId === lateProduct.id || ingredientId === item.id));
     });
   } finally {
     await db.warehouseDocument.deleteMany({ where: { cafeId: cafe.id } });

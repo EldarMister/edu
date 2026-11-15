@@ -34,10 +34,13 @@ export interface StockDocument {
   createdAt: string;
   submittedAt: string | null;
   postedAt: string | null;
+  countedAt?: string | null;
+  effectiveAt?: string | null;
   createdByName: string | null;
   postedByName: string | null;
   itemsCount: number;
   productNames?: string[];
+  categories?: string[];
   varianceValue: number | null;
 }
 
@@ -45,6 +48,18 @@ export interface StockDocumentDetails extends StockDocument {
   items: StockDocumentItem[];
   sourceLines?: WriteoffSourceLine[];
   sourceTotal?: number | null;
+  inventoryContext?: {
+    cutoffAt: string;
+    rows: Array<{
+      ingredientId: string;
+      lastCountAt: string | null;
+      openingQuantity: number;
+      incomingQuantity: number;
+      consumptionQuantity: number;
+      writeoffQuantity: number;
+      otherQuantity: number;
+    }>;
+  };
 }
 
 export interface DocumentInput {
@@ -54,6 +69,8 @@ export interface DocumentInput {
   sourcePurchaseId?: string;
   revision?: number;
   recount?: boolean;
+  countedAt?: string | null;
+  effectiveAt?: string | null;
   reason?: WriteoffReason | null;
   note?: string;
   items?: { ingredientId: string; quantity: number | null }[];
@@ -78,11 +95,23 @@ export function useStockDocument(id: string) {
   });
 }
 
+export function useInventoryContext(id: string) {
+  return useQuery({
+    queryKey: [...DOCUMENTS_KEY, 'detail', id, 'inventory-context'],
+    queryFn: async () => (await api.get<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}`, {
+      params: { includeInventoryContext: true },
+    })).data,
+    staleTime: 0,
+  });
+}
+
 export function useStockDocumentMutations() {
   const qc = useQueryClient();
   const saved = (document: StockDocumentDetails) => {
     qc.setQueryData([...DOCUMENTS_KEY, 'detail', document.id], document);
     void qc.invalidateQueries({ queryKey: [...DOCUMENTS_KEY, 'list'] });
+    if (document.kind === 'inventory')
+      void qc.invalidateQueries({ queryKey: [...DOCUMENTS_KEY, 'detail', document.id, 'inventory-context'] });
     if (document.status === 'posted' || document.status === 'reversed')
       void qc.invalidateQueries({ queryKey: WAREHOUSE_KEY });
   };

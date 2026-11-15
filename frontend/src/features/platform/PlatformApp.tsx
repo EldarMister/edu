@@ -3,8 +3,9 @@ import { usePlatformAuth } from './auth';
 import { PlatformLogin } from './PlatformLogin';
 import { CafesPage } from './CafesPage';
 import { MonitoringPage } from './MonitoringPage';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 
-type Tab = 'cafes' | 'monitoring';
+type Tab = 'cafes' | 'monitoring' | 'settings';
 
 export function PlatformApp() {
   const { token, admin, logout } = usePlatformAuth();
@@ -14,12 +15,13 @@ export function PlatformApp() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="sticky top-0 z-20 flex items-center justify-between border-b border-border bg-card px-4 py-3">
-        <div className="flex items-center gap-4">
+      <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-4">
           <span className="text-[15px] font-bold text-text-primary">EDU POS · Платформа</span>
           <nav className="flex rounded-lg bg-background p-1">
             <TabButton active={tab === 'cafes'} onClick={() => setTab('cafes')}>Кафе</TabButton>
             <TabButton active={tab === 'monitoring'} onClick={() => setTab('monitoring')}>Мониторинг</TabButton>
+            <TabButton active={tab === 'settings'} onClick={() => setTab('settings')}>Настройки</TabButton>
           </nav>
         </div>
         <div className="flex items-center gap-3">
@@ -31,7 +33,9 @@ export function PlatformApp() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-5">
-        {tab === 'cafes' ? <CafesPage /> : <MonitoringPage />}
+        {tab === 'cafes' && <CafesPage />}
+        {tab === 'monitoring' && <MonitoringPage />}
+        {tab === 'settings' && <section aria-label="Внешний вид" className="card p-5"><ThemeSwitch /></section>}
       </main>
     </div>
   );

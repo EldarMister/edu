@@ -8,11 +8,12 @@ import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, u
 import { warehouseBalances, type WarehouseLocation } from './warehouse-location';
 
 type SourcePart = { ingredientId: string; name: string; unit: UnitCode; amountBase: string };
+export type WriteoffPackageSnapshot = { packageId: string; packageName: string; packageQuantity: number; packageUnit: UnitCode; packageFactor: number };
 export type WriteoffSourceLine = {
   sourceLineId: string; kind: 'ingredient' | 'dish'; sourceId: string; variantId?: string;
   name: string; quantity: number; unit: UnitCode; recipeSignature: string;
   parts: SourcePart[]; recipe: Prisma.InputJsonValue;
-};
+} & Partial<WriteoffPackageSnapshot>;
 export type WriteoffSnapshot = { version: 1; lines: WriteoffSourceLine[] };
 const zero = new Prisma.Decimal(0);
 
@@ -23,14 +24,30 @@ export function readWriteoffSnapshot(value: Prisma.JsonValue | null): WriteoffSn
 
 /** Caller holds the shared recipe graph lock before any ingredient locks. */
 export async function resolveWriteoffSources(tx: Prisma.TransactionClient, warehouse: WarehouseLocation,
-  inputs: WriteoffSourceLineDto[], requireSignatures = false, allowEmpty = false): Promise<WriteoffSnapshot> {
+  inputs: WriteoffSourceLineDto[], requireSignatures = false, allowEmpty = false, savedSnapshot?: WriteoffSnapshot | null): Promise<WriteoffSnapshot> {
   if (!Array.isArray(inputs) || (!allowEmpty && !inputs.length) || inputs.length > 200) throw new BadRequestException('Добавьте продукты для списания');
   if (new Set(inputs.map((line) => line.sourceLineId)).size !== inputs.length) throw new BadRequestException('Строка списания указана несколько раз');
   const resolver = new RecipeResolver(tx);
+  const packageIds = [...new Set(inputs.flatMap((input) => input.packageId && !input.packageSnapshotLineId ? [input.packageId] : []))];
+  const packages = new Map((packageIds.length ? await tx.warehousePackage.findMany({ where: { cafeId: warehouse.cafeId, id: { in: packageIds }, isActive: true } }) : []).map((pack) => [pack.id, pack]));
   const lines: WriteoffSourceLine[] = [];
   for (const input of inputs) {
     if (!input.sourceLineId?.trim() || !Number.isFinite(input.quantity) || input.quantity <= 0) throw new BadRequestException('Укажите продукт и количество больше нуля');
     let name: string, unit: UnitCode, recipe: Prisma.InputJsonObject;
+    let pack: WriteoffPackageSnapshot | undefined;
+    if (input.packageSnapshotLineId) {
+      const saved = savedSnapshot?.lines.find((line) => line.sourceLineId === input.packageSnapshotLineId);
+      if (!input.packageId || !saved || input.packageSnapshotLineId !== input.sourceLineId || saved.kind !== input.kind || saved.sourceId !== input.sourceId ||
+        (saved.variantId ?? '') !== (input.variantId ?? '') || saved.packageId !== input.packageId || !saved.packageName || !saved.packageQuantity || !saved.packageUnit || !saved.packageFactor) {
+        throw new BadRequestException('Сохранённая фасовка не относится к этой строке списания');
+      }
+      pack = { packageId: saved.packageId, packageName: saved.packageName, packageQuantity: saved.packageQuantity, packageUnit: saved.packageUnit, packageFactor: saved.packageFactor };
+    } else if (input.packageId) {
+      const selected = packages.get(input.packageId);
+      if (!selected) throw new BadRequestException('Фасовка не найдена или находится в архиве');
+      pack = { packageId: selected.id, packageName: selected.name, packageQuantity: Number(selected.quantity), packageUnit: normalizeUnit(selected.unit), packageFactor: Number(selected.quantityBase) };
+    }
+    if (pack && (!Number.isFinite(pack.packageFactor) || pack.packageFactor <= 0 || !Number.isFinite(pack.packageQuantity) || pack.packageQuantity <= 0)) throw new BadRequestException('Некорректное количество в фасовке');
     const roots: Array<{ ingredientId: string; amount: Prisma.Decimal }> = [];
     if (input.kind === 'ingredient') {
       if (input.variantId) throw new BadRequestException('Вариант доступен только для блюда');
@@ -38,8 +55,9 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
       if (!ingredient) throw new BadRequestException('Продукт недоступен для списания');
       unit = normalizeUnit(input.unit ?? ingredient.displayUnit);
       assertUnitMatchesType(unit, ingredient.unitType);
+      if (pack) assertUnitMatchesType(pack.packageUnit, ingredient.unitType);
       name = ingredient.name;
-      roots.push({ ingredientId: ingredient.id, amount: new Prisma.Decimal(input.quantity).mul(toBase(1, unit)) });
+      roots.push({ ingredientId: ingredient.id, amount: new Prisma.Decimal(input.quantity).mul(pack?.packageFactor ?? toBase(1, unit)) });
       recipe = { kind: ingredient.preparationMode === 'virtual' ? 'virtual' : 'stock', preparationMode: ingredient.preparationMode };
     } else if (input.kind === 'dish') {
       const dish = await tx.dish.findFirst({ where: { id: input.sourceId, cafeId: warehouse.cafeId, isActive: true }, include: { variants: true, recipeItems: true } });
@@ -49,9 +67,11 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
       if (dish.variants.length && !variant) throw new BadRequestException('Выберите вариант блюда');
       unit = normalizeUnit(input.unit ?? (dish.isWeighted ? 'g' : 'pcs'));
       assertUnitMatchesType(unit, dish.isWeighted ? 'mass' : 'count');
+      if (pack) assertUnitMatchesType(pack.packageUnit, dish.isWeighted ? 'mass' : 'count');
+      const amountBase = new Prisma.Decimal(input.quantity).mul(pack?.packageFactor ?? toBase(1, unit));
       const multiplier = dish.isWeighted
-        ? new Prisma.Decimal(input.quantity).mul(toBase(1, unit)).div(dish.weightedPriceBase)
-        : new Prisma.Decimal(input.quantity);
+        ? amountBase.div(dish.weightedPriceBase)
+        : amountBase;
       name = variant ? `${dish.name} · ${variant.name}` : dish.name;
       const directId = variant?.stockIngredientId ?? dish.stockIngredientId;
       if (directId) roots.push({ ingredientId: directId, amount: (variant?.stockIngredientId ? variant.stockAmount : dish.stockAmount).mul(multiplier) });
@@ -74,19 +94,20 @@ export async function resolveWriteoffSources(tx: Prisma.TransactionClient, wareh
     if (sourceParts.some((part) => new Prisma.Decimal(part.amountBase).gte('100000000000'))) throw new BadRequestException('Количество вне допустимого диапазона');
     recipe = { ...recipe, preparations: [...new Map(parts.flatMap((part) => part.preparations).map((snapshot) => [snapshot.signature, snapshot])).values()] as unknown as Prisma.InputJsonValue };
     const signature = createHash('sha256').update(JSON.stringify({ kind: input.kind, sourceId: input.sourceId,
-      variantId: input.variantId ?? null, quantity: input.quantity, unit, recipe, parts: sourceParts.map(({ ingredientId, amountBase }) => ({ ingredientId, amountBase })) })).digest('hex');
+      variantId: input.variantId ?? null, quantity: input.quantity, unit, ...(pack ? { package: pack } : {}), recipe, parts: sourceParts.map(({ ingredientId, amountBase }) => ({ ingredientId, amountBase })) })).digest('hex');
     if ((requireSignatures && !input.recipeSignature) || (input.recipeSignature && input.recipeSignature !== signature)) {
       throw new ConflictException('Состав изменился. Обновите предварительный расчёт');
     }
     lines.push({ sourceLineId: input.sourceLineId, kind: input.kind, sourceId: input.sourceId, variantId: input.variantId,
-      name, quantity: input.quantity, unit, recipeSignature: signature, parts: sourceParts, recipe });
+      name, quantity: input.quantity, unit, ...pack, recipeSignature: signature, parts: sourceParts, recipe });
   }
   return { version: 1, lines };
 }
 
 export function sourceInputs(snapshot: WriteoffSnapshot): WriteoffSourceLineDto[] {
-  return snapshot.lines.map(({ sourceLineId, kind, sourceId, variantId, quantity, unit, recipeSignature }) => ({
+  return snapshot.lines.map(({ sourceLineId, kind, sourceId, variantId, quantity, unit, recipeSignature, packageId }) => ({
     sourceLineId, kind, sourceId, variantId, quantity, unit, recipeSignature,
+    ...(packageId ? { packageId, packageSnapshotLineId: sourceLineId } : {}),
   }));
 }
 
@@ -111,7 +132,9 @@ export function serializeWriteoffSources(snapshot: WriteoffSnapshot, costs: Map<
     const known = line.parts.every((part) => costs.get(part.ingredientId)?.cost != null);
     const exactTotal = line.parts.reduce((sum, part) => sum.add(new Prisma.Decimal(part.amountBase).mul(costs.get(part.ingredientId)?.cost ?? zero)), zero);
     const { recipe: _recipe, ...display } = line;
-    return { ...display, unit: unitLabel(line.unit), unitCode: line.unit, parts, total: known ? Number(exactTotal.toDecimalPlaces(2)) : null };
+    return { ...display, unit: unitLabel(line.unit), unitCode: line.unit,
+      physicalQuantity: fromBase(Number(new Prisma.Decimal(line.quantity).mul(line.packageFactor ?? toBase(1, line.unit))), line.unit),
+      parts, total: known ? Number(exactTotal.toDecimalPlaces(2)) : null };
   });
   const allParts = snapshot.lines.flatMap((line) => line.parts);
   const total = allParts.every((part) => costs.get(part.ingredientId)?.cost != null)

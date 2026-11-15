@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { API_URL, apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
@@ -60,6 +61,23 @@ interface Form {
 const RECEIPT_LIMIT = 120;
 
 export function SettingsPage() {
+  const { canSection } = usePermissions();
+  const t = useT();
+
+  return (
+    <div className="space-y-4">
+      <section className="card p-5" aria-labelledby="appearance-heading">
+        <h2 id="appearance-heading" className="mb-3 text-[17px] font-semibold text-text-primary">
+          {t('Внешний вид')}
+        </h2>
+        <ThemeSwitch />
+      </section>
+      {canSection('settings') && <CafeSettings />}
+    </div>
+  );
+}
+
+function CafeSettings() {
   const permissions = usePermissions();
   const { data, isLoading, isError, error } = useAdminSettings();
   const update = useUpdateSettings();

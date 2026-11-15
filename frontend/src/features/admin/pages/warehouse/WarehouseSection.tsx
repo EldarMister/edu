@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { DatePicker } from '@/components/DatePicker';
 import { EditorPage } from './EditorPage';
 import { useEditorRoute, usePageFilter, usePageFilters } from './workspace-route';
 import { Select } from '@/components/Select';
@@ -11,10 +10,13 @@ import { PurchaseModal } from './PurchasesTab';
 import type { StockDocumentKind } from './stock-documents-api';
 import { WarehouseReportsTab } from './WarehouseReportsTab';
 import { WarehouseMovementSummary } from './WarehouseMovementSummary';
+import { ReportPeriodFilter, REPORT_PERIODS } from './ReportPeriodFilter';
+import { calendarDate, warehouseDay, warehousePeriodRange } from './warehouse-period';
 import { PreparationModal, ProductionBatchModal } from './PreparationTab';
 import { StartDocumentModal } from './StockDocumentsTab';
 import { StockDocumentModal } from './StockDocumentModal';
-import { SupplyList, DocumentList, ProductionList } from './WarehouseDocumentLists';
+import { DocumentList, ProductionList } from './WarehouseDocumentLists';
+import { SupplyList } from './WarehouseSupplies';
 import { ProcessingPage, ProcessingModal } from './ProcessingPage';
 import { LocationsPage, SuppliersPage, PackagesPage } from './WarehouseDirectories';
 import { QueryState } from './WarehouseUi';
@@ -25,7 +27,6 @@ import { ItemCard } from './ItemCard';
 import { useWarehouseLocations, useIngredients, type Ingredient } from './api';
 import { useWarehousePolicy } from './settings-api';
 
-type PeriodPreset = 'today' | 'week' | 'month' | 'custom';
 export function WarehouseSection({
   view = 'balances',
   onView,
@@ -46,6 +47,9 @@ export function WarehouseSection({
     movementRange: '',
     movementExpanded: '',
     movementDocuments: '',
+    movementClosedGroups: '',
+    movementWarehouses: '',
+    supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', inventoryPage: '1',
   });
   const {
     warehouse: warehouseId,
@@ -53,19 +57,17 @@ export function WarehouseSection({
     stockFrom,
     stockTo,
   } = conditions;
-  const today = localDate(new Date());
-  const customFrom = stockFrom || localDate(addDays(new Date(), -6));
-  const customTo = stockTo || today;
+  const today = warehouseDay();
+  const customFrom = stockFrom || calendarDate(today, -6);
+  const customTo = stockTo || calendarDate(today);
   function setReportConditions(
     patch: Partial<Pick<typeof conditions, 'warehouse' | 'stockPeriod' | 'stockFrom' | 'stockTo'>>,
   ) {
-    updateConditions({ ...patch, movementPage: '1', movementRange: '', movementExpanded: '', movementDocuments: '' });
+    updateConditions({ ...patch, movementPage: '1', movementRange: '', movementExpanded: '', movementDocuments: '', movementClosedGroups: '',
+      ...(patch.warehouse !== undefined ? { supplyPage: '1', supplyExpanded: '', transferPage: '1', writeoffPage: '1', inventoryPage: '1' } : {}),
+    });
   }
   const setWarehouseId = (value: string) => setReportConditions({ warehouse: value });
-  const setPreset = (value: PeriodPreset) => setReportConditions({ stockPeriod: value,
-    ...(value === 'custom' ? { stockFrom: customFrom, stockTo: customTo } : {}) });
-  const setCustomFrom = (value: string) => setReportConditions({ stockFrom: value });
-  const setCustomTo = (value: string) => setReportConditions({ stockTo: value });
   const { editor: active, openEditor: setActive, closeEditor: close } = useEditorRoute();
   const [stockFilter, setStockFilter] = usePageFilter('stockFilter');
   const policy = useWarehousePolicy();
@@ -74,14 +76,11 @@ export function WarehouseSection({
   const locations = locationsQ.data?.locations ?? [];
   const warehouse =
     locations.find((l) => l.id === warehouseId) ?? locations.find((l) => l.isDefault) ?? locations[0];
-  const preset = presetValue as PeriodPreset;
-  const range = {
-      dateFrom:
-        preset === 'custom'
-          ? customFrom
-          : localDate(addDays(new Date(), preset === 'today' ? 0 : preset === 'month' ? -29 : -6)),
-      dateTo: preset === 'custom' ? customTo : today,
-  };
+  const preset = presetValue === 'custom' ? 'custom' : REPORT_PERIODS.find(({ value }) => value === presetValue)?.value ?? 'week';
+  const range = warehousePeriodRange(preset, today, customFrom, customTo);
+  const periodFilter = <ReportPeriodFilter preset={preset} today={today} range={range}
+    onPreset={(value) => setReportConditions({ stockPeriod: value, stockFrom: '', stockTo: '' })}
+    onRange={(from, to) => setReportConditions({ stockPeriod: 'custom', stockFrom: from, stockTo: to })} />;
   const allowedViews = WAREHOUSE_NAV.filter(
     (v) =>
       warehouseViewInUse(v.key, locations.length, policy.data) &&
@@ -91,6 +90,19 @@ export function WarehouseSection({
   const allowed = allowedViews.some((v) => v.key === view);
   const aggregate = ['balances', 'movement', 'supplies', 'processing', 'transfers', 'writeoffs', 'inventory'].includes(view);
   const scopedWarehouse = aggregate ? warehouseId || undefined : warehouse?.id;
+  const movementWarehouseSelection = conditions.movementWarehouses
+    ? conditions.movementWarehouses.split(',')
+    : warehouseId ? [warehouseId] : [];
+  const movementLocations = locations
+    .filter(({ id }) => movementWarehouseSelection.includes(id))
+    .sort((left, right) => left.id.localeCompare(right.id));
+  const movementHistory = view === 'movement' && active?.type === 'history';
+  const historyWarehouseIds = movementHistory && movementLocations.length > 1
+    ? movementLocations.map(({ id }) => id).join(',')
+    : undefined;
+  const historyWarehouseId = movementHistory
+    ? (movementLocations.length === 1 ? movementLocations[0].id : undefined)
+    : active?.warehouseId;
   const warehouseFilter = <Select ariaLabel="Склад" className="poster-filter h-9 min-w-44"
     value={aggregate ? warehouseId : (warehouse?.id ?? '')} onChange={setWarehouseId}
     options={[...(aggregate ? [{ value: '', label: view === 'balances' || view === 'movement' ? 'Склад' : 'Все склады' }] : []), ...locations.map((location) => ({ value: location.id, label: location.name }))]} />;
@@ -143,7 +155,7 @@ export function WarehouseSection({
                     <SupplyList
                       filters={warehouseFilter}
                       warehouseId={scopedWarehouse}
-                      onOpen={(id) => setActive({ type: 'purchase', id })}
+                      onOpen={(id, edit) => setActive({ type: 'purchase', id, action: edit ? 'correct' : undefined })}
                       onCreate={() => setActive({ type: 'purchase' })}
                     />
                   )}
@@ -187,10 +199,8 @@ export function WarehouseSection({
                   )}
                   {view === 'movement' && (
                     <WarehouseMovementSummary
-                      filters={warehouseFilter}
-                      periodFilter={<PeriodFilter preset={preset} setPreset={setPreset}
-                        customFrom={customFrom} customTo={customTo}
-                        setCustomFrom={setCustomFrom} setCustomTo={setCustomTo} />}
+                      locations={locations}
+                      periodFilter={periodFilter}
                       warehouseId={scopedWarehouse}
                       range={range}
                       onOpen={openSource}
@@ -226,32 +236,43 @@ export function WarehouseSection({
         )}
         {active?.type === 'history' && (
           <EditorPage open onClose={close} title="Движение товара" panelClassName="max-w-6xl">
-            <div className="space-y-3">
-              <PeriodFilter
-                preset={preset}
-                setPreset={setPreset}
-                customFrom={customFrom}
-                customTo={customTo}
-                setCustomFrom={setCustomFrom}
-                setCustomTo={setCustomTo}
-              />
-              <WarehouseReportsTab
-                warehouseId={active.warehouseId}
-                range={range}
-                view="movements"
-                onView={() => {}}
-                contextOnly
-                ingredientId={active.itemId}
-                onOpen={openSource}
-              />
-            </div>
+            <QueryState
+              pending={movementHistory && locationsQ.isPending}
+              error={movementHistory ? locationsQ.error : undefined}
+            >
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  {movementHistory && (
+                    <p className="text-sm text-text-muted">
+                      {movementLocations.length
+                        ? `Склады: ${movementLocations.map(({ name }) => name).join(', ')}`
+                        : 'Все склады'}
+                    </p>
+                  )}
+                  {periodFilter}
+                </div>
+                <WarehouseReportsTab
+                  key={`${historyWarehouseIds ?? historyWarehouseId ?? ''}:${range.dateFrom ?? ''}:${range.dateTo ?? ''}`}
+                  warehouseId={historyWarehouseId}
+                  warehouseIds={historyWarehouseIds}
+                  range={range}
+                  view="movements"
+                  onView={() => {}}
+                  contextOnly
+                  ingredientId={active.itemId}
+                  onOpen={openSource}
+                />
+              </div>
+            </QueryState>
           </EditorPage>
         )}
         {warehouse && (
           <>
             {active?.type === 'purchase' && (
               <PurchaseModal
+                key={`${active.id ?? 'new'}:${active.action ?? ''}`}
                 id={active.id}
+                edit={active.action === 'correct'}
                 warehouseId={warehouse.id}
                 locations={locations}
                 onClose={close}
@@ -275,7 +296,8 @@ export function WarehouseSection({
                 warehouseId={active.warehouseId ?? warehouse.id}
                 locations={locations}
                 onClose={close}
-                sourcePurchaseId={active.id}
+                sourcePurchaseId={active.action === 'supplier_return' ? active.id : undefined}
+                copyTransferId={active.action === 'transfer' ? active.id : undefined}
                 onCreated={(id) => setActive({ type: 'document', id }, true)}
               />
             )}
@@ -285,6 +307,7 @@ export function WarehouseSection({
                 warehouse={warehouse}
                 isOwner={permissions.can('actions.warehouseApprove')}
                 onClose={close}
+                onCopyTransfer={(id) => setActive({ type: 'start', action: 'transfer', id })}
               />
             )}
             {active?.type === 'preparation' && active.id && (
@@ -375,66 +398,4 @@ function ChooseProduction({
       </div>
     </EditorPage>
   );
-}
-
-export function PeriodFilter({
-  preset,
-  setPreset,
-  customFrom,
-  customTo,
-  setCustomFrom,
-  setCustomTo,
-}: {
-  preset: PeriodPreset;
-  setPreset: (v: PeriodPreset) => void;
-  customFrom: string;
-  customTo: string;
-  setCustomFrom: (v: string) => void;
-  setCustomTo: (v: string) => void;
-}) {
-  const items: { key: PeriodPreset; label: string }[] = [
-    { key: 'today', label: 'Сегодня' },
-    { key: 'week', label: 'Последние 7 дней' },
-    { key: 'month', label: 'Последние 30 дней' },
-    { key: 'custom', label: 'Период' },
-  ];
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2">
-      <Select ariaLabel="Период отчёта" className="h-9 min-w-40" value={preset}
-        onChange={(value) => setPreset(value as PeriodPreset)}
-        options={items.map((item) => ({ value: item.key, label: item.label }))} />
-      {preset === 'custom' && (
-        <div className="flex items-center gap-2">
-          <DatePicker
-            aria-label="Начало периода отчёта"
-            className="input h-10 w-[145px] text-sm"
-            value={customFrom}
-            max={customTo || undefined}
-            onChange={(value) => setCustomFrom(value)}
-          />
-          <span className="text-text-muted">-</span>
-          <DatePicker
-            aria-label="Конец периода отчёта"
-            className="input h-10 w-[145px] text-sm"
-            value={customTo}
-            min={customFrom || undefined}
-            onChange={(value) => setCustomTo(value)}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function localDate(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
 }

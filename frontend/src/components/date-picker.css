@@ -8,7 +8,7 @@
 .date-time-error {
   display: block;
   margin-top: 4px;
-  color: #dc2626;
+  color: light-dark(#dc2626, rgb(var(--edu-danger)));
   font-size: 12px;
   line-height: 18px;
 }
@@ -19,11 +19,11 @@
 :where(.date-picker) {
   width: 166px;
   height: 46px;
-  border: 1px solid #dce5f2;
+  border: 1px solid light-dark(#dce5f2, rgb(var(--edu-border)));
   border-radius: 11px;
-  background: #fff;
+  background: rgb(var(--edu-card));
   padding-left: 13px;
-  color: #1f3156;
+  color: light-dark(#1f3156, rgb(var(--edu-text)));
   font-size: 14px;
 }
 div.date-picker {
@@ -34,11 +34,11 @@ div.date-picker {
   padding-right: 37px;
 }
 .date-picker:focus-within, .date-picker.is-open {
-  border-color: #397eff;
-  box-shadow: 0 0 0 3px rgba(0, 91, 255, .11);
+  border-color: light-dark(#397eff, rgb(var(--edu-link)));
+  box-shadow: 0 0 0 3px rgb(var(--edu-focus) / .11);
 }
 .date-picker.is-invalid {
-  border-color: #dc2626;
+  border-color: light-dark(#dc2626, #a95562);
 }
 .date-picker-input {
   width: 100%;
@@ -50,14 +50,14 @@ div.date-picker {
   font: inherit;
   outline: none;
 }
-.date-picker-input::placeholder { color: #93a3be; font-weight: 400; }
+.date-picker-input::placeholder { color: light-dark(#93a3be, rgb(var(--edu-text-light))); font-weight: 400; }
 .date-picker-icon {
   position: absolute;
   inset: 0 0 0 auto;
   display: grid;
   width: 37px;
   place-items: center;
-  color: #324a76;
+  color: light-dark(#324a76, rgb(var(--edu-text-secondary)));
 }
 .date-picker-icon svg { width: 17px; height: 17px; }
 .date-picker-icon:disabled { cursor: not-allowed; opacity: .5; }
@@ -65,9 +65,9 @@ div.date-picker {
   position: fixed;
   z-index: 70;
   overflow-y: auto;
-  border: 1px solid #e1e8f3;
+  border: 1px solid light-dark(#e1e8f3, rgb(var(--edu-border)));
   border-radius: 13px;
-  background: #fff;
+  background: rgb(var(--edu-card));
   box-shadow: 0 14px 34px rgba(29, 54, 94, .14), 0 3px 8px rgba(29, 54, 94, .05);
   padding: 15px 16px 11px;
 }
@@ -81,7 +81,7 @@ div.date-picker {
 }
 
 .date-picker-calendar-header { margin-bottom: 14px; }
-.date-picker-calendar-header strong { font-size: 14px; font-weight: 700; color: #172440; }
+.date-picker-calendar-header strong { font-size: 14px; font-weight: 700; color: light-dark(#172440, rgb(var(--edu-text))); }
 .date-picker-calendar-nav { gap: 3px; }
 .date-picker-calendar-nav button {
   display: grid;
@@ -89,9 +89,9 @@ div.date-picker {
   height: 28px;
   place-items: center;
   border-radius: 7px;
-  color: #466087;
+  color: light-dark(#466087, rgb(var(--edu-text-secondary)));
 }
-.date-picker-calendar-nav button:hover { background: #f0f5fc; }
+.date-picker-calendar-nav button:hover { background: light-dark(#f0f5fc, var(--edu-raised)); }
 .date-picker-calendar-nav svg { width: 17px; height: 17px; }
 .date-picker-calendar-nav svg.is-next { transform: rotate(180deg); }
 
@@ -106,7 +106,7 @@ div.date-picker {
   display: grid;
   height: 27px;
   place-items: center;
-  color: #6e7e9a;
+  color: light-dark(#6e7e9a, rgb(var(--edu-text-muted)));
   font-size: 11px;
 }
 
@@ -115,39 +115,39 @@ div.date-picker {
   height: 34px;
   place-items: center;
   border-radius: 7px;
-  color: #1c2a48;
+  color: light-dark(#1c2a48, rgb(var(--edu-text)));
   font-size: 14px;
 }
 
 .date-picker-calendar-grid button:hover,
 .date-picker-calendar-grid button:focus-visible {
-  background: #edf4ff;
+  background: light-dark(#edf4ff, var(--edu-selected));
   outline: none;
 }
 
-.date-picker-calendar-grid button.is-outside { color: #a4b0c2; }
-.date-picker-calendar-grid button.is-today { box-shadow: inset 0 0 0 1px #a7c6ff; }
+.date-picker-calendar-grid button.is-outside { color: light-dark(#a4b0c2, rgb(var(--edu-text-light))); }
+.date-picker-calendar-grid button.is-today { box-shadow: inset 0 0 0 1px light-dark(#a7c6ff, #757575); }
 .date-picker-calendar-grid button.is-selected,
 .date-picker-calendar-grid button.is-selected:hover {
-  background: #005bff;
-  box-shadow: 0 3px 8px rgba(0, 91, 255, .2);
+  background: rgb(var(--edu-primary));
+  box-shadow: 0 3px 8px rgb(var(--edu-primary) / .2);
   color: #fff;
 }
 
 .date-picker-calendar-footer {
   margin-top: 10px;
   padding-top: 8px;
-  border-top: 1px solid #edf1f7;
+  border-top: 1px solid light-dark(#edf1f7, rgb(var(--edu-border)));
 }
 .date-picker-calendar-footer button {
   padding: 5px 2px;
-  color: #005bff;
+  color: rgb(var(--edu-link));
   font-size: 13px;
   font-weight: 600;
 }
-.date-picker-calendar-footer button:hover { color: #0049cc; text-decoration: underline; }
+.date-picker-calendar-footer button:hover { color: rgb(var(--edu-link-hover)); text-decoration: underline; }
 
-.date-picker-calendar button:disabled { color: #b8c2d2; cursor: not-allowed; box-shadow: none; }
+.date-picker-calendar button:disabled { color: light-dark(#b8c2d2, rgb(var(--edu-text-light))); cursor: not-allowed; box-shadow: none; }
 .date-picker-calendar button:disabled:hover { background: transparent; text-decoration: none; }
 @media (max-width: 1023px) {
   .date-picker-input { font-size: 16px; }

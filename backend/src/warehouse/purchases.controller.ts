@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import { Response } from 'express';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
-import { PurchaseStatus, Role } from '@prisma/client';
+import { Role } from '@prisma/client';
 import { PurchasesService } from './purchases.service';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CreatePurchaseDto, UpdatePurchaseDto } from './dto';
+import { PurchaseExportQuery, PurchaseListQuery } from './purchases-query.dto';
 
 @Controller('admin/warehouse/purchases')
 @Roles(Role.ADMIN, Role.OWNER)
@@ -20,14 +22,17 @@ export class PurchasesController {
 
   @Get()
   @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
-  findAll(
-    @Query('status') status?: PurchaseStatus,
-    @Query('search') search?: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('warehouseId') warehouseId?: string,
-  ) {
-    return this.purchases.findAll({ status, search, from, to, warehouseId });
+  findAll(@Query() query: PurchaseListQuery) {
+    return this.purchases.findAll(query);
+  }
+
+  @Get('export.xlsx')
+  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts', 'actions.exportReports')
+  async exportXlsx(@Query() query: PurchaseExportQuery, @Res() response: Response) {
+    const workbook = await this.purchases.exportXlsx(query);
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', 'attachment; filename="warehouse-purchases.xlsx"');
+    response.send(workbook);
   }
 
   @Get('last-prices')

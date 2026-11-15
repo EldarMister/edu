@@ -485,7 +485,7 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
           const yy = y(t);
           return (
             <g key={t}>
-              <line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="#F1F5F9" strokeWidth="0.8" />
+              <line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="var(--edu-raised)" strokeWidth="0.8" />
               <text x={padL - 12} y={yy + 4} textAnchor="end" className="fill-text-light text-[11px] font-medium">
                 {shortMoney(t)}
               </text>
@@ -516,9 +516,9 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
         {/* Hover: crosshair + точка */}
         {hi && hover != null && (
           <g className="revenue-active-point">
-            <line x1={x(hover)} x2={x(hover)} y1={padT} y2={H - padB} stroke="#D8E2F0" strokeWidth="0.9" strokeDasharray="3 6" />
+            <line x1={x(hover)} x2={x(hover)} y1={padT} y2={H - padB} stroke="rgb(var(--edu-border))" strokeWidth="0.9" strokeDasharray="3 6" />
             <circle cx={x(hover)} cy={y(hi.amount)} r="9" fill="#005BFF" opacity="0.1" />
-            <circle cx={x(hover)} cy={y(hi.amount)} r="5.4" fill="#fff" stroke="#005BFF" strokeWidth="2.6" filter="url(#rev-active-glow)" />
+            <circle cx={x(hover)} cy={y(hi.amount)} r="5.4" fill="rgb(var(--edu-card))" stroke="#005BFF" strokeWidth="2.6" filter="url(#rev-active-glow)" />
           </g>
         )}
       </svg>
@@ -526,7 +526,7 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
       {/* Тултип */}
       {hi && hover != null && (
         <div
-          className="revenue-tooltip pointer-events-none absolute z-10 -translate-x-1/2 rounded-xl border border-[#E6ECF5] bg-white px-3.5 py-2.5 shadow-[0_16px_36px_rgba(15,23,42,0.12),0_2px_8px_rgba(15,23,42,0.06)]"
+          className="revenue-tooltip pointer-events-none absolute z-10 -translate-x-1/2 rounded-xl border border-border bg-white px-3.5 py-2.5 shadow-soft"
           style={{ left: `clamp(76px, ${(x(hover) / W) * 100}%, calc(100% - 76px))`, top: `${(y(hi.amount) / H) * 100}%`, transform: 'translate(-50%, calc(-100% - 14px))' }}
         >
           <p className="whitespace-nowrap text-[11px] font-medium leading-none text-text-muted">{formatTooltipLabel(hi.label)}</p>

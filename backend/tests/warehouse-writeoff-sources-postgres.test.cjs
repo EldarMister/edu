@@ -119,6 +119,88 @@ test('PostgreSQL: recipe writeoffs retain source lines and immutable ingredient 
           sourceLines: [source('ingredient', flour.id, 1, 'kg')] }), /предварительный расчёт/);
         await assert.rejects(docs.create(owner, { warehouseId: main.id, kind: 'inventory', mode: 'partial', sourceLines: inputs }), /только для списания/);
       });
+      await t.test('packaged ingredient drafts retain their factor after catalogue edits and archive; posted movements stay physical', async () => {
+        const pack = await db.warehousePackage.create({ data: { cafeId: cafe.id, name: 'Half kilo bag', unit: 'kg', unitType: 'mass', quantity: 0.5, quantityBase: 500 } });
+        const input = [{ ...source('ingredient', flour.id, 2, 'kg'), packageId: pack.id }];
+        const preview = await docs.writeoffPreview({ warehouseId: main.id, sourceLines: input });
+        assert.equal(preview.sourceLines[0].physicalQuantity, 1);
+        assert.equal(preview.sourceLines[0].parts[0].quantity, 1);
+        assert.equal(preview.sourceLines[0].packageFactor, 500);
+        assert.equal(preview.total, 100);
+        const draft = await docs.create(owner, { warehouseId: main.id, kind: 'writeoff', reason: 'damage', sourceLines: withSignatures(input, preview) });
+        await db.warehousePackage.update({ where: { id: pack.id }, data: { name: 'Two kilo bag', quantity: 2, quantityBase: 2000, isActive: false } });
+        const next = [{ ...input[0], quantity: 3, packageSnapshotLineId: input[0].sourceLineId }];
+        const recalculated = await docs.writeoffPreview({ warehouseId: main.id, documentId: draft.id, sourceLines: next });
+        assert.equal(recalculated.sourceLines[0].packageName, 'Half kilo bag');
+        assert.equal(recalculated.sourceLines[0].packageQuantity, 0.5);
+        assert.equal(recalculated.sourceLines[0].physicalQuantity, 1.5);
+        const before = await stock(flour.id);
+        const postedPack = await docs.update(owner, draft.id, { revision: draft.revision, finalize: 'post', sourceLines: withSignatures(next, recalculated) });
+        assert.equal(await stock(flour.id), before - 1.5);
+        assert.equal(postedPack.sourceLines[0].quantity, 3);
+        assert.equal(postedPack.items[0].quantity, 1.5);
+        const movement = await db.stockMovement.findFirst({ where: { sourceId: postedPack.id, type: 'writeoff' } });
+        assert.equal(Number(movement.change), -1500);
+        const evidence = JSON.stringify(postedPack.sourceLines);
+        assert.equal(JSON.stringify((await docs.get(postedPack.id)).sourceLines), evidence);
+        await docs.reverse(owner, postedPack.id, 'Pack test reversal', postedPack.revision);
+        assert.equal(await stock(flour.id), before, 'reversal uses the historical physical amount');
+        await assert.rejects(docs.writeoffPreview({ warehouseId: main.id, sourceLines: input }), /архиве/);
+        await db.warehousePackage.update({ where: { id: pack.id }, data: { isActive: true } });
+        const current = await docs.writeoffPreview({ warehouseId: main.id, sourceLines: input });
+        assert.equal(current.sourceLines[0].physicalQuantity, 4, 'a new selection uses the current 2 kg definition');
+        await assert.rejects(docs.writeoffPreview({ warehouseId: main.id, documentId: draft.id, sourceLines: [{ ...next[0], sourceId: water.id }] }), /не относится/);
+      });
+      await t.test('fractional portion and weighted-dish packages expand recipes without rounding portions to integers', async () => {
+        const half = await db.warehousePackage.create({ data: { cafeId: cafe.id, name: 'Half portion', unit: 'pcs', unitType: 'count', quantity: 0.5, quantityBase: 0.5 } });
+        const portions = [{ ...source('dish', dish.id, 1, 'pcs', variant.id), packageId: half.id }];
+        const preview = await docs.writeoffPreview({ warehouseId: main.id, sourceLines: portions });
+        assert.equal(preview.sourceLines[0].physicalQuantity, 0.5);
+        assert.equal(preview.sourceLines[0].parts.find((part) => part.ingredientId === flour.id).quantity, 0.08);
+        const mass = await db.warehousePackage.create({ data: { cafeId: cafe.id, name: 'Half kilo tub', unit: 'kg', unitType: 'mass', quantity: 0.5, quantityBase: 500 } });
+        const weighted = await db.dish.create({ data: { name: 'Weighted flour', price: 100, categoryId: category.id, isWeighted: true, weightedPriceBase: 100,
+          recipeItems: { create: [{ ingredientId: flour.id, amount: 100 }] } } });
+        const weightedPreview = await docs.writeoffPreview({ warehouseId: main.id, sourceLines: [{ ...source('dish', weighted.id, 2, 'kg'), packageId: mass.id }] });
+        assert.equal(weightedPreview.sourceLines[0].physicalQuantity, 1);
+        assert.equal(weightedPreview.sourceLines[0].parts[0].quantity, 1);
+        await assert.rejects(docs.writeoffPreview({ warehouseId: main.id, sourceLines: [{ ...portions[0], packageId: mass.id }] }), /единиц|единица|Единица/);
+      });
+      await t.test('changed unsaved package or forged snapshot references cannot silently change posted quantities', async () => {
+        const pack = await db.warehousePackage.create({ data: { cafeId: cafe.id, name: 'Preview bag', unit: 'kg', unitType: 'mass', quantity: 0.25, quantityBase: 250 } });
+        const input = [{ ...source('ingredient', flour.id, 2, 'kg'), packageId: pack.id }];
+        const preview = await docs.writeoffPreview({ warehouseId: main.id, sourceLines: input });
+        const before = await stock(flour.id);
+        await db.warehousePackage.update({ where: { id: pack.id }, data: { quantity: 0.75, quantityBase: 750 } });
+        await assert.rejects(docs.create(owner, { warehouseId: main.id, kind: 'writeoff', reason: 'damage', finalize: 'post', sourceLines: withSignatures(input, preview) }), /Состав изменился/);
+        assert.equal(await stock(flour.id), before);
+        await assert.rejects(docs.writeoffPreview({ warehouseId: main.id, sourceLines: [{ ...input[0], packageSnapshotLineId: input[0].sourceLineId }] }), /не относится/);
+      });
+      await t.test('register categories cover every selected source and legacy line without using dish components or another cafe', async () => {
+        const selected = [];
+        for (let index = 1; index <= 4; index++) selected.push(await ingredients.create({
+          name: `Category line ${index}`, unit: 'pcs', category: `Selected category ${index}`,
+        }));
+        const expected = selected.map((_, index) => `Selected category ${index + 1}`);
+        const legacy = await docs.create(owner, { warehouseId: main.id, kind: 'writeoff', items: selected.map(({ id }) => ({ ingredientId: id, quantity: 1 })) });
+        const sourced = await docs.create(owner, { warehouseId: main.id, kind: 'writeoff', sourceLines: selected.map(({ id }) => source('ingredient', id, 1, 'pcs')) });
+        await db.ingredient.update({ where: { id: flour.id }, data: { category: 'Recipe components only' } });
+        await db.ingredient.update({ where: { id: water.id }, data: { category: 'Recipe components only' } });
+        const dishOnly = await docs.create(owner, { warehouseId: main.id, kind: 'writeoff', sourceLines: [source('dish', dish.id, 1, 'pcs', variant.id)] });
+        const listed = await docs.list(main.id, 'writeoff');
+        for (const document of [legacy, sourced]) {
+          const row = listed.find(({ id }) => id === document.id);
+          assert.equal(row.productNames.length, 3);
+          assert.deepEqual(row.categories, expected, 'fourth line contributes category despite the three-name preview');
+        }
+        assert.deepEqual(listed.find(({ id }) => id === dishOnly.id).categories, ['Writeoff recipes']);
+        const foreign = await db.cafe.create({ data: { name: `Category isolation ${randomUUID()}` } });
+        try {
+          await runWithTenant({ cafeId: foreign.id }, async () => {
+            assert.equal((await docs.list(undefined, 'writeoff')).length, 0);
+            await assert.rejects(docs.list(main.id, 'writeoff'), /не найден/);
+          });
+        } finally { await db.cafe.delete({ where: { id: foreign.id } }); }
+      });
     });
   } finally {
     await db.warehouseDocument.deleteMany({ where: { cafeId: cafe.id } });

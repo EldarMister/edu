@@ -1,46 +1,30 @@
-import { DatePicker } from '@/components/DatePicker';
-import { Select } from '@/components/Select';
+import { ReportPeriodFilter, REPORT_PERIODS, type PeriodPreset } from './ReportPeriodFilter';
 import { usePageFilters } from './workspace-route';
+import { calendarDate, warehouseDay, warehousePeriodRange } from './warehouse-period';
 
-function localDay(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-export function useListPeriod(name: string, defaultPeriod = 'all') {
-  const today = new Date();
-  const monthAgo = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29);
-  const [values, update] = usePageFilters({
-    [`${name}Period`]: defaultPeriod,
-    [`${name}From`]: '',
-    [`${name}To`]: '',
-  });
-  const period = values[`${name}Period`];
-  const from = values[`${name}From`] || localDay(monthAgo);
-  const to = values[`${name}To`] || localDay(today);
-  const start = period === 'custom' ? from : localDay(new Date(today.getFullYear(), today.getMonth(), today.getDate() - (period === 'month' ? 29 : period === 'week' ? 6 : 0)));
-  const end = period === 'custom' ? to : localDay(today);
+export function useListPeriod(name: string, defaultPeriod: PeriodPreset = 'all') {
+  const periodKey = `${name}Period`;
+  const fromKey = `${name}From`;
+  const toKey = `${name}To`;
+  const pageKey = `${name}Page`;
+  const expandedKey = `${name}Expanded`;
+  const [values, update] = usePageFilters({ [periodKey]: defaultPeriod, [fromKey]: '', [toKey]: '', [pageKey]: '1', [expandedKey]: '' });
+  const selection = values[periodKey];
+  const preset = selection === 'custom' ? selection : REPORT_PERIODS.find(({ value }) => value === selection)?.value ?? defaultPeriod;
+  const today = warehouseDay();
+  const range = warehousePeriodRange(preset, today, values[fromKey] || calendarDate(today, -29), values[toKey] || calendarDate(today));
   return {
-    active: period !== 'all',
+    active: preset !== 'all',
+    range,
     includes(value: string) {
-      if (period === 'all') return true;
-      const day = localDay(new Date(value));
-      return (!start || day >= start) && (!end || day <= end);
+      if (preset === 'all') return true;
+      const parsed = new Date(value);
+      if (!Number.isFinite(+parsed)) return false;
+      const day = calendarDate(warehouseDay(parsed));
+      return (!range.dateFrom || day >= range.dateFrom) && (!range.dateTo || day <= range.dateTo);
     },
-    filter: <div className="poster-period-filter flex flex-wrap items-center gap-2">
-      <Select ariaLabel="Период" value={period} onChange={(value) => update({ [`${name}Period`]: value,
-        ...(value === 'custom' ? { [`${name}From`]: from, [`${name}To`]: to } : {}) })}
-        options={[
-          { value: 'all', label: 'За всё время' },
-          { value: 'today', label: 'Сегодня' },
-          { value: 'week', label: 'Последние 7 дней' },
-          { value: 'month', label: 'Последние 30 дней' },
-          { value: 'custom', label: 'Выбрать период' },
-        ]} />
-      {period === 'custom' && <>
-        <DatePicker aria-label="Начало периода" className="input w-36" value={from} max={to || undefined} onChange={(value) => update({ [`${name}From`]: value })} />
-        <span className="text-text-muted">—</span>
-        <DatePicker aria-label="Конец периода" className="input w-36" value={to} min={from || undefined} onChange={(value) => update({ [`${name}To`]: value })} />
-      </>}
-    </div>,
+    filter: <ReportPeriodFilter preset={preset} today={today} range={range} label="Период" allCaption="За всё время"
+      onPreset={(value) => update({ [periodKey]: value, [fromKey]: '', [toKey]: '', [pageKey]: '1', [expandedKey]: '' })}
+      onRange={(from, to) => update({ [periodKey]: 'custom', [fromKey]: from, [toKey]: to, [pageKey]: '1', [expandedKey]: '' })} />,
   };
 }

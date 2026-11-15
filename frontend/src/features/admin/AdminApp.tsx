@@ -164,7 +164,7 @@ export function AdminApp() {
   // Раздел в меню: структурное ограничение (adminOnly) + право доступа к разделу.
   const sections = SECTIONS.filter((s) => {
     if (s.adminOnly && !isAdmin) return false;
-    return canSection(s.perm);
+    return s.key === 'settings' || canSection(s.perm);
   });
   const [route, setRoute] = useSearchParams();
   useWorkspaceScroll();
@@ -511,7 +511,7 @@ export function AdminApp() {
               {section === 'staff' && canSection('staff') && <StaffPage />}
               {section === 'audit' && canSection('journal') && <AuditPage />}
               {section === 'reconcile' && canSection('paymentReconciliation') && <ReconciliationPage />}
-              {section === 'settings' && canSection('settings') && <SettingsPage />}
+              {section === 'settings' && <SettingsPage />}
             </>
           )}
         </main>

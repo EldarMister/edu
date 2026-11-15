@@ -78,7 +78,7 @@ export function QrPaymentCard({ qrImageUrl }: { qrImageUrl: string | null }) {
 
       {hasQr ? (
         <div className="flex items-center gap-4">
-          <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-white p-1.5">
+          <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-paper p-1.5">
             <img src={qrImageUrl} alt="QR" className="h-full w-full object-contain" />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-2">

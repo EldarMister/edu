@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Toggle } from '@/components/Toggle';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { Modal } from '@/components/Modal';
 import { useT } from '@/lib/i18n';
+import { useAuth } from '@/store/auth';
 import { kitchenVoice } from '@/services/kitchenVoice';
 import { waiterVoice } from '@/services/waiterVoice';
 import {
@@ -27,6 +29,7 @@ export function WaiterVoiceSettings({ userId }: { userId: string }) {
 
 function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; waiterId?: string }) {
   const t = useT();
+  const isKitchen = useAuth((state) => state.user?.role === 'KITCHEN');
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState<KitchenVoiceSettingsType>(() =>
     waiterId ? getWaiterVoiceSettings(waiterId) : getKitchenVoiceSettings(),
@@ -128,6 +131,7 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
           onChange={(rate) => patch({ speechRate: rate })}
         />
       </Section>
+      {!waiterId && isKitchen && <Section><ThemeSwitch /></Section>}
     </>
   );
 
@@ -175,7 +179,7 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
         <div
           role="dialog"
           aria-label={title}
-          className="absolute right-0 top-[calc(100%+10px)] z-50 w-[calc(100vw-2rem)] max-w-[320px] rounded-xl border border-border bg-white p-4 text-sm shadow-soft"
+          className="absolute right-0 top-[calc(100%+10px)] z-50 max-h-[calc(100dvh-6rem)] w-[calc(100vw-2rem)] max-w-[320px] overflow-y-auto rounded-xl border border-border bg-white p-4 text-sm shadow-soft"
         >
           <h3 className="text-[15px] font-semibold text-text-secondary">{title}</h3>
           {controls}

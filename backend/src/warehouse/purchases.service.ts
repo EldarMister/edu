@@ -16,6 +16,12 @@ import { getCafeId } from '../tenant/tenant-context';
 import { lockIngredients } from './stock-lock';
 import { getWarehouseBalance, resolveWarehouse, warehouseDocumentFilter } from './warehouse-location';
 import { assertUnitMatchesType, costToBase, fromBase, normalizeUnit, toBase, unitLabel, type UnitCode } from './units';
+import { PurchaseExportQuery, PurchaseListQuery, purchaseDateRange } from './purchases-query.dto';
+import { purchaseExportColumns, writePurchaseWorkbook } from './purchases-xlsx';
+import { parseStockEffectiveAt } from './stock-effective-time';
+import { replayHistoricalStock } from './historical-stock-replay';
+
+const postingTransaction = { timeout: 30_000 };
 
 // Нормализованная позиция закупки: введённые (display) + базовые значения.
 type NormalizedItem = {
@@ -71,6 +77,8 @@ export class PurchasesService {
       id: p.id,
       number: p.number,
       date: p.date,
+      effectiveAt: p.effectiveAt,
+      postedAt: p.stockPostedAt,
       supplier: p.supplier, supplierId: p.supplierId,
       warehouseId: p.warehouseId,
       totalAmount: Number(p.totalAmount), note: p.note, attachments: p.attachments ?? [], discount: Number(p.discount ?? 0),
@@ -82,8 +90,8 @@ export class PurchasesService {
     };
   }
 
-  async findAll(params: { status?: PurchaseStatus; search?: string; from?: string; to?: string; warehouseId?: string }) {
-    const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, params.warehouseId);
+  private async listWhere(db: Prisma.TransactionClient, params: PurchaseListQuery): Promise<Prisma.PurchaseWhereInput> {
+    const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(db, params.warehouseId);
     const search = params.search?.trim();
     const numberMatch = search?.match(/^(?:ЗКП-)?(\d+)$/i);
     const number = numberMatch ? Number(numberMatch[1]) : NaN;
@@ -93,16 +101,28 @@ export class PurchasesService {
       { items: { some: { ingredient: { name: { contains: search, mode: 'insensitive' } } } } },
       ...(Number.isInteger(number) && number > 0 && number <= 2147483647 ? [{ number }] : []),
     ] : [];
-    const where: Prisma.PurchaseWhereInput = {
+    const period = this.dateRange(params.from, params.to);
+    return {
       ...warehouseDocumentFilter(warehouse),
       ...(params.status ? { status: params.status } : {}),
+      ...(params.suppliers?.length ? { supplier: { in: params.suppliers } } : {}),
+      ...(params.categories?.length ? { items: { some: { ingredient: { category: { in: params.categories } } } } } : {}),
       // The default warehouse already has an OR for legacy records without a warehouseId.
-      ...(searchConditions.length ? { AND: [{ OR: searchConditions }] } : {}),
-      ...(this.dateRange(params.from, params.to)),
+      AND: [...(searchConditions.length ? [{ OR: searchConditions }] : []), ...(period ? [period] : [])],
     };
+  }
+
+  private sortByOperationDate<T extends { date: Date; effectiveAt: Date | null; number: number }>(rows: T[], direction?: 'asc' | 'desc') {
+    if (!direction) return rows;
+    const order = direction === 'asc' ? 1 : -1;
+    return rows.sort((a, b) => order * ((a.effectiveAt ?? a.date).getTime() - (b.effectiveAt ?? b.date).getTime() || a.number - b.number));
+  }
+
+  async findAll(params: PurchaseListQuery) {
+    const where = await this.listWhere(this.prisma, params);
     const purchases = await this.prisma.purchase.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: {
         _count: { select: { items: true } },
         items: {
@@ -112,18 +132,33 @@ export class PurchasesService {
         },
       },
     });
-    return purchases.map(({ items, ...purchase }) => ({
+    return this.sortByOperationDate(purchases, params.dateSort).map(({ items, ...purchase }) => ({
       ...this.serialize(purchase),
       productNames: [...new Set(items.map((item) => item.ingredient.name))],
     }));
   }
 
+  async exportXlsx(params: PurchaseExportQuery) {
+    const columns = purchaseExportColumns(params.columns);
+    const data = await this.prisma.$transaction(async (tx) => {
+      const where = await this.listWhere(tx, params);
+      const purchases = await tx.purchase.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], include: {
+        items: { orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], include: { ingredient: { select: { name: true, category: true } } } },
+      } });
+      const warehouses = await tx.warehouse.findMany({ select: { id: true, name: true, isDefault: true } });
+      return { purchases, warehouses };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return writePurchaseWorkbook(this.sortByOperationDate(data.purchases, params.dateSort), new Map(data.warehouses.map(({ id, name }) => [id, name])),
+      data.warehouses.find(({ isDefault }) => isDefault)?.name ?? 'Основной склад', columns);
+  }
+
   async overview(params: { from?: string; to?: string; warehouseId?: string }) {
     const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(this.prisma, params.warehouseId);
+    const period = this.dateRange(params.from, params.to);
     const where: Prisma.PurchaseWhereInput = {
       ...warehouseDocumentFilter(warehouse),
       status: PurchaseStatus.completed,
-      ...(this.dateRange(params.from, params.to)),
+      ...(period ? { AND: [period] } : {}),
     };
     const completed = await this.prisma.purchase.findMany({
       where,
@@ -174,7 +209,8 @@ export class PurchasesService {
       return snapshot?.kind === 'purchase_correction' ? [{ id: movement.id, createdAt: movement.createdAt,
         actorName: movement.actorName, reason: movement.comment, before: snapshot.before, after: snapshot.after }] : [];
     });
-    return { ...this.serialize(purchase), ...eligibility, postedAt: eligibility.stockPostedAt, returnableItems, corrections };
+    const postedAt = purchase.stockPostedAt ?? eligibility.stockPostedAt;
+    return { ...this.serialize(purchase), ...eligibility, stockPostedAt: postedAt, postedAt, returnableItems, corrections };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
@@ -193,12 +229,12 @@ export class PurchasesService {
       grossTotal: Prisma.Decimal; date: Date; purchaseId: string; supplier: string }>>(Prisma.sql`
       SELECT DISTINCT ON (pi.ingredient_id) pi.ingredient_id AS "ingredientId", i.display_unit AS "unitCode",
         SUM(pi.quantity_base) AS quantity, SUM(pi.quantity * pi.purchase_price) AS "grossTotal",
-        p.date, p.id AS "purchaseId", p.supplier
+        COALESCE(p.effective_at, p.date) AS date, p.id AS "purchaseId", p.supplier
       FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id JOIN ingredients i ON i.id = pi.ingredient_id
       WHERE p.cafe_id = ${cafeId} AND i.cafe_id = ${cafeId} AND p.status = 'completed'
         AND pi.ingredient_id IN (${Prisma.join(ids)}) ${warehouseSql} ${excludeSql}
-      GROUP BY pi.ingredient_id, i.display_unit, p.id, p.date, p.supplier, p.created_at
-      ORDER BY pi.ingredient_id, p.date DESC, p.created_at DESC, p.id DESC
+      GROUP BY pi.ingredient_id, i.display_unit, p.id, p.date, p.effective_at, p.supplier, p.created_at
+      ORDER BY pi.ingredient_id, COALESCE(p.effective_at, p.date) DESC, p.created_at DESC, p.id DESC
     `);
     return prices.map((row) => {
       const unitCode = normalizeUnit(row.unitCode);
@@ -213,6 +249,7 @@ export class PurchasesService {
     const discount = new Prisma.Decimal(dto.discount ?? 0).toDecimalPlaces(2);
     this.validateDate(dto.date, dto.complete === true);
     this.validateAttachments(dto.attachments);
+    const effectiveAt = parseStockEffectiveAt(dto.effectiveAt);
     const warehouse = await resolveWarehouse(this.prisma, dto.warehouseId);
     const purchaseId = await this.prisma.$transaction(async (tx) => {
       const cafeId = getCafeId();
@@ -223,6 +260,7 @@ export class PurchasesService {
         if (previous) {
           const lineKey = (item: { ingredientId: string; quantityBase: Prisma.Decimal; grossTotal: Prisma.Decimal }) => `${item.ingredientId}:${item.quantityBase}:${item.grossTotal}`;
           if (previous.warehouseId !== (warehouse?.id ?? null) || !previous.discount.eq(discount)
+            || previous.effectiveAt?.getTime() !== effectiveAt?.getTime()
             || (dto.supplierId ? previous.supplierId !== dto.supplierId : previous.supplier.trim().toLocaleLowerCase() !== dto.supplier?.trim().toLocaleLowerCase())
             || JSON.stringify(previous.items.map(lineKey).sort()) !== JSON.stringify(this.retryItems(dto.items, previous.items).map(lineKey).sort())) {
             throw new ConflictException('Ключ повторного запроса уже использован для другого прихода');
@@ -237,6 +275,7 @@ export class PurchasesService {
       const purchase = await tx.purchase.create({
         data: {
           date: dto.date ? new Date(dto.date) : new Date(),
+          effectiveAt,
           supplier: supplier.supplier!, supplierId: supplier.supplierId, requestKey: dto.requestKey, note: dto.note?.trim() || null, attachments: dto.attachments ?? [], discount,
           warehouseId: warehouse?.id ?? null,
           totalAmount: new Prisma.Decimal(total),
@@ -246,7 +285,7 @@ export class PurchasesService {
       });
       if (dto.complete) await this.completePurchase(tx, purchase, actor);
       return purchase.id;
-    });
+    }, postingTransaction);
     return this.findOne(purchaseId);
   }
 
@@ -272,6 +311,7 @@ export class PurchasesService {
   async update(id: string, dto: UpdatePurchaseDto, actor?: AuthUser) {
     this.validateDate(dto.date);
     this.validateAttachments(dto.attachments);
+    const effectiveAt = parseStockEffectiveAt(dto.effectiveAt);
     const warehouse = dto.warehouseId === undefined ? undefined : await resolveWarehouse(this.prisma, dto.warehouseId);
 
     await this.prisma.$transaction(async (tx) => {
@@ -279,7 +319,12 @@ export class PurchasesService {
       const purchase = await tx.purchase.findUnique({ where: { id }, include: { items: { include: { ingredient: { select: { name: true } } } } } });
       if (!purchase) throw new NotFoundException('Закупка не найдена');
       if (purchase.status === PurchaseStatus.cancelled) throw new BadRequestException('Отменённую закупку нельзя редактировать');
-      if (purchase.status === PurchaseStatus.completed) return this.correctCompleted(tx, purchase, dto, actor);
+      if (purchase.status === PurchaseStatus.completed) {
+        if (effectiveAt !== undefined && effectiveAt?.getTime() !== purchase.effectiveAt?.getTime()) {
+          throw new ConflictException('Складскую дату проведённой поставки нельзя менять');
+        }
+        return this.correctCompleted(tx, purchase, dto, actor);
+      }
       const rawItems = dto.items ? await this.normalizeItems(dto.items, tx, purchase.items) : undefined;
       if (dto.discount !== undefined && !rawItems) throw new BadRequestException('Для изменения скидки передайте позиции прихода');
       const supplier = dto.supplier !== undefined || dto.supplierId !== undefined ? await resolveWarehouseSupplier(tx, { ...dto, required: true }) : undefined;
@@ -296,6 +341,7 @@ export class PurchasesService {
         where: { id },
         data: {
           date: dto.date !== undefined ? new Date(dto.date) : undefined,
+          effectiveAt,
           supplier: supplier?.supplier ?? undefined, supplierId: supplier?.supplierId, note: dto.note === undefined ? undefined : dto.note?.trim() || null,
           attachments: dto.attachments, discount,
           warehouseId: warehouse !== undefined ? warehouse?.id ?? null : undefined,
@@ -304,7 +350,7 @@ export class PurchasesService {
         include: { items: true },
       });
       if (dto.complete) await this.completePurchase(tx, updated, actor);
-    });
+    }, postingTransaction);
     return this.findOne(id);
   }
 
@@ -404,6 +450,11 @@ export class PurchasesService {
 
     const warehouse = await resolveWarehouse(tx, purchase.warehouseId);
     await lockIngredients(tx, purchase.items.map((item) => item.ingredientId));
+    const postedAt = new Date();
+    const effectiveAt = purchase.effectiveAt;
+    if (effectiveAt && effectiveAt > postedAt) throw new BadRequestException('Дата складской операции не может быть в будущем');
+    const insertedMovementIds: string[] = [];
+    let stockPostedAt = effectiveAt ? postedAt : null;
     let total = new Prisma.Decimal(0);
     for (const item of purchase.items) {
       const ingredient = await tx.ingredient.findUnique({
@@ -414,15 +465,26 @@ export class PurchasesService {
 
       if (item.quantityBase.lte(0)) throw new BadRequestException('Количество должно быть больше нуля');
       total = total.add(item.total);
-      await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse,
+      const result = await postStockMovement(tx, { ingredientId: item.ingredientId, warehouse,
         change: item.quantityBase, cost: item.total.div(item.quantityBase), costKnown: true, value: item.total, valuation: 'average',
         movement: { type: 'purchase', sourceType: 'purchase', sourceId: purchase.id,
+          ...(effectiveAt ? { createdAt: effectiveAt, recordedAt: postedAt } : {}),
           actorId: actor?.id, actorName: actor?.name, comment: `Приход от ${purchase.supplier}` } });
+      if (effectiveAt) insertedMovementIds.push(result.movement.id);
+      stockPostedAt ??= result.movement.createdAt;
     }
 
+    if (effectiveAt) {
+      if (!purchase.cafeId) throw new BadRequestException('Заведение не назначено');
+      await replayHistoricalStock(tx, { cafeId: purchase.cafeId, effectiveAt, insertedMovementIds });
+      await tx.auditLog.create({ data: { cafeId: purchase.cafeId, userId: actor?.id, userName: actor?.name, userRole: actor?.role,
+        actionType: 'PURCHASE_POSTED_RETROSPECTIVELY', entityType: 'PURCHASE', entityId: purchase.id,
+        description: 'Поставка проведена с пересчётом себестоимости',
+        metadata: { effectiveAt: effectiveAt.toISOString(), postedAt: postedAt.toISOString(), movementIds: insertedMovementIds } } });
+    }
     await tx.purchase.update({
       where: { id: purchase.id },
-      data: { status: PurchaseStatus.completed, totalAmount: total, warehouseId: warehouse?.id ?? null },
+      data: { status: PurchaseStatus.completed, totalAmount: total, warehouseId: warehouse?.id ?? null, stockPostedAt },
     });
   }
 
@@ -540,10 +602,8 @@ export class PurchasesService {
     }
   }
 
-  private dateRange(from?: string, to?: string): Prisma.PurchaseWhereInput {
-    if (!from && !to) return {};
-    const gte = from ? new Date(from) : undefined;
-    const lte = to ? new Date(`${to}T23:59:59.999`) : undefined;
-    return { date: { ...(gte ? { gte } : {}), ...(lte ? { lte } : {}) } };
+  private dateRange(from?: string, to?: string): Prisma.PurchaseWhereInput | undefined {
+    const date = purchaseDateRange(from, to);
+    return date ? { OR: [{ effectiveAt: date }, { effectiveAt: null, date }] } : undefined;
   }
 }

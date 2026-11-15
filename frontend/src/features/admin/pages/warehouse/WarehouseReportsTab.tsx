@@ -8,6 +8,8 @@ import { money } from '@/lib/format';
 import { useStaff } from '../../api';
 import { qty, useIngredients } from './api';
 import { usePageFilter } from './workspace-route';
+import { usePermissions } from '@/hooks/usePermissions';
+import { canOpenMovementSource } from './movement-source';
 
 interface ReportRow {
   id: string;
@@ -51,6 +53,7 @@ interface Report {
 }
 export function WarehouseReportsTab({
   warehouseId,
+  warehouseIds,
   range,
   view,
   onView,
@@ -59,13 +62,16 @@ export function WarehouseReportsTab({
   contextOnly = false,
 }: {
   warehouseId?: string;
-  range: { dateFrom: string; dateTo: string };
+  warehouseIds?: string;
+  range: { dateFrom?: string; dateTo?: string };
   view: string;
   onView: (v: string) => void;
   ingredientId?: string;
   onOpen: (type: string, id: string) => void;
   contextOnly?: boolean;
 }) {
+  const permissions = usePermissions();
+  const canExport = permissions.canAction('exportReports');
   const [item, setItem] = usePageFilter('historyItem', ingredientId ?? '');
   const [search, setSearch] = usePageFilter('historySearch');
   const [employee, setEmployee] = usePageFilter('historyEmployee');
@@ -78,7 +84,8 @@ export function WarehouseReportsTab({
   const ingredients = useIngredients('', warehouseId);
   const params = {
     view,
-    warehouseId,
+    warehouseId: warehouseIds ? undefined : warehouseId,
+    warehouseIds,
     from: range.dateFrom,
     to: range.dateTo,
     ingredientId: (contextOnly && ingredientId ? ingredientId : item) || undefined,
@@ -101,7 +108,7 @@ export function WarehouseReportsTab({
       const url = URL.createObjectURL(response.data);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = `Склад-${view}-${range.dateFrom}.csv`;
+      anchor.download = `Склад-${view}-${range.dateFrom ?? 'всё-время'}.csv`;
       anchor.click();
       URL.revokeObjectURL(url);
     } catch (err) {
@@ -146,14 +153,14 @@ export function WarehouseReportsTab({
               }}
             />
           )}
-          <button
+          {canExport && <button
             type="button"
             className="btn-secondary btn-md"
             onClick={() => void download()}
             disabled={exporting}
           >
-            CSV / Excel
-          </button>
+            Экспорт CSV
+          </button>}
           <button type="button" className="btn-secondary btn-md" onClick={() => window.print()}>
             Печать
           </button>
@@ -312,7 +319,7 @@ export function WarehouseReportsTab({
                     <td className="px-3 py-3">
                       <span className="font-medium">{row.ingredientName}</span>
                       <span className="block text-xs text-text-muted">
-                        {row.createdAt ? new Date(row.createdAt).toLocaleString('ru-RU') : row.category}
+                        {row.createdAt ? new Date(row.createdAt).toLocaleString('ru-RU', { timeZone: 'Asia/Bishkek' }) : row.category}
                       </span>
                     </td>
                     <td className="px-3 py-3">{row.warehouseName}</td>
@@ -327,7 +334,7 @@ export function WarehouseReportsTab({
                       </td>
                     )}
                     <td className="px-3 py-3">
-                      {row.sourceId ? (
+                      {row.sourceId && canOpenMovementSource(row.sourceType, permissions) ? (
                         <button
                           type="button"
                           className="text-left text-primary"

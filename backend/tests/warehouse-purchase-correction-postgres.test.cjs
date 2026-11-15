@@ -137,8 +137,9 @@ test('PostgreSQL: last purchase prices use invoices, warehouse/tenant scope and 
     { ingredientId: ingredient.id, quantity: 500, unit: 'g', purchasePrice: 0.1 },
   ] });
   const bar = await locations.save(cafe.id, 'Price bar');
-  const barPurchase = await purchases.create({ supplier: 'Bar supplier', warehouseId: bar.id, complete: true,
-    items: [{ ingredientId: ingredient.id, quantity: 1, unit: 'kg', purchasePrice: 300 }] });
+  const barPurchase = await purchases.create({ supplier: 'Bar supplier', warehouseId: bar.id, complete: true, discount: 30,
+    items: [{ ingredientId: ingredient.id, quantity: 1, unit: 'kg', purchasePrice: 300 },
+      { ingredientId: ingredient.id, quantity: 500, unit: 'g', purchasePrice: 0.18 }] });
   await purchases.create({ supplier: 'Draft ignored', items: [{ ingredientId: ingredient.id, quantity: 1, purchasePrice: 999 }] });
   const mainPrice = (await purchases.lastPrices({ ingredientIds: ingredient.id, warehouseId: warehouse.id }))[0];
   assert.equal(mainPrice.unitPrice, 100);
@@ -146,6 +147,13 @@ test('PostgreSQL: last purchase prices use invoices, warehouse/tenant scope and 
   assert.equal(mainPrice.date.toISOString(), earlier);
   assert.equal((await purchases.lastPrices({ ingredientIds: ingredient.id }))[0].purchaseId, barPurchase.id);
   assert.equal((await purchases.lastPrices({ ingredientIds: ingredient.id, excludePurchaseId: barPurchase.id }))[0].unitPrice, 100);
+  await purchases.create({ supplier: 'Old invoice entered later', effectiveAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    warehouseId: warehouse.id, complete: true, items: [{ ingredientId: ingredient.id, quantity: 1, unit: 'kg', purchasePrice: 999 }] });
+  const latestSupply = (await ingredients.supplies(ingredient.id, {})).rows[0];
+  assert.equal(latestSupply.purchaseId, barPurchase.id);
+  assert.equal(latestSupply.unitPrice, 240);
+  assert.equal((await ingredients.findOne(ingredient.id)).lastPurchasePrice, 240,
+    'the card uses the newest invoice by operation date and all of its discounted lines');
   await runWithTenant({ cafeId: randomUUID() }, async () => assert.deepEqual(await purchases.lastPrices({ ingredientIds: ingredient.id }), []));
   await assert.rejects(purchases.lastPrices({ ingredientIds: Array.from({ length: 101 }, (_, i) => `id${i}`).join(',') }), /100/);
 }));

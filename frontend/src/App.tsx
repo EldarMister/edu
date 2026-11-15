@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from '@/store/auth';
+import { useTheme } from '@/store/theme';
 import { api } from '@/lib/api';
 import type { AuthUser } from '@/types';
 import { ProtectedRoute, homeForRole } from '@/routes/ProtectedRoute';
@@ -24,6 +25,8 @@ export function App() {
   const accessToken = useAuth((s) => s.accessToken);
   const updateUser = useAuth((s) => s.updateUser);
   const location = useLocation();
+  const theme = useTheme((state) => state.theme);
+  const publicPage = /^\/(menu|queue|q)(\/|$)/.test(location.pathname);
   const waiterButtonVisible = useRadioVisibility((s) => s.waiterButtonVisible);
   const onWaiter = location.pathname.startsWith('/waiter');
   const showPtt =
@@ -31,6 +34,12 @@ export function App() {
     ['/waiter', '/kitchen', '/bar', '/admin', '/owner', '/warehouse'].some((prefix) =>
       location.pathname.startsWith(prefix),
     );
+
+  useLayoutEffect(() => {
+    const dark = theme === 'dark' && !publicPage;
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#101010' : '#005BFF');
+  }, [theme, publicPage]);
 
   // Подтягиваем актуальные права доступа при загрузке (старые сессии могли войти
   // до появления permissions; владелец мог изменить права сотрудника).

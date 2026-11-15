@@ -11,6 +11,11 @@ import { useSuppliers } from './settings-api';
 import { usePackages } from './extended-api';
 import { DocumentField, DocumentFooter } from './WarehouseUi';
 import { DocumentProductPicker } from './DocumentProductPicker';
+import { focusDocumentInput } from './document-focus';
+import { InventoryTimingFields } from './InventoryTimingFields';
+import { inventoryTimeDisplay, inventoryTimingError, inventoryTimingFor, inventoryTimingValue } from './inventory-time';
+import './document-workspace.css';
+import './inventory-workspace.css';
 import { documentStatus, formatDocumentDate } from './stock-document-format';
 import {
   useIngredients,
@@ -42,6 +47,7 @@ export function PurchaseModal({
   onClose,
   onReturn,
   onOpenDocument,
+  edit = false,
 }: {
   id?: string;
   warehouseId: string;
@@ -49,9 +55,13 @@ export function PurchaseModal({
   onClose: () => void;
   onReturn?: (id: string, warehouseId: string) => void;
   onOpenDocument?: (id: string) => void;
+  edit?: boolean;
 }) {
   const query = usePurchase(id ?? null);
-  const [correcting, setCorrecting] = useState(false);
+  const permissions = usePermissions();
+  const [requestedCorrection, setCorrecting] = useState(edit);
+  const correcting = requestedCorrection && query.data?.status === 'completed' &&
+    permissions.canAction('warehouseReceive') && permissions.canAction('warehouseCosts');
   return (
     <EditorPage
       open
@@ -125,6 +135,8 @@ function PurchaseForm({
   const [supplier, setSupplier] = useState(purchase?.supplier ?? '');
   const [date, setDate] = useState(localTime(purchase?.date));
   const [dateValid, setDateValid] = useState(true);
+  const [timing, setTiming] = useState(() => inventoryTimingFor(purchase?.effectiveAt));
+  const [timingValid, setTimingValid] = useState(true);
   const [focusedPrice, setFocusedPrice] = useState<string | null>(null);
   const packages = usePackages();
   const [rows, setRows] = useState<Row[]>(
@@ -151,10 +163,13 @@ function PurchaseForm({
   const byId = new Map((ingredients.data ?? []).map((item) => [item.id, item]));
   const editable = can('actions.warehouseReceive') && costs && (!purchase || purchase.status === 'draft' || correcting);
   const stockEditable = editable && (purchase?.status !== 'completed' || purchase.canCorrectStock === true);
+  const timingEditable = editable && (!purchase || purchase.status === 'draft');
+  const effectiveAt = inventoryTimingValue(timing, purchase?.effectiveAt);
+  const timingReady = !timingEditable || (timingValid && effectiveAt !== undefined && !inventoryTimingError(timing, undefined, true));
   const push = useNotifications((state) => state.push);
-  const signature = JSON.stringify({ location, supplier, date, rows, discount, note, attachments });
+  const signature = JSON.stringify({ location, supplier, date, timing, rows, discount, note, attachments });
   const initialSignature = useRef(signature);
-  const { markSaved } = useEditorDirty(editable && (signature !== initialSignature.current || !dateValid));
+  const { markSaved } = useEditorDirty(editable && (signature !== initialSignature.current || !dateValid || !timingReady));
   const lastPrices = useLastPurchasePrices(stockEditable ? rows.map((row) => row.ingredientId) : [], location, purchase?.id);
   const returns = useStockDocuments(purchase?.warehouseId ?? undefined, 'supplier_return');
   const linkedReturns = (returns.data ?? []).filter((document) => document.sourcePurchaseId === purchase?.id);
@@ -219,7 +234,7 @@ function PurchaseForm({
     });
   }
   async function save(complete: boolean) {
-    if (busy || !editable || (stockEditable && !catalogReady) || !dateValid || !date) return;
+    if (busy || !editable || (stockEditable && !catalogReady) || !dateValid || !date || !timingReady) return;
     setError('');
     setValidationAttempt((attempt) => attempt + 1);
     if (discountError) setDiscountVisible(true);
@@ -238,6 +253,7 @@ function PurchaseForm({
         supplier: supplier.trim(),
         supplierId: suppliers.data?.find((s) => s.name === supplier.trim())?.id,
         date: purchase && date === localTime(purchase.date) ? purchase.date : new Date(date).toISOString(),
+        ...(timingEditable ? { effectiveAt } : {}),
         note: note.trim(),
         discount: discountAmount,
         attachments: attachments
@@ -299,11 +315,11 @@ function PurchaseForm({
       )}
       {purchase?.status === 'completed' ? (
         <div className="space-y-1 text-sm text-text-muted">
-          <p>Поставка проведена{purchase.postedAt ? ` ${formatDocumentDate(purchase.postedAt)}` : ''}. Остатки изменены в момент проведения.</p>
+          <p>Поставка проведена{purchase.postedAt ? ` ${inventoryTimeDisplay(purchase.postedAt)} (Бишкек)` : ''}.{purchase.effectiveAt ? ' Остатки и себестоимость пересчитаны с даты складской операции.' : ' Остатки изменены в момент проведения.'}</p>
           {correcting && !stockEditable && <p role="status">{purchase.correctionBlockedReason} Доступно исправление реквизитов и комментария.</p>}
           {correcting && stockEditable && <p>Исправление обновит остатки и себестоимость. Предыдущая версия останется в истории.</p>}
         </div>
-      ) : editable && <p className="text-sm text-text-muted">«Сохранить» оприходует товары сейчас. Черновик не меняет остатки. Дата накладной хранится отдельно от времени проведения.</p>}
+      ) : editable && <p className="text-sm text-text-muted">«Сохранить» оприходует товары с выбранного момента. Черновик не меняет остатки. Дата накладной хранится отдельно.</p>}
       <div className="poster-form-fields space-y-3">
         <DocumentField label="Дата накладной">
           {editable ? (
@@ -314,25 +330,24 @@ function PurchaseForm({
             <span className="poster-readonly">{formatDocumentDate(purchase?.date ?? date)}</span>
           )}
         </DocumentField>
+        {timingEditable ? <InventoryTimingFields value={timing} onChange={setTiming} onValidityChange={setTimingValid} disabled={busy} operationLabel="Оприходовать товары" /> : <DocumentField label="Дата складской операции">
+          <span className="poster-readonly">{purchase?.effectiveAt || purchase?.postedAt ? `${inventoryTimeDisplay((purchase.effectiveAt ?? purchase.postedAt)!)} (Бишкек)` : 'На момент проведения'}</span>
+        </DocumentField>}
         <DocumentField label="Поставщик">
           {editable ? (
             <>
-              <input
-                className="input w-full"
-                list="warehouse-suppliers"
-                aria-label="Поставщик"
-                aria-invalid={!!validationAttempt && !!supplierError || undefined}
-                aria-describedby={validationAttempt && supplierError ? `${formId}-supplier-error` : undefined}
+              <DocumentProductPicker
+                label="Поставщик"
+                placeholder="Выберите поставщика или введите название"
+                allowCustomValue
                 value={supplier}
-                onChange={(e) => setSupplier(e.target.value)}
+                options={(suppliers.data ?? []).map((entry) => ({ id: entry.name, name: entry.name }))}
+                onChange={setSupplier}
+                error={validationAttempt ? supplierError || undefined : undefined}
                 disabled={busy}
               />
-              <datalist id="warehouse-suppliers">
-                {suppliers.data?.map((s) => (
-                  <option key={s.id} value={s.name} />
-                ))}
-              </datalist>
-              {!!validationAttempt && supplierError && <p id={`${formId}-supplier-error`} className="mt-1 text-xs text-danger">{supplierError}</p>}
+              {suppliers.isPending && <p role="status" className="mt-1 text-xs text-text-muted">Загрузка поставщиков. Можно ввести название вручную.</p>}
+              {suppliers.isError && <p role="alert" className="mt-1 text-xs text-text-muted">Список поставщиков не загрузился. Введите название или <button type="button" className="text-primary" onClick={() => void suppliers.refetch()}>повторите загрузку</button>.</p>}
             </>
           ) : (
             <span className="poster-readonly">{supplier || '—'}</span>
@@ -452,9 +467,11 @@ function PurchaseForm({
                     <td className="py-2 pr-2">
                       {stockEditable ? (
                         <DocumentProductPicker
+                          id={`${errorId}-product-input`}
                           value={row.ingredientId}
-                          options={(ingredients.data ?? []).filter((entry) => entry.preparationMode !== 'virtual')}
+                          options={(ingredients.data ?? []).filter((entry) => entry.preparationMode !== 'virtual').map((entry) => ({ ...entry, detail: entry.category ?? undefined }))}
                           onChange={(id) => choose(row.key, id)}
+                          onSelected={() => focusDocumentInput(`${errorId}-quantity-input`)}
                           disabled={busy}
                           loading={ingredients.isPending}
                           loadError={ingredients.isError ? 'Не удалось загрузить продукты.' : undefined}
@@ -498,6 +515,7 @@ function PurchaseForm({
                       {stockEditable ? (
                         <>
                         <input
+                          id={`${errorId}-quantity-input`}
                           className="input h-9 w-full text-right"
                           type="number"
                           min="0"
@@ -626,7 +644,11 @@ function PurchaseForm({
               type="button"
               className="py-3 text-sm text-primary"
               disabled={busy}
-              onClick={() => setRows((current) => [...current, emptyRow()])}
+              onClick={() => {
+                const row = emptyRow();
+                setRows((current) => [...current, row]);
+                focusDocumentInput(`${formId}-${row.key}-product-input`);
+              }}
             >
               + Добавить ещё
             </button>
@@ -715,7 +737,7 @@ function PurchaseForm({
             <button
               type="button"
               className="btn-primary btn-md"
-              disabled={busy || (stockEditable && !catalogReady) || !dateValid || !date}
+              disabled={busy || (stockEditable && !catalogReady) || !dateValid || !date || !timingReady}
               onClick={() => void save(true)}
             >
               {correcting ? 'Сохранить исправление' : 'Сохранить'}
@@ -723,7 +745,7 @@ function PurchaseForm({
             {correcting ? <button type="button" className="btn-secondary btn-md" disabled={busy} onClick={() => { markSaved(); onCorrecting(false); }}>Отменить изменения</button> : <button
               type="button"
               className="btn-secondary btn-md"
-              disabled={busy || (stockEditable && !catalogReady) || !dateValid || !date}
+              disabled={busy || (stockEditable && !catalogReady) || !dateValid || !date || !timingReady}
               onClick={() => void save(false)}
             >
               Сохранить черновик

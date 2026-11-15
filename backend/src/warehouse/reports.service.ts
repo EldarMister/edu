@@ -3,11 +3,15 @@ import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { getCafeId } from '../tenant/tenant-context';
 import { warehouseDateRange } from './report-range';
-import { WarehouseReportQuery, WarehouseReportView } from './reports.dto';
-import { resolveWarehouse, warehouseDocumentFilter, warehouseBalances } from './warehouse-location';
+import { reportIngredientFilters } from './report-ingredient-filters';
+import { WarehouseMovementExportQuery, WarehouseReportQuery, WarehouseReportView } from './reports.dto';
+import { warehouseBalances } from './warehouse-location';
+import { reportWarehouses } from './report-warehouses';
+import { internalTransferLegs } from './report-transfer-flow';
 import { normalizeUnit, unitDef, unitLabel } from './units';
 import { preparedLossQuantity, warehouseLossFilter } from './movement-cost';
 import { movementSummary } from './movement-summary';
+import { movementExportColumns, writeMovementWorkbook } from './movement-report-xlsx';
 
 type ReportRow = {
   id: string; createdAt: Date | null; ingredientId: string; ingredientName: string;
@@ -40,7 +44,9 @@ export class WarehouseReportsService {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 100;
     const totalCost = rows.reduce((sum, row) => sum.add(row.exactCost), zero);
-    const salesPerformance = query.view === 'sales' && !query.warehouseId && !query.ingredientId && !query.category && !query.search && !query.type && !query.kind
+    const ingredientFilters = reportIngredientFilters(query);
+    const salesPerformance = query.view === 'sales' && !query.warehouseId && !query.warehouseIds
+      && !query.ingredientId && !ingredientFilters.category && !ingredientFilters.kind && !query.search && !query.type
       ? await this.salesPerformance(query, db) : null;
     return {
       view: query.view ?? 'movements', page, pageSize, totalRows: rows.length,
@@ -118,6 +124,16 @@ export class WarehouseReportsService {
     return this.prisma.$transaction((tx) => this.readCsv(tx, query), { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
+  async exportMovementXlsx(query: WarehouseMovementExportQuery) {
+    if (query.view && query.view !== 'movement_summary') {
+      throw new BadRequestException('Экспорт в Excel доступен для отчёта по движению');
+    }
+    const columns = movementExportColumns(query.columns);
+    const summary = await this.prisma.$transaction((tx) => movementSummary(tx, query),
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    return writeMovementWorkbook(summary.rows, columns);
+  }
+
   private async readCsv(db: Prisma.TransactionClient, query: WarehouseReportQuery) {
     if (query.view === 'movement_summary') {
       const summary = await movementSummary(db, query);
@@ -144,15 +160,12 @@ export class WarehouseReportsService {
     if (!cafeId) throw new BadRequestException('Заведение не назначено');
     const view = query.view ?? 'movements';
     const period = warehouseDateRange(query.from, query.to);
-    const warehouse = query.warehouseId ? await resolveWarehouse(db, query.warehouseId) : null;
-    const locations = await db.warehouse.findMany({ where: { cafeId } });
-    const names = new Map(locations.map((location) => [location.id, location.name]));
-    const defaultWarehouse = locations.find((location) => location.isDefault);
+    const scope = await reportWarehouses(db, query);
+    const names = new Map(scope.locations.map((location) => [location.id, location.name]));
     const ingredientFilter: Prisma.IngredientWhereInput = {
       cafeId, ...(query.ingredientId ? { id: query.ingredientId } : {}),
       ...(query.search ? { name: { contains: query.search.trim(), mode: 'insensitive' } } : {}),
-      ...(query.category ? { category: query.category } : {}),
-      ...(query.kind ? { kind: query.kind } : {}),
+      ...reportIngredientFilters(query),
     };
     if (view === 'balances') {
       const ingredients = await db.ingredient.findMany({
@@ -160,7 +173,7 @@ export class WarehouseReportsService {
       });
       const rows: InternalRow[] = [];
       // A separate row per warehouse preserves each location's valuation.
-      for (const location of warehouse ? [warehouse] : locations) {
+      for (const location of scope.selected) {
         const balances = await warehouseBalances(db, location, ingredients);
         for (const ingredient of ingredients) {
           const balance = balances.get(ingredient.id)!;
@@ -185,7 +198,7 @@ export class WarehouseReportsService {
       throw new BadRequestException('Неизвестный тип движения');
     }
     const where: Prisma.StockMovementWhereInput = {
-      cafeId, ...warehouseDocumentFilter(warehouse), ingredient: ingredientFilter,
+      cafeId, ...scope.filter, ingredient: ingredientFilter,
       ...(period ? { createdAt: period } : {}),
       AND: [viewFilter(view), ...(query.type ? [{ type: query.type as StockMovementType }] : [])],
     };
@@ -215,8 +228,8 @@ export class WarehouseReportsService {
       return {
         id: movement.id, createdAt: movement.createdAt, ingredientId: movement.ingredientId,
         ingredientName: movement.ingredient.name, category: movement.ingredient.category,
-        warehouseId: movement.warehouseId ?? defaultWarehouse?.id ?? null,
-        warehouseName: names.get(movement.warehouseId ?? '') ?? defaultWarehouse?.name ?? 'Основной склад',
+        warehouseId: movement.warehouseId ?? scope.defaultWarehouse?.id ?? null,
+        warehouseName: names.get(movement.warehouseId ?? '') ?? scope.defaultWarehouse?.name ?? 'Основной склад',
         quantity: Number(movement.change.div(unitDef(unit).factor)), unit: unitLabel(unit),
         exactQuantity: movement.change.div(unitDef(unit).factor),
         unitCost: movement.costKnown ? Number(movement.costAtMoment.mul(unitDef(unit).factor).toDecimalPlaces(8)) : null,
@@ -256,9 +269,10 @@ function groupMovements(rows: InternalRow[]) {
     quantity: Prisma.Decimal; cost: Prisma.Decimal; costKnown: boolean; count: number;
   };
   const groups = new Map<string, Group>();
+  const internalLegs = internalTransferLegs(rows.map((row) => ({ ...row, quantity: row.exactQuantity })));
   for (const row of rows) {
     // Pure valuation and prepared-loss evidence does not move physical quantity.
-    if (row.exactQuantity.isZero()) continue;
+    if (row.exactQuantity.isZero() || internalLegs.has(row.id)) continue;
     const direction = row.exactQuantity.gt(0) ? 'incoming' : 'outgoing';
     const sourceType = row.sourceType ?? 'manual';
     const key = JSON.stringify([direction, sourceType, row.unit]);
@@ -267,7 +281,8 @@ function groupMovements(rows: InternalRow[]) {
       quantity: zero, cost: zero, costKnown: true, count: 0,
     };
     group.quantity = group.quantity.add(row.exactQuantity.abs());
-    group.cost = group.cost.add(row.exactCost.abs());
+    // Stock valuation adjustments affect book value, not the original unit cost.
+    group.cost = group.cost.add(row.exactCost.sub(row.exactAdjustment).abs());
     group.costKnown &&= row.costKnown;
     group.count++;
     groups.set(key, group);

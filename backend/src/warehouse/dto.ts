@@ -151,6 +151,9 @@ export class PurchaseItemInputDto {
 }
 
 export class PurchaseMetadataDto {
+  @IsOptional() @IsString() @MaxLength(35)
+  effectiveAt?: string | null;
+
   @IsOptional() @IsString() @MaxLength(160)
   supplierId?: string | null;
   @IsOptional() @IsString() @MaxLength(2000)

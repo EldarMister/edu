@@ -17,7 +17,8 @@ function loadTypeScript(filename) {
   return module.exports;
 }
 
-const { documentQuantityError, documentQuantityValue, returnableQuantityInUnit } = loadTypeScript(
+const { documentQuantityError, documentQuantityInUnit, documentQuantityValue, documentStockShortages, documentUnitCost,
+  returnableQuantityInUnit } = loadTypeScript(
   resolve(__dirname, '../src/features/admin/pages/warehouse/stock-document-form.ts'),
 );
 
@@ -49,4 +50,23 @@ test('a supplier return limit follows the saved row unit even when the catalogue
   assert.ok(documentQuantityError('2501', false, grams));
   assert.equal(returnableQuantityInUnit(12, 'шт.'), 12);
   assert.equal(returnableQuantityInUnit(2500, 'unknown'), undefined);
+});
+
+test('writeoff and transfer shortages combine lines in the warehouse base unit', () => {
+  const catalog = [{ id: 'rice', name: 'Рис', unit: 'кг', stockBase: 1000 }];
+  assert.deepEqual(documentStockShortages(catalog, [
+    { ingredientId: 'rice', quantity: 700, unit: 'g' },
+    { ingredientId: 'rice', quantity: 0.5, unit: 'кг' },
+    { ingredientId: 'rice', quantity: null, unit: 'кг' },
+    { ingredientId: 'rice', quantity: 200, unit: 'мл' },
+  ]), [{ ingredientId: 'rice', name: 'Рис', unit: 'кг', available: 1, requested: 1.2, deficit: 0.2 }]);
+  assert.deepEqual(documentStockShortages(catalog, [{ ingredientId: 'rice', quantity: 1, unit: 'kg' }]), []);
+});
+
+test('copied quantities and draft costing preserve the saved physical unit', () => {
+  assert.equal(documentQuantityInUnit(0.25, 'кг', 'g'), 250);
+  assert.equal(documentQuantityInUnit(0.25, 'кг', 'мл'), undefined);
+  assert.equal(documentUnitCost('кг', 0.11), 110);
+  assert.equal(documentUnitCost('г', 0.11), 0.11);
+  assert.equal(documentUnitCost('кг', null), null);
 });

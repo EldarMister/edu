@@ -13,7 +13,8 @@ const scrollPositions = new Map<string, number>();
 function scrollKey(pathname: string, search: string) {
   const params = new URLSearchParams(search);
   // Disclosures change the URL for Back navigation without moving the current list.
-  ['balanceExpanded', 'catalogueExpanded', 'movementExpanded', 'movementDocuments'].forEach((key) => params.delete(key));
+  ['balanceExpanded', 'catalogueExpanded', 'movementExpanded', 'movementDocuments', 'supplyExpanded',
+    'supplyColumns', 'movementColumns', 'movementColumnWidths', 'movementClosedGroups'].forEach((key) => params.delete(key));
   return `${pathname}?${params.toString()}`;
 }
 

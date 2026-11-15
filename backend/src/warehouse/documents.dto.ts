@@ -31,6 +31,10 @@ export class WriteoffSourceLineDto {
   sourceId: string;
   @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
   variantId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  packageId?: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  packageSnapshotLineId?: string;
   @IsNumber() @Min(0.000001)
   quantity: number;
   @IsOptional() @IsString() @MaxLength(16)
@@ -40,6 +44,8 @@ export class WriteoffSourceLineDto {
 }
 
 export class WriteoffPreviewDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  documentId?: string;
   @IsString() @IsNotEmpty() @MaxLength(160)
   warehouseId: string;
   @IsArray() @ArrayMaxSize(200) @ValidateNested({ each: true }) @Type(() => WriteoffSourceLineDto)
@@ -54,6 +60,12 @@ export class WarehouseDocumentRevisionDto {
 export class UpdateWarehouseDocumentDto extends WarehouseDocumentRevisionDto {
   @IsOptional() @IsIn(['submit', 'post'])
   finalize?: 'submit' | 'post';
+
+  @IsOptional() @IsString() @MaxLength(35)
+  countedAt?: string | null;
+
+  @IsOptional() @IsString() @MaxLength(35)
+  effectiveAt?: string | null;
 
   @IsOptional() @IsEnum(WarehouseWriteoffReason)
   reason?: WarehouseWriteoffReason | null;

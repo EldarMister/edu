@@ -158,13 +158,18 @@ export class IngredientStockService {
     await this.lockOrderStock(tx, orderId);
     const sourceIds = [...new Set(lines.flatMap((line) => [line.sourceLineId, line.stockSourceLineId, line.id].filter((id): id is string => !!id)))];
     if (!sourceIds.length) return [];
+    const saleFilter = { sourceType: 'order', sourceId: orderId, type: 'sale', orderItemId: { in: sourceIds } } as const;
+    const affected = await tx.stockMovement.findMany({ where: saleFilter, select: { ingredientId: true } });
+    if (!affected.length) return [];
+    await lockIngredients(tx, affected.map((sale) => sale.ingredientId));
+    // A historical repost can reprice the sale while the return waits for the
+    // ingredient lock. Read the final sale price only after obtaining the lock.
     const sales = await tx.stockMovement.findMany({
-      where: { sourceType: 'order', sourceId: orderId, type: 'sale', orderItemId: { in: sourceIds } },
+      where: saleFilter,
       include: { ingredient: true, warehouse: true },
     });
     if (!sales.length) return [];
     const sourceIdFor = (line: OrderLine) => line.sourceLineId ?? (sales.some((sale) => sale.orderItemId === line.id) ? line.id : line.stockSourceLineId ?? line.id);
-    await lockIngredients(tx, sales.map((sale) => sale.ingredientId));
     const expandedLines: OrderLine[] = [];
     for (const line of lines) {
       const sourceId = sourceIdFor(line);

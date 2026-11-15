@@ -3,7 +3,7 @@ import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { PROCESSING_METHODS, useIngredients, type Ingredient } from './api';
 import { QueryState } from './WarehouseUi';
-import { usePageFilter } from './workspace-route';
+import { usePageFilter, usePageFilters } from './workspace-route';
 import { useWarehousePolicy } from './settings-api';
 import { UNIT_OPTIONS, unitLabel } from './units';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
@@ -11,6 +11,7 @@ import { WorkspaceSearch } from '../WorkspaceSearch';
 import { BalanceSupplies } from './BalanceSupplies';
 import { balanceMoney, balanceQuantity, balanceValue } from './balance-format';
 import { CatalogueUsage, PreparationComposition } from './CatalogueDetails';
+import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
 
 export type StockFilter = '' | 'low' | 'empty';
 export function IngredientsTab({
@@ -52,6 +53,9 @@ export function IngredientsTab({
   const [unit, setUnit] = usePageFilter('unit');
   const [sort, setSort] = usePageFilter('balanceSort', 'asc');
   const [catalogueSort, setCatalogueSort] = usePageFilter('nameSort', 'asc');
+  const [, updateBalanceFilters] = usePageFilters({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '' });
+  const balanceKinds = warehouseMultiFilterValues(kind);
+  const balanceCategories = warehouseMultiFilterValues(category);
   const policy = useWarehousePolicy();
   const production = policy.data?.warehouseProductionEnabled || policy.data?.productionInUse;
   const query = useIngredients('', warehouseId);
@@ -69,8 +73,8 @@ export function IngredientsTab({
         [item.name, item.barcode, item.category].some((value) =>
           value?.toLocaleLowerCase().includes(searchText),
         )) &&
-      (catalogue || !kind || balanceKind(item) === kind || item.kind === kind) &&
-      (!category || item.category === category) &&
+      (catalogue || !balanceKinds.length || balanceKinds.includes(balanceKind(item)) || balanceKinds.includes(item.kind ?? '')) &&
+      (catalogue ? !category || item.category === category : !balanceCategories.length || balanceCategories.includes(item.category ?? '')) &&
       (!unit || item.displayUnit === unit) &&
       (preparedCatalogue || !filter || (filter === 'empty' ? item.stock <= 0 : item.isLow && item.stock > 0)),
   );
@@ -89,7 +93,8 @@ export function IngredientsTab({
   const stock = (item: Ingredient) => (virtual(item) ? 'По рецепту' : quantity(item.stock, item));
   const kindLabel = (item: Ingredient) =>
     item.isPrepared ? 'Полуфабрикат' : ['goods', 'beverage'].includes(item.kind ?? '') ? 'Товар' : 'Ингредиент';
-  const threshold = (item: Ingredient) => (virtual(item) ? '—' : quantity(item.lowStockThreshold, item));
+  const threshold = (item: Ingredient) => virtual(item) ? '—'
+    : `${item.lowStockThreshold.toLocaleString('ru-RU', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${item.unit}`;
   const output = (item: Ingredient) =>
     item.recipeOutputQuantity != null && item.recipeOutputUnit
       ? balanceQuantity(item.recipeOutputQuantity, unitLabel(item.recipeOutputUnit))
@@ -124,10 +129,10 @@ export function IngredientsTab({
       <button type="button" onClick={() => onOpen(item)}>
         {preparedCatalogue
           ? can('actions.warehouseRecipes')
-            ? 'Ред.'
+            ? catalogue ? 'Ред.' : 'Изменить'
             : 'Открыть'
           : can('actions.warehouseSettings')
-            ? 'Ред.'
+            ? catalogue ? 'Ред.' : 'Изменить'
             : 'Открыть'}
       </button>
       {production &&
@@ -215,16 +220,14 @@ export function IngredientsTab({
         </WorkspaceHeaderActions>
       )}
       <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск позиции" value={search} onChange={setSearch} />
+        <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={setSearch} />
         {filters}
         {!catalogue && (
-          <Select
-            ariaLabel="Тип"
-            className="poster-filter w-36"
+          <WarehouseMultiFilter
+            label="Тип"
             value={kind}
             onChange={setKind}
             options={[
-              { value: '', label: 'Тип' },
               { value: 'ingredient', label: 'Ингредиент' },
               { value: 'goods', label: 'Товар' },
               { value: 'preparation', label: 'Полуфабрикат' },
@@ -233,7 +236,7 @@ export function IngredientsTab({
         )}
         {!preparedCatalogue && (
           <>
-            <Select
+            {catalogue ? <Select
               ariaLabel="Категория"
               className="poster-filter w-40"
               value={category}
@@ -242,7 +245,10 @@ export function IngredientsTab({
                 { value: '', label: 'Категория' },
                 ...categories.map((value) => ({ value, label: value })),
               ]}
-            />
+            /> : <WarehouseMultiFilter label="Категория" value={category} onChange={setCategory} options={[
+              { value: '', label: 'Без категории' },
+              ...categories.map((value) => ({ value, label: value })),
+            ]} />}
             {catalogue && <Select
               ariaLabel="Единица измерения"
               className="poster-filter w-40"
@@ -293,6 +299,10 @@ export function IngredientsTab({
             )}
           </div>
         </details>
+        {!catalogue && (filtered || warehouseId) && <button type="button" className="poster-balance-reset"
+          onClick={() => updateBalanceFilters({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '' })}>
+          Сбросить всё
+        </button>}
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">
@@ -442,7 +452,7 @@ export function IngredientsTab({
               <tfoot>
                 <tr>
                   <td colSpan={catalogue === 'ingredients' ? 6 : 5}>
-                    {unknown ? 'Известная стоимость' : 'Итого'}
+                    {unknown ? 'Известная стоимость' : catalogue ? 'Итого' : 'Всего'}
                   </td>
                   <td className="whitespace-nowrap text-right tabular-nums">{amount(total)}</td>
                   <td />
@@ -454,12 +464,13 @@ export function IngredientsTab({
         <div className="divide-y divide-border md:hidden">
           {rows.map((item) => (
             <article key={item.id} className="py-3">
+              {catalogue ? <>
               <div className="flex items-start justify-between gap-3">
-                {catalogue ? <button type="button" className="text-left text-sm text-primary"
+                <button type="button" className="text-left text-sm text-primary"
                   aria-expanded={catalogueDetail?.id === item.id && catalogueDetail.kind === 'usage'}
                   onClick={() => toggleCatalogue(item.id, 'usage')}>
                   {item.name}
-                </button> : toggle(item, `${detailId}-mobile-${item.id}`)}
+                </button>
                 {costs && (
                   <span className="shrink-0 text-sm">
                     {listCost(item) == null ? '—' : amount(listCost(item)!)}
@@ -470,12 +481,18 @@ export function IngredientsTab({
                 <span>{preparedCatalogue ? 'Выход' : item.category || 'Без категории'}</span>
                 <span>{preparedCatalogue ? output(item) : stock(item)}</span>
               </div>
-              {!catalogue && (
-                <div className="mt-1 flex justify-between gap-3 text-xs text-text-muted">
-                  <span>{kindLabel(item)}</span>
-                  <span>Лимит: {threshold(item)}</span>
-                </div>
-              )}
+              </> : <>
+                {toggle(item, `${detailId}-mobile-${item.id}`)}
+                <p className="poster-balance-mobile-meta">{kindLabel(item)}{item.category ? ` · ${item.category}` : ''}</p>
+                <dl className="poster-balance-mobile-values">
+                  <div><dt>Остатки</dt><dd>{stock(item)}</dd></div>
+                  <div><dt>Лимит</dt><dd>{threshold(item)}</dd></div>
+                  {costs && <>
+                    <div><dt>Себестоимость</dt><dd>{unitCost(item) == null ? '—' : amount(unitCost(item)!)}</dd></div>
+                    <div><dt>Сумма</dt><dd>{!virtual(item) && balanceValue(item) != null ? amount(balanceValue(item)!) : '—'}</dd></div>
+                  </>}
+                </dl>
+              </>}
               {catalogue ? <div className="mt-2">{actions(item)}</div> : expanded === item.id && details(item, `${detailId}-mobile-${item.id}`)}
               {catalogue && catalogueDetail?.id === item.id && catalogueDetails(item)}
             </article>
@@ -483,7 +500,7 @@ export function IngredientsTab({
           {!rows.length && emptyState}
           {!preparedCatalogue && costs && rows.length > 0 && (
             <p className="flex justify-between py-3 text-sm font-medium">
-              <span>{unknown ? 'Известная стоимость' : 'Итого'}</span>
+              <span>{unknown ? 'Известная стоимость' : catalogue ? 'Итого' : 'Всего'}</span>
               <span>{amount(total)}</span>
             </p>
           )}

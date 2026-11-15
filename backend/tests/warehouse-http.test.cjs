@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const { randomUUID, randomInt } = require('node:crypto');
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
+const XLSX = require('xlsx');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 const api = process.env.WAREHOUSE_TEST_API_URL;
@@ -27,8 +28,9 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     const reader = await createUser('KITCHEN', { sections: { warehouse: true }, actions: { warehouseProduce: false, warehouseRecipes: true, warehouseReports: false, warehouseCosts: false } });
     const outsider = await createUser('WAITER', { sections: { warehouse: true }, actions: { warehouseApprove: true } });
     const reportReader = await createUser('ADMIN', { sections: { warehouse: true }, actions: {
-      warehouseReports: true, warehouseCosts: true, warehouseReceive: false,
+      warehouseReports: true, warehouseCosts: true, warehouseReceive: false, exportReports: false,
     } });
+    const reportBlocked = await createUser('ADMIN', { actions: { warehouseReports: false } });
     const login = async (user) => {
       const response = await fetch(`${api}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: user.phone, password }) });
       assert.equal(response.status, 200);
@@ -37,13 +39,16 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     const ownerToken = await login(owner), keeperToken = await login(keeper), outsiderToken = await login(outsider);
     const chefToken = await login(chef), readerToken = await login(reader), counterToken = await login(counter);
     const reportReaderToken = await login(reportReader);
+    const reportBlockedToken = await login(reportBlocked);
     const request = (token, path, method = 'GET', body) => fetch(`${api}/api${path}`, {
       method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
     const settings = await Promise.all(Array.from({ length: 5 }, () => request(ownerToken, '/settings')));
     assert.ok(settings.every(response => response.status === 200), 'first-use settings must be race safe');
-    const created = await request(ownerToken, '/admin/warehouse/ingredients', 'POST', { name: 'HTTP item', unit: 'pcs', kind: 'goods', stock: 5, avgCost: 7 });
+    const created = await request(ownerToken, '/admin/warehouse/ingredients', 'POST', {
+      name: 'HTTP позиция', unit: 'pcs', kind: 'goods', category: 'Напитки, холодные', stock: 5, avgCost: 7,
+    });
     assert.equal(created.status, 201);
     const ingredient = await created.json();
     const list = await request(keeperToken, '/admin/warehouse/ingredients');
@@ -63,6 +68,52 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
       assert.equal((await request(ownerToken, `${supplyPath}?${query}`)).status, 400);
     }
     assert.equal((await request(keeperToken, '/admin/warehouse/reports/export.csv')).status, 403);
+    const excelPath = '/admin/warehouse/reports/export.xlsx';
+    for (const token of [keeperToken, reportReaderToken, reportBlockedToken]) {
+      assert.equal((await request(token, excelPath)).status, 403);
+    }
+    for (const query of ['view=purchases', 'columns=kind', 'columns=name,name', 'columns=name,unexpected']) {
+      assert.equal((await request(ownerToken, `${excelPath}?${query}`)).status, 400);
+    }
+    const nameValue = encodeURIComponent('http ПоЗиЦиЯ');
+    const excel = await request(ownerToken, `${excelPath}?nameCondition=equals&nameValue=${nameValue}&columns=name,closingQuantity,closingAvgCost`);
+    assert.equal(excel.status, 200);
+    assert.equal(excel.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    assert.equal(excel.headers.get('content-disposition'), 'attachment; filename="warehouse-movement.xlsx"');
+    const workbook = XLSX.read(Buffer.from(await excel.arrayBuffer()), { type: 'buffer' });
+    assert.deepEqual(XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1 }), [
+      ['Название', 'Итог. остаток', 'Средняя себестоимость на конец'],
+      ['HTTP позиция', 5, 7],
+    ]);
+    for (const [name, kind, category] of [
+      ['Мука', 'raw', 'Сырьё'], ['Пакет', 'consumable', 'Сырьё'], ['Сок', 'goods', 'Горячие напитки'],
+    ]) {
+      const response = await request(ownerToken, '/admin/warehouse/ingredients', 'POST', { name, kind, category, unit: 'pcs' });
+      assert.equal(response.status, 201);
+    }
+    const reportPath = '/admin/warehouse/reports';
+    const facets = new URLSearchParams([
+      ['view', 'movement_summary'], ['kinds', 'raw'], ['kinds', 'goods'],
+      ['categories', 'Напитки, холодные'], ['categories', 'Сырьё'],
+    ]);
+    const readNames = async (parameters) => {
+      const response = await request(ownerToken, `${reportPath}?${parameters}`);
+      assert.equal(response.status, 200);
+      return (await response.json()).rows.map(({ name }) => name).sort();
+    };
+    assert.deepEqual(await readNames(facets), ['HTTP позиция', 'Мука']);
+    assert.deepEqual(await readNames(new URLSearchParams({ view: 'movement_summary', kinds: 'raw', categories: 'Сырьё' })), ['Мука']);
+    assert.deepEqual(await readNames(new URLSearchParams({ view: 'movement_summary', kind: 'consumable', category: 'Сырьё' })), ['Пакет']);
+    const filteredExcel = await request(ownerToken, `${excelPath}?${facets}&columns=name`);
+    assert.equal(filteredExcel.status, 200);
+    const filteredWorkbook = XLSX.read(Buffer.from(await filteredExcel.arrayBuffer()), { type: 'buffer' });
+    const [, ...filteredRows] = XLSX.utils.sheet_to_json(filteredWorkbook.Sheets[filteredWorkbook.SheetNames[0]], { header: 1 });
+    assert.deepEqual(filteredRows.map(([name]) => name).sort(), ['HTTP позиция', 'Мука']);
+    const invalidFacets = ['kinds=raw&kinds=unknown', 'categories=', `categories=${'x'.repeat(121)}`,
+      Array(7).fill('kinds=raw').join('&'), Array(101).fill('categories=x').join('&')];
+    for (const query of invalidFacets) {
+      assert.equal((await request(ownerToken, `${reportPath}?view=movement_summary&${query}`)).status, 400);
+    }
     for (const token of [keeperToken, ownerToken]) assert.equal((await request(token, `/admin/warehouse/ingredients/${ingredient.id}/adjust`, 'POST', { mode: 'set', quantity: 99, unit: 'pcs' })).status, 404);
     assert.equal((await request(outsiderToken, '/admin/warehouse/ingredients')).status, 403);
     const check = await db.ingredient.findUnique({ where: { id: ingredient.id } });
@@ -94,6 +145,17 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     assert.equal(uncountedResponse.status, 201, 'HTTP validation accepts an explicitly selected uncounted inventory position');
     const uncounted = await uncountedResponse.json();
     assert.equal(uncounted.items[0].quantity, null);
+    const inventoryPath = `/admin/warehouse/documents/${uncounted.id}`;
+    const withContext = await request(counterToken, `${inventoryPath}?includeInventoryContext=true`);
+    assert.equal(withContext.status, 200);
+    const inventory = await withContext.json();
+    assert.ok(Number.isFinite(Date.parse(inventory.inventoryContext.cutoffAt)));
+    assert.deepEqual(inventory.inventoryContext.rows, [{
+      ingredientId: atomicIngredient.id, lastCountAt: null, openingQuantity: 3,
+      incomingQuantity: 0, consumptionQuantity: 0, writeoffQuantity: -1, otherQuantity: 0,
+    }]);
+    assert.equal((await (await request(counterToken, inventoryPath)).json()).inventoryContext, undefined);
+    assert.equal((await request(counterToken, `${inventoryPath}?includeInventoryContext=invalid`)).status, 400);
     assert.equal((await request(counterToken, `/admin/warehouse/documents/${uncounted.id}/submit`, 'POST', {
       revision: uncounted.revision,
     })).status, 400, 'a partial inventory cannot silently skip selected uncounted positions');
@@ -154,11 +216,13 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     assert.equal((await request(readerToken, '/admin/warehouse/preparation/batches')).status, 403);
     assert.equal((await request(outsiderToken, '/admin/warehouse/preparation/batches')).status, 403);
 
+    await checkPurchaseExport({ db, request, ownerToken, actor: reportReader, actorToken: reportReaderToken, outsiderToken });
   } finally {
     await db.stockMovement.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.preparationBatch.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.warehouseDocument.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.preparationRecipe.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
+    await db.purchase.deleteMany({ where: { cafeId: cafe.id } });
     await db.ingredient.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
     await db.settings.deleteMany({ where: { cafeId: cafe.id } });
     await db.user.deleteMany({ where: { cafeId: cafe.id } });
@@ -167,3 +231,57 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     await db.$disconnect();
   }
 });
+
+async function checkPurchaseExport({ db, request, ownerToken, actor, actorToken, outsiderToken }) {
+  const base = '/admin/warehouse/purchases';
+  const exportPath = `${base}/export.xlsx`;
+  // Switch one test user's grants to exercise each guard without consuming
+  // more distinct logins from the local application's shared rate limiter.
+  const setPermission = (excluded) => db.user.update({ where: { id: actor.id }, data: {
+    permissions: { sections: { warehouse: excluded !== 'section' }, actions: {
+      warehouseReceive: excluded !== 'receive', warehouseCosts: excluded !== 'costs', exportReports: excluded !== 'export',
+    } },
+  } });
+  for (const excluded of ['export', 'receive', 'costs', 'section']) {
+    await setPermission(excluded);
+    assert.equal((await request(actorToken, exportPath)).status, 403);
+    assert.equal((await request(actorToken, base)).status, excluded === 'export' ? 200 : 403);
+  }
+  assert.equal((await request(outsiderToken, exportPath)).status, 403);
+  await setPermission();
+
+  const ingredientResponse = await request(ownerToken, '/admin/warehouse/ingredients', 'POST', {
+    name: 'Фильтр XLSX', unit: 'kg', category: 'Сырьё, сыпучее',
+  });
+  assert.equal(ingredientResponse.status, 201);
+  const product = await ingredientResponse.json();
+  const supplier = 'ООО Поставка, первая';
+  const created = await request(ownerToken, base, 'POST', {
+    supplier, date: '2026-11-14T18:00:00.000Z',
+    items: [{ ingredientId: product.id, quantity: 1.25, unit: 'kg', purchasePrice: 20 }],
+  });
+  assert.equal(created.status, 201);
+  const purchase = await created.json();
+  const query = new URLSearchParams([
+    ['suppliers', 'Не выбран'], ['suppliers', supplier], ['categories', 'Сырьё, сыпучее'], ['categories', 'Другая'],
+    ['from', '2026-11-15'], ['to', '2026-11-15'], ['status', 'draft'], ['dateSort', 'asc'], ['search', 'Фильтр XLSX'],
+  ]);
+  const list = await request(actorToken, `${base}?${query}`);
+  assert.equal(list.status, 200);
+  assert.deepEqual((await list.json()).map(({ id }) => id), [purchase.id]);
+  query.set('columns', 'number,supplier,totalAmount');
+  for (const token of [actorToken, ownerToken]) {
+    const response = await request(token, `${exportPath}?${query}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('content-type'), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    assert.equal(response.headers.get('content-disposition'), 'attachment; filename="warehouse-purchases.xlsx"');
+    const workbook = XLSX.read(Buffer.from(await response.arrayBuffer()), { type: 'buffer' });
+    assert.deepEqual(XLSX.utils.sheet_to_json(workbook.Sheets['Поставки'], { header: 1 }), [
+      ['№', 'Поставщик', 'Сумма'], [`ЗКП-${String(purchase.number).padStart(6, '0')}`, supplier, 25],
+    ]);
+    assert.equal(workbook.Sheets['Позиции'].H2.t, 'n');
+  }
+  for (const invalid of ['columns=number,unexpected', 'columns=number,number', 'columns=', 'from=2026-02-30', 'dateSort=random', 'status=deleted', 'suppliers=', 'categories=']) {
+    assert.equal((await request(ownerToken, `${exportPath}?${invalid}`)).status, 400, invalid);
+  }
+}

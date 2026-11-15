@@ -1,8 +1,16 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { DocumentProductPicker } from './DocumentProductPicker';
+import { focusDocumentInput } from './document-focus';
+import './document-workspace.css';
+import './inventory-workspace.css';
+import { inventoryCountMatches, inventoryCountSummary, inventoryQuantity, type InventoryCountFilter } from './inventory-workflow';
+import { InventoryCountSheet } from './InventoryCountSheet';
+import { InventoryTimingFields } from './InventoryTimingFields';
+import { inventoryTimingFor, inventoryTimingValue, inventoryTimingError, inventoryTimeDisplay } from './inventory-time';
+import { InventoryFlowDetails } from './InventoryFlowDetails';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
@@ -11,7 +19,8 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { DocumentField, DocumentFooter } from './WarehouseUi';
 import { qty, purchaseNumber, usePurchase, useIngredients, useWarehouseLocations, type Ingredient, type WarehouseLocation } from './api';
-import { documentQuantityError, documentQuantityValue, returnableQuantityInUnit } from './stock-document-form';
+import { documentQuantityError, documentQuantityFromBase, documentQuantityValue, documentStockShortages, documentUnitCost, returnableQuantityInUnit } from './stock-document-form';
+import { DocumentStockWarnings } from './DocumentStockWarnings';
 import { WriteoffLines, useWriteoffLines } from './WriteoffLines';
 import {
   useStockDocument,
@@ -33,11 +42,13 @@ export function StockDocumentModal({
   warehouse,
   isOwner,
   onClose,
+  onCopyTransfer,
 }: {
   id: string;
   warehouse: WarehouseLocation;
   isOwner: boolean;
   onClose: () => void;
+  onCopyTransfer?: (id: string) => void;
 }) {
   const query = useStockDocument(id);
   const locations = useWarehouseLocations();
@@ -68,6 +79,11 @@ export function StockDocumentModal({
           {apiError(query.error)}
         </p>
       )}
+      {document?.kind === 'transfer' && (document.status === 'posted' || document.status === 'reversed') &&
+        can('actions.warehouseTransfer') && onCopyTransfer && (
+          <WorkspaceHeaderActions><button type="button" className="btn-ghost btn-md text-primary"
+            onClick={() => onCopyTransfer(document.id)}>Копировать</button></WorkspaceHeaderActions>
+        )}
       {document?.status === 'draft' && (
         <StockDocumentDraft
           document={document}
@@ -93,8 +109,8 @@ function draftItems(document: StockDocumentDetails): DraftItem[] {
   return document.items.map((item) => ({ item, input: item.quantity === null ? '' : String(item.quantity) }));
 }
 
-function draftValues(items: DraftItem[], reason: string, note: string) {
-  return JSON.stringify({ items: items.map(({ item, input }) => [item.ingredientId, input.trim() && !Number.isFinite(Number(input)) ? input : documentQuantityValue(input)]), reason, note: note.trim() });
+function draftValues(items: DraftItem[], reason: string, note: string, countedAt?: string | null) {
+  return JSON.stringify({ items: items.map(({ item, input }) => [item.ingredientId, input.trim() && !Number.isFinite(Number(input)) ? input : documentQuantityValue(input)]), reason, note: note.trim(), countedAt: countedAt ?? null });
 }
 
 function StockDocumentDraft({
@@ -124,8 +140,23 @@ function StockDocumentDraft({
   const [items, setItems] = useState(() => draftItems(document));
   const [reason, setReason] = useState<WriteoffReason | ''>(document.reason ?? '');
   const [note, setNote] = useState(document.note ?? '');
-  const [savedValues, setSavedValues] = useState(() => draftValues(draftItems(document), document.reason ?? '', document.note ?? ''));
-  const { markSaved } = useEditorDirty(draftValues(items, reason, note) !== savedValues || (document.kind === 'writeoff' && writeoffLines.dirty));
+  const supportsStockDate = document.kind === 'writeoff' || document.kind === 'transfer';
+  const [timing, setTiming] = useState(() => inventoryTimingFor(supportsStockDate ? document.effectiveAt : document.countedAt));
+  const [timingValid, setTimingValid] = useState(true);
+  const [savedCountedAt, setSavedCountedAt] = useState(document.countedAt ?? null);
+  const [timingApplied, setTimingApplied] = useState(false);
+  const countedAt = document.kind === 'inventory' ? inventoryTimingValue(timing, savedCountedAt) : undefined;
+  const [savedEffectiveAt, setSavedEffectiveAt] = useState(document.effectiveAt ?? null);
+  const effectiveAt = supportsStockDate ? inventoryTimingValue(timing, savedEffectiveAt) : undefined;
+  const historical = supportsStockDate && timing.mode === 'past';
+  const timingChanged = document.kind === 'inventory' && countedAt !== savedCountedAt;
+  const historicalScopeChanged = document.kind === 'inventory' && !!countedAt && items.some(({ item }) => !document.items.some((saved) => saved.ingredientId === item.ingredientId));
+  const previewNeedsSave = timingChanged || historicalScopeChanged;
+  const timingReady = (document.kind !== 'inventory' && !supportsStockDate) ||
+    (timingValid && !inventoryTimingError(timing) && (supportsStockDate ? effectiveAt !== undefined : countedAt !== undefined));
+  const [savedValues, setSavedValues] = useState(() => draftValues(draftItems(document), document.reason ?? '', document.note ?? '', document.countedAt));
+  const { markSaved } = useEditorDirty(draftValues(items, reason, note, countedAt) !== savedValues ||
+    (supportsStockDate && effectiveAt !== savedEffectiveAt) || !timingReady || (document.kind === 'writeoff' && writeoffLines.dirty));
   const [error, setError] = useState('');
   const [reloading, setReloading] = useState(false);
   const [validationAttempt, setValidationAttempt] = useState(0);
@@ -167,7 +198,10 @@ function StockDocumentDraft({
     setItems(draftItems(saved));
     setReason(saved.reason ?? '');
     setNote(saved.note ?? '');
-    setSavedValues(draftValues(draftItems(saved), saved.reason ?? '', saved.note ?? ''));
+    setTiming(inventoryTimingFor(supportsStockDate ? saved.effectiveAt : saved.countedAt));
+    setSavedEffectiveAt(saved.effectiveAt ?? null);
+    setSavedCountedAt(saved.countedAt ?? null);
+    setSavedValues(draftValues(draftItems(saved), saved.reason ?? '', saved.note ?? '', saved.countedAt));
     if (document.kind === 'writeoff') writeoffLines.adopt(saved);
   }
 
@@ -193,8 +227,19 @@ function StockDocumentDraft({
     ]);
   }
 
-  async function save(action: 'save' | 'submit' | 'recount') {
-    if (pending || stale || !sourceReady) return;
+  function replaceIngredient(previousId: string, ingredientId: string) {
+    if (previousId === ingredientId) return;
+    const ingredient = byId.get(ingredientId);
+    if (!ingredient || usedIds.has(ingredientId)) return;
+    setItems((current) => current.map((row) => row.item.ingredientId !== previousId ? row : {
+      item: { ingredientId, name: ingredient.name, unit: ingredient.unit, expected: ingredient.stock,
+        quantity: null, difference: null, value: null, unitCost: ingredient.avgCost, costKnown: ingredient.valuationKnown },
+      input: '',
+    }));
+  }
+
+  async function save(action: 'save' | 'submit' | 'recount' | 'apply-time') {
+    if (pending || stale || !sourceReady || !timingReady || (action === 'submit' && previewNeedsSave)) return;
     setError('');
     setValidationAttempt((attempt) => attempt + 1);
     setSubmitAttempt(action === 'submit');
@@ -211,12 +256,15 @@ function StockDocumentDraft({
         reason: needsReason ? reason || null : undefined,
         note: note.trim(),
         recount: action === 'recount' || undefined,
+        countedAt: document.kind === 'inventory' ? countedAt : undefined,
+        effectiveAt,
         sourceLines: document.kind === 'writeoff' ? writeoffLines.input() : undefined,
         items: document.kind === 'writeoff' ? undefined : items.map(({ item, input }) => ({
           ingredientId: item.ingredientId,
           quantity: documentQuantityValue(input),
         })),
       });
+      if (previewNeedsSave) setTimingApplied(true);
       adopt(saved);
       markSaved();
       if (action === 'submit') {
@@ -225,7 +273,7 @@ function StockDocumentDraft({
           at: new Date().toISOString(),
         });
       } else {
-        push({ message: 'Черновик сохранён', at: new Date().toISOString() });
+        push({ message: timingChanged ? 'Время проверки применено. Фактические количества сохранены.' : historicalScopeChanged ? 'Учётные остатки пересчитаны. Фактические количества сохранены.' : 'Черновик сохранён', at: new Date().toISOString() });
       }
       if (action === 'submit' || writeoff) onClose();
     } catch (err) {
@@ -244,13 +292,22 @@ function StockDocumentDraft({
     }
   }
 
+  const demands = !writeoff ? [] : document.kind === 'writeoff'
+    ? writeoffLines.ready ? writeoffLines.lines.flatMap((line) => line.parts) : []
+    : items.map(({ item, input }) => ({
+      ingredientId: item.ingredientId, quantity: documentQuantityValue(input), unit: item.unit,
+    }));
+  const shortages = historical ? [] : documentStockShortages(ingredients.data ?? [], demands);
+  const deficient = new Set(shortages.map(({ ingredientId }) => ingredientId));
   const rows = items.map(({ item, input }) => {
     const ingredient = byId.get(item.ingredientId);
     const preview = document.items.find((row) => row.ingredientId === item.ingredientId) ?? item;
     const quantity = input.trim() === '' ? null : Number(input);
     const validQuantity = quantity !== null && Number.isFinite(quantity) && quantity >= 0 ? quantity : null;
-    const expected = preview.expected ?? ingredient?.stock ?? null;
-    const unitCost = preview.costKnown === false ? null : (preview.unitCost ?? ingredient?.avgCost ?? null);
+    const expected = timingChanged || (historicalScopeChanged && !document.items.some((saved) => saved.ingredientId === item.ingredientId)) ? null : preview.expected ?? ingredient?.stock ?? null;
+    const unitCost = writeoff
+      ? deficient.has(item.ingredientId) ? null : documentUnitCost(item.unit, ingredient?.avgCostBase)
+      : preview.costKnown === false ? null : (preview.unitCost ?? ingredient?.avgCost ?? null);
     const difference =
       validQuantity === null
         ? null
@@ -270,6 +327,8 @@ function StockDocumentDraft({
       input,
       error: validationAttempt ? documentQuantityError(input, !writeoff, remainingFor(item)) : undefined,
       remaining: remainingFor(item),
+      stock: document.kind === 'transfer' && ingredient ? documentQuantityFromBase(ingredient.stockBase, item.unit) : undefined,
+      category: ingredient?.category ?? undefined,
     };
   });
   const totals = rows.filter((row) => row.quantity !== null);
@@ -294,8 +353,16 @@ function StockDocumentDraft({
       ref={formRef}
       className={`poster-form poster-form--document space-y-6 ${writeoff ? 'poster-document--modern' : 'poster-document--inventory'}`}
     >
+      {!writeoff && <>
+        <InventoryCountSheet document={document} warehouseName={warehouse.name} rows={rows} />
+        <WorkspaceHeaderActions><button type="button" className="btn-ghost btn-md text-primary" disabled={previewNeedsSave || !timingReady} onClick={() => window.print()}>Печать списка</button></WorkspaceHeaderActions>
+      </>}
       <div className="poster-document-panel poster-document-fields space-y-3">
-        <DocumentHeader document={document} warehouse={warehouse} />
+        <DocumentHeader document={document} warehouse={warehouse} editingStockDate={supportsStockDate} />
+        {!writeoff && <InventoryTimingFields value={timing} onChange={setTiming} onValidityChange={setTimingValid} disabled={pending || stale} />}
+        {supportsStockDate && <InventoryTimingFields value={timing} onChange={setTiming}
+          onValidityChange={setTimingValid} disabled={pending || stale}
+          operationLabel={document.kind === 'transfer' ? 'Дата перемещения' : 'Дата списания'} />}
         {needsReason && (
           <DocumentField label="Причина списания">
             <Select
@@ -325,15 +392,24 @@ function StockDocumentDraft({
           {noteError && <p id={`${formId}-note-error`} className="mt-1 text-xs text-danger">{noteError}</p>}
         </DocumentField>
       </div>
+      {!writeoff && (previewNeedsSave || timingApplied) && <div role="status" className="inventory-timing-notice">
+        {timingChanged
+          ? 'Время проверки ещё не применено. Примените его, чтобы пересчитать учётные остатки. Все введённые фактические количества сохранятся.'
+          : historicalScopeChanged ? 'Для новых продуктов ещё нет учётного остатка на выбранное время. Обновите расчёт; введённые фактические количества сохранятся.'
+          : `Учётные остатки пересчитаны ${savedCountedAt ? `на ${inventoryTimeDisplay(savedCountedAt)} по времени Бишкека` : 'на текущий момент'}. Проверьте, что фактические количества соответствуют этому времени, затем проведите инвентаризацию.`}
+      </div>}
       {ingredients.isError && (
         <p role="alert" className="text-sm text-danger">
           {apiError(ingredients.error)}
         </p>
       )}
-      {document.kind === 'writeoff' ? <WriteoffLines editor={writeoffLines} disabled={pending || stale} showErrors={!!validationAttempt} requireRows={submitAttempt} /> : <DocumentItems
+      {document.kind === 'writeoff' ? <WriteoffLines editor={writeoffLines} disabled={pending || stale} showErrors={!!validationAttempt} requireRows={submitAttempt} showCost={!historical} /> : <DocumentItems
         writeoff={writeoff}
         rows={rows}
         total={total}
+        showCost={!historical}
+        inventoryId={writeoff || timingChanged ? undefined : document.id}
+        previewPending={!writeoff && previewNeedsSave}
         addProducts={!full ? {
           options: available,
           onSelect: addIngredient,
@@ -343,6 +419,7 @@ function StockDocumentDraft({
           onRetry: () => { void ingredients.refetch(); if (document.kind === 'supplier_return') void sourcePurchase.refetch(); },
         } : undefined}
         editable={{
+          onSelectProduct: writeoff ? replaceIngredient : undefined,
           onChange: (ingredientId, input) =>
             setItems((current) =>
               current.map((row) => (row.item.ingredientId === ingredientId ? { ...row, input } : row)),
@@ -356,12 +433,11 @@ function StockDocumentDraft({
       />}
       {!writeoff && (
         <p className="text-xs text-text-muted">
-          Посчитано {counted.length} из {items.length}.{' '}
           Пустые поля сохраняются как «не посчитано». Для отсутствующего товара укажите 0.
         </p>
       )}
-      {document.kind !== 'writeoff' && unknownValue && can('actions.warehouseCosts') && <p className="text-xs text-text-muted">Стоимость части посчитанных позиций неизвестна, итоговая сумма пока не определена.</p>}
-      {submitHint && <p className="poster-document-validation text-sm text-text-muted" role={invalidCount ? 'alert' : 'status'}>{submitHint}</p>}
+      {document.kind !== 'writeoff' && !previewNeedsSave && unknownValue && can('actions.warehouseCosts') && <p className="text-xs text-text-muted">Стоимость части посчитанных позиций неизвестна, итоговая сумма пока не определена.</p>}
+      {submitHint && (writeoff || invalidCount || !items.length) && <p className="poster-document-validation text-sm text-text-muted" role={invalidCount ? 'alert' : 'status'}>{submitHint}</p>}
       {stale && (
         <div
           role="alert"
@@ -378,12 +454,13 @@ function StockDocumentDraft({
           </button>
         </div>
       )}
+      {writeoff && <DocumentStockWarnings shortages={shortages} />}
       {error && (
         <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">
           {error}
           {document.kind === 'writeoff' && error.includes('Состав изменился') ? (
             <button type="button" className="btn-secondary btn-md" disabled={pending} onClick={() => { setError(''); writeoffLines.refresh(); }}>Обновить расчёт</button>
-          ) : (
+          ) : writeoff || stale || error.includes('Документ уже изменился') ? (
           <button
             type="button"
             className="btn-secondary btn-md"
@@ -392,36 +469,39 @@ function StockDocumentDraft({
           >
             Загрузить изменения
           </button>
-          )}
+          ) : null}
         </div>
       )}
       <p className="text-sm text-text-muted">{writeoff
         ? canApprove ? '«Сохранить» проведёт документ и изменит остатки. Черновик сохраняет данные без изменения остатков.' : 'Черновик не меняет остатки. Они изменятся после утверждения документа.'
-        : 'Черновик не меняет остатки. Учётные остатки показываются на текущий момент; перед завершением проверьте, что введённые фактические количества актуальны.'}</p>
+        : savedCountedAt ? `Черновик не меняет остатки. Учётные и фактические количества сравниваются на ${inventoryTimeDisplay(savedCountedAt)} по времени Бишкека. Более поздние движения сохраняются.`
+          : 'Черновик не меняет остатки. Учётные остатки показываются на текущий момент; перед проведением проверьте, что введённые фактические количества актуальны.'}</p>
       {!writeoff && counted.length > 0 && (
         <details className="poster-advanced">
           <summary className="cursor-pointer text-sm text-primary">Повторный подсчёт после другой инвентаризации</summary>
           <p className="mt-3 max-w-2xl text-sm text-text-secondary">Если эти продукты уже проверили другой инвентаризацией, пересчитайте их и внесите свежие фактические остатки. Затем сохраните повторный подсчёт. Это обновит черновик; остатки изменятся только при завершении.</p>
-          <button type="button" className="btn-secondary btn-md mt-3" disabled={pending || stale || invalidCount} onClick={() => void save('recount')}>Сохранить повторный подсчёт</button>
+          <button type="button" className="btn-secondary btn-md mt-3" disabled={pending || stale || invalidCount || !timingReady || previewNeedsSave} onClick={() => void save('recount')}>Сохранить повторный подсчёт</button>
         </details>
       )}
-      <DocumentFooter total={document.kind === 'writeoff' && can('actions.warehouseCosts') ? writeoffLines.calculating ? 'Итого: расчёт…' : writeoffLines.total == null ? 'Итого: стоимость неполная' : `Итого: ${balanceMoney(writeoffLines.total)}` : undefined}>
+      <DocumentFooter total={writeoff && can('actions.warehouseCosts') ? historical ? 'Стоимость после проведения' : document.kind === 'writeoff'
+        ? writeoffLines.calculating ? 'Итого: расчёт…' : writeoffLines.total == null ? 'Итого: стоимость неполная' : `Итого: ${balanceMoney(writeoffLines.total)}`
+        : total == null ? 'Итого: стоимость неполная' : `Итого: ${balanceMoney(Math.abs(total))}` : !writeoff ? `Посчитано: ${rows.filter((row) => row.quantity !== null).length} из ${items.length}` : undefined}>
         <button
           type="button"
           className="btn-primary btn-md"
-          disabled={pending || stale || !sourceReady || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess)) || (!writeoff && (invalidCount || !canSubmit))}
-          onClick={() => void save('submit')}
+          disabled={pending || stale || !sourceReady || !timingReady || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess)) || (!writeoff && (invalidCount || (!previewNeedsSave && !canSubmit)))}
+          onClick={() => void save(previewNeedsSave ? 'apply-time' : 'submit')}
         >
-          {canApprove
+          {timingChanged ? 'Применить время проверки' : historicalScopeChanged ? 'Обновить расчёт' : canApprove
             ? document.kind === 'inventory'
-              ? 'Завершить инвентаризацию'
+              ? 'Провести инвентаризацию'
               : 'Сохранить'
             : 'Отправить на утверждение'}
         </button>
         <button
           type="button"
           className="btn-secondary btn-md"
-          disabled={pending || stale || !sourceReady || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess))}
+          disabled={pending || stale || !sourceReady || !timingReady || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess))}
           onClick={() => void save('save')}
         >
           Сохранить черновик
@@ -446,6 +526,12 @@ function StockDocumentReview({
   const push = useNotifications((state) => state.push);
   const pending = transition.isPending;
   const needsApproval = document.status === 'submitted';
+  const pendingHistorical = !!document.effectiveAt && document.status === 'submitted';
+  const showAvailability = needsApproval && document.kind !== 'inventory' && !pendingHistorical;
+  const approvalCatalog = useIngredients('', warehouse.id, showAvailability);
+  const approvalDemands = document.kind === 'writeoff' && document.sourceLines?.length
+    ? document.sourceLines.flatMap((line) => line.parts) : document.items;
+  const shortages = showAvailability ? documentStockShortages(approvalCatalog.data ?? [], approvalDemands) : [];
   const reason = WRITEOFF_REASONS.find(({ value }) => value === document.reason)?.label;
 
   async function change(action: 'approve' | 'reopen' | 'reverse') {
@@ -473,6 +559,7 @@ function StockDocumentReview({
     <div
       className={`poster-form poster-form--document space-y-6 ${document.kind === 'inventory' ? 'poster-document--inventory' : 'poster-document--modern'}`}
     >
+      {document.kind === 'inventory' && <InventoryCountSheet document={document} warehouseName={warehouse.name} rows={document.items} />}
       <div className="poster-document-panel poster-document-fields space-y-3">
         <DocumentHeader document={document} warehouse={warehouse} />
         {reason && (
@@ -484,11 +571,22 @@ function StockDocumentReview({
           <span className="poster-readonly whitespace-pre-wrap break-words">{document.note || '—'}</span>
         </DocumentField>
       </div>
-      {document.kind === 'writeoff' && !!document.sourceLines?.length ? <WriteoffLines sourceLines={document.sourceLines} total={document.sourceTotal} /> : <DocumentItems
+      {document.kind === 'inventory' && document.countedAt && <p className="inventory-timing-notice">
+        Расхождение рассчитано на {inventoryTimeDisplay(document.countedAt)} по времени Бишкека.
+        {document.postedAt ? ` Документ проведён ${inventoryTimeDisplay(document.postedAt)}. Последующие движения сохранены.` : ' Остатки изменятся после проведения.'}
+        {can('actions.warehouseCosts') && ' Стоимость корректировки определяется на момент проведения.'}
+      </p>}
+      {pendingHistorical && can('actions.warehouseCosts') && <p className="inventory-timing-notice">
+        Себестоимость будет рассчитана на складскую дату при проведении.
+      </p>}
+      {document.kind === 'writeoff' && !!document.sourceLines?.length ? <WriteoffLines sourceLines={document.sourceLines} total={document.sourceTotal} showCost={!pendingHistorical} /> : <DocumentItems
         writeoff={document.kind !== 'inventory'}
         rows={document.items}
         total={document.varianceValue}
+        showCost={!pendingHistorical}
+        inventoryId={document.kind === 'inventory' ? document.id : undefined}
       />}
+      {showAvailability && <DocumentStockWarnings shortages={shortages} />}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -544,22 +642,24 @@ function StockDocumentReview({
 function DocumentHeader({
   document,
   warehouse,
+  editingStockDate = false,
 }: {
   document: StockDocumentDetails;
   warehouse: WarehouseLocation;
+  editingStockDate?: boolean;
 }) {
   const locations = useWarehouseLocations();
   const sourcePurchase = usePurchase(document.kind === 'supplier_return' ? document.sourcePurchaseId ?? null : null);
   const destination = locations.data?.locations.find((l) => l.id === document.destinationWarehouseId);
   const inventory = document.kind === 'inventory';
-  const operationDate = inventory ? document.createdAt : (document.postedAt ?? document.createdAt);
+  const operationDate = inventory ? document.createdAt : (document.effectiveAt ?? document.postedAt ?? document.createdAt);
   const operator = !inventory && document.postedAt ? document.postedByName : document.createdByName;
   return (
     <dl className="space-y-3 text-sm">
-      <Meta label={inventory ? 'Начало инвентаризации' : 'Дата и время'}>
-        {formatDocumentDate(operationDate)}
-        {operator && ` · ${operator}`}
-      </Meta>
+      {!editingStockDate && <Meta label={inventory ? 'Начало инвентаризации' : document.effectiveAt ? 'Складская дата' : 'Дата и время'}>
+        {inventory || document.effectiveAt ? inventoryTimeDisplay(operationDate) : formatDocumentDate(operationDate)}
+        {!document.effectiveAt && operator && ` · ${operator}`}
+      </Meta>}
       <Meta label={document.kind === 'transfer' ? 'Со склада' : 'Склад'}>{warehouse.name}</Meta>
       {destination && <Meta label="На склад">{destination.name}</Meta>}
       {document.kind === 'supplier_return' && (
@@ -573,14 +673,17 @@ function DocumentHeader({
       {inventory && (
         <Meta label="Тип инвентаризации">{document.mode === 'full' ? 'Полная' : 'Частичная'}</Meta>
       )}
+      {inventory && document.status !== 'draft' && <Meta label="Остатки проверены на">
+        {document.countedAt || document.postedAt ? `${inventoryTimeDisplay(document.countedAt ?? document.postedAt!)} · Бишкек` : 'Момент проведения'}
+      </Meta>}
       <Meta label="Статус">
         <span className="document-status" data-status={document.status}>
           {documentStatus(document.status)}
         </span>
       </Meta>
-      {document.postedAt && inventory ? (
-        <Meta label="Завершена">
-          {formatDocumentDate(document.postedAt)}
+      {document.postedAt && (inventory || document.effectiveAt) ? (
+        <Meta label={inventory ? 'Проведена' : 'Проведён'}>
+          {inventoryTimeDisplay(document.postedAt)} · Бишкек
           {document.postedByName && ` · ${document.postedByName}`}
         </Meta>
       ) : document.postedAt ? (
@@ -610,11 +713,18 @@ function DocumentItems({
   writeoff,
   editable,
   addProducts,
+  inventoryId,
+  previewPending = false,
+  showCost = true,
 }: {
-  rows: (StockDocumentItem & { input?: string; error?: string; remaining?: number })[];
+  rows: (StockDocumentItem & { input?: string; error?: string; remaining?: number; stock?: number; category?: string })[];
   total: number | null;
   writeoff: boolean;
+  inventoryId?: string;
+  previewPending?: boolean;
+  showCost?: boolean;
   editable?: {
+    onSelectProduct?: (previousId: string, id: string) => void;
     onChange: (id: string, value: string) => void;
     onRemove?: (id: string) => void;
     disabled: boolean;
@@ -622,32 +732,53 @@ function DocumentItems({
   addProducts?: { options: Ingredient[]; onSelect: (id: string) => void; loading?: boolean; error?: string; validationError?: string; onRetry?: () => void };
 }) {
   const { can } = usePermissions();
-  const costs = can('actions.warehouseCosts');
+  const costs = showCost && can('actions.warehouseCosts');
   const columns = writeoff ? 4 : 6;
   const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState('');
-  const [countFilter, setCountFilter] = useState('');
+  const [countFilter, setCountFilter] = useState<InventoryCountFilter>('');
   const [focusedRow, setFocusedRow] = useState<string | null>(null);
+  const [flowItemId, setFlowItemId] = useState<string | null>(null);
   const formId = useId();
   const searchText = search.trim().toLocaleLowerCase();
+  const summary = inventoryCountSummary(rows);
   const visibleRows = writeoff ? rows : rows.filter((row) =>
-    (!searchText || row.name.toLocaleLowerCase().includes(searchText)) &&
-    (!editable || countFilter !== 'uncounted' || row.quantity === null || focusedRow === row.ingredientId),
+    (!searchText || `${row.name} ${row.category ?? ''}`.toLocaleLowerCase().includes(searchText)) &&
+    ((previewPending && countFilter !== 'uncounted') || inventoryCountMatches(row, countFilter) || focusedRow === row.ingredientId),
   );
+  function focusUncounted() {
+    const row = rows.find((item) => item.quantity === null);
+    if (!row) return;
+    setSearch('');
+    setCountFilter('uncounted');
+    setFocusedRow(row.ingredientId);
+    focusDocumentInput(`${formId}-${row.ingredientId}-quantity-input`);
+  }
   const amount = (value: number | null) =>
     writeoff ? (value === null ? '—' : balanceMoney(Math.abs(value))) : formatVariance(value);
   return (
-    <section className="poster-document-panel poster-document-products">
+    <section className={`poster-document-panel poster-document-products ${!writeoff ? 'poster-inventory-count' : ''}`}>
     {!writeoff && rows.length > 0 && (
-      <div className="poster-count-toolbar mb-4 flex flex-wrap items-center gap-3">
-        <WorkspaceSearch label="Поиск продуктов инвентаризации" value={search} onChange={setSearch} />
-        {editable && <Select ariaLabel="Позиции инвентаризации" value={countFilter} onChange={setCountFilter}
-          className="w-48" options={[{ value: '', label: 'Все продукты' }, { value: 'uncounted', label: 'Не посчитано' }]} />}
-        {(searchText || countFilter) && <span className="text-xs text-text-muted">Показано {visibleRows.length} из {rows.length}</span>}
+      <>
+      <div className="poster-inventory-progress">
+        <span><strong>{summary.counted}</strong> из {summary.total} посчитано</span>
+        <span className="text-text-muted">Не посчитано: {summary.uncounted}</span>
+        {previewPending ? <span className="text-text-muted">Обновите учётные остатки для расчёта расхождений.</span> : <>
+          <button type="button" className="text-primary" onClick={() => { setCountFilter('shortage'); setFocusedRow(null); }}>Недостача: {summary.shortage}{costs && summary.shortage > 0 ? ` · ${summary.shortageValue === null ? 'стоимость неизвестна' : `−${balanceMoney(summary.shortageValue)}`}` : ''}</button>
+          <button type="button" className="text-primary" onClick={() => { setCountFilter('surplus'); setFocusedRow(null); }}>Излишек: {summary.surplus}{costs && summary.surplus > 0 ? ` · ${summary.surplusValue === null ? 'стоимость неизвестна' : `+${balanceMoney(summary.surplusValue)}`}` : ''}</button>
+        </>}
+        {editable && summary.uncounted > 0 && <button type="button" className="ml-auto text-primary" disabled={editable.disabled} onClick={focusUncounted}>К непосчитанному</button>}
       </div>
+      <div className="poster-count-toolbar mb-4 flex flex-wrap items-center gap-3">
+        <WorkspaceSearch label="Поиск продуктов и категорий инвентаризации" value={search} onChange={setSearch} />
+        <Select ariaLabel="Позиции инвентаризации" value={countFilter} disabled={previewPending} onChange={(value) => { setCountFilter(value as InventoryCountFilter); setFocusedRow(null); }}
+          className="w-52" options={[{ value: '', label: `Все продукты · ${summary.total}` }, ...(editable ? [{ value: 'uncounted', label: `Не посчитано · ${summary.uncounted}` }] : []), { value: 'differences', label: `С расхождением · ${summary.shortage + summary.surplus}` }, { value: 'shortage', label: `Недостача · ${summary.shortage}` }, { value: 'surplus', label: `Излишек · ${summary.surplus}` }]} />
+        {(searchText || countFilter) ? <button type="button" className="text-xs text-primary" onClick={() => { setSearch(''); setCountFilter(''); }}>Сбросить фильтры · показано {visibleRows.length}</button> : editable && <span className="text-xs text-text-muted">Enter — следующий продукт · Shift+Enter — предыдущий</span>}
+      </div>
+      </>
     )}
     <div className="overflow-x-auto">
-      <table className={`poster-table poster-document-table w-full table-fixed text-sm ${writeoff ? 'poster-document-table--compact min-w-[650px]' : 'min-w-[700px]'}`}>
+      <table className={`poster-table poster-document-table w-full table-fixed text-sm ${writeoff ? 'poster-document-table--compact min-w-[650px]' : 'poster-inventory-count-table min-w-[700px]'}`}>
         <colgroup>
           {writeoff ? (
             <>
@@ -670,22 +801,45 @@ function DocumentItems({
         <thead>
           <tr className="border-b border-border text-left text-xs text-text-muted">
             <th className="py-3 pr-3 font-normal">Наименование</th>
-            {!writeoff && <th className="px-3 py-3 text-right font-normal">По учёту</th>}
-            <th className="px-3 py-3 text-right font-normal">{writeoff ? 'Количество' : 'Фактически'}</th>
+            {!writeoff && <th className="px-3 py-3 text-right font-normal">Плановый остаток</th>}
+            <th className="px-3 py-3 text-right font-normal">{writeoff ? 'Количество' : 'Фактический остаток'}</th>
             {!writeoff && <th className="px-3 py-3 text-right font-normal">Разница</th>}
-            <th className="px-3 py-3 text-right font-normal">{costs ? 'Сумма' : ''}</th>
+            <th className="px-3 py-3 text-right font-normal">{costs ? writeoff ? 'Сумма' : 'Разница в деньгах' : ''}</th>
             <th />
           </tr>
         </thead>
         <tbody className={writeoff ? 'poster-document-rows' : undefined}>
           {visibleRows.map((row) => (
-            <tr key={row.ingredientId} className="border-b border-border">
+            <Fragment key={row.ingredientId}>
+            <tr className="border-b border-border">
               <td className={`py-3 pr-3 ${writeoff ? 'poster-product-cell' : ''}`}>
-                <span className="block truncate" title={row.name}>{row.name}</span>
+                {writeoff && editable?.onSelectProduct && addProducts ? <div className="poster-inline-product"><DocumentProductPicker
+                  value={row.ingredientId}
+                  options={[{ id: row.ingredientId, name: row.name, unit: row.unit }, ...addProducts.options.map((option) => ({ ...option, detail: option.category ?? undefined }))]}
+                  label={`Продукт · ${row.name}`}
+                  disabled={editable.disabled}
+                  loading={addProducts.loading}
+                  loadError={addProducts.error}
+                  onRetry={addProducts.onRetry}
+                  fallbackName={row.name}
+                  onChange={(ingredientId) => {
+                    editable.onSelectProduct?.(row.ingredientId, ingredientId);
+                    focusDocumentInput(`${formId}-${ingredientId}-quantity-input`);
+                  }}
+                  onSelected={() => focusDocumentInput(`${formId}-${row.ingredientId}-quantity-input`)}
+                /></div> : inventoryId ? (
+                  <button type="button" className="inventory-flow-toggle" title={row.name}
+                    aria-label={`Движение к плановому остатку: ${row.name}`}
+                    aria-expanded={flowItemId === row.ingredientId}
+                    onClick={() => setFlowItemId(flowItemId === row.ingredientId ? null : row.ingredientId)}>
+                    <span aria-hidden="true">{flowItemId === row.ingredientId ? '⌄' : '›'}</span>
+                    <span className="truncate">{row.name}</span>
+                  </button>
+                ) : <span className="block truncate" title={row.name}>{row.name}</span>}
               </td>
               {!writeoff && (
                 <td className="px-3 py-3 text-right text-text-secondary">
-                  {row.expected === null ? '—' : qty(row.expected, row.unit)}
+                  {row.expected === null ? '—' : inventoryQuantity(row.expected, row.unit)}
                 </td>
               )}
               <td className="px-3 py-2 text-right">
@@ -693,38 +847,48 @@ function DocumentItems({
                   <>
                   <label className={`poster-number-unit ml-auto flex items-center justify-end gap-2 ${writeoff ? 'poster-inline-number' : ''}`}>
                     <input
+                      id={`${formId}-${row.ingredientId}-quantity-input`}
                       className={`input h-9 min-w-0 w-full text-right ${writeoff ? 'poster-document-number' : ''}`}
                       type="number"
                       min="0"
                       step="any"
                       inputMode="decimal"
-                      aria-label={`Количество · ${row.name}`}
+                      aria-label={`${writeoff ? 'Количество' : 'Фактический остаток'} · ${row.name}`}
                       aria-invalid={!!row.error || undefined}
                       aria-describedby={row.error ? `${formId}-${row.ingredientId}-error` : row.remaining !== undefined ? `${formId}-${row.ingredientId}-limit` : undefined}
                       max={row.remaining}
                       disabled={editable.disabled}
                       value={row.input ?? ''}
+                      placeholder={!writeoff ? 'Не посчитано' : undefined}
                       onFocus={() => setFocusedRow(row.ingredientId)}
                       onBlur={() => setFocusedRow(null)}
                       onChange={(event) => editable.onChange(row.ingredientId, event.target.value)}
+                      onKeyDown={(event) => {
+                        if (writeoff || event.key !== 'Enter') return;
+                        event.preventDefault();
+                        const index = visibleRows.findIndex((item) => item.ingredientId === row.ingredientId);
+                        const next = visibleRows[index + (event.shiftKey ? -1 : 1)];
+                        if (next) focusDocumentInput(`${formId}-${next.ingredientId}-quantity-input`);
+                      }}
                     />
                     <span className="whitespace-nowrap text-text-muted">{row.unit}</span>
                   </label>
                   {row.remaining !== undefined && <p id={`${formId}-${row.ingredientId}-limit`} className="mt-1 text-left text-xs text-text-muted">К возврату: {qty(row.remaining, row.unit)}</p>}
+                  {row.stock !== undefined && <p className="mt-1 text-right text-xs text-text-muted">На складе {row.stock.toLocaleString('ru-RU', { maximumFractionDigits: 6 })} {row.unit}</p>}
                   {row.error && <p id={`${formId}-${row.ingredientId}-error`} className="mt-1 text-left text-xs text-danger">{row.error}</p>}
                   </>
                 ) : row.quantity === null ? (
                   '—'
                 ) : (
-                  writeoff ? balanceQuantity(row.quantity, row.unit) : qty(row.quantity, row.unit)
+                  writeoff ? balanceQuantity(row.quantity, row.unit) : inventoryQuantity(row.quantity, row.unit)
                 )}
               </td>
               {!writeoff && (
-                <td className="px-3 py-3 text-right text-text-secondary">
-                  {row.difference === null ? '—' : signedQuantity(row.difference, row.unit)}
+                <td className="px-3 py-3 text-right text-text-secondary" data-inventory-variance={inventoryCountMatches(row, 'shortage') ? 'shortage' : inventoryCountMatches(row, 'surplus') ? 'surplus' : undefined}>
+                  {row.difference === null ? '—' : inventoryQuantity(row.difference, row.unit, true)}
                 </td>
               )}
-              <td className={`px-3 py-3 text-right ${writeoff ? 'whitespace-nowrap tabular-nums' : ''}`}>{costs ? amount(row.value) : ''}</td>
+              <td className={`px-3 py-3 text-right ${writeoff ? 'whitespace-nowrap tabular-nums' : ''}`} data-inventory-variance={!writeoff && inventoryCountMatches(row, 'shortage') ? 'shortage' : !writeoff && inventoryCountMatches(row, 'surplus') ? 'surplus' : undefined}>{costs ? amount(row.value) : ''}</td>
               <td>
                 {editable?.onRemove && (
                   <button
@@ -739,18 +903,36 @@ function DocumentItems({
                 )}
               </td>
             </tr>
+            {inventoryId && flowItemId === row.ingredientId && <tr className="inventory-flow-row">
+              <td colSpan={columns}><InventoryFlowDetails documentId={inventoryId} item={row} /></td>
+            </tr>}
+            </Fragment>
           ))}
-          {!visibleRows.length && (
+          {!visibleRows.length && !(writeoff && addProducts) && (
             <tr>
               <td colSpan={columns} className="py-12 text-center text-text-muted">
                 {rows.length
-                  ? countFilter === 'uncounted' && !searchText ? 'Все продукты посчитаны.' : 'Продукты не найдены. Измените поиск или фильтр.'
+                  ? countFilter === 'uncounted' && !searchText ? 'Все продукты посчитаны.' : countFilter && !searchText ? 'Нет продуктов с таким расхождением.' : 'Продукты не найдены. Измените поиск или фильтр.'
                   : addProducts ? writeoff ? 'Добавьте продукт в документ.' : 'Выберите ниже продукты, которые нужно проверить.' : 'В документе нет позиций.'}
               </td>
             </tr>
           )}
+          {writeoff && addProducts && (adding || !rows.length) && <tr className="poster-document-entry-row">
+            <td className="poster-product-cell"><div className="poster-inline-product"><DocumentProductPicker
+              value=""
+              label="Добавить продукт"
+              autoFocus={adding}
+              options={addProducts.options.map((option) => ({ ...option, detail: option.category ?? undefined }))}
+              disabled={editable?.disabled}
+              loading={addProducts.loading}
+              loadError={addProducts.error}
+              error={addProducts.validationError}
+              onRetry={addProducts.onRetry}
+              onChange={(ingredientId) => { addProducts.onSelect(ingredientId); setAdding(false); focusDocumentInput(`${formId}-${ingredientId}-quantity-input`); }}
+            /></div></td><td className="text-right text-text-muted">—</td><td className="text-right text-text-muted">{costs ? balanceMoney(0) : ''}</td><td />
+          </tr>}
         </tbody>
-        <tfoot>
+        {(!writeoff || !editable) && <tfoot>
           <tr className={`border-t border-border bg-background/30 ${writeoff ? 'poster-document-table-total' : ''}`}>
             <td colSpan={columns - 2} className="py-3 pr-3 font-medium">
               {writeoff ? 'Итого' : 'Итого расхождение'}
@@ -758,16 +940,17 @@ function DocumentItems({
             <td className={`px-3 py-3 text-right font-medium ${writeoff ? 'whitespace-nowrap tabular-nums' : ''}`}>{costs ? amount(total) : ''}</td>
             <td />
           </tr>
-        </tfoot>
+        </tfoot>}
       </table>
     </div>
     {addProducts && (
       <div className={`poster-document-add max-w-md py-3 ${writeoff ? 'poster-inline-product' : ''}`}>
-        {adding || !rows.length ? (
+        {!writeoff && (adding || !rows.length) ? (
           <DocumentProductPicker
             key={rows.length}
             value=""
             label="Добавить продукт"
+            autoFocus={adding}
             options={addProducts.options}
             disabled={editable?.disabled}
             loading={addProducts.loading}
@@ -778,6 +961,7 @@ function DocumentItems({
               addProducts.onSelect(id);
               setAdding(false);
               setSearch('');
+              focusDocumentInput(`${formId}-${id}-quantity-input`);
             }}
           />
         ) : (
@@ -794,10 +978,4 @@ function DocumentItems({
     )}
     </section>
   );
-}
-
-function signedQuantity(value: number, unit: string) {
-  const rounded = Math.round(Math.abs(value) * 1000) / 1000;
-  const sign = rounded === 0 ? '' : value < 0 ? '−' : '+';
-  return `${sign}${qty(rounded, unit)}`;
 }

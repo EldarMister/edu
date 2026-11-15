@@ -3,7 +3,7 @@ import { Role } from '@prisma/client';
 import type { Response } from 'express';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
-import { WarehouseReportQuery } from './reports.dto';
+import { WarehouseMovementExportQuery, WarehouseReportQuery } from './reports.dto';
 import { WarehouseReportsService } from './reports.service';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { assertWarehousePermission } from './warehouse-permissions';
@@ -23,6 +23,17 @@ export class WarehouseReportsController {
     response.setHeader('Content-Type', 'text/csv; charset=utf-8');
     response.setHeader('Content-Disposition', 'attachment; filename="warehouse-report.csv"');
     response.send(csv);
+  }
+
+  @Get('export.xlsx')
+  @RequirePermission('actions.warehouseReports')
+  async exportXlsx(@Query() query: WarehouseMovementExportQuery, @Res() response: Response, @CurrentUser() user: AuthUser) {
+    assertWarehousePermission(user, 'warehouseCosts');
+    assertWarehousePermission(user, 'exportReports');
+    const workbook = await this.reports.exportMovementXlsx(query);
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', 'attachment; filename="warehouse-movement.xlsx"');
+    response.send(workbook);
   }
 
   @Get()

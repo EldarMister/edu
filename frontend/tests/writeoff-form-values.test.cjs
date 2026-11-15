@@ -17,7 +17,7 @@ function loadTypeScript(filename) {
   return module.exports;
 }
 
-const { emptyWriteoffLine, sameWriteoffSource, writeoffDraftLines, writeoffFormKey, writeoffLineInput, writeoffPreviewPlan } = loadTypeScript(
+const { changeWriteoffPackage, changeWriteoffUnit, emptyWriteoffLine, sameWriteoffSource, writeoffDraftLines, writeoffFormKey, writeoffLineInput, writeoffPreviewPlan } = loadTypeScript(
   resolve(__dirname, '../src/features/admin/pages/warehouse/writeoff-form-values.ts'),
 );
 
@@ -78,4 +78,54 @@ test('removing a saved row requires a new server total even when every remaining
   assert.equal(writeoffPreviewPlan(rows, snapshots).needed, false);
   assert.equal(writeoffPreviewPlan(rows.slice(0, 1), snapshots).needed, true);
   assert.deepEqual(writeoffPreviewPlan([], snapshots), { inputs: [], needed: false });
+});
+
+test('changing display unit preserves the actual writeoff amount and invalidates its recipe preview', () => {
+  const row = { ...writeoffDraftLines([snapshot])[0], kind: 'ingredient', sourceId: 'rice', unit: 'g', quantity: '250' };
+  const changed = changeWriteoffUnit(row, 'kg');
+  assert.equal(changed.quantity, '0.25');
+  assert.equal(changed.unit, 'kg');
+  assert.equal(changeWriteoffUnit(changed, 'g').quantity, '250');
+  assert.equal(changeWriteoffUnit({ ...row, unit: 'ml', quantity: '750' }, 'l').quantity, '0.75');
+  assert.equal(changeWriteoffUnit(row, 'pcs'), row);
+  assert.equal(changeWriteoffUnit({ ...row, quantity: '' }, 'kg').quantity, '');
+  assert.equal(changeWriteoffUnit({ ...row, quantity: '0' }, 'kg').quantity, '0');
+  const saved = { ...snapshot, kind: 'ingredient', sourceId: 'rice', unitCode: 'g', quantity: 250 };
+  assert.equal(sameWriteoffSource(changed, saved), false);
+  assert.equal(writeoffPreviewPlan([changed], [saved]).inputs[0].recipeSignature, undefined);
+});
+
+test('saved packaging retains its trusted reference while changing quantity or refreshing the recipe', () => {
+  const packed = { ...snapshot, packageId: 'half-portion', packageName: 'Полпорции', packageUnit: 'pcs', packageQuantity: 0.5, packageFactor: 0.5 };
+  const [row] = writeoffDraftLines([packed]);
+  assert.equal(sameWriteoffSource(row, packed), true);
+  assert.equal(writeoffLineInput(row).packageSnapshotLineId, packed.sourceLineId);
+  const changed = { ...row, quantity: '3' };
+  const input = writeoffPreviewPlan([changed], [packed], true).inputs[0];
+  assert.equal(input.packageId, 'half-portion');
+  assert.equal(input.packageSnapshotLineId, packed.sourceLineId);
+  assert.equal(input.recipeSignature, undefined);
+  assert.equal('packageFactor' in input, false, 'only the server decides physical conversion');
+});
+
+test('explicitly switching packages uses the current catalogue and supports fractional dish portions', () => {
+  const [row] = writeoffDraftLines([{ ...snapshot, packageId: 'pack', packageName: 'Old', packageUnit: 'pcs', packageQuantity: 6, packageFactor: 6 }]);
+  const changed = changeWriteoffPackage(row, { id: 'half', name: 'Полпорции', unit: 'pcs', quantity: 0.5, isActive: true });
+  assert.equal(changed.quantity, row.quantity);
+  assert.equal(changed.packageFactor, 0.5);
+  assert.equal(changed.packageSnapshotLineId, undefined);
+  assert.equal(writeoffLineInput(changed).packageId, 'half');
+  assert.notEqual(writeoffFormKey([changed]), writeoffFormKey([row]));
+  assert.equal(changeWriteoffPackage(row, { id: 'kg', name: 'Мешок', unit: 'kg', quantity: 5, isActive: true }), row);
+  assert.equal(changeWriteoffPackage(row, { id: 'old', name: 'Архив', unit: 'pcs', quantity: 2, isActive: false }), row);
+});
+
+test('removing a saved package converts its physical amount without reading the changed catalogue', () => {
+  const [row] = writeoffDraftLines([{ ...snapshot, kind: 'ingredient', sourceId: 'flour', unitCode: 'kg', quantity: 3,
+    packageId: 'bag', packageName: 'Old half kilo', packageUnit: 'kg', packageQuantity: 0.5, packageFactor: 500 }]);
+  const unpacked = changeWriteoffUnit(row, 'kg');
+  assert.equal(unpacked.quantity, '1.5');
+  assert.equal(unpacked.packageId, undefined);
+  assert.equal(unpacked.packageSnapshotLineId, undefined);
+  assert.equal(changeWriteoffUnit(row, 'g').quantity, '1500');
 });

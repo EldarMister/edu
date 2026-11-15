@@ -280,7 +280,7 @@ function FiscalBlock({ order }: { order: Order }) {
         {qr && (
           <div className="mt-2">
             {isImage ? (
-              <img src={qr} alt="QR ГНС" className="h-28 w-28 rounded border border-border bg-white p-1" />
+              <img src={qr} alt="QR ГНС" className="h-28 w-28 rounded border border-border bg-paper p-1" />
             ) : (
               <a
                 href={qr}

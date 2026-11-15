@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
@@ -37,8 +37,11 @@ export class WarehouseDocumentsController {
   writeoffPreview(@Body() dto: WriteoffPreviewDto) { return this.documents.writeoffPreview(dto); }
 
   @Get(':id')
-  get(@Param('id') id: string) {
-    return this.documents.get(id);
+  get(@Param('id') id: string, @Query('includeInventoryContext') includeInventoryContext?: string) {
+    if (includeInventoryContext !== undefined && includeInventoryContext !== 'true' && includeInventoryContext !== 'false') {
+      throw new BadRequestException('Параметр includeInventoryContext принимает true или false');
+    }
+    return this.documents.get(id, includeInventoryContext === 'true');
   }
 
   @Post()

@@ -126,7 +126,7 @@ export function TakeawaySwitch({ on, onChange }: { on: boolean; onChange: (v: bo
         }`}
       >
         <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+          className={`inline-block h-4 w-4 transform rounded-full bg-paper shadow transition-transform ${
             on ? 'translate-x-[18px]' : 'translate-x-0.5'
           }`}
         />

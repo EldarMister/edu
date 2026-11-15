@@ -143,6 +143,7 @@ export interface PurchaseItem {
 export interface Purchase {
   updatedAt?: string;
   postedAt?: string | null;
+  effectiveAt: string | null;
   canCorrectStock?: boolean;
   correctionBlockedReason?: string | null;
   returnableItems?: { ingredientId: string; name: string; unit: string; unitCode: UnitCode; receivedQuantity: number; returnedQuantity: number; remainingQuantity: number; receivedQuantityBase: number; returnedQuantityBase: number; remainingQuantityBase: number; remainingBase: number }[];
@@ -329,12 +330,13 @@ export function useWarehouseOverview(params: { dateFrom: string; dateTo: string;
 
 // ---------- Сырьё ----------
 
-export function useIngredients(search: string, warehouseId?: string) {
+export function useIngredients(search: string, warehouseId?: string, enabled = true) {
   const q = warehouseQuery(warehouseId);
   if (search) q.set('search', search);
   return useQuery({
     queryKey: [...KEY, 'ingredients', { search, warehouseId }],
     queryFn: () => get<Ingredient[]>(`/admin/warehouse/ingredients?${q.toString()}`),
+    enabled,
   });
 }
 
@@ -593,15 +595,32 @@ export function usePreparationMutations() {
 
 // ---------- Закупки ----------
 
-export function usePurchases(params: {
+type PurchaseListParams = {
   status: string;
   search: string;
   warehouseId?: string;
+  suppliers?: string[];
+  categories?: string[];
+  from?: string;
+  to?: string;
+  dateSort?: 'asc' | 'desc';
   enabled?: boolean;
-}) {
+};
+
+export function purchaseListQuery(params: PurchaseListParams) {
   const q = warehouseQuery(params.warehouseId);
   if (params.status) q.set('status', params.status);
   if (params.search) q.set('search', params.search);
+  if (params.from) q.set('from', params.from);
+  if (params.to) q.set('to', params.to);
+  if (params.dateSort) q.set('dateSort', params.dateSort);
+  params.suppliers?.forEach((name) => q.append('suppliers', name));
+  params.categories?.forEach((name) => q.append('categories', name));
+  return q;
+}
+
+export function usePurchases(params: PurchaseListParams) {
+  const q = purchaseListQuery(params);
   return useQuery({
     queryKey: [...KEY, 'purchases', params],
     enabled: params.enabled ?? true,
@@ -632,6 +651,7 @@ export interface CreatePurchaseInput {
   attachments?: string[];
   discount?: number;
   date?: string;
+  effectiveAt?: string | null;
   warehouseId?: string;
   supplier: string;
   items: {
@@ -656,6 +676,7 @@ export interface UpdatePurchaseInput {
   discount?: number;
   id: string;
   date?: string;
+  effectiveAt?: string | null;
   supplier?: string;
   items?: {
     purchaseItemId?: string;

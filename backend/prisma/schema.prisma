@@ -1092,6 +1092,8 @@ model WarehouseDocument {
   createdAt       DateTime                @default(now()) @map("created_at")
   submittedAt     DateTime?               @map("submitted_at")
   postedAt        DateTime?               @map("posted_at")
+  countedAt       DateTime?               @map("counted_at")
+  effectiveAt     DateTime?               @map("effective_at")
   createdById     String                  @map("created_by_id")
   createdByName   String                  @map("created_by_name")
   submittedById   String?                 @map("submitted_by_id")
@@ -1173,6 +1175,8 @@ model Purchase {
   id          String         @id @default(uuid())
   number      Int            @default(autoincrement())
   date        DateTime       @default(now())
+  effectiveAt DateTime?      @map("effective_at")
+  stockPostedAt DateTime?    @map("stock_posted_at")
   supplier    String
   supplierId String? @map("supplier_id")
   supplierRecord WarehouseSupplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
@@ -1227,7 +1231,7 @@ model PurchaseItem {
   @@map("purchase_items")
 }
 
-// Движение склада — неизменяемая запись в журнале остатков.
+// Исходная операция в журнале; расчётные остатки и стоимость обновляются при пересчёте периода.
 model StockMovement {
   cafeId       String?             @map("cafe_id")
   id           String              @id @default(uuid())
@@ -1243,6 +1247,8 @@ model StockMovement {
   costAtMoment Decimal             @map("cost_at_moment") @db.Decimal(20, 8) // себестоимость за базовую единицу
   comment      String?
   createdAt    DateTime            @default(now()) @map("created_at")
+  recordedAt   DateTime?           @map("recorded_at")
+  receiptValue Decimal?            @map("receipt_value") @db.Decimal(12, 2)
 
   ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
 

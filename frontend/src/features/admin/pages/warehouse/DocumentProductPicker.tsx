@@ -16,6 +16,11 @@ export function DocumentProductPicker({
   loadError,
   onRetry,
   error,
+  allowCustomValue = false,
+  placeholder,
+  autoFocus = false,
+  onSelected,
+  id,
 }: {
   value: string;
   options: ProductChoice[];
@@ -27,13 +32,19 @@ export function DocumentProductPicker({
   loadError?: string;
   onRetry?: () => void;
   error?: string;
+  /** Supplier names may be entered without creating a directory entry. Products never use this. */
+  allowCustomValue?: boolean;
+  placeholder?: string;
+  autoFocus?: boolean;
+  onSelected?: () => void;
+  id?: string;
 }) {
   const listId = useId();
   const selecting = useRef(false);
   const input = useRef<HTMLInputElement>(null);
   const field = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const selectedName = options.find((option) => option.id === value)?.name ?? fallbackName ?? '';
+  const selectedName = options.find((option) => option.id === value)?.name ?? fallbackName ?? (allowCustomValue ? value : '');
   const [text, setText] = useState(selectedName);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
@@ -105,6 +116,7 @@ export function DocumentProductPicker({
     selecting.current = true;
     input.current?.focus({ preventScroll: true });
     selecting.current = false;
+    onSelected?.();
   }
   function show() {
     if (disabled) return;
@@ -126,6 +138,7 @@ export function DocumentProductPicker({
     <div ref={field} className="relative min-w-0">
       <div className="relative">
       <input
+        id={id}
         ref={input}
         role="combobox"
         aria-autocomplete="list"
@@ -140,8 +153,9 @@ export function DocumentProductPicker({
         disabled={disabled}
         readOnly={unavailable}
         aria-label={label}
-        placeholder={loading ? 'Загрузка продуктов…' : loadError ? 'Не удалось загрузить продукты' : 'Выберите продукт…'}
+        placeholder={loading ? 'Загрузка продуктов…' : loadError ? 'Не удалось загрузить продукты' : placeholder ?? 'Выберите продукт…'}
         autoComplete="off"
+        autoFocus={autoFocus}
         onFocus={(event) => {
           if (!selecting.current) {
             show();
@@ -155,6 +169,7 @@ export function DocumentProductPicker({
           if (unavailable) return;
           setText(event.target.value);
           setSearch(event.target.value);
+          if (allowCustomValue) onChange(event.target.value);
           setActive(0);
           setOpen(true);
         }}
@@ -234,7 +249,7 @@ export function DocumentProductPicker({
                 </Fragment>
               ))
             ) : (
-              <p role="status" className="px-3 py-3 text-text-muted">{search.trim() ? 'Продукты не найдены. Попробуйте другое название.' : 'Нет доступных продуктов'}</p>
+              <p role="status" className="px-3 py-3 text-text-muted">{allowCustomValue ? search.trim() ? 'Это название сохранится в документе.' : 'Выберите из списка или введите название.' : search.trim() ? 'Продукты не найдены. Попробуйте другое название.' : 'Нет доступных продуктов'}</p>
             )}
           </div>,
           document.body,

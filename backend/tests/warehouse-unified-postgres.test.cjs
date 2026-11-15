@@ -10,6 +10,9 @@ const { WarehouseLocationsService } = require('../src/warehouse/locations.servic
 const { WarehouseDocumentsService } = require('../src/warehouse/documents.service.ts');
 const { CatalogService } = require('../src/admin/catalog.service.ts');
 const { WarehouseSuppliersService } = require('../src/warehouse/suppliers.ts');
+const { movementSummary } = require('../src/warehouse/movement-summary.ts');
+const { WarehouseReportsService } = require('../src/warehouse/reports.service.ts');
+const { warehouseDay } = require('../src/warehouse/report-range.ts');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new URL(url).pathname.includes('test'))) {
@@ -73,6 +76,10 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
         const sent = await docs.submit(admin, a.id, a.revision);
         const attempts = await Promise.allSettled([docs.approve(admin, a.id, sent.revision), docs.approve(admin, a.id, sent.revision)]);
         assert.deepEqual(attempts.map((v) => v.status).sort(), ['fulfilled', 'rejected']);
+        const posted = attempts.find(({ status }) => status === 'fulfilled').value;
+        const transferLegs = await db.stockMovement.findMany({ where: { sourceId: a.id, type: 'transfer' } });
+        assert.equal(transferLegs.length, 2);
+        assert.ok(transferLegs.every(({ createdAt }) => +createdAt === +posted.postedAt), 'one document belongs to one report day');
         assert.deepEqual([(await stock(cola.id)).stock, (await stock(cola.id, bar.id)).stock], [12, 12]);
         assert.equal((await stock(cola.id, bar.id)).avgCost, 9);
         await assert.rejects(docs.create(admin, { ...payload, items: [{ ingredientId: cola.id, quantity: 13 }] }), /другими позициями/);
@@ -80,6 +87,8 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
         assert.equal(reversed.status, 'reversed');
         assert.deepEqual([(await stock(cola.id)).stock, (await stock(cola.id, bar.id)).stock], [24, 0]);
         assert.equal(await db.stockMovement.count({ where: { sourceId: a.id } }), 4);
+        const reversals = await db.stockMovement.findMany({ where: { sourceId: a.id, type: 'cancel' } });
+        assert.ok(reversals.every(({ createdAt }) => +createdAt === +reversed.reversedAt));
         await assert.rejects(docs.reverse(owner, a.id, 'Повторное сторно'));
       });
       await t.test('supplier return cannot exceed receipt; reversal restores original quantity and valuation', async () => {
@@ -117,6 +126,151 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
         const pending = await docs.submit(owner, next.id, changed.revision);
         await docs.approve(owner, next.id, pending.revision);
         assert.equal((await stock(water.id)).stock, 17);
+      });
+      await t.test('zero inventory clears carrying cost, preserves subsequent receipts and can reverse a deficit', async () => {
+        const rawBalance = async (ingredientId) => {
+          const balance = await db.ingredient.findUniqueOrThrow({ where: { id: ingredientId } });
+          return [Number(balance.stock), Number(balance.avgCost), balance.valuationKnown];
+        };
+        const countZero = (ingredient) => post({ kind: 'inventory', mode: 'partial', items: [{ ingredientId: ingredient.id, quantity: 0 }] });
+        const receipt = (ingredient, quantity, purchasePrice) => purchases.create({ supplier: 'После пересчёта', complete: true,
+          items: [{ ingredientId: ingredient.id, quantity, purchasePrice }] });
+
+        const positive = await items.create({ name: 'Два на инвентаризации', unit: 'pcs', stock: 2, avgCost: 5 });
+        const draft = await docs.create(owner, { kind: 'inventory', mode: 'partial', warehouseId: main.id,
+          items: [{ ingredientId: positive.id, quantity: 0 }] });
+        assert.deepEqual(await rawBalance(positive.id), [2, 5, true], 'entering zero in a draft does not clear quantity or price');
+        const pending = await docs.submit(owner, draft.id, draft.revision);
+        const zeroed = await docs.approve(owner, draft.id, pending.revision);
+        assert.equal(zeroed.varianceValue, -10, 'the shortage uses the previous known price');
+        assert.deepEqual(await rawBalance(positive.id), [0, 0, false]);
+        const [emptyRow] = (await movementSummary(db, { ingredientId: positive.id, warehouseId: main.id })).rows;
+        assert.deepEqual([emptyRow.closingQuantity, emptyRow.closingValue], [0, 0]);
+        await receipt(positive, 3, 7);
+        assert.deepEqual(await rawBalance(positive.id), [3, 7, true]);
+
+        const noDeduction = await items.create({ name: 'Нулевой остаток с прежней ценой', unit: 'pcs', stock: 0, avgCost: 12 });
+        const zeroMovement = await countZero(noDeduction);
+        assert.deepEqual(await rawBalance(noDeduction.id), [0, 0, false]);
+        const [reset] = await db.stockMovement.findMany({ where: { sourceId: zeroMovement.id } });
+        assert.deepEqual([Number(reset.change), Number(reset.valuationAdjustment), Number(reset.costAtMoment)], [0, 0, 12]);
+        assert.equal((await movementSummary(db, { ingredientId: noDeduction.id, onlyWithMovement: 'true' })).rows.length, 0);
+        await docs.reverse(owner, zeroMovement.id, 'Пересчёт отменён');
+        assert.deepEqual(await rawBalance(noDeduction.id), [0, 12, false]);
+        const staleZero = await countZero(noDeduction);
+        await receipt(noDeduction, 2, 18);
+        await docs.reverse(owner, staleZero.id, 'Отмена прошлого нулевого пересчёта');
+        assert.deepEqual(await rawBalance(noDeduction.id), [2, 18, true], 'reversing the old reset cannot erase a verified receipt');
+
+        await db.settings.upsert({ where: { cafeId: cafe.id }, create: { cafeId: cafe.id, allowNegativeIngredientStock: true },
+          update: { allowNegativeIngredientStock: true } });
+        try {
+          const deficit = await items.create({ name: 'Минус до инвентаризации', unit: 'pcs', stock: 1, avgCost: 12 });
+          await post({ kind: 'writeoff', reason: 'damage', items: [{ ingredientId: deficit.id, quantity: 2 }] });
+          assert.deepEqual(await rawBalance(deficit.id), [-1, 12, false]);
+          const check = await countZero(deficit);
+          assert.deepEqual(await rawBalance(deficit.id), [0, 0, false]);
+          await docs.reverse(owner, check.id, 'Ошибочный нулевой факт');
+          assert.deepEqual(await rawBalance(deficit.id), [-1, 12, false]);
+        } finally {
+          await db.settings.update({ where: { cafeId: cafe.id }, data: { allowNegativeIngredientStock: false } });
+        }
+      });
+      await t.test('receipts, transfer, writeoff and inventory agree with both warehouse and combined reports', async () => {
+        const flour = await items.create({ name: 'Мука для проверки склада', unit: 'kg', kind: 'raw',
+          purchaseUnits: [{ name: 'мешок', factor: 5 }] });
+        const draft = await purchases.create({ supplier: 'Мельница', warehouseId: main.id,
+          items: [{ ingredientId: flour.id, quantity: 2, unit: 'мешок', purchasePrice: 500 }] });
+        assert.equal((await stock(flour.id)).stock, 0, 'a receipt draft does not post any quantity');
+        await purchases.complete(draft.id, owner);
+        await purchases.create({ supplier: 'Мельница', warehouseId: main.id, complete: true,
+          items: [{ ingredientId: flour.id, quantity: 10, unit: 'kg', purchasePrice: 120 }] });
+        assert.deepEqual([(await stock(flour.id)).stock, (await stock(flour.id)).avgCost], [20, 110]);
+
+        const transfer = await post({ kind: 'transfer', destinationWarehouseId: bar.id,
+          items: [{ ingredientId: flour.id, quantity: 5 }] });
+        assert.deepEqual([(await stock(flour.id)).stock, (await stock(flour.id, bar.id)).stock], [15, 5]);
+        assert.equal((await stock(flour.id, bar.id)).avgCost, 110);
+        assert.equal(transfer.items[0].value, -550);
+
+        const writeoff = await post({ kind: 'writeoff', warehouseId: bar.id, reason: 'spoilage',
+          items: [{ ingredientId: flour.id, quantity: 0.5 }] });
+        assert.equal(writeoff.items[0].value, -55);
+        const inventory = await post({ kind: 'inventory', warehouseId: bar.id, mode: 'partial',
+          items: [{ ingredientId: flour.id, quantity: 4 }] });
+        assert.deepEqual([inventory.items[0].expected, inventory.items[0].difference, inventory.items[0].value], [4.5, -0.5, -55]);
+
+        const [combined, barOnly] = await Promise.all([
+          movementSummary(db, { search: flour.name }),
+          movementSummary(db, { search: flour.name, warehouseId: bar.id }),
+        ]);
+        const values = ({ rows: [row] }) => [row.incomingQuantity, row.outgoingQuantity, row.closingQuantity, row.closingAvgCost, row.closingValue];
+        assert.deepEqual(values(combined), [20, 1, 19, 110, 2090], 'internal transfers do not increase turnover for both warehouses');
+        assert.deepEqual(values(barOnly), [5, 1, 4, 110, 440], 'the receiving warehouse reports the transfer as a receipt');
+
+        await post({ kind: 'inventory', warehouseId: bar.id, mode: 'partial',
+          items: [{ ingredientId: flour.id, quantity: 0 }] });
+        await purchases.create({ supplier: 'Мельница', warehouseId: bar.id, complete: true,
+          items: [{ ingredientId: flour.id, quantity: 2, unit: 'kg', purchasePrice: 140 }] });
+        assert.deepEqual([(await stock(flour.id, bar.id)).stock, (await stock(flour.id, bar.id)).avgCost], [2, 140]);
+      });
+      await t.test('three backdated documents reprice normal operations and agree with report dates and scopes', async () => {
+        const operator = await db.user.create({ data: { name: 'Владелец', role: 'OWNER', phone: randomUUID(), passwordHash: 'unused' } });
+        const reports = new WarehouseReportsService(db);
+        const product = await items.create({ name: 'Лёд для исторических движений', kind: 'raw', unit: 'kg', stock: 10, avgCost: 100 });
+        const pack = await db.warehousePackage.create({ data: { cafeId: cafe.id, name: 'Пакет 0,5 кг', unit: 'kg',
+          unitType: 'mass', quantity: 0.5, quantityBase: 500 } });
+        const now = Date.now();
+        const daysAgo = (days) => new Date(now - days * 86_400_000);
+        await db.ingredient.update({ where: { id: product.id }, data: { createdAt: daysAgo(4) } });
+        await db.stockMovement.updateMany({ where: { ingredientId: product.id }, data: { createdAt: daysAgo(4) } });
+        const transfer = (quantity, effectiveAt) => docs.create(operator, {
+          kind: 'transfer', warehouseId: main.id, destinationWarehouseId: bar.id, effectiveAt,
+          items: [{ ingredientId: product.id, quantity }], finalize: 'post',
+        });
+        const normalTransfer = await transfer(4);
+        const normalWaste = await docs.create(operator, { kind: 'writeoff', warehouseId: bar.id, reason: 'damage',
+          items: [{ ingredientId: product.id, quantity: 1 }], finalize: 'post' });
+        assert.equal(normalWaste.items[0].unitCost, 100);
+
+        const historicReceipt = await purchases.create({ supplier: 'Поставка за прошлый день', warehouseId: main.id,
+          effectiveAt: daysAgo(3).toISOString(), complete: true,
+          items: [{ ingredientId: product.id, quantity: 10, unit: 'kg', purchasePrice: 300 }] }, operator);
+        const source = { kind: 'ingredient', sourceId: product.id, sourceLineId: randomUUID(), quantity: 2, unit: 'kg', packageId: pack.id };
+        const preview = await docs.writeoffPreview({ warehouseId: main.id, sourceLines: [source] });
+        const historicWaste = await docs.create(operator, { kind: 'writeoff', warehouseId: main.id, reason: 'spoilage',
+          effectiveAt: daysAgo(2).toISOString(), sourceLines: [{ ...source, recipeSignature: preview.sourceLines[0].recipeSignature }],
+          finalize: 'post' });
+        const historicTransfer = await transfer(3, daysAgo(1).toISOString());
+        assert.equal(historicWaste.sourceLines[0].physicalQuantity, 1);
+        assert.equal(historicWaste.sourceLines[0].packageFactor, 500);
+        assert.equal(historicWaste.sourceTotal, 200);
+        assert.equal(historicTransfer.items[0].unitCost, 200);
+        assert.equal((await docs.get(normalTransfer.id)).items[0].unitCost, 200);
+        assert.equal((await docs.get(normalWaste.id)).items[0].unitCost, 200);
+
+        const baseQuery = { from: warehouseDay(daysAgo(3)), to: warehouseDay(daysAgo(0)), ingredientId: product.id };
+        const ledger = await reports.report({ ...baseQuery, view: 'movements' });
+        assert.deepEqual([...new Set(ledger.rows.map(({ sourceId }) => sourceId))],
+          [normalWaste.id, normalTransfer.id, historicTransfer.id, historicWaste.id, historicReceipt.id]);
+        for (const [id, date] of [[historicReceipt.id, daysAgo(3)], [historicWaste.id, daysAgo(2)], [historicTransfer.id, daysAgo(1)]]) {
+          const dates = ledger.rows.filter(({ sourceId }) => sourceId === id).map(({ createdAt }) => +createdAt);
+          assert.ok(dates.length && dates.every((stamp) => stamp === +date));
+        }
+        const values = (summary) => {
+          const [row] = summary.rows;
+          return [row.openingQuantity, row.incomingQuantity, row.outgoingQuantity, row.closingQuantity, row.closingAvgCost, row.closingValue];
+        };
+        const [combined, mainOnly, barOnly, historicOnly] = await Promise.all([
+          reports.report({ ...baseQuery, view: 'movement_summary' }),
+          reports.report({ ...baseQuery, view: 'movement_summary', warehouseId: main.id }),
+          reports.report({ ...baseQuery, view: 'movement_summary', warehouseId: bar.id }),
+          reports.report({ ...baseQuery, view: 'movement_summary', to: warehouseDay(daysAgo(1)) }),
+        ]);
+        assert.deepEqual(values(combined), [10, 10, 2, 18, 200, 3600]);
+        assert.deepEqual(values(mainOnly), [10, 10, 8, 12, 200, 2400]);
+        assert.deepEqual(values(barOnly), [0, 7, 1, 6, 200, 1200]);
+        assert.deepEqual(values(historicOnly), [10, 10, 1, 19, 200, 3800]);
       });
       await t.test('catalog cannot resurrect a separate stock system and item cards cannot bypass documents', async () => {
         const catalog = new CatalogService(db, { emitBroadcast() {} }, { async log() {} });
@@ -179,6 +333,25 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
         assert.equal(Number(value), balance.stock * balance.avgCost);
         await db.settings.update({ where: { cafeId: cafe.id }, data: { allowNegativeIngredientStock: false } });
       });
+      await t.test('a shortage blocks both sides of a transfer unless the warehouse policy allows it', async () => {
+        const item = await items.create({ name: 'Проверка перемещения в минус', unit: 'pcs', stock: 1, avgCost: 20 });
+        const payload = { kind: 'transfer', warehouseId: main.id, destinationWarehouseId: bar.id,
+          items: [{ ingredientId: item.id, quantity: 2 }], finalize: 'post' };
+        await assert.rejects(docs.create(admin, payload), /недостаточно товара/);
+        assert.deepEqual([(await stock(item.id)).stock, (await stock(item.id, bar.id)).stock], [1, 0]);
+
+        await db.settings.update({ where: { cafeId: cafe.id }, data: { allowNegativeIngredientStock: true } });
+        try {
+          const document = await docs.create(admin, payload);
+          assert.equal(document.status, 'posted');
+          assert.deepEqual([(await stock(item.id)).stock, (await stock(item.id, bar.id)).stock], [-1, 2]);
+          const legs = await db.stockMovement.findMany({ where: { sourceId: document.id } });
+          assert.equal(legs.length, 2);
+          assert.equal(legs.every(({ costKnown }) => !costKnown), true);
+        } finally {
+          await db.settings.update({ where: { cafeId: cafe.id }, data: { allowNegativeIngredientStock: false } });
+        }
+      });
       await t.test('opening and all stock movements reconcile to balances', async () => {
         const opening = await items.create({ name: 'Салфетки', unit: 'pcs', stock: 10, avgCost: 0.5, kind: 'consumable' });
         for (const id of [rice.id, cola.id, opening.id]) {
@@ -189,11 +362,13 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
       });
     });
   } finally {
+    await db.auditLog.deleteMany({ where: { cafeId: cafe.id } });
     await db.warehouseDocument.deleteMany({ where: { cafeId: cafe.id } });
     await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
     await db.purchase.deleteMany({ where: { cafeId: cafe.id } });
     await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
     await db.settings.deleteMany({ where: { cafeId: cafe.id } });
+    await db.user.deleteMany({ where: { cafeId: cafe.id } });
     await db.cafe.delete({ where: { id: cafe.id } });
     await db.$disconnect();
   }

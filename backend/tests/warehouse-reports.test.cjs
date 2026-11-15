@@ -3,6 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
 const { PrismaClient, Prisma } = require('@prisma/client');
+const XLSX = require('xlsx');
 const { runWithTenant, tenantPrismaMiddleware } = require('../src/tenant/tenant-context.ts');
 const { WarehouseReportsService, csvCell } = require('../src/warehouse/reports.service.ts');
 const { WarehouseOverviewService } = require('../src/warehouse/overview.service.ts');
@@ -155,7 +156,7 @@ test('PostgreSQL: movement detail groups all filtered rows before pagination wit
       assert.equal(result.movementGroups.length, 4);
       assert.deepEqual(group('incoming', 'purchase'), {
         direction: 'incoming', sourceType: 'purchase', label: 'Поставки', quantity: 27,
-        unit: 'кг', averageCost: 12.22226795, count: 25,
+        unit: 'кг', averageCost: 12.22222222, count: 25,
       });
       assert.deepEqual(group('outgoing', 'purchase'), {
         direction: 'outgoing', sourceType: 'purchase', label: 'Поставки', quantity: 2,
@@ -226,12 +227,199 @@ test('PostgreSQL: Poster movement summary preserves historical carry-in, warehou
       assert.equal(unknown.rows[0].closingAvgCost, null);
       assert.equal(unknown.rows[0].closingValue, null);
       assert.equal(unknown.closingValue, null);
+      const xlsx = await reports.exportMovementXlsx({
+        ...query, search: 'УК', nameCondition: 'equals', nameValue: 'мУка', page: 2, pageSize: 1,
+        columns: 'closingValue,name,kind,closingQuantity,openingAvgCost',
+      });
+      const workbook = XLSX.read(xlsx, { type: 'buffer', cellNF: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      assert.deepEqual(XLSX.utils.sheet_to_json(sheet, { header: 1 }), [
+        ['Итог. сумма', 'Название', 'Тип', 'Итог. остаток', 'Средняя себестоимость на начало'],
+        [19.25, 'Мука', 'Ингредиент', 7, 2],
+      ]);
+      assert.equal(sheet.A2.t, 'n');
+      assert.equal(sheet.D2.z, '#,##0.000 "кг"');
+      const unknownWorkbook = XLSX.read(await reports.exportMovementXlsx({
+        ...query, from: undefined, to: undefined, search: 'Без цены', columns: 'name,openingAvgCost,closingQuantity,closingAvgCost,closingValue',
+      }), { type: 'buffer', cellNF: true });
+      const unknownSheet = unknownWorkbook.Sheets[unknownWorkbook.SheetNames[0]];
+      assert.equal(unknownSheet.B2.v, 0, 'a known zero differs from unknown valuation');
+      assert.equal(unknownSheet.C2.v, 2);
+      assert.equal(unknownSheet.C2.z, '#,##0.00 "шт"');
+      assert.equal(unknownSheet.D2, undefined);
+      assert.equal(unknownSheet.E2, undefined);
       await assert.rejects(reports.report({ ...query, employeeId: 'someone' }), /Фильтр сотрудника/);
     });
   } finally {
     await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
     await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
     await db.cafe.delete({ where: { id: cafe.id } });
+    await db.$disconnect();
+  }
+});
+
+test('PostgreSQL: movement advanced name conditions combine with search and preserve literal text', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafe = await db.cafe.create({ data: { name: `Name filter test ${randomUUID()}` } });
+  try {
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const ingredients = new IngredientsService(db);
+      for (const name of ['Сок', 'Сок 100%', 'Сок 1000', 'Вода', '=1+1']) {
+        await ingredients.create({ name, kind: 'goods', unit: 'pcs' });
+      }
+      const reports = new WarehouseReportsService(db);
+      const query = { view: 'movement_summary' };
+      const names = async (filters) => (await reports.report({ ...query, ...filters })).rows.map((row) => row.name);
+      assert.deepEqual(await names({ search: 'сОк', nameCondition: 'equals', nameValue: ' СОК ' }), ['Сок']);
+      assert.deepEqual(await names({ search: 'сок', nameCondition: 'contains', nameValue: '100%' }), ['Сок 100%']);
+      assert.deepEqual(await names({ search: '100%', nameCondition: 'equals', nameValue: 'СОК 100%' }), ['Сок 100%']);
+      assert.deepEqual(await names({ search: '100%', nameCondition: 'notEquals', nameValue: 'сок 100%' }), []);
+      assert.equal((await names({ search: 'сок', nameCondition: 'equals', nameValue: ' ' })).length, 3);
+      assert.equal((await names({ nameCondition: 'empty' })).length, 0);
+      assert.equal((await names({ nameCondition: 'notEmpty' })).length, 5);
+      assert.doesNotMatch(await reports.exportCsv({ ...query, search: 'сок', nameCondition: 'notEquals', nameValue: 'Сок 100%' }), /Сок 100%/);
+      const workbook = XLSX.read(await reports.exportMovementXlsx({ ...query, search: '=1+1', columns: 'name' }), { type: 'buffer' });
+      const cell = workbook.Sheets[workbook.SheetNames[0]].A2;
+      assert.equal(cell.t, 's');
+      assert.equal(cell.v, '=1+1');
+      assert.equal(cell.f, undefined);
+    });
+  } finally {
+    await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+    await db.cafe.delete({ where: { id: cafe.id } });
+    await db.$disconnect();
+  }
+});
+
+test('PostgreSQL: movement summary includes preparations once physically stocked within the warehouse and report dates', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafe = await db.cafe.create({ data: { name: `Preparation visibility ${randomUUID()}` } });
+  try {
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const ingredients = new IngredientsService(db);
+      const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
+      const [main] = (await locations.list(cafe.id)).locations;
+      const bar = await locations.save(cafe.id, 'Бар');
+      const neverStocked = await ingredients.create({ name: 'Без производства', kind: 'preparation', unit: 'pcs' });
+      const later = await ingredients.create({ name: 'Будущая партия', kind: 'prepared_dish', unit: 'pcs' });
+      const depleted = await ingredients.create({ name: 'Расходованная партия', kind: 'preparation', unit: 'pcs' });
+      const imported = await db.ingredient.create({
+        data: { cafeId: cafe.id, name: 'Перенесённый остаток', kind: 'preparation', stock: 4, avgCost: 2, valuationKnown: true },
+      });
+      const goods = await ingredients.create({ name: 'Обычный товар', kind: 'goods', unit: 'pcs' });
+      const d = (value) => new Prisma.Decimal(value);
+      await db.$transaction(async (tx) => {
+        for (const [ingredient, quantity, type, date] of [
+          [depleted, 2, 'production', '2026-11-10'],
+          [depleted, -2, 'writeoff', '2026-11-11'],
+          [later, 3, 'production', '2026-11-15'],
+        ]) {
+          await postStockMovement(tx, {
+            ingredientId: ingredient.id, warehouse: { ...main, cafeId: cafe.id }, change: d(quantity),
+            ...(quantity > 0 ? { cost: d(2), costKnown: true, valuation: 'average' } : {}),
+            movement: { type, sourceType: type, createdAt: new Date(date + 'T00:00Z') },
+          });
+        }
+      });
+      const reports = new WarehouseReportsService(db);
+      const query = { view: 'movement_summary', warehouseId: main.id, from: '2026-11-12', to: '2026-11-14' };
+      const beforeProduction = await reports.report(query);
+      const byId = new Map(beforeProduction.rows.map((row) => [row.ingredientId, row]));
+      assert.deepEqual(new Set(byId.keys()), new Set([depleted.id, imported.id, goods.id]));
+      assert.equal(byId.get(depleted.id).closingQuantity, 0);
+      assert.equal(byId.get(imported.id).closingQuantity, 4);
+      assert.equal((await reports.report({ ...query, onlyWithMovement: 'true' })).totalRows, 0);
+      const afterProduction = await reports.report({ ...query, to: '2026-11-15' });
+      assert.equal(afterProduction.rows.find((row) => row.ingredientId === later.id).closingQuantity, 3);
+      assert.equal(afterProduction.rows.some((row) => row.ingredientId === neverStocked.id), false);
+      assert.deepEqual((await reports.report({ ...query, warehouseId: bar.id })).rows.map((row) => row.ingredientId), [goods.id]);
+    });
+  } finally {
+    await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
+    await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+    await db.cafe.delete({ where: { id: cafe.id } });
+    await db.$disconnect();
+  }
+});
+
+test('PostgreSQL: movement summary keeps one product row and nets only transfers within the selected scope', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafe = await db.cafe.create({ data: { name: `Transfer summary ${randomUUID()}` } });
+  const foreignCafe = await db.cafe.create({ data: { name: `Foreign scope ${randomUUID()}` } });
+  try {
+    const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
+    const foreign = await runWithTenant({ cafeId: foreignCafe.id }, () => locations.save(foreignCafe.id, 'Another cafe'));
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const reports = new WarehouseReportsService(db);
+      const ingredients = new IngredientsService(db);
+      const main = { ...(await locations.list(cafe.id)).locations[0], cafeId: cafe.id };
+      const bar = { ...await locations.save(cafe.id, 'Бар'), cafeId: cafe.id };
+      const patio = { ...await locations.save(cafe.id, 'Терраса'), cafeId: cafe.id };
+      const rice = await ingredients.create({ name: 'Рис 2', unit: 'kg', stock: 10, avgCost: 2 });
+      const flour = await ingredients.create({ name: 'Рис 10', unit: 'kg', stock: 4, avgCost: 1 });
+      const old = new Date('2026-11-10T08:00:00Z');
+      const day = new Date('2026-11-14T08:00:00Z');
+      await db.stockMovement.updateMany({ where: { ingredientId: { in: [rice.id, flour.id] } }, data: { createdAt: old } });
+      const d = (n) => new Prisma.Decimal(n);
+      const transferId = randomUUID();
+      await db.$transaction(async (tx) => {
+        for (const [warehouse, quantity, price] of [[bar, 5000, '0.006'], [patio, 100000, '0.01']]) {
+          await postStockMovement(tx, { ingredientId: rice.id, warehouse, change: d(quantity), cost: d(price), costKnown: true,
+            valuation: 'average', movement: { type: 'purchase', sourceType: 'purchase', createdAt: old } });
+        }
+        await postStockMovement(tx, { ingredientId: rice.id, warehouse: main, change: d(-2000),
+          movement: { type: 'transfer', sourceType: 'transfer', sourceId: transferId, createdAt: day } });
+        await postStockMovement(tx, { ingredientId: rice.id, warehouse: bar, change: d(2000), cost: d('0.002'), costKnown: true,
+          valuation: 'average', movement: { type: 'transfer', sourceType: 'transfer', sourceId: transferId, createdAt: day } });
+        await postStockMovement(tx, { ingredientId: rice.id, warehouse: main, change: d(0), costKnown: true,
+          movement: { type: 'writeoff', sourceType: 'order', createdAt: day, recipeSnapshot: { kind: 'prepared_loss', lossQuantity: '1000' } } });
+        await postStockMovement(tx, { ingredientId: flour.id, warehouse: main, change: d(-1000),
+          movement: { type: 'inventory', sourceType: 'inventory', createdAt: day } });
+        await postStockMovement(tx, { ingredientId: flour.id, warehouse: bar, change: d(1000), cost: d('0.002'), costKnown: true,
+          valuation: 'average', movement: { type: 'inventory', sourceType: 'inventory', createdAt: day } });
+        await postStockMovement(tx, { ingredientId: rice.id, warehouse: main, change: d(5000), cost: d('0.020'), costKnown: true,
+          valuation: 'average', movement: { type: 'purchase', sourceType: 'purchase', createdAt: new Date('2026-11-15T08:00:00Z') } });
+      });
+      const query = { view: 'movement_summary', from: '2026-11-14', to: '2026-11-14' };
+      const scope = { warehouseIds: `${main.id},${bar.id}` };
+      const summary = await reports.report({ ...query, ...scope });
+      assert.equal(summary.totalRows, 2);
+      const [riceRow, flourRow] = summary.rows;
+      assert.deepEqual([riceRow.name, riceRow.warehouseId, riceRow.openingQuantity, riceRow.incomingQuantity,
+        riceRow.outgoingQuantity, riceRow.closingQuantity, riceRow.movementCount],
+      ['Рис 2', null, 15, 0, 0, 15, 0]);
+      assert.deepEqual([riceRow.openingValue, riceRow.closingValue], [50, 50]);
+      assert.ok(Math.abs(riceRow.closingAvgCost - 50 / 15) < 0.00001);
+      assert.deepEqual([flourRow.openingQuantity, flourRow.incomingQuantity, flourRow.outgoingQuantity, flourRow.closingQuantity],
+        [4, 1, 1, 4], 'opposite inventory changes are not an internal transfer');
+      assert.equal((await reports.report({ ...query, ...scope, nameSort: 'desc', pageSize: 1 })).rows[0].name, 'Рис 10');
+      assert.deepEqual((await reports.report({ ...query, ...scope, onlyWithMovement: 'true' })).rows.map((row) => row.ingredientId), [flour.id]);
+      assert.equal((await reports.report(query)).rows[0].closingQuantity, 115);
+      assert.equal((await reports.report({ ...query, warehouseId: main.id, ingredientId: rice.id })).rows[0].outgoingQuantity, 2);
+      assert.equal((await reports.report({ ...query, warehouseIds: bar.id, ingredientId: rice.id })).rows[0].incomingQuantity, 2);
+      const detail = await reports.report({ ...query, ...scope, view: 'movements', ingredientId: rice.id, pageSize: 1 });
+      assert.equal(detail.totalRows, 3, 'transfer and prepared loss remain available in document history');
+      assert.deepEqual(detail.movementGroups, []);
+      const oneLocation = await reports.report({ ...query, view: 'movements', warehouseId: main.id, ingredientId: rice.id });
+      assert.deepEqual(oneLocation.movementGroups.map(({ direction, sourceType, quantity, averageCost }) =>
+        [direction, sourceType, quantity, averageCost]), [['outgoing', 'transfer', 2, 2]]);
+      const inventory = await reports.report({ ...query, ...scope, view: 'movements', ingredientId: flour.id });
+      assert.deepEqual(inventory.movementGroups.map(({ direction, sourceType, quantity }) =>
+        [direction, sourceType, quantity]), [['incoming', 'inventory', 1], ['outgoing', 'inventory', 1]]);
+      const csv = await reports.exportCsv({ ...query, ...scope });
+      assert.equal(csv.split('\r\n').length, 3);
+      assert.match(csv, /"Рис 2";"raw";"";"Выбранные склады";"кг";"15";/);
+      await assert.rejects(reports.report({ ...query, warehouseIds: `${main.id},${foreign.id}` }), /Склад не найден/);
+      await assert.rejects(reports.report({ ...query, ...scope, warehouseId: main.id }), /Укажите один способ выбора/);
+    });
+  } finally {
+    await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
+    await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+    await db.cafe.delete({ where: { id: cafe.id } });
+    await db.cafe.delete({ where: { id: foreignCafe.id } });
     await db.$disconnect();
   }
 });

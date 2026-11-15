@@ -144,12 +144,20 @@ export class IngredientsService {
       const [recipes, direct, latest] = await Promise.all([
         db.recipeItem.findMany({ where: { ingredientId: id }, select: { dish: { select: { id: true, name: true } } } }),
         db.dish.findMany({ where: { stockIngredientId: id }, select: { id: true, name: true } }),
-        db.purchaseItem.findFirst({ where: { ingredientId: id, purchase: { status: 'completed' } }, orderBy: { createdAt: 'desc' } }),
+        db.$queryRaw<Array<{ unitPriceBase: Prisma.Decimal | null }>>`
+          SELECT SUM(pi.total) / NULLIF(SUM(pi.quantity_base), 0) AS "unitPriceBase"
+          FROM purchase_items pi JOIN purchases p ON p.id = pi.purchase_id
+          WHERE pi.ingredient_id = ${id} AND pi.cafe_id IS NOT DISTINCT FROM ${ingredient.cafeId}
+            AND p.cafe_id IS NOT DISTINCT FROM ${ingredient.cafeId} AND p.status = 'completed'
+          GROUP BY p.id
+          ORDER BY COALESCE(p.effective_at, p.date) DESC, p.created_at DESC, p.id DESC
+          LIMIT 1
+        `,
       ]);
       const aggregate = (await warehouseBalances(db, null, [ingredient])).get(id)!;
       return { ...this.serialize({ ...ingredient, ...aggregate }), balances,
         usedInDishes: [...new Map([...recipes.map(({ dish }) => dish), ...direct].map((dish) => [dish.id, dish])).values()],
-        lastPurchasePrice: latest ? costFromBase(Number(latest.unitPriceBase), unit) : null };
+        lastPurchasePrice: latest[0]?.unitPriceBase == null ? null : Number(latest[0].unitPriceBase.mul(toBase(1, unit)).toDecimalPlaces(8)) };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
@@ -167,14 +175,24 @@ export class IngredientsService {
         ...warehouseDocumentFilter(warehouse),
         items: { some: { ingredientId: id, cafeId } },
       };
-      const total = await db.purchase.count({ where });
+      const warehouseSql = !warehouse ? Prisma.empty : warehouse.isDefault
+        ? Prisma.sql`AND (p.warehouse_id = ${warehouse.id} OR p.warehouse_id IS NULL)`
+        : Prisma.sql`AND p.warehouse_id = ${warehouse.id}`;
+      const [total, pageIds] = await Promise.all([
+        db.purchase.count({ where }),
+        db.$queryRaw<Array<{ id: string }>>`
+          SELECT p.id FROM purchases p
+          WHERE p.cafe_id = ${cafeId} AND p.status = 'completed' ${warehouseSql}
+            AND EXISTS (SELECT 1 FROM purchase_items pi
+              WHERE pi.purchase_id = p.id AND pi.ingredient_id = ${id} AND pi.cafe_id = ${cafeId})
+          ORDER BY COALESCE(p.effective_at, p.date) DESC, p.id DESC
+          OFFSET ${(page - 1) * pageSize} LIMIT ${pageSize}
+        `,
+      ]);
       const purchases = await db.purchase.findMany({
-        where,
-        orderBy: [{ date: 'desc' }, { id: 'desc' }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
+        where: { ...where, id: { in: pageIds.map((entry) => entry.id) } },
         select: {
-          id: true, number: true, date: true, supplier: true,
+          id: true, number: true, date: true, effectiveAt: true, supplier: true,
           warehouse: { select: { id: true, name: true } },
           items: {
             where: { ingredientId: id, cafeId },
@@ -184,20 +202,23 @@ export class IngredientsService {
       });
       const unit = normalizeUnit(ingredient.displayUnit);
       const factor = toBase(1, unit);
-      const rows = purchases.map((purchase) => {
+      const purchaseById = new Map(purchases.map((purchase) => [purchase.id, purchase]));
+      const rows = pageIds.flatMap(({ id: purchaseId }) => {
+        const purchase = purchaseById.get(purchaseId);
+        if (!purchase) return [];
         const quantityBase = purchase.items.reduce((sum, item) => sum.add(item.quantityBase), new Prisma.Decimal(0));
         const quantity = quantityBase.div(factor);
         // Line totals already contain the allocated purchase discount.
         const value = purchase.items.reduce((sum, item) => sum.add(item.total), new Prisma.Decimal(0));
         const location = purchase.warehouse ?? defaultWarehouse;
-        return {
-          purchaseId: purchase.id, number: purchase.number, date: purchase.date,
+        return [{
+          purchaseId: purchase.id, number: purchase.number, date: purchase.effectiveAt ?? purchase.date,
           warehouseId: location?.id ?? null, warehouseName: location?.name ?? 'Основной склад',
           supplier: purchase.supplier, quantity: Number(quantity),
           unitCode: unit, unit: unitLabel(unit),
           unitPrice: quantity.isZero() ? null : Number(value.div(quantity).toDecimalPlaces(8)),
           total: Number(value),
-        };
+        }];
       });
       return { rows, total, page, pageSize };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
