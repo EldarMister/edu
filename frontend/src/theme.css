@@ -26,9 +26,9 @@
 @media screen {
   :root[data-theme='dark'] {
     color-scheme: dark;
-    --edu-background: 33 33 33;
-    --edu-card: 43 43 43;
-    --edu-border: 69 69 69;
+    --edu-background: 16 16 16;
+    --edu-card: 25 25 25;
+    --edu-border: 55 55 55;
     --edu-text: 240 240 240;
     --edu-text-secondary: 211 211 211;
     --edu-text-muted: 174 174 174;
@@ -43,10 +43,10 @@
     --edu-warning: 250 198 104;
     --edu-shadow-card: 0 1px 3px rgb(0 0 0 / .36);
     --edu-shadow-soft: 0 7px 24px rgb(0 0 0 / .45);
-    --edu-modal-chrome: #171717;
-    --edu-raised: #373737;
-    --edu-inset: #252525;
-    --edu-selected: #3d3d3d;
+    --edu-modal-chrome: #0a0a0a;
+    --edu-raised: #252525;
+    --edu-inset: #131313;
+    --edu-selected: #303030;
   }
 
   :where(:root[data-theme='dark']) :is(.btn-danger, .bg-danger.text-white) {
@@ -62,11 +62,11 @@
   }
 
   :where(:root[data-theme='dark']) .bg-slate-200 {
-    background-color: #444;
+    background-color: #373737;
   }
 
   :where(:root[data-theme='dark']) .bg-slate-300 {
-    background-color: #555;
+    background-color: #484848;
   }
 
   :where(:root[data-theme='dark']) :is(.border-slate-200, .border-slate-300, .border-slate-400) {
@@ -95,6 +95,6 @@
   }
 
   :where(:root[data-theme='dark']) .app-scrollbar-subtle {
-    scrollbar-color: #5a5a5a transparent;
+    scrollbar-color: #454545 transparent;
   }
 }
