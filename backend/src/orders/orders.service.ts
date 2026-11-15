@@ -1,4 +1,7 @@
 import { lockRecipeGraph } from '../warehouse/recipe-resolution';
+import { recordOrderReceipts, reverseOrderReceipts } from '../finance/order-receipts';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { hasPermission } from '../common/permissions';
 import {
   BadRequestException,
   ConflictException,
@@ -2237,8 +2240,12 @@ export class OrdersService {
       } else if (source === PaymentSource.split && paymentParts.length < 2) {
         throw new BadRequestException('Для раздельной оплаты укажите минимум два платежа');
       }
-      const sum = paymentParts.reduce((acc, p) => acc + p.amount, 0);
-      if (Math.abs(sum - final) > 0.01) {
+      const amounts = paymentParts.map(({ amount }) => new Prisma.Decimal(amount));
+      if (amounts.some((amount) => amount.decimalPlaces() > 2)) {
+        throw new BadRequestException('Укажите суммы оплаты с точностью до двух знаков после запятой');
+      }
+      const sum = amounts.reduce((total, amount) => total.add(amount), new Prisma.Decimal(0));
+      if (!sum.eq(order.finalAmount)) {
         throw new BadRequestException('Сумма частей оплаты должна совпадать с итогом заказа');
       }
     } else {
@@ -2265,6 +2272,8 @@ export class OrdersService {
           })),
         });
       }
+      const closedAt = new Date();
+      if (latest.cafeId) await recordOrderReceipts(tx, latest.cafeId, orderId, cashierId, closedAt);
       // Стол освобождается.
       await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
       return tx.order.update({
@@ -2273,7 +2282,7 @@ export class OrdersService {
           status: OrderStatus.paid,
           paymentStatus: PaymentStatus.paid,
           paymentMethod: method,
-          closedAt: new Date(),
+          closedAt,
         },
         include: orderInclude,
       });
@@ -2309,7 +2318,7 @@ export class OrdersService {
   }
 
   /** Ручная корректировка статуса заказа администратором/владельцем. */
-  async adminUpdateStatus(orderId: string, actor: AuditActor, targetStatus: OrderStatus, reason?: string) {
+  async adminUpdateStatus(orderId: string, actor: AuthUser, targetStatus: OrderStatus, reason?: string) {
     if (actor.role !== Role.ADMIN && actor.role !== Role.OWNER) {
       throw new ForbiddenException('Недостаточно прав');
     }
@@ -2355,6 +2364,10 @@ export class OrdersService {
       await lockOrder(tx, orderId);
       const latest = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       if (latest.updatedAt.getTime() !== order.updatedAt.getTime()) throw new ConflictException('Заказ изменился. Обновите его и повторите действие');
+      if (actor.role !== Role.OWNER && (latest.status === OrderStatus.paid || latest.paymentStatus === PaymentStatus.paid)
+        && !hasPermission(actor.permissions, 'actions.refundChecks')) {
+        throw new ForbiddenException('Нет права на возврат или отмену оплаченного чека');
+      }
       if (fromClosedCancelled && targetIsActive) {
         await this.ingredientStock.applyDishSale(tx, order.id, order.items, true);
       }
@@ -2390,6 +2403,9 @@ export class OrdersService {
       }
 
       if (targetStatus !== OrderStatus.paid) {
+        if (latest.cafeId && latest.paymentStatus === PaymentStatus.paid) {
+          await reverseOrderReceipts(tx, latest.cafeId, orderId, actor.id);
+        }
         await tx.payment.updateMany({
           where: { orderId, status: PaymentStatus.paid },
           data: { status: PaymentStatus.cancelled },

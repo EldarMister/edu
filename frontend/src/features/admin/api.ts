@@ -79,6 +79,8 @@ export interface AdminDishVariant {
 }
 export interface StaffMember {
   prepStation?: string | null;
+  positionId?: string | null;
+  positionName?: string | null;
   id: string;
   name: string;
   phone: string;
@@ -848,6 +850,7 @@ export function useStaff(role: string, search: string) {
 }
 export interface StaffInput {
   prepStation?: string | null;
+  positionId?: string | null;
   name: string;
   phone: string;
   role: Role;
@@ -865,7 +868,7 @@ export function useUpdatePermissions() {
 }
 
 export function useStaffMutations() {
-  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'staff', 'overview']]);
+  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'positions']]);
   const create = useMutation({
     mutationFn: (b: StaffInput) => api.post('/admin/staff', b).then((r) => r.data),
     onSuccess: invalidate,

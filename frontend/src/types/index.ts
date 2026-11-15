@@ -20,6 +20,7 @@ export type ActionKey =
   | 'refundChecks'
   | 'exportReports'
   | 'closeShift'
+  | 'financeCashShifts'
   | 'manageStaff'
   | 'editPermissions'
   | 'warehouseReceive'
@@ -40,6 +41,7 @@ export interface EmployeePermissions {
 
 export interface AuthUser {
   prepStation?: string | null;
+  positionId?: string | null;
   id: string;
   name: string;
   phone: string;

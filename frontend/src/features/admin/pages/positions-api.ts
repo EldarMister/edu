@@ -1,0 +1,43 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import type { EmployeePermissions, Role } from '@/types';
+
+export type PositionRole = Extract<Role, 'ADMIN' | 'WAITER' | 'KITCHEN' | 'BAR'>;
+export const POSITION_ROLES: { value: PositionRole; label: string }[] = [
+  { value: 'ADMIN', label: 'Администратор' },
+  { value: 'WAITER', label: 'Официант' },
+  { value: 'KITCHEN', label: 'Кухня' },
+  { value: 'BAR', label: 'Бар' },
+];
+
+export interface StaffPosition {
+  id: string;
+  name: string;
+  role: PositionRole;
+  permissions: EmployeePermissions;
+  employees: number;
+}
+
+const key = ['admin', 'positions'];
+const endpoint = '/admin/positions';
+
+export function useStaffPositions(enabled: boolean) {
+  return useQuery({ queryKey: key, enabled, queryFn: async () => (await api.get<StaffPosition[]>(endpoint)).data });
+}
+
+export function useStaffPositionMutations() {
+  const qc = useQueryClient();
+  async function refresh() {
+    await Promise.all([qc.invalidateQueries({ queryKey: key }), qc.invalidateQueries({ queryKey: ['admin', 'staff'] })]);
+  }
+  const save = useMutation({
+    mutationFn: ({ id, name, role, permissions }: Pick<StaffPosition, 'name' | 'role' | 'permissions'> & { id?: string }) =>
+      id ? api.patch(endpoint + '/' + id, { name, permissions }) : api.post(endpoint, { name, role, permissions }),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.delete(endpoint + '/' + id),
+    onSuccess: refresh,
+  });
+  return { save, remove };
+}

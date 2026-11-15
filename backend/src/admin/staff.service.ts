@@ -25,6 +25,8 @@ const STAFF_SELECT = {
   name: true,
   phone: true,
   role: true,
+  positionId: true,
+  position: { select: { id: true, name: true, role: true, permissions: true } },
   prepStation: true,
   isActive: true,
   permissions: true,
@@ -43,8 +45,9 @@ export class StaffService {
   }
 
   /** Подставить итоговые (resolved) права вместо «сырого» json из БД. */
-  private withPermissions<T extends { role: Role; permissions: Prisma.JsonValue }>(user: T) {
-    return { ...user, permissions: resolvePermissions(user.role, user.permissions) };
+  private withPermissions({ position, ...user }: Prisma.UserGetPayload<{ select: typeof STAFF_SELECT }>) {
+    const assigned = position?.role === user.role ? position : null;
+    return { ...user, positionName: assigned?.name ?? null, permissions: resolvePermissions(user.role, assigned?.permissions ?? user.permissions) };
   }
 
   /** Кто может редактировать права: владелец, либо право editPermissions/manageStaff. */
@@ -58,6 +61,21 @@ export class StaffService {
     if (role === Role.OWNER && !this.isOwner(actor)) {
       throw new ForbiddenException('Только владелец может управлять владельцами');
     }
+  }
+
+  private assertCanManagePositionAccount(actor: AuditActor, user: { role: Role; positionId: string | null }) {
+    if (!this.isOwner(actor) && (user.positionId || user.role === Role.ADMIN)) {
+      throw new ForbiddenException('Этим сотрудником управляет владелец заведения');
+    }
+  }
+
+  private async checkPosition(tx: Prisma.TransactionClient, actor: AuthUser, positionId: string, role: Role) {
+    if (!this.isOwner(actor) || !actor.cafeId || role === Role.OWNER) {
+      throw new ForbiddenException('Должность назначает владелец заведения');
+    }
+    const position = await tx.staffPosition.findFirst({ where: { cafeId: actor.cafeId, id: positionId }, select: { role: true } });
+    if (!position) throw new NotFoundException('Должность не найдена');
+    if (position.role !== role) throw new BadRequestException('Выбранная должность не соответствует базовой роли');
   }
 
   async overview(actor: AuditActor) {
@@ -139,6 +157,10 @@ export class StaffService {
     if (id === actor.id) {
       throw new ForbiddenException('Нельзя менять собственные права доступа');
     }
+    if (user.positionId) {
+      throw new ForbiddenException('Измените права в разделе «Должности»');
+    }
+    this.assertCanManagePositionAccount(actor, user);
 
     const permissions: EmployeePermissions = sanitizePermissionsInput(user.role, {
       sections: dto.sections,
@@ -166,8 +188,9 @@ export class StaffService {
     return phone.trim().replace(/[^\d+]/g, '');
   }
 
-  async create(dto: CreateStaffDto, actor: AuditActor) {
+  async create(dto: CreateStaffDto, actor: AuthUser) {
     this.assertCanManageRole(actor, dto.role);
+    this.assertCanManagePositionAccount(actor, { role: dto.role, positionId: dto.positionId ?? null });
     const phone = this.normalizePhone(dto.phone);
     const exists = await this.prisma.user.findUnique({ where: { phone } });
     if (exists) {
@@ -177,8 +200,9 @@ export class StaffService {
     const created = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
       const prepStation = await staffStation(tx, dto.role, dto.prepStation);
+      if (dto.positionId) await this.checkPosition(tx, actor, dto.positionId, dto.role);
       return tx.user.create({
-        data: { name: dto.name, phone, role: dto.role, prepStation, passwordHash },
+        data: { name: dto.name, phone, role: dto.role, prepStation, passwordHash, positionId: dto.positionId },
         select: STAFF_SELECT,
       });
     });
@@ -188,12 +212,12 @@ export class StaffService {
       entityType: AuditEntity.STAFF,
       entityId: created.id,
       description: `${actor.name ?? 'Сотрудник'} добавил сотрудника ${created.name} (${created.role})`,
-      newValue: { name: created.name, phone: created.phone, role: created.role, prepStation: created.prepStation },
+      newValue: { name: created.name, phone: created.phone, role: created.role, prepStation: created.prepStation, positionId: created.positionId },
     });
     return this.withPermissions(created);
   }
 
-  async update(id: string, dto: UpdateStaffDto, actor: AuditActor) {
+  async update(id: string, dto: UpdateStaffDto, actor: AuthUser) {
     const actorId = actor.id;
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Сотрудник не найден');
@@ -202,7 +226,7 @@ export class StaffService {
       this.assertCanManageRole(actor, dto.role);
     }
 
-    const data: Prisma.UserUpdateInput = {};
+    const data: Prisma.UserUncheckedUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.role !== undefined) data.role = dto.role;
     if (dto.isActive !== undefined) {
@@ -229,6 +253,19 @@ export class StaffService {
       if (!current) throw new NotFoundException('Сотрудник не найден');
       this.assertCanManageRole(actor, current.role);
       const role = dto.role ?? current.role;
+      if (id !== actorId) this.assertCanManagePositionAccount(actor, current);
+      if (id === actorId && (role !== current.role || (dto.positionId !== undefined && dto.positionId !== current.positionId))) {
+        throw new ForbiddenException('Нельзя менять собственную роль или должность');
+      }
+      if (role !== current.role) this.assertCanManagePositionAccount(actor, { role, positionId: null });
+      if (dto.positionId !== undefined && dto.positionId !== current.positionId) {
+        if (!this.isOwner(actor)) throw new ForbiddenException('Должность назначает владелец заведения');
+        if (dto.positionId) await this.checkPosition(tx, actor, dto.positionId, role);
+        data.positionId = dto.positionId;
+        data.permissions = Prisma.DbNull;
+      } else if (current.positionId && role !== current.role) {
+        throw new BadRequestException('Выберите должность для новой роли');
+      }
       if (dto.prepStation !== undefined || role !== current.role) {
         data.prepStation = await staffStation(tx, role, dto.prepStation);
       }
@@ -246,8 +283,8 @@ export class StaffService {
             ? ' · доступ включён'
             : ' · доступ выключен'
           : ''),
-      oldValue: { name: user.name, role: user.role, phone: user.phone, isActive: user.isActive, prepStation: user.prepStation },
-      newValue: { name: updated.name, role: updated.role, phone: updated.phone, isActive: updated.isActive, prepStation: updated.prepStation },
+      oldValue: { name: user.name, role: user.role, phone: user.phone, isActive: user.isActive, prepStation: user.prepStation, positionId: user.positionId },
+      newValue: { name: updated.name, role: updated.role, phone: updated.phone, isActive: updated.isActive, prepStation: updated.prepStation, positionId: updated.positionId },
       metadata: { passwordChanged: !!dto.password },
     });
     return this.withPermissions(updated);
@@ -258,6 +295,7 @@ export class StaffService {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('Сотрудник не найден');
     this.assertCanManageRole(actor, user.role);
+    this.assertCanManagePositionAccount(actor, user);
     if (id === actorId) {
       throw new ForbiddenException('Нельзя удалить самого себя');
     }

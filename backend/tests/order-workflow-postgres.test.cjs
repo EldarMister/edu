@@ -374,6 +374,13 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         await db.orderItem.updateMany({ where: { orderId: order.id }, data: { status: 'served' } });
         await db.order.update({ where: { id: order.id }, data: { status: 'served' } });
         await orders.markPaid(order.id, waiter, 'cash');
+        const payment = await db.payment.findFirstOrThrow({ where: { orderId: order.id, status: 'paid' } });
+        await orders.markPaid(order.id, waiter, 'cash');
+        const sourceKey = 'sale:' + payment.id;
+        const sale = await db.financeEntry.findFirstOrThrow({ where: { sourceKey }, include: { account: true } });
+        assert.equal(sale.account.type, 'cash');
+        assert.equal(sale.account.cafeId, cafe.id);
+        assert.ok(sale.amount.eq(payment.amount));
         await assert.rejects(orders.cancelOrder(order.id, owner, 'Нельзя без возврата'), /оплачен/);
         await assert.rejects(orders.editOrder(order.id, waiter, [editLine(order.items[0])]), /оплачен/);
         await runWithTenant({ cafeId: 'another-cafe' }, async () => {
@@ -381,6 +388,11 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         });
         assert.equal((await orders.findById(order.id)).status, 'paid');
         await orders.adminUpdateStatus(order.id, owner, 'served', 'Отмена оплаты по существующему механизму');
+        await orders.adminUpdateStatus(order.id, owner, 'served', 'Повтор запроса');
+        const entries = await db.financeEntry.findMany({ where: { sourceKey: { in: [sourceKey, 'refund:' + sourceKey] } } });
+        assert.equal(entries.length, 2);
+        assert.ok(entries.every(({ accountId }) => accountId === sale.accountId));
+        assert.ok(entries.reduce((total, { amount }) => total.add(amount), sale.amount.mul(0)).isZero());
         assert.equal((await orders.findById(order.id)).payments.length, 0);
         await orders.cancelOrder(order.id, owner, 'Отмена после возврата');
         assert.equal((await orders.findById(order.id)).status, 'cancelled');

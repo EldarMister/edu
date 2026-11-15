@@ -24,7 +24,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<AuthUser> {
-    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
+    const user = await this.prisma.user.findUnique({ where: { id: payload.sub }, include: { position: true } });
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Пользователь не найден или отключён');
     }
@@ -39,7 +39,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       phone: user.phone,
       cafeId: user.cafeId,
       prepStation: user.prepStation,
-      permissions: resolvePermissions(user.role, user.permissions),
+      positionId: user.position?.role === user.role ? user.positionId : null,
+      permissions: resolvePermissions(user.role, user.position?.role === user.role ? user.position.permissions : user.permissions),
     };
   }
 }

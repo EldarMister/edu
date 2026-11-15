@@ -30,12 +30,13 @@ export function setCafeId(cafeId: string | null | undefined): void {
 
 /** Все таблицы, привязанные к кафе (имеют колонку cafe_id). Cafe — НЕ тенант. */
 const TENANT_MODELS = new Set<string>([
-  'User', 'Hall', 'Table', 'Category', 'Dish', 'SetComponent', 'DishVariant',
-  'Order', 'OrderAction', 'WaiterShift', 'ShiftCashReport', 'OrderItem',
+  'User', 'StaffPosition', 'Hall', 'Table', 'Category', 'Dish', 'SetComponent', 'DishVariant',
+  'Order', 'OrderAction', 'WaiterShift', 'ShiftCashReport', 'CashShift', 'OrderItem',
   'OrderItemSetComponent', 'Payment', 'KitchenEvent', 'PenaltyReward', 'Incident',
   'AuditLog', 'Settings', 'PushSubscription', 'ReceiptPrintRequest',
   'QrTableSession', 'QrGuest', 'QrSessionItem', 'Ingredient', 'RecipeItem',
   'Purchase', 'PurchaseItem', 'StockMovement', 'PreparationStation',
+  'FinanceAccount', 'FinanceCategory', 'FinanceEntry', 'SalaryAccrual',
   'Warehouse', 'WarehouseStock', 'StationWarehouse', 'PreparationRecipe', 'PreparationRecipeItem',
   'WarehouseDocument', 'WarehouseDocumentItem', 'PreparationBatch', 'RecipeRevision', 'WarehouseSupplier', 'WarehousePackage', 'ProcessingDocument', 'ProcessingLine', 'MenuModifierGroup', 'MenuModifierOption',
 ]);

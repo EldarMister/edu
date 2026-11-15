@@ -57,6 +57,7 @@ import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
 import { WaiterCabinet } from './WaiterCabinet';
+import { CashShiftBanner } from '@/features/settings/CashShiftControls';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { PaymentModal } from './PaymentModal';
 import { ReceiptPrintSheet } from './ReceiptPrintSheet';
@@ -879,6 +880,7 @@ export function WaiterApp() {
       </header>
       <OfflineBanner inHeader />
       </div>
+      <CashShiftBanner />
 
       {showPushBanner && (
         <BackgroundPushBanner onEnable={pushNotifications.enable} />

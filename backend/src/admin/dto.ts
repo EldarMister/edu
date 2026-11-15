@@ -9,6 +9,7 @@ import {
   IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
   MaxLength,
   IsArray,
@@ -312,6 +313,9 @@ export class UpdateSetDto {
 
 // ---------- Персонал ----------
 export class CreateStaffDto {
+  @IsOptional() @IsUUID()
+  positionId?: string | null;
+
   @IsOptional() @IsString() @MaxLength(80)
   prepStation?: string | null;
 
@@ -328,6 +332,9 @@ export class CreateStaffDto {
   password: string;
 }
 export class UpdateStaffDto {
+  @IsOptional() @IsUUID()
+  positionId?: string | null;
+
   @IsOptional() @IsString() @MaxLength(80)
   prepStation?: string | null;
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
 import { ThemeSwitch } from '@/components/ThemeSwitch';
+import { CashShiftSettings } from './CashShiftControls';
 import { API_URL, apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
@@ -383,6 +384,7 @@ function CafeSettings() {
               <p>Фискальный чек формируется только через подключенную ККМ или онлайн-кассу.</p>
             </div>
             <PrinterSettings />
+            {isOwner && <CashShiftSettings />}
 
             {/* Гео-проверка QR-заказа — рядом со статусом принтера */}
             <div className="pt-2">

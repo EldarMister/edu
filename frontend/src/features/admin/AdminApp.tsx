@@ -26,6 +26,7 @@ import {
   IconReconcile,
   IconPrinter,
   IconWarehouse,
+  IconMoney,
   IconLogout,
 } from './components/icons';
 import { StatisticsPage } from './pages/StatisticsPage';
@@ -34,6 +35,10 @@ import { OrdersPage } from './pages/OrdersPage';
 import { TablesPage } from './pages/TablesPage';
 import { MenuCategoriesPage, MenuPage } from './pages/MenuPage';
 import { StaffPage } from './pages/StaffPage';
+import { PositionsPage } from './pages/PositionsPage';
+import { FinancePage } from './pages/finance/FinancePage';
+import { cashShiftKey, financeKey, useFinanceAccess } from './pages/finance/api';
+import { FINANCE_NAV, PERSONNEL_NAV } from './pages/finance/navigation';
 import { AuditPage } from './pages/AuditPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
 import { ReceiptPrintsPage } from './pages/ReceiptPrintsPage';
@@ -122,6 +127,7 @@ type Section =
   | 'tables'
   | 'menu'
   | 'warehouse'
+  | 'finance'
   | 'staff'
   | 'audit'
   | 'reconcile'
@@ -133,10 +139,11 @@ const SECTIONS: {
   key: Section;
   label: string;
   icon: typeof IconStats;
-  perm: SectionKey;
+  perm?: SectionKey;
   adminOnly?: boolean;
 }[] = [
   { key: 'stats', label: 'Статистика', icon: IconStats, perm: 'statistics' },
+  { key: 'finance', label: 'Финансы', icon: IconMoney },
   { key: 'orders', label: 'Заказы', icon: IconOrders, perm: 'orders' },
   { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks', adminOnly: true },
   { key: 'tables', label: 'Столы', icon: IconTables, perm: 'tables' },
@@ -161,11 +168,18 @@ export function AdminApp() {
   const { canSection, can } = usePermissions();
   const isOwner = user?.role === 'OWNER';
   const isAdmin = user?.role === 'ADMIN';
+  const financeAccess = useFinanceAccess(isAdmin);
+  const mayPostFinances = isOwner || financeAccess.data?.allowed === true;
+  const mayUseCashShifts = can('actions.financeCashShifts');
+  const financeNav = FINANCE_NAV.filter(({ key }) => key === 'cashShifts' ? mayUseCashShifts
+    : key === 'transactions' ? mayPostFinances : isOwner);
+  const personnelNav = PERSONNEL_NAV.filter(({ key }) => key !== 'positions' || isOwner);
 
   // Раздел в меню: структурное ограничение (adminOnly) + право доступа к разделу.
   const sections = SECTIONS.filter((s) => {
     if (s.adminOnly && !isAdmin) return false;
-    return s.key === 'settings' || canSection(s.perm);
+    if (s.key === 'finance') return financeNav.length > 0;
+    return s.key === 'settings' || (!!s.perm && canSection(s.perm));
   });
   const [route, setRoute] = useSearchParams();
   useWorkspaceScroll();
@@ -173,7 +187,9 @@ export function AdminApp() {
   const warehousePolicy = useWarehousePolicy(canSection('warehouse'));
   const warehouseLocations = useWarehouseLocations(canSection('warehouse'));
   function setSection(next: Section) {
-    const defaults: Partial<Record<Section, string>> = { stats: 'overview', menu: 'goods', warehouse: 'balances' };
+    const defaults: Partial<Record<Section, string>> = {
+      stats: 'overview', menu: 'goods', warehouse: 'balances', finance: financeNav[0]?.key, staff: 'employees',
+    };
     const view = defaults[next];
     setRoute(view ? { section: next, view } : { section: next });
   }
@@ -182,7 +198,9 @@ export function AdminApp() {
   const statsView = statisticsView(route.get('view'));
   const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
   const menuView = (MENU_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'goods') as MenuView;
-  const posterWorkspace = section === 'menu' || section === 'warehouse';
+  const financeView = financeNav.find(({ key }) => key === route.get('view'))?.key ?? financeNav[0]?.key;
+  const staffView = personnelNav.find(({ key }) => key === route.get('view'))?.key ?? 'employees';
+  const posterWorkspace = section === 'menu' || section === 'warehouse' || section === 'finance';
   function setStatsView(view: StatisticsView) { setRoute({ section: 'stats', view }); }
   function setWarehouseView(view: WarehouseView) { setRoute({ section: 'warehouse', view }); }
   function setMenuView(view: MenuView) { setRoute({ section: 'menu', view }); }
@@ -191,10 +209,11 @@ export function AdminApp() {
 
   // Если текущий раздел стал недоступен (право отозвали) — уходим на первый доступный.
   useEffect(() => {
+    if (section === 'finance' && isAdmin && financeAccess.isPending) return;
     if (sections.length > 0 && !sections.some((s) => s.key === section)) {
       setSection(sections[0].key);
     }
-  }, [sections, section]);
+  }, [sections, section, isAdmin, financeAccess.isPending]);
 
   useEffect(() => {
     if (!mobileNav) {
@@ -205,6 +224,8 @@ export function AdminApp() {
 
   // Живое обновление: при изменении статуса заказа обновляем admin-данные.
   useSocketEvent<Order>('order:status_changed', (order) => {
+    void qc.invalidateQueries({ queryKey: financeKey });
+    void qc.invalidateQueries({ queryKey: cashShiftKey });
     applyOrderStatusToCache(qc, order);
     qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
     qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
@@ -231,6 +252,7 @@ export function AdminApp() {
     void qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] });
   });
   useSocketEvent('settings:updated', () => {
+    void qc.invalidateQueries({ queryKey: cashShiftKey });
     qc.invalidateQueries({ queryKey: ['settings'] });
     qc.invalidateQueries({ queryKey: ['admin', 'warehouse', 'locations'] });
     qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
@@ -331,7 +353,9 @@ export function AdminApp() {
     ? STATISTICS_NAV.find((item) => item.key === statsView)?.label
     : section === 'warehouse'
       ? WAREHOUSE_NAV.find((item) => item.key === warehouseView)?.label
-      : section === 'menu' ? MENU_NAV.find((item) => item.key === menuView)?.label : undefined;
+      : section === 'menu' ? MENU_NAV.find((item) => item.key === menuView)?.label
+        : section === 'finance' ? financeNav.find(({ key }) => key === financeView)?.label
+          : section === 'staff' ? personnelNav.find(({ key }) => key === staffView)?.label : undefined;
 
   const renderSidebar = (variant: 'desktop' | 'mobile') => (
     <aside className="workspace-sidebar flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
@@ -352,8 +376,11 @@ export function AdminApp() {
                 )
               : s.key === 'menu'
                 ? MENU_NAV.filter((item) => !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
-                : s.key === 'stats' ? STATISTICS_NAV : [];
-          const currentView = s.key === 'warehouse' ? warehouseView : s.key === 'menu' ? menuView : statsView;
+                : s.key === 'stats' ? STATISTICS_NAV
+                  : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav : [];
+          const currentView = s.key === 'warehouse' ? warehouseView
+            : s.key === 'menu' ? menuView : s.key === 'stats' ? statsView
+              : s.key === 'finance' ? financeView : staffView;
           const hasChildren = children.length > 0;
           const expanded = hasChildren && active && collapsedSection !== s.key;
           const selectedSection = active && !hasChildren;
@@ -400,7 +427,8 @@ export function AdminApp() {
                             onClick={() => {
                               if (s.key === 'warehouse') setWarehouseView(item.key as WarehouseView);
                               else if (s.key === 'menu') setMenuView(item.key as MenuView);
-                              else setStatsView(item.key as StatisticsView);
+                              else if (s.key === 'stats') setStatsView(item.key as StatisticsView);
+                              else setRoute({ section: s.key, view: item.key });
                               setMobileNav(false);
                             }}
                             className={`workspace-nav-child block w-full rounded-lg py-2 pl-[34px] pr-2 text-left text-sm leading-[21px] transition-colors ${selected ? 'bg-primary font-medium text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
@@ -519,7 +547,8 @@ export function AdminApp() {
                   }}
                 />
               )}
-              {section === 'staff' && canSection('staff') && <StaffPage />}
+              {section === 'finance' && financeView && <FinancePage key={financeView} view={financeView} />}
+              {section === 'staff' && canSection('staff') && (staffView === 'positions' ? <PositionsPage /> : <StaffPage />)}
               {section === 'audit' && canSection('journal') && <AuditPage />}
               {section === 'reconcile' && canSection('paymentReconciliation') && <ReconciliationPage />}
               {section === 'settings' && <SettingsPage />}

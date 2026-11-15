@@ -24,7 +24,7 @@ export class AuthService {
 
   async login(dto: LoginDto) {
     const phone = this.normalizePhone(dto.phone);
-    const user = await this.prisma.user.findUnique({ where: { phone } });
+    const user = await this.prisma.user.findUnique({ where: { phone }, include: { position: true } });
 
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Неверный телефон или пароль');
@@ -48,7 +48,8 @@ export class AuthService {
         role: user.role,
         cafeId: user.cafeId,
         prepStation: user.prepStation,
-        permissions: resolvePermissions(user.role, user.permissions),
+        positionId: user.position?.role === user.role ? user.positionId : null,
+        permissions: resolvePermissions(user.role, user.position?.role === user.role ? user.position.permissions : user.permissions),
       },
     };
   }
@@ -74,7 +75,8 @@ export class AuthService {
   async me(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, name: true, phone: true, role: true, cafeId: true, prepStation: true, permissions: true },
+      select: { id: true, name: true, phone: true, role: true, cafeId: true, prepStation: true, permissions: true,
+        positionId: true, position: { select: { role: true, permissions: true } } },
     });
     if (!user) {
       throw new UnauthorizedException();
@@ -86,7 +88,8 @@ export class AuthService {
       role: user.role,
       cafeId: user.cafeId,
       prepStation: user.prepStation,
-      permissions: resolvePermissions(user.role, user.permissions),
+      positionId: user.position?.role === user.role ? user.positionId : null,
+      permissions: resolvePermissions(user.role, user.position?.role === user.role ? user.position.permissions : user.permissions),
     };
   }
 

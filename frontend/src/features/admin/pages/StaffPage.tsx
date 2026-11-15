@@ -1,6 +1,7 @@
 import { DatePicker, DateTimePicker } from '@/components/DatePicker';
 import { useEffect, useMemo, useState } from 'react';
 import type { Role } from '@/types';
+import { useStaffPositions } from './positions-api';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -130,8 +131,7 @@ export function StaffPage() {
   const tr = useT();
   const currentUser = useAuth((s) => s.user);
   const { isOwner, canAction } = usePermissions();
-  // Кнопку «Права доступа» видит владелец, либо админ с правом editPermissions/manageStaff.
-  const canManagePermissions = isOwner || canAction('editPermissions') || canAction('manageStaff');
+  const canManageStaff = isOwner || canAction('manageStaff');
 
   useEffect(() => {
     if (!showWaiterReportBadge) return;
@@ -254,12 +254,12 @@ export function StaffPage() {
               </button>
             </>
           )}
-          <button
+          {canManageStaff && <button
             className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
             onClick={() => setEditing('new')}
           >
             <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
-          </button>
+          </button>}
         </div>
       </div>}
 
@@ -330,6 +330,7 @@ export function StaffPage() {
                         ? 'text-success'
                         : 'text-danger';
                   const member = memberById.get(row.waiterId);
+                  const canEdit = !!member && canManageStaff && (isOwner || (member.role !== 'ADMIN' && !member.positionId));
                   const openEdit = () => {
                     if (member) setEditing(member);
                   };
@@ -344,7 +345,7 @@ export function StaffPage() {
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="font-medium text-text-primary">{row.name}</div>
-                          <div className="text-xs text-text-muted">{stationNames.get(member?.prepStation ?? (row.role === 'KITCHEN' ? 'kitchen' : row.role === 'BAR' ? 'bar' : '')) ?? tr(ROLE_LABEL[row.role])}</div>
+                          <div className="text-xs text-text-muted">{member?.positionName ?? stationNames.get(member?.prepStation ?? (row.role === 'KITCHEN' ? 'kitchen' : row.role === 'BAR' ? 'bar' : '')) ?? tr(ROLE_LABEL[row.role])}</div>
                         </td>
                         {isWaiter ? (
                           <>
@@ -363,20 +364,20 @@ export function StaffPage() {
                           </td>
                         )}
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1">
+                          {canEdit && <div className="flex items-center justify-end gap-1">
                             <IconBtn title={tr('Изменить')} onClick={openEdit}>
                               <IconEdit className="h-4 w-4" />
                             </IconBtn>
-                            <IconBtn title={tr('Удалить')} danger onClick={() => setPendingDelete({ id: row.waiterId, name: row.name })}>
+                            {row.waiterId !== currentUser?.id && <IconBtn title={tr('Удалить')} danger onClick={() => setPendingDelete({ id: row.waiterId, name: row.name })}>
                               <IconTrash className="h-4 w-4" />
-                            </IconBtn>
-                          </div>
+                            </IconBtn>}
+                          </div>}
                         </td>
                       </tr>
                       {open && (
                         <tr className="border-b border-border bg-background/30">
                           <td colSpan={8} className="px-3 py-3">
-                            <ShiftDetails row={row} onEdit={openEdit} />
+                            <ShiftDetails row={row} onEdit={canEdit ? openEdit : undefined} />
                           </td>
                         </tr>
                       )}
@@ -404,7 +405,7 @@ export function StaffPage() {
           member={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
           onManagePermissions={
-            editing !== 'new' && editing && canManagePermissions && editing.role === 'ADMIN' && editing.id !== currentUser?.id
+            editing !== 'new' && editing && isOwner && editing.role === 'ADMIN' && !editing.positionId && editing.id !== currentUser?.id
               ? () => {
                   setPermissionsFor(editing);
                   setEditing(null);
@@ -844,7 +845,7 @@ function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
   );
 }
 
-function ShiftDetails({ row, onEdit }: { row: ShiftReportRow; onEdit: () => void }) {
+function ShiftDetails({ row, onEdit }: { row: ShiftReportRow; onEdit?: () => void }) {
   const tr = useT();
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -860,12 +861,12 @@ function ShiftDetails({ row, onEdit }: { row: ShiftReportRow; onEdit: () => void
             ))}
           </div>
         )}
-        <button
+        {onEdit && <button
           onClick={onEdit}
           className="mt-3 text-sm font-medium text-primary hover:underline"
         >
           {tr('Редактировать профиль')}
-        </button>
+        </button>}
       </div>
 
       {/* Правая колонка: отменённые чеки */}
@@ -949,8 +950,14 @@ function StaffModal({
   const [name, setName] = useState(member?.name ?? '');
   const [phone, setPhone] = useState(member?.phone ?? '');
   const [assignment, setAssignment] = useState(member?.prepStation ?? member?.role ?? 'WAITER');
+  const [positionId, setPositionId] = useState(member?.positionId ?? '');
+  const currentUser = useAuth((state) => state.user);
+  const { isOwner } = usePermissions();
+  const canChangeRole = !member || member.id !== currentUser?.id;
+  const canAssignPosition = isOwner && canChangeRole && member?.role !== 'OWNER';
+  const positions = useStaffPositions(canAssignPosition);
   const stations = usePreparationStations().data ?? [];
-  const roles = ['WAITER', 'ADMIN', 'OWNER'] as const;
+  const roles = isOwner ? (['WAITER', 'ADMIN', 'OWNER'] as const) : (['WAITER'] as const);
   const stationOptions = stations
     .map((station) => ({
       value: station.id === 'kitchen' ? 'KITCHEN' : station.id === 'bar' ? 'BAR' : station.id,
@@ -963,11 +970,17 @@ function StaffModal({
   const [error, setError] = useState('');
 
   const pending = create.isPending || update.isPending;
+  const systemRole = (value: string) => value === 'KITCHEN' || value === 'BAR' ? value : roles.find((role) => role === value);
+  const stationRole = member?.role === 'BAR' ? 'BAR' : 'KITCHEN';
+  const selectedRole = systemRole(assignment);
+  const role = selectedRole ?? stationRole;
+  const matchingPositions = (positions.data ?? []).filter((position) => position.role === role);
+  const positionPatch = canAssignPosition && positionId !== (member?.positionId ?? '')
+    ? { positionId: positionId || null }
+    : {};
 
   async function onSubmit() {
     setError('');
-    const selectedRole = assignment === 'KITCHEN' || assignment === 'BAR' ? assignment : roles.find((role) => role === assignment);
-    const role = selectedRole ?? (member?.role === 'BAR' ? 'BAR' : 'KITCHEN');
     const prepStation = selectedRole ? null : assignment;
     try {
       if (isEdit) {
@@ -978,6 +991,7 @@ function StaffModal({
           role,
           prepStation,
           isActive,
+          ...positionPatch,
           ...(password ? { password } : {}),
         });
         push({ message: 'Сотрудник обновлён', at: new Date().toISOString() });
@@ -986,7 +1000,7 @@ function StaffModal({
           setError('Укажите пароль');
           return;
         }
-        await create.mutateAsync({ name, phone, role, password, prepStation });
+        await create.mutateAsync({ name, phone, role, password, prepStation, ...positionPatch });
         push({ message: 'Сотрудник добавлен', at: new Date().toISOString() });
       }
       onClose();
@@ -1018,10 +1032,18 @@ function StaffModal({
             ariaLabel="Роль или станция"
             className="h-11 w-full"
             value={assignment}
-            onChange={setAssignment}
+            disabled={!canChangeRole}
+            onChange={(value) => {
+              setAssignment(value);
+              if ((systemRole(value) ?? stationRole) !== role) setPositionId('');
+            }}
             options={[{ value: 'WAITER', label: ROLE_LABEL.WAITER }, ...stationOptions, ...roles.slice(1).map((value) => ({ value, label: ROLE_LABEL[value] }))]}
           />
         </Field>
+        {canAssignPosition && (matchingPositions.length > 0 || positionId) && <Field label="Должность">
+          <Select ariaLabel="Должность" className="h-11 w-full" value={positionId} onChange={setPositionId}
+            options={[{ value: '', label: 'Стандартные права роли' }, ...matchingPositions.map(({ id, name }) => ({ value: id, label: name }))]} />
+        </Field>}
         <Field label={isEdit ? 'Новый пароль (если менять)' : 'Пароль'}>
           <input
             className="input"

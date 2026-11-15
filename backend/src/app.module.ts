@@ -19,6 +19,7 @@ import { QrModule } from './qr/qr.module';
 import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { WaiterShiftsModule } from './waiter-shifts/waiter-shifts.module';
+import { CashShiftsModule } from './cash-shifts/cash-shifts.module';
 import { AdminModule } from './admin/admin.module';
 import { WarehouseModule } from './warehouse/warehouse.module';
 import { PreparationProductionModule } from './warehouse/preparation-production';
@@ -34,6 +35,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { TenantContextMiddleware } from './tenant/tenant-context.middleware';
 import { DeliveryIntegrationModule } from './delivery-integration/delivery-integration.module';
+import { FinanceModule } from './finance/finance.module';
 
 @Module({
   imports: [
@@ -49,6 +51,7 @@ import { DeliveryIntegrationModule } from './delivery-integration/delivery-integ
     DishesModule,
     OrdersModule,
     WaiterShiftsModule,
+    CashShiftsModule,
     KitchenModule,
     PaymentsModule,
     ReceiptPrintsModule,
@@ -66,6 +69,7 @@ import { DeliveryIntegrationModule } from './delivery-integration/delivery-integ
     BackupBotModule,
     PlatformModule,
     DeliveryIntegrationModule,
+    FinanceModule,
   ],
   providers: [
     // Глобально: сначала проверка JWT, затем роли, затем права доступа к разделам.

@@ -221,6 +221,11 @@ enum CafeStatus {
 // Заведение (арендатор). Все бизнес-данные привязаны к кафе через cafe_id.
 // Мультитенантность, фаза 1: cafe_id добавлен nullable во все таблицы и бэкфиллен «Кафе #1».
 model Cafe {
+  staffPositions StaffPosition[]
+  financeAccounts FinanceAccount[]
+  financeCategories FinanceCategory[]
+  financeEntries FinanceEntry[]
+  salaryAccruals SalaryAccrual[]
   warehouseSuppliers WarehouseSupplier[]
   warehousePackages WarehousePackage[]
   processingDocuments ProcessingDocument[]
@@ -254,6 +259,108 @@ model PlatformAdmin {
   @@map("platform_admins")
 }
 
+enum FinanceAccountType {
+  cash
+  noncash
+}
+
+enum FinanceCategoryKind {
+  income
+  expense
+}
+
+enum FinanceEntryKind {
+  income
+  expense
+  transfer
+  sale
+  refund
+  salary
+  adjustment
+}
+
+model FinanceAccount {
+  id             String             @id @default(uuid())
+  cafeId         String             @map("cafe_id")
+  name           String
+  type           FinanceAccountType
+  isDefault      Boolean            @default(false) @map("is_default")
+  openingBalance Decimal            @default(0) @map("opening_balance") @db.Decimal(18, 2)
+  createdAt      DateTime           @default(now()) @map("created_at")
+  cafe           Cafe               @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  entries        FinanceEntry[]     @relation("FinanceAccountEntries")
+  counterEntries FinanceEntry[]    @relation("FinanceCounterAccount")
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, name])
+  @@map("finance_accounts")
+}
+
+model FinanceCategory {
+  id          String              @id @default(uuid())
+  cafeId      String              @map("cafe_id")
+  name        String
+  kind        FinanceCategoryKind
+  userIds     String[]            @default([]) @map("user_ids")
+  positionIds String[]            @default([]) @map("position_ids")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  cafe        Cafe                @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  entries     FinanceEntry[]
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, kind, name])
+  @@map("finance_categories")
+}
+
+model SalaryAccrual {
+  id           String         @id @default(uuid())
+  cafeId       String         @map("cafe_id")
+  userId       String         @map("user_id")
+  employeeName String         @map("employee_name")
+  month        String
+  amount       Decimal        @db.Decimal(18, 2)
+  note         String?
+  actorId      String         @map("actor_id")
+  requestKey   String         @map("request_key")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  cafe         Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  payments     FinanceEntry[]
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, requestKey])
+  @@index([cafeId, month])
+  @@map("salary_accruals")
+}
+
+model FinanceEntry {
+  id                    String           @id @default(uuid())
+  cafeId                String           @map("cafe_id")
+  accountId             String           @map("account_id")
+  kind                  FinanceEntryKind
+  amount                Decimal          @db.Decimal(18, 2)
+  categoryId            String?          @map("category_id")
+  counterpartyAccountId String?          @map("counterparty_account_id")
+  salaryAccrualId       String?          @map("salary_accrual_id")
+  cashShiftId           String?          @map("cash_shift_id")
+  actorId               String?          @map("actor_id")
+  sourceKey             String?          @map("source_key")
+  note                  String?
+  occurredAt            DateTime         @default(now()) @map("occurred_at")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  cafe                  Cafe             @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  account               FinanceAccount   @relation("FinanceAccountEntries", fields: [cafeId, accountId], references: [cafeId, id], onDelete: NoAction)
+  counterparty          FinanceAccount?  @relation("FinanceCounterAccount", fields: [cafeId, counterpartyAccountId], references: [cafeId, id], onDelete: NoAction)
+  category              FinanceCategory? @relation(fields: [cafeId, categoryId], references: [cafeId, id], onDelete: NoAction)
+  salaryAccrual         SalaryAccrual?   @relation(fields: [cafeId, salaryAccrualId], references: [cafeId, id], onDelete: NoAction)
+
+  @@unique([cafeId, sourceKey])
+  @@index([cafeId, occurredAt])
+  @@index([cafeId, accountId, occurredAt])
+  @@index([cafeId, salaryAccrualId])
+  @@index([cafeId, cashShiftId])
+  @@map("finance_entries")
+}
+
 model User {
   cafeId       String?  @map("cafe_id")
   id           String   @id @default(uuid())
@@ -267,6 +374,8 @@ model User {
   isActive     Boolean  @default(true) @map("is_active")
   // Права доступа сотрудника (разделы/действия). null = дефолты по роли.
   permissions  Json?    @map("permissions")
+  positionId   String?  @map("position_id")
+  position     StaffPosition? @relation(fields: [cafeId, positionId], references: [cafeId, id], onDelete: Restrict)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -285,7 +394,25 @@ model User {
   cashReports          ShiftCashReport[]     @relation("WaiterCashReports")
 
   @@index([cafeId, prepStation])
+  @@index([cafeId, positionId])
   @@map("users")
+}
+
+model StaffPosition {
+  id          String   @id @default(uuid())
+  cafeId      String   @map("cafe_id")
+  name        String
+  role        Role
+  permissions Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  cafe  Cafe   @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  users User[]
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, name])
+  @@map("staff_positions")
 }
 
 model Hall {
@@ -540,6 +667,23 @@ model OrderAction {
   @@map("order_actions")
 }
 
+model CashShift {
+  id             String    @id @default(uuid())
+  cafeId         String    @map("cafe_id")
+  accountId      String    @map("account_id")
+  openedById     String    @map("opened_by_id")
+  closedById     String?   @map("closed_by_id")
+  openedAt       DateTime  @default(now()) @map("opened_at")
+  closedAt       DateTime? @map("closed_at")
+  openingAmount  Decimal   @map("opening_amount") @db.Decimal(14, 2)
+  expectedAmount Decimal?  @map("expected_amount") @db.Decimal(14, 2)
+  actualAmount   Decimal?  @map("actual_amount") @db.Decimal(14, 2)
+  difference     Decimal?  @db.Decimal(14, 2)
+
+  @@index([cafeId, openedAt])
+  @@map("cash_shifts")
+}
+
 model WaiterShift {
   cafeId    String?           @map("cafe_id")
   id        String            @id @default(uuid())
@@ -770,6 +914,7 @@ model AuditLog {
 
 // Настройки заведения (singleton, id = "default"). Этап 8.
 model Settings {
+  cashShiftsEnabled            Boolean @default(false) @map("cash_shifts_enabled")
   waiterOrderPermissions Json? @map("waiter_order_permissions")
   cafeId                       String? @unique @map("cafe_id")
   id                           String  @id @default(uuid())

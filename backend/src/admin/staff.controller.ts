@@ -74,6 +74,7 @@ export class StaffController {
   }
 
   @Post()
+  @RequirePermission('actions.manageStaff')
   create(@Body() dto: CreateStaffDto, @CurrentUser() actor: AuthUser) {
     return this.staff.create(dto, actor);
   }
@@ -84,11 +85,13 @@ export class StaffController {
   }
 
   @Patch(':id')
+  @RequirePermission('actions.manageStaff')
   update(@Param('id') id: string, @Body() dto: UpdateStaffDto, @CurrentUser() actor: AuthUser) {
     return this.staff.update(id, dto, actor);
   }
 
   @Delete(':id')
+  @RequirePermission('actions.manageStaff')
   remove(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.staff.remove(id, actor);
   }

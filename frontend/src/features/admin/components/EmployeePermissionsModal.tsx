@@ -66,6 +66,7 @@ const ACTION_ICONS: Record<ActionKey, IconCmp> = {
   refundChecks: IconClock,
   exportReports: IconDownload,
   closeShift: IconLock,
+  financeCashShifts: IconCard,
   manageStaff: IconStaff,
   editPermissions: IconKey,
   warehouseReceive: IconWarehouse,
