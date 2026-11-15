@@ -113,26 +113,6 @@ function MenuDishList({ view }: { view: MenuView }) {
   return (
     <div className="min-w-0">
       <WorkspaceHeaderCount count={dishesQ.isSuccess ? rows.length : undefined} />
-      {editable && (
-        <WorkspaceHeaderActions>
-          {!isGoods && (
-            <MenuActions
-              ariaLabel="Другие действия"
-              onChange={(action) => {
-                if (action === 'set') openEditor({ type: 'set' });
-              }}
-              options={[{ value: 'set', label: 'Добавить сет' }]}
-            />
-          )}
-          <button
-            aria-label={isGoods ? 'Добавить товар' : undefined}
-            className="btn-primary btn-md"
-            onClick={() => openEditor({ type: 'entry' })}
-          >
-            {isGoods ? 'Добавить' : t('Добавить блюдо')}
-          </button>
-        </WorkspaceHeaderActions>
-      )}
       {editor?.type === 'entry' && (
         <MenuEntryPage
           id={editor.id}
@@ -180,6 +160,20 @@ function MenuDishList({ view }: { view: MenuView }) {
               options={[{ value: '', label: 'Все позиции' }, { value: 'visible', label: 'Доступные в меню' }, { value: 'hidden', label: 'Скрытые' }]} />
           </div>
         </details>
+        {editable && !editor && (
+          <div className="ml-auto flex items-center gap-2">
+            {!isGoods && (
+              <MenuActions
+                ariaLabel="Другие действия"
+                onChange={() => openEditor({ type: 'set' })}
+                options={[{ value: 'set', label: 'Добавить сет' }]}
+              />
+            )}
+            <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'entry' })}>
+              {t(isGoods ? 'Добавить товар' : 'Добавить блюдо')}
+            </button>
+          </div>
+        )}
       </div>
       {categoriesQ.isError && (
         <ListLoadError
