@@ -6,11 +6,12 @@ import { WarehouseReportQuery } from './reports.dto';
 import { warehouseBalances } from './warehouse-location';
 import { reportWarehouses } from './report-warehouses';
 import { internalTransferLegs } from './report-transfer-flow';
+import { adjustsPurchaseReceipt } from './purchase-correction';
 import { normalizeUnit, unitDef, unitLabel } from './units';
 
 const zero = new Prisma.Decimal(0);
 type Evidence = { createdAt: Date; change: Prisma.Decimal; costAtMoment: Prisma.Decimal; valuationAdjustment: Prisma.Decimal;
-  beforeValuationKnown?: boolean; excludeFromFlow?: boolean };
+  beforeValuationKnown?: boolean; excludeFromFlow?: boolean; adjustsReceipt?: boolean };
 
 /** Rewind the current book balance using immutable value deltas. The carry-in
  * survives imports with no opening movement; later purchases cannot reprice it. */
@@ -36,7 +37,7 @@ export function summarizeMovements(current: { stock: Prisma.Decimal; stockValue:
     if ((!from || movement.createdAt >= from) && (!to || movement.createdAt <= to)) {
       valuationAdjustment = valuationAdjustment.add(movement.valuationAdjustment);
       if (!movement.excludeFromFlow && !movement.change.isZero()) {
-        if (movement.change.gt(0)) incomingQuantity = incomingQuantity.add(movement.change);
+        if (movement.adjustsReceipt || movement.change.gt(0)) incomingQuantity = incomingQuantity.add(movement.change);
         else outgoingQuantity = outgoingQuantity.sub(movement.change);
         movementCount += 1;
       }
@@ -107,6 +108,7 @@ export async function movementSummary(db: Prisma.TransactionClient, query: Wareh
   }, select: {
     id: true, ingredientId: true, warehouseId: true, createdAt: true, change: true, costAtMoment: true,
     valuationAdjustment: true, beforeValuationKnown: true, sourceId: true, sourceType: true, type: true,
+    reason: true,
   } }) : [];
   const preparations = new Set(ingredients.filter(({ kind }) => kind === 'preparation' || kind === 'prepared_dish').map(({ id }) => id));
   const stockedPreparations = new Set<string>();
@@ -121,7 +123,7 @@ export async function movementSummary(db: Prisma.TransactionClient, query: Wareh
     }
     const key = balanceKey(movement.warehouseId ?? scope.defaultWarehouse?.id ?? null, movement.ingredientId);
     const list = byBalance.get(key) ?? [];
-    list.push({ ...movement, excludeFromFlow: internalLegs.has(movement.id) });
+    list.push({ ...movement, excludeFromFlow: internalLegs.has(movement.id), adjustsReceipt: adjustsPurchaseReceipt(movement) });
     byBalance.set(key, list);
   }
 

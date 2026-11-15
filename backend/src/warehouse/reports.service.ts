@@ -8,6 +8,7 @@ import { WarehouseMovementExportQuery, WarehouseReportQuery, WarehouseReportView
 import { warehouseBalances } from './warehouse-location';
 import { reportWarehouses } from './report-warehouses';
 import { internalTransferLegs } from './report-transfer-flow';
+import { adjustsPurchaseReceipt, historicalPurchaseCorrection, historicalPurchaseValue } from './purchase-correction';
 import { normalizeUnit, unitDef, unitLabel } from './units';
 import { preparedLossQuantity, warehouseLossFilter } from './movement-cost';
 import { movementSummary } from './movement-summary';
@@ -20,7 +21,8 @@ type ReportRow = {
   sourceType: string | null; sourceId: string | null; documentLabel: string | null;
   employeeId: string | null; employeeName: string | null; reason: string | null; type: string;
 };
-type InternalRow = ReportRow & { exactQuantity: Prisma.Decimal; exactCost: Prisma.Decimal; exactAdjustment: Prisma.Decimal };
+type InternalRow = ReportRow & { exactQuantity: Prisma.Decimal; exactCost: Prisma.Decimal; exactAdjustment: Prisma.Decimal;
+  receiptCorrection?: Prisma.Decimal; exactReceiptValue?: Prisma.Decimal };
 const zero = new Prisma.Decimal(0);
 
 @Injectable()
@@ -55,7 +57,7 @@ export class WarehouseReportsService {
       salesPerformance,
       ...((query.view ?? 'movements') === 'movements' && query.ingredientId
         ? { movementGroups: groupMovements(rows) } : {}),
-      rows: rows.slice((page - 1) * pageSize, page * pageSize).map(({ exactQuantity, exactCost, exactAdjustment, ...row }) => row),
+      rows: rows.slice((page - 1) * pageSize, page * pageSize).map(({ exactQuantity, exactCost, exactAdjustment, receiptCorrection, exactReceiptValue, ...row }) => row),
     };
   }
 
@@ -223,8 +225,13 @@ export class WarehouseReportsService {
       const unit = normalizeUnit(movement.ingredient.displayUnit);
       const signedValue = movement.change.mul(movement.costAtMoment);
       const loss = preparedLossQuantity(movement).mul(movement.costAtMoment);
+      const bookChange = signedValue.add(movement.valuationAdjustment);
+      const receiptCorrection = historicalPurchaseCorrection(movement) ? historicalPurchaseValue(movement)
+        : adjustsPurchaseReceipt(movement) ? bookChange : undefined;
+      const costKnown = movement.costKnown || (view === 'purchases' && receiptCorrection !== undefined);
       const exactCost = view === 'losses' ? signedValue.neg().add(loss)
-        : view === 'sales' ? signedValue.neg().sub(loss) : view === 'movements' ? signedValue.add(movement.valuationAdjustment) : signedValue;
+        : view === 'sales' ? signedValue.neg().sub(loss) : view === 'movements' ? bookChange
+        : receiptCorrection ?? movement.receiptValue ?? signedValue;
       return {
         id: movement.id, createdAt: movement.createdAt, ingredientId: movement.ingredientId,
         ingredientName: movement.ingredient.name, category: movement.ingredient.category,
@@ -233,10 +240,10 @@ export class WarehouseReportsService {
         quantity: Number(movement.change.div(unitDef(unit).factor)), unit: unitLabel(unit),
         exactQuantity: movement.change.div(unitDef(unit).factor),
         unitCost: movement.costKnown ? Number(movement.costAtMoment.mul(unitDef(unit).factor).toDecimalPlaces(8)) : null,
-        totalCost: movement.costKnown ? Number(exactCost.toDecimalPlaces(2)) : null, exactCost, sourceType: movement.sourceType,
-        costKnown: movement.costKnown,
+        totalCost: costKnown ? Number(exactCost.toDecimalPlaces(2)) : null, exactCost, sourceType: movement.sourceType,
+        costKnown,
         valuationAdjustment: Number(movement.valuationAdjustment), exactAdjustment: movement.valuationAdjustment,
-        sourceId: movement.sourceId,
+        sourceId: movement.sourceId, receiptCorrection, exactReceiptValue: movement.receiptValue ?? undefined,
         documentLabel: loss.gt(0) ? `Потери готового блюда · ${order ? `Заказ №${order.orderNumber}` : 'Заказ'}`
           : document ? documentName(document.kind) : purchase ? `Поставка №${purchase.number}`
           : movement.sourceType === 'processing' ? 'Переработка' : movement.sourceType === 'production' ? 'Производство'
@@ -272,22 +279,23 @@ function groupMovements(rows: InternalRow[]) {
   const internalLegs = internalTransferLegs(rows.map((row) => ({ ...row, quantity: row.exactQuantity })));
   for (const row of rows) {
     // Pure valuation and prepared-loss evidence does not move physical quantity.
-    if (row.exactQuantity.isZero() || internalLegs.has(row.id)) continue;
-    const direction = row.exactQuantity.gt(0) ? 'incoming' : 'outgoing';
+    if ((!row.receiptCorrection && row.exactQuantity.isZero()) || internalLegs.has(row.id)) continue;
+    const direction = row.receiptCorrection || row.exactQuantity.gt(0) ? 'incoming' : 'outgoing';
     const sourceType = row.sourceType ?? 'manual';
     const key = JSON.stringify([direction, sourceType, row.unit]);
     const group = groups.get(key) ?? {
       direction, sourceType, label: movementGroupLabel(sourceType, direction), unit: row.unit,
       quantity: zero, cost: zero, costKnown: true, count: 0,
     };
-    group.quantity = group.quantity.add(row.exactQuantity.abs());
-    // Stock valuation adjustments affect book value, not the original unit cost.
-    group.cost = group.cost.add(row.exactCost.sub(row.exactAdjustment).abs());
-    group.costKnown &&= row.costKnown;
-    group.count++;
+    group.quantity = group.quantity.add(row.receiptCorrection ? row.exactQuantity : row.exactQuantity.abs());
+    // A historical invoice correction contributes the signed change to its
+    // original receipt. Ordinary book adjustments do not reprice group totals.
+    group.cost = group.cost.add(row.receiptCorrection ?? row.exactReceiptValue ?? row.exactCost.sub(row.exactAdjustment).abs());
+    group.costKnown &&= row.receiptCorrection !== undefined || row.costKnown;
+    if (!row.receiptCorrection) group.count++;
     groups.set(key, group);
   }
-  return [...groups.values()]
+  return [...groups.values()].filter((group) => !group.quantity.isZero())
     .sort((a, b) => a.direction.localeCompare(b.direction) || a.label.localeCompare(b.label, 'ru') || a.unit.localeCompare(b.unit))
     .map((group) => ({
       direction: group.direction, sourceType: group.sourceType, label: group.label,

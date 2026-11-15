@@ -145,6 +145,7 @@ export interface Purchase {
   postedAt?: string | null;
   effectiveAt: string | null;
   canCorrectStock?: boolean;
+  historicalStockCorrection?: boolean;
   correctionBlockedReason?: string | null;
   returnableItems?: { ingredientId: string; name: string; unit: string; unitCode: UnitCode; receivedQuantity: number; returnedQuantity: number; remainingQuantity: number; receivedQuantityBase: number; returnedQuantityBase: number; remainingQuantityBase: number; remainingBase: number }[];
   corrections?: { id: string; createdAt: string; actorName: string | null; reason: string; before: { totalAmount: number }; after: { totalAmount: number } }[];

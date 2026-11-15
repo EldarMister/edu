@@ -484,3 +484,85 @@ test('PostgreSQL: historical inventory applies the cutoff variance once and refu
     await db.$disconnect();
   }
 });
+
+test('PostgreSQL: historical inventory follows tied stock chains regardless of UUID order', { skip: !url }, async () => {
+  const db = new PrismaClient({ datasourceUrl: url });
+  db.$use(tenantPrismaMiddleware);
+  const cafe = await db.cafe.create({ data: { name: `Tied inventory ${randomUUID()}` } });
+  try {
+    await runWithTenant({ cafeId: cafe.id }, async () => {
+      const owner = await db.user.create({ data: { name: 'Owner', role: 'OWNER', phone: randomUUID(), passwordHash: 'unused' } });
+      const ingredients = new IngredientsService(db);
+      const docs = new WarehouseDocumentsService(db);
+      const purchases = new PurchasesService(db);
+      const locations = new WarehouseLocationsService(db, { emitBroadcast() {} });
+      const [main] = (await locations.list(cafe.id)).locations;
+      const warehouse = await resolveWarehouse(db, main.id);
+      const origin = new Date(Date.now() - 120_000);
+      const receiptAt = new Date(+origin + 30_000);
+      const before = new Date(+receiptAt - 1);
+      const after = new Date(+receiptAt + 1);
+      const product = await ingredients.create({ name: 'Rice in two invoice lines', unit: 'pcs' });
+      await db.ingredient.update({ where: { id: product.id }, data: { createdAt: origin } });
+      const receipt = await purchases.create({ warehouseId: main.id, supplier: 'Two prices', complete: true,
+        effectiveAt: receiptAt.toISOString(), items: [
+          { ingredientId: product.id, quantity: 10, purchasePrice: 2 },
+          { ingredientId: product.id, quantity: 20, purchasePrice: 3 },
+        ] }, owner);
+      const movements = await db.stockMovement.findMany({ where: { sourceId: receipt.id } });
+      assert.equal(movements.length, 2);
+      assert.ok(movements.every((row) => +row.createdAt === +receiptAt));
+      const first = movements.find((row) => row.beforeStock.isZero());
+      const last = movements.find((row) => row.afterStock.eq(30));
+      // Force the old DESC UUID ordering to select the earlier posting first.
+      await db.stockMovement.update({ where: { id: first.id }, data: { id: `ffffffff-${randomUUID().slice(9)}` } });
+      await db.stockMovement.update({ where: { id: last.id }, data: { id: `00000000-${randomUUID().slice(9)}` } });
+
+      const count = async (item, at, expected) => {
+        const document = await docs.create(owner, { kind: 'inventory', mode: 'partial', warehouseId: main.id,
+          countedAt: at.toISOString(), items: [{ ingredientId: item.id, quantity: expected }] });
+        assert.equal(document.items[0].expected, expected);
+        assert.equal(document.items[0].difference, 0);
+        assert.equal((await docs.get(document.id)).items[0].expected, expected);
+        return document;
+      };
+      const earlierCount = await count(product, before, 0);
+      await count(product, receiptAt, 0); // A timestamp at the cutoff is outside the checked period.
+      const laterCount = await count(product, after, 30);
+
+      // A valid same-time chain may revisit a balance; greedy edge selection
+      // would get stuck if it unwound 0→10 before the cycle 10→20→10.
+      const cycling = await ingredients.create({ name: 'Receipt and withdrawal', unit: 'pcs' });
+      await db.ingredient.update({ where: { id: cycling.id }, data: { createdAt: origin } });
+      await db.$transaction(async (tx) => {
+        await lockIngredients(tx, [cycling.id]);
+        for (const change of [10, 10, -10]) await postStockMovement(tx, {
+          warehouse, ingredientId: cycling.id, change: new Prisma.Decimal(change),
+          movement: { type: 'correction', sourceType: 'manual', sourceId: randomUUID(), createdAt: receiptAt },
+        });
+      });
+      await count(cycling, before, 0);
+      await count(cycling, after, 10);
+
+      // A disconnected balanced loop has zero net quantity but is not evidence
+      // of this stock history. It must still fail both rewind and anchor checks.
+      await db.stockMovement.createMany({ data: [[50, 60], [60, 50]].map(([from, to]) => ({
+        cafeId: cafe.id, ingredientId: product.id, warehouseId: main.id, warehouseKey: 'default',
+        type: 'correction', sourceType: 'manual', sourceId: randomUUID(), createdAt: receiptAt,
+        beforeStock: from, afterStock: to, change: to - from, costAtMoment: 0,
+      })) });
+      await assert.rejects(docs.get(earlierCount.id), /Журнал .* не подтверждает/);
+      await assert.rejects(docs.get(laterCount.id), /Журнал .* не подтверждает/);
+      assert.equal(Number((await db.ingredient.findUniqueOrThrow({ where: { id: product.id } })).stock), 30);
+    });
+  } finally {
+    await db.auditLog.deleteMany({ where: { cafeId: cafe.id } });
+    await db.warehouseDocument.deleteMany({ where: { cafeId: cafe.id } });
+    await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
+    await db.purchase.deleteMany({ where: { cafeId: cafe.id } });
+    await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+    await db.user.deleteMany({ where: { cafeId: cafe.id } });
+    await db.cafe.delete({ where: { id: cafe.id } });
+    await db.$disconnect();
+  }
+});

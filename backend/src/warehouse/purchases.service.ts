@@ -11,7 +11,7 @@ import { resolveWarehouseSupplier } from './suppliers';
 import { purchaseUnitsFor } from './purchase-units';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { postStockMovement } from './stock-posting';
-import { postPurchaseCorrection, purchaseCorrectionEligibility } from './purchase-correction';
+import { historicalPurchaseCorrectionReason, postPurchaseCorrection, purchaseCorrectionEligibility } from './purchase-correction';
 import { getCafeId } from '../tenant/tenant-context';
 import { lockIngredients } from './stock-lock';
 import { getWarehouseBalance, resolveWarehouse, warehouseDocumentFilter } from './warehouse-location';
@@ -19,7 +19,7 @@ import { assertUnitMatchesType, costToBase, fromBase, normalizeUnit, toBase, uni
 import { PurchaseExportQuery, PurchaseListQuery, purchaseDateRange } from './purchases-query.dto';
 import { purchaseExportColumns, writePurchaseWorkbook } from './purchases-xlsx';
 import { parseStockEffectiveAt } from './stock-effective-time';
-import { replayHistoricalStock } from './historical-stock-replay';
+import { receiptMovementValue, replayHistoricalStock } from './historical-stock-replay';
 
 const postingTransaction = { timeout: 30_000 };
 
@@ -179,7 +179,7 @@ export class PurchasesService {
     const completed = purchase.status === PurchaseStatus.completed;
     const warehouse = completed ? await resolveWarehouse(tx, purchase.warehouseId) : null;
     const eligibility = completed ? await purchaseCorrectionEligibility(tx, purchase, [warehouse])
-      : { stockPostedAt: null, canCorrectStock: false, correctionBlockedReason: null };
+      : { stockPostedAt: null, historicalAt: null, canCorrectStock: false, correctionBlockedReason: null };
     const returned = completed ? await tx.warehouseDocumentItem.groupBy({
       by: ['ingredientId'], where: { document: { sourcePurchaseId: id, kind: 'supplier_return', status: 'posted' } },
       _sum: { quantity: true },
@@ -201,16 +201,19 @@ export class PurchasesService {
         remainingQuantityBase, remainingBase: remainingQuantityBase };
     });
     const history = await tx.stockMovement.findMany({
-      where: { sourceType: 'purchase', sourceId: id, reason: 'purchase_correction', recipeSnapshot: { not: Prisma.DbNull } },
+      where: { sourceType: 'purchase', sourceId: id, reason: { in: ['purchase_correction', historicalPurchaseCorrectionReason] },
+        recipeSnapshot: { not: Prisma.DbNull } },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
     const corrections = history.flatMap((movement) => {
       const snapshot = movement.recipeSnapshot as Prisma.JsonObject | null;
-      return snapshot?.kind === 'purchase_correction' ? [{ id: movement.id, createdAt: movement.createdAt,
+      return snapshot?.kind === 'purchase_correction' && snapshot.before && snapshot.after
+        ? [{ id: movement.id, createdAt: movement.recordedAt ?? movement.createdAt,
         actorName: movement.actorName, reason: movement.comment, before: snapshot.before, after: snapshot.after }] : [];
-    });
+    }).sort((a, b) => +b.createdAt - +a.createdAt || b.id.localeCompare(a.id));
     const postedAt = purchase.stockPostedAt ?? eligibility.stockPostedAt;
-    return { ...this.serialize(purchase), ...eligibility, stockPostedAt: postedAt, postedAt, returnableItems, corrections };
+    return { ...this.serialize(purchase), canCorrectStock: eligibility.canCorrectStock, historicalStockCorrection: eligibility.historicalAt !== null,
+      correctionBlockedReason: eligibility.correctionBlockedReason, stockPostedAt: postedAt, postedAt, returnableItems, corrections };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
@@ -381,9 +384,36 @@ export class PurchasesService {
     purchase.items.forEach((item) => add(item, previousWarehouse, -1));
     (items ?? purchase.items).forEach((item) => add(item, nextWarehouse, 1));
     const stockChanges = [...plans.values()].filter((plan) => !plan.quantity.isZero() || !plan.value.isZero());
+    let historicalAt: Date | null = null;
     if (stockChanges.length) {
       const eligibility = await purchaseCorrectionEligibility(tx, purchase, [previousWarehouse, nextWarehouse], ids);
       if (!eligibility.canCorrectStock) throw new ConflictException(eligibility.correctionBlockedReason!);
+      historicalAt = eligibility.historicalAt;
+      if (historicalAt) {
+        const previousIds = new Set(purchase.items.map(({ ingredientId }) => ingredientId));
+        const nextIds = new Set((items ?? purchase.items).map(({ ingredientId }) => ingredientId));
+        if (previousWarehouse?.id !== nextWarehouse?.id
+          || previousIds.size !== nextIds.size || [...previousIds].some((id) => !nextIds.has(id))) {
+          throw new ConflictException('Историческое исправление возможно для существующих позиций на том же складе');
+        }
+        const returned = await tx.warehouseDocumentItem.groupBy({ by: ['ingredientId'],
+          where: { document: { sourcePurchaseId: purchase.id, kind: 'supplier_return', status: 'posted' } },
+          _sum: { quantity: true } });
+        for (const row of returned) {
+          const received = (items ?? purchase.items).filter((line) => line.ingredientId === row.ingredientId)
+            .reduce((sum, line) => sum.add(line.quantityBase), new Prisma.Decimal(0));
+          if (row._sum.quantity && received.lt(row._sum.quantity)) {
+            throw new ConflictException('Количество в поставке не может быть меньше уже возвращённого поставщику');
+          }
+        }
+        // Preserve the exact original value of legacy postings whose current
+        // invoice items are about to be replaced.
+        for (const original of eligibility.posted) {
+          if (original.receiptValue != null) continue;
+          const receiptValue = receiptMovementValue(original, purchase.items);
+          await tx.stockMovement.update({ where: { id: original.id }, data: { receiptValue } });
+        }
+      }
     }
     const before = JSON.parse(JSON.stringify(this.serialize(purchase))) as Prisma.InputJsonValue;
     if (items) {
@@ -404,13 +434,31 @@ export class PurchasesService {
     // A metadata-only correction is durable evidence with zero quantity/value change.
     const movements = stockChanges.length ? stockChanges : [{ ingredientId: purchase.items[0].ingredientId,
       warehouse: previousWarehouse, quantity: new Prisma.Decimal(0), value: new Prisma.Decimal(0) }];
-    for (const [index, plan] of movements.entries()) await postPurchaseCorrection(tx, {
-      purchaseId: purchase.id, ingredientId: plan.ingredientId, warehouse: plan.warehouse,
-      quantityDelta: plan.quantity, valueDelta: plan.value, actor, reason, snapshot: index === 0 ? snapshot : undefined,
-    });
+    if (historicalAt && purchase.cafeId) {
+      const recordedAt = new Date();
+      const insertedMovementIds: string[] = [];
+      for (const [index, plan] of movements.entries()) {
+        const { movement } = await postStockMovement(tx, { ingredientId: plan.ingredientId, warehouse: plan.warehouse,
+          change: plan.quantity, allowNegative: true,
+          movement: { type: 'correction', sourceType: 'purchase', sourceId: purchase.id,
+            createdAt: historicalAt, recordedAt, actorId: actor?.id, actorName: actor?.name,
+            reason: historicalPurchaseCorrectionReason, comment: reason,
+            recipeSnapshot: { kind: 'purchase_correction', version: 2, accounting: 'historical_replay',
+              valueDelta: plan.value.toString(), ...(index === 0 ? { before, after } : {}) } },
+        });
+        insertedMovementIds.push(movement.id);
+      }
+      await replayHistoricalStock(tx, { cafeId: purchase.cafeId, effectiveAt: historicalAt, insertedMovementIds });
+    } else {
+      for (const [index, plan] of movements.entries()) await postPurchaseCorrection(tx, {
+        purchaseId: purchase.id, ingredientId: plan.ingredientId, warehouse: plan.warehouse,
+        quantityDelta: plan.quantity, valueDelta: plan.value, actor, reason, snapshot: index === 0 ? snapshot : undefined,
+      });
+    }
     await tx.auditLog.create({ data: { cafeId: purchase.cafeId, userId: actor?.id, userName: actor?.name, userRole: actor?.role,
       actionType: 'PURCHASE_CORRECTED', entityType: 'PURCHASE', entityId: purchase.id, description: reason,
-      oldValue: before, newValue: after, metadata: { accounting: 'current_adjustment', historicalSalesRecalculated: false } } });
+      oldValue: before, newValue: after, metadata: { accounting: historicalAt ? 'historical_replay' : 'current_adjustment',
+        historicalSalesRecalculated: historicalAt !== null, ...(historicalAt ? { effectiveAt: historicalAt.toISOString() } : {}) } } });
   }
 
   async complete(id: string, actor?: AuthUser) {

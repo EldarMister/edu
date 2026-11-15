@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import { Prisma, type StockMovement } from '@prisma/client';
 import { calculateStockValuation } from './stock-posting';
+import { calculatePurchaseCorrection, historicalPurchaseCorrection, historicalPurchaseValue } from './purchase-correction';
 import { getWarehouseBalance, setWarehouseBalance, type WarehouseLocation } from './warehouse-location';
 
 type Movement = StockMovement;
@@ -134,14 +135,14 @@ function chartLanes(inserted: Movement[], rows: Movement[], pairs: Map<string, M
   return starts;
 }
 
-function priceReceipt(movement: Movement, items: Map<string, ReceiptLine[]>) {
+export function receiptMovementValue(movement: Movement, items: ReceiptLine[] | undefined) {
   if (movement.receiptValue != null) {
     if (!movement.receiptValue.div(movement.change).toDecimalPlaces(8).eq(movement.costAtMoment)) {
       throw cannotReplay('сумма поставки расходится с исходной ценой');
     }
     return movement.receiptValue;
   }
-  const amount = items.get(movement.sourceId ?? '')?.filter((line) =>
+  const amount = items?.filter((line) =>
     line.ingredientId === movement.ingredientId && line.quantityBase.eq(movement.change)
     && line.quantityBase.gt(0) && line.total.div(line.quantityBase).toDecimalPlaces(8).eq(movement.costAtMoment));
   if (!amount?.length || amount.some((line) => !line.total.eq(amount[0].total))) {
@@ -164,6 +165,18 @@ function replayStep(before: Balance, row: Movement, pricing: Pricing) {
     beforeValuationKnown: before.valuationKnown, valuationKnown,
   };
   return { balance, movement };
+}
+
+function replayPurchaseCorrection(before: Balance, row: Movement) {
+  if (before.avgCost === null) throw cannotReplay('не подтверждена себестоимость перед исправлением поставки');
+  const { stock, avgCost, valuationKnown, costKnown, valuationAdjustment } = calculatePurchaseCorrection(
+    { ...before, avgCost: before.avgCost }, row.change, historicalPurchaseValue(row),
+  );
+  return {
+    balance: { stock, avgCost, valuationKnown },
+    movement: { costAtMoment: before.avgCost, costKnown, beforeStock: before.stock, afterStock: stock, valuationAdjustment,
+      beforeValuationKnown: before.valuationKnown, valuationKnown },
+  };
 }
 
 type OpeningWitness = Pick<Movement, 'change' | 'sourceType' | 'type' | 'afterStock' | 'valuationKnown' | 'costAtMoment'> & { key: string };
@@ -320,7 +333,11 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
         costKnown: before.valuationKnown && before.stock.gte(row.change.abs()) } };
     }
     if (row.sourceType === 'purchase' && row.type === 'purchase' && row.change.gt(0)) {
-      return { mode: 'average', price: { costAtMoment: row.costAtMoment, costKnown: row.costKnown }, value: priceReceipt(row, prices) };
+      return { mode: 'average', price: { costAtMoment: row.costAtMoment, costKnown: row.costKnown },
+        value: receiptMovementValue(row, prices.get(row.sourceId ?? '')) };
+    }
+    if (row.sourceType === 'purchase' && row.type === 'correction' && row.change.isZero() && row.valuationAdjustment.isZero()) {
+      return { mode: 'preserve', price: { costAtMoment: before.avgCost ?? row.costAtMoment, costKnown: true } };
     }
     if (row.sourceType === 'manual' && row.type === 'correction' && row.sourceId === row.ingredientId
       && row.comment === 'Начальный остаток' && row.change.gte(0)) {
@@ -350,7 +367,8 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     }
     const original = dependency(row);
     if (original && original.createdAt > row.createdAt) throw cannotReplay('возврат или перемещение стоит раньше исходного движения');
-    const result = replayStep(before, row, derivePricing(row, before, original));
+    const result = historicalPurchaseCorrection(row) ? replayPurchaseCorrection(before, row)
+      : replayStep(before, row, derivePricing(row, before, original));
     replayed.set(row.id, result.movement);
     balances.set(key, result.balance);
     const index = cursors.get(key)! + 1;

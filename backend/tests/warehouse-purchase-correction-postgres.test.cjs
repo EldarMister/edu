@@ -8,6 +8,7 @@ const { IngredientsService } = require('../src/warehouse/ingredients.service.ts'
 const { WarehouseLocationsService } = require('../src/warehouse/locations.service.ts');
 const { PurchasesService } = require('../src/warehouse/purchases.service.ts');
 const { WarehouseDocumentsService } = require('../src/warehouse/documents.service.ts');
+const { WarehouseReportsService } = require('../src/warehouse/reports.service.ts');
 const { postStockMovement } = require('../src/warehouse/stock-posting.ts');
 const { lockIngredients } = require('../src/warehouse/stock-lock.ts');
 
@@ -80,29 +81,74 @@ test('PostgreSQL: completed purchase corrections adjust quantity/value atomicall
   assert.equal((await db.auditLog.count({ where: { entityId: purchase.id } })), 3);
 }));
 
-test('PostgreSQL: later consumption blocks financial correction but metadata stays editable without resetting the guard', { skip: !url }, async () => fixture(async ({ db, warehouse, ingredients, purchases, actor }) => {
+test('PostgreSQL: historical receipt edits reprice downstream consumption and net signed quantities in the same report', { skip: !url }, async () => fixture(async ({ db, cafe, warehouse, ingredients, purchases, actor }) => {
   const ingredient = await ingredients.create({ name: 'Consumed bottle', unit: 'pcs' });
-  let purchase = await purchases.create({ supplier: 'Supplier', complete: true, items: [{ ingredientId: ingredient.id, quantity: 10, purchasePrice: 10 }] }, actor);
-  await db.$transaction(async (tx) => {
+  const purchase = await purchases.create({ supplier: 'Supplier', complete: true, items: [{ ingredientId: ingredient.id, quantity: 10, purchasePrice: 10 }] }, actor);
+  const original = await db.stockMovement.findFirstOrThrow({ where: { sourceId: purchase.id, type: 'purchase' } });
+  const sale = await db.$transaction(async (tx) => {
     await lockIngredients(tx, [ingredient.id]);
-    await postStockMovement(tx, { ingredientId: ingredient.id, warehouse, change: new Prisma.Decimal(-2),
-      movement: { type: 'sale', sourceType: 'order', sourceId: randomUUID() } });
+    return postStockMovement(tx, { ingredientId: ingredient.id, warehouse, change: new Prisma.Decimal(-2),
+      movement: { type: 'sale', sourceType: 'order', sourceId: randomUUID(), createdAt: new Date(+original.createdAt + 10) } });
   });
-  const before = await db.ingredient.findUnique({ where: { id: ingredient.id } });
   let detail = await purchases.findOne(purchase.id);
-  assert.equal(detail.canCorrectStock, false);
-  assert.match(detail.correctionBlockedReason, /другие складские операции/);
-  await assert.rejects(purchases.update(purchase.id, { expectedUpdatedAt: detail.updatedAt.toISOString(),
-    items: [{ ingredientId: ingredient.id, quantity: 10, purchasePrice: 20 }] }, actor), /другие складские операции/);
+  assert.equal(detail.canCorrectStock, true);
+  assert.equal(detail.historicalStockCorrection, true);
+  assert.equal(detail.correctionBlockedReason, null);
+  const edit = (quantity, purchasePrice, expectedUpdatedAt = detail.updatedAt.toISOString()) => purchases.update(purchase.id, {
+    expectedUpdatedAt, items: [{ ingredientId: ingredient.id, quantity, purchasePrice }],
+  }, actor);
+  const readSale = async () => db.stockMovement.findUniqueOrThrow({ where: { id: sale.movement.id } });
+  detail = await edit(10, 20);
+  assert.equal(Number((await readSale()).costAtMoment), 20, 'price-only edits reprice the later physical sale');
+  assert.equal(await db.stockMovement.count({ where: { sourceId: purchase.id, type: 'correction', change: 0 } }), 1);
   detail = await purchases.update(purchase.id, { expectedUpdatedAt: detail.updatedAt.toISOString(), note: 'Corrected invoice comment' }, actor);
-  assert.equal(detail.canCorrectStock, false);
-  const after = await db.ingredient.findUnique({ where: { id: ingredient.id } });
-  assert.equal(String(before.stock), String(after.stock));
-  assert.equal(String(before.avgCost), String(after.avgCost));
-  assert.equal(detail.corrections.length, 1);
-  await assert.rejects(purchases.update(purchase.id, { expectedUpdatedAt: detail.updatedAt.toISOString(),
-    items: [{ ingredientId: ingredient.id, quantity: 11, purchasePrice: 10 }] }), /другие складские операции/);
-  assert.equal((await purchases.findOne(purchase.id)).totalAmount, 100);
+  assert.equal(detail.historicalStockCorrection, true);
+  detail = await edit(12, 20);
+  const reports = new WarehouseReportsService(db);
+  const summary = async () => (await reports.report({ view: 'movement_summary', ingredientId: ingredient.id, warehouseId: warehouse.id })).rows[0];
+  assert.deepEqual([(await summary()).incomingQuantity, (await summary()).closingQuantity], [12, 10]);
+  const stale = detail.updatedAt.toISOString();
+  detail = await edit(9, 30);
+  assert.equal(detail.corrections.length, 4);
+  await assert.rejects(edit(8, 30, stale), /изменилась/);
+  const row = await summary();
+  assert.deepEqual([row.incomingQuantity, row.outgoingQuantity, row.closingQuantity, row.closingValue], [9, 2, 7, 210]);
+  const movementGroups = (await reports.report({ view: 'movements', ingredientId: ingredient.id, warehouseId: warehouse.id })).movementGroups;
+  const receiptGroup = movementGroups.find((group) => group.sourceType === 'purchase');
+  assert.equal(receiptGroup.direction, 'incoming');
+  assert.deepEqual([receiptGroup.quantity, receiptGroup.averageCost], [9, 30]);
+  assert.equal(movementGroups.some((group) => group.direction === 'outgoing' && group.sourceType === 'purchase'), false);
+  assert.deepEqual(await db.stockMovement.findUniqueOrThrow({ where: { id: original.id } }), original);
+  await assert.rejects(edit(1, 30), /недостаточно/);
+  assert.equal((await purchases.findOne(purchase.id)).totalAmount, 270, 'failed replay rolls the edited invoice back');
+  assert.equal(Number((await readSale()).costAtMoment), 30);
+
+  const another = await purchases.create({ supplier: 'Same timestamp', effectiveAt: original.createdAt.toISOString(), complete: true,
+    items: [{ ingredientId: ingredient.id, quantity: 3, purchasePrice: 12 }] }, actor);
+  assert.equal(Number((await readSale()).costAtMoment), 25.5, 'subsequent replay consumes the prior signed corrections in order');
+  assert.equal((await summary()).incomingQuantity, 12);
+  assert.equal((await purchases.findOne(another.id)).stockPostedAt.getTime() >= +original.createdAt, true);
+  assert.match((await purchases.findOne(purchase.id)).correctionBlockedReason, /совпадает время/);
+  await assert.rejects(edit(8, 30), /совпадает время/);
+  await runWithTenant({ cafeId: randomUUID() }, async () => await assert.rejects(edit(9, 30), /не найдена/));
+}));
+
+test('PostgreSQL: current price-only receipt correction contributes invoice value without moving stock', { skip: !url }, async () => fixture(async ({ db, warehouse, ingredients, purchases, actor }) => {
+  const ingredient = await ingredients.create({ name: 'Price only', unit: 'pcs' });
+  const original = await purchases.create({ supplier: 'Supplier', complete: true,
+    items: [{ ingredientId: ingredient.id, quantity: 10, purchasePrice: 10 }] }, actor);
+  const updated = await purchases.update(original.id, { expectedUpdatedAt: original.updatedAt.toISOString(),
+    items: [{ ingredientId: ingredient.id, quantity: 10, purchasePrice: 20 }] }, actor);
+  assert.equal(updated.historicalStockCorrection, false);
+  const reports = new WarehouseReportsService(db);
+  const options = { ingredientId: ingredient.id, warehouseId: warehouse.id };
+  const purchasesReport = await reports.report({ ...options, view: 'purchases' });
+  assert.equal(purchasesReport.totalCost, 200);
+  assert.equal(purchasesReport.rows.find((row) => row.type === 'correction').totalCost, 100);
+  const { movementGroups: [group] } = await reports.report({ ...options, view: 'movements' });
+  assert.deepEqual([group.direction, group.quantity, group.averageCost, group.count], ['incoming', 10, 20, 1]);
+  const { rows: [balance] } = await reports.report({ ...options, view: 'movement_summary' });
+  assert.deepEqual([balance.incomingQuantity, balance.outgoingQuantity, balance.closingQuantity, balance.closingValue], [10, 0, 10, 200]);
 }));
 
 test('PostgreSQL: return limits aggregate duplicate receipt lines, exclude drafts/reversals and follow display units', { skip: !url }, async () => fixture(async ({ db, warehouse, ingredients, purchases, docs, actor }) => {
@@ -246,5 +292,6 @@ test('PostgreSQL: a transaction started before the receipt but waiting on its lo
   const detail = await purchases.findOne(draft.id);
   assert.ok(transactionStartedAt < detail.postedAt, 'waiting transaction really began before posting');
   assert.ok(consumption.createdAt >= detail.postedAt, 'posting uses wall clock after the ingredient lock');
-  assert.equal(detail.canCorrectStock, false, 'the delayed consumption cannot evade the correction guard');
+  assert.equal(detail.historicalStockCorrection, consumption.createdAt > detail.postedAt,
+    'consumption must enter historical replay unless the two timestamps are indistinguishable');
 }));

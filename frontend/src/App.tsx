@@ -38,7 +38,7 @@ export function App() {
   useLayoutEffect(() => {
     const dark = theme === 'dark' && !publicPage;
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#101010' : '#005BFF');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#212121' : '#005BFF');
   }, [theme, publicPage]);
 
   // Подтягиваем актуальные права доступа при загрузке (старые сессии могли войти

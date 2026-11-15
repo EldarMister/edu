@@ -163,6 +163,8 @@ function PurchaseForm({
   const byId = new Map((ingredients.data ?? []).map((item) => [item.id, item]));
   const editable = can('actions.warehouseReceive') && costs && (!purchase || purchase.status === 'draft' || correcting);
   const stockEditable = editable && (purchase?.status !== 'completed' || purchase.canCorrectStock === true);
+  const historicalCorrection = correcting && purchase?.historicalStockCorrection === true;
+  const compositionEditable = stockEditable && !historicalCorrection;
   const timingEditable = editable && (!purchase || purchase.status === 'draft');
   const effectiveAt = inventoryTimingValue(timing, purchase?.effectiveAt);
   const timingReady = !timingEditable || (timingValid && effectiveAt !== undefined && !inventoryTimingError(timing, undefined, true));
@@ -317,7 +319,9 @@ function PurchaseForm({
         <div className="space-y-1 text-sm text-text-muted">
           <p>Поставка проведена{purchase.postedAt ? ` ${inventoryTimeDisplay(purchase.postedAt)} (Бишкек)` : ''}.{purchase.effectiveAt ? ' Остатки и себестоимость пересчитаны с даты складской операции.' : ' Остатки изменены в момент проведения.'}</p>
           {correcting && !stockEditable && <p role="status">{purchase.correctionBlockedReason} Доступно исправление реквизитов и комментария.</p>}
-          {correcting && stockEditable && <p>Исправление обновит остатки и себестоимость. Предыдущая версия останется в истории.</p>}
+          {correcting && stockEditable && <p>{historicalCorrection
+            ? 'Можно исправить количество и цену существующих товаров. Последующие движения и себестоимость будут пересчитаны. Склад, товары и фасовки сохраняются; предыдущая версия останется в истории.'
+            : 'Исправление обновит остатки и себестоимость. Предыдущая версия останется в истории.'}</p>}
         </div>
       ) : editable && <p className="text-sm text-text-muted">«Сохранить» оприходует товары с выбранного момента. Черновик не меняет остатки. Дата накладной хранится отдельно.</p>}
       <div className="poster-form-fields space-y-3">
@@ -354,7 +358,7 @@ function PurchaseForm({
           )}
         </DocumentField>
         <DocumentField label="Склад">
-          {stockEditable ? (
+          {compositionEditable ? (
             <div data-invalid={!!validationAttempt && !!locationError || undefined}>
             <Select
               ariaLabel="Склад поставки"
@@ -465,7 +469,7 @@ function PurchaseForm({
                 return (
                   <tr key={row.key} className="border-b border-border">
                     <td className="py-2 pr-2">
-                      {stockEditable ? (
+                      {compositionEditable ? (
                         <DocumentProductPicker
                           id={`${errorId}-product-input`}
                           value={row.ingredientId}
@@ -488,7 +492,7 @@ function PurchaseForm({
                       )}
                     </td>
                     <td className="px-2 py-2">
-                      {stockEditable ? (
+                      {compositionEditable ? (
                         <Select
                           ariaLabel="Единица закупки"
                           className="h-9 w-full"
@@ -616,7 +620,7 @@ function PurchaseForm({
                         ))}
                     </td>
                     <td className="!px-0 py-2 text-center">
-                      {stockEditable && (
+                      {compositionEditable && (
                         <button
                           type="button"
                           className="poster-remove"
@@ -639,7 +643,7 @@ function PurchaseForm({
           </table>
         </div>
         <div className="poster-purchase-table-actions flex flex-wrap items-center justify-between gap-3">
-          {stockEditable && (
+          {compositionEditable && (
             <button
               type="button"
               className="py-3 text-sm text-primary"

@@ -345,6 +345,7 @@ export function AdminApp() {
                 : [];
           const hasChildren = children.length > 0;
           const expanded = hasChildren && active && collapsedSection !== s.key;
+          const selectedSection = active && !hasChildren;
           const childrenId = `workspace-${variant}-${s.key}-children`;
           return (
             <div key={s.key}>
@@ -362,7 +363,8 @@ export function AdminApp() {
                 }}
                 aria-expanded={hasChildren ? expanded : undefined}
                 aria-controls={hasChildren ? childrenId : undefined}
-                className={`workspace-nav-section flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${active ? 'bg-primary/10 text-primary' : 'text-text-secondary hover:bg-background'}`}
+                aria-current={selectedSection ? 'page' : undefined}
+                className={`workspace-nav-section flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${selectedSection ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
               >
                 <Icon />
                 {t(s.label)}
@@ -389,7 +391,7 @@ export function AdminApp() {
                               else setMenuView(item.key as MenuView);
                               setMobileNav(false);
                             }}
-                            className={`workspace-nav-child block w-full rounded-lg py-2 pl-[34px] pr-2 text-left text-sm leading-[21px] transition-colors ${selected ? 'bg-primary/[.09] font-medium text-text-primary' : 'text-primary hover:bg-background'}`}
+                            className={`workspace-nav-child block w-full rounded-lg py-2 pl-[34px] pr-2 text-left text-sm leading-[21px] transition-colors ${selected ? 'bg-primary font-medium text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
                           >
                             {t(item.label)}
                           </button>

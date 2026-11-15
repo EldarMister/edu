@@ -26,38 +26,30 @@
 @media screen {
   :root[data-theme='dark'] {
     color-scheme: dark;
-    --edu-background: 16 16 16;
-    --edu-card: 25 25 25;
-    --edu-border: 55 55 55;
+    --edu-background: 33 33 33;
+    --edu-card: 43 43 43;
+    --edu-border: 69 69 69;
     --edu-text: 240 240 240;
     --edu-text-secondary: 211 211 211;
     --edu-text-muted: 174 174 174;
     --edu-text-light: 153 153 153;
-    --edu-primary: 88 88 88;
-    --edu-primary-hover: 96 96 96;
-    --edu-focus: 168 168 168;
-    --edu-link: 219 219 219;
-    --edu-link-hover: 255 255 255;
+    --edu-primary: 38 100 216;
+    --edu-primary-hover: 36 91 193;
+    --edu-focus: 138 182 255;
+    --edu-link: 138 182 255;
+    --edu-link-hover: 174 206 255;
     --edu-danger: 255 139 144;
     --edu-success: 92 211 149;
     --edu-warning: 250 198 104;
     --edu-shadow-card: 0 1px 3px rgb(0 0 0 / .36);
     --edu-shadow-soft: 0 7px 24px rgb(0 0 0 / .45);
-    --edu-modal-chrome: #0a0a0a;
-    --edu-raised: #252525;
-    --edu-inset: #131313;
-    --edu-selected: #303030;
+    --edu-modal-chrome: #171717;
+    --edu-raised: #373737;
+    --edu-inset: #252525;
+    --edu-selected: #3d3d3d;
   }
 
-  :where(:root[data-theme='dark']) .btn-primary {
-    background-color: #205bc7;
-  }
-
-  :where(:root[data-theme='dark']) .btn-primary:hover:not(:disabled) {
-    background-color: #2868d8;
-  }
-
-  :where(:root[data-theme='dark']) .btn-danger {
+  :where(:root[data-theme='dark']) :is(.btn-danger, .bg-danger.text-white) {
     background-color: #b62740;
   }
 
@@ -70,11 +62,11 @@
   }
 
   :where(:root[data-theme='dark']) .bg-slate-200 {
-    background-color: #373737;
+    background-color: #444;
   }
 
   :where(:root[data-theme='dark']) .bg-slate-300 {
-    background-color: #484848;
+    background-color: #555;
   }
 
   :where(:root[data-theme='dark']) :is(.border-slate-200, .border-slate-300, .border-slate-400) {
@@ -103,6 +95,6 @@
   }
 
   :where(:root[data-theme='dark']) .app-scrollbar-subtle {
-    scrollbar-color: #454545 transparent;
+    scrollbar-color: #5a5a5a transparent;
   }
 }
