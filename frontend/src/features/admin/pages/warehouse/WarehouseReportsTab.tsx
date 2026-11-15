@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -10,6 +11,7 @@ import { qty, useIngredients } from './api';
 import { usePageFilter } from './workspace-route';
 import { usePermissions } from '@/hooks/usePermissions';
 import { canOpenMovementSource } from './movement-source';
+import './warehouse-journal-print.css';
 
 interface ReportRow {
   id: string;
@@ -161,7 +163,7 @@ export function WarehouseReportsTab({
           >
             Экспорт CSV
           </button>}
-          <button type="button" className="btn-secondary btn-md" onClick={() => window.print()}>
+          <button type="button" className="btn-secondary btn-md" disabled={!query.isSuccess} onClick={() => window.print()}>
             Печать
           </button>
         </div>
@@ -254,108 +256,20 @@ export function WarehouseReportsTab({
           {error || apiError(query.error)}
         </p>
       )}
-      {query.data?.salesPerformance && (
-        <div className="space-y-2 border-b border-border p-4">
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-            <div>
-              Выручка после скидок
-              <p className="font-semibold">{money(query.data.salesPerformance.netRevenue)}</p>
-            </div>
-            <div>
-              Фактическая себестоимость
-              <p className="font-semibold">{money(query.data.salesPerformance.actualCost)}</p>
-            </div>
-            <div>
-              Маржа до прочих расходов
-              <p className="font-semibold">
-                {query.data.salesPerformance.grossMargin == null
-                  ? 'Недостаточно данных'
-                  : money(query.data.salesPerformance.grossMargin)}
-              </p>
-            </div>
-            <div>
-              Маржа, %
-              <p className="font-semibold">
-                {query.data.salesPerformance.marginPercent == null
-                  ? '—'
-                  : `${query.data.salesPerformance.marginPercent.toFixed(1)}%`}
-              </p>
-            </div>
-          </div>
-          <p
-            className={`text-xs ${query.data.salesPerformance.complete ? 'text-text-muted' : 'text-warning'}`}
-          >
-            {query.data.salesPerformance.note}
-          </p>
-        </div>
-      )}
       {query.data && (
         <>
-          <div className="flex flex-wrap justify-between gap-3 p-4 text-sm">
-            <span>{query.data.totalRows} строк</span>
-            <span className="font-semibold">
-              Итого: {costLabel(query.data.totalCost)}
-              {query.data.totalValuationAdjustment
-                ? ` · корректировка оценки ${money(query.data.totalValuationAdjustment)}`
-                : ''}
-            </span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[800px] text-left text-sm">
-              <thead className="border-y border-border bg-background/50 text-xs text-text-muted">
-                <tr>
-                  <th className="px-3 py-3">Товар / дата</th>
-                  <th className="px-3 py-3">Склад</th>
-                  <th className="px-3 py-3">Количество</th>
-                  <th className="px-3 py-3">Стоимость единицы</th>
-                  <th className="px-3 py-3">Сумма</th>
-                  {view === 'movements' && <th className="px-3 py-3">Корректировка оценки</th>}
-                  <th className="px-3 py-3">Документ / сотрудник</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {query.data.rows.map((row) => (
-                  <tr key={row.id}>
-                    <td className="px-3 py-3">
-                      <span className="font-medium">{row.ingredientName}</span>
-                      <span className="block text-xs text-text-muted">
-                        {row.createdAt ? new Date(row.createdAt).toLocaleString('ru-RU', { timeZone: 'Asia/Bishkek' }) : row.category}
-                      </span>
-                    </td>
-                    <td className="px-3 py-3">{row.warehouseName}</td>
-                    <td className="px-3 py-3">{qty(row.quantity, row.unit)}</td>
-                    <td className="px-3 py-3">
-                      {costLabel(row.unitCost)} / {row.unit}
-                    </td>
-                    <td className="px-3 py-3">{costLabel(row.totalCost)}</td>
-                    {view === 'movements' && (
-                      <td className="px-3 py-3">
-                        {row.valuationAdjustment ? money(row.valuationAdjustment) : '—'}
-                      </td>
-                    )}
-                    <td className="px-3 py-3">
-                      {row.sourceId && canOpenMovementSource(row.sourceType, permissions) ? (
-                        <button
-                          type="button"
-                          className="text-left text-primary"
-                          onClick={() => onOpen(row.sourceType ?? '', row.sourceId!)}
-                        >
-                          {row.documentLabel ?? 'Открыть источник'}
-                        </button>
-                      ) : (
-                        (row.documentLabel ?? 'Текущий остаток')
-                      )}
-                      {row.employeeName && (
-                        <span className="block text-xs text-text-muted">{row.employeeName}</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {!query.data.rows.length && (
-            <p className="p-8 text-center text-sm text-text-muted">По выбранным условиям движений нет.</p>
+          <WarehouseReportContents
+            report={query.data}
+            view={view}
+            canOpen={(sourceType) => canOpenMovementSource(sourceType, permissions)}
+            onOpen={onOpen}
+          />
+          {createPortal(
+            <section className="warehouse-journal-print">
+              <h1>{view === 'movements' ? 'Движение товара' : 'Отчёт по складу'}</h1>
+              <WarehouseReportContents report={query.data} view={view} />
+            </section>,
+            document.body,
           )}
           <div className="flex items-center justify-end gap-2 border-t border-border p-3 print:hidden">
             <button
@@ -381,5 +295,118 @@ export function WarehouseReportsTab({
         </>
       )}
     </div>
+  );
+}
+
+function WarehouseReportContents({ report, view, canOpen, onOpen }: {
+  report: Report;
+  view: string;
+  canOpen?: (sourceType: string | null) => boolean;
+  onOpen?: (type: string, id: string) => void;
+}) {
+  return (
+    <>
+      {report.salesPerformance && (
+        <div className="space-y-2 border-b border-border p-4">
+          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+            <div>
+              Выручка после скидок
+              <p className="font-semibold">{money(report.salesPerformance.netRevenue)}</p>
+            </div>
+            <div>
+              Фактическая себестоимость
+              <p className="font-semibold">{money(report.salesPerformance.actualCost)}</p>
+            </div>
+            <div>
+              Маржа до прочих расходов
+              <p className="font-semibold">
+                {report.salesPerformance.grossMargin == null
+                  ? 'Недостаточно данных'
+                  : money(report.salesPerformance.grossMargin)}
+              </p>
+            </div>
+            <div>
+              Маржа, %
+              <p className="font-semibold">
+                {report.salesPerformance.marginPercent == null
+                  ? '—'
+                  : `${report.salesPerformance.marginPercent.toFixed(1)}%`}
+              </p>
+            </div>
+          </div>
+          <p
+            className={`text-xs ${report.salesPerformance.complete ? 'text-text-muted' : 'text-warning'}`}
+          >
+            {report.salesPerformance.note}
+          </p>
+        </div>
+      )}
+      <div className="flex flex-wrap justify-between gap-3 p-4 text-sm">
+        <span>{report.totalRows} строк</span>
+        <span className="font-semibold">
+          Итого: {costLabel(report.totalCost)}
+          {report.totalValuationAdjustment
+            ? ` · корректировка оценки ${money(report.totalValuationAdjustment)}`
+            : ''}
+        </span>
+      </div>
+      <div className="warehouse-report-table overflow-x-auto">
+        <table className="w-full min-w-[800px] text-left text-sm">
+          <thead className="border-y border-border bg-background/50 text-xs text-text-muted">
+            <tr>
+              <th className="px-3 py-3">Товар / дата</th>
+              <th className="px-3 py-3">Склад</th>
+              <th className="px-3 py-3">Количество</th>
+              <th className="px-3 py-3">Стоимость единицы</th>
+              <th className="px-3 py-3">Сумма</th>
+              {view === 'movements' && <th className="px-3 py-3">Корректировка оценки</th>}
+              <th className="px-3 py-3">Документ / сотрудник</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {report.rows.map((row) => (
+              <tr key={row.id}>
+                <td className="px-3 py-3">
+                  <span className="font-medium">{row.ingredientName}</span>
+                  <span className="block text-xs text-text-muted">
+                    {row.createdAt ? new Date(row.createdAt).toLocaleString('ru-RU', { timeZone: 'Asia/Bishkek' }) : row.category}
+                  </span>
+                </td>
+                <td className="px-3 py-3">{row.warehouseName}</td>
+                <td className="px-3 py-3">{qty(row.quantity, row.unit)}</td>
+                <td className="px-3 py-3">
+                  {costLabel(row.unitCost)} / {row.unit}
+                </td>
+                <td className="px-3 py-3">{costLabel(row.totalCost)}</td>
+                {view === 'movements' && (
+                  <td className="px-3 py-3">
+                    {row.valuationAdjustment ? money(row.valuationAdjustment) : '—'}
+                  </td>
+                )}
+                <td className="px-3 py-3">
+                  {row.sourceId && canOpen?.(row.sourceType) && onOpen ? (
+                    <button
+                      type="button"
+                      className="text-left text-primary"
+                      onClick={() => onOpen(row.sourceType ?? '', row.sourceId!)}
+                    >
+                      {row.documentLabel ?? 'Открыть источник'}
+                    </button>
+                  ) : (
+                    (row.documentLabel ?? 'Текущий остаток')
+                  )}
+                  {row.employeeName && (
+                    <span className="block text-xs text-text-muted">{row.employeeName}</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!report.rows.length && (
+        <p className="p-8 text-center text-sm text-text-muted">По выбранным условиям движений нет.</p>
+      )}
+    </>
   );
 }
