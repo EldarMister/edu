@@ -3,7 +3,8 @@
 .workspace-title-slot:has(> *) + .workspace-default-title { display: none; }
 .workspace-header-count { font-size: 13px; font-weight: 400; color: rgb(var(--edu-text-light)); }
 .poster-search { position: relative; width: 200px; max-width: 100%; flex-shrink: 0; }
-.poster-workspace .poster-search .input { padding-left: 30px; padding-right: 28px; }
+.poster-search .input { padding-left: 30px; padding-right: 34px; }
+.poster-search .input:where(:placeholder-shown) { padding-right: 14px; }
 .poster-search-icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: rgb(var(--edu-text-light)); pointer-events: none; }
 .poster-search-clear { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); display: grid; place-items: center; width: 26px; height: 28px; color: rgb(var(--edu-text-light)); }
 .poster-search-clear:hover { color: rgb(var(--edu-link)); }

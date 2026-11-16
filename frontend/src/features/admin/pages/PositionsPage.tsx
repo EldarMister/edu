@@ -4,6 +4,7 @@ import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
 import { ACTION_KEYS, ACTION_LABELS, getDefaultPermissionsByRole, resolvePermissions, SECTION_KEYS, SECTION_LABELS } from '@/lib/permissions';
+import { IconEdit, IconTrash } from '../components/icons';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { EditorPage } from './warehouse/EditorPage';
@@ -83,7 +84,7 @@ export function PositionsPage() {
               </button>
             </th>
             <th scope="col" className="px-3 py-3 font-normal">Права доступа</th>
-            <th scope="col"><span className="sr-only">Действия</span></th>
+            <th scope="col" className="px-3 py-3 text-right font-normal">Действия</th>
           </tr></thead>
           <tbody>{rows.map(({ id, name, role, access, position }) => <tr className="h-12 border-b border-border hover:bg-background/60" key={id}>
             <td className="px-3 py-2"><div className="flex items-center gap-2">
@@ -91,17 +92,22 @@ export function PositionsPage() {
               {position ? <button type="button" className="text-left" onClick={() => openEditor({ type: 'position', id })}>{name}</button> : name}
             </div></td>
             <td className="px-3 py-2">{access}</td>
-            <td className="w-20 px-3 py-2">{position && <div className="flex items-center justify-end gap-1">
-              <button type="button" className="inline-flex h-8 w-8 items-center justify-center text-lg text-primary"
-                aria-label={`Редактировать должность ${name}`} onClick={() => openEditor({ type: 'position', id })}>→</button>
-              <Select ariaLabel={`Действия должности ${name}`} placeholder="⋮" value=""
-                className="!h-8 !w-8 !justify-center !rounded-md !border-transparent !bg-transparent !p-0 !text-lg [&>span]:!text-primary [&>svg]:hidden"
-                options={[{ value: 'edit', label: 'Редактировать' }, { value: 'delete', label: 'Удалить' }]}
-                onChange={(action) => {
-                  if (action === 'edit') openEditor({ type: 'position', id });
-                  if (action === 'delete') { remove.reset(); setReplacementId(''); setRemovePosition(position); }
-                }} />
-            </div>}</td>
+            <td className="w-24 px-3 py-2 text-right">{position ? <div className="flex items-center justify-end gap-1">
+              <button type="button" title="Редактировать" aria-label={`Редактировать должность ${name}`}
+                className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-background hover:text-primary"
+                onClick={() => openEditor({ type: 'position', id })}>
+                <IconEdit className="h-4 w-4" />
+              </button>
+              <button type="button" title="Удалить" aria-label={`Удалить должность ${name}`}
+                className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-danger/10 hover:text-danger"
+                onClick={() => {
+                  remove.reset();
+                  setReplacementId('');
+                  setRemovePosition(position);
+                }}>
+                <IconTrash className="h-4 w-4" />
+              </button>
+            </div> : <span className="text-xs text-text-muted">Системная</span>}</td>
           </tr>)}</tbody>
         </table>
       </div>
