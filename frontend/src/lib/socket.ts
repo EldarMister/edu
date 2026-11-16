@@ -2,6 +2,7 @@ import { io, type Socket } from 'socket.io-client';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/store/auth';
 import { API_URL } from './api';
+import { workspaceForPath } from './workspaces';
 
 let socket: Socket | null = null;
 // Сколько ждём восстановления связи, прежде чем показать баннер «Нет соединения».
@@ -13,9 +14,10 @@ const VISIBLE_DISCONNECT_GRACE_MS = 20_000;
 /** Возвращает singleton-сокет, подключённый с текущим JWT. */
 export function getSocket(): Socket {
   const token = useAuth.getState().accessToken;
+  const workspace = workspaceForPath(window.location.pathname, useAuth.getState().user);
   if (!socket) {
     socket = io(API_URL, {
-      auth: { token },
+      auth: { token, workspace },
       // websocket предпочтительнее, но оставляем polling как fallback:
       // на нестабильной мобильной сети чистый websocket часто не поднимается.
       transports: ['websocket', 'polling'],
@@ -29,7 +31,9 @@ export function getSocket(): Socket {
     });
   } else {
     // Обновляем токен на случай повторного входа.
-    socket.auth = { token };
+    const changedWorkspace = (socket.auth as { workspace?: string }).workspace !== workspace;
+    socket.auth = { token, workspace };
+    if (changedWorkspace) socket.disconnect();
     if (token && !socket.connected) {
       socket.connect();
     }

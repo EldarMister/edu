@@ -14,6 +14,7 @@ import { getWarehouseBalance, resolveWarehouse, warehouseBalances } from './ware
 import { IngredientsService } from './ingredients.service';
 import { lockRecipeGraph, RecipeResolver, warehouseKey } from './recipe-resolution';
 import { postStockMovement } from './stock-posting';
+import { inventoryReversalBlockedReason } from './closed-inventory-period';
 
 class CreatePreparationDto {
   @IsString() @IsNotEmpty() @MaxLength(120) name: string;
@@ -305,7 +306,12 @@ export class PreparationProductionService {
     const batch = await this.prisma.preparationBatch.findFirst({ where: { id, cafeId: this.cafeId() } });
     if (!batch) throw new NotFoundException('Производственная партия не найдена');
     const ingredient = await this.prisma.ingredient.findUniqueOrThrow({ where: { id: batch.ingredientId } });
-    return this.serializeBatch(batch, ingredient);
+    const movements = batch.reversedAt ? [] : await this.prisma.stockMovement.findMany({
+      where: { cafeId: batch.cafeId, sourceType: 'production', sourceId: id, type: { in: ['production', 'correction'] } },
+      select: { ingredientId: true, warehouseId: true },
+    });
+    const reversalBlockedReason = await this.reversalBlockedReason(this.prisma, batch, movements);
+    return { ...this.serializeBatch(batch, ingredient), ...(reversalBlockedReason ? { reversalBlockedReason } : {}) };
   }
 
   async reverse(id: string, reason: string, actor: Pick<AuthUser, 'id' | 'name'>) {
@@ -321,6 +327,8 @@ export class PreparationProductionService {
       const movements = await tx.stockMovement.findMany({ where: { sourceType: 'production', sourceId: id, type: { in: ['production', 'correction'] } }, include: { warehouse: true } });
       if (!movements.length) throw new BadRequestException('Исходные движения производства не найдены');
       await lockIngredients(tx, movements.map((movement) => movement.ingredientId));
+      const blocked = await this.reversalBlockedReason(tx, batch, movements);
+      if (blocked) throw new ConflictException(blocked);
       // Remove the produced output first; consumed/transferred output cannot be silently restored.
       for (const movement of movements.sort((a, b) => Number(b.change) - Number(a.change))) await postStockMovement(tx, {
         ingredientId: movement.ingredientId, warehouse: movement.warehouse, change: movement.change.negated(), cost: movement.costAtMoment, costKnown: movement.costKnown, valuation: 'value', allowNegative: false,
@@ -330,6 +338,15 @@ export class PreparationProductionService {
       const updated = await tx.preparationBatch.update({ where: { id }, data: { reversedAt: new Date(), reverseReason: reason.trim(), reversedById: actor.id } });
       return this.serializeBatch(updated, ingredient);
     });
+  }
+  private async reversalBlockedReason(tx: Prisma.TransactionClient, batch: Prisma.PreparationBatchGetPayload<{}>, movements: { ingredientId: string; warehouseId: string | null }[]) {
+    if (batch.reversedAt || !movements.length) return null;
+    const defaultWarehouse = movements.some((movement) => !movement.warehouseId) ? await resolveWarehouse(tx) : null;
+    const scopes = movements.flatMap(({ ingredientId, warehouseId }) => {
+      const resolvedId = warehouseId ?? defaultWarehouse?.id;
+      return resolvedId ? [{ ingredientId, warehouseId: resolvedId }] : [];
+    });
+    return inventoryReversalBlockedReason(tx, batch.cafeId, batch.producedAt, scopes);
   }
   private productionFingerprint(id: string, dto: ProducePreparationDto) {
     const base = (quantity: number, unit: string) => new Prisma.Decimal(quantity).mul(toBase(1, normalizeUnit(unit))).toDecimalPlaces(3).toString();
@@ -378,7 +395,7 @@ class PreparationProductionController {
   createCard(@Body() dto: PreparationCardDto) { return this.preparation.saveCard(dto); }
   @Put(':id/card') @RequirePermission('actions.warehouseRecipes')
   updateCard(@Param('id') id: string, @Body() dto: PreparationCardDto) { return this.preparation.saveCard(dto, id); }
-  @Get('batches') @RequirePermission('actions.warehouseProduce')
+  @Get('batches')
   journal(@Query('warehouseId') warehouseId?: string) { return this.preparation.journal(warehouseId); }
   @Get('batches/:batchId') batch(@Param('batchId') id: string) { return this.preparation.batch(id); }
   @Post('batches/:batchId/reverse') @Roles(Role.OWNER, Role.ADMIN) @RequirePermission('actions.warehouseApprove')

@@ -3,8 +3,11 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useAuth } from '@/store/auth';
 import { useTheme } from '@/store/theme';
 import { api } from '@/lib/api';
+import { queryClient } from '@/lib/queryClient';
 import type { AuthUser } from '@/types';
-import { ProtectedRoute, homeForRole } from '@/routes/ProtectedRoute';
+import { ProtectedRoute } from '@/routes/ProtectedRoute';
+import { homeForUser, workspaceForPath } from '@/lib/workspaces';
+import { getSocket } from '@/lib/socket';
 import { Toaster } from '@/components/Toaster';
 import { AudioUnlockButton } from '@/components/AudioUnlockButton';
 import { UpdateModal } from '@/components/UpdateModal';
@@ -41,23 +44,44 @@ export function App() {
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#101010' : '#005BFF');
   }, [theme, publicPage]);
 
-  // Подтягиваем актуальные права доступа при загрузке (старые сессии могли войти
-  // до появления permissions; владелец мог изменить права сотрудника).
+  // Обновляем должность и права также в открытой сессии, когда владелец меняет доступ.
   useEffect(() => {
     if (!accessToken) return;
     let cancelled = false;
     const userId = useAuth.getState().user?.id;
-    api
-      .get<AuthUser>('/auth/me')
+    let pending = false;
+    const refreshUser = () => {
+      if (pending || document.visibilityState === 'hidden') return;
+      pending = true;
+      void api.get<AuthUser>('/auth/me')
       .then(({ data }) => {
         const session = useAuth.getState();
         if (cancelled || session.user?.id !== userId) return;
-        if (data?.id === userId) updateUser(data);
+        if (data?.id === userId) {
+          const previous = session.user;
+          const accessChanged = previous?.role !== data.role || previous?.positionId !== data.positionId
+            || previous?.prepStation !== data.prepStation
+            || JSON.stringify(previous?.permissions) !== JSON.stringify(data.permissions);
+          updateUser(data);
+          if (accessChanged) {
+            getSocket().disconnect().connect();
+            void queryClient.resetQueries();
+          }
+        }
         else if (session.accessToken === accessToken) session.logout();
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { pending = false; });
+    };
+    refreshUser();
+    const timer = window.setInterval(refreshUser, 30_000);
+    window.addEventListener('focus', refreshUser);
+    document.addEventListener('visibilitychange', refreshUser);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshUser);
+      document.removeEventListener('visibilitychange', refreshUser);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken]);
@@ -65,7 +89,7 @@ export function App() {
   return (
     <>
       {showPtt && <AudioUnlockButton />}
-      <Routes>
+      <Routes key={workspaceForPath(location.pathname, user)}>
         {/* Публичное QR-меню стола (EDU MENU) — без авторизации. */}
         <Route path="/menu/:tableToken" element={<QrMenuApp />} />
 
@@ -79,13 +103,13 @@ export function App() {
 
         <Route
           path="/login"
-          element={user ? <Navigate to={homeForRole(user.role)} replace /> : <LoginPage />}
+          element={user ? <Navigate to={homeForUser(user)} replace /> : <LoginPage />}
         />
 
         <Route
           path="/waiter/*"
           element={
-            <ProtectedRoute roles={['WAITER']}>
+            <ProtectedRoute workspace="terminal">
               <WaiterApp />
             </ProtectedRoute>
           }
@@ -94,7 +118,7 @@ export function App() {
         <Route
           path="/kitchen/*"
           element={
-            <ProtectedRoute roles={['KITCHEN', 'ADMIN', 'OWNER']}>
+            <ProtectedRoute workspace="kitchen">
               <KitchenApp />
             </ProtectedRoute>
           }
@@ -103,19 +127,19 @@ export function App() {
         <Route
           path="/bar/*"
           element={
-            <ProtectedRoute roles={['BAR', 'ADMIN', 'OWNER']}>
+            <ProtectedRoute workspace="bar">
               <BarApp />
             </ProtectedRoute>
           }
         />
 
-        <Route path="/warehouse/*" element={<ProtectedRoute roles={['OWNER','ADMIN','KITCHEN','BAR']}><WarehouseStaffApp/></ProtectedRoute>}/>
+        <Route path="/warehouse/*" element={<ProtectedRoute workspace="warehouse"><WarehouseStaffApp/></ProtectedRoute>}/>
 
         {/* Этап 6 — администратор, Этап 7 — владелец (одна панель, нав зависит от роли) */}
         <Route
           path="/admin/*"
           element={
-            <ProtectedRoute roles={['ADMIN', 'OWNER']}>
+            <ProtectedRoute workspace="admin">
               <AdminApp />
             </ProtectedRoute>
           }
@@ -123,15 +147,20 @@ export function App() {
         <Route
           path="/owner/*"
           element={
-            <ProtectedRoute roles={['OWNER']}>
+            <ProtectedRoute roles={['OWNER']} workspace="admin">
               <AdminApp />
             </ProtectedRoute>
           }
         />
 
+        <Route path="/access-denied" element={user ? <div className="grid h-full place-content-center gap-4 p-6 text-center">
+          <h1 className="text-xl font-semibold">Доступ не назначен</h1>
+          <p>Владелец должен назначить должность с доступом к кассе или админ-панели.</p>
+          <button className="btn-secondary btn-md" onClick={() => useAuth.getState().logout()}>Выйти</button>
+        </div> : <Navigate to="/login" replace />} />
         <Route
           path="*"
-          element={<Navigate to={user ? homeForRole(user.role) : '/login'} replace />}
+          element={<Navigate to={user ? homeForUser(user) : '/login'} replace />}
         />
       </Routes>
       {showPtt && <PttOverlay waiterMode={onWaiter} buttonHidden={onWaiter && !waiterButtonVisible} />}

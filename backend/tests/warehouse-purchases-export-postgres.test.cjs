@@ -30,6 +30,7 @@ async function fixture(run) {
       await db.stockMovement.deleteMany({ where: { cafeId: cafe.id } });
       await db.purchase.deleteMany({ where: { cafeId: cafe.id } });
       await db.ingredient.deleteMany({ where: { cafeId: cafe.id } });
+      await db.auditLog.deleteMany({ where: { cafeId: cafe.id } });
       await db.cafe.delete({ where: { id: cafe.id } });
     }
     await db.$disconnect();
@@ -59,6 +60,37 @@ test('purchase query: Bishkek calendar bounds and explicit ISO instants are inde
     assert.throws(() => purchaseDateRange(...args));
   }
 });
+
+test('PostgreSQL: legacy invoice date stays intact while supply list, period, overview and XLSX use the physical receipt date', { skip: !url }, async () => fixture(async ({ db, ingredients, purchases }) => {
+  const item = await ingredients.create({ name: 'Поставка с отдельной накладной', unit: 'kg' });
+  const invoiceDate = '2025-07-01T03:04:05.123Z';
+  const receivedAt = '2025-07-03T06:07:08.456Z';
+  const laterAt = '2025-07-03T07:08:09.321Z';
+  const create = (date, effectiveAt, quantity) => purchases.create({ supplier: 'Проверка даты поставки', date, effectiveAt, complete: true,
+    items: [{ ingredientId: item.id, unit: 'kg', quantity, purchasePrice: 10 }] });
+  const legacy = await create(invoiceDate, receivedAt, 1);
+  // Older receipts recorded their physical instant only in stockPostedAt; the invoice date is independent.
+  await db.purchase.update({ where: { id: legacy.id }, data: { effectiveAt: null, stockPostedAt: new Date(receivedAt) } });
+  const explicit = await create('2025-06-30T01:02:03.123Z', laterAt, 2);
+  const period = { from: '2025-07-03', to: '2025-07-03', dateSort: 'asc', status: 'completed' };
+  const rows = await purchases.findAll(period);
+  assert.deepEqual(rows.map(({ id }) => id), [legacy.id, explicit.id], 'sort by receipt, even when invoice dates are reversed');
+  assert.deepEqual((await purchases.findAll({ ...period, dateSort: 'desc' })).map(({ id }) => id), [explicit.id, legacy.id]);
+  assert.equal(rows[0].date.toISOString(), invoiceDate, 'invoice precision is preserved in the list');
+  assert.equal(rows[0].postedAt.toISOString(), receivedAt);
+  const detail = await purchases.findOne(legacy.id);
+  assert.equal(detail.date.toISOString(), invoiceDate, 'opening a receipt does not rewrite its invoice date');
+  assert.equal(detail.postedAt.toISOString(), receivedAt);
+  assert.deepEqual((await purchases.findAll({ from: receivedAt, to: receivedAt })).map(({ id }) => id), [legacy.id]);
+  assert.equal((await purchases.findAll({ from: '2025-07-01', to: '2025-07-01' })).length, 0, 'invoice day does not masquerade as stock receipt day');
+  assert.deepEqual(await purchases.overview(period), { count: 2, suppliers: 1, sum: 30 });
+  const workbook = XLSX.read(await purchases.exportXlsx(period), { type: 'buffer' });
+  for (const sheet of ['Поставки', 'Позиции']) {
+    const values = XLSX.utils.sheet_to_json(workbook.Sheets[sheet], { header: 1 });
+    assert.equal(XLSX.SSF.format('yyyy-mm-dd hh:mm:ss', values[1][1]), '2025-07-03 12:07:08');
+    assert.equal(XLSX.SSF.format('yyyy-mm-dd hh:mm:ss', values[2][1]), '2025-07-03 13:08:09');
+  }
+}));
 
 test('PostgreSQL: list and XLSX combine exact suppliers/categories, warehouse, search, date and status without partial document totals', { skip: !url }, async () => fixture(async ({ db, cafe, foreign, ingredients, purchases, locations }) => {
   const warehouse = (await locations.list(cafe.id)).locations[0];

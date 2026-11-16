@@ -81,6 +81,7 @@ test('PostgreSQL: shared packages and multi-output processing preserve quantitie
         await purchases.create({ supplier: 'Возврат хлеба', complete: true, items: [{ ingredientId: bread.id, quantity: 1, purchasePrice: 22 }] });
         const result = await processing.reverse(actor, posted.id, { revision: posted.revision, note: 'Ошибочный выпуск' });
         assert.equal(result.status, 'reversed');
+        assert.equal(result.reversalReason, 'Ошибочный выпуск', 'API exposes the reversal reason under the field displayed in the document');
         assert.equal((await processing.reverse(actor, posted.id, { revision: posted.revision, note: 'Повтор запроса' })).status, 'reversed');
         assert.equal(await db.stockMovement.count({ where: { sourceId: posted.id } }), 8);
         assert.deepEqual([(await stock(flour.id)).stock, (await stock(water.id, bar.id)).stock, (await stock(bread.id)).stock, (await stock(crumbs.id, bar.id)).stock], [60, 10, 0, 0]);
@@ -108,6 +109,33 @@ test('PostgreSQL: shared packages and multi-output processing preserve quantitie
           assert.equal((await packages.list()).length, 0);
           await assert.rejects(processing.create({ ...actor, cafeId: foreign.id }, { ...dto, requestKey: undefined }), /не найден/);
         });
+      });
+      await t.test('saving and posting a draft is atomic and a failed attempt can be corrected with the same revision', async () => {
+        const draft = await processing.create(actor, { ...dto, requestKey: undefined });
+        const balancesBefore = await Promise.all([stock(flour.id), stock(water.id, bar.id), stock(bread.id), stock(crumbs.id, bar.id)]);
+        await assert.rejects(processing.update(actor, draft.id, {
+          ...dto, revision: draft.revision, complete: true, note: 'Must roll back',
+          inputs: [dto.inputs[0], { ...dto.inputs[1], quantity: 100 }],
+        }), /недостаточно/);
+        assert.deepEqual(await processing.findOne(draft.id), draft, 'failed posting must not save a new revision, note, lines or costs');
+        assert.equal(await db.stockMovement.count({ where: { sourceId: draft.id } }), 0);
+        assert.deepEqual(await Promise.all([stock(flour.id), stock(water.id, bar.id), stock(bread.id), stock(crumbs.id, bar.id)]), balancesBefore);
+        const saved = await processing.update(actor, draft.id, { ...dto, revision: draft.revision, complete: true });
+        assert.equal(saved.status, 'posted');
+        assert.equal(await db.stockMovement.count({ where: { sourceId: draft.id } }), 4);
+        await processing.reverse(actor, saved.id, { revision: saved.revision, note: 'Test cleanup' });
+      });
+      await t.test('future document dates can be drafted but cannot post stock movements', async () => {
+        const date = new Date(Date.now() + 86_400_000).toISOString();
+        const draft = await processing.create(actor, { ...dto, requestKey: undefined, date });
+        assert.equal(draft.status, 'draft');
+        await assert.rejects(processing.post(actor, draft.id, draft.revision), /в будущем/);
+        await assert.rejects(processing.update(actor, draft.id, { ...dto, date, revision: draft.revision, complete: true }), /в будущем/);
+        assert.deepEqual(await processing.findOne(draft.id), draft);
+        assert.equal(await db.stockMovement.count({ where: { sourceId: draft.id } }), 0);
+        const requestKey = randomUUID();
+        await assert.rejects(processing.create(actor, { ...dto, requestKey, date, complete: true }), /в будущем/);
+        assert.equal(await db.processingDocument.count({ where: { requestKey } }), 0);
       });
       await t.test('immutable movement quantities and adjusted values reconcile to every warehouse balance', async () => {
         for (const id of [flour.id, water.id, bread.id, crumbs.id]) for (const location of [main, bar]) {

@@ -4,11 +4,17 @@ import type { EmployeePermissions, Role } from '@/types';
 
 export type PositionRole = Extract<Role, 'ADMIN' | 'WAITER' | 'KITCHEN' | 'BAR'>;
 export const POSITION_ROLES: { value: PositionRole; label: string }[] = [
-  { value: 'ADMIN', label: 'Администратор' },
-  { value: 'WAITER', label: 'Официант' },
-  { value: 'KITCHEN', label: 'Кухня' },
-  { value: 'BAR', label: 'Бар' },
+  { value: 'ADMIN', label: 'Панель управления' },
+  { value: 'WAITER', label: 'Касса и обслуживание' },
+  { value: 'KITCHEN', label: 'Экран кухни' },
+  { value: 'BAR', label: 'Экран бара' },
 ];
+
+export type AssignablePosition = Pick<StaffPosition, 'id' | 'name' | 'role' | 'permissions'>;
+export function useAssignableStaffPositions(enabled: boolean) {
+  return useQuery({ queryKey: ['admin', 'staff', 'positions'], enabled,
+    queryFn: async () => (await api.get<AssignablePosition[]>('/admin/staff/positions')).data });
+}
 
 export interface StaffPosition {
   id: string;

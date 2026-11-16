@@ -61,7 +61,11 @@ interface Form {
 const RECEIPT_LIMIT = 120;
 
 export function SettingsPage() {
-  return usePermissions().canSection('settings') ? <CafeSettings /> : null;
+  const { canSection, canEditSection } = usePermissions();
+  return canSection('settings') ? <>
+    {!canEditSection('settings') && <p className="mb-3 text-sm text-text-muted">Настройки доступны только для просмотра.</p>}
+    <fieldset className="min-w-0" disabled={!canEditSection('settings')}><CafeSettings /></fieldset>
+  </> : null;
 }
 
 function PrinterSettings() {

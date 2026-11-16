@@ -818,11 +818,12 @@ export function ProductionBatchModal({ id, onClose }: { id: string; onClose: () 
           {batch.reversedAt && (
             <p className="rounded-lg bg-warning/10 p-3 text-sm">Проведение отменено: {batch.reverseReason}</p>
           )}
+          {batch.reversalBlockedReason && <p role="status" className="rounded-lg bg-background p-3 text-sm text-text-secondary">{batch.reversalBlockedReason}</p>}
           {!batch.reversedAt && can('actions.warehouseApprove') && (
             <button
               type="button"
               className="btn-secondary btn-md"
-              disabled={reverseBatch.isPending}
+              disabled={reverseBatch.isPending || !!batch.reversalBlockedReason}
               onClick={() => void reverse()}
             >
               Отменить проведение

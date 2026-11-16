@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
+import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
@@ -16,6 +17,7 @@ import {
 } from '../api';
 
 export function TablesPage() {
+  const editable = usePermissions().canEditSection('tables');
   const overview = useTablesOverview();
   const hallsQ = useAdminHalls();
   const { remove: removeHall } = useHallMutations();
@@ -76,9 +78,9 @@ export function TablesPage() {
           <Sep />
           <Sum label={tr('Занятых')} value={o?.occupiedCount ?? '—'} />
         </div>
-        <button className="btn-secondary btn-md" onClick={() => setHallModal('new')}>
+        {editable && <button className="btn-secondary btn-md" onClick={() => setHallModal('new')}>
           <IconPlus className="h-4 w-4" /> {tr('Добавить зал')}
-        </button>
+        </button>}
       </div>
 
       {hallsQ.isLoading ? (
@@ -111,7 +113,7 @@ export function TablesPage() {
                     <span className="rounded-lg bg-slate-100 px-2 py-0.5 text-xs text-text-muted">{tr('отключён')}</span>
                   )}
                   <div className="flex shrink-0 items-center gap-1">
-                    <button
+                    {editable && <><button
                       className="btn-secondary btn-md h-9 px-3"
                       onClick={() => setTableModal({ hall, table: null })}
                     >
@@ -122,7 +124,7 @@ export function TablesPage() {
                     </IconBtn>
                     <IconBtn onClick={() => delHall(hall)} title="Удалить зал" danger>
                       <IconTrash className="h-4 w-4" />
-                    </IconBtn>
+                    </IconBtn></>}
                     <IconBtn onClick={() => toggleHall(hall.id)} title={collapsed ? 'Развернуть' : 'Свернуть'}>
                       <Chevron expanded={!collapsed} />
                     </IconBtn>
@@ -150,12 +152,12 @@ export function TablesPage() {
                             <IconBtn onClick={() => setQrModal({ table: t, hallName: hall.name })} title="QR-код меню">
                               <IconQr className="h-4 w-4" />
                             </IconBtn>
-                            <IconBtn onClick={() => setTableModal({ hall, table: t })} title="Изменить">
+                            {editable && <><IconBtn onClick={() => setTableModal({ hall, table: t })} title="Изменить">
                               <IconEdit className="h-4 w-4" />
                             </IconBtn>
                             <IconBtn onClick={() => delTable(t)} title="Удалить" danger>
                               <IconTrash className="h-4 w-4" />
-                            </IconBtn>
+                            </IconBtn></>}
                           </div>
                         </li>
                       ))}
@@ -168,10 +170,10 @@ export function TablesPage() {
         </div>
       )}
 
-      {hallModal !== null && (
+      {editable && hallModal !== null && (
         <HallModal hall={hallModal === 'new' ? null : hallModal} onClose={() => setHallModal(null)} />
       )}
-      {tableModal && (
+      {editable && tableModal && (
         <TableModal
           hall={tableModal.hall}
           table={tableModal.table}

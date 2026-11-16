@@ -7,7 +7,7 @@ import { Spinner } from '@/components/Spinner';
 import { minDishUnitPrice, variantNamesLine } from '@/lib/format';
 import { resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
-import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader';
+import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { DocumentField } from './warehouse/WarehouseUi';
 import { apiError } from '@/lib/api';
@@ -458,19 +458,17 @@ export function MenuCategoriesPage() {
   return (
     <div className="min-w-0">
       <WorkspaceHeaderCount count={categoriesQ.isSuccess ? rows.length : undefined} />
-      {editable && (
-        <WorkspaceHeaderActions>
+      <div className="poster-toolbar">
+        <WorkspaceSearch label="Поиск категорий меню" value={search} onChange={setSearch} />
+        {editable && (
           <button
             aria-label="Добавить категорию"
-            className="btn-primary btn-md"
+            className="btn-primary btn-md ml-auto"
             onClick={() => openEditor({ type: 'category' })}
           >
             Добавить
           </button>
-        </WorkspaceHeaderActions>
-      )}
-      <div className="poster-toolbar">
-        <WorkspaceSearch label="Поиск категорий меню" value={search} onChange={setSearch} />
+        )}
       </div>
       {categoriesQ.isPending ? (
         <Spinner />

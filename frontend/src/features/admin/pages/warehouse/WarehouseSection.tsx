@@ -20,7 +20,7 @@ import { SupplyList } from './WarehouseSupplies';
 import { ProcessingPage, ProcessingModal } from './ProcessingPage';
 import { LocationsPage, SuppliersPage, PackagesPage } from './WarehouseDirectories';
 import { QueryState } from './WarehouseUi';
-import { WAREHOUSE_NAV, warehouseViewInUse, type WarehouseView, type MenuView } from './navigation';
+import { WAREHOUSE_NAV, warehouseViewAllowed, warehouseViewInUse, type WarehouseView, type MenuView } from './navigation';
 import { useAdminOrderDetails } from '../../api';
 import { OrderDetailsModal } from '../../components/OrderDetailsModal';
 import { ItemCard } from './ItemCard';
@@ -83,9 +83,9 @@ export function WarehouseSection({
     onRange={(from, to) => setReportConditions({ stockPeriod: 'custom', stockFrom: from, stockTo: to })} />;
   const allowedViews = WAREHOUSE_NAV.filter(
     (v) =>
+      (!staffMode || ['balances', 'processing', 'production', 'locations'].includes(v.key)) &&
       warehouseViewInUse(v.key, locations.length, policy.data) &&
-      (!v.permission || permissions.can(`actions.${v.permission}`)) &&
-      (!v.costs || permissions.can('actions.warehouseCosts')),
+      warehouseViewAllowed(v, permissions),
   );
   const allowed = allowedViews.some((v) => v.key === view);
   const aggregate = ['balances', 'movement', 'supplies', 'processing', 'transfers', 'writeoffs', 'inventory'].includes(view);
@@ -217,11 +217,9 @@ export function WarehouseSection({
         </>
       )}
       <div key={`${active?.type}:${active?.id ?? 'new'}:${active?.action ?? ''}`}>
-        {active && ['supplier', 'location', 'package'].includes(active.type) && !permissions.can('actions.warehouseSettings') &&
-          <EditorPage title="Справочник склада" onClose={close}><p role="alert" className="text-text-muted">Нет доступа к настройкам склада.</p></EditorPage>}
-        {active?.type === 'supplier' && permissions.can('actions.warehouseSettings') && <SuppliersPage />}
-        {active?.type === 'location' && permissions.can('actions.warehouseSettings') && locationsQ.data && <LocationsPage data={locationsQ.data} />}
-        {active?.type === 'package' && permissions.can('actions.warehouseSettings') && <PackagesPage />}
+        {active?.type === 'supplier' && <SuppliersPage />}
+        {active?.type === 'location' && locationsQ.data && <LocationsPage data={locationsQ.data} />}
+        {active?.type === 'package' && <PackagesPage />}
         {active?.type === 'item' && (
           <ItemCard
             id={active.id}

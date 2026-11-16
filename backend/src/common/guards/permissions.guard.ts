@@ -27,7 +27,7 @@ export class PermissionsGuard implements CanActivate {
     ].flatMap((permission) => permission ? (Array.isArray(permission) ? permission : [permission]) : []);
     if (!required.length) return true;
 
-    const { user } = context.switchToHttp().getRequest();
+    const { user, method } = context.switchToHttp().getRequest();
     if (!user) {
       throw new ForbiddenException('У вас нет доступа к этому разделу');
     }
@@ -37,6 +37,10 @@ export class PermissionsGuard implements CanActivate {
       user.permissions ?? resolvePermissions(user.role, null);
     if (!required.every((permission) => hasPermission(perms, permission))) {
       throw new ForbiddenException('У вас нет доступа к этому разделу');
+    }
+    if (method && !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase()) && required.some((permission) =>
+      permission.startsWith('sections.') && perms.readOnlySections?.includes(permission.slice(9) as keyof typeof perms.sections))) {
+      throw new ForbiddenException('Для этого раздела разрешён только просмотр');
     }
     return true;
   }

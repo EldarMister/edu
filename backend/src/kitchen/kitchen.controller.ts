@@ -9,6 +9,8 @@ import { ReadyItemsDto, RejectItemsDto } from './dto/batch.dto';
 import { UpdateStopListDto } from './dto/stop-list.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
+import { assertAdminSectionAccess } from '../common/admin-section-access';
 
 @Controller('kitchen')
 @Roles(Role.KITCHEN, Role.BAR, Role.ADMIN, Role.OWNER)
@@ -20,6 +22,7 @@ export class KitchenController {
   ) {}
 
   @Get('orders')
+  @RequirePermission('sections.orders')
   async list(
     @CurrentUser() user: AuthUser,
     @Query('tab') tab: KitchenTab = 'new',
@@ -32,6 +35,7 @@ export class KitchenController {
   }
 
   @Get('statistics')
+  @RequirePermission('sections.orders')
   async statistics(
     @CurrentUser() user: AuthUser,
     @Query('period') period: KitchenStatsPeriod = 'today',
@@ -45,35 +49,41 @@ export class KitchenController {
 
   @Get('stop-list')
   async stopList(@CurrentUser() user: AuthUser, @Query('station') station?: string) {
+    assertAdminSectionAccess(user, 'menu');
     const selected = await resolveStation(this.prisma, user, station);
     return this.kitchen.getStopList(selected.id);
   }
 
   @Patch('stop-list')
   async updateStopList(@CurrentUser() user: AuthUser, @Body() dto: UpdateStopListDto, @Query('station') station?: string) {
+    assertAdminSectionAccess(user, 'menu', true, 'editMenu');
     const selected = await resolveStation(this.prisma, user, station);
     return this.kitchen.updateStopList(user, dto.items, selected.id);
   }
 
   @Post('orders/:id/accept')
+  @RequirePermission('sections.orders')
   async accept(@Param('id') id: string, @CurrentUser() user: AuthUser, @Query('station') station?: string) {
     const selected = await resolveStation(this.prisma, user, station);
     return this.orders.stationAccept(id, user.id, selected.id, selected.name);
   }
 
   @Post('orders/:id/ready')
+  @RequirePermission('sections.orders')
   async ready(@Param('id') id: string, @CurrentUser() user: AuthUser, @Query('station') station?: string) {
     const selected = await resolveStation(this.prisma, user, station);
     return this.orders.kitchenReadyStation(id, user.id, selected.id);
   }
 
   @Post('orders/:id/reject')
+  @RequirePermission('sections.orders')
   async rejectOrder(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: RejectDto, @Query('station') station?: string) {
     const selected = await resolveStation(this.prisma, user, station);
     return this.orders.kitchenRejectStation(id, user.id, selected.id, dto.reason, dto.comment, selected.name);
   }
 
   @Post('orders/:id/items/:itemId/reject')
+  @RequirePermission('sections.orders')
   async rejectItem(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
@@ -86,6 +96,7 @@ export class KitchenController {
   }
 
   @Post('orders/:id/items/:itemId/ready')
+  @RequirePermission('sections.orders')
   async readyItem(
     @Param('id') id: string,
     @Param('itemId') itemId: string,
@@ -97,6 +108,7 @@ export class KitchenController {
   }
 
   @Post('orders/:id/items/ready-batch')
+  @RequirePermission('sections.orders')
   async readyItems(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
@@ -115,6 +127,7 @@ export class KitchenController {
   }
 
   @Post('orders/:id/items/reject-batch')
+  @RequirePermission('sections.orders')
   async rejectItems(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,

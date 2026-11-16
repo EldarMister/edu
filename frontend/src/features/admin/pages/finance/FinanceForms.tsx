@@ -124,7 +124,8 @@ export function AccountForm({ account, onClose }: { account?: FinanceAccount; on
     <DocumentField label="Валюта"><input className="input w-full" value="Кыргызский сом (KGS)" readOnly /></DocumentField>
     {account ? <DocumentField label="Тип"><input className="input w-full" value={accountTypes.find((entry) => entry.value === type)?.label ?? ''} readOnly /></DocumentField>
       : <Choice label="Тип" value={type} onChange={setType} options={accountTypes} />}
-    <Amount label="Начальный баланс" value={opening} onChange={setOpening} hint="Остаток денег на счёте на момент создания" />
+    <Amount label="Начальный баланс" value={opening} onChange={setOpening}
+      hint="Остаток до первых операций. Для уже сверенной кассы исправится актуализация при первом открытии; фактические остатки смен сохранятся." />
     <DocumentField label="Зачисление продаж">
       {account?.isCollection ? <p className="pt-2">Сейф для инкассаций</p>
         : <label className="flex items-center gap-2 pt-2"><input type="checkbox" checked={isDefault} disabled={account?.isDefault}
@@ -150,11 +151,12 @@ function GrantList({ label, options, value, onChange }: {
   </DocumentField>;
 }
 
-export function CategoryForm({ category, categories, employees, positions, onClose }: {
+export function CategoryForm({ category, categories, employees, positions, canEditPermissions, onClose }: {
   category?: FinanceCategory;
   categories: FinanceCategory[];
   employees: { id: string; name: string }[];
   positions: { id: string; name: string }[];
+  canEditPermissions: boolean;
   onClose: () => void;
 }) {
   const { saveCategory } = useFinanceWrites();
@@ -182,14 +184,14 @@ export function CategoryForm({ category, categories, employees, positions, onClo
     </DocumentField>
     <OperationKind label="Показывать на кассе" value={showOnPos ? 'yes' : 'no'} onChange={(value) => setShowOnPos(value === 'yes')}
       options={[{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }]} />
-    <div className="border-t border-border pt-4">
-      <h2 className="mb-3 font-semibold text-text-primary">Доступ к категории</h2>
+    {canEditPermissions && <div className="border-t border-border pt-4">
+      <h2 className="mb-3 font-semibold text-text-primary">Ограниченный доступ к категории</h2>
       <div className="grid gap-4">
         <GrantList label="Должности" options={positions} value={positionIds} onChange={setPositionIds} />
         <GrantList label="Сотрудники" options={employees} value={userIds} onChange={setUserIds} />
-        <p className="text-sm text-text-secondary">Если доступ никому не выдан, проводить операции в админ-панели может только владелец.</p>
+        <p className="text-sm text-text-secondary">Для сотрудников без полного доступа к финансам. Полный доступ к разделу «Финансы» задаётся в должности и разрешает операции по всем категориям.</p>
       </div>
-    </div>
+    </div>}
   </FormPage>;
 }
 
@@ -350,8 +352,9 @@ export function ReverseTransactionDialog({ entry, onClose, onSuccess }: { entry:
   </Modal>;
 }
 
-export function AccrualForm({ employees, initialMonth, initialUser, calculated = false, onClose }: {
-  employees: { id: string; name: string }[]; initialMonth: string; initialUser?: string; calculated?: boolean; onClose: () => void;
+export function AccrualForm({ employees, initialMonth, initialUser, calculated = false, supplemental = false, dialog = false, fixedContext = false, onClose }: {
+  employees: { id: string; name: string }[]; initialMonth: string; initialUser?: string; calculated?: boolean;
+  supplemental?: boolean; dialog?: boolean; fixedContext?: boolean; onClose: () => void;
 }) {
   const { accrue } = useFinanceWrites();
   const [requestKey] = useState(() => crypto.randomUUID());
@@ -359,47 +362,65 @@ export function AccrualForm({ employees, initialMonth, initialUser, calculated =
   const [month, setMonth] = useState(initialMonth);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
-  const calculatedReport = usePayroll(month, calculated);
+  const calculatedReport = usePayroll(month, calculated && /^\d{4}-\d{2}$/.test(month));
   const summary = calculatedReport.data?.staff.find((row) => row.userId === userId);
+  const employeeOptions = calculated ? (calculatedReport.data?.staff ?? []).map(({ userId: id, name }) => ({ id, name })) : employees;
   const validAmount = calculated ? calculatedReport.isSuccess ? summary?.available ?? null : null : parseMoney(amount);
-  return <FormPage title={calculated ? 'Начисление по расчёту' : 'Начисление зарплаты'} onClose={onClose} submitLabel="Начислить"
+  return <FormPage title={calculated ? 'Подтвердить расчёт зарплаты' : supplemental ? 'Премия или доплата' : 'Начислить зарплату вручную'} onClose={onClose} submitLabel="Начислить" dialog={dialog}
     disabled={!userId || !month || validAmount == null || validAmount <= 0}
     onSubmit={async () => {
       try {
-        await accrue.mutateAsync({ userId, month, amount: validAmount!, note: note.trim() || undefined, requestKey, calculated });
+        await accrue.mutateAsync({ userId, month, amount: validAmount!, note: note.trim() || undefined, requestKey, calculated, supplemental });
       } catch (error) {
         if (calculated) void calculatedReport.refetch();
         throw error;
       }
     }}>
-    <Choice label="Сотрудник" value={userId} onChange={setUser} options={employees.map(optionFor)} empty="Выберите сотрудника" />
-    <DocumentField label="Месяц начисления"><input type="month" className="input w-full" value={month}
+    {fixedContext ? <p className="text-text-secondary">{employees.find(({ id }) => id === userId)?.name} · {month.split('-').reverse().join('.')}</p> : <><DocumentField label="Расчётный месяц"><input type="month" className="input w-full" value={month}
       max={calculated ? financeDay().slice(0, 7) : undefined} onChange={(event) => setMonth(event.target.value)} required /></DocumentField>
+    <Choice label="Сотрудник" value={userId} onChange={setUser} options={employeeOptions.map(optionFor)} empty="Выберите сотрудника" /></>}
     {calculated ? <>
+      <p className="text-sm text-text-muted">Подтвердите зарплату по закрытым рабочим сменам и продажам за месяц. Уже начисленная основная зарплата вычтена из суммы.</p>
       <DocumentField label="К начислению за месяц"><p className="pt-2 tabular-nums">{financeMoney(validAmount)}</p></DocumentField>
-      {summary && <p className="text-sm text-text-muted">По ставкам {financeMoney(summary.estimate)}. Уже начислено {financeMoney(summary.accrued)}.</p>}
+      {summary && <p className="text-sm text-text-muted">По ставкам {financeMoney(summary.estimate)}. Основная зарплата уже начислена: {financeMoney(summary.baseAccrued)}. Доплаты: {financeMoney(summary.supplementalAccrued)}.</p>}
+      {summary && summary.hours === 0 && <p className="text-sm text-text-muted">В выбранном месяце нет закрытых рабочих смен. Часы и смены появятся после завершения рабочего дня в табеле.</p>}
       {calculatedReport.isError && <p role="alert" className="text-sm text-danger">{apiError(calculatedReport.error)}</p>}
-    </> : <Amount label="Сумма" value={amount} onChange={setAmount} />}
+    </> : <><Amount label={supplemental ? 'Сумма доплаты' : 'Сумма зарплаты'} value={amount} onChange={setAmount} />
+      <p className="text-sm text-text-muted">{supplemental
+        ? 'Сумма добавится к зарплате по ставкам за выбранный месяц. Она не уменьшает основное начисление.'
+        : 'Основная зарплата за выбранный месяц. При последующем начислении по ставкам эта сумма будет вычтена, чтобы не начислить зарплату дважды.'}</p></>}
     <Comment value={note} onChange={setNote} />
     <p className="text-sm text-text-muted">Списание со счёта произойдёт при фактической выплате.</p>
   </FormPage>;
 }
 
-export function PayoutForm({ accounts, accrual, onClose }: { accounts: FinanceAccount[]; accrual: PayrollAccrual; onClose: () => void }) {
+export function PayoutForm({ accounts, accrual: initialAccrual, accruals = [], dialog = false, onClose }: {
+  accounts: FinanceAccount[]; accrual: PayrollAccrual; accruals?: PayrollAccrual[]; dialog?: boolean; onClose: () => void;
+}) {
   const { payout } = useFinanceWrites();
   const [requestKey] = useState(() => crypto.randomUUID());
   const [accountId, setAccount] = useState('');
+  const [accrualId, setAccrualId] = useState(initialAccrual.id);
+  const accrual = accruals.find(({ id }) => id === accrualId) ?? initialAccrual;
   const remainder = Math.round((accrual.amount - accrual.paidAmount) * 100) / 100;
   const [amount, setAmount] = useState(String(remainder));
   const [note, setNote] = useState('');
   const validAmount = parseMoney(amount);
-  return <FormPage title="Выплата зарплаты" onClose={onClose} submitLabel="Выплатить"
+  return <FormPage title="Выплата зарплаты" onClose={onClose} submitLabel="Выплатить" dialog={dialog}
     disabled={!accountId || validAmount == null || validAmount <= 0 || validAmount > remainder}
     onSubmit={() => payout.mutateAsync({ id: accrual.id, values: { accountId, amount: validAmount!, requestKey, note: note.trim() || undefined } })}>
     <DocumentField label="Сотрудник"><p className="pt-2">{accrual.employeeName}</p></DocumentField>
+    <DocumentField label="За расчётный месяц"><p className="pt-2">{accrual.month.split('-').reverse().join('.')}</p></DocumentField>
+    {accruals.length > 1 && <Choice label="Что выплатить" value={accrualId} onChange={(id) => {
+      setAccrualId(id);
+      const selected = accruals.find((entry) => entry.id === id);
+      if (selected) setAmount(String(Math.round((selected.amount - selected.paidAmount) * 100) / 100));
+    }} options={accruals.map((entry) => ({ value: entry.id,
+      label: `${entry.supplemental ? 'Доплата' : 'Зарплата'} от ${financeDateTime(entry.createdAt)} · остаток ${financeMoney(entry.amount - entry.paidAmount)}` }))} />}
     <DocumentField label="К выплате"><p className="pt-2">{financeMoney(remainder)}</p></DocumentField>
     <Choice label="Счёт списания" value={accountId} onChange={setAccount} options={accounts.map(optionFor)} empty="Выберите счёт" />
     <Amount label="Сумма выплаты" value={amount} onChange={setAmount} />
+    <p className="text-sm text-text-muted">Можно выплатить часть суммы. Остаток сохранится в расчёте сотрудника за этот месяц.</p>
     <Comment value={note} onChange={setNote} />
   </FormPage>;
 }

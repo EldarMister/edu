@@ -45,6 +45,7 @@ export interface StockDocument {
 }
 
 export interface StockDocumentDetails extends StockDocument {
+  reversalBlockedReason?: string | null;
   items: StockDocumentItem[];
   sourceLines?: WriteoffSourceLine[];
   sourceTotal?: number | null;

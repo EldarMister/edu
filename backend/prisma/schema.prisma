@@ -226,6 +226,7 @@ model Cafe {
   financeCategories FinanceCategory[]
   financeEntries FinanceEntry[]
   salaryAccruals SalaryAccrual[]
+  employeeSalaryRates EmployeeSalaryRate[]
   warehouseSuppliers WarehouseSupplier[]
   warehousePackages WarehousePackage[]
   processingDocuments ProcessingDocument[]
@@ -330,6 +331,11 @@ model SalaryAccrual {
   amount       Decimal        @db.Decimal(18, 2)
   note         String?
   calculation  Json?
+  supplemental Boolean        @default(false)
+  revision     Int            @default(0)
+  history      Json           @default("[]")
+  voidedAt     DateTime?      @map("voided_at")
+  voidReason   String?        @map("void_reason")
   actorId      String         @map("actor_id")
   requestKey   String         @map("request_key")
   createdAt    DateTime       @default(now()) @map("created_at")
@@ -441,6 +447,24 @@ model StaffPositionSalaryRate {
 
   @@id([cafeId, positionId, effectiveMonth])
   @@map("staff_position_salary_rates")
+}
+
+// Independent snapshots keep past payroll intact after a position is changed or removed.
+model EmployeeSalaryRate {
+  cafeId          String   @map("cafe_id")
+  userId          String   @map("user_id")
+  effectiveMonth  String   @map("effective_month")
+  positionId      String?  @map("position_id")
+  positionName    String   @map("position_name")
+  hourly          Decimal  @default(0) @db.Decimal(14, 2)
+  perShift        Decimal  @default(0) @map("per_shift") @db.Decimal(14, 2)
+  monthly         Decimal  @default(0) @db.Decimal(14, 2)
+  personalPercent Decimal  @default(0) @map("personal_percent") @db.Decimal(5, 2)
+  shiftPercent    Decimal  @default(0) @map("shift_percent") @db.Decimal(5, 2)
+  cafe            Cafe     @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, userId, effectiveMonth])
+  @@map("employee_salary_rates")
 }
 
 model Hall {
@@ -707,6 +731,8 @@ model CashShift {
   expectedAmount Decimal?  @map("expected_amount") @db.Decimal(14, 2)
   actualAmount   Decimal?  @map("actual_amount") @db.Decimal(14, 2)
   difference     Decimal?  @db.Decimal(14, 2)
+  closingComment String?   @map("closing_comment") @db.VarChar(500)
+  closeEmployeeShifts Boolean @default(false) @map("close_employee_shifts")
 
   deletedOperations CashShiftDeletedOperation[]
 

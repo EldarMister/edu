@@ -10,14 +10,34 @@ import {
 import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { Prisma } from '@prisma/client';
 import { ROOMS, SERVER_EVENTS, QR_CLIENT_EVENTS } from './events';
 import { getJwtAccessSecret } from '../auth/jwt.config';
 import { PrismaService } from '../prisma/prisma.service';
-import { getCafeId } from '../tenant/tenant-context';
+import { getCafeId, runWithTenant } from '../tenant/tenant-context';
 import { assertCafeActive } from '../platform/cafe-status';
+import { resolveUserPermissions } from '../common/permissions';
+import { projectWorkspaceUser } from '../common/workspace-access';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
 
 const QR_OFFLINE_CART_TTL_MS = 60 * 60 * 1000;
 const QR_OFFLINE_CART_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+const STAFF_ACCESS_CHECK_INTERVAL_MS = 30_000;
+const socketUserSelect = { id: true, role: true, name: true, phone: true, cafeId: true, isActive: true,
+  prepStation: true, positionId: true, permissions: true, position: { select: { role: true, permissions: true } } } satisfies Prisma.UserSelect;
+type SocketEmployee = Prisma.UserGetPayload<{ select: typeof socketUserSelect }>;
+
+function socketActor(user: SocketEmployee, workspace?: unknown) {
+  return projectWorkspaceUser({ id: user.id, role: user.role, name: user.name, phone: user.phone,
+    cafeId: user.cafeId, prepStation: user.prepStation, positionId: user.positionId,
+    permissions: resolveUserPermissions(user) }, workspace);
+}
+
+function socketAccessFingerprint(user: AuthUser) {
+  return JSON.stringify({ cafeId: user.cafeId, identityRole: user.identityRole, role: user.role,
+    workspace: user.workspace, prepStation: user.prepStation, positionId: user.positionId,
+    access: user.access, permissions: user.permissions });
+}
 
 interface SocketUser {
   id: string;
@@ -43,6 +63,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   private readonly logger = new Logger('EventsGateway');
   private readonly qrPresence = new Map<string, number>();
   private cleanupTimer?: NodeJS.Timeout;
+  private accessTimer?: NodeJS.Timeout;
+  private checkingAccess = false;
 
   constructor(
     private readonly jwt: JwtService,
@@ -56,10 +78,37 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       });
     }, QR_OFFLINE_CART_CLEANUP_INTERVAL_MS);
     this.cleanupTimer.unref?.();
+    this.accessTimer = setInterval(() => {
+      void this.revalidateStaffConnections().catch((error: unknown) => this.logger.error('Failed to revalidate staff socket access', error));
+    }, STAFF_ACCESS_CHECK_INTERVAL_MS);
+    this.accessTimer.unref?.();
   }
 
   onModuleDestroy() {
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    if (this.accessTimer) clearInterval(this.accessTimer);
+  }
+
+  /** One batched lookup per interval, regardless of the number of devices per employee. */
+  async revalidateStaffConnections() {
+    if (this.checkingAccess || !this.server?.sockets?.sockets) return;
+    const clients = [...this.server.sockets.sockets.values()].filter((client) => client.data.user);
+    if (!clients.length) return;
+    this.checkingAccess = true;
+    try {
+      const ids = [...new Set(clients.map((client) => (client.data.user as SocketUser).id))];
+      const users = await runWithTenant({}, async () => await this.prisma.user.findMany({ where: { id: { in: ids } }, select: socketUserSelect }));
+      const byId = new Map(users.map((user) => [user.id, user]));
+      for (const client of clients) {
+        const before = client.data.user as AuthUser;
+        const employee = byId.get(before.id);
+        try {
+          if (!employee?.isActive || socketAccessFingerprint(socketActor(employee, before.workspace)) !== client.data.accessFingerprint) {
+            client.disconnect(true);
+          }
+        } catch { client.disconnect(true); }
+      }
+    } finally { this.checkingAccess = false; }
   }
 
   async handleConnection(client: Socket) {
@@ -81,7 +130,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       });
       const dbUser = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-        select: { id: true, role: true, name: true, cafeId: true, isActive: true },
+        select: socketUserSelect,
       });
       if (!dbUser || !dbUser.isActive) {
         client.disconnect(true);
@@ -89,16 +138,18 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       }
       await assertCafeActive(this.prisma, dbUser.cafeId);
 
-      const user: SocketUser = { id: dbUser.id, role: dbUser.role, name: dbUser.name, cafeId: dbUser.cafeId };
+      const user = socketActor(dbUser, client.handshake.auth?.workspace);
       client.data.user = user;
+      client.data.accessFingerprint = socketAccessFingerprint(user);
       client.join(ROOMS.cafeStaff(user.cafeId));
+      // The legacy personal room also carries work-time updates for kitchen, bar and management.
+      client.join(ROOMS.waiter(user.id));
 
       if (user.role === 'KITCHEN' || user.role === 'BAR') {
         // Бар получает ту же ленту, что и кухня; экран фильтрует позиции по станции.
         client.join(ROOMS.cafeKitchen(user.cafeId));
       } else if (user.role === 'WAITER') {
         client.join(ROOMS.cafeWaiters(user.cafeId));
-        client.join(ROOMS.waiter(user.id));
       } else if (user.role === 'ADMIN' || user.role === 'OWNER') {
         client.join(ROOMS.cafeManagement(user.cafeId));
         client.join(ROOMS.cafeKitchen(user.cafeId)); // админ видит и кухонную ленту

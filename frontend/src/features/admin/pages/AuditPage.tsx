@@ -34,6 +34,9 @@ const ACTION_LABELS: Record<string, string> = {
   FINANCE_TRANSACTION_UPDATED: 'Изменение транзакции',
   FINANCE_ACCOUNT_ARCHIVED: 'Счёт перемещён в корзину',
   FINANCE_ACCOUNT_RESTORED: 'Счёт восстановлен',
+  SALARY_ACCRUAL_UPDATED: 'Исправление начисления зарплаты',
+  SALARY_ACCRUAL_CANCELLED: 'Отмена начисления зарплаты',
+  SALARY_PAYMENT_REVERSED: 'Отмена выплаты зарплаты',
   SETTINGS_UPDATED: 'Изменение настроек',
 };
 

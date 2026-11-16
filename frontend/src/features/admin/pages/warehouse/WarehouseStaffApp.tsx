@@ -5,8 +5,9 @@ import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { usePageFilter, useWorkspaceScroll } from './workspace-route';
 import { useAuth } from '@/store/auth';
 import { usePermissions } from '@/hooks/usePermissions';
-import { homeForRole } from '@/routes/ProtectedRoute';
+import { homeForUser } from '@/lib/workspaces';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
+import { WorkShiftBanner } from '@/features/settings/WorkShiftBanner';
 import { WarehouseSection } from './WarehouseSection';
 import {
   WorkspaceHeaderProvider,
@@ -30,15 +31,15 @@ export function WarehouseStaffApp() {
   useWorkspaceScroll();
   const setSection = (next: string) => setParams({ section: next });
   if (!user) return null;
-  if (!canSection('warehouse')) return <Navigate to={homeForRole(user.role)} replace />;
+  if (!canSection('warehouse')) return <Navigate to={homeForUser(user)} replace />;
   return (
     <WorkspaceHeaderProvider>
       <div className="poster-workspace flex h-dvh flex-col overflow-hidden bg-white">
         <header className="workspace-header flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-white">
           <div className="flex min-w-0 items-center gap-3">
             {!editorOpen && (
-              <Link to={homeForRole(user.role)} className="btn-secondary btn-md shrink-0">
-                ← К заказам
+              <Link to={homeForUser(user)} className="btn-secondary btn-md shrink-0">
+                ← Назад
               </Link>
             )}
             <WorkspaceTitleSlot>
@@ -50,6 +51,7 @@ export function WarehouseStaffApp() {
             <ConnectionStatus />
           </div>
         </header>
+        <WorkShiftBanner />
         <main className="workspace-main app-scrollbar-subtle min-h-0 min-w-0 w-full flex-1 overflow-y-auto overflow-x-hidden">
           {!editorOpen && (
             <nav aria-label="Разделы склада" className="mb-4 flex flex-wrap gap-2">

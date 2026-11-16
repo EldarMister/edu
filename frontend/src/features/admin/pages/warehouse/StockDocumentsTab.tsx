@@ -9,10 +9,11 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { InventoryScopePicker } from './InventoryScopePicker';
 import { InventoryTimingFields } from './InventoryTimingFields';
+import { StockOperationDateField } from './StockOperationDateField';
 import { inventoryTimingFor, inventoryTimingError, inventoryTimingValue } from './inventory-time';
 import { apiError } from '@/lib/api';
 import { balanceMoney } from './balance-format';
-import { usePurchases, usePurchase, useIngredients, type WarehouseLocation } from './api';
+import { usePurchases, usePurchase, useIngredients, purchaseNumber, type WarehouseLocation } from './api';
 import {
   useStockDocumentMutations,
   useStockDocument,
@@ -39,9 +40,30 @@ interface StartDocumentProps {
 }
 
 type TransferFields = { destination: string; note: string; rows: Omit<DraftRow, 'key'>[] };
+type ReturnFields = { number: number; supplier: string; rows: Omit<DraftRow, 'key'>[] };
 
 export function StartDocumentModal({ copyTransferId, ...props }: StartDocumentProps) {
+  if (props.kind === 'supplier_return' && props.sourcePurchaseId) return <PurchaseReturn {...props} sourcePurchaseId={props.sourcePurchaseId} />;
   return copyTransferId && props.kind === 'transfer' ? <CopyTransfer id={copyTransferId} {...props} /> : <CreateDocument {...props} />;
+}
+
+function PurchaseReturn(props: StartDocumentProps & { sourcePurchaseId: string }) {
+  const query = usePurchase(props.sourcePurchaseId);
+  const source = query.data;
+  const warehouseId = source?.warehouseId ?? props.warehouseId;
+  const items = useIngredients('', warehouseId, !!source);
+  if (source && items.isSuccess) {
+    const available = new Set(items.data.map((item) => item.id));
+    const rows = source.returnableItems?.filter((item) => item.remainingQuantityBase > 0 && available.has(item.ingredientId))
+      .map((item) => ({ id: item.ingredientId, quantity: '0' })) ?? [];
+    return <CreateDocument {...props} warehouseId={warehouseId} initialReturn={{ number: source.number, supplier: source.supplier, rows }} />;
+  }
+  return <EditorPage title="Возврат поставщику" onClose={props.onClose}>
+    {(query.isPending || items.isPending) && <div className="flex justify-center p-6"><Spinner /></div>}
+    {(query.error || items.error) && <p role="alert" className="text-sm text-danger">{apiError(query.error ?? items.error)}
+      <button type="button" className="ml-2 text-primary" onClick={() => { void query.refetch(); void items.refetch(); }}>Повторить</button>
+    </p>}
+  </EditorPage>;
 }
 
 function CopyTransfer({ id, ...props }: StartDocumentProps & { id: string }) {
@@ -79,23 +101,26 @@ function CopyTransfer({ id, ...props }: StartDocumentProps & { id: string }) {
   </EditorPage>;
 }
 
-function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sourcePurchaseId, initialTransfer }: StartDocumentProps & {
+function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sourcePurchaseId, initialTransfer, initialReturn }: StartDocumentProps & {
   initialTransfer?: TransferFields;
+  initialReturn?: ReturnFields;
 }) {
   const [location, setLocation] = useState(warehouseId);
   const [destination, setDestination] = useState(initialTransfer?.destination ?? '');
   const [source, setSource] = useState(sourcePurchaseId ?? '');
   const [mode, setMode] = useState<InventoryMode>('full');
-  const [timing, setTiming] = useState(() => inventoryTimingFor());
+  const [initialOperationAt] = useState(() => new Date().toISOString());
+  const [timing, setTiming] = useState(() => inventoryTimingFor(kind === 'transfer' || kind === 'writeoff' ? initialOperationAt : undefined));
   const [timingValid, setTimingValid] = useState(true);
   const supportsStockDate = kind === 'transfer' || kind === 'writeoff';
-  const historical = supportsStockDate && timing.mode === 'past';
+  const historical = supportsStockDate && timing.mode === 'past' && timing.local !== inventoryTimingFor(initialOperationAt).local;
   const timingReady = timingValid && !inventoryTimingError(timing);
   const [selectedProducts, setSelectedProducts] = useState<string[]>([]);
   const [note, setNote] = useState(initialTransfer?.note ?? '');
   const [reason, setReason] = useState<WriteoffReason | ''>('');
-  const [rows, setRows] = useState<DraftRow[]>(() => initialTransfer?.rows.length
-    ? initialTransfer.rows.map((row) => ({ ...row, key: crypto.randomUUID() })) : [emptyRow()]);
+  const initialRows = initialReturn?.rows ?? initialTransfer?.rows ?? [];
+  const [rows, setRows] = useState<DraftRow[]>(() => initialReturn || initialRows.length
+    ? initialRows.map((row) => ({ ...row, key: crypto.randomUUID() })) : [emptyRow()]);
   const [error, setError] = useState('');
   const [validationAttempt, setValidationAttempt] = useState(0);
   const [postAttempt, setPostAttempt] = useState(false);
@@ -104,10 +129,10 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
   const [requestKey] = useState(() => crypto.randomUUID());
   const writeoffLines = useWriteoffLines(kind === 'writeoff', location);
   const changedItems = JSON.stringify(rows.filter(({ id, quantity }) => id || quantity).map(({ id, quantity }) => [id, quantity])) !==
-    JSON.stringify((initialTransfer?.rows ?? []).map(({ id, quantity }) => [id, quantity]));
+    JSON.stringify(initialRows.map(({ id, quantity }) => [id, quantity]));
   const { markSaved } = useEditorDirty(location !== warehouseId || destination !== (initialTransfer?.destination ?? '') || source !== (sourcePurchaseId ?? '') ||
     mode !== 'full' || note !== (initialTransfer?.note ?? '') || reason !== '' ||
-    ((kind === 'inventory' || supportsStockDate) && (timing.mode === 'past' || !timingValid)) || (kind === 'writeoff' ? writeoffLines.dirty : changedItems));
+    (kind === 'inventory' && (timing.mode === 'past' || !timingValid)) || (supportsStockDate && (inventoryTimingValue(timing, initialOperationAt) !== initialOperationAt || !timingValid)) || (kind === 'writeoff' ? writeoffLines.dirty : changedItems));
   const mutations = useStockDocumentMutations();
   const push = useNotifications((state) => state.push);
   const { can } = usePermissions();
@@ -116,7 +141,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
     status: 'completed',
     search: '',
     warehouseId: location,
-    enabled: kind === 'supplier_return',
+    enabled: kind === 'supplier_return' && !initialReturn,
   });
   const ingredients = useIngredients('', location);
   const sourcePurchase = usePurchase(kind === 'supplier_return' && source ? source : null);
@@ -139,7 +164,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
       : kind === 'supplier_return'
         ? can('actions.warehouseReceive') && costs
         : can('actions.warehouseApprove');
-  const enteredRows = rows.filter((row) => row.id || row.quantity);
+  const enteredRows = rows.filter((row) => initialReturn ? row.quantity.trim() && Number(row.quantity) !== 0 : row.id || row.quantity);
   const products = (ingredients.data ?? []).filter(
     (item) => item.preparationMode !== 'virtual' && (kind !== 'supplier_return' ||
       returnable.has(item.id) && ((returnable.get(item.id)?.remainingQuantityBase ?? 0) > 0 || rows.some((row) => row.id === item.id))),
@@ -191,7 +216,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
         rowIssues.quantity = documentQuantityError(row.quantity, false, remainingFor(row.id));
         if (rowIssues.product || rowIssues.quantity) issues.rows.set(row.key, rowIssues);
       }
-      if (post && !enteredRows.length) issues.rows.set(rows[0].key, { product: 'Добавьте хотя бы один продукт.' });
+      if (post && !enteredRows.length) issues.rows.set(rows[0]?.key ?? 'empty', { product: initialReturn ? 'Укажите количество для возврата.' : 'Добавьте хотя бы один продукт.' });
     }
     return issues;
   }
@@ -222,7 +247,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
         kind,
         mode: inventory ? mode : undefined,
         countedAt: inventory ? inventoryTimingValue(timing) : undefined,
-        effectiveAt: supportsStockDate ? inventoryTimingValue(timing) : undefined,
+        effectiveAt: supportsStockDate ? inventoryTimingValue(timing, initialOperationAt) : undefined,
         destinationWarehouseId: kind === 'transfer' ? destination : undefined,
         sourcePurchaseId: kind === 'supplier_return' ? source : undefined,
         requestKey,
@@ -250,16 +275,16 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
         className={`poster-form poster-form--document space-y-6 ${inventory ? 'poster-document--inventory' : 'poster-document--modern'}`}
       >
         <div className="poster-document-panel poster-document-fields space-y-3">
-          {supportsStockDate && <InventoryTimingFields value={timing} onChange={setTiming}
+          {supportsStockDate && <StockOperationDateField value={timing} onChange={setTiming}
             onValidityChange={setTimingValid} disabled={busy}
-            operationLabel={kind === 'transfer' ? 'Дата перемещения' : 'Дата списания'} />}
+            label={kind === 'transfer' ? 'Дата и время перемещения' : 'Дата и время списания'} />}
           {kind === 'supplier_return' && (
             <DocumentField label="Дата возврата">
               <span className="poster-readonly">На момент проведения</span>
             </DocumentField>
           )}
           <DocumentField label={kind === 'transfer' ? 'Со склада' : 'Склад'}>
-            <Select
+            {initialReturn ? <span className="poster-readonly">{locations.find((item) => item.id === location)?.name ?? '—'}</span> : <Select
               className="h-10 w-full"
               ariaLabel="Склад документа"
               ariaInvalid={!!validationAttempt && !!fieldErrors.location || undefined}
@@ -278,7 +303,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
                 setValidationAttempt(0);
               }}
               options={locations.map((l) => ({ value: l.id, label: l.name }))}
-            />
+            />}
             {!!validationAttempt && fieldErrors.location && <p id={`${formId}-location-error`} className="mt-1 text-xs text-danger">{fieldErrors.location}</p>}
           </DocumentField>
           {kind === 'transfer' && (
@@ -300,7 +325,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
           )}
           {kind === 'supplier_return' && (
             <DocumentField label="Исходная поставка">
-              <Select
+              {initialReturn ? <span className="poster-readonly">{purchaseNumber(initialReturn.number)} · {initialReturn.supplier}</span> : <Select
                 className="h-10 w-full"
                 ariaLabel="Исходная поставка"
                 ariaInvalid={!!validationAttempt && !!fieldErrors.source || undefined}
@@ -314,12 +339,12 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
                 }}
                 options={(purchases.data ?? []).map((p) => ({
                   value: p.id,
-                  label: `№${p.number} · ${p.supplier} · ${formatDocumentDate(p.date)}`,
+                  label: `№${p.number} · ${p.supplier} · ${formatDocumentDate(p.effectiveAt ?? p.postedAt ?? p.date)}`,
                 }))}
-              />
+              />}
               {!!validationAttempt && fieldErrors.source && <p id={`${formId}-source-error`} className="mt-1 text-xs text-danger">{fieldErrors.source}</p>}
               {purchases.isError && <p role="alert" className="mt-1 text-sm text-danger">Не удалось загрузить поставки. <button type="button" className="text-primary" onClick={() => void purchases.refetch()}>Повторить загрузку</button></p>}
-              {purchases.isSuccess && !purchases.data?.length && <p className="mt-1 text-sm text-text-muted">На этом складе пока нет проведённых поставок.</p>}
+              {!initialReturn && purchases.isSuccess && !purchases.data?.length && <p className="mt-1 text-sm text-text-muted">На этом складе пока нет проведённых поставок.</p>}
             </DocumentField>
           )}
           {kind === 'writeoff' && (
@@ -397,6 +422,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
           <WriteoffLines editor={writeoffLines} disabled={busy} showErrors={!!validationAttempt} requireRows={postAttempt} showCost={!historical} />
         ) : (
           <section className="poster-document-panel poster-document-products">
+          {initialReturn && <p className="mb-3 px-4 text-sm text-text-secondary">Укажите количество возвращаемых товаров. Для остальных оставьте 0.</p>}
           {productLoading && <p role="status" className="mb-3 px-4 text-sm text-text-muted">Загрузка продуктов…</p>}
           {!!productError && <p role="alert" className="mb-3 px-4 text-sm text-danger">Не удалось загрузить продукты. {apiError(productError)} <button type="button" className="text-primary" onClick={retryProducts}>Повторить загрузку</button></p>}
           {kind === 'supplier_return' && sourcePurchase.isSuccess && !products.length && <p role="status" className="mb-3 px-4 text-sm text-text-muted">Все продукты этой поставки уже возвращены.</p>}
@@ -427,7 +453,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
                     <tr key={r.key} className="border-b border-border">
                       <td className="poster-product-cell py-2 pr-3">
                         <div className="poster-inline-product">
-                        <DocumentProductPicker
+                        {initialReturn ? <span className="poster-readonly">{item?.name ?? returnable.get(r.id)?.name ?? 'Продукт'}</span> : <DocumentProductPicker
                           id={`${errorId}-product-input`}
                           label="Продукт документа"
                           value={r.id}
@@ -446,7 +472,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
                               current.map((row) => (row.key === r.key ? { ...row, id, quantity: row.id === id ? row.quantity : '' } : row)),
                             )
                           }
-                        />
+                        />}
                         </div>
                       </td>
                       <td className="px-3 py-2 text-right">
@@ -482,7 +508,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
                         {costs ? value === null ? '—' : balanceMoney(value) : ''}
                       </td>
                       <td className="py-2">
-                        <button
+                        {!initialReturn && <button
                           type="button"
                           className="btn-ghost h-8 w-8 text-text-muted hover:text-danger"
                           aria-label={`Удалить ${item?.name ?? 'строку'}`}
@@ -494,7 +520,7 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
                           }
                         >
                           ×
-                        </button>
+                        </button>}
                       </td>
                     </tr>
                   );
@@ -502,14 +528,14 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
               </tbody>
             </table>
           </div>
-            <button
+            {!initialReturn && <button
               type="button"
               className="poster-document-add py-3 text-sm text-primary"
               disabled={busy}
               onClick={() => { const row = emptyRow(); setRows((current) => [...current, row]); focusDocumentInput(`${formId}-${row.key}-quantity-product-input`); }}
             >
               + Добавить
-            </button>
+            </button>}
           </section>
         )}
         {!inventory && <DocumentStockWarnings shortages={shortages} />}
@@ -541,14 +567,14 @@ function CreateDocument({ kind, warehouseId, locations, onClose, onCreated, sour
               ((inventory || supportsStockDate) && !timingReady) ||
               !location ||
               (kind === 'transfer' && !destination) ||
-              (kind === 'supplier_return' && !source)
+              (kind === 'supplier_return' && (!source || !!initialReturn && !enteredRows.length))
             }
             onClick={() => void submit(true)}
           >
             {inventory ? 'Начать подсчёт' : canPost ? 'Сохранить' : 'Отправить на утверждение'}
           </button>
           {!inventory && (
-            <button className="btn-secondary btn-md" disabled={busy || !catalogReady || (supportsStockDate && !timingReady) || (kind === 'writeoff' && writeoffLines.calculating)} onClick={() => void submit(false)}>
+            <button className="btn-secondary btn-md" disabled={busy || !catalogReady || (!!initialReturn && !enteredRows.length) || (supportsStockDate && !timingReady) || (kind === 'writeoff' && writeoffLines.calculating)} onClick={() => void submit(false)}>
               Сохранить черновик
             </button>
           )}

@@ -325,8 +325,8 @@ export class CreateStaffDto {
   @IsString() @IsNotEmpty()
   phone: string;
 
-  @IsEnum(Role)
-  role: Role;
+  @IsOptional() @IsEnum(Role)
+  role?: Role;
 
   @IsString() @IsNotEmpty()
   password: string;
@@ -379,7 +379,7 @@ export class SetCashHandedDto {
 }
 
 export class ShiftHistoryQueryDto {
-  @IsOptional() @IsString()
+  @IsOptional() @IsIn(['today', 'week', 'month', 'custom'])
   period?: 'today' | 'week' | 'month' | 'custom';
 
   @IsOptional() @IsString()

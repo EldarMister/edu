@@ -1,7 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { EditorPage, useEditorDirty } from './EditorPage';
 import { DocumentProductPicker } from './DocumentProductPicker';
-import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { formatDocumentListDate } from './WarehouseDocumentLists';
 import { usePageFilter } from './workspace-route';
@@ -20,9 +19,9 @@ import {
   type ProcessingRow,
 } from './extended-api';
 import { DocumentField, DocumentFooter, QueryState } from './WarehouseUi';
-import { formatDocumentDate } from './stock-document-format';
 import { useListPeriod } from './ListPeriodFilter';
 import { balanceMoney, balanceQuantity } from './balance-format';
+import { inventoryLocalTime, inventoryTimeDisplay, inventoryTimingValue } from './inventory-time';
 
 export function ProcessingPage({
   warehouseId,
@@ -37,19 +36,16 @@ export function ProcessingPage({
 }) {
   const [search, setSearch] = usePageFilter('processingSearch');
   const period = useListPeriod('processing', 'month');
-  const q = useProcessing({ warehouseId, search });
-  const documents = q.data?.filter((document) => period.includes(document.date)) ?? [];
+  const { can } = usePermissions();
+  const q = useProcessing({ warehouseId, search, from: period.range.dateFrom, to: period.range.dateTo });
+  const documents = q.data ?? [];
   return (
     <div className="poster-register-surface min-w-0">
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск переработок" value={search} onChange={setSearch} />
         {period.filter}
         {filters}
-        <WorkspaceHeaderActions>
-          <button className="btn-primary btn-md" onClick={onCreate}>
-            Добавить
-          </button>
-        </WorkspaceHeaderActions>
+        {can('actions.warehouseProduce') && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       <QueryState pending={q.isPending} error={q.error}>
         <div className="overflow-x-auto">
@@ -87,7 +83,7 @@ export function ProcessingPage({
                     <button
                       className="text-primary"
                       onClick={() => onOpen(d.id)}
-                      title={formatDocumentDate(d.date)}
+                      title={inventoryTimeDisplay(d.date)}
                     >
                       {formatDocumentListDate(d.date)}
                     </button>
@@ -186,7 +182,7 @@ function ProcessingForm({
   const push = useNotifications((state) => state.push);
   const { can } = usePermissions();
   const [requestKey] = useState(() => crypto.randomUUID());
-  const [date, setDate] = useState(localTime(document?.date));
+  const [date, setDate] = useState(inventoryLocalTime(document?.date));
   const [dateValid, setDateValid] = useState(true);
   const [note, setNote] = useState(document?.note ?? '');
   const emptyRow = (output: boolean): DraftRow => ({
@@ -219,8 +215,13 @@ function ProcessingForm({
   const allocatedPercent = enteredOutputs.reduce((sum, row) => sum + Math.round((row.costSharePercent ?? 0) * 10000), 0) / 10000;
   async function save(complete: boolean) {
     if (busy || !editable || !dateValid) return;
-    if (!date || Number.isNaN(new Date(date).getTime())) {
+    const documentDate = inventoryTimingValue({ mode: 'past', local: date }, document?.date);
+    if (!documentDate) {
       setError('Укажите дату и время переработки.');
+      return;
+    }
+    if (complete && Date.parse(documentDate) > Date.now()) {
+      setError('Дата и время переработки не могут быть в будущем. Сохраните черновик или измените дату.');
       return;
     }
     for (const [label, rows] of [['Исходные продукты', inputs], ['Полученные продукты', outputs]] as const) {
@@ -256,7 +257,7 @@ function ProcessingForm({
         revision: document?.revision,
         requestKey,
         complete,
-        date: new Date(date).toISOString(),
+        date: documentDate,
         note,
         inputs: enteredInputs.map(({ ingredientId, warehouseId, quantity, unit }) => ({
           ingredientId,
@@ -489,13 +490,14 @@ function ProcessingForm({
   return (
     <div className="poster-form poster-form--document poster-document--modern space-y-7">
       <div className="poster-document-panel poster-document-fields space-y-3">
-        <DocumentField label="Дата и время">
+        <DocumentField label="Дата документа">
           {editable ? (
             <div className="w-[250px] max-w-full">
               <DateTimePicker className="input h-9" value={date} onChange={setDate} onValidityChange={setDateValid} required disabled={busy} />
+              <p className="mt-1 text-xs text-text-muted">Время Бишкека</p>
             </div>
           ) : (
-            <span className="poster-readonly">{formatDocumentDate(document?.date ?? date)}</span>
+            <span className="poster-readonly">{inventoryTimeDisplay(document?.date ?? inventoryTimingValue({ mode: 'past', local: date })!)}</span>
           )}
         </DocumentField>
         <DocumentField label="Комментарий">
@@ -514,8 +516,11 @@ function ProcessingForm({
         {document && <DocumentField label="Статус">
           <span className="poster-readonly"><span className="document-status" data-status={document.status}>{status(document.status)}</span></span>
         </DocumentField>}
+        {document?.postedAt && <DocumentField label="Проведено">
+          <span className="poster-readonly">{inventoryTimeDisplay(document.postedAt)} · время изменения остатков</span>
+        </DocumentField>}
         {document?.status === 'reversed' && document.reversedAt && <DocumentField label="Проведение отменено">
-          <span className="poster-readonly">{formatDocumentDate(document.reversedAt)}</span>
+          <span className="poster-readonly">{inventoryTimeDisplay(document.reversedAt)}</span>
         </DocumentField>}
         {document?.status === 'reversed' && document.reversalReason && <DocumentField label="Причина отмены">
           <span className="poster-readonly whitespace-pre-wrap">{document.reversalReason}</span>
@@ -528,6 +533,7 @@ function ProcessingForm({
           Стоимость исходных продуктов определяется по выбранным складам при проведении. Распределите её между
           полученными продуктами. Сейчас распределено: {allocatedPercent.toLocaleString('ru-RU', { maximumFractionDigits: 4 })}%.
           {' '}«Сохранить» проведёт переработку и изменит остатки. Черновик сохраняет данные без изменения остатков.
+          {' '}Дата документа нужна для поиска; складские движения и себестоимость фиксируются на момент проведения.
         </p>
       )}
       {(error || ingredients.isError) && (
@@ -535,6 +541,7 @@ function ProcessingForm({
           {error || apiError(ingredients.error)}
         </p>
       )}
+      {document?.reversalBlockedReason && <p role="status" className="rounded-lg bg-background p-3 text-sm text-text-secondary">{document.reversalBlockedReason}</p>}
       <DocumentFooter
         total={
           editable && rowsChanged
@@ -561,7 +568,7 @@ function ProcessingForm({
               {status(document?.status ?? 'draft')}
             </span>
             {document?.status === 'posted' && can('actions.warehouseApprove') && (
-              <button className="btn-secondary btn-md" disabled={busy} onClick={() => void reverse()}>
+              <button className="btn-secondary btn-md" disabled={busy || !!document.reversalBlockedReason} onClick={() => void reverse()}>
                 Отменить проведение
               </button>
             )}
@@ -573,8 +580,4 @@ function ProcessingForm({
 }
 function status(value: string) {
   return value === 'posted' ? 'Проведена' : value === 'reversed' ? 'Проведение отменено' : 'Черновик';
-}
-function localTime(value?: string) {
-  const d = value ? new Date(value) : new Date();
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }

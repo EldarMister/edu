@@ -58,6 +58,7 @@ import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
 import { WaiterCabinet } from './WaiterCabinet';
 import { CashShiftBanner } from '@/features/settings/CashShiftControls';
+import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { PaymentModal } from './PaymentModal';
 import { ReceiptPrintSheet } from './ReceiptPrintSheet';
@@ -89,7 +90,7 @@ export function WaiterApp() {
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
   const t = useT();
-  const pushNotifications = useWaiterPushNotifications(user?.role === 'WAITER');
+  const pushNotifications = useWaiterPushNotifications(!!user);
 
   const hallsQ = useHalls();
   const categoriesQ = useCategories();
@@ -878,9 +879,10 @@ export function WaiterApp() {
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
         </div>
       </header>
+      <WorkspaceLinks current="terminal" />
       <OfflineBanner inHeader />
       </div>
-      <CashShiftBanner />
+      <CashShiftBanner promptOnEntry={shiftActive && !showShiftGate && tab !== 'profile' && !paymentOrder} />
 
       {showPushBanner && (
         <BackgroundPushBanner onEnable={pushNotifications.enable} />

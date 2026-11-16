@@ -5,7 +5,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import {
   FinanceAccountCreateDto, FinanceAccountUpdateDto, FinanceCategoryCreateDto, FinanceCategoryDeleteDto, FinanceCategoryUpdateDto,
   FinanceQueryDto, FinanceTransactionDto, SalaryAccrualDto, SalaryPaymentDto,
-  FinanceTransactionEditDto, FinanceTransactionMetadataDto, FinanceTransactionReverseDto,
+  FinanceTransactionEditDto, FinanceTransactionMetadataDto, FinanceTransactionReverseDto, SalaryAccrualEditDto, SalaryCorrectionDto,
 } from './finance.dto';
 import { FinanceService } from './finance.service';
 import { PayrollReportDto } from './finance.dto';
@@ -81,7 +81,6 @@ export class FinanceController {
   }
 
   @Patch('transactions/:id/details')
-  @Roles(Role.OWNER)
   editTransaction(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() input: FinanceTransactionEditDto) {
     return this.finance.editTransaction(actor, id, input);
   }
@@ -109,5 +108,26 @@ export class FinanceController {
   @Post('payroll/:id/pay')
   pay(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() input: SalaryPaymentDto) {
     return this.finance.paySalary(actor, id, input);
+  }
+
+  @Get('payroll/:id')
+  salaryDetails(@CurrentUser() actor: AuthUser, @Param('id') id: string) {
+    return this.finance.salaryDetails(actor, id);
+  }
+
+  @Patch('payroll/:id')
+  editSalary(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() input: SalaryAccrualEditDto) {
+    return this.finance.editSalary(actor, id, input);
+  }
+
+  @Post('payroll/:id/cancel')
+  cancelSalary(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() input: SalaryCorrectionDto) {
+    return this.finance.editSalary(actor, id, input, true);
+  }
+
+  @Post('payroll/:id/payments/:paymentId/reverse')
+  reverseSalary(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Param('paymentId') paymentId: string,
+    @Body() input: FinanceTransactionReverseDto) {
+    return this.finance.reverseSalary(actor, id, paymentId, input.reason);
   }
 }

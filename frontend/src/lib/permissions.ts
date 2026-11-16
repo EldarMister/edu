@@ -2,6 +2,7 @@ import type { ActionKey, EmployeePermissions, Role, SectionKey } from '@/types';
 
 export const SECTION_KEYS: SectionKey[] = [
   'statistics',
+  'finance',
   'orders',
   'tables',
   'menu',
@@ -25,9 +26,17 @@ export const ACTION_KEYS: ActionKey[] = [
   'warehouseRecipes', 'warehouseProduce', 'warehouseCosts', 'warehouseReports', 'warehouseSettings',
 ];
 
+export const READ_ONLY_SECTION_KEYS: SectionKey[] = ['finance', 'orders', 'tables', 'menu', 'warehouse', 'staff', 'checks', 'settings'];
+export const SECTION_WRITE_ACTIONS: Partial<Record<SectionKey, ActionKey[]>> = {
+  menu: ['editMenu'], staff: ['manageStaff'], checks: ['refundChecks'],
+  warehouse: ['warehouseReceive', 'warehouseTransfer', 'warehouseWriteoff', 'warehouseCount', 'warehouseApprove',
+    'warehouseRecipes', 'warehouseProduce', 'warehouseSettings'],
+};
+
 /** Подписи разделов — как в референсе. */
 export const SECTION_LABELS: Record<SectionKey, string> = {
   statistics: 'Статистика',
+  finance: 'Финансы',
   orders: 'Заказы',
   tables: 'Столы',
   menu: 'Меню',
@@ -44,7 +53,7 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   editMenu: 'Редактировать меню',
   refundChecks: 'Возврат / отмена чеков',
   exportReports: 'Экспорт отчётов',
-  closeShift: 'Закрытие смены',
+  closeShift: 'Закрывать рабочие смены сотрудников',
   financeCashShifts: 'Кассовые смены: открытие и закрытие',
   manageStaff: 'Управление сотрудниками',
   editPermissions: 'Редактирование прав доступа',
@@ -69,11 +78,13 @@ const allActions = (v: boolean): Record<ActionKey, boolean> =>
 export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
   switch (role) {
     case 'OWNER':
-      return { sections: allSections(true), actions: allActions(true) };
+      return { sections: allSections(true), actions: allActions(true), terminalAccess: true, adminAccess: true };
     case 'ADMIN':
       return {
+        terminalAccess: false, adminAccess: true,
         sections: {
           statistics: false,
+          finance: false,
           orders: true,
           tables: true,
           menu: true,
@@ -98,10 +109,10 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
         },
       };
     case 'WAITER':
-      return { sections: { ...allSections(false), tables: true, menu: true, orders: true }, actions: allActions(false) };
+      return { sections: { ...allSections(false), tables: true, menu: true, orders: true }, actions: allActions(false), terminalAccess: true, adminAccess: false };
     case 'KITCHEN':
     case 'BAR':
-      return { sections: { ...allSections(false), orders: true }, actions: allActions(false) };
+      return { sections: { ...allSections(false), orders: true }, actions: allActions(false), terminalAccess: false, adminAccess: false };
     default:
       return { sections: allSections(false), actions: allActions(false) };
   }
@@ -123,11 +134,21 @@ export function resolvePermissions(role: Role, stored: unknown): EmployeePermiss
   const def = getDefaultPermissionsByRole(role);
   if (role === 'OWNER') return def;
   if (!stored || typeof stored !== 'object') return def;
-  const s = stored as { sections?: unknown; actions?: unknown };
-  return {
+  const s = stored as { sections?: unknown; actions?: unknown; readOnlySections?: unknown; terminalAccess?: unknown; adminAccess?: unknown };
+  const permissions: EmployeePermissions = {
+    terminalAccess: typeof s.terminalAccess === 'boolean' ? s.terminalAccess : def.terminalAccess,
+    adminAccess: typeof s.adminAccess === 'boolean' ? s.adminAccess : def.adminAccess,
     sections: pick(SECTION_KEYS, s.sections, def.sections),
     actions: pick(ACTION_KEYS, s.actions, def.actions),
   };
+  if (Array.isArray(s.readOnlySections)) {
+    const selected = s.readOnlySections;
+    permissions.readOnlySections = READ_ONLY_SECTION_KEYS.filter((key) => permissions.sections[key] && selected.includes(key));
+    for (const section of permissions.readOnlySections) {
+      for (const action of SECTION_WRITE_ACTIONS[section] ?? []) permissions.actions[action] = false;
+    }
+  }
+  return permissions;
 }
 
 /** Проверка одного права: "sections.warehouse" / "actions.editMenu". */

@@ -53,7 +53,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
 }) {
   const permissions = usePermissions();
   const canEdit = permissions.canAction('warehouseReceive') && permissions.canAction('warehouseCosts');
-  const canExport = canEdit && permissions.canAction('exportReports');
+  const canExport = permissions.canAction('warehouseCosts') && permissions.canAction('exportReports');
   const [conditions, update] = usePageFilters({
     supplySearch: '', supplyStatus: '', supplySupplier: '', supplyCategories: '', supplyOrder: 'desc',
     supplyExpanded: '', supplyColumns: '', supplyPage: '1', warehouse: '',
@@ -104,7 +104,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
       case 'number': return <button type="button" aria-label={`Открыть поставку ${purchase.number}`} className="font-medium text-primary"
         onClick={() => onOpen(purchase.id)}>{purchase.number}</button>;
       case 'date': {
-        const operationDate = purchase.effectiveAt ?? purchase.date;
+        const operationDate = purchase.effectiveAt ?? purchase.postedAt ?? purchase.date;
         return <time dateTime={operationDate} title={`${inventoryTimeDisplay(operationDate)} (Бишкек)`}>{formatDocumentListDate(operationDate)}</time>;
       }
       case 'supplier': return <span title={purchase.supplier}>{purchase.supplier}</span>;
@@ -149,7 +149,6 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
         {canExport && <button type="button" className="supply-header-action" disabled={exporting}
           onClick={() => void exportWorkbook()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
         {period.filter}
-        {canEdit && <button type="button" className="btn-primary btn-md" onClick={onCreate}>Добавить</button>}
       </WorkspaceHeaderActions>
       {settingsOpen && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}
         label={(key) => supplyColumns[key].label} onClose={() => setSettingsOpen(false)}
@@ -178,6 +177,7 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
           filter({ supplySearch: '', supplyStatus: '', supplySupplier: '', supplyCategories: '', warehouse: '',
             supplyPeriod: 'all', supplyFrom: '', supplyTo: '' });
         }}>Сбросить всё</button>}
+        {canEdit && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
       </div>
       {exportError && <p role="alert" className="p-3 text-sm text-danger">{exportError}</p>}
       <QueryState pending={query.isPending} error={query.error}>

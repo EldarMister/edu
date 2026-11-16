@@ -1,0 +1,176 @@
+require('ts-node/register/transpile-only');
+const assert = require('node:assert/strict');
+const { test } = require('node:test');
+const { randomUUID, randomInt } = require('node:crypto');
+const bcrypt = require('bcrypt');
+const { Module, ValidationPipe } = require('@nestjs/common');
+const { NestFactory, Reflector } = require('@nestjs/core');
+const { PassportModule } = require('@nestjs/passport');
+const { JwtService } = require('@nestjs/jwt');
+const { PrismaClient } = require('@prisma/client');
+const { PrismaService } = require('../src/prisma/prisma.service.ts');
+const { AuthController } = require('../src/auth/auth.controller.ts');
+const { AuthService } = require('../src/auth/auth.service.ts');
+const { JwtStrategy } = require('../src/auth/strategies/jwt.strategy.ts');
+const { JwtAuthGuard } = require('../src/common/guards/jwt-auth.guard.ts');
+const { RolesGuard } = require('../src/common/guards/roles.guard.ts');
+const { PermissionsGuard } = require('../src/common/guards/permissions.guard.ts');
+const { OrdersController } = require('../src/orders/orders.controller.ts');
+const { OrdersService } = require('../src/orders/orders.service.ts');
+const { PaymentsController } = require('../src/payments/payments.controller.ts');
+const { PaymentsService } = require('../src/payments/payments.service.ts');
+const { StaffController } = require('../src/admin/staff.controller.ts');
+const { StaffService } = require('../src/admin/staff.service.ts');
+const { PositionsController } = require('../src/admin/positions.controller.ts');
+const { AuditService } = require('../src/audit/audit.service.ts');
+const { TablesController } = require('../src/tables/tables.controller.ts');
+const { TablesService } = require('../src/tables/tables.service.ts');
+const { WaiterShiftsController } = require('../src/waiter-shifts/waiter-shifts.controller.ts');
+const { WaiterShiftsService } = require('../src/waiter-shifts/waiter-shifts.service.ts');
+const { SettingsService } = require('../src/settings/settings.service.ts');
+const { IngredientStockService } = require('../src/warehouse/ingredient-stock.service.ts');
+const { getDefaultPermissionsByRole } = require('../src/common/permissions.ts');
+const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
+
+const databaseUrl = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
+if (databaseUrl && (!['localhost', '127.0.0.1'].includes(new URL(databaseUrl).hostname)
+  || !new URL(databaseUrl).pathname.includes('test'))) throw new Error('Only a dedicated local test database is allowed');
+
+test('HTTP + PostgreSQL: independent terminal and administration access with stable employee identity', { skip: !databaseUrl }, async (t) => {
+  const db = new PrismaClient({ datasourceUrl: databaseUrl });
+  db.$use(tenantPrismaMiddleware);
+  const cafe = await db.cafe.create({ data: { name: `Workspace ${randomUUID()}` } });
+  const auditEntries = [];
+  const audit = { log: async (entry) => auditEntries.push(entry) };
+  const events = new Proxy({}, { get: () => () => {} });
+  const push = { notifyRole: async () => {}, notifyUser: async () => {}, notifyWaiter: async () => {} };
+  const shifts = new WaiterShiftsService(db, events);
+  const settings = new SettingsService(db, audit, events);
+  const orders = new OrdersService(db, events, shifts, push, settings, { recalculateDishes: async () => {} }, audit, new IngredientStockService());
+  const staff = new StaffService(db, audit);
+  const providers = [
+    [PrismaService, db], [AuditService, audit], [AuthService, new AuthService(db, new JwtService())],
+    [OrdersService, orders], [PaymentsService, new PaymentsService(db, orders, settings)],
+    [WaiterShiftsService, shifts], [StaffService, staff], [TablesService, new TablesService(db, events)],
+    [JwtStrategy, new JwtStrategy(db)],
+  ].map(([provide, useValue]) => ({ provide, useValue }));
+  class HttpFixtureModule {}
+  Module({ imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
+    controllers: [AuthController, OrdersController, PaymentsController, WaiterShiftsController, StaffController, PositionsController, TablesController], providers })(HttpFixtureModule);
+  const app = await NestFactory.create(HttpFixtureModule, { logger: false });
+  app.setGlobalPrefix('api');
+  app.use((_req, _res, next) => runWithTenant({}, next));
+  const reflector = new Reflector();
+  app.useGlobalGuards(new JwtAuthGuard(reflector), new RolesGuard(reflector), new PermissionsGuard(reflector));
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  await app.listen(0, '127.0.0.1');
+  const base = (await app.getUrl()) + '/api';
+  const request = async (path, { token, workspace, method = 'GET', body, status = 200 } = {}) => {
+    const response = await fetch(base + path, { method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(workspace ? { 'X-EDU-Workspace': workspace } : {}) },
+      ...(body ? { body: JSON.stringify(body) } : {}) });
+    const value = await response.json();
+    assert.equal(response.status, status, `${method} ${path}: ${JSON.stringify(value)}`);
+    return value;
+  };
+  try {
+    const fixture = await runWithTenant({ cafeId: cafe.id }, async () => {
+      const passwordHash = await bcrypt.hash('workspace-test-password', 4);
+      const makeUser = (role, positionId) => db.user.create({ data: { role, name: role, phone: `+996${randomInt(100_000_000, 1_000_000_000)}`, passwordHash, positionId } });
+      const owner = await makeUser('OWNER');
+      const permissions = getDefaultPermissionsByRole('ADMIN');
+      permissions.terminalAccess = true;
+      permissions.adminAccess = true;
+      permissions.sections.orders = false;
+      permissions.sections.checks = false;
+      permissions.sections.staff = true;
+      permissions.readOnlySections = ['staff'];
+      const mixedPosition = await db.staffPosition.create({ data: { name: 'Manager and cashier', role: 'ADMIN', permissions } });
+      const mixed = await makeUser('ADMIN', mixedPosition.id);
+      const legacy = await makeUser('WAITER');
+      const kitchen = await makeUser('KITCHEN');
+      const admin = await makeUser('ADMIN');
+      const hall = await db.hall.create({ data: { name: 'Workspace hall' } });
+      const category = await db.category.create({ data: { name: 'Workspace menu', prepStation: 'none' } });
+      const dish = await db.dish.create({ data: { categoryId: category.id, name: 'Water', price: 50, prepStation: 'none' } });
+      await settings.ensure();
+      return { owner, mixed, legacy, kitchen, admin, mixedPosition, permissions, hall, dish };
+    });
+    const sessions = {};
+    for (const name of ['owner', 'mixed', 'legacy', 'kitchen', 'admin']) {
+      const session = await request('/auth/login', { method: 'POST', body: { phone: fixture[name].phone, password: 'workspace-test-password' } });
+      sessions[name] = session.accessToken;
+      assert.equal(session.user.role, fixture[name].role);
+      assert.equal(session.user.access.terminal, ['owner', 'mixed', 'legacy'].includes(name));
+    }
+    const newTable = () => runWithTenant({ cafeId: cafe.id }, async () => await db.table.create({ data: { hallId: fixture.hall.id, number: ++tableNumber } }));
+    let tableNumber = 1;
+    let mixedOrder;
+    await t.test('owner operates a real terminal shift, order and payment without changing owner identity', async () => {
+      const token = sessions.owner;
+      await request('/waiter/shifts/start', { token, workspace: 'terminal', method: 'POST', status: 201 });
+      const table = await newTable();
+      const order = await request('/orders', { token, workspace: 'terminal', method: 'POST', status: 201,
+        body: { tableId: table.id, items: [{ dishId: fixture.dish.id, quantity: 1 }], idempotencyKey: randomUUID() } });
+      assert.equal(order.waiterId, fixture.owner.id);
+      await request(`/orders/${order.id}/served`, { token, workspace: 'terminal', method: 'POST', status: 201 });
+      const paid = await request('/payments', { token, workspace: 'terminal', method: 'POST', status: 201, body: { orderId: order.id, method: 'cash' } });
+      assert.equal(paid.status, 'paid');
+      await request('/waiter/shifts/end', { token, workspace: 'terminal', method: 'POST', status: 201 });
+      assert.equal((await request('/auth/me', { token, workspace: 'terminal' })).role, 'OWNER');
+      assert.equal((await db.user.findUnique({ where: { id: fixture.owner.id } })).role, 'OWNER');
+      assert.equal(auditEntries.find((entry) => entry.actor?.id === fixture.owner.id && entry.actor?.workspace === 'terminal').actor.identityRole, 'OWNER');
+    });
+    await t.test('mixed cashier works independently of disabled admin orders and read-only staff', async () => {
+      const token = sessions.mixed;
+      await request('/admin/staff', { token, workspace: 'admin' });
+      await request('/admin/staff', { token, workspace: 'terminal', status: 403 });
+      await request('/waiter/shifts/start', { token, workspace: 'admin', method: 'POST', status: 403 });
+      await request('/waiter/shifts/start', { token, workspace: 'terminal', method: 'POST', status: 201 });
+      const table = await newTable();
+      mixedOrder = await request('/orders', { token, workspace: 'terminal', method: 'POST', status: 201,
+        body: { tableId: table.id, items: [{ dishId: fixture.dish.id, quantity: 1 }] } });
+      await request(`/orders/${mixedOrder.id}`, { token, workspace: 'admin', status: 403 });
+      await request(`/orders/${mixedOrder.id}`, { token, workspace: 'terminal' });
+      await request('/payments', { token, workspace: 'admin', method: 'POST', status: 403, body: { orderId: mixedOrder.id, method: 'cash' } });
+      await request(`/orders/${mixedOrder.id}`, { token: sessions.owner, workspace: 'terminal', status: 403 });
+      await request('/payments', { token: sessions.owner, workspace: 'terminal', method: 'POST', status: 403, body: { orderId: mixedOrder.id, method: 'cash' } });
+      const active = await request('/tables/available-waiters', { token, workspace: 'terminal' });
+      assert.ok(active.some((row) => row.id === fixture.mixed.id), 'technical ADMIN with terminal access must be a transfer target');
+      assert.equal((await request('/auth/me', { token })).role, 'ADMIN');
+    });
+    await t.test('legacy clients retain their defaults and cannot forge a workspace capability', async () => {
+      await request('/waiter/shifts/start', { token: sessions.legacy, method: 'POST', status: 201 });
+      await request('/admin/staff', { token: sessions.legacy, workspace: 'admin', status: 403 });
+      await request('/waiter/shifts/start', { token: sessions.admin, workspace: 'terminal', method: 'POST', status: 403 });
+      await request('/waiter/shifts/start', { token: sessions.kitchen, workspace: 'terminal', method: 'POST', status: 403 });
+      await request('/orders/active', { token: sessions.mixed, workspace: 'invented', status: 403 });
+      await request('/waiter/shifts/end', { token: sessions.legacy, method: 'POST', status: 201 });
+    });
+    await t.test('terminal revocation waits for live work, then invalidates existing tokens immediately', async () => {
+      const permissions = { ...fixture.permissions, terminalAccess: false };
+      await request(`/admin/positions/${fixture.mixedPosition.id}`, { token: sessions.owner, workspace: 'admin', method: 'PATCH', status: 409,
+        body: { name: fixture.mixedPosition.name, permissions } });
+      await request(`/orders/${mixedOrder.id}/served`, { token: sessions.mixed, workspace: 'terminal', method: 'POST', status: 201 });
+      await request('/payments', { token: sessions.mixed, workspace: 'terminal', method: 'POST', status: 201, body: { orderId: mixedOrder.id, method: 'cash' } });
+      await request('/waiter/shifts/end', { token: sessions.mixed, workspace: 'terminal', method: 'POST', status: 201 });
+      await request(`/admin/positions/${fixture.mixedPosition.id}`, { token: sessions.owner, workspace: 'admin', method: 'PATCH', body: { name: fixture.mixedPosition.name, permissions } });
+      await request('/orders/active', { token: sessions.mixed, workspace: 'terminal', status: 403 });
+      const account = await request('/auth/me', { token: sessions.mixed, workspace: 'terminal' });
+      assert.equal(account.access.terminal, false);
+      assert.equal(account.access.admin, true);
+      await request('/admin/staff', { token: sessions.mixed, workspace: 'admin' });
+    });
+  } finally {
+    await app.close();
+    await db.order.deleteMany({ where: { cafeId: cafe.id } });
+    await db.table.deleteMany({ where: { cafeId: cafe.id } });
+    await db.hall.deleteMany({ where: { cafeId: cafe.id } });
+    await db.dish.deleteMany({ where: { cafeId: cafe.id } });
+    await db.category.deleteMany({ where: { cafeId: cafe.id } });
+    await db.user.deleteMany({ where: { cafeId: cafe.id } });
+    await db.settings.deleteMany({ where: { cafeId: cafe.id } });
+    await db.cafe.delete({ where: { id: cafe.id } });
+    await db.$disconnect();
+  }
+});

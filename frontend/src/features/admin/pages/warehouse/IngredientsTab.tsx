@@ -6,7 +6,7 @@ import { QueryState } from './WarehouseUi';
 import { usePageFilter, usePageFilters } from './workspace-route';
 import { useWarehousePolicy } from './settings-api';
 import { UNIT_OPTIONS, unitLabel } from './units';
-import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
+import { WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { BalanceSupplies } from './BalanceSupplies';
 import { balanceMoney, balanceQuantity, balanceValue } from './balance-format';
@@ -212,16 +212,10 @@ export function IngredientsTab({
   return (
     <div className={catalogue ? undefined : 'poster-balance-surface'}>
       {catalogue && <WorkspaceHeaderCount count={query.data ? catalogueRows.length : undefined} />}
-      {catalogue && canCreate && (
-        <WorkspaceHeaderActions>
-          <button className="btn-primary btn-md" onClick={onCreate}>
-            Добавить
-          </button>
-        </WorkspaceHeaderActions>
-      )}
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={setSearch} />
         {filters}
+        {catalogue && canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
         {!catalogue && (
           <WarehouseMultiFilter
             label="Тип"

@@ -45,6 +45,7 @@ export function DocumentList({
     .sort((a, b) => a.localeCompare(b, 'ru'));
   const { can } = usePermissions();
   const costs = can('actions.warehouseCosts');
+  const canCreate = can(`actions.${kind === 'inventory' ? 'warehouseCount' : kind === 'writeoff' ? 'warehouseWriteoff' : 'warehouseTransfer'}`);
   const inventory = kind === 'inventory';
   const transfer = kind === 'transfer';
   const operationDate = (document: StockDocument) => document.countedAt ?? document.effectiveAt ?? document.postedAt ?? document.createdAt;
@@ -93,14 +94,12 @@ export function DocumentList({
   return (
     <div className={inventory ? 'poster-inventory-list' : 'poster-register-surface'}>
       {inventory && <WorkspaceHeaderCount count={query.isSuccess ? rows.length : undefined} />}
-      <WorkspaceHeaderActions>
-        {inventory && period.filter}
-        <button className="btn-primary btn-md" onClick={onCreate}>Добавить</button>
-      </WorkspaceHeaderActions>
+      {inventory && <WorkspaceHeaderActions>{period.filter}</WorkspaceHeaderActions>}
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск документов" placeholder={inventory ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={(value) => changeFilter('Search', value)} />
         {!inventory && period.filter}
         {filters}
+        {canCreate && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Добавить</button>}
         {kind === 'writeoff' && <WarehouseMultiFilter label="Категории" value={conditions[kind + 'Category']}
           options={categoryOptions.map((category) => ({ value: category, label: category }))}
           onChange={(value) => updateConditions({ [kind + 'Category']: value, [kind + 'Page']: '1' })} />}
@@ -208,6 +207,7 @@ export function ProductionList({
   onCreate: () => void;
 }) {
   const query = useProductionJournal(warehouseId);
+  const { can } = usePermissions();
   const [search, setSearch] = usePageFilter('productionSearch');
   const rows = (query.data ?? []).filter((m) =>
     m.ingredientName.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
@@ -218,11 +218,7 @@ export function ProductionList({
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск производства" value={search} onChange={setSearch} />
         {filters}
-        <WorkspaceHeaderActions>
-          <button className="btn-primary btn-md" onClick={onCreate}>
-            Произвести
-          </button>
-        </WorkspaceHeaderActions>
+        {can('actions.warehouseProduce') && <button type="button" className="btn-primary btn-md ml-auto" onClick={onCreate}>Произвести</button>}
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="overflow-x-auto">

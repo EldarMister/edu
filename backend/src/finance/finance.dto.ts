@@ -1,4 +1,4 @@
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsISO8601, IsNumber, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsISO8601, IsNumber, IsOptional, IsString, IsUUID, Length, Matches, Max, Min } from 'class-validator';
 
 const MAX_MONEY = 9_999_999_999.99;
 const datePattern = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
@@ -79,6 +79,7 @@ export class FinanceTransactionReverseDto {
 export class SalaryAccrualDto extends MoneyPostDto {
   @IsString() @Length(1, 120) userId!: string;
   @Matches(monthPattern) month!: string;
+  @IsOptional() @IsBoolean() supplemental?: boolean;
 }
 
 export class PayrollReportDto {
@@ -89,4 +90,15 @@ export class PayrollReportDto {
 
 export class SalaryPaymentDto extends MoneyPostDto {
   @IsString() @Length(1, 120) accountId!: string;
+}
+
+export class SalaryCorrectionDto {
+  @IsUUID() requestKey!: string;
+  @IsInt() @Min(0) revision!: number;
+  @IsString() @Length(1, 500) reason!: string;
+}
+
+export class SalaryAccrualEditDto extends SalaryCorrectionDto {
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(MAX_MONEY) amount!: number;
+  @IsOptional() @IsString() @Length(0, 500) note?: string;
 }

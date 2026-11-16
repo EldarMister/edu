@@ -1,5 +1,6 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
 import { useAuth } from '@/store/auth';
+import { workspaceForPath } from './workspaces';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
@@ -13,6 +14,7 @@ api.interceptors.request.use((config) => {
   const token = useAuth.getState().accessToken;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+    config.headers['X-EDU-Workspace'] = workspaceForPath(window.location.pathname, useAuth.getState().user);
   }
   // Для FormData убираем JSON Content-Type — браузер сам выставит multipart с boundary.
   if (typeof FormData !== 'undefined' && config.data instanceof FormData) {

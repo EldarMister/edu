@@ -112,10 +112,10 @@ export class PurchasesService {
     };
   }
 
-  private sortByOperationDate<T extends { date: Date; effectiveAt: Date | null; number: number }>(rows: T[], direction?: 'asc' | 'desc') {
+  private sortByOperationDate<T extends { date: Date; effectiveAt: Date | null; stockPostedAt: Date | null; number: number }>(rows: T[], direction?: 'asc' | 'desc') {
     if (!direction) return rows;
     const order = direction === 'asc' ? 1 : -1;
-    return rows.sort((a, b) => order * ((a.effectiveAt ?? a.date).getTime() - (b.effectiveAt ?? b.date).getTime() || a.number - b.number));
+    return rows.sort((a, b) => order * ((a.effectiveAt ?? a.stockPostedAt ?? a.date).getTime() - (b.effectiveAt ?? b.stockPostedAt ?? b.date).getTime() || a.number - b.number));
   }
 
   async findAll(params: PurchaseListQuery) {
@@ -652,6 +652,10 @@ export class PurchasesService {
 
   private dateRange(from?: string, to?: string): Prisma.PurchaseWhereInput | undefined {
     const date = purchaseDateRange(from, to);
-    return date ? { OR: [{ effectiveAt: date }, { effectiveAt: null, date }] } : undefined;
+    return date ? { OR: [
+      { effectiveAt: date },
+      { effectiveAt: null, stockPostedAt: date },
+      { effectiveAt: null, stockPostedAt: null, date },
+    ] } : undefined;
   }
 }

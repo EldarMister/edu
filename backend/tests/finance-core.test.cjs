@@ -141,7 +141,7 @@ test('transfer reversal undoes both legs on the original accounts and retries wi
   ];
   const service = new FinanceService({ $transaction: (fn) => fn({
     $queryRaw: async () => [],
-    cashShift: { findMany: async () => [] },
+    cashShift: { findMany: async () => [], findFirst: async () => null },
     financeEntry: {
       findFirst: async ({ where }) => rows.find(({ id, cafeId }) => id === where.id && cafeId === where.cafeId),
       findMany: async ({ where }) => rows.filter(({ cafeId, sourceKey }) => cafeId === where.cafeId && where.sourceKey.in.includes(sourceKey)),
@@ -182,9 +182,13 @@ test('transfer appends equal and opposite entries and an identical retry does no
   const service = new FinanceService({ $transaction: (fn) => fn({
     $queryRaw: async () => [],
     financeAccount: { findFirst: async ({ where }) => { assert.equal(where.cafeId, 'cafe'); return { id: where.id }; } },
-    cashShift: { findFirst: async ({ where }) => where.accountId === 'drawer' ? { id: 'shift', openedAt: date('2026-01-01T00:00:00Z') } : null },
+    cashShift: { findFirst: async ({ where }) => where.accountId === 'drawer' ? {
+      id: 'shift', cafeId: 'cafe', accountId: 'drawer', openingAmount: dec(100.1), openedAt: date('2026-01-01T00:00:00Z'),
+    } : null },
     financeEntry: {
       findFirst: async ({ where }) => entries.find((entry) => entry.sourceKey === where.sourceKey),
+      aggregate: async ({ where }) => ({ _sum: { amount: entries.filter((entry) => entry.accountId === where.accountId)
+        .reduce((sum, entry) => sum.add(entry.amount), dec(0)) } }),
       create: async ({ data }) => {
         const row = { ...data, categoryId: data.categoryId ?? null, id: String(entries.length + 1) };
         entries.push(row);

@@ -104,31 +104,31 @@ export class CatalogController {
   }
 
   @Post('categories')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   createCategory(@Body() dto: CreateCategoryDto, @CurrentUser() user: AuthUser) {
     return this.catalog.createCategory(dto, user);
   }
 
   @Patch('categories/reorder')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   reorderCategories(@Body() dto: ReorderCategoriesDto, @CurrentUser() user: AuthUser) {
     return this.catalog.reorderCategories(dto.ids, user);
   }
 
   @Post('categories/move-dishes')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   moveCategoryDishes(@Body() dto: MoveCategoryDishesDto, @CurrentUser() user: AuthUser) {
     return this.catalog.moveCategoryDishes(dto.fromCategoryId, dto.toCategoryId, user);
   }
 
   @Patch('categories/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto, @CurrentUser() user: AuthUser) {
     return this.catalog.updateCategory(id, dto, user);
   }
 
   @Delete('categories/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   deleteCategory(@Param('id') id: string, @Body() dto: DeleteCategoryDto, @CurrentUser() user: AuthUser) {
     return this.catalog.deleteCategory(id, dto ?? {}, user);
   }
@@ -140,19 +140,19 @@ export class CatalogController {
   }
 
   @Post('dishes')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   createDish(@Body() dto: CreateDishDto, @CurrentUser() user: AuthUser) {
     return this.catalog.createDish(dto, user);
   }
 
   @Patch('dishes/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   updateDish(@Param('id') id: string, @Body() dto: UpdateDishDto, @CurrentUser() user: AuthUser) {
     return this.catalog.updateDish(id, dto, user);
   }
 
   @Delete('dishes/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   deleteDish(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.catalog.deleteDish(id, user);
   }
@@ -165,19 +165,19 @@ export class CatalogController {
   }
 
   @Post('sets')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   createSet(@Body() dto: CreateSetDto, @CurrentUser() user: AuthUser) {
     return this.catalog.createSet(dto, user);
   }
 
   @Patch('sets/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   updateSet(@Param('id') id: string, @Body() dto: UpdateSetDto, @CurrentUser() user: AuthUser) {
     return this.catalog.updateSet(id, dto, user);
   }
 
   @Delete('sets/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   deleteSet(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.catalog.deleteDish(id, user);
   }

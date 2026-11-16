@@ -1,7 +1,7 @@
 import { lockRecipeGraph } from '../warehouse/recipe-resolution';
 import { recordOrderReceipts, reverseOrderReceipts } from '../finance/order-receipts';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { hasPermission } from '../common/permissions';
+import { hasPermission, resolveUserPermissions } from '../common/permissions';
 import {
   BadRequestException,
   ConflictException,
@@ -3071,8 +3071,8 @@ export class OrdersService {
       throw new ForbiddenException('Это не ваш заказ');
     }
 
-    const waiter = await this.prisma.user.findUnique({ where: { id: waiterId } });
-    if (!waiter || waiter.role !== Role.WAITER || !waiter.isActive) {
+    const waiter = await this.prisma.user.findUnique({ where: { id: waiterId }, include: { position: true } });
+    if (!waiter || !resolveUserPermissions(waiter).terminalAccess || !waiter.isActive) {
       throw new BadRequestException('Официант недоступен');
     }
     if (waiter.id === order.waiterId) {
@@ -3130,13 +3130,14 @@ export class OrdersService {
   /** Официанты на активной смене — для модалки «Передать стол». */
   async availableWaiters() {
     const shifts = await this.prisma.waiterShift.findMany({
-      where: { status: WaiterShiftStatus.active, waiter: { isActive: true, role: Role.WAITER } },
-      select: { waiterId: true, waiter: { select: { id: true, name: true } } },
+      where: { status: WaiterShiftStatus.active, waiter: { isActive: true } },
+      select: { waiterId: true, waiter: { select: { id: true, name: true, role: true, permissions: true, position: { select: { role: true, permissions: true } } } } },
       orderBy: { startedAt: 'asc' },
     });
     const seen = new Set<string>();
     const list: { id: string; name: string }[] = [];
     for (const s of shifts) {
+      if (!resolveUserPermissions(s.waiter).terminalAccess) continue;
       if (!seen.has(s.waiterId)) {
         seen.add(s.waiterId);
         list.push({ id: s.waiter.id, name: s.waiter.name });

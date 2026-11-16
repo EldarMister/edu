@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Spinner } from '@/components/Spinner';
+import { usePermissions } from '@/hooks/usePermissions';
 import { api, apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -12,6 +13,7 @@ import { useAdminOrderDetails, useReceiptPrintRequests, useReceiptPrintActions, 
 
 /** Раздел администратора «Печать чека»: заявки официантов на печать. */
 export function ReceiptPrintsPage() {
+  const editable = usePermissions().canEditSection('checks');
   const t = useT();
   const q = useReceiptPrintRequests();
   const { approve, printed, reject } = useReceiptPrintActions();
@@ -92,7 +94,7 @@ export function ReceiptPrintsPage() {
 
   const renderRows = (rows: ReceiptPrintRequest[]) =>
     rows.map((r) => {
-      const busy = pendingId === r.id;
+      const busy = !editable || pendingId === r.id;
       const prelim = r.type === 'preliminary';
       const isRequest = (r.source ?? 'request') === 'request';
       const approved = r.status === 'approved';

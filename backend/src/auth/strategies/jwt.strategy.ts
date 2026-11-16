@@ -5,7 +5,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../../common/decorators/current-user.decorator';
 import { setCafeId } from '../../tenant/tenant-context';
 import { assertCafeActive } from '../../platform/cafe-status';
-import { resolvePermissions } from '../../common/permissions';
+import { resolveUserPermissions } from '../../common/permissions';
+import { projectWorkspaceUser, workspaceAccess } from '../../common/workspace-access';
 import { getJwtAccessSecret } from '../jwt.config';
 
 export interface JwtPayload {
@@ -20,10 +21,11 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: getJwtAccessSecret(),
+      passReqToCallback: true,
     });
   }
 
-  async validate(payload: JwtPayload): Promise<AuthUser> {
+  async validate(request: { headers?: Record<string, unknown>; originalUrl?: string; url?: string }, payload: JwtPayload): Promise<AuthUser> {
     const user = await this.prisma.user.findUnique({ where: { id: payload.sub }, include: { position: true } });
     if (!user || !user.isActive) {
       throw new UnauthorizedException('Пользователь не найден или отключён');
@@ -32,15 +34,22 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     await assertCafeActive(this.prisma, user.cafeId);
     // Кафе пользователя — в контекст тенанта на весь остаток запроса (авто-скоуп Prisma).
     setCafeId(user.cafeId);
-    return {
+    const permissions = resolveUserPermissions(user);
+    const identity: AuthUser = {
       id: user.id,
       role: user.role,
+      identityRole: user.role,
+      access: workspaceAccess(user.role, permissions),
       name: user.name,
       phone: user.phone,
       cafeId: user.cafeId,
       prepStation: user.prepStation,
       positionId: user.position?.role === user.role ? user.positionId : null,
-      permissions: resolvePermissions(user.role, user.position?.role === user.role ? user.position.permissions : user.permissions),
+      permissions,
     };
+    // Account refresh must still work after the currently open workspace is revoked.
+    const path = (request.originalUrl ?? request.url ?? '').split('?')[0].replace(/\/$/, '');
+    if (path.endsWith('/auth/me')) return identity;
+    return projectWorkspaceUser(identity, request.headers?.['x-edu-workspace']);
   }
 }

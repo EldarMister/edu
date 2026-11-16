@@ -2,10 +2,10 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { usePageFilter, useEditorRoute } from './workspace-route';
 import { EditorPage } from './EditorPage';
-import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useSuppliers, useSupplierMutations, type Supplier } from './settings-api';
 import { useWarehouseLocationMutations, type WarehouseLocations, type WarehouseLocation } from './api';
 import { usePackages, usePackageMutations, type PackageUnit } from './extended-api';
@@ -37,6 +37,7 @@ function DirectoryActions({
   label: string;
 }) {
   const menuId = useId();
+  const editable = usePermissions().can('actions.warehouseSettings');
   const trigger = useRef<HTMLButtonElement>(null);
   const popup = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
@@ -67,10 +68,10 @@ function DirectoryActions({
   }, [position]);
   return (
     <div className="poster-row-actions justify-end">
-      <button type="button" aria-label={`Редактировать: ${label}`} onClick={onEdit}>
-        Ред.
+      <button type="button" aria-label={`${editable ? 'Редактировать' : 'Открыть'}: ${label}`} onClick={onEdit}>
+        {editable ? 'Ред.' : 'Открыть'}
       </button>
-      {onArchive && (
+      {editable && onArchive && (
         <>
           <button
             type="button"
@@ -141,6 +142,7 @@ function MissingDirectoryItem({
 }
 
 export function SuppliersPage() {
+  const editable = usePermissions().can('actions.warehouseSettings');
   const q = useSuppliers();
   const mutations = useSupplierMutations();
   const [search, setSearch] = usePageFilter('search');
@@ -174,13 +176,9 @@ export function SuppliersPage() {
   }
   return (
     <div className="poster-directory-surface">
-      <WorkspaceHeaderActions>
-        <button className="btn-primary btn-md" onClick={() => openEditor({ type: 'supplier' })}>
-          Добавить
-        </button>
-      </WorkspaceHeaderActions>
       <div className="poster-toolbar">
         <WorkspaceSearch value={search} onChange={setSearch} label="Поиск поставщика" placeholder="Поиск..." />
+        {editable && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: 'supplier' })}>Добавить</button>}
       </div>
       {error && (
         <p role="alert" className="py-3 text-danger">
@@ -241,6 +239,7 @@ export function SuppliersPage() {
   );
 }
 function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () => void }) {
+  const editable = usePermissions().can('actions.warehouseSettings');
   const formId = useId();
   const { save } = useSupplierMutations();
   const [form, setForm] = useState({
@@ -254,7 +253,7 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
   const [error, setError] = useState('');
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (save.isPending || !form.name.trim()) return;
+    if (!editable || save.isPending || !form.name.trim()) return;
     try {
       await save.mutateAsync({ id: supplier?.id, ...form, name: form.name.trim() });
       onClose();
@@ -266,9 +265,10 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
     <EditorPage
       open
       onClose={onClose}
-      title={supplier ? 'Редактирование поставщика' : 'Новый поставщик'}
+      title={supplier ? editable ? 'Редактирование поставщика' : 'Поставщик' : 'Новый поставщик'}
     >
       <form id={formId} className="poster-form poster-form--directory poster-document--modern" onSubmit={submit}>
+        <fieldset disabled={!editable} className="min-w-0">
         <div className="poster-document-panel">
         {(
           [
@@ -316,7 +316,7 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
           </p>
         )}
         </div>
-        <DocumentFooter>
+        {editable && <DocumentFooter>
           <button
             type="submit"
             form={formId}
@@ -325,13 +325,15 @@ function SupplierForm({ supplier, onClose }: { supplier?: Supplier; onClose: () 
           >
             Сохранить
           </button>
-        </DocumentFooter>
+        </DocumentFooter>}
+        </fieldset>
       </form>
     </EditorPage>
   );
 }
 
 export function LocationsPage({ data }: { data: WarehouseLocations }) {
+  const editable = usePermissions().can('actions.warehouseSettings');
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const [search, setSearch] = usePageFilter('search');
   const [sort, setSort] = usePageFilter('sort', 'asc');
@@ -359,13 +361,9 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
   }
   return (
     <div className="poster-directory-surface">
-      <WorkspaceHeaderActions>
-        <button className="btn-primary btn-md" onClick={() => openEditor({ type: 'location' })}>
-          Добавить
-        </button>
-      </WorkspaceHeaderActions>
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск склада" value={search} onChange={setSearch} placeholder="Поиск..." />
+        {editable && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: 'location' })}>Добавить</button>}
       </div>
       <div className="overflow-x-auto">
       <table className="poster-table poster-directory-table poster-directory-table--locations w-full min-w-[580px]">
@@ -421,7 +419,7 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
                 ariaLabel={`Склад станции ${station.stationName}`}
                 className="h-10 w-full"
                 value={station.warehouseId ?? ''}
-                disabled={setRoute.isPending}
+                disabled={!editable || setRoute.isPending}
                 onChange={(value) => void assign(station.stationId, value)}
                 options={[
                   { value: '', label: 'Склад по умолчанию' },
@@ -441,6 +439,7 @@ export function LocationsPage({ data }: { data: WarehouseLocations }) {
   );
 }
 function LocationForm({ location, onClose }: { location?: WarehouseLocation; onClose: () => void }) {
+  const editable = usePermissions().can('actions.warehouseSettings');
   const formId = useId();
   const [name, setName] = useState(location?.name ?? '');
   const [address, setAddress] = useState(location?.address ?? '');
@@ -448,7 +447,7 @@ function LocationForm({ location, onClose }: { location?: WarehouseLocation; onC
   const { save } = useWarehouseLocationMutations();
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (save.isPending || !name.trim()) return;
+    if (!editable || save.isPending || !name.trim()) return;
     try {
       await save.mutateAsync({ id: location?.id, name: name.trim(), address });
       onClose();
@@ -460,9 +459,10 @@ function LocationForm({ location, onClose }: { location?: WarehouseLocation; onC
     <EditorPage
       open
       onClose={onClose}
-      title={location ? 'Редактирование склада' : 'Новый склад'}
+      title={location ? editable ? 'Редактирование склада' : 'Склад' : 'Новый склад'}
     >
       <form id={formId} className="poster-form poster-form--directory poster-document--modern" onSubmit={submit}>
+        <fieldset disabled={!editable} className="min-w-0">
         <div className="poster-document-panel">
         <DocumentField label="Название">
           <input className="input w-full" required value={name} onChange={(e) => setName(e.target.value)} />
@@ -480,7 +480,7 @@ function LocationForm({ location, onClose }: { location?: WarehouseLocation; onC
           </p>
         )}
         </div>
-        <DocumentFooter>
+        {editable && <DocumentFooter>
           <button
             type="submit"
             form={formId}
@@ -489,13 +489,15 @@ function LocationForm({ location, onClose }: { location?: WarehouseLocation; onC
           >
             Сохранить
           </button>
-        </DocumentFooter>
+        </DocumentFooter>}
+        </fieldset>
       </form>
     </EditorPage>
   );
 }
 
 export function PackagesPage() {
+  const editable = usePermissions().can('actions.warehouseSettings');
   const q = usePackages();
   const mutations = usePackageMutations();
   const [search, setSearch] = usePageFilter('search');
@@ -531,11 +533,6 @@ export function PackagesPage() {
   }
   return (
     <div className="poster-directory-surface">
-      <WorkspaceHeaderActions>
-        <button className="btn-primary btn-md" onClick={() => openEditor({ type: 'package' })}>
-          Добавить
-        </button>
-      </WorkspaceHeaderActions>
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск фасовок" value={search} onChange={setSearch} placeholder="Поиск..." />
         <Select
@@ -545,6 +542,7 @@ export function PackagesPage() {
           onChange={setUnit}
           options={[{ value: '', label: 'Ед. измерения' }, ...UNIT_OPTIONS]}
         />
+        {editable && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: 'package' })}>Добавить</button>}
       </div>
       {error && (
         <p role="alert" className="py-3 text-danger">
@@ -610,6 +608,7 @@ export function PackagesPage() {
   );
 }
 function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => void }) {
+  const editable = usePermissions().can('actions.warehouseSettings');
   const formId = useId();
   const [name, setName] = useState(item?.name ?? '');
   const [unit, setUnit] = useState<UnitCode>(item?.unit ?? 'kg');
@@ -618,7 +617,7 @@ function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => voi
   const { save } = usePackageMutations();
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (save.isPending || !name.trim() || !Number.isFinite(Number(quantity)) || !(Number(quantity) > 0)) return;
+    if (!editable || save.isPending || !name.trim() || !Number.isFinite(Number(quantity)) || !(Number(quantity) > 0)) return;
     try {
       await save.mutateAsync({ id: item?.id, name: name.trim(), unit, quantity: Number(quantity) });
       onClose();
@@ -630,9 +629,10 @@ function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => voi
     <EditorPage
       open
       onClose={onClose}
-      title={item ? 'Редактирование фасовки' : 'Новая фасовка'}
+      title={item ? editable ? 'Редактирование фасовки' : 'Фасовка' : 'Новая фасовка'}
     >
       <form id={formId} className="poster-form poster-form--directory poster-document--modern" onSubmit={submit}>
+        <fieldset disabled={!editable} className="min-w-0">
         <div className="poster-document-panel">
         <DocumentField label="Название">
           <input
@@ -669,7 +669,7 @@ function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => voi
           </p>
         )}
         </div>
-        <DocumentFooter>
+        {editable && <DocumentFooter>
           <button
             type="submit"
             form={formId}
@@ -678,7 +678,8 @@ function PackageForm({ item, onClose }: { item?: PackageUnit; onClose: () => voi
           >
             Сохранить
           </button>
-        </DocumentFooter>
+        </DocumentFooter>}
+        </fieldset>
       </form>
     </EditorPage>
   );

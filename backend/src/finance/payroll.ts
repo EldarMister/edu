@@ -91,7 +91,7 @@ function payrollAmounts(
 }
 
 export async function payrollReport(db: Db, cafeId: string, month: string, onlyUserId?: string, window = payrollMonth(month)) {
-  const [employees, accruals, shifts] = await Promise.all([
+  const [employees, accruals, shifts, employeeRates] = await Promise.all([
     db.user.findMany({
       where: { cafeId, role: { not: Role.OWNER }, ...(onlyUserId ? { id: onlyUserId } : {}), OR: [
         { isActive: true }, { waiterShifts: { some: {
@@ -100,9 +100,7 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
           cafeId, status: OrderStatus.paid, closedAt: { gte: new Date(window.start), lt: new Date(window.end) },
         } } },
       ] },
-      select: { id: true, name: true, role: true, isActive: true, position: { select: {
-        id: true, name: true, salaryRates: { where: { cafeId, effectiveMonth: { lte: month } }, orderBy: { effectiveMonth: 'desc' }, take: 1 },
-      } } },
+      select: { id: true, name: true, role: true, isActive: true, position: { select: { id: true, name: true } } },
       orderBy: { name: 'asc' },
     }),
     db.salaryAccrual.findMany({
@@ -115,8 +113,12 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
         startedAt: { lt: new Date(window.end) }, endedAt: { gt: new Date(window.start) }, ...(onlyUserId ? { waiterId: onlyUserId } : {}) },
       select: { waiterId: true, startedAt: true, endedAt: true },
     }),
+    db.employeeSalaryRate.findMany({
+      where: { cafeId, effectiveMonth: { lte: month }, ...(onlyUserId ? { userId: onlyUserId } : {}) },
+      orderBy: { effectiveMonth: 'desc' }, distinct: ['userId'],
+    }),
   ]);
-  const ratesByEmployee = new Map(employees.map(({ id, position }) => [id, salaryRates(position?.salaryRates[0])]));
+  const ratesByEmployee = new Map(employeeRates.map((rate) => [rate.userId, rate]));
   const employeeIds = employees.map(({ id }) => id);
   const hasClosedShifts = shifts.length > 0;
   const paidByEmployee = new Map<string, Prisma.Decimal>();
@@ -156,32 +158,41 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     byEmployee.set(shift.waiterId, list);
   }
 
-  const totals = new Map<string, { accrued: Prisma.Decimal; paid: Prisma.Decimal }>();
+  const emptyTotals = () => ({ accrued: zero, paid: zero, baseAccrued: zero, supplementalAccrued: zero });
+  const totals = new Map<string, ReturnType<typeof emptyTotals>>();
   const records = accruals.map(({ payments, ...record }) => {
-    const existing = totals.get(record.userId) ?? { accrued: zero, paid: zero };
+    const existing = totals.get(record.userId) ?? emptyTotals();
     const paid = payments.reduce((sum, entry) => sum.sub(entry.amount), zero);
-    totals.set(record.userId, { accrued: existing.accrued.add(record.amount), paid: existing.paid.add(paid) });
+    const accruedAmount = record.voidedAt ? zero : record.amount;
+    totals.set(record.userId, {
+      accrued: existing.accrued.add(accruedAmount), paid: existing.paid.add(paid),
+      baseAccrued: existing.baseAccrued.add(record.supplemental ? zero : accruedAmount),
+      supplementalAccrued: existing.supplementalAccrued.add(record.supplemental ? accruedAmount : zero),
+    });
     return { ...record, amount: Number(record.amount), paidAmount: Number(paid) };
   });
   const staff = employees.map((employee) => {
-    const rates = ratesByEmployee.get(employee.id)!;
+    const rate = ratesByEmployee.get(employee.id);
+    const rates = salaryRates(rate);
     const work = payrollWorkTime(byEmployee.get(employee.id) ?? [], window);
     const personalSales = paidByEmployee.get(employee.id) ?? zero;
     const shiftSales = work.periods.reduce((total, { start, end }) => total.add(priorSales(end).sub(priorSales(start))), zero);
     const amounts = payrollAmounts(rates, work, window.days, personalSales, shiftSales);
     const estimate = Object.values(amounts).reduce((total, amount) => total.add(amount), zero);
-    const booked = totals.get(employee.id) ?? { accrued: zero, paid: zero };
-    const tracked = employee.role === Role.WAITER || work.periods.length > 0;
+    const booked = totals.get(employee.id) ?? emptyTotals();
+    const tracked = true;
     return {
-      userId: employee.id, name: employee.name, positionId: employee.position?.id ?? null,
-      position: employee.position?.name ?? staffLabels[employee.role] ?? '',
+      userId: employee.id, name: employee.name, positionId: rate?.positionId ?? employee.position?.id ?? null,
+      position: rate?.positionName ?? employee.position?.name ?? staffLabels[employee.role] ?? '',
+      timeTrackingAvailable: tracked,
       hours: tracked ? Math.round(work.milliseconds / HOUR * 100) / 100 : null,
       shifts: tracked ? work.shifts : null, days: tracked ? work.days : null,
-      rateMonth: employee.position?.salaryRates[0]?.effectiveMonth ?? null, rates,
+      rateMonth: rate?.effectiveMonth ?? null, rates,
       hourlyPay: Number(amounts.hourlyPay), shiftPay: Number(amounts.shiftPay), monthlyPay: Number(amounts.monthlyPay),
       personalCommission: Number(amounts.personalCommission), shiftCommission: Number(amounts.shiftCommission),
       personalSales: Number(personalSales), shiftSales: Number(shiftSales), estimate: Number(estimate),
-      available: employee.isActive ? Number(Prisma.Decimal.max(zero, estimate.sub(booked.accrued))) : 0,
+      available: Number(Prisma.Decimal.max(zero, estimate.sub(booked.baseAccrued))),
+      baseAccrued: Number(booked.baseAccrued), supplementalAccrued: Number(booked.supplementalAccrued),
       accrued: Number(booked.accrued), paid: Number(booked.paid), due: Number(booked.accrued.sub(booked.paid)),
     };
   });
@@ -192,9 +203,11 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     const booked = totals.get(record.userId)!;
     staff.push({
       userId: record.userId, name: record.employeeName, positionId: null, position: '',
+      timeTrackingAvailable: false,
       hours: null, shifts: null, days: null, rateMonth: null, rates: salaryRates(), personalSales: 0, shiftSales: 0,
       hourlyPay: 0, shiftPay: 0, monthlyPay: 0, personalCommission: 0, shiftCommission: 0,
-      estimate: 0, available: 0, accrued: Number(booked.accrued), paid: Number(booked.paid), due: Number(booked.accrued.sub(booked.paid)),
+      estimate: 0, available: 0, baseAccrued: Number(booked.baseAccrued), supplementalAccrued: Number(booked.supplementalAccrued),
+      accrued: Number(booked.accrued), paid: Number(booked.paid), due: Number(booked.accrued.sub(booked.paid)),
     });
   }
   return { staff: staff.sort((a, b) => a.name.localeCompare(b.name, 'ru')), records };
@@ -217,7 +230,7 @@ export function payrollPeriods(from: string, to: string) {
 }
 
 const totalsKeys = ['hourlyPay', 'shiftPay', 'monthlyPay', 'personalCommission', 'shiftCommission',
-  'personalSales', 'shiftSales', 'estimate', 'available', 'accrued', 'paid', 'due'] as const;
+  'personalSales', 'shiftSales', 'estimate', 'available', 'baseAccrued', 'supplementalAccrued', 'accrued', 'paid', 'due'] as const;
 const activityKeys = ['hours', 'shifts', 'days'] as const;
 
 export async function payrollPeriodReport(db: Db, cafeId: string, from: string, to: string) {
@@ -234,6 +247,7 @@ export async function payrollPeriodReport(db: Db, cafeId: string, from: string, 
       ratesByEmployee.set(row.userId, ratesByMonth);
       const previous = staff.get(row.userId);
       if (previous) {
+        row.timeTrackingAvailable = previous.timeTrackingAvailable || row.timeTrackingAvailable;
         for (const key of totalsKeys) row[key] = new Prisma.Decimal(previous[key]).add(row[key]).toNumber();
         for (const key of activityKeys) {
           if (previous[key] !== null || row[key] !== null) row[key] = Number(((previous[key] ?? 0) + (row[key] ?? 0)).toFixed(2));

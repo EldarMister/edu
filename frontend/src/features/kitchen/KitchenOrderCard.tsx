@@ -47,6 +47,7 @@ export function KitchenOrderCard({
   tab,
   now,
   submitting,
+  readOnly = false,
   pendingItemIds,
   pendingType,
   pendingPartial,
@@ -57,6 +58,7 @@ export function KitchenOrderCard({
   tab: KitchenTab;
   now: number;
   submitting: boolean;
+  readOnly?: boolean;
   /** Блюда заказа с отложенным (ещё не подтверждённым) действием. */
   pendingItemIds: string[];
   pendingType: 'reject' | 'ready' | null;
@@ -79,7 +81,7 @@ export function KitchenOrderCard({
   // Станции независимы: отказ на баре не блокирует кухню и наоборот.
   const stationRejected = order.items.some((it) => it.status === 'rejected');
   const waitingDecision = order.requiresWaiterDecision && stationRejected;
-  const canSelect = (tab === 'new' || tab === 'in_work') && !waitingDecision;
+  const canSelect = !readOnly && (tab === 'new' || tab === 'in_work') && !waitingDecision;
 
   // «С собой»: если все живые позиции навынос — бейдж на весь заказ, иначе помечаем точечно.
   const liveItems = order.items.filter((it) => it.status !== 'rejected' && it.status !== 'cancelled');
@@ -130,7 +132,7 @@ export function KitchenOrderCard({
       return next.size === prev.size ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusById, pendingItemIds]);
+  }, [statusById, pendingItemIds, canSelect]);
 
   function toggle(id: string) {
     setSelected((prev) => {

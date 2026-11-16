@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'rea
 import { SheetHandle } from '@/components/SheetHandle';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
 import { useAudioPttSender } from './useAudioPttSender';
 import {
@@ -288,13 +289,14 @@ export function PttOverlay({
   buttonHidden?: boolean;
 }) {
   const user = useAuth((s) => s.user);
+  const { effectiveRole } = usePermissions();
   const connected = useSocketConnected();
   const isMobile = useMediaQuery('(max-width: 1023px)');
   const overlayOpen = useBlockingOverlayOpen();
   const [open, setOpen] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const [docked, setDocked] = useState(false);
-  const [channel, setChannel] = useState<PttChannel>(() => initialChannel(user?.role));
+  const [channel, setChannel] = useState<PttChannel>(() => initialChannel(effectiveRole ?? undefined));
   const [onlineCount, setOnlineCount] = useState(0);
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
   const effectiveButtonHidden = buttonHidden || overlayOpen;
@@ -330,8 +332,8 @@ export function PttOverlay({
   }, [channel]);
 
   useEffect(() => {
-    setChannel(initialChannel(user?.role));
-  }, [user?.role]);
+    setChannel(initialChannel(effectiveRole ?? undefined));
+  }, [effectiveRole]);
 
   useEffect(() => {
     const sock = getSocket();

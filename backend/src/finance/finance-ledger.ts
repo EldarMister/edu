@@ -1,4 +1,19 @@
-import { Prisma } from '@prisma/client';
+import { BadRequestException } from '@nestjs/common';
+import { Prisma, type CashShift } from '@prisma/client';
+
+export async function assertDrawerBalance(
+  tx: Prisma.TransactionClient, shift: Pick<CashShift, 'id' | 'cafeId' | 'accountId' | 'openingAmount'>, change: Prisma.Decimal,
+) {
+  if (!change.isNegative()) return;
+  const movement = await tx.financeEntry.aggregate({
+    where: { cafeId: shift.cafeId, accountId: shift.accountId, cashShiftId: shift.id,
+      OR: [{ sourceKey: null }, { sourceKey: { notIn: ['cash-open:' + shift.id, 'cash-close:' + shift.id] } }] },
+    _sum: { amount: true },
+  });
+  if (shift.openingAmount.add(movement._sum.amount ?? 0).add(change).isNegative()) {
+    throw new BadRequestException('Операция оставит отрицательный остаток наличных в открытой кассе');
+  }
+}
 
 export async function lockFinance(tx: Prisma.TransactionClient, cafeId: string) {
   await tx.$queryRaw`SELECT id FROM cafes WHERE id = ${cafeId} FOR UPDATE`;

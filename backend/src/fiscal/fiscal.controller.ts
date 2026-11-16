@@ -2,6 +2,7 @@ import { Controller, Param, Post } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { FiscalService } from './fiscal.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 
 @Controller('fiscal')
 export class FiscalController {
@@ -17,6 +18,7 @@ export class FiscalController {
 
   /** Фискализация при печати чека (идемпотентно: если уже пробит — вернёт существующий). */
   @Post('orders/:orderId/print')
+  @RequirePermission('sections.checks')
   @Roles(Role.ADMIN, Role.OWNER)
   print(@Param('orderId') orderId: string) {
     return this.fiscal.fiscalizeOrder(orderId, false);
@@ -24,6 +26,7 @@ export class FiscalController {
 
   /** Повторить фискализацию заказа — кнопка «Повторить» в карточке заказа. */
   @Post('orders/:orderId/retry')
+  @RequirePermission('sections.checks')
   @Roles(Role.ADMIN, Role.OWNER)
   retry(@Param('orderId') orderId: string) {
     return this.fiscal.fiscalizeOrder(orderId, true);

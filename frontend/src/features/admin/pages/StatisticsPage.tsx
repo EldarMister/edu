@@ -378,7 +378,7 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
   const pts = data.map((p, i) => [x(i), y(p.amount)] as const);
   const line = smoothPath(pts);
   const area = `${line} L ${x(n - 1)} ${H - padB} L ${x(0)} ${H - padB} Z`;
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(niceMax * t));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => niceMax * t);
 
   // Подписи по оси X — прореживаем, чтобы не наезжали (на узком экране реже).
   const maxLabels = W < 480 ? 5 : 7;

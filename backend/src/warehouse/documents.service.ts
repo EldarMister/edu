@@ -9,6 +9,7 @@ import { inventoryPeriodContext } from './inventory-period-context';
 import { postStockMovement } from './stock-posting';
 import { parseStockEffectiveAt } from './stock-effective-time';
 import { replayHistoricalStock } from './historical-stock-replay';
+import { inventoryReversalBlockedReason } from './closed-inventory-period';
 import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, UnitCode, unitLabel } from './units';
 import { getWarehouseBalance, resolveWarehouse, warehouseBalances, warehouseDocumentFilter, WarehouseLocation } from './warehouse-location';
@@ -356,6 +357,8 @@ export class WarehouseDocumentsService {
     return this.prisma.$transaction(async (tx) => {
       const document = await this.lockDocument(tx, id, revision, 'posted');
       await lockIngredients(tx, document.items.map((item) => item.ingredientId));
+      const blocked = await this.reversalBlockedReason(tx, document);
+      if (blocked) throw new ConflictException(blocked);
       const movements = await tx.stockMovement.findMany({ where: { cafeId: document.cafeId, sourceId: id, sourceType: document.kind }, orderBy: { createdAt: 'desc' } });
       const transferReversalAt = document.kind === 'transfer' ? new Date() : undefined;
       // Reverse withdrawals before receipts, so both sides of a transfer remain atomic.
@@ -529,15 +532,17 @@ export class WarehouseDocumentsService {
   /** Draft counts are preserved while the preview follows the current book stock.
    * Posted/reversed documents keep the immutable values captured at approval. */
   private async preview(tx: Prisma.TransactionClient, document: Document, includeInventoryContext = false) {
+    const reversalBlockedReason = await this.reversalBlockedReason(tx, document);
+    const serialize = (value: Document) => ({ ...this.serialize(value), ...(reversalBlockedReason ? { reversalBlockedReason } : {}) });
     const snapshot = readWriteoffSnapshot(document.sourceLines);
     if (snapshot && ['draft', 'submitted'].includes(document.status)) {
       const valuation = await previewWriteoffSources(tx, await this.warehouse(tx, document.warehouseId), snapshot);
-      return { ...this.serialize(document), sourceLines: valuation.sourceLines, sourceTotal: valuation.total };
+      return { ...serialize(document), sourceLines: valuation.sourceLines, sourceTotal: valuation.total };
     }
-    if (document.kind !== 'inventory') return this.serialize(document);
+    if (document.kind !== 'inventory') return serialize(document);
     const draft = document.status === 'draft' || document.status === 'submitted';
     const cutoffAt = document.countedAt ?? (draft ? new Date() : document.postedAt);
-    if (!draft && (!includeInventoryContext || !cutoffAt)) return this.serialize(document);
+    if (!draft && (!includeInventoryContext || !cutoffAt)) return serialize(document);
     const warehouse = await this.warehouse(tx, document.warehouseId);
     if (draft) {
       const ingredients = await tx.ingredient.findMany({ where: { cafeId: document.cafeId, id: { in: document.items.map(({ ingredientId }) => ingredientId) } } });
@@ -551,9 +556,17 @@ export class WarehouseDocumentsService {
           unitCost: balance.avgCost, costKnown: balance.valuationKnown };
       }) };
     }
-    const serialized = this.serialize(document);
+    const serialized = serialize(document);
     if (!includeInventoryContext || !cutoffAt) return serialized;
     return { ...serialized, inventoryContext: await inventoryPeriodContext(tx, warehouse, document.id, document.items, cutoffAt) };
+  }
+
+  private reversalBlockedReason(tx: Prisma.TransactionClient, document: Document) {
+    if (document.status !== 'posted' || !document.postedAt) return Promise.resolve(null);
+    const warehouseIds = [document.warehouseId, ...(document.destinationWarehouseId ? [document.destinationWarehouseId] : [])];
+    return inventoryReversalBlockedReason(tx, document.cafeId, document.countedAt ?? document.effectiveAt ?? document.postedAt,
+      warehouseIds.flatMap((warehouseId) => document.items.filter((item) => item.quantity !== null)
+        .map(({ ingredientId }) => ({ warehouseId, ingredientId }))), document.id);
   }
 
   private async validateSourceSnapshot(tx: Prisma.TransactionClient, document: Document) {

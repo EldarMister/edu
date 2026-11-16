@@ -18,11 +18,16 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
   const cafeId = cafe.id;
   try {
     const [owner, waiter] = await Promise.all(['OWNER', 'WAITER'].map((role) => db.user.create({
-      data: { cafeId, name: role, phone: randomUUID(), passwordHash: 'fixture', role },
+      data: { cafeId, name: role, phone: randomUUID(), passwordHash: 'fixture', role,
+        permissions: { actions: { financeCashShifts: true } } },
     })));
     const hall = await db.hall.create({ data: { cafeId, name: 'Settlement' } });
     const table = await db.table.create({ data: { cafeId, hallId: hall.id, number: 1 } });
-    const shifts = new CashShiftsService(db, { log: async () => {} });
+    const staffEvents = [];
+    const shifts = new CashShiftsService(db, { log: async () => {} }, {
+      emitToWaiter: (id, event, shift) => staffEvents.push({ id, event, shift }),
+      emitToAdmin: (event, shift) => staffEvents.push({ event, shift }),
+    });
     const finance = new FinanceService(db, { log: async () => {} });
     const balance = async () => {
       const overview = await finance.overview(owner, {});
@@ -75,10 +80,27 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     assert.deepEqual(await balance(), { cash: 10, card: 0, safe: 0 });
 
     await assert.rejects(shifts.close(cafeId, waiter.id, { shiftId: shift.id, amount: 135, expectedAmount: 139 }), { status: 409 });
-    const request = { shiftId: shift.id, amount: 135, expectedAmount: 140 };
+    const employeeShift = await db.waiterShift.create({ data: { cafeId, waiterId: waiter.id } });
+    const activeOrder = await db.order.create({
+      data: { cafeId, tableId: table.id, orderNumber: randomUUID(), waiterId: waiter.id, waiterShiftId: employeeShift.id, status: 'waiting_payment' },
+    });
+    const request = { shiftId: shift.id, amount: 135, expectedAmount: 140, closingComment: '  Проведена сверка  ', closeEmployeeShifts: true };
+    await assert.rejects(shifts.close(cafeId, waiter.id, request), { status: 409 });
+    assert.equal((await shifts.list(cafeId, true)).current.id, shift.id);
+    assert.equal((await db.waiterShift.findUniqueOrThrow({ where: { id: employeeShift.id } })).status, 'active');
+    assert.deepEqual(await balance(), { cash: 10, card: 0, safe: 0 });
+    await db.order.update({ where: { id: activeOrder.id }, data: { status: 'paid' } });
     const [closed, retry] = await Promise.all([shifts.close(cafeId, waiter.id, request), shifts.close(cafeId, waiter.id, request)]);
     assert.equal(retry.id, closed.id);
     assert.equal(closed.difference, -5);
+    assert.equal(closed.closingComment, 'Проведена сверка');
+    assert.equal((await shifts.list(cafeId, true)).history[0].closingComment, 'Проведена сверка');
+    assert.deepEqual(staffEvents.map(({ id, event, shift }) => [id, event, shift.id, shift.status]), [
+      [waiter.id, 'waiter:shift_ended', employeeShift.id, 'closed'],
+      [undefined, 'waiter:shift_ended', employeeShift.id, 'closed'],
+    ]);
+    assert.deepEqual(staffEvents[0].shift.endedAt, closed.closedAt);
+    await assert.rejects(shifts.close(cafeId, waiter.id, { ...request, closeEmployeeShifts: false }), { status: 409 });
     assert.deepEqual(await balance(), { cash: 135, card: 80, safe: 100 });
     const removedCollection = await shifts.createOperation(cafeId, owner, shift.id, operation('collection', 12, { note: 'Удалённая инкассация' }));
     assert.equal((await shifts.list(cafeId, true)).history[0].collectionAmount, 112);
@@ -114,7 +136,13 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     await db.$transaction((tx) => reverseOrderReceipts(tx, cafeId, mixedOrder.id, waiter.id));
     assert.equal((await shifts.list(cafeId, true)).current.expectedAmount, -15);
     assert.deepEqual(await balance(), { cash: 136, card: 80, safe: 100 });
-    await shifts.close(cafeId, waiter.id, { shiftId: nextShift.id, amount: 0, expectedAmount: -15 });
+    const nextEmployeeShift = await db.waiterShift.create({ data: { cafeId, waiterId: waiter.id } });
+    await db.order.create({ data: { cafeId, tableId: table.id, orderNumber: randomUUID(), waiterId: waiter.id,
+      waiterShiftId: nextEmployeeShift.id, status: 'waiting_payment' } });
+    const cashOnly = await shifts.close(cafeId, waiter.id, { shiftId: nextShift.id, amount: 0, expectedAmount: -15 });
+    assert.equal(cashOnly.closingComment, null);
+    assert.equal((await db.waiterShift.findUniqueOrThrow({ where: { id: nextEmployeeShift.id } })).status, 'active');
+    assert.equal(staffEvents.length, 2);
     assert.deepEqual(await balance(), { cash: 0, card: 0, safe: 100 });
   } finally {
     await db.financeEntry.deleteMany({ where: { cafeId } });

@@ -514,6 +514,7 @@ export interface ProductionBatch {
   costKnown?: boolean;
   reversedAt?: string | null;
   reverseReason?: string | null;
+  reversalBlockedReason?: string | null;
   id: string;
   batchId: string;
   ingredientName: string;

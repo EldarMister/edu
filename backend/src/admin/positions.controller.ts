@@ -6,10 +6,13 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { getDefaultPermissionsByRole, sanitizePermissionsInput } from '../common/permissions';
+import { resolvePermissions, sanitizePermissionsInput } from '../common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
 import { lockFinance } from '../finance/finance-ledger';
 import { currentPayrollMonth, salaryRates, type SalaryRates } from '../finance/payroll';
+import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
+import { assertStaffWorkspaceChange, losesOperationalAccess } from './staff-access';
+import { syncEmployeeSalary } from '../finance/employee-salary';
 
 const assignableRoles = [Role.ADMIN, Role.WAITER, Role.KITCHEN, Role.BAR];
 const positionSelect = {
@@ -20,7 +23,7 @@ const positionSelect = {
 type Position = Prisma.StaffPositionGetPayload<{ select: typeof positionSelect }>;
 
 function positionView({ _count, salaryRates: history, ...position }: Position) {
-  return { ...position, employees: _count.users, salary: salaryRates(history[0]), salaryEffectiveMonth: history[0]?.effectiveMonth ?? null };
+  return { ...position, permissions: resolvePermissions(position.role, position.permissions), employees: _count.users, salary: salaryRates(history[0]), salaryEffectiveMonth: history[0]?.effectiveMonth ?? null };
 }
 
 class PositionSalaryDto implements SalaryRates {
@@ -32,10 +35,14 @@ class PositionSalaryDto implements SalaryRates {
 }
 
 function positionPermissions(role: Role, input: unknown) {
-  if (role === Role.ADMIN) return sanitizePermissionsInput(role, input);
-  const defaults = getDefaultPermissionsByRole(role);
-  if (role === Role.WAITER) defaults.actions.financeCashShifts = sanitizePermissionsInput(role, input).actions.financeCashShifts;
-  return defaults;
+    const permissions = sanitizePermissionsInput(role, input);
+    permissions.actions.editMenu &&= permissions.sections.menu;
+    permissions.actions.refundChecks &&= permissions.sections.checks;
+    permissions.actions.manageStaff &&= permissions.sections.staff;
+    for (const key of Object.keys(permissions.actions) as (keyof typeof permissions.actions)[]) {
+      if (key.startsWith('warehouse')) permissions.actions[key] &&= permissions.sections.warehouse;
+    }
+    return permissions;
 }
 
 class UpdatePositionDto {
@@ -50,8 +57,8 @@ class UpdatePositionDto {
 }
 
 class CreatePositionDto extends UpdatePositionDto {
-  @IsIn(assignableRoles)
-  role!: Role;
+  @IsOptional() @IsIn(assignableRoles)
+  role?: Role;
 }
 
 class RemovePositionDto {
@@ -76,12 +83,13 @@ export class PositionsController {
   async create(@CurrentUser() actor: AuthUser, @Body() dto: CreatePositionDto) {
     const cafeId = this.cafe(actor);
     const name = this.name(dto.name);
-    if (!assignableRoles.includes(dto.role as (typeof assignableRoles)[number])) throw new BadRequestException('Выберите базовую роль сотрудника');
-    const permissions = positionPermissions(dto.role, dto.permissions);
+    const role = dto.role ?? Role.ADMIN;
+    if (!assignableRoles.includes(role as (typeof assignableRoles)[number])) throw new BadRequestException('Выберите тип должности');
+    const permissions = positionPermissions(role, dto.permissions);
     const salary = dto.salary && Object.values(dto.salary).some((amount) => amount > 0) ? dto.salary : undefined;
     const row = await this.withUniqueName(() => this.prisma.$transaction(async (db) => {
       const position = await db.staffPosition.create({
-        data: { cafeId, name, role: dto.role, permissions: permissions as unknown as Prisma.InputJsonValue },
+        data: { cafeId, name, role, permissions: permissions as unknown as Prisma.InputJsonValue },
         select: positionSelect,
       });
       if (salary) position.salaryRates = [await db.staffPositionSalaryRate.create({
@@ -103,6 +111,10 @@ export class PositionsController {
       await lockFinance(db, cafeId);
       const before = await this.find(cafeId, id, db);
       const permissions = positionPermissions(before.role, dto.permissions ?? before.permissions);
+      if (losesOperationalAccess(before, { role: before.role, permissions })) {
+        const users = await db.user.findMany({ where: { cafeId, positionId: id }, select: { id: true } });
+        await assertStaffWorkspaceChange(db, cafeId, users.map((user) => user.id), 'отключением рабочего доступа');
+      }
       const oldSalary = salaryRates(before.salaryRates[0]);
       if (dto.salary && (Object.keys(oldSalary) as (keyof SalaryRates)[]).some((key) => dto.salary![key] !== oldSalary[key])) {
         const effectiveMonth = currentPayrollMonth();
@@ -116,6 +128,10 @@ export class PositionsController {
         data: { name, permissions: permissions as unknown as Prisma.InputJsonValue },
         select: positionSelect,
       });
+      if (dto.salary || before.name !== row.name) {
+        const users = await db.user.findMany({ where: { cafeId, positionId: id }, select: { id: true } });
+        await syncEmployeeSalary(db, cafeId, users.map((user) => user.id));
+      }
       return { before, row };
     }));
     await this.audit.log({ actor, actionType: AuditAction.POSITION_UPDATED, entityType: AuditEntity.POSITION,
@@ -129,6 +145,7 @@ export class PositionsController {
   async remove(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() dto: RemovePositionDto = {}) {
     const cafeId = this.cafe(actor);
     const { before, replacement, transferred } = await this.prisma.$transaction(async (db) => {
+      await lockStationRouting(db, cafeId);
       await lockFinance(db, cafeId);
       const before = await this.find(cafeId, id, db);
       if (before._count.users && !dto.replacementPositionId) {
@@ -136,13 +153,24 @@ export class PositionsController {
       }
       const replacementId = dto.replacementPositionId;
       const replacement = replacementId ? await this.find(cafeId, replacementId, db) : null;
-      if (replacement && (replacement.id === before.id || replacement.role !== before.role)) {
-        throw new BadRequestException('Выберите другую должность с той же базовой ролью');
+      if (replacement?.id === before.id) {
+        throw new BadRequestException('Выберите другую должность');
       }
+      const users = await db.user.findMany({ where: { cafeId, positionId: id }, select: { id: true, role: true } });
+      const losesTerminal = replacement && losesOperationalAccess(before, replacement);
+      const changedUsers = replacement ? users.filter((user) => user.role !== replacement.role).map((user) => user.id) : [];
+      if (losesTerminal) await assertStaffWorkspaceChange(db, cafeId, users.map((user) => user.id), 'отключением доступа к кассе');
+      if (changedUsers.length) await assertStaffWorkspaceChange(db, cafeId, changedUsers);
+      const prepStation = replacement && changedUsers.length ? await staffStation(db, replacement.role) : undefined;
       const transferred = replacement ? (await db.user.updateMany({
-        where: { cafeId, positionId: id, role: before.role },
-        data: { positionId: replacement.id, permissions: Prisma.DbNull },
+        where: { cafeId, positionId: id },
+        data: { positionId: replacement.id, role: replacement.role, permissions: Prisma.DbNull,
+          ...(changedUsers.length === users.length && changedUsers.length ? { prepStation } : {}) },
       })).count : 0;
+      if (changedUsers.length && changedUsers.length !== users.length) {
+        await db.user.updateMany({ where: { cafeId, id: { in: changedUsers } }, data: { prepStation } });
+      }
+      if (replacement && transferred) await syncEmployeeSalary(db, cafeId, users.map((user) => user.id));
       if (transferred !== before._count.users) {
         throw new ConflictException('Проверьте должности сотрудников и попробуйте ещё раз');
       }

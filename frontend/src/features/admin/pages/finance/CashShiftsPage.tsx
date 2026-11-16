@@ -1,29 +1,34 @@
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { Modal } from '@/components/Modal';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import { CashShiftForm, useCashShiftAccess } from '@/features/settings/CashShiftControls';
 import { api, apiError } from '@/lib/api';
+import { useAuth } from '@/store/auth';
+import { IconPrinter } from '../../components/icons';
 import { QueryState } from '../warehouse/WarehouseUi';
 import { EditorPage } from '../warehouse/EditorPage';
 import { useEditorRoute, usePageFilters } from '../warehouse/workspace-route';
-import { cashShiftKey, financeKey, type CashShift, type EntryKind, useCashShiftMutation, useCashShifts } from './api';
+import { cashShiftKey, financeKey, type CashShift, type EntryKind, useCashShifts } from './api';
 import { financeDateTime, financeDay, financeMoney, parseMoney } from './finance-format';
 import { FinancePeriod } from './FinancePeriod';
 import { printRegister } from './FinanceRegister';
 import { CashOperationDialog, type CashOperation } from './CashOperationDialog';
+import './cash-shifts.css';
 
 export function FinanceTable({ headers, rows, empty = 'Нет записей', amounts = [], totals }: {
   headers: string[];
-  rows: { key: string; cells: ReactNode[]; deleted?: boolean }[];
+  rows: { key: string; cells: ReactNode[]; deleted?: boolean; className?: string; onClick?: () => void }[];
   empty?: ReactNode;
   amounts?: number[];
   totals?: ReactNode[];
 }) {
-  return <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="Таблица отчёта">
+  return <div className="relative min-w-0 overflow-x-auto" tabIndex={0} role="region" aria-label="Таблица отчёта">
     <table className="poster-register-table w-full min-w-max text-left">
       <thead><tr>{headers.map((label, index) => <th key={index} scope="col" className={amounts.includes(index) ? 'text-right' : undefined}>
         {label || <span className="sr-only">Действия</span>}
       </th>)}</tr></thead>
-      <tbody>{rows.length ? rows.map(({ key, cells, deleted }) => <tr key={key}>
+      <tbody>{rows.length ? rows.map(({ key, cells, deleted, className, onClick }) => <tr key={key} className={className} onClick={onClick}>
         {cells.map((cell, index) => <td key={index} className={amounts.includes(index) ? 'text-right tabular-nums' : undefined}>
           {deleted && index < cells.length - 1 ? <s className="text-text-muted">{cell}</s> : cell}
         </td>)}
@@ -35,7 +40,17 @@ export function FinanceTable({ headers, rows, empty = 'Нет записей', a
   </div>;
 }
 
+const journalTime = new Intl.DateTimeFormat('ru-RU', {
+  day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bishkek',
+});
+
+function ShiftJournalTime({ time }: { time: string }) {
+  return <time dateTime={time} title={financeDateTime(time)}>{journalTime.format(new Date(time))}</time>;
+}
+
 export function CashShiftsPage() {
+  const isOwner = useAuth((state) => state.user?.role === 'OWNER');
+  const { canManage } = useCashShiftAccess();
   const today = financeDay();
   const [{ from, to }, setPeriod] = usePageFilters({ from: financeDay(new Date(Date.now() - 30 * 86_400_000)), to: today });
   const rangeValid = !!from && !!to && from <= to;
@@ -52,7 +67,7 @@ export function CashShiftsPage() {
     const shift = (current?.id === editor.id ? current : history.find(({ id }) => id === editor.id));
     return <EditorPage title={shift ? 'Кассовая смена №' + shift.number : 'Кассовая смена'} onClose={closeEditor}>
       <QueryState pending={shifts.isPending && rangeValid} error={shifts.error}>
-        {shift ? <CashShiftDetails shift={shift} /> : <p>Смена не найдена в выбранном периоде.</p>}
+        {shift ? <CashShiftDetails shift={shift} canManage={canManage} /> : <p>Смена не найдена в выбранном периоде.</p>}
       </QueryState>
     </EditorPage>;
   }
@@ -61,45 +76,53 @@ export function CashShiftsPage() {
     <p role="alert" className="text-danger">Укажите начало и конец периода.</p></>;
   return <QueryState pending={shifts.isPending} error={shifts.error}>
     {shifts.data && <>
-      <div className="finance-register">
-        <div className="finance-register-toolbar">
-          {(current || shifts.data.enabled) && <button type="button" className="btn-secondary btn-md"
-            onClick={() => setEditing(current ? 'close' : 'open')}>
-            {current ? 'Закрыть смену' : 'Открыть смену'}
-          </button>}
+      <section className="finance-register cash-shift-history min-w-0">
+        <div className="finance-register-toolbar print:hidden">
+          {canManage && !current && shifts.data.enabled && <button type="button" className="btn-secondary btn-md"
+            onClick={() => setEditing('open')}>Открыть смену</button>}
           <div className="finance-register-tools">
-          <button type="button" className="btn-secondary btn-md" disabled={!rows.length}
-            onClick={() => setPrintBlocked(!printRegister('Кассовые смены', [columns, ...rows.map((shift) => [
-              shift.number, financeDateTime(shift.openedAt), financeDateTime(shift.closedAt), shift.openingAmount, shift.collectionAmount,
-              shift.actualAmount ?? shift.expectedAmount, shift.difference,
-            ])]))}>Распечатать</button>
-          {period}
+            <button type="button" className="btn-secondary btn-md inline-flex items-center gap-2" disabled={!rows.length}
+              onClick={() => setPrintBlocked(!printRegister('Кассовые смены', [columns, ...rows.map((shift) => [
+                shift.number, financeDateTime(shift.openedAt), shift.closedAt ? financeDateTime(shift.closedAt) : 'Не закрыта',
+                shift.openingAmount, shift.collectionAmount || null, shift.actualAmount, shift.difference,
+              ])]))}><IconPrinter className="h-4 w-4" aria-hidden="true" />Распечатать</button>
+            {period}
           </div>
         </div>
+        {current && <div className="cash-shift-history-notice print:hidden">
+          <div>
+            <p className="font-semibold">Кассовая смена открыта</p>
+            <p className="mt-1 text-sm text-text-secondary">В конце работы пересчитайте наличные и закройте смену.</p>
+          </div>
+          {canManage && <button type="button" className="btn-secondary btn-md" onClick={() => setEditing('close')}>Закрыть смену</button>}
+        </div>}
+        {!current && !shifts.data.enabled && <div className="cash-shift-history-notice print:hidden">
+          <p className="text-sm text-text-secondary">Кассовые смены выключены. Продажи доступны без открытия смены.</p>
+          {isOwner && <Link className="text-sm text-primary hover:underline" to="?section=settings#cash-shift-settings">Включить в настройках</Link>}
+        </div>}
         {printBlocked && <p role="alert" className="text-danger">Разрешите всплывающие окна и повторите печать.</p>}
         <FinanceTable headers={columns} amounts={[0, 3, 4, 5, 6]}
-          rows={rows.map((shift) => ({ key: shift.id, cells: [
-            shift.number,
-            <button type="button" className="text-left text-primary hover:underline"
-              onClick={() => openEditor({ type: 'cashShiftHistory', id: shift.id })}>
-              <ShiftTime time={shift.openedAt} name={shift.openedByName} />
-            </button>,
-            shift.closedAt ? <ShiftTime time={shift.closedAt} name={shift.closedByName} /> : <span className="text-success">Открыта</span>,
-            <>{financeMoney(shift.openingAmount)}{shift.openingDifference !== 0 &&
-              <span className="block text-xs text-danger" title="Расхождение при открытии">{financeMoney(shift.openingDifference)}</span>}</>,
-            financeMoney(shift.collectionAmount),
-            financeMoney(shift.actualAmount ?? shift.expectedAmount),
-            <span className={shift.difference ? 'text-danger' : undefined}>{financeMoney(shift.difference)}</span>,
-          ] }))} empty={null} />
-        {!rows.length && <div className="grid min-h-64 place-content-center gap-3 px-4 pb-16 pt-14 text-center">
-          <p className="text-lg font-medium">За этот период кассовых смен нет</p>
-          <p className="max-w-sm text-sm text-text-muted">{shifts.data.enabled
-            ? 'Откройте смену с суммой размена, чтобы отслеживать деньги в кассе.'
-            : 'Кассовые смены выключены в настройках заведения.'}</p>
-        </div>}
-      </div>
-      {editing && (editing === 'open' || current) && <ShiftDialog current={editing === 'close' ? current! : null}
-        onClose={() => setEditing(null)} onRefresh={shifts.refetch} />}
+          rows={rows.map((shift) => {
+            const difference = shift.difference ?? 0;
+            const status = !shift.closedAt || difference > 0 ? 'warning' : difference < 0 ? 'short' : '';
+            return { key: shift.id, className: 'cash-shift-history-row ' + (status ? 'cash-shift-history-row--' + status : ''),
+              onClick: () => openEditor({ type: 'cashShiftHistory', id: shift.id }), cells: [
+                shift.number,
+                <button type="button" className="text-left hover:underline" aria-label={'Открыть кассовую смену №' + shift.number}>
+                  <ShiftJournalTime time={shift.openedAt} />
+                </button>,
+                shift.closedAt ? <ShiftJournalTime time={shift.closedAt} /> : <span className="font-medium">Не закрыта</span>,
+                financeMoney(shift.openingAmount),
+                financeMoney(shift.collectionAmount || null),
+                financeMoney(shift.actualAmount),
+                <span className={difference < 0 ? 'font-semibold text-danger' : difference > 0 ? 'font-semibold' : undefined}>
+                  {difference > 0 ? '+' : ''}{financeMoney(shift.difference)}
+                </span>,
+              ] };
+          })} empty="За этот период кассовых смен нет" />
+      </section>
+      {canManage && editing && (editing === 'open' || current) && <CashShiftForm current={editing === 'close' ? current! : null}
+        onClose={() => setEditing(null)} endpoint="/admin/cash-shifts" />}
     </>}
   </QueryState>;
 }
@@ -118,7 +141,7 @@ type ShiftEntry = {
   reconciliation: 'open' | 'close' | null;
 };
 
-function CashShiftDetails({ shift }: { shift: CashShift }) {
+function CashShiftDetails({ shift, canManage }: { shift: CashShift; canManage: boolean }) {
   const [editCount, setEditCount] = useState<'openingAmount' | 'actualAmount' | null>(null);
   const [operation, setOperation] = useState<'create' | CashOperation | null>(null);
   const [deleteOperation, setDeleteOperation] = useState<ShiftEntry | null>(null);
@@ -154,6 +177,7 @@ function CashShiftDetails({ shift }: { shift: CashShift }) {
     <div className="flex flex-wrap gap-x-8 gap-y-2 border-b border-border px-4 py-3 text-sm text-text-muted">
       <span>Открыта <ShiftTime time={shift.openedAt} name={shift.openedByName} /></span>
       {shift.closedAt && <span>Закрыта <ShiftTime time={shift.closedAt} name={shift.closedByName} /></span>}
+      {shift.closingComment && <p className="w-full whitespace-pre-wrap break-words">Комментарий при закрытии: <span className="text-text-primary">{shift.closingComment}</span></p>}
     </div>
     <QueryState pending={entries.isPending} error={entries.error}>
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(210px,285px)_minmax(0,1fr)]">
@@ -162,7 +186,7 @@ function CashShiftDetails({ shift }: { shift: CashShift }) {
             <dt className="text-text-secondary">{label}</dt>
             <dd className="flex flex-wrap justify-end gap-2 text-right tabular-nums">
               <span className={label === 'Разница' && amount ? 'text-danger' : undefined}>{financeMoney(amount)}</span>
-              {key && amount != null && <button type="button" className="text-primary hover:underline"
+              {canManage && key && amount != null && <button type="button" className="text-primary hover:underline"
                 aria-label={'Изменить ' + label.toLowerCase()} onClick={() => setEditCount(key)}>Ред.</button>}
             </dd>
           </div>)}
@@ -170,7 +194,7 @@ function CashShiftDetails({ shift }: { shift: CashShift }) {
         <div className="min-w-0">
           <div className="flex items-center justify-between gap-3 px-4 pb-2">
             <h2 className="font-semibold">Транзакции смены</h2>
-            <button type="button" className="text-sm text-primary hover:underline" onClick={() => setOperation('create')}>+ Добавить транзакцию</button>
+            {canManage && <button type="button" className="text-sm text-primary hover:underline" onClick={() => setOperation('create')}>+ Добавить транзакцию</button>}
           </div>
           <FinanceTable headers={['Дата и время', 'Тип', 'Категория', 'Сотрудник', 'Комментарий', 'Сумма', '']} amounts={[5]}
         rows={(entries.data ?? []).map((entry) => ({ key: entry.id, deleted: !!entry.deletedAt, cells: [
@@ -185,7 +209,7 @@ function CashShiftDetails({ shift }: { shift: CashShift }) {
           entry.deletedAt ? <div className="text-xs text-text-muted">
             <p>{entry.deletedByName ? 'Удалена · ' + entry.deletedByName : 'Удалена'}</p>
             <time dateTime={entry.deletedAt}>{financeDateTime(entry.deletedAt)}</time>
-          </div> : entry.editable && <div className="flex gap-3">
+          </div> : canManage && entry.editable && <div className="flex gap-3">
             <button type="button" className="text-primary hover:underline"
               onClick={() => setOperation({ ...entry, kind: entry.kind === 'transfer' ? 'collection' : entry.kind as 'income' | 'expense' })}>Ред.</button>
             <button type="button" className="text-text-muted hover:text-danger" aria-label="Удалить транзакцию"
@@ -195,11 +219,11 @@ function CashShiftDetails({ shift }: { shift: CashShift }) {
         </div>
       </div>
     </QueryState>
-    {operation && <CashOperationDialog shiftId={shift.id} operation={operation === 'create' ? undefined : operation}
+    {canManage && operation && <CashOperationDialog shiftId={shift.id} operation={operation === 'create' ? undefined : operation}
       onClose={() => setOperation(null)} />}
-    {editCount && <CountDialog endpoint={endpoint} field={editCount} amount={shift[editCount] ?? 0}
+    {canManage && editCount && <CountDialog endpoint={endpoint} field={editCount} amount={shift[editCount] ?? 0}
       onClose={() => setEditCount(null)} onSuccess={refresh} />}
-    {deleteOperation && <Modal open title="Удалить транзакцию?" onClose={() => { if (!remove.isPending) setDeleteOperation(null); }}
+    {canManage && deleteOperation && <Modal open title="Удалить транзакцию?" onClose={() => { if (!remove.isPending) setDeleteOperation(null); }}
       footer={<div className="flex gap-2">
         <button type="button" className="btn-danger btn-md" disabled={remove.isPending} onClick={() => remove.mutate(deleteOperation.id)}>Удалить</button>
         <button type="button" className="btn-secondary btn-md" disabled={remove.isPending} onClick={() => setDeleteOperation(null)}>Отмена</button>
@@ -239,44 +263,4 @@ function CountDialog({ endpoint, field, amount, onClose, onSuccess }: {
 
 function ShiftTime({ time, name }: { time?: string | null; name?: string | null }) {
   return <>{financeDateTime(time)}{name && <p className="text-sm text-text-muted">{name}</p>}</>;
-}
-
-function ShiftDialog({ current, onClose, onRefresh }: { current: CashShift | null; onClose: () => void; onRefresh: () => unknown }) {
-  const [amount, setAmount] = useState('');
-  const [error, setError] = useState('');
-  const busy = useRef(false);
-  const form = useId();
-  const mutation = useCashShiftMutation(current ? 'close' : 'open');
-  const validAmount = parseMoney(amount);
-  const difference = validAmount != null && current ? Math.round((validAmount - current.expectedAmount) * 100) / 100 : null;
-  const action = current ? 'Закрыть смену' : 'Открыть смену';
-  const close = () => { if (!busy.current) onClose(); };
-  return <Modal open title={action} onClose={close} footer={<div className="flex justify-end gap-2">
-    <button type="button" className="btn-secondary btn-md" onClick={close} disabled={mutation.isPending}>Отмена</button>
-    <button type="submit" className="btn-primary btn-md" form={form} disabled={validAmount == null || validAmount < 0 || mutation.isPending}>{action}</button>
-  </div>}>
-    <form id={form} className="grid gap-3" onSubmit={async (event) => {
-      event.preventDefault();
-      if (busy.current || validAmount == null || validAmount < 0) return;
-      busy.current = true;
-      setError('');
-      try {
-        await mutation.mutateAsync({ amount: validAmount, shiftId: current?.id, expectedAmount: current?.expectedAmount });
-        onClose();
-      } catch (cause) {
-        setError(apiError(cause));
-        void onRefresh();
-      } finally {
-        busy.current = false;
-      }
-    }}>
-      {current && <p>Книжный баланс <strong>{financeMoney(current.expectedAmount)}</strong></p>}
-      <label className="grid gap-1.5">{current ? 'Наличные, оставленные в кассе' : 'Остаток в кассе'}
-        <input className="input w-full" value={amount} onChange={(event) => setAmount(event.target.value)}
-          autoFocus inputMode="decimal" placeholder="0,00" disabled={mutation.isPending} maxLength={17} />
-      </label>
-      {difference != null && difference !== 0 && <p className="text-text-secondary">Расхождение {financeMoney(difference)} отразится в транзакциях.</p>}
-      {error && <><p role="alert" className="text-danger">{error}</p><p className="text-text-secondary">Если сумма по учёту изменилась, закройте окно и сверьте остаток ещё раз.</p></>}
-    </form>
-  </Modal>;
 }

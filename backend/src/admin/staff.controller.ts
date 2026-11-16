@@ -39,6 +39,7 @@ export class StaffController {
   }
 
   @Post('cash-handed')
+  @RequirePermission('actions.closeShift')
   setCashHanded(@Body() dto: SetCashHandedDto, @CurrentUser() actor: AuthUser) {
     return this.staff.setCashHanded(dto.waiterId, dto.date, dto.cashHanded, actor);
   }
@@ -54,11 +55,13 @@ export class StaffController {
   }
 
   @Patch('shift-history/:id')
+  @RequirePermission('actions.manageStaff')
   updateShiftHistory(@Param('id') id: string, @Body() dto: UpdateShiftHistoryDto, @CurrentUser() actor: AuthUser) {
     return this.staff.updateShiftHistory(id, dto, actor);
   }
 
   @Post('shift-history/:id/close')
+  @RequirePermission('actions.closeShift')
   closeShiftHistory(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.staff.closeShiftHistory(id, actor);
   }
@@ -66,6 +69,12 @@ export class StaffController {
   @Get()
   list(@CurrentUser() actor: AuthUser, @Query('role') role?: Role, @Query('search') search?: string) {
     return this.staff.list(actor, { role, search });
+  }
+
+  @Get('positions')
+  @RequirePermission('actions.manageStaff')
+  positions(@CurrentUser() actor: AuthUser) {
+    return this.staff.positions(actor);
   }
 
   @Get(':id')

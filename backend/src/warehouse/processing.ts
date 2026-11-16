@@ -10,6 +10,8 @@ import { getCafeId } from '../tenant/tenant-context';
 import { assertWarehousePermission } from './warehouse-permissions';
 import { lockIngredients } from './stock-lock';
 import { postStockMovement } from './stock-posting';
+import { inventoryReversalBlockedReason } from './closed-inventory-period';
+import { purchaseDateRange } from './purchases-query.dto';
 import { assertUnitMatchesType, costFromBase, fromBase, normalizeUnit, toBase, unitLabel } from './units';
 import { getWarehouseBalance, resolveWarehouse } from './warehouse-location';
 
@@ -56,19 +58,21 @@ export class ProcessingService {
 
   async list(query: { from?: string; to?: string; warehouseId?: string; search?: string } = {}) {
     const cafeId = tenant();
-    const from = query.from ? dateValue(query.from) : undefined;
-    const to = query.to ? dateValue(query.to.length === 10 ? `${query.to}T23:59:59.999Z` : query.to) : undefined;
-    if (from && to && from > to) throw new BadRequestException('Начальная дата позже конечной');
+    const period = purchaseDateRange(query.from, query.to);
     const search = query.search?.trim();
     const rows = await this.prisma.processingDocument.findMany({ where: { cafeId,
-      date: from || to ? { gte: from, lte: to } : undefined,
+      date: period,
       lines: query.warehouseId ? { some: { warehouseId: query.warehouseId } } : undefined,
       OR: search ? [{ note: { contains: search, mode: 'insensitive' } }, { lines: { some: { name: { contains: search, mode: 'insensitive' } } } }] : undefined,
-    }, include, orderBy: [{ date: 'desc' }, { id: 'desc' }], take: 500 });
+    }, include, orderBy: [{ date: 'desc' }, { id: 'desc' }] });
     return rows.map((row) => this.serialize(row));
   }
 
-  async findOne(id: string) { return this.serialize(await this.load(this.prisma, id)); }
+  async findOne(id: string) {
+    const document = await this.load(this.prisma, id);
+    const reversalBlockedReason = await this.reversalBlockedReason(this.prisma, document);
+    return { ...this.serialize(document), ...(reversalBlockedReason ? { reversalBlockedReason } : {}) };
+  }
 
   async create(actor: Actor, dto: ProcessingSaveDto) {
     const cafeId = tenant(actor);
@@ -114,7 +118,7 @@ export class ProcessingService {
         date: dto.date ? dateValue(dto.date) : undefined, note: dto.note?.trim() || null,
         revision: { increment: 1 }, totalCost: valued.totalCost, hasUnknownCost: valued.hasUnknownCost,
       }, include });
-      return this.serialize(saved);
+      return this.serialize(dto.complete ? await this.postWithin(tx, actor, saved) : saved);
     });
   }
 
@@ -140,6 +144,8 @@ export class ProcessingService {
       const movements = await tx.stockMovement.findMany({ where: { cafeId: current.cafeId, sourceType: 'processing', sourceId: id, type: 'processing' } });
       if (movements.length !== current.lines.length) throw new ConflictException('История переработки неполна');
       await lockIngredients(tx, movements.map((m) => m.ingredientId));
+      const blocked = await this.reversalBlockedReason(tx, current);
+      if (blocked) throw new ConflictException(blocked);
       // Remove every produced output before restoring the inputs. A consumed
       // output cannot be reversed by silently creating a negative quantity.
       const ordered = [...movements.filter((m) => m.change.gt(0)), ...movements.filter((m) => m.change.lt(0))];
@@ -159,6 +165,7 @@ export class ProcessingService {
 
   private async postWithin(tx: Prisma.TransactionClient, actor: Actor, current: Document) {
     if (current.status !== 'draft') throw new ConflictException('Переработка уже проведена или отменена');
+    if (current.date.getTime() > Date.now()) throw new BadRequestException('Дата и время переработки не могут быть в будущем. Сохраните черновик или измените дату');
     await lockIngredients(tx, current.lines.map((line) => line.ingredientId));
     const rows: Line[] = current.lines.map(({ id: _id, cafeId: _cafeId, documentId: _documentId, ...line }) => ({ ...line }));
     const valued = await this.value(tx, rows, true);
@@ -177,6 +184,11 @@ export class ProcessingService {
       status: 'posted', postedAt: new Date(), postedById: actor.id, postedByName: actor.name, revision: { increment: 1 },
       totalCost: valued.totalCost, hasUnknownCost: valued.hasUnknownCost,
     }, include });
+  }
+
+  private reversalBlockedReason(tx: Prisma.TransactionClient, document: Document) {
+    if (document.status !== 'posted' || !document.postedAt) return Promise.resolve(null);
+    return inventoryReversalBlockedReason(tx, document.cafeId, document.postedAt, document.lines);
   }
 
   private async normalize(tx: Prisma.TransactionClient, dto: ProcessingSaveDto): Promise<Line[]> {
@@ -260,7 +272,7 @@ export class ProcessingService {
       costSharePercent: Number(line.costSharePercent), unitLabel: unitLabel(unit),
     }; });
     const { lines: _lines, ...data } = document;
-    return { ...data, totalCost: document.hasUnknownCost ? null : Number(document.totalCost), inputs: rows.filter((row) => row.direction === 'input'), outputs: rows.filter((row) => row.direction === 'output') };
+    return { ...data, reversalReason: document.reverseReason, totalCost: document.hasUnknownCost ? null : Number(document.totalCost), inputs: rows.filter((row) => row.direction === 'input'), outputs: rows.filter((row) => row.direction === 'output') };
   }
 }
 

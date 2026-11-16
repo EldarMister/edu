@@ -1,13 +1,16 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import type { Role } from '@/types';
 import { useAuth } from '@/store/auth';
+import { canOpenWorkspace, homeForUser, type WorkspaceDestination } from '@/lib/workspaces';
 
 /** Пускает только аутентифицированных; при указании roles — только нужные роли. */
 export function ProtectedRoute({
   roles,
+  workspace,
   children,
 }: {
   roles?: Role[];
+  workspace?: WorkspaceDestination;
   children: React.ReactNode;
 }) {
   const { user, accessToken } = useAuth();
@@ -19,6 +22,7 @@ export function ProtectedRoute({
   if (roles && !roles.includes(user.role)) {
     return <Navigate to="/" replace />;
   }
+  if (workspace && !canOpenWorkspace(user, workspace)) return <Navigate to={homeForUser(user)} replace />;
   return <>{children}</>;
 }
 

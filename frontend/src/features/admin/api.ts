@@ -82,6 +82,7 @@ export interface StaffMember {
   positionId?: string | null;
   positionName?: string | null;
   positionIsStarter?: boolean;
+  canManage?: boolean;
   id: string;
   name: string;
   phone: string;
@@ -819,8 +820,7 @@ export function useShiftHistory(filters: ShiftHistoryFilters, enabled = true) {
 }
 
 export function useShiftHistoryActions() {
-  const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-history'] });
+  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'finance']]);
   const update = useMutation({
     mutationFn: ({ id, ...body }: { id: string; startedAt?: string; endedAt?: string | null }) =>
       api.patch(`/admin/staff/shift-history/${id}`, body).then((r) => r.data),
@@ -856,12 +856,12 @@ export interface StaffInput {
   positionId?: string | null;
   name: string;
   phone: string;
-  role: Role;
+  role?: Role;
   password?: string;
   isActive?: boolean;
 }
 export function useStaffMutations() {
-  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'positions']]);
+  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'positions'], ['admin', 'finance']]);
   const create = useMutation({
     mutationFn: (b: StaffInput) => api.post('/admin/staff', b).then((r) => r.data),
     onSuccess: invalidate,

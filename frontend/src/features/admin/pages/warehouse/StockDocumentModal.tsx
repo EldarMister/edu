@@ -9,6 +9,7 @@ import './inventory-workspace.css';
 import { inventoryCountMatches, inventoryCountSummary, inventoryQuantity, type InventoryCountFilter } from './inventory-workflow';
 import { InventoryCountSheet } from './InventoryCountSheet';
 import { InventoryTimingFields } from './InventoryTimingFields';
+import { StockOperationDateField } from './StockOperationDateField';
 import { inventoryTimingFor, inventoryTimingValue, inventoryTimingError, inventoryTimeDisplay } from './inventory-time';
 import { InventoryFlowDetails } from './InventoryFlowDetails';
 import { Select } from '@/components/Select';
@@ -54,6 +55,7 @@ export function StockDocumentModal({
   const locations = useWarehouseLocations();
   const { can } = usePermissions();
   const document = query.data;
+  const canEditDocument = !!document && can(`actions.${document.kind === 'inventory' ? 'warehouseCount' : document.kind === 'writeoff' ? 'warehouseWriteoff' : document.kind === 'transfer' ? 'warehouseTransfer' : 'warehouseReceive'}`);
   const documentWarehouse =
     locations.data?.locations.find((l) => l.id === document?.warehouseId) ?? warehouse;
   const canApprove =
@@ -84,7 +86,7 @@ export function StockDocumentModal({
           <WorkspaceHeaderActions><button type="button" className="btn-ghost btn-md text-primary"
             onClick={() => onCopyTransfer(document.id)}>Копировать</button></WorkspaceHeaderActions>
         )}
-      {document?.status === 'draft' && (
+      {document?.status === 'draft' && canEditDocument && (
         <StockDocumentDraft
           document={document}
           warehouse={documentWarehouse}
@@ -93,7 +95,7 @@ export function StockDocumentModal({
           onClose={onClose}
         />
       )}
-      {document && document.status !== 'draft' && (
+      {document && (document.status !== 'draft' || !canEditDocument) && (
         <StockDocumentReview document={document} warehouse={documentWarehouse} isOwner={canApprove} />
       )}
     </EditorPage>
@@ -145,6 +147,7 @@ function StockDocumentDraft({
   const [timingValid, setTimingValid] = useState(true);
   const [savedCountedAt, setSavedCountedAt] = useState(document.countedAt ?? null);
   const [timingApplied, setTimingApplied] = useState(false);
+  const [parametersOpen, setParametersOpen] = useState(false);
   const countedAt = document.kind === 'inventory' ? inventoryTimingValue(timing, savedCountedAt) : undefined;
   const [savedEffectiveAt, setSavedEffectiveAt] = useState(document.effectiveAt ?? null);
   const effectiveAt = supportsStockDate ? inventoryTimingValue(timing, savedEffectiveAt) : undefined;
@@ -152,6 +155,7 @@ function StockDocumentDraft({
   const timingChanged = document.kind === 'inventory' && countedAt !== savedCountedAt;
   const historicalScopeChanged = document.kind === 'inventory' && !!countedAt && items.some(({ item }) => !document.items.some((saved) => saved.ingredientId === item.ingredientId));
   const previewNeedsSave = timingChanged || historicalScopeChanged;
+  useEffect(() => { if (previewNeedsSave) setParametersOpen(true); }, [previewNeedsSave]);
   const timingReady = (document.kind !== 'inventory' && !supportsStockDate) ||
     (timingValid && !inventoryTimingError(timing) && (supportsStockDate ? effectiveAt !== undefined : countedAt !== undefined));
   const [savedValues, setSavedValues] = useState(() => draftValues(draftItems(document), document.reason ?? '', document.note ?? '', document.countedAt));
@@ -239,7 +243,7 @@ function StockDocumentDraft({
   }
 
   async function save(action: 'save' | 'submit' | 'recount' | 'apply-time') {
-    if (pending || stale || !sourceReady || !timingReady || (action === 'submit' && previewNeedsSave)) return;
+    if (pending || stale || !sourceReady || !timingReady || ((action === 'submit' || action === 'save') && previewNeedsSave)) return;
     setError('');
     setValidationAttempt((attempt) => attempt + 1);
     setSubmitAttempt(action === 'submit');
@@ -266,6 +270,7 @@ function StockDocumentDraft({
       });
       if (previewNeedsSave) setTimingApplied(true);
       adopt(saved);
+      if (action === 'apply-time') setParametersOpen(false);
       markSaved();
       if (action === 'submit') {
         push({
@@ -359,10 +364,19 @@ function StockDocumentDraft({
       </>}
       <div className="poster-document-panel poster-document-fields space-y-3">
         <DocumentHeader document={document} warehouse={warehouse} editingStockDate={supportsStockDate} />
-        {!writeoff && <InventoryTimingFields value={timing} onChange={setTiming} onValidityChange={setTimingValid} disabled={pending || stale} />}
-        {supportsStockDate && <InventoryTimingFields value={timing} onChange={setTiming}
+        {!writeoff && <div className="border-t border-border pt-3">
+          <button type="button" className="text-sm text-primary" aria-expanded={parametersOpen}
+            onClick={() => setParametersOpen((open) => !open)}>Изменить параметры</button>
+          {parametersOpen && <div className="mt-4 space-y-3">
+            <InventoryTimingFields value={timing} onChange={setTiming} onValidityChange={setTimingValid} disabled={pending || stale} />
+            <button type="button" className="btn-secondary btn-md" disabled={pending || stale || !timingReady || invalidCount || !previewNeedsSave}
+              onClick={() => void save('apply-time')}>Применить параметры</button>
+            <p className="text-xs text-text-muted">Учётные остатки пересчитаются. Введённые фактические количества сохранятся.</p>
+          </div>}
+        </div>}
+        {supportsStockDate && <StockOperationDateField value={timing} onChange={setTiming}
           onValidityChange={setTimingValid} disabled={pending || stale}
-          operationLabel={document.kind === 'transfer' ? 'Дата перемещения' : 'Дата списания'} />}
+          label={document.kind === 'transfer' ? 'Дата и время перемещения' : 'Дата и время списания'} />}
         {needsReason && (
           <DocumentField label="Причина списания">
             <Select
@@ -476,7 +490,7 @@ function StockDocumentDraft({
         ? canApprove ? '«Сохранить» проведёт документ и изменит остатки. Черновик сохраняет данные без изменения остатков.' : 'Черновик не меняет остатки. Они изменятся после утверждения документа.'
         : savedCountedAt ? `Черновик не меняет остатки. Учётные и фактические количества сравниваются на ${inventoryTimeDisplay(savedCountedAt)} по времени Бишкека. Более поздние движения сохраняются.`
           : 'Черновик не меняет остатки. Учётные остатки показываются на текущий момент; перед проведением проверьте, что введённые фактические количества актуальны.'}</p>
-      {!writeoff && counted.length > 0 && (
+      {!writeoff && error.includes('проведена другая инвентаризация') && (
         <details className="poster-advanced">
           <summary className="cursor-pointer text-sm text-primary">Повторный подсчёт после другой инвентаризации</summary>
           <p className="mt-3 max-w-2xl text-sm text-text-secondary">Если эти продукты уже проверили другой инвентаризацией, пересчитайте их и внесите свежие фактические остатки. Затем сохраните повторный подсчёт. Это обновит черновик; остатки изменятся только при завершении.</p>
@@ -486,13 +500,14 @@ function StockDocumentDraft({
       <DocumentFooter total={writeoff && can('actions.warehouseCosts') ? historical ? 'Стоимость после проведения' : document.kind === 'writeoff'
         ? writeoffLines.calculating ? 'Итого: расчёт…' : writeoffLines.total == null ? 'Итого: стоимость неполная' : `Итого: ${balanceMoney(writeoffLines.total)}`
         : total == null ? 'Итого: стоимость неполная' : `Итого: ${balanceMoney(Math.abs(total))}` : !writeoff ? `Посчитано: ${rows.filter((row) => row.quantity !== null).length} из ${items.length}` : undefined}>
+        {previewNeedsSave && <span role="status" className="self-center text-sm text-text-muted">Примените параметры</span>}
         <button
           type="button"
           className="btn-primary btn-md"
-          disabled={pending || stale || !sourceReady || !timingReady || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess)) || (!writeoff && (invalidCount || (!previewNeedsSave && !canSubmit)))}
-          onClick={() => void save(previewNeedsSave ? 'apply-time' : 'submit')}
+          disabled={pending || stale || !sourceReady || !timingReady || previewNeedsSave || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess)) || (!writeoff && (invalidCount || !canSubmit))}
+          onClick={() => void save('submit')}
         >
-          {timingChanged ? 'Применить время проверки' : historicalScopeChanged ? 'Обновить расчёт' : canApprove
+          {canApprove
             ? document.kind === 'inventory'
               ? 'Провести инвентаризацию'
               : 'Сохранить'
@@ -501,7 +516,7 @@ function StockDocumentDraft({
         <button
           type="button"
           className="btn-secondary btn-md"
-          disabled={pending || stale || !sourceReady || !timingReady || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess))}
+          disabled={pending || stale || !sourceReady || !timingReady || previewNeedsSave || (document.kind === 'writeoff' && (writeoffLines.calculating || !writeoffLines.options.isSuccess))}
           onClick={() => void save('save')}
         >
           Сохранить черновик
@@ -587,6 +602,7 @@ function StockDocumentReview({
         inventoryId={document.kind === 'inventory' ? document.id : undefined}
       />}
       {showAvailability && <DocumentStockWarnings shortages={shortages} />}
+      {document.reversalBlockedReason && <p role="status" className="rounded-lg bg-background p-3 text-sm text-text-secondary">{document.reversalBlockedReason}</p>}
       {error && (
         <p role="alert" className="text-sm text-danger">
           {error}
@@ -627,7 +643,7 @@ function StockDocumentReview({
             <button
               type="button"
               className="btn-secondary btn-md"
-              disabled={pending}
+              disabled={pending || !!document.reversalBlockedReason}
               onClick={() => void change('reverse')}
             >
               Отменить проведение

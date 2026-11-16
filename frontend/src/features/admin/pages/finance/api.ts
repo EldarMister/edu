@@ -54,6 +54,10 @@ export interface PayrollAccrual {
   month: string;
   amount: number;
   paidAmount: number;
+  supplemental?: boolean;
+  revision: number;
+  voidedAt?: string | null;
+  voidReason?: string | null;
   note?: string;
   createdAt: string;
 }
@@ -74,9 +78,11 @@ interface FinanceData {
   entries: FinanceEntry[];
   payroll: PayrollAccrual[];
   flow: CashFlow | null;
-  employees: (Choice & { role: string })[];
+  employees: (Choice & { role: string; adminAccess?: boolean })[];
   positions: Choice[];
   canManage: boolean;
+  canViewAll: boolean;
+  canEditPermissions: boolean;
 }
 export interface CashShift {
   id: string;
@@ -86,6 +92,7 @@ export interface CashShift {
   closedByName?: string | null;
   openedAt: string;
   closedAt?: string | null;
+  closingComment?: string | null;
   openingAmount: number;
   expectedAmount: number;
   actualAmount: number | null;
@@ -105,10 +112,16 @@ const entrypoint = '/admin/finance';
 const shiftEndpoint = '/admin/cash-shifts';
 export const cashShiftKey = ['cash-shifts'] as const;
 
+export interface FinanceAccess {
+  allowed: boolean;
+  level: 'none' | 'limited' | 'view' | 'full';
+  canViewAll: boolean;
+  canManage: boolean;
+}
 export function useFinanceAccess(enabled: boolean) {
   return useQuery({
     queryKey: [...financeKey, 'access'],
-    queryFn: async () => (await api.get<{ allowed: boolean }>(entrypoint + '/access')).data,
+    queryFn: async () => (await api.get<FinanceAccess>(entrypoint + '/access')).data,
     enabled, retry: false,
   });
 }
@@ -145,8 +158,25 @@ type TransactionValues = {
   note?: string;
   occurredAt?: string;
 };
-type AccrualInput = { userId: string; month: string; amount: number; note?: string; requestKey: string };
+type AccrualInput = { userId: string; month: string; amount: number; note?: string; requestKey: string; supplemental?: boolean };
 type PayoutInput = { accountId: string; amount: number; note?: string; requestKey: string };
+
+export interface SalaryPaymentRecord {
+  id: string; amount: number; occurredAt: string; createdAt: string; accountName: string; actorName: string;
+  note: string | null; reversedAt: string | null; reversalOf: string | null;
+  reversible: boolean; reverseBlockedReason: string | null;
+}
+export interface SalaryAccrualDetails extends PayrollAccrual {
+  createdByName: string;
+  history: { revision: number; type: 'edit' | 'cancel'; at: string; actorName: string; reason: string;
+    before: { amount: number; note: string | null }; after: { amount: number; note: string | null } }[];
+  payments: SalaryPaymentRecord[];
+}
+export function useSalaryAccrual(id: string) {
+  return useQuery({ queryKey: [...financeKey, 'salary-accrual', id],
+    queryFn: async () => (await api.get<SalaryAccrualDetails>(entrypoint + '/payroll/' + id)).data });
+}
+type SalaryCorrection = { requestKey: string; revision: number; reason: string };
 
 export function useFinanceCategoryRemoval(id: string) {
   return useQuery({
@@ -160,7 +190,9 @@ export function useFinanceCategoryRemoval(id: string) {
 
 export function useFinanceWrites() {
   const cache = useQueryClient();
-  const onSuccess = () => cache.invalidateQueries({ queryKey: financeKey });
+  const onSuccess = () => Promise.all([
+    cache.invalidateQueries({ queryKey: financeKey }), cache.invalidateQueries({ queryKey: ['audit'] }),
+  ]);
   return {
     saveAccount: useMutation({
       mutationFn: ({ id, values }: { id?: string; values: AccountInput }) => {
@@ -168,7 +200,7 @@ export function useFinanceWrites() {
         return api.patch(entrypoint + '/accounts/' + id, {
           name: values.name, isDefault: values.isDefault, openingBalance: values.openingBalance,
         });
-      }, onSuccess,
+      }, onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
     }),
     archiveAccount: useMutation({
       mutationFn: (id: string) => api.delete(entrypoint + '/accounts/' + id),
@@ -195,7 +227,8 @@ export function useFinanceWrites() {
       onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
     }),
     postTransaction: useMutation({
-      mutationFn: (values: TransactionValues & { requestKey: string }) => api.post(entrypoint + '/transactions', values), onSuccess,
+      mutationFn: (values: TransactionValues & { requestKey: string }) => api.post(entrypoint + '/transactions', values),
+      onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
     }),
     editTransactionDetails: useMutation({
       mutationFn: ({ id, values }: { id: string; values: TransactionValues }) => api.patch(entrypoint + '/transactions/' + id + '/details', values),
@@ -216,7 +249,21 @@ export function useFinanceWrites() {
     }),
     payout: useMutation({
       mutationFn: ({ id, values }: { id: string; values: PayoutInput }) => api.post(entrypoint + '/payroll/' + id + '/pay', values),
-      onSuccess,
+      onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
+      onError: onSuccess,
+    }),
+    editAccrual: useMutation({
+      mutationFn: ({ id, ...values }: SalaryCorrection & { id: string; amount: number; note?: string }) =>
+        api.patch(entrypoint + '/payroll/' + id, values), onSuccess, onError: onSuccess,
+    }),
+    cancelAccrual: useMutation({
+      mutationFn: ({ id, ...values }: SalaryCorrection & { id: string }) => api.post(entrypoint + '/payroll/' + id + '/cancel', values), onSuccess, onError: onSuccess,
+    }),
+    reverseSalaryPayment: useMutation({
+      mutationFn: ({ id, paymentId, reason }: { id: string; paymentId: string; reason: string }) =>
+        api.post(entrypoint + '/payroll/' + id + '/payments/' + paymentId + '/reverse', { reason }),
+      onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
+      onError: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
     }),
   };
 }
@@ -226,6 +273,7 @@ export interface PayrollStaffRow {
   name: string;
   positionId: string | null;
   position: string;
+  timeTrackingAvailable: boolean;
   hours: number | null;
   shifts: number | null;
   days: number | null;
@@ -241,6 +289,8 @@ export interface PayrollStaffRow {
   shiftCommission: number;
   estimate: number;
   available: number;
+  baseAccrued: number;
+  supplementalAccrued: number;
   accrued: number;
   paid: number;
   due: number;
@@ -269,15 +319,5 @@ export function useCashShifts(enabled = true, endpoint = shiftEndpoint, period?:
     queryKey: [...cashShiftKey, endpoint, period],
     queryFn: async () => (await api.get<CashShifts>(endpoint, { params: period })).data,
     enabled, retry: false,
-  });
-}
-
-export function useCashShiftMutation(action: 'open' | 'close', endpoint = shiftEndpoint) {
-  const cache = useQueryClient();
-  return useMutation({
-    mutationFn: (values: { amount: number; shiftId?: string; expectedAmount?: number }) => api.post(endpoint + '/' + action, values),
-    onSuccess: async () => {
-      await Promise.all([cache.invalidateQueries({ queryKey: cashShiftKey }), cache.invalidateQueries({ queryKey: financeKey })]);
-    },
   });
 }

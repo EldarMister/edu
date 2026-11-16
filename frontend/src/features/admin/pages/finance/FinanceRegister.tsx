@@ -9,7 +9,7 @@ export interface RegisterColumn {
   label: string;
   width?: string;
   numeric?: boolean;
-  sort?: { ascending: boolean; toggle: () => void };
+  sort?: { ascending?: boolean; toggle: () => void };
 }
 
 interface Cell {
@@ -126,9 +126,9 @@ export function FinanceRegister({
         </colgroup>
         <thead><tr>
           {visible.map(({ key, label, numeric, sort }) => <th scope="col" key={key} className={numeric ? 'finance-register-number text-right' : undefined}
-            aria-sort={sort ? sort.ascending ? 'ascending' : 'descending' : undefined}>
+            aria-sort={sort?.ascending == null ? undefined : sort.ascending ? 'ascending' : 'descending'}>
             {sort ? <button type="button" className="finance-register-sort" onClick={sort.toggle}>
-              {label}<span aria-hidden="true">{sort.ascending ? '▴' : '▾'}</span>
+              {label}<span aria-hidden="true">{sort.ascending == null ? '↕' : sort.ascending ? '▴' : '▾'}</span>
             </button> : label}
           </th>)}
           {showActions && <th scope="col"><span className="sr-only">Действия</span></th>}

@@ -29,7 +29,6 @@ export class WarehouseDocumentsController {
   }
 
   @Get('writeoff-options')
-  @RequirePermission('actions.warehouseWriteoff')
   writeoffOptions() { return this.documents.writeoffOptions(); }
 
   @Post('writeoff-preview')

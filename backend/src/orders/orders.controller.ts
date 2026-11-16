@@ -8,9 +8,11 @@ import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelOrderItemDto } from './dto/cancel-order-item.dto';
 import { ReplaceRejectedItemDto } from './dto/resolve-rejected-item.dto';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
 @Controller('orders')
+@RequirePermission('sections.orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 

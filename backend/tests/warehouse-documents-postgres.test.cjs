@@ -290,11 +290,11 @@ test('PostgreSQL: inventory context reconciles the counted warehouse and posting
       assert.equal((await docs.get(posted.id)).inventoryContext, undefined);
       assert.equal(await db.stockMovement.count({ where: { sourceId: posted.id, ingredientId: milk.id } }), 1);
       await move(milk, main, 100, 'purchase', 'purchase', new Date(posted.postedAt.getTime() + 1));
-      await docs.reverse(owner, last.id, 'Review previous count');
+      await assert.rejects(docs.reverse(owner, last.id, 'Review previous count'), /инвентаризация/);
       const postedWithContext = await docs.get(posted.id, true);
       assert.equal(postedWithContext.inventoryContext.cutoffAt.getTime(), posted.postedAt.getTime());
       assert.deepEqual(postedWithContext.inventoryContext.rows, draftWithContext.inventoryContext.rows,
-        'later stock and reversals cannot change the closed period; own correction is never counted');
+        'later stock and attempted reversal cannot change the closed period; own correction is never counted');
     });
   } finally {
     await db.warehouseDocument.deleteMany({ where: { cafeId: cafe.id } });

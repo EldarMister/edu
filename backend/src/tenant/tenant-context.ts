@@ -30,7 +30,7 @@ export function setCafeId(cafeId: string | null | undefined): void {
 
 /** Все таблицы, привязанные к кафе (имеют колонку cafe_id). Cafe — НЕ тенант. */
 const TENANT_MODELS = new Set<string>([
-  'User', 'StaffPosition', 'StaffPositionSalaryRate', 'Hall', 'Table', 'Category', 'Dish', 'SetComponent', 'DishVariant',
+  'User', 'StaffPosition', 'StaffPositionSalaryRate', 'EmployeeSalaryRate', 'Hall', 'Table', 'Category', 'Dish', 'SetComponent', 'DishVariant',
   'Order', 'OrderAction', 'WaiterShift', 'ShiftCashReport', 'CashShift', 'OrderItem',
   'OrderItemSetComponent', 'Payment', 'KitchenEvent', 'PenaltyReward', 'Incident',
   'AuditLog', 'Settings', 'PushSubscription', 'ReceiptPrintRequest',

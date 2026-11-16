@@ -7,6 +7,8 @@ import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { usePublicSettings, resolveQrSrc } from '@/features/settings/api';
+import { CashShiftForm, useCashShiftState } from '@/features/settings/CashShiftControls';
+import { usePermissions } from '@/hooks/usePermissions';
 import { beep } from '@/lib/sound';
 import { usePay, fetchReceipt, useCreateReceiptPrintRequest } from './api';
 import { useReceiptPrint } from './receiptPrint';
@@ -42,6 +44,9 @@ export function PaymentModal({
   const beginPrint = useReceiptPrint((s) => s.begin);
   const push = useNotifications((s) => s.push);
   const settings = usePublicSettings();
+  const { canAction } = usePermissions();
+  const mayOpenCashShift = canAction('financeCashShifts');
+  const cashShift = useCashShiftState(open && Number(order.finalAmount) > 0 && mayOpenCashShift);
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState<Receipt | null>(null);
@@ -283,6 +288,10 @@ export function PaymentModal({
         </div>
       </Modal>
     );
+  }
+
+  if (open && total > 0 && mayOpenCashShift && cashShift.data?.enabled && !cashShift.data.current && !pay.isPending) {
+    return <CashShiftForm current={null} onClose={onClose} onComplete={() => setError('')} />;
   }
 
   // Шаг 1 — выбор способа оплаты

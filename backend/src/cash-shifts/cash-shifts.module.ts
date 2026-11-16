@@ -1,14 +1,19 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
-import { CashShift, Prisma, Role } from '@prisma/client';
+import { CashShift, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import { IsBoolean, IsISO8601, IsIn, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min } from 'class-validator';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { AuditModule } from '../audit/audit.module';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { hasPermission } from '../common/permissions';
-import { ensureCollectionAccount, ensureFinanceAccounts, lockFinance } from '../finance/finance-ledger';
+import { hasPermission, resolvePermissions } from '../common/permissions';
+import { projectWorkspaceUser, type Workspace } from '../common/workspace-access';
+import { canManageFinance, canViewFinance } from '../finance/finance-access';
+import { assertDrawerBalance, ensureCollectionAccount, ensureFinanceAccounts, lockFinance } from '../finance/finance-ledger';
 import { PrismaService } from '../prisma/prisma.service';
+import { SERVER_EVENTS } from '../realtime/events';
+import { EventsGateway } from '../realtime/events.gateway';
+import { CLOSED_ORDER_STATUSES } from '../waiter-shifts/waiter-shifts.service';
 import { warehouseDateRange } from '../warehouse/report-range';
 
 class OpenCashShiftDto {
@@ -24,6 +29,15 @@ class CloseCashShiftDto extends OpenCashShiftDto {
 
   @IsNumber({ maxDecimalPlaces: 2 })
   expectedAmount!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  closingComment?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  closeEmployeeShifts?: boolean;
 }
 
 class CashShiftsSettingDto {
@@ -113,6 +127,26 @@ function serialize(shift: CashShift, expected = shift.expectedAmount ?? shift.op
 type Db = Prisma.TransactionClient;
 type CashOperation = CashOperationDto;
 
+async function closeStaffShifts(db: Db, cafeId: string, endedAt: Date) {
+  const active = await db.waiterShift.findMany({
+    where: { cafeId, status: WaiterShiftStatus.active, startedAt: { lte: endedAt }, waiter: { cafeId } },
+    select: { id: true },
+  });
+  if (!active.length) return [];
+  const ids = active.map(({ id }) => id);
+  const updated = await db.waiterShift.updateMany({
+    where: {
+      cafeId, id: { in: ids }, status: WaiterShiftStatus.active,
+      waiter: { cafeId, orders: { none: { cafeId, status: { notIn: CLOSED_ORDER_STATUSES } } } },
+    },
+    data: { endedAt, status: WaiterShiftStatus.closed },
+  });
+  if (updated.count !== ids.length) {
+    throw new ConflictException('Сначала закройте открытые заказы сотрудников или снимите галочку «Закрыть смены сотрудников».');
+  }
+  return db.waiterShift.findMany({ where: { cafeId, id: { in: ids } } });
+}
+
 async function findShift(db: Db, cafeId: string, id: string) {
   const shift = await db.cashShift.findFirst({ where: { cafeId, id } });
   if (!shift) throw new NotFoundException('Кассовая смена не найдена');
@@ -171,10 +205,9 @@ async function storeOperation(db: Db, shift: CashShift, actorId: string, input: 
   const data = { kind: transfer ? 'transfer' as const : input.kind as 'income' | 'expense',
     amount, categoryId, counterpartyAccountId: destination, occurredAt, note: input.note?.trim() || null };
   const pendingCashShift = !shift.closedAt;
-  if (pendingCashShift && amount.isNegative()) {
+  if (pendingCashShift) {
     const before = previous ? await db.financeEntry.findUnique({ where: { id: previous.id }, select: { amount: true } }) : null;
-    const remaining = shift.openingAmount.add(await drawerDelta(db, shift)).sub(before?.amount ?? 0).add(amount);
-    if (remaining.isNegative()) throw new BadRequestException('Сумма больше остатка наличных в кассе');
+    await assertDrawerBalance(db, shift, amount.sub(before?.amount ?? 0));
   }
   const entry = previous
     ? await db.financeEntry.update({ where: { id: previous.id }, data })
@@ -194,7 +227,7 @@ async function storeOperation(db: Db, shift: CashShift, actorId: string, input: 
 
 @Injectable()
 export class CashShiftsService {
-  constructor(private readonly db: PrismaService, private readonly audit: AuditService) {}
+  constructor(private readonly db: PrismaService, private readonly audit: AuditService, private readonly events: EventsGateway) {}
 
   async list(cafeId: string, includeHistory: boolean, period: CashShiftHistoryDto = {}) {
     const openedAt = includeHistory ? warehouseDateRange(period.from, period.to) : undefined;
@@ -317,7 +350,7 @@ export class CashShiftsService {
         throw new ConflictException('Операция с таким запросом уже была удалена');
       }
       if (atRegister && (shift.closedAt || input.occurredAt)) throw new ConflictException('Операцию можно провести только в открытой смене');
-      const categoryId = await cashCategory(db, cafeId, input, actor.role !== Role.OWNER);
+      const categoryId = await cashCategory(db, cafeId, input, actor.role !== Role.OWNER && !canManageFinance(actor));
       return storeOperation(db, shift, actor.id, input, categoryId, sourceKey, cashOperationDate(shift, input));
     });
   }
@@ -338,11 +371,12 @@ export class CashShiftsService {
       }
       if (input) {
         const categoryId = input.categoryId === original.categoryId && input.kind === original.kind
-          ? original.categoryId : await cashCategory(db, cafeId, input, actor.role !== Role.OWNER);
+          ? original.categoryId : await cashCategory(db, cafeId, input, actor.role !== Role.OWNER && !canManageFinance(actor));
         const updated = await storeOperation(db, shift, actor.id, input, categoryId, original.sourceKey,
           cashOperationDate(shift, input, original.occurredAt), original);
         return { original, updated };
       }
+      if (!shift.closedAt) await assertDrawerBalance(db, shift, original.amount.negated());
       const author = original.actorId ? await db.user.findFirst({ where: { id: original.actorId, cafeId }, select: { name: true } }) : null;
       await db.cashShiftDeletedOperation.create({ data: {
         id: original.id, cafeId, cashShiftId: shift.id, sourceKey: original.sourceKey, kind: original.kind, amount: original.amount,
@@ -370,6 +404,7 @@ export class CashShiftsService {
       const openingAmount = input.openingAmount == null ? before.openingAmount : new Prisma.Decimal(input.openingAmount);
       const actualAmount = input.actualAmount == null ? before.actualAmount : new Prisma.Decimal(input.actualAmount);
       const changedOpening = openingAmount.sub(before.openingAmount);
+      if (!before.closedAt) await assertDrawerBalance(db, before, changedOpening);
       if (!changedOpening.isZero()) {
         const adjustment = await db.financeEntry.findUnique({ where: { cafeId_sourceKey: { cafeId, sourceKey: openKey + id } } });
         await saveAdjustment(db, before, actor.id, 'open', (adjustment?.amount ?? new Prisma.Decimal(0)).add(changedOpening));
@@ -407,9 +442,20 @@ export class CashShiftsService {
     });
   }
 
-  async open(cafeId: string, actorId: string, amount: number) {
+  async open(cafeId: string, actorId: string, amount: number, workspace?: Workspace) {
     return this.db.$transaction(async (tx) => {
       await lockFinance(tx, cafeId);
+      const actor = await tx.user.findFirst({ where: { cafeId, id: actorId },
+        select: { role: true, isActive: true, permissions: true, position: { select: { role: true, permissions: true } } } });
+      if (!actor?.isActive) {
+        throw new ForbiddenException('Нет доступа к кассовым сменам');
+      }
+      const permissions = resolvePermissions(actor.role,
+        actor.position?.role === actor.role ? actor.position.permissions : actor.permissions);
+      const projected = projectWorkspaceUser({ id: actorId, cafeId, role: actor.role, permissions, name: '', phone: '' }, workspace);
+      if (!canWriteCashShifts(projected)) {
+        throw new ForbiddenException('Нет доступа к кассовым сменам');
+      }
       if (!(await cashShiftEnabled(tx, cafeId))?.cashShiftsEnabled) throw new BadRequestException('Кассовые смены выключены');
       if (await tx.cashShift.findFirst({ where: { cafeId, closedAt: null } })) {
         throw new ConflictException('Кассовая смена уже открыта');
@@ -427,13 +473,18 @@ export class CashShiftsService {
   }
 
   async close(cafeId: string, actorId: string, input: CloseCashShiftDto) {
-    return this.db.$transaction(async (tx) => {
+    const closingComment = input.closingComment?.trim() || null;
+    const closeEmployeeShifts = input.closeEmployeeShifts ?? false;
+    const { shift: result, closedShifts } = await this.db.$transaction(async (tx) => {
       await lockFinance(tx, cafeId);
       const shift = await tx.cashShift.findFirst({ where: { cafeId, id: input.shiftId } });
       if (!shift) throw new ConflictException('Смена изменилась. Обновите список смен');
       const actualAmount = new Prisma.Decimal(input.amount);
       if (shift.closedAt) {
-        if (shift.closedById === actorId && shift.actualAmount?.eq(actualAmount) && shift.expectedAmount?.eq(input.expectedAmount)) return serialize(shift);
+        if (shift.closedById === actorId && shift.actualAmount?.eq(actualAmount) && shift.expectedAmount?.eq(input.expectedAmount)
+          && shift.closingComment === closingComment && shift.closeEmployeeShifts === closeEmployeeShifts) {
+          return { shift: serialize(shift), closedShifts: [] };
+        }
         throw new ConflictException('Кассовая смена уже закрыта');
       }
       const expectedAmount = shift.openingAmount.add(await drawerDelta(tx, shift));
@@ -442,13 +493,24 @@ export class CashShiftsService {
       }
       const difference = actualAmount.sub(expectedAmount);
       const closedAt = new Date();
+      const closedShifts = closeEmployeeShifts ? await closeStaffShifts(tx, cafeId, closedAt) : [];
       const updated = await tx.cashShift.update({ where: { id: shift.id },
-        data: { closedAt, closedById: actorId, expectedAmount, actualAmount, difference } });
+        data: { closedAt, closedById: actorId, expectedAmount, actualAmount, difference, closingComment, closeEmployeeShifts } });
       await saveAdjustment(tx, updated, actorId, 'close', difference);
       await tx.financeEntry.updateMany({ where: { cafeId, cashShiftId: shift.id, pendingCashShift: true }, data: { pendingCashShift: false } });
-      return serialize(updated);
+      return { shift: serialize(updated), closedShifts };
     });
+    for (const staffShift of closedShifts) {
+      this.events.emitToWaiter(staffShift.waiterId, SERVER_EVENTS.WAITER_SHIFT_ENDED, staffShift);
+      this.events.emitToAdmin(SERVER_EVENTS.WAITER_SHIFT_ENDED, staffShift);
+    }
+    return result;
   }
+}
+
+function canWriteCashShifts(user: AuthUser) {
+  // The finance section governs the admin workspace. A terminal keeps its separate cashier permission.
+  return canViewFinance(user) ? canManageFinance(user) : hasPermission(user.permissions, 'actions.financeCashShifts');
 }
 
 @Controller(['cash-shifts', 'admin/cash-shifts'])
@@ -456,8 +518,9 @@ export class CashShiftsService {
 class CashShiftsController {
   constructor(private readonly shifts: CashShiftsService) {}
 
-  private access(user: AuthUser) {
-    if (!user.cafeId || (user.role !== Role.OWNER && !hasPermission(user.permissions, 'actions.financeCashShifts'))) {
+  private access(user: AuthUser, write = false) {
+    const allowed = write ? canWriteCashShifts(user) : canViewFinance(user) || hasPermission(user.permissions, 'actions.financeCashShifts');
+    if (!user.cafeId || !allowed) {
       throw new ForbiddenException('Нет доступа к кассовым сменам');
     }
     return user.cafeId;
@@ -476,47 +539,51 @@ class CashShiftsController {
 
   @Get('operation-categories')
   operationCategories(@CurrentUser() user: AuthUser) {
-    return this.shifts.operationCategories(this.access(user), user.role !== Role.OWNER);
+    return this.shifts.operationCategories(this.access(user), !canViewFinance(user));
   }
 
   @Post(':id/operations')
   createOperation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() input: CreateCashOperationDto) {
-    return this.shifts.createOperation(this.access(user), user, id, input);
+    return this.shifts.createOperation(this.access(user, true), user, id, input);
   }
 
   @Patch(':id/operations/:entryId')
   @Roles(Role.OWNER, Role.ADMIN)
   updateOperation(@CurrentUser() user: AuthUser, @Param('id') id: string,
     @Param('entryId') entryId: string, @Body() input: CashOperationDto) {
-    return this.shifts.updateOperation(this.access(user), user, id, entryId, input);
+    return this.shifts.updateOperation(this.access(user, true), user, id, entryId, input);
   }
 
   @Delete(':id/operations/:entryId')
   @Roles(Role.OWNER, Role.ADMIN)
   deleteOperation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('entryId') entryId: string) {
-    return this.shifts.updateOperation(this.access(user), user, id, entryId);
+    return this.shifts.updateOperation(this.access(user, true), user, id, entryId);
   }
 
   @Patch(':id/counts')
   @Roles(Role.OWNER, Role.ADMIN)
   correctCashCount(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() input: CashCountDto) {
-    return this.shifts.correctCashCount(this.access(user), user, id, input);
+    return this.shifts.correctCashCount(this.access(user, true), user, id, input);
   }
 
   @Patch('setting')
   @Roles(Role.OWNER)
   setting(@CurrentUser() user: AuthUser, @Body() body: CashShiftsSettingDto) {
-    return this.shifts.setting(this.access(user), body.enabled);
+    return this.shifts.setting(this.access(user, true), body.enabled);
   }
 
   @Post('open')
   open(@CurrentUser() user: AuthUser, @Body() body: OpenCashShiftDto) {
-    return this.shifts.open(this.access(user), user.id, body.amount);
+    return this.shifts.open(this.access(user, true), user.id, body.amount, user.workspace);
   }
 
   @Post('close')
   close(@CurrentUser() user: AuthUser, @Body() body: CloseCashShiftDto) {
-    return this.shifts.close(this.access(user), user.id, body);
+    const cafeId = this.access(user, true);
+    if (body.closeEmployeeShifts && user.role !== Role.OWNER && !hasPermission(user.permissions, 'actions.closeShift')) {
+      throw new ForbiddenException('Нет доступа к закрытию смен сотрудников');
+    }
+    return this.shifts.close(cafeId, user.id, body);
   }
 }
 

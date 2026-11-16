@@ -23,6 +23,7 @@ import { categoryAccepts, categoryAncestors, categoryOptions } from './category-
 import { entryCategoryLabel, entryLabel, entryLabels, financeDateTime, financeDay, financeMoney } from './finance-format';
 import type { FinanceView } from './navigation';
 import { PayrollRegister } from './PayrollRegister';
+import { SalaryAccrualCard } from './SalaryAccrualCard';
 
 const nameSort = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, 'ru');
 const filterByName = (value: string, term: string) => value.toLocaleLowerCase('ru').includes(term.trim().toLocaleLowerCase('ru'));
@@ -41,13 +42,13 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   start.setUTCMonth(start.getUTCMonth() - 2);
   const [{
     financeFrom: from, financeTo: to, financeSearch: search, financeScope: scope,
-    financeKind: kind, financeCategory: categoryId, payrollPosition, payrollFrom, payrollTo,
+    financeKind: kind, financeCategory: categoryId, payrollPosition, payrollMonth,
   }, setFilters] = usePageFilters({
     financeFrom: view === 'cashFlow' ? start.toISOString().slice(0, 10) : today.slice(0, 7) + '-01', financeTo: today, financeSearch: '',
     financeScope: '', financeKind: '', financeCategory: '', payrollPosition: '',
-    payrollFrom: financeDay(new Date(Date.now() - 30 * 86400000)), payrollTo: today,
+    payrollMonth: today.slice(0, 7),
   });
-  const month = payrollTo.slice(0, 7);
+  const month = /^\d{4}-(0[1-9]|1[0-2])$/.test(payrollMonth) && payrollMonth <= today.slice(0, 7) ? payrollMonth : today.slice(0, 7);
   const transactionPeriod = useListPeriod('financeTransaction', 'all');
   const { editTransaction } = useFinanceWrites();
   const [ascending, setAscending] = useState(view !== 'transactions');
@@ -62,7 +63,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
     month: view === 'payroll' ? month : undefined,
     accountIds: view === 'cashFlow' ? scope || undefined : undefined,
   }, rangeValid);
-  const salary = usePayroll({ from: payrollFrom, to: payrollTo }, view === 'payroll');
+  const salary = usePayroll(month, view === 'payroll');
   const [salaryHistoryId, setSalaryHistory] = useState<string | null>(null);
   const [reversingEntryId, setReversingEntryId] = useState<string | null>(null);
   const [archivingAccount, setArchivingAccount] = useState<FinanceAccount | null>(null);
@@ -78,6 +79,10 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
 
   const transactionEditor = view === 'transactions' && editor?.type === 'financeTransaction' ? editor : null;
   if (data && editor && !transactionEditor) {
+    if (data.canViewAll && view === 'payroll' && editor.type === 'financeAccrualDetail' && editor.id) {
+      return <SalaryAccrualCard id={editor.id} onClose={closeEditor} canEdit={data.canManage}
+        onPay={() => openEditor({ type: 'financePayout', id: editor.id })} canPay={data.canManage && data.accounts.length > 0} />;
+    }
     if (data.canManage) {
       if (view === 'accounts' && editor.type === 'financeAccountTrash') return <AccountTrashPage onClose={closeEditor} />;
       if (view === 'accounts' && editor.type === 'financeAccount') {
@@ -87,16 +92,20 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
       if (view === 'categories' && editor.type === 'financeCategory') {
         const category = data.categories.find(({ id }) => id === editor.id);
         if (!editor.id || category) return <CategoryForm key={editor.id ?? 'new'} category={category} categories={data.categories}
-          employees={data.employees.filter(({ role }) => role === 'ADMIN')} positions={data.positions} onClose={closeEditor} />;
+          employees={data.employees.filter(({ adminAccess }) => adminAccess)} positions={data.positions}
+          canEditPermissions={data.canEditPermissions} onClose={closeEditor} />;
       }
       if (view === 'payroll' && editor.type === 'financeAccrual') {
-        return <AccrualForm key={(editor.id ?? 'new') + (editor.action ?? '')} employees={data.employees}
-          initialMonth={month} initialUser={editor.id} calculated={editor.action === 'calculated'} onClose={closeEditor} />;
+        const employees = new Map(data.employees.map(({ id, name }) => [id, { id, name }]));
+        for (const row of salary.data?.staff ?? []) employees.set(row.userId, { id: row.userId, name: row.name });
+        return <AccrualForm key={(editor.id ?? 'new') + (editor.action ?? '')} employees={[...employees.values()]}
+          initialMonth={month} initialUser={editor.id}
+          calculated={editor.action === 'calculated'} supplemental={editor.action === 'bonus'} onClose={closeEditor} />;
       }
       if (view === 'payroll' && editor.type === 'financePayout') {
         const accrual = salary.data?.records.find(({ id }) => id === editor.id);
         if (salary.isPending) return <EditorPage title="Выплата зарплаты" onClose={closeEditor}><QueryState pending /></EditorPage>;
-        if (accrual && accrual.paidAmount < accrual.amount && data.accounts.length) {
+        if (accrual && !accrual.voidedAt && accrual.paidAmount < accrual.amount && data.accounts.length) {
           return <PayoutForm key={accrual.id} accounts={data.accounts} accrual={accrual} onClose={closeEditor} />;
         }
       }
@@ -144,7 +153,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
           </button>
           {addButton('Добавить счёт', 'financeAccount')}
         </>}
-        totals={data.canManage ? { name: { value: 'Итого' }, balance: { value: total, display: financeMoney(total) } } : undefined}
+        totals={data.canViewAll ? { name: { value: 'Итого' }, balance: { value: total, display: financeMoney(total) } } : undefined}
         rows={accounts.map((account) => ({ id: account.id, values: {
           name: { value: account.name, display: <div className="flex flex-wrap items-center gap-2">
             {account.name}
@@ -154,11 +163,11 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
           type: { value: account.type === 'cash' ? 'Наличные' : 'Безналичный счёт' },
           balance: { value: account.balance, display: <span className={account.balance == null || account.balance === 0 ? 'text-text-muted'
             : account.balance < 0 ? 'text-danger' : undefined}>{financeMoney(account.balance)}</span> },
-        }, action: data.canManage && <div className="flex justify-end gap-3">
-          <EditButton name={account.name} onClick={() => openEditor({ type: 'financeAccount', id: account.id })} />
+        }, action: data.canViewAll && <div className="flex justify-end gap-3">
+          {data.canManage && <EditButton name={account.name} onClick={() => openEditor({ type: 'financeAccount', id: account.id })} />}
           <Link className="text-primary text-base" title="Движение денег" aria-label={'Движение денег: ' + account.name}
             to={{ search: new URLSearchParams({ section: 'finance', view: 'cashFlow', financeScope: account.id }).toString() }}>→</Link>
-          {!account.isDefault && !account.isCollection && <FinanceRowMenu label={account.name} action="Удалить"
+          {data.canManage && !account.isDefault && !account.isCollection && <FinanceRowMenu label={account.name} action="Удалить"
             onAction={() => setArchivingAccount(account)} />}
         </div> }))}
         empty="Счета не найдены" />
@@ -177,13 +186,13 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
       edit={data.canManage ? (id) => openEditor({ type: 'financeCategory', id }) : undefined} />;
   }
 
-  if (view === 'payroll') return <PayrollRegister report={salary} from={payrollFrom} to={payrollTo}
-    changePeriod={(period) => { setFilters({ payrollFrom: period.from, payrollTo: period.to }); setSalaryHistory(null); }}
+  if (view === 'payroll') return <PayrollRegister report={salary} month={month}
+    changeMonth={(value) => { setFilters({ payrollMonth: value }); setSalaryHistory(null); }}
     search={search} changeSearch={setSearch} position={payrollPosition}
     changePosition={(value) => setFilters({ payrollPosition: value })}
     historyId={salaryHistoryId} changeHistory={setSalaryHistory}
-    canAccrue={data.canManage && data.employees.length > 0} canPay={data.canManage && data.accounts.length > 0}
-    openEditor={openEditor} />;
+    canAccrue={data.canManage && (data.employees.length > 0 || (salary.data?.staff.length ?? 0) > 0)} canPay={data.canManage && data.accounts.length > 0}
+    accounts={data.accounts} openEditor={openEditor} />;
 
   if (view === 'cashFlow') {
     const flow = data.flow;
@@ -225,7 +234,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
       { key: 'category', label: 'Категория', width: '15%' },
       { key: 'note', label: 'Комментарий' },
       { key: 'amount', label: 'Сумма', width: '14%', numeric: true },
-      ...(data.canManage ? [{ key: 'balance', label: 'Баланс', width: '14%', numeric: true }] : []),
+      ...(data.canViewAll ? [{ key: 'balance', label: 'Баланс', width: '14%', numeric: true }] : []),
       { key: 'account', label: 'Счёт', width: '29%' },
       { key: 'type', label: 'Тип' }, { key: 'actor', label: 'Сотрудник' },
     ]} defaultColumns={transactionColumns}
@@ -244,7 +253,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
           onClick={() => setFilters({ financeScope: '', financeKind: '', financeCategory: '', financeSearch: '' })}>Сбросить</button>}
       </>}
       tools={<>{transactionPeriod.filter}
-        {data.accounts.length > 0 && (data.canManage || data.categories.length > 0) && addButton('Добавить транзакцию', 'financeTransaction')}
+        {data.accounts.length > 0 && (data.canManage || !data.canViewAll && data.categories.length > 0) && addButton('Добавить транзакцию', 'financeTransaction')}
       </>}
       totals={showDeleted ? undefined : { date: { value: 'Итого' }, amount: { value: total, display: <span className={total < 0 ? 'text-danger' : undefined}>{financeMoney(total)}</span> } }}
       rows={transactions.map((entry, index) => {
@@ -294,7 +303,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
       ? <TransactionForm key={selectedEntry.id} entry={selectedEntry} accounts={data.accounts} categories={data.categories} owner onClose={closeEditor} />
       : <TransactionDetail key={selectedEntry.id} entry={selectedEntry} accounts={data.accounts}
         categories={data.categories} owner={data.canManage} onClose={closeEditor} />
-      : !transactionEditor.id && data.accounts.length > 0 ? <TransactionForm accounts={data.accounts}
+      : !transactionEditor.id && data.accounts.length > 0 && (data.canManage || !data.canViewAll) ? <TransactionForm accounts={data.accounts}
         categories={data.categories} owner={data.canManage} initialAccountId={scope} initialCategoryId={categoryId} onClose={closeEditor} />
       : <EditorPage title="Транзакция недоступна" onClose={closeEditor}>
         <p role="alert" className="text-text-secondary">Проверьте период или права доступа к транзакции.</p>

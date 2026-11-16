@@ -15,19 +15,19 @@ export class PurchasesController {
   constructor(private readonly purchases: PurchasesService) {}
 
   @Get('overview')
-  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
+  @RequirePermission('actions.warehouseCosts')
   overview(@Query('from') from?: string, @Query('to') to?: string, @Query('warehouseId') warehouseId?: string) {
     return this.purchases.overview({ from, to, warehouseId });
   }
 
   @Get()
-  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
+  @RequirePermission('actions.warehouseCosts')
   findAll(@Query() query: PurchaseListQuery) {
     return this.purchases.findAll(query);
   }
 
   @Get('export.xlsx')
-  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts', 'actions.exportReports')
+  @RequirePermission('actions.warehouseCosts', 'actions.exportReports')
   async exportXlsx(@Query() query: PurchaseExportQuery, @Res() response: Response) {
     const workbook = await this.purchases.exportXlsx(query);
     response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -36,14 +36,14 @@ export class PurchasesController {
   }
 
   @Get('last-prices')
-  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
+  @RequirePermission('actions.warehouseCosts')
   lastPrices(@Query('ingredientIds') ingredientIds?: string, @Query('warehouseId') warehouseId?: string,
     @Query('excludePurchaseId') excludePurchaseId?: string) {
     return this.purchases.lastPrices({ ingredientIds, warehouseId, excludePurchaseId });
   }
 
   @Get(':id')
-  @RequirePermission('actions.warehouseReceive', 'actions.warehouseCosts')
+  @RequirePermission('actions.warehouseCosts')
   findOne(@Param('id') id: string) {
     return this.purchases.findOne(id);
   }

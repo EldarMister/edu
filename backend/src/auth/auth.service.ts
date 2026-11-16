@@ -3,7 +3,8 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertCafeActive } from '../platform/cafe-status';
-import { resolvePermissions } from '../common/permissions';
+import { resolveUserPermissions } from '../common/permissions';
+import { workspaceAccess } from '../common/workspace-access';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './strategies/jwt.strategy';
 import { getJwtAccessSecret, getJwtRefreshSecret } from './jwt.config';
@@ -49,7 +50,8 @@ export class AuthService {
         cafeId: user.cafeId,
         prepStation: user.prepStation,
         positionId: user.position?.role === user.role ? user.positionId : null,
-        permissions: resolvePermissions(user.role, user.position?.role === user.role ? user.position.permissions : user.permissions),
+        permissions: resolveUserPermissions(user),
+        access: workspaceAccess(user.role, resolveUserPermissions(user)),
       },
     };
   }
@@ -89,7 +91,8 @@ export class AuthService {
       cafeId: user.cafeId,
       prepStation: user.prepStation,
       positionId: user.position?.role === user.role ? user.positionId : null,
-      permissions: resolvePermissions(user.role, user.position?.role === user.role ? user.position.permissions : user.permissions),
+      permissions: resolveUserPermissions(user),
+      access: workspaceAccess(user.role, resolveUserPermissions(user)),
     };
   }
 

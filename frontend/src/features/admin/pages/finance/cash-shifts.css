@@ -1,0 +1,36 @@
+.cash-shift-history-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 24px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border-block: 1px solid rgb(var(--edu-border));
+  background: rgb(var(--edu-background));
+}
+
+.cash-shift-history .poster-register-table {
+  min-width: 720px;
+}
+
+.cash-shift-history-row {
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.poster-workspace .cash-shift-history .cash-shift-history-row--warning {
+  background-color: rgb(var(--edu-warning) / .13);
+}
+
+.poster-workspace .cash-shift-history .cash-shift-history-row--short {
+  background-color: rgb(var(--edu-danger) / .16);
+}
+
+.poster-workspace .cash-shift-history .cash-shift-history-row--warning:hover {
+  background-color: rgb(var(--edu-warning) / .20);
+}
+
+.poster-workspace .cash-shift-history .cash-shift-history-row--short:hover {
+  background-color: rgb(var(--edu-danger) / .23);
+}

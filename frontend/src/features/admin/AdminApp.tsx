@@ -8,6 +8,7 @@ import type { SectionKey } from '@/types';
 import { useT } from '@/lib/i18n';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
+import { WorkShiftBanner } from '@/features/settings/WorkShiftBanner';
 import { SidebarProfile } from './components/SidebarProfile';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
@@ -29,11 +30,13 @@ import {
   IconMoney,
 } from './components/icons';
 import { StatisticsPage } from './pages/StatisticsPage';
-import { STATISTICS_NAV, statisticsView, type StatisticsView } from './pages/statisticsViews';
+import { STATISTICS_NAV, statisticsView } from './pages/statisticsViews';
 import { OrdersPage } from './pages/OrdersPage';
 import { TablesPage } from './pages/TablesPage';
 import { MenuCategoriesPage, MenuPage } from './pages/MenuPage';
 import { StaffPage } from './pages/StaffPage';
+import { StaffDirectory } from './pages/StaffDirectory';
+import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { PositionsPage } from './pages/PositionsPage';
 import { FinancePage } from './pages/finance/FinancePage';
 import { cashShiftKey, financeKey, useFinanceAccess } from './pages/finance/api';
@@ -42,7 +45,7 @@ import { AuditPage } from './pages/AuditPage';
 import { ReconciliationPage } from './pages/ReconciliationPage';
 import { ReceiptPrintsPage } from './pages/ReceiptPrintsPage';
 import { WarehouseSection } from './pages/warehouse/WarehouseSection';
-import { WAREHOUSE_NAV, MENU_NAV, warehouseViewInUse, type WarehouseView, type MenuView } from './pages/warehouse/navigation';
+import { WAREHOUSE_NAV, MENU_NAV, warehouseViewAllowed, warehouseViewInUse, type WarehouseView, type MenuView } from './pages/warehouse/navigation';
 import { useWarehousePolicy } from './pages/warehouse/settings-api';
 import { useWarehouseLocations } from './pages/warehouse/api';
 import { useWorkspaceScroll } from './pages/warehouse/workspace-route';
@@ -144,11 +147,11 @@ const SECTIONS: {
   { key: 'stats', label: 'Статистика', icon: IconStats, perm: 'statistics' },
   { key: 'finance', label: 'Финансы', icon: IconMoney },
   { key: 'orders', label: 'Заказы', icon: IconOrders, perm: 'orders' },
-  { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks', adminOnly: true },
+  { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks' },
   { key: 'tables', label: 'Столы', icon: IconTables, perm: 'tables' },
   { key: 'menu', label: 'Меню', icon: IconMenu, perm: 'menu' },
   { key: 'warehouse', label: 'Склад', icon: IconWarehouse, perm: 'warehouse' },
-  { key: 'staff', label: 'Персонал', icon: IconStaff, perm: 'staff' },
+  { key: 'staff', label: 'Доступ', icon: IconStaff, perm: 'staff' },
   { key: 'audit', label: 'Журнал', icon: IconJournal, perm: 'journal' },
   { key: 'reconcile', label: 'Сверка оплат', icon: IconReconcile, perm: 'paymentReconciliation' },
   { key: 'settings', label: 'Настройки', icon: IconSettings, perm: 'settings' },
@@ -164,14 +167,16 @@ export function AdminApp() {
   const qc = useQueryClient();
   const pushNotification = useNotifications((state) => state.push);
   const t = useT();
-  const { canSection, can } = usePermissions();
-  const isOwner = user?.role === 'OWNER';
-  const isAdmin = user?.role === 'ADMIN';
+  const permissions = usePermissions();
+  const { canSection, can } = permissions;
+  const isOwner = permissions.isOwner;
+  const isAdmin = permissions.effectiveRole === 'ADMIN';
   const financeAccess = useFinanceAccess(isAdmin);
   const mayPostFinances = isOwner || financeAccess.data?.allowed === true;
-  const mayUseCashShifts = can('actions.financeCashShifts');
+  const mayViewFinances = isOwner || financeAccess.data?.canViewAll === true;
+  const mayUseCashShifts = can('actions.financeCashShifts') || mayViewFinances;
   const financeNav = FINANCE_NAV.filter(({ key }) => key === 'cashShifts' ? mayUseCashShifts
-    : key === 'transactions' ? mayPostFinances : isOwner);
+    : key === 'transactions' ? mayPostFinances : mayViewFinances);
   const personnelNav = PERSONNEL_NAV.filter(({ key }) => key !== 'positions' || isOwner);
 
   // Раздел в меню: структурное ограничение (adminOnly) + право доступа к разделу.
@@ -198,9 +203,8 @@ export function AdminApp() {
   const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
   const menuView = (MENU_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'goods') as MenuView;
   const financeView = financeNav.find(({ key }) => key === route.get('view'))?.key ?? financeNav[0]?.key;
-  const staffView = personnelNav.find(({ key }) => key === route.get('view'))?.key ?? 'employees';
-  const posterWorkspace = section === 'menu' || section === 'warehouse' || section === 'finance';
-  function setStatsView(view: StatisticsView) { setRoute({ section: 'stats', view }); }
+  const staffView = ['employees', 'positions', 'worktime', 'waiter-report'].find((key) => key === route.get('view')) ?? 'employees';
+  const posterWorkspace = ['menu', 'warehouse', 'finance', 'staff', 'settings', 'tables'].includes(section);
   function setWarehouseView(view: WarehouseView) { setRoute({ section: 'warehouse', view }); }
   function setMenuView(view: MenuView) { setRoute({ section: 'menu', view }); }
   const edgeSwipe = useRef<{ x: number; y: number } | null>(null);
@@ -284,11 +288,7 @@ export function AdminApp() {
     logout();
   }
 
-  function go(s: Section) {
-    setCollapsedSection(null);
-    setSection(s);
-    setMobileNav(false);
-  }
+
 
   function handleAppTouchStart(event: TouchEvent<HTMLDivElement>) {
     const isDesktop = typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches;
@@ -347,14 +347,40 @@ export function AdminApp() {
     drawerPull.current = null;
   }
 
+  type NavItem = { key: string; label: string; section: Section; view?: string };
+  const itemsFor = (target: Section, items: readonly { key: string; label: string }[]): NavItem[] =>
+    items.map((item) => ({ ...item, section: target, view: item.key }));
+  const navGroups = [
+    { key: 'stats' as Section, label: 'Статистика', icon: IconStats, children: [
+      ...(canSection('statistics') ? itemsFor('stats', STATISTICS_NAV) : []),
+      ...(canSection('orders') ? [{ key: 'orders', label: 'Заказы и чеки', section: 'orders' as Section }] : []),
+      ...(canSection('checks') ? [{ key: 'receipts', label: 'Печать чеков', section: 'receipts' as Section }] : []),
+      ...(canSection('staff') ? itemsFor('staff', [{ key: 'worktime', label: 'Рабочие смены' }, { key: 'waiter-report', label: 'Продажи сотрудников' }]) : []),
+      ...(canSection('journal') ? [{ key: 'audit', label: 'Журнал действий', section: 'audit' as Section }] : []),
+    ] },
+    { key: 'finance' as Section, label: 'Финансы', icon: IconMoney, children: [
+      ...itemsFor('finance', financeNav),
+      ...(canSection('paymentReconciliation') ? [{ key: 'reconcile', label: 'Сверка оплат', section: 'reconcile' as Section }] : []),
+    ] },
+    { key: 'menu' as Section, label: 'Меню', icon: IconMenu, children: canSection('menu') ? itemsFor('menu', MENU_NAV.filter((item) =>
+      !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))) : [] },
+    { key: 'warehouse' as Section, label: 'Склад', icon: IconWarehouse, children: canSection('warehouse') ? itemsFor('warehouse', WAREHOUSE_NAV.filter((item) =>
+      warehouseViewAllowed(item, permissions) && warehouseViewInUse(item.key, warehouseLocations.data?.locations.length ?? 0, warehousePolicy.data))) : [] },
+    { key: 'staff' as Section, label: 'Доступ', icon: IconStaff, children: canSection('staff') ? itemsFor('staff', personnelNav) : [] },
+    { key: 'settings' as Section, label: 'Настройки', icon: IconSettings, children: [
+      ...(canSection('settings') ? [{ key: 'general', label: 'Общие', section: 'settings' as Section }] : []),
+      ...(canSection('tables') ? [{ key: 'tables', label: 'Залы и столы', section: 'tables' as Section }] : []),
+    ] },
+  ].filter((group) => group.children.length);
+  const selectedView = section === 'warehouse' ? warehouseView : section === 'menu' ? menuView
+    : section === 'stats' ? statsView : section === 'finance' ? financeView : section === 'staff' ? staffView : undefined;
+  const itemSelected = (item: NavItem) => item.section === section && (!item.view || item.view === selectedView);
+  const openItem = (item: NavItem) => {
+    setRoute(item.view ? { section: item.section, view: item.view } : { section: item.section });
+    setMobileNav(false);
+  };
   const current = sections.find((s) => s.key === section) ?? sections[0];
-  const currentViewLabel = section === 'stats'
-    ? STATISTICS_NAV.find((item) => item.key === statsView)?.label
-    : section === 'warehouse'
-      ? WAREHOUSE_NAV.find((item) => item.key === warehouseView)?.label
-      : section === 'menu' ? MENU_NAV.find((item) => item.key === menuView)?.label
-        : section === 'finance' ? financeNav.find(({ key }) => key === financeView)?.label
-          : section === 'staff' ? personnelNav.find(({ key }) => key === staffView)?.label : undefined;
+  const currentViewLabel = navGroups.flatMap((group) => group.children).find(itemSelected)?.label;
 
   const renderSidebar = (variant: 'desktop' | 'mobile') => (
     <aside className="workspace-sidebar flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
@@ -362,24 +388,10 @@ export function AdminApp() {
         <BrandLogo />
       </div>
       <nav className="workspace-nav app-scrollbar-subtle min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
-        {sections.map((s) => {
+        {navGroups.map((s) => {
           const Icon = s.icon;
-          const active = s.key === section;
-          const children =
-            s.key === 'warehouse'
-              ? WAREHOUSE_NAV.filter(
-                  (item) =>
-                    (!item.permission || can(`actions.${item.permission}`)) &&
-                    warehouseViewInUse(item.key, warehouseLocations.data?.locations.length ?? 0, warehousePolicy.data) &&
-                    (!item.costs || can('actions.warehouseCosts')),
-                )
-              : s.key === 'menu'
-                ? MENU_NAV.filter((item) => !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
-                : s.key === 'stats' ? STATISTICS_NAV
-                  : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav : [];
-          const currentView = s.key === 'warehouse' ? warehouseView
-            : s.key === 'menu' ? menuView : s.key === 'stats' ? statsView
-              : s.key === 'finance' ? financeView : staffView;
+          const children = s.children;
+          const active = children.some(itemSelected);
           const hasChildren = children.length > 0;
           const expanded = hasChildren && active && collapsedSection !== s.key;
           const selectedSection = active && !hasChildren;
@@ -390,10 +402,10 @@ export function AdminApp() {
                 type="button"
                 onClick={() => {
                   if (!hasChildren) {
-                    go(s.key);
+                    openItem(children[0]);
                   } else if (!active) {
                     setCollapsedSection(null);
-                    setSection(s.key);
+                    openItem(children[0]);
                   } else {
                     setCollapsedSection(expanded ? s.key : null);
                   }
@@ -416,7 +428,7 @@ export function AdminApp() {
                   <div className="min-h-0 overflow-hidden">
                     <div className="workspace-nav-children mb-2 mt-1.5 space-y-0.5">
                       {children.map((item) => {
-                        const selected = active && currentView === item.key;
+                        const selected = itemSelected(item);
                         return (
                           <button
                             key={item.key}
@@ -424,10 +436,7 @@ export function AdminApp() {
                             tabIndex={expanded ? undefined : -1}
                             aria-current={selected ? 'page' : undefined}
                             onClick={() => {
-                              if (s.key === 'warehouse') setWarehouseView(item.key as WarehouseView);
-                              else if (s.key === 'menu') setMenuView(item.key as MenuView);
-                              else if (s.key === 'stats') setStatsView(item.key as StatisticsView);
-                              else setRoute({ section: s.key, view: item.key });
+                              openItem(item);
                               setMobileNav(false);
                             }}
                             className={`workspace-nav-child block w-full rounded-lg py-2 pl-[34px] pr-2 text-left text-sm leading-[21px] transition-colors ${selected ? 'bg-primary font-medium text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
@@ -444,6 +453,7 @@ export function AdminApp() {
           );
         })}
       </nav>
+      <div className="px-3 py-3"><WorkspaceLinks current="admin" /></div>
       <SidebarProfile name={user?.name} onLogout={onLogout} />
     </aside>
   );
@@ -510,7 +520,7 @@ export function AdminApp() {
             <ConnectionStatus />
           </div>
         </header>
-
+        <WorkShiftBanner />
         <main
           className={`workspace-main app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${posterWorkspace ? 'poster-workspace' : ''} ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
         >
@@ -520,7 +530,7 @@ export function AdminApp() {
             <>
               {section === 'stats' && canSection('statistics') && <StatisticsPage view={statsView} />}
               {section === 'orders' && canSection('orders') && <OrdersPage />}
-              {section === 'receipts' && isAdmin && canSection('checks') && <ReceiptPrintsPage />}
+              {section === 'receipts' && canSection('checks') && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
               {section === 'menu' && canSection('menu') && <>
                 {menuView === 'stations' && <StationsPage />}
@@ -538,7 +548,7 @@ export function AdminApp() {
                 />
               )}
               {section === 'finance' && financeView && <FinancePage key={financeView} view={financeView} />}
-              {section === 'staff' && canSection('staff') && (staffView === 'positions' ? <PositionsPage /> : <StaffPage />)}
+              {section === 'staff' && canSection('staff') && (staffView === 'positions' ? <PositionsPage /> : staffView === 'employees' ? <StaffDirectory /> : <StaffPage key={staffView} initialTab={staffView === 'waiter-report' ? 'waiter-orders' : 'current'} />)}
               {section === 'audit' && canSection('journal') && <AuditPage />}
               {section === 'reconcile' && canSection('paymentReconciliation') && <ReconciliationPage />}
               {section === 'settings' && canSection('settings') && <SettingsPage />}

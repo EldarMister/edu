@@ -55,8 +55,10 @@ export interface ProcessingDocument {
   inputs: ProcessingRow[];
   outputs: ProcessingRow[];
   createdAt: string;
+  postedAt?: string | null;
   reversedAt?: string;
   reversalReason?: string;
+  reversalBlockedReason?: string | null;
 }
 export interface ProcessingBody {
   date: string;
@@ -64,7 +66,7 @@ export interface ProcessingBody {
   inputs: ProcessingRow[];
   outputs: ProcessingRow[];
 }
-export function useProcessing(params: { warehouseId?: string; search?: string }) {
+export function useProcessing(params: { warehouseId?: string; search?: string; from?: string; to?: string }) {
   return useQuery({
     queryKey: [...KEY, 'processing', params],
     queryFn: async () =>
@@ -98,16 +100,9 @@ export function useProcessingMutations() {
               complete,
             })
           ).data;
-        const saved = (
-          await api.patch<ProcessingDocument>(`/admin/warehouse/processing/${id}`, { ...body, revision })
+        return (
+          await api.patch<ProcessingDocument>(`/admin/warehouse/processing/${id}`, { ...body, revision, complete })
         ).data;
-        return complete
-          ? (
-              await api.post<ProcessingDocument>(`/admin/warehouse/processing/${id}/post`, {
-                revision: saved.revision,
-              })
-            ).data
-          : saved;
       },
       onSuccess: invalidate,
     }),

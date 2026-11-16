@@ -5,6 +5,7 @@ export type PrepStation = string;
 
 export type SectionKey =
   | 'statistics'
+  | 'finance'
   | 'orders'
   | 'tables'
   | 'menu'
@@ -35,11 +36,15 @@ export type ActionKey =
   | 'warehouseSettings';
 
 export interface EmployeePermissions {
+  terminalAccess?: boolean;
+  adminAccess?: boolean;
   sections: Record<SectionKey, boolean>;
   actions: Record<ActionKey, boolean>;
+  readOnlySections?: SectionKey[];
 }
 
 export interface AuthUser {
+  access?: { terminal: boolean; admin: boolean; production: 'kitchen' | 'bar' | null };
   prepStation?: string | null;
   positionId?: string | null;
   id: string;

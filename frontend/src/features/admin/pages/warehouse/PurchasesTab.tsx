@@ -12,8 +12,8 @@ import { usePackages } from './extended-api';
 import { DocumentField, DocumentFooter } from './WarehouseUi';
 import { DocumentProductPicker } from './DocumentProductPicker';
 import { focusDocumentInput } from './document-focus';
-import { InventoryTimingFields } from './InventoryTimingFields';
-import { inventoryTimeDisplay, inventoryTimingError, inventoryTimingFor, inventoryTimingValue } from './inventory-time';
+import { StockOperationDateField } from './StockOperationDateField';
+import { inventoryLocalTime, inventoryTimeDisplay, inventoryTimingError, inventoryTimingFor, inventoryTimingValue } from './inventory-time';
 import './document-workspace.css';
 import './inventory-workspace.css';
 import { documentStatus, formatDocumentDate } from './stock-document-format';
@@ -133,9 +133,11 @@ function PurchaseForm({
   const [location, setLocation] = useState(purchase?.warehouseId ?? warehouseId);
   const suppliers = useSuppliers();
   const [supplier, setSupplier] = useState(purchase?.supplier ?? '');
-  const [date, setDate] = useState(localTime(purchase?.date));
+  const [initialOperationAt] = useState(() => purchase?.effectiveAt ?? purchase?.postedAt ?? new Date().toISOString());
+  const [date, setDate] = useState(() => inventoryLocalTime(purchase?.date ?? initialOperationAt));
+  const [separateInvoiceDate, setSeparateInvoiceDate] = useState(() => !!purchase && inventoryLocalTime(purchase.date) !== inventoryLocalTime(initialOperationAt));
   const [dateValid, setDateValid] = useState(true);
-  const [timing, setTiming] = useState(() => inventoryTimingFor(purchase?.effectiveAt));
+  const [timing, setTiming] = useState(() => inventoryTimingFor(purchase ? purchase.effectiveAt ?? purchase.postedAt : initialOperationAt));
   const [timingValid, setTimingValid] = useState(true);
   const [focusedPrice, setFocusedPrice] = useState<string | null>(null);
   const packages = usePackages();
@@ -166,10 +168,10 @@ function PurchaseForm({
   const historicalCorrection = correcting && purchase?.historicalStockCorrection === true;
   const compositionEditable = stockEditable && !historicalCorrection;
   const timingEditable = editable && (!purchase || purchase.status === 'draft');
-  const effectiveAt = inventoryTimingValue(timing, purchase?.effectiveAt);
+  const effectiveAt = inventoryTimingValue(timing, purchase?.effectiveAt ?? (!purchase ? initialOperationAt : undefined));
   const timingReady = !timingEditable || (timingValid && effectiveAt !== undefined && !inventoryTimingError(timing, undefined, true));
   const push = useNotifications((state) => state.push);
-  const signature = JSON.stringify({ location, supplier, date, timing, rows, discount, note, attachments });
+  const signature = JSON.stringify({ location, supplier, date, separateInvoiceDate, timing, rows, discount, note, attachments });
   const initialSignature = useRef(signature);
   const { markSaved } = useEditorDirty(editable && (signature !== initialSignature.current || !dateValid || !timingReady));
   const lastPrices = useLastPurchasePrices(stockEditable ? rows.map((row) => row.ingredientId) : [], location, purchase?.id);
@@ -254,7 +256,7 @@ function PurchaseForm({
         warehouseId: location,
         supplier: supplier.trim(),
         supplierId: suppliers.data?.find((s) => s.name === supplier.trim())?.id,
-        date: purchase && date === localTime(purchase.date) ? purchase.date : new Date(date).toISOString(),
+        date: inventoryTimingValue({ mode: 'past', local: date }, purchase?.date ?? initialOperationAt)!,
         ...(timingEditable ? { effectiveAt } : {}),
         note: note.trim(),
         discount: discountAmount,
@@ -323,19 +325,13 @@ function PurchaseForm({
             ? 'Можно исправить количество и цену существующих товаров. Последующие движения и себестоимость будут пересчитаны. Склад, товары и фасовки сохраняются; предыдущая версия останется в истории.'
             : 'Исправление обновит остатки и себестоимость. Предыдущая версия останется в истории.'}</p>}
         </div>
-      ) : editable && <p className="text-sm text-text-muted">«Сохранить» оприходует товары с выбранного момента. Черновик не меняет остатки. Дата накладной хранится отдельно.</p>}
+      ) : editable && <p className="text-sm text-text-muted">«Сохранить» оприходует товары на дату поставки. Черновик не меняет остатки.</p>}
       <div className="poster-form-fields space-y-3">
-        <DocumentField label="Дата накладной">
-          {editable ? (
-            <div className="w-[250px] max-w-full">
-              <DateTimePicker className="input h-9" value={date} onChange={setDate} onValidityChange={setDateValid} required disabled={busy} />
-            </div>
-          ) : (
-            <span className="poster-readonly">{formatDocumentDate(purchase?.date ?? date)}</span>
-          )}
-        </DocumentField>
-        {timingEditable ? <InventoryTimingFields value={timing} onChange={setTiming} onValidityChange={setTimingValid} disabled={busy} operationLabel="Оприходовать товары" /> : <DocumentField label="Дата складской операции">
-          <span className="poster-readonly">{purchase?.effectiveAt || purchase?.postedAt ? `${inventoryTimeDisplay((purchase.effectiveAt ?? purchase.postedAt)!)} (Бишкек)` : 'На момент проведения'}</span>
+        {timingEditable ? <StockOperationDateField label="Дата и время поставки" value={timing} onChange={(next) => {
+          setTiming(next);
+          if (!separateInvoiceDate) { setDate(next.local); setDateValid(true); }
+        }} onValidityChange={setTimingValid} disabled={busy} /> : <DocumentField label="Дата и время поставки">
+          <span className="poster-readonly">{inventoryTimeDisplay(purchase?.effectiveAt ?? purchase?.postedAt ?? purchase?.date ?? initialOperationAt)}</span>
         </DocumentField>}
         <DocumentField label="Поставщик">
           {editable ? (
@@ -693,10 +689,21 @@ function PurchaseForm({
           </div>
         )}
       </div>
-      {(editable || attachments.trim()) && (
+      {(editable || attachments.trim() || separateInvoiceDate) && (
         <details className="poster-advanced">
-          <summary className="cursor-pointer text-sm font-medium">Накладные</summary>
+          <summary className="cursor-pointer text-sm font-medium">Накладная и дополнительные реквизиты</summary>
           <div className="mt-3 space-y-3">
+            {editable && <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={separateInvoiceDate} disabled={busy} onChange={(event) => {
+                setSeparateInvoiceDate(event.target.checked);
+                if (!event.target.checked) { setDate(timing.local); setDateValid(true); }
+              }} />
+              Дата накладной отличается от даты поставки
+            </label>}
+            {separateInvoiceDate && <DocumentField label="Дата накладной">
+              {editable ? <div className="w-[250px] max-w-full"><DateTimePicker aria-label="Дата накладной" className="input h-9" value={date} onChange={setDate} onValidityChange={setDateValid} required disabled={busy} /></div>
+                : <span className="poster-readonly">{inventoryTimeDisplay(purchase?.date ?? initialOperationAt)}</span>}
+            </DocumentField>}
             <DocumentField label="Ссылки на накладные, по одной на строку">
               {editable ? (
                 <textarea
@@ -780,11 +787,6 @@ function PurchaseForm({
       </DocumentFooter>
     </div>
   );
-}
-
-function localTime(value?: string) {
-  const d = value ? new Date(value) : new Date();
-  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 // Keep the exact calculation in row.price; shorten only its unfocused presentation.

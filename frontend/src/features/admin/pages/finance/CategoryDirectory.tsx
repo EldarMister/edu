@@ -56,13 +56,13 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
       { key: 'name', label: 'Название', width: '37%', sort: { ascending, toggle: toggleSort } },
       { key: 'type', label: 'Допустимые транзакции', width: '22%' },
       { key: 'pos', label: 'Показывать на кассе', width: '19%' },
-      { key: 'access', label: 'Доступ в админ-панели' },
+      { key: 'access', label: 'Дополнительный доступ' },
     ]} reportActions={false} filters={filters} tools={add}
       rows={flatten(null, 0).map(({ category, depth, hasChildren, open }) => {
         const delegates = [
           ...category.positionIds.map((id) => positionNames.get(id)), ...category.userIds.map((id) => employeeNames.get(id)),
         ].filter(Boolean);
-        const access = delegates.length ? ['Владелец', ...delegates].join(', ') : 'Только владелец';
+        const access = delegates.length ? delegates.join(', ') : '—';
         const toggle = () => setExpanded((current) => open ? current.filter((id) => id !== category.id) : [...current, category.id]);
         return { id: category.id, values: {
           name: { value: category.name, display: <span className="finance-category-name" style={{ paddingInlineStart: Math.min(depth, 6) * 20 }}>

@@ -2,7 +2,7 @@ require('ts-node/register/transpile-only');
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { Prisma } = require('@prisma/client');
-const { calculatePayroll, payrollMonth, payrollPeriodReport, payrollPeriods, payrollWorkTime } = require('../src/finance/payroll.ts');
+const { calculatePayroll, payrollMonth, payrollReport, payrollPeriodReport, payrollPeriods, payrollWorkTime } = require('../src/finance/payroll.ts');
 const { FinanceService } = require('../src/finance/finance.service.ts');
 
 const shift = (start, end) => ({ startedAt: new Date(start), endedAt: end ? new Date(end) : null });
@@ -61,13 +61,13 @@ test('payroll report clips shifts and sales to a custom period and applies each 
     ['2026-12-02T11:00:00+06:00', 'waiter', 1000],
   ].map(([at, waiterId, finalAmount]) => ({ closedAt: new Date(at), waiterId, finalAmount: new Prisma.Decimal(finalAmount) }));
   const db = {
-    user: { findMany: async ({ select }) => {
-      const month = select.position.select.salaryRates.where.effectiveMonth.lte;
+    user: { findMany: async () => [{ id: 'waiter', name: 'Сотрудник', role: 'WAITER', isActive: true,
+      position: { id: 'position', name: 'Новая должность' } }] },
+    employeeSalaryRate: { findMany: async ({ where }) => {
+      const month = where.effectiveMonth.lte;
       const november = month === '2026-11';
-      return [{ id: 'waiter', name: 'Сотрудник', role: 'WAITER', isActive: true, position: {
-        id: 'position', name: 'Официант', salaryRates: [{ effectiveMonth: month, hourly: november ? 100 : 200,
-          perShift: 10, monthly: november ? 3000 : 6200, personalPercent: 5, shiftPercent: 10 }],
-      } }];
+      return [{ userId: 'waiter', positionId: 'old-position', positionName: 'Официант', effectiveMonth: month,
+        hourly: november ? 100 : 200, perShift: 10, monthly: november ? 3000 : 6200, personalPercent: 5, shiftPercent: 10 }];
     } },
     salaryAccrual: { findMany: async () => [] },
     waiterShift: { findMany: async ({ where }) => shifts.filter(({ startedAt, endedAt }) =>
@@ -84,6 +84,7 @@ test('payroll report clips shifts and sales to a custom period and applies each 
   assert.equal(row.personalCommission, 10);
   assert.equal(row.shiftCommission, 40);
   assert.equal(row.estimate, 1170);
+  assert.equal(row.position, 'Официант');
   assert.deepEqual(row.ratesByMonth.map(({ month, rates }) => [month, rates.hourly, rates.monthly]), [
     ['2026-11', 100, 3000], ['2026-12', 200, 6200],
   ]);
@@ -110,6 +111,9 @@ test('payroll shows the actual sales bases for fixed-rate staff even when no com
   }));
   const db = {
     user: { findMany: async () => [worker] },
+    employeeSalaryRate: { findMany: async () => worker.position.salaryRates.map((rate) => ({
+      ...rate, userId: worker.id, positionId: worker.position.id, positionName: worker.position.name,
+    })) },
     salaryAccrual: { findMany: async () => [] },
     waiterShift: { findMany: async () => [{
       waiterId: worker.id, ...shift('2026-11-30T10:00:00+06:00', '2026-11-30T12:00:00+06:00'),
@@ -122,4 +126,44 @@ test('payroll shows the actual sales bases for fixed-rate staff even when no com
   assert.equal(row.personalCommission, 0);
   assert.equal(row.shiftCommission, 0);
   assert.equal(row.estimate, 200);
+});
+
+test('a departed employee can receive final salary, and a bonus does not consume base salary', async () => {
+  const rate = { userId: 'departed', effectiveMonth: '2026-10', positionId: 'removed-position', positionName: 'Официант',
+    hourly: 100, perShift: 0, monthly: 0, personalPercent: 0, shiftPercent: 0 };
+  const db = {
+    user: { findMany: async () => [{ id: 'departed', name: 'Анна', role: 'WAITER', isActive: false,
+      position: { id: 'new-position', name: 'Управляющий' } }] },
+    employeeSalaryRate: { findMany: async () => [rate] },
+    salaryAccrual: { findMany: async () => [
+      { id: 'base', userId: 'departed', month: '2026-11', amount: new Prisma.Decimal(50), supplemental: false, payments: [] },
+      { id: 'bonus', userId: 'departed', month: '2026-11', amount: new Prisma.Decimal(80), supplemental: true,
+        payments: [{ amount: new Prisma.Decimal(-30) }] },
+    ] },
+    waiterShift: { findMany: async () => [{ waiterId: 'departed',
+      ...shift('2026-11-02T10:00:00+06:00', '2026-11-02T12:00:00+06:00') }] },
+    order: { findMany: async () => [] },
+  };
+  const { staff: [row] } = await payrollReport(db, 'cafe', '2026-11');
+  assert.equal(row.positionId, 'removed-position');
+  assert.equal(row.position, 'Официант');
+  assert.equal(row.estimate, 200);
+  assert.equal(row.baseAccrued, 50);
+  assert.equal(row.supplementalAccrued, 80);
+  assert.equal(row.available, 150);
+  assert.equal(row.accrued, 130);
+  assert.equal(row.paid, 30);
+  assert.equal(row.due, 100);
+});
+
+test('base salary and bonus requests cannot reuse the same idempotency key', async () => {
+  const input = { userId: 'worker', month: '2026-11', amount: 100, requestKey: 'same', supplemental: true };
+  const service = new FinanceService({ $transaction: (action) => action({
+    $queryRaw: async () => [],
+    salaryAccrual: { findFirst: async () => ({ ...input, amount: new Prisma.Decimal(100), calculation: null, note: null }) },
+  }) });
+  const actor = { id: 'owner', role: 'OWNER', cafeId: 'cafe' };
+  assert.equal((await service.accrue(actor, input)).supplemental, true);
+  await assert.rejects(service.accrue(actor, { ...input, supplemental: false }), { status: 409 });
+  await assert.rejects(service.accrueCalculated(actor, input), { status: 400 });
 });

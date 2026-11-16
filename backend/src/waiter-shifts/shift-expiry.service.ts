@@ -3,16 +3,14 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
-import { OrderStatus, WaiterShiftStatus } from '@prisma/client';
-
-/** Максимальная длительность смены (20 часов в миллисекундах). */
-const MAX_SHIFT_MS = 20 * 60 * 60 * 1000;
+import { WaiterShiftStatus } from '@prisma/client';
+import { lockFinance } from '../finance/finance-ledger';
+import { CLOSED_ORDER_STATUSES, MAX_WORK_SHIFT_MS } from './waiter-shifts.service';
 
 /**
  * Каждый час проверяет все активные смены.
- * Если смена длится дольше MAX_SHIFT_MS — принудительно закрывает её.
- * Активные заказы при этом НЕ отменяются: смена просто закрывается,
- * а заказы официант обязан закрыть самостоятельно до/после.
+ * Забытую смену закрываем на отметке 20 часов, чтобы простой сервера не
+ * увеличивал зарплату. Смены сотрудников с активными заказами сохраняем.
  */
 @Injectable()
 export class ShiftExpiryService {
@@ -26,14 +24,14 @@ export class ShiftExpiryService {
   /** Запускается каждый час ровно (0 минут каждого часа). */
   @Cron(CronExpression.EVERY_HOUR)
   async closeExpiredShifts() {
-    const cutoff = new Date(Date.now() - MAX_SHIFT_MS);
+    const cutoff = new Date(Date.now() - MAX_WORK_SHIFT_MS);
 
     const expired = await this.prisma.waiterShift.findMany({
       where: {
         status: WaiterShiftStatus.active,
         startedAt: { lt: cutoff },
       },
-      select: { id: true, waiterId: true, startedAt: true },
+      select: { id: true, cafeId: true, waiterId: true, startedAt: true },
     });
 
     if (expired.length === 0) return;
@@ -42,25 +40,22 @@ export class ShiftExpiryService {
 
     for (const shift of expired) {
       try {
-        const activeOrders = await this.prisma.order.count({
-          where: {
-            waiterId: shift.waiterId,
-            status: {
-              notIn: [OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected],
-            },
-          },
+        const closed = await this.prisma.$transaction(async (tx) => {
+          if (shift.cafeId) await lockFinance(tx, shift.cafeId);
+          const current = await tx.waiterShift.findFirst({
+            where: { id: shift.id, status: WaiterShiftStatus.active, startedAt: { lt: cutoff } },
+          });
+          if (!current) return null;
+          const activeOrders = await tx.order.count({ where: {
+            waiterId: current.waiterId, status: { notIn: CLOSED_ORDER_STATUSES },
+          } });
+          if (activeOrders) return null;
+          return tx.waiterShift.update({
+            where: { id: current.id },
+            data: { status: WaiterShiftStatus.closed, endedAt: new Date(current.startedAt.getTime() + MAX_WORK_SHIFT_MS) },
+          });
         });
-        if (activeOrders > 0) {
-          this.logger.warn(
-            `Смена ${shift.id} не закрыта автоматически: у официанта ${shift.waiterId} есть ${activeOrders} активных заказ(а/ов).`,
-          );
-          continue;
-        }
-
-        const closed = await this.prisma.waiterShift.update({
-          where: { id: shift.id },
-          data: { status: WaiterShiftStatus.closed, endedAt: new Date() },
-        });
+        if (!closed) continue;
 
         // Уведомляем официанта и администратора через WebSocket.
         this.events.emitToWaiter(
@@ -71,7 +66,7 @@ export class ShiftExpiryService {
         this.events.emitToAdmin(SERVER_EVENTS.WAITER_SHIFT_ENDED, closed);
 
         this.logger.log(
-          `Смена ${shift.id} (официант ${shift.waiterId}) закрыта автоматически.`,
+          `Смена ${shift.id} (сотрудник ${shift.waiterId}) закрыта автоматически.`,
         );
       } catch (err) {
         this.logger.error(`Ошибка авто-закрытия смены ${shift.id}:`, err);

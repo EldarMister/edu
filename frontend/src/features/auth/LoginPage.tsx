@@ -2,7 +2,7 @@ import { FormEvent, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, apiError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
-import { homeForRole } from '@/routes/ProtectedRoute';
+import { homeForUser } from '@/lib/workspaces';
 import { Spinner } from '@/components/Spinner';
 import { BrandLogo } from '@/components/BrandLogo';
 import { AppVersion } from '@/components/AppVersion';
@@ -26,7 +26,7 @@ export function LoginPage() {
     try {
       const { data } = await api.post<LoginResponse>('/auth/login', { phone, password });
       setSession(data);
-      navigate(homeForRole(data.user.role), { replace: true });
+      navigate(homeForUser(data.user), { replace: true });
     } catch (err) {
       setError(apiError(err));
     } finally {

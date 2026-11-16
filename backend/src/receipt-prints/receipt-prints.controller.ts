@@ -2,6 +2,7 @@ import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ReceiptPrintType, Role } from '@prisma/client';
 import { ReceiptPrintsService } from './receipt-prints.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
 @Controller('receipt-prints')
@@ -20,6 +21,7 @@ export class ReceiptPrintsController {
 
   /** Администратор видит список ожидающих заявок. */
   @Get()
+  @RequirePermission('sections.checks')
   @Roles(Role.ADMIN, Role.OWNER)
   list() {
     return this.service.listPending();
@@ -27,6 +29,7 @@ export class ReceiptPrintsController {
 
   /** Администратор принимает заявку — чек печатается. */
   @Post(':id/approve')
+  @RequirePermission('sections.checks')
   @Roles(Role.ADMIN, Role.OWNER)
   approve(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.approve(user, id);
@@ -34,6 +37,7 @@ export class ReceiptPrintsController {
 
   /** Администраторское устройство подтвердило, что печать действительно завершилась. */
   @Post(':id/printed')
+  @RequirePermission('sections.checks')
   @Roles(Role.ADMIN, Role.OWNER)
   printed(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.markPrinted(user, id);
@@ -41,6 +45,7 @@ export class ReceiptPrintsController {
 
   /** Администратор отклоняет заявку — чек не печатается. */
   @Post(':id/reject')
+  @RequirePermission('sections.checks')
   @Roles(Role.ADMIN, Role.OWNER)
   reject(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.service.reject(user, id);

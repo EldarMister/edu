@@ -15,6 +15,7 @@ export const SECTION_KEYS = [
   'paymentReconciliation',
   'checks',
   'settings',
+  'finance',
 ] as const;
 export type SectionKey = (typeof SECTION_KEYS)[number];
 
@@ -42,7 +43,17 @@ export type ActionKey = (typeof ACTION_KEYS)[number];
 export interface EmployeePermissions {
   sections: Record<SectionKey, boolean>;
   actions: Record<ActionKey, boolean>;
+  readOnlySections?: SectionKey[];
+  terminalAccess?: boolean;
+  adminAccess?: boolean;
 }
+
+export const READ_ONLY_SECTION_KEYS: SectionKey[] = ['orders', 'tables', 'menu', 'warehouse', 'staff', 'checks', 'settings', 'finance'];
+export const SECTION_WRITE_ACTIONS: Partial<Record<SectionKey, ActionKey[]>> = {
+  menu: ['editMenu'], staff: ['manageStaff'], checks: ['refundChecks'],
+  warehouse: ['warehouseReceive', 'warehouseTransfer', 'warehouseWriteoff', 'warehouseCount', 'warehouseApprove',
+    'warehouseRecipes', 'warehouseProduce', 'warehouseSettings'],
+};
 
 const allSections = (value: boolean): Record<SectionKey, boolean> =>
   SECTION_KEYS.reduce((acc, k) => ((acc[k] = value), acc), {} as Record<SectionKey, boolean>);
@@ -57,9 +68,10 @@ const allActions = (value: boolean): Record<ActionKey, boolean> =>
 export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
   switch (role) {
     case Role.OWNER:
-      return { sections: allSections(true), actions: allActions(true) };
+      return { sections: allSections(true), actions: allActions(true), terminalAccess: true, adminAccess: true };
     case Role.ADMIN:
       return {
+        terminalAccess: false, adminAccess: true,
         sections: {
           statistics: false,
           orders: true,
@@ -71,6 +83,7 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
           paymentReconciliation: false,
           checks: true,
           settings: false,
+          finance: false,
         },
         actions: {
           editMenu: true,
@@ -94,21 +107,24 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
       };
     case Role.WAITER:
       return {
+        terminalAccess: true, adminAccess: false,
         sections: { ...allSections(false), tables: true, menu: true, orders: true },
         actions: allActions(false),
       };
     case Role.KITCHEN:
       return {
+        terminalAccess: false, adminAccess: false,
         sections: { ...allSections(false), orders: true },
         actions: allActions(false),
       };
     case Role.BAR:
       return {
+        terminalAccess: false, adminAccess: false,
         sections: { ...allSections(false), orders: true },
         actions: allActions(false),
       };
     default:
-      return { sections: allSections(false), actions: allActions(false) };
+      return { sections: allSections(false), actions: allActions(false), terminalAccess: false, adminAccess: false };
   }
 }
 
@@ -132,11 +148,29 @@ export function resolvePermissions(role: Role, stored: unknown): EmployeePermiss
   const def = getDefaultPermissionsByRole(role);
   if (role === Role.OWNER) return def;
   if (!stored || typeof stored !== 'object') return def;
-  const s = stored as { sections?: unknown; actions?: unknown };
-  return {
+  const s = stored as { sections?: unknown; actions?: unknown; readOnlySections?: unknown; terminalAccess?: unknown; adminAccess?: unknown };
+  const permissions: EmployeePermissions = {
     sections: pick(SECTION_KEYS, s.sections, def.sections),
     actions: pick(ACTION_KEYS, s.actions, def.actions),
+    terminalAccess: typeof s.terminalAccess === 'boolean' ? s.terminalAccess : def.terminalAccess,
+    adminAccess: typeof s.adminAccess === 'boolean' ? s.adminAccess : def.adminAccess,
   };
+  if (Array.isArray(s.readOnlySections)) {
+    const selected = s.readOnlySections;
+    permissions.readOnlySections = READ_ONLY_SECTION_KEYS.filter((key) => permissions.sections[key] && selected.includes(key));
+    for (const section of permissions.readOnlySections) {
+      for (const action of SECTION_WRITE_ACTIONS[section] ?? []) permissions.actions[action] = false;
+    }
+  }
+  return permissions;
+}
+
+/** Resolve the assigned position once; raw employee overrides are only a legacy fallback. */
+export function resolveUserPermissions(user: {
+  role: Role | string; permissions?: unknown;
+  position?: { role: Role | string; permissions: unknown } | null;
+}): EmployeePermissions {
+  return resolvePermissions(user.role as Role, user.position?.role === user.role ? user.position.permissions : user.permissions);
 }
 
 /** Нормализовать входные данные перед сохранением (whitelist ключей, только boolean). */

@@ -37,7 +37,7 @@ export function writePurchaseWorkbook(purchases: ExportPurchase[], warehouseName
   for (const [index, purchase] of purchases.entries()) {
     const number = `ЗКП-${String(purchase.number).padStart(6, '0')}`;
     const warehouse = purchase.warehouseId ? warehouseNames.get(purchase.warehouseId) ?? 'Склад недоступен' : defaultWarehouseName;
-    const date = excelDate(purchase.effectiveAt ?? purchase.date);
+    const date = excelDate(purchase.effectiveAt ?? purchase.stockPostedAt ?? purchase.date);
     const row = { number, date, supplier: purchase.supplier, warehouse,
       products: [...new Set(purchase.items.map(({ ingredient }) => ingredient.name))].join(', '),
       note: purchase.note ?? '', status: statuses[purchase.status], totalAmount: Number(purchase.totalAmount) };

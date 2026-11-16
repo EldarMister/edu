@@ -9,6 +9,8 @@ import { Spinner } from '@/components/Spinner';
 import { Select } from '@/components/Select';
 import { Modal } from '@/components/Modal';
 import { ThemeSwitch } from '@/components/ThemeSwitch';
+import { WorkShiftBanner } from '@/features/settings/WorkShiftBanner';
+import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { disconnectSocket } from '@/lib/socket';
 import { usePushNotifications } from '@/lib/push';
 import { useKitchenRealtime } from './useKitchenRealtime';
@@ -57,7 +59,9 @@ export function KitchenApp({
   station?: PrepStation;
 } = {}) {
   const { user, logout } = useAuth();
-  const {canSection}=usePermissions();
+  const { canSection, canEditSection, canAction, effectiveRole } = usePermissions();
+  const canChangeOrders = canEditSection('orders');
+  const canChangeStopList = !!user && (effectiveRole !== 'ADMIN' || (canEditSection('menu') && canAction('editMenu')));
   const [searchParams, setSearchParams] = useSearchParams();
   const stationKey = `edu-pos-prep-station:${user?.id ?? ''}:${defaultStation}`;
   const [selectedStation, setSelectedStation] = useState(() => {
@@ -66,7 +70,7 @@ export function KitchenApp({
   });
   const stations = usePreparationStations();
   usePreparationStationUpdates();
-  const canAccessBoth = user?.role === 'OWNER' || user?.role === 'ADMIN';
+  const canAccessBoth = effectiveRole === 'OWNER' || effectiveRole === 'ADMIN';
   const assignedStation = user?.prepStation ?? defaultStation;
   const availableStations = (stations.data ?? []).filter((item) => canAccessBoth || item.id === assignedStation);
   const requestedStation = searchParams.get('station') ?? selectedStation;
@@ -108,6 +112,7 @@ export function KitchenApp({
 
   // Отправляет отложенное действие на сервер (= «уходит официанту»).
   function commit(p: PendingAction) {
+    if (!canChangeOrders) return;
     const run =
       p.type === 'reject'
         ? rejectItems.mutateAsync({
@@ -128,19 +133,21 @@ export function KitchenApp({
   // По истечении таймера действие фиксируется и уходит на сервер.
   useEffect(() => {
     if (!pending) return;
+    if (!canChangeOrders) { setPending(null); return; }
     const t = setTimeout(() => {
       commit(pending);
       setPending(null);
     }, Math.max(0, pending.deadline - Date.now()));
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending]);
+  }, [pending, canChangeOrders]);
 
   function onBatch(
     orderId: string,
     type: 'reject' | 'ready',
     ids: { itemIds: string[]; setComponentIds: string[]; partial?: { itemId: string; quantity: number }[] },
   ) {
+    if (!canChangeOrders) return;
     // Новое действие, пока предыдущее не подтверждено — фиксируем предыдущее сразу.
     if (pending) commit(pending);
     setPending({ orderId, type, ...ids, deadline: Date.now() + UNDO_SECONDS * 1000 });
@@ -162,6 +169,7 @@ export function KitchenApp({
   }
 
   function acceptOrder(id: string) {
+    if (!canChangeOrders) return;
     const isOnlyNewOrder = tab === 'new' && orders.length === 1;
     return act(id, async () => {
       await accept.mutateAsync(id);
@@ -225,6 +233,8 @@ export function KitchenApp({
           </button>
         </div>
       </header>
+      <WorkspaceLinks current="production" />
+      <WorkShiftBanner />
       {user?.role === 'BAR' && (
         <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Настройки">
           <ThemeSwitch />
@@ -232,8 +242,8 @@ export function KitchenApp({
       )}
 
       {/* Вкладки + Стоп-лист */}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-white px-5 py-2.5">
-        <div className="no-scrollbar flex gap-2 overflow-x-auto">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-3 py-2.5 sm:flex-nowrap sm:px-5">
+        <div className="no-scrollbar flex min-w-0 w-full gap-2 overflow-x-auto sm:w-auto sm:flex-1">
           {TABS.map((t) => (
             <button
               key={t.key}
@@ -252,7 +262,7 @@ export function KitchenApp({
             </button>
           ))}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
           <button
             onClick={() => setShowStats((v) => !v)}
             className={`shrink-0 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
@@ -263,13 +273,13 @@ export function KitchenApp({
           >
             Статистика
           </button>
-          <KitchenHandControl />
-          <button
+          {canChangeOrders && <KitchenHandControl />}
+          {canChangeStopList && <button
             onClick={() => setStopListOpen(true)}
             className="shrink-0 rounded-lg border border-primary bg-white px-3.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
           >
             Стоп-лист
-          </button>
+          </button>}
         </div>
       </div>
 
@@ -292,6 +302,8 @@ export function KitchenApp({
           <button className="btn-secondary btn-md" onClick={() => setHistoryRange({ from: '', to: '' })}>Сегодня</button>
         </div>
       )}
+
+      {!canChangeOrders && <p className="border-b border-border bg-card px-5 py-2 text-sm text-text-muted">Заказы доступны только для просмотра.</p>}
 
       {/* Статистика кухни */}
       {showStats ? (
@@ -334,6 +346,7 @@ export function KitchenApp({
                   tab={tab}
                   now={now}
                   submitting={actingId === o.id}
+                  readOnly={!canChangeOrders}
                   pendingItemIds={
                     pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []
                   }
@@ -377,7 +390,7 @@ export function KitchenApp({
         </div>
       )}
 
-      <StopListDrawer open={stopListOpen} station={station} onClose={() => setStopListOpen(false)} />
+      {canChangeStopList && <StopListDrawer open={stopListOpen} station={station} onClose={() => setStopListOpen(false)} />}
     </div>
   );
 }

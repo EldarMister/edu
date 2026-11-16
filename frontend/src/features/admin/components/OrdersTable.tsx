@@ -2,6 +2,7 @@ import type { RefObject } from 'react';
 import type { Order } from '@/types';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Spinner } from '@/components/Spinner';
+import { usePermissions } from '@/hooks/usePermissions';
 import { displayOrderNumber, hallSuffix, money, paymentCell, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { IconEdit, IconX } from './icons';
@@ -27,6 +28,7 @@ type Props = {
 
 export function OrdersTable({ items, isLoading, error, scrollRef, loadMoreRef, isFetchingNextPage, hasNextPage, onOpen, onEdit, onCancel }: Props) {
   const tr = useT();
+  const editable = usePermissions().canEditSection('orders');
   return (
     <div className="orders-table-card">
       {isLoading ? (
@@ -81,8 +83,8 @@ export function OrdersTable({ items, isLoading, error, scrollRef, loadMoreRef, i
                   <Td className="whitespace-nowrap text-text-secondary">{paymentCell(order)}</Td>
                   <Td className="px-1">
                     <div className="flex items-center justify-center gap-1">
-                      <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>
-                      {CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}
+                      {editable && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
+                      {editable && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}
                     </div>
                   </Td>
                 </tr>

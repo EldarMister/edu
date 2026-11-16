@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
@@ -7,6 +7,11 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
 import { lockFinance } from '../finance/finance-ledger';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { assertStaffWorkspaceChange, canManagePosition, losesOperationalAccess } from './staff-access';
+import { syncEmployeeSalary } from '../finance/employee-salary';
+import { payrollWorkTime } from '../finance/payroll';
+import { warehouseDateRange, warehouseDay } from '../warehouse/report-range';
+import { CLOSED_ORDER_STATUSES, WORK_SHIFT_ROLES } from '../waiter-shifts/waiter-shifts.service';
 import {
   CreateStaffDto,
   ShiftHistoryQueryDto,
@@ -20,6 +25,7 @@ import {
   EmployeePermissions,
   getDefaultPermissionsByRole,
   resolvePermissions,
+  resolveUserPermissions,
   sanitizePermissionsInput,
   SECTION_KEYS,
 } from '../common/permissions';
@@ -60,12 +66,13 @@ export class StaffService {
   }
 
   /** Подставить итоговые (resolved) права вместо «сырого» json из БД. */
-  private withPermissions({ position, ...user }: Prisma.UserGetPayload<{ select: typeof STAFF_SELECT }>) {
+  private withPermissions({ position, ...user }: Prisma.UserGetPayload<{ select: typeof STAFF_SELECT }>, actor?: AuthUser) {
     const assigned = position?.role === user.role ? position : null;
     return {
       ...user,
       positionName: assigned?.name ?? null,
       positionIsStarter: isManageableStarter(user.role, assigned),
+      canManage: actor ? canManagePosition(actor, { role: user.role, permissions: assigned?.permissions ?? user.permissions }) : undefined,
       permissions: resolvePermissions(user.role, assigned?.permissions ?? user.permissions),
     };
   }
@@ -84,29 +91,41 @@ export class StaffService {
   }
 
   private assertCanManagePositionAccount(
-    actor: AuditActor, user: { role: Role; positionId: string | null; position?: StaffPosition | null },
+    actor: AuthUser, user: { role: Role; positionId: string | null; position?: StaffPosition | null; permissions?: unknown },
   ) {
-    if (!this.isOwner(actor) && (user.role === Role.ADMIN || (user.positionId && !isManageableStarter(user.role, user.position ?? null)))) {
+    if (!canManagePosition(actor, { role: user.role, permissions: user.position?.permissions ?? user.permissions })) {
       throw new ForbiddenException('Этим сотрудником управляет владелец заведения');
     }
   }
 
-  private async starterPositionId(tx: Prisma.TransactionClient, actor: AuthUser, role: Role) {
+  private async starterPosition(tx: Prisma.TransactionClient, actor: AuthUser, role: Role) {
     if (!actor.cafeId || role === Role.OWNER) return null;
     const starter = await tx.staffPosition.findFirst({
       where: { cafeId: actor.cafeId, role, isStarter: true },
       select: staffPositionSelect,
     });
-    return starter && (this.isOwner(actor) || isManageableStarter(role, starter)) ? starter.id : null;
+    if (!starter) throw new BadRequestException('Выберите должность сотрудника');
+    if (!canManagePosition(actor, starter)) throw new ForbiddenException('Нет права назначать эту должность');
+    return starter;
   }
 
-  private async checkPosition(tx: Prisma.TransactionClient, actor: AuthUser, positionId: string, role: Role) {
-    if (!this.isOwner(actor) || !actor.cafeId || role === Role.OWNER) {
-      throw new ForbiddenException('Должность назначает владелец заведения');
-    }
-    const position = await tx.staffPosition.findFirst({ where: { cafeId: actor.cafeId, id: positionId }, select: { role: true } });
+  private async checkPosition(tx: Prisma.TransactionClient, actor: AuthUser, positionId: string, role?: Role) {
+    if (!actor.cafeId) throw new ForbiddenException('Не выбрано заведение');
+    const position = await tx.staffPosition.findFirst({ where: { cafeId: actor.cafeId, id: positionId }, select: staffPositionSelect });
     if (!position) throw new NotFoundException('Должность не найдена');
-    if (position.role !== role) throw new BadRequestException('Выбранная должность не соответствует базовой роли');
+    if (role !== undefined && position.role !== role) throw new BadRequestException('Рабочее место определяется выбранной должностью');
+    if (!canManagePosition(actor, position)) throw new ForbiddenException('Нет права назначать эту должность');
+    return position;
+  }
+
+  async positions(actor: AuthUser) {
+    if (!actor.cafeId) throw new ForbiddenException('Не выбрано заведение');
+    const positions = await this.prisma.staffPosition.findMany({
+      where: { cafeId: actor.cafeId }, select: staffPositionSelect, orderBy: { name: 'asc' },
+    });
+    return positions.filter((position) => canManagePosition(actor, position)).map(({ isStarter, ...position }) => ({
+      ...position, permissions: resolvePermissions(position.role, position.permissions),
+    }));
   }
 
   async overview(actor: AuditActor) {
@@ -130,7 +149,7 @@ export class StaffService {
     };
   }
 
-  async list(actor: AuditActor, params: { role?: Role; search?: string }) {
+  async list(actor: AuthUser, params: { role?: Role; search?: string }) {
     if (params.role === Role.OWNER && !this.isOwner(actor)) {
       throw new ForbiddenException('Только владелец может просматривать владельцев');
     }
@@ -159,17 +178,17 @@ export class StaffService {
     });
     const onShift = new Set(activeShifts.map((s) => s.waiterId));
 
-    return users.map((u) => ({ ...this.withPermissions(u), onShift: onShift.has(u.id) }));
+    return users.map((u) => ({ ...this.withPermissions(u, actor), onShift: onShift.has(u.id) }));
   }
 
   /** Один сотрудник с итоговыми правами доступа. */
-  async getOne(id: string, actor: AuditActor) {
+  async getOne(id: string, actor: AuthUser) {
     const user = await this.prisma.user.findUnique({ where: { id }, select: STAFF_SELECT });
     if (!user) throw new NotFoundException('Сотрудник не найден');
     if (user.role === Role.OWNER && !this.isOwner(actor)) {
       throw new ForbiddenException('Только владелец может просматривать владельцев');
     }
-    return this.withPermissions(user);
+    return this.withPermissions(user, actor);
   }
 
   /** Обновить права доступа сотрудника. */
@@ -220,8 +239,6 @@ export class StaffService {
   }
 
   async create(dto: CreateStaffDto, actor: AuthUser) {
-    this.assertCanManageRole(actor, dto.role);
-    this.assertCanManagePositionAccount(actor, { role: dto.role, positionId: dto.positionId ?? null });
     const phone = this.normalizePhone(dto.phone);
     const exists = await this.prisma.user.findUnique({ where: { phone } });
     if (exists) {
@@ -231,13 +248,23 @@ export class StaffService {
     const created = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
       if (actor.cafeId) await lockFinance(tx, actor.cafeId);
-      const prepStation = await staffStation(tx, dto.role, dto.prepStation);
-      if (dto.positionId) await this.checkPosition(tx, actor, dto.positionId, dto.role);
-      const positionId = dto.positionId === undefined ? await this.starterPositionId(tx, actor, dto.role) : dto.positionId;
-      return tx.user.create({
-        data: { name: dto.name, phone, role: dto.role, prepStation, passwordHash, positionId },
+      if (!dto.positionId && dto.role !== Role.OWNER && (dto.positionId === null || !dto.role)) {
+        throw new BadRequestException('Выберите должность сотрудника');
+      }
+      const position = dto.positionId
+        ? await this.checkPosition(tx, actor, dto.positionId, dto.role)
+        : await this.starterPosition(tx, actor, dto.role!);
+      const role = position?.role ?? dto.role!;
+      this.assertCanManageRole(actor, role);
+      this.assertCanManagePositionAccount(actor, { role, positionId: position?.id ?? null, position });
+      const prepStation = await staffStation(tx, role, dto.prepStation);
+      const positionId = position?.id ?? null;
+      const created = await tx.user.create({
+        data: { name: dto.name, phone, role, prepStation, passwordHash, positionId },
         select: STAFF_SELECT,
       });
+      if (actor.cafeId && role !== Role.OWNER) await syncEmployeeSalary(tx, actor.cafeId, [created.id]);
+      return created;
     });
     await this.audit.log({
       actor,
@@ -247,7 +274,7 @@ export class StaffService {
       description: `${actor.name ?? 'Сотрудник'} добавил сотрудника ${created.name} (${created.role})`,
       newValue: { name: created.name, phone: created.phone, role: created.role, prepStation: created.prepStation, positionId: created.positionId },
     });
-    return this.withPermissions(created);
+    return this.withPermissions(created, actor);
   }
 
   async update(id: string, dto: UpdateStaffDto, actor: AuthUser) {
@@ -261,7 +288,6 @@ export class StaffService {
 
     const data: Prisma.UserUncheckedUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
-    if (dto.role !== undefined) data.role = dto.role;
     if (dto.isActive !== undefined) {
       if (id === actorId && dto.isActive === false) {
         throw new ForbiddenException('Нельзя отключить самого себя');
@@ -286,28 +312,40 @@ export class StaffService {
       const current = await tx.user.findUnique({ where: { id }, select: STAFF_SELECT });
       if (!current) throw new NotFoundException('Сотрудник не найден');
       this.assertCanManageRole(actor, current.role);
-      const role = dto.role ?? current.role;
       if (id !== actorId) this.assertCanManagePositionAccount(actor, current);
-      if (id === actorId && (role !== current.role || (dto.positionId !== undefined && dto.positionId !== current.positionId))) {
+      if (dto.isActive === false) await assertStaffWorkspaceChange(tx, actor.cafeId, [id], 'отключением сотрудника');
+      if (id === actorId && ((dto.role !== undefined && dto.role !== current.role) || (dto.positionId !== undefined && dto.positionId !== current.positionId))) {
         throw new ForbiddenException('Нельзя менять собственную роль или должность');
       }
-      if (role !== current.role) this.assertCanManagePositionAccount(actor, { role, positionId: null });
-      if (dto.positionId !== undefined && dto.positionId !== current.positionId) {
-        if (!this.isOwner(actor)) throw new ForbiddenException('Должность назначает владелец заведения');
-        if (dto.positionId) await this.checkPosition(tx, actor, dto.positionId, role);
-        data.positionId = dto.positionId;
-        data.permissions = Prisma.DbNull;
+      let position = current.position;
+      let role = dto.role ?? current.role;
+      if (dto.positionId) {
+        // A position is the source of both workspace and permissions, including role-only legacy clients.
+        position = await this.checkPosition(tx, actor, dto.positionId, dto.role);
+        role = position.role;
+      } else if (dto.positionId === null && role !== Role.OWNER) {
+        throw new BadRequestException('Выберите должность сотрудника');
       } else if (role !== current.role) {
-        if (current.positionId && !current.position?.isStarter) {
-          throw new BadRequestException('Выберите должность для новой роли');
-        }
-        data.positionId = await this.starterPositionId(tx, actor, role);
+        position = await this.starterPosition(tx, actor, role);
+      }
+      if (role === Role.OWNER) position = null;
+      this.assertCanManageRole(actor, role);
+      const positionChanged = (position?.id ?? null) !== current.positionId;
+      if (role !== current.role || positionChanged) {
+        this.assertCanManagePositionAccount(actor, { role, positionId: position?.id ?? null, position });
+        const losesTerminal = losesOperationalAccess({ role: current.role, permissions: resolveUserPermissions(current) },
+          { role, permissions: position?.permissions });
+        if (actor.cafeId && (role !== current.role || losesTerminal)) await assertStaffWorkspaceChange(tx, actor.cafeId, [id]);
+        data.role = role;
+        data.positionId = position?.id ?? null;
         data.permissions = Prisma.DbNull;
       }
       if (dto.prepStation !== undefined || role !== current.role) {
         data.prepStation = await staffStation(tx, role, dto.prepStation);
       }
-      return tx.user.update({ where: { id }, data, select: STAFF_SELECT });
+      const updated = await tx.user.update({ where: { id }, data, select: STAFF_SELECT });
+      if (actor.cafeId && (role !== current.role || positionChanged)) await syncEmployeeSalary(tx, actor.cafeId, [id]);
+      return updated;
     });
     await this.audit.log({
       actor,
@@ -315,7 +353,7 @@ export class StaffService {
       entityType: AuditEntity.STAFF,
       entityId: id,
       description: `${actor.name ?? 'Сотрудник'} изменил сотрудника ${updated.name}` +
-        (dto.role !== undefined && dto.role !== user.role ? ` · роль ${user.role} → ${dto.role}` : '') +
+        (updated.role !== user.role ? ` · рабочее место ${user.role} → ${updated.role}` : '') +
         (dto.isActive !== undefined && dto.isActive !== user.isActive
           ? dto.isActive
             ? ' · доступ включён'
@@ -325,7 +363,7 @@ export class StaffService {
       newValue: { name: updated.name, role: updated.role, phone: updated.phone, isActive: updated.isActive, prepStation: updated.prepStation, positionId: updated.positionId },
       metadata: { passwordChanged: !!dto.password },
     });
-    return this.withPermissions(updated);
+    return this.withPermissions(updated, actor);
   }
 
   async remove(id: string, actor: AuthUser) {
@@ -338,9 +376,21 @@ export class StaffService {
       if (!user) throw new NotFoundException('Сотрудник не найден');
       this.assertCanManageRole(actor, user.role);
       this.assertCanManagePositionAccount(actor, user);
-
-      const hasOrders = await tx.order.count({ where: { waiterId: id } });
-      if (hasOrders > 0) {
+      await assertStaffWorkspaceChange(tx, actor.cafeId, [id], 'удалением сотрудника');
+      const scope = actor.cafeId ? { cafeId: actor.cafeId } : {};
+      const history = await Promise.all([
+        tx.user.findFirst({ where: { id, OR: [
+          { orders: { some: {} } }, { waiterShifts: { some: {} } }, { payments: { some: {} } },
+          { kitchenEvents: { some: {} } }, { penalties: { some: {} } }, { assignedRewards: { some: {} } },
+          { incidentsOwned: { some: {} } }, { incidentsMade: { some: {} } }, { auditLogs: { some: {} } },
+          { receiptPrintRequests: { some: {} } }, { cashReports: { some: {} } },
+        ] }, select: { id: true } }),
+        tx.salaryAccrual.findFirst({ where: { ...scope, OR: [{ userId: id }, { actorId: id }] }, select: { id: true } }),
+        tx.cashShift.findFirst({ where: { ...scope, OR: [{ openedById: id }, { closedById: id }] }, select: { id: true } }),
+        tx.financeEntry.findFirst({ where: { ...scope, actorId: id }, select: { id: true } }),
+        tx.orderAction.findFirst({ where: { ...scope, userId: id }, select: { id: true } }),
+      ]);
+      if (history.some(Boolean)) {
         const result = await tx.user.update({ where: { id }, data: { isActive: false }, select: STAFF_SELECT });
         return { user, result, softDeleted: true };
       }
@@ -352,7 +402,7 @@ export class StaffService {
       actionType: AuditAction.STAFF_DELETED,
       entityType: AuditEntity.STAFF,
       entityId: id,
-      description: `${actor.name ?? 'Сотрудник'} удалил сотрудника ${user.name}${softDeleted ? ' (отключён, есть история заказов)' : ''}`,
+      description: `${actor.name ?? 'Сотрудник'} ${softDeleted ? 'отключил' : 'удалил'} сотрудника ${user.name}${softDeleted ? ' (история работы и расчётов сохранена)' : ''}`,
       oldValue: { name: user.name, role: user.role, phone: user.phone },
       metadata: { softDeleted },
     });
@@ -360,40 +410,13 @@ export class StaffService {
   }
 
   async waiterReport(period: 'today' | 'week' | 'month', dateStr?: string) {
-    const startOfDay = (d = new Date()) => {
-      const s = new Date(d);
-      s.setHours(0, 0, 0, 0);
-      return s;
-    };
-    const endExclusive = (d: Date) => {
-      const next = startOfDay(d);
-      next.setDate(next.getDate() + 1);
-      return next;
-    };
-    const addDays = (d: Date, days: number) => {
-      const next = new Date(d);
-      next.setDate(next.getDate() + days);
-      return next;
-    };
-
-    const today = startOfDay();
-    const baseDate = dateStr && !Number.isNaN(new Date(dateStr).getTime()) ? startOfDay(new Date(dateStr)) : today;
-
-    let from: Date;
-    let to: Date;
-    if (period === 'today') {
-      from = baseDate;
-      to = endExclusive(baseDate);
-    } else if (period === 'week') {
-      from = addDays(baseDate, -6);
-      to = endExclusive(baseDate);
-    } else { // month
-      from = addDays(baseDate, -29);
-      to = endExclusive(baseDate);
-    }
-
+    const day = this.dayBounds(dateStr);
+    const from = new Date(day.from.getTime() - (period === 'week' ? 6 : period === 'month' ? 29 : 0) * 86400000);
+    const to = day.to;
     const waiters = await this.prisma.user.findMany({
-      where: { role: Role.WAITER },
+      where: { role: { not: Role.OWNER }, OR: [{ role: Role.WAITER }, { orders: { some: {
+        status: { in: [OrderStatus.paid, OrderStatus.cancelled] }, closedAt: { gte: from, lt: to },
+      } } }] },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },
     });
@@ -433,19 +456,15 @@ export class StaffService {
   // ====== Отчёт по сменам за дату ======
 
   private dayBounds(dateStr?: string) {
-    const base =
-      dateStr && !Number.isNaN(new Date(dateStr).getTime()) ? new Date(dateStr) : new Date();
-    const from = new Date(base);
-    from.setHours(0, 0, 0, 0);
-    const to = new Date(from);
-    to.setDate(to.getDate() + 1);
-    return { from, to };
+    const day = dateStr ?? warehouseDay(new Date());
+    const range = warehouseDateRange(day, day)!;
+    return { from: range.gte!, to: new Date(range.lte!.getTime() + 1) };
   }
 
   /** Дата без времени (для уникального ключа ShiftCashReport). */
   private dateOnly(dateStr?: string) {
     const { from } = this.dayBounds(dateStr);
-    return from;
+    return new Date(warehouseDay(from) + 'T00:00:00.000Z');
   }
 
   private loadPaidOrders(waiterIds: string[], from: Date, to: Date) {
@@ -517,43 +536,26 @@ export class StaffService {
       select: { id: true, name: true, role: true },
       orderBy: { name: 'asc' },
     });
-    // Финансовый отчёт по смене считаем только для официантов.
-    const waiterIds = users.filter((u) => u.role === Role.WAITER).map((u) => u.id);
+    // Work time belongs to every employee. Historical waiter orders remain attached after a role change.
+    const waiterIds = users.map((u) => u.id);
+    const shifts = await this.prisma.waiterShift.findMany({
+      where: { waiterId: { in: waiterIds }, startedAt: { lt: to }, OR: [{ endedAt: null }, { endedAt: { gt: from } }] },
+      select: { waiterId: true, startedAt: true, endedAt: true, status: true },
+    });
 
-    // Финансовая агрегация. Если что-то из неё упадёт (напр. отсутствует таблица/колонка
-    // на ещё не мигрированной БД) — НЕ роняем весь отчёт: показываем список сотрудников
-    // с нулевыми финансами, а не пустую страницу «нет данных».
-    let shifts: { waiterId: string; startedAt: Date; endedAt: Date | null; status: WaiterShiftStatus }[] = [];
-    let paidOrders: Awaited<ReturnType<typeof this.loadPaidOrders>> = [];
-    let cancelledOrders: { id: string; waiterId: string | null; orderNumber: string; finalAmount: Prisma.Decimal; closedAt: Date | null }[] = [];
-    let rejectedItems: Awaited<ReturnType<typeof this.loadRejectedItems>> = [];
-    let cashReports: { waiterId: string; cashHanded: Prisma.Decimal }[] = [];
-    if (waiterIds.length > 0) {
-      try {
-        [shifts, paidOrders, cancelledOrders, rejectedItems, cashReports] = await Promise.all([
-          this.prisma.waiterShift.findMany({
-            where: {
-              waiterId: { in: waiterIds },
-              startedAt: { lt: to },
-              OR: [{ endedAt: null }, { endedAt: { gte: from } }],
-            },
-            select: { waiterId: true, startedAt: true, endedAt: true, status: true },
-          }),
-          this.loadPaidOrders(waiterIds, from, to),
-          this.prisma.order.findMany({
-            where: { waiterId: { in: waiterIds }, status: OrderStatus.cancelled, closedAt: { gte: from, lt: to } },
-            select: { id: true, waiterId: true, orderNumber: true, finalAmount: true, closedAt: true },
-          }),
-          this.loadRejectedItems(waiterIds, from, to),
-          this.prisma.shiftCashReport.findMany({
-            where: { waiterId: { in: waiterIds }, date: dateKey },
-            select: { waiterId: true, cashHanded: true },
-          }),
-        ]);
-      } catch (err) {
-        console.error('[shiftReport] финансовая агрегация не удалась:', err);
-      }
-    }
+    // A failed query must surface as a report error, never as a fictitious zero balance.
+    const [paidOrders, cancelledOrders, rejectedItems, cashReports] = await Promise.all([
+      this.loadPaidOrders(waiterIds, from, to),
+      this.prisma.order.findMany({
+        where: { waiterId: { in: waiterIds }, status: OrderStatus.cancelled, closedAt: { gte: from, lt: to } },
+        select: { id: true, waiterId: true, orderNumber: true, finalAmount: true, closedAt: true },
+      }),
+      this.loadRejectedItems(waiterIds, from, to),
+      this.prisma.shiftCashReport.findMany({
+        where: { waiterId: { in: waiterIds }, date: dateKey },
+        select: { waiterId: true, cashHanded: true },
+      }),
+    ]);
 
     // Причины отмены заказов — из журнала аудита.
     const cancelledIds = cancelledOrders.map((o) => o.id);
@@ -669,13 +671,16 @@ export class StaffService {
     }
 
     const rows = users.map((u) => {
-      const isWaiter = u.role === Role.WAITER;
-      const a = isWaiter ? acc.get(u.id) : undefined;
-      const sh = isWaiter ? shiftByWaiter.get(u.id) : undefined;
+      const a = acc.get(u.id);
+      const isWaiter = u.role === Role.WAITER || !!a;
+      const sh = shiftByWaiter.get(u.id);
       const cashDue = a?.cashDue ?? 0;
-      const cashHanded = isWaiter ? cashHandedByWaiter.get(u.id) ?? 0 : 0;
-      const durationMin =
-        sh && sh.end ? Math.max(0, Math.round((sh.end.getTime() - sh.start.getTime()) / 60000)) : null;
+      const cashHanded = cashHandedByWaiter.get(u.id) ?? 0;
+      const durationMin = sh ? Math.round(payrollWorkTime(
+        shifts.filter((shift) => shift.waiterId === u.id).map((shift) => ({
+          startedAt: shift.startedAt, endedAt: shift.endedAt ?? new Date(),
+        })), { start: from.getTime(), end: to.getTime(), days: 1 },
+      ).milliseconds / 60000) : null;
       const categories = a
         ? [...a.categories.values()]
             .sort((x, y) => x.sortOrder - y.sortOrder || y.amount - x.amount)
@@ -705,7 +710,7 @@ export class StaffService {
         // Подробный отчёт по смене — только для официантов.
         isWaiter,
         shiftStart: sh ? sh.start.toISOString() : null,
-        shiftEnd: sh?.end ? sh.end.toISOString() : null,
+        shiftEnd: sh?.end && !sh.open ? sh.end.toISOString() : null,
         shiftOpen: sh?.open ?? false,
         durationMin,
         turnover: a?.turnover ?? 0,
@@ -751,37 +756,20 @@ export class StaffService {
   }
 
   private rangeForShiftHistory(params: ShiftHistoryQueryDto) {
-    const startOfDay = (d = new Date()) => {
-      const x = new Date(d);
-      x.setHours(0, 0, 0, 0);
-      return x;
-    };
-    const addDays = (d: Date, days: number) => {
-      const x = new Date(d);
-      x.setDate(x.getDate() + days);
-      return x;
-    };
-    const endExclusive = (d: Date) => addDays(startOfDay(d), 1);
-    const today = startOfDay();
+    const today = this.dayBounds();
     const period = params.period ?? 'today';
-
-    if (period === 'custom' && params.from && params.to) {
-      const from = startOfDay(new Date(params.from));
-      const to = endExclusive(new Date(params.to));
-      return { from, to };
+    if (period === 'custom') {
+      if (!params.from || !params.to) throw new BadRequestException('Укажите начало и конец периода');
+      const range = warehouseDateRange(params.from, params.to)!;
+      return { from: range.gte!, to: new Date(range.lte!.getTime() + 1) };
     }
-    if (period === 'week') return { from: addDays(today, -6), to: endExclusive(today) };
-    if (period === 'month') return { from: addDays(today, -29), to: endExclusive(today) };
-    return { from: today, to: endExclusive(today) };
+    const days = period === 'week' ? 6 : period === 'month' ? 29 : 0;
+    return { from: new Date(today.from.getTime() - days * 86400000), to: today.to };
   }
 
   private shiftStatus(startedAt: Date, endedAt: Date | null, now = new Date()) {
     if (endedAt) return 'closed';
-    const startDay = new Date(startedAt);
-    startDay.setHours(0, 0, 0, 0);
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    return startDay < today ? 'unclosed' : 'active';
+    return warehouseDay(startedAt) < warehouseDay(now) ? 'unclosed' : 'active';
   }
 
   async shiftHistory(params: ShiftHistoryQueryDto, actor: AuditActor) {
@@ -795,7 +783,7 @@ export class StaffService {
     const shifts = await this.prisma.waiterShift.findMany({
       where: {
         startedAt: { lt: to },
-        OR: [{ endedAt: null }, { endedAt: { gte: from } }],
+        OR: [{ endedAt: null }, { endedAt: { gt: from } }],
         waiter: userWhere,
       },
       orderBy: { startedAt: 'desc' },
@@ -811,7 +799,7 @@ export class StaffService {
     const now = new Date();
     const rows = shifts.map((s) => {
       const effectiveEnd = s.endedAt ?? now;
-      const durationMin = Math.max(0, Math.round((effectiveEnd.getTime() - s.startedAt.getTime()) / 60000));
+      const durationMin = Math.max(0, Math.round((Math.min(effectiveEnd.getTime(), to.getTime()) - Math.max(s.startedAt.getTime(), from.getTime())) / 60000));
       const turnover = s.orders.reduce((sum, o) => sum + Number(o.finalAmount), 0);
       return {
         id: s.id,
@@ -847,42 +835,27 @@ export class StaffService {
 
   /** Детальный отчет по блюдам в оплаченных заказах одного официанта. */
   async waiterOrdersReport(params: WaiterOrdersReportQueryDto) {
-    const parseLocalDate = (value: string) => {
-      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-      if (!match) throw new BadRequestException('Некорректный период отчета');
-      const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-      if (
-        date.getFullYear() !== Number(match[1]) ||
-        date.getMonth() !== Number(match[2]) - 1 ||
-        date.getDate() !== Number(match[3])
-      ) {
-        throw new BadRequestException('Некорректный период отчета');
-      }
-      return date;
-    };
-
-    const from = parseLocalDate(params.from);
-    const toInclusive = parseLocalDate(params.to);
-    if (from > toInclusive) throw new BadRequestException('Дата начала не может быть позже даты окончания');
-    const to = new Date(toInclusive);
-    to.setDate(to.getDate() + 1);
+    const range = warehouseDateRange(params.from, params.to)!;
+    const from = range.gte!;
+    const toInclusive = range.lte!;
+    const to = new Date(toInclusive.getTime() + 1);
 
     const waiter = await this.prisma.user.findFirst({
       where: {
         id: params.waiterId,
-        role: Role.WAITER,
+        role: { not: Role.OWNER },
       },
       select: { id: true, name: true },
     });
-    if (!waiter) throw new NotFoundException('Официант не найден');
+    if (!waiter) throw new NotFoundException('Сотрудник не найден');
 
     const orders = await this.prisma.order.findMany({
       where: {
         waiterId: waiter.id,
         status: OrderStatus.paid,
-        createdAt: { gte: from, lt: to },
+        closedAt: { gte: from, lt: to },
       },
-      orderBy: { createdAt: 'asc' },
+      orderBy: { closedAt: 'asc' },
       select: {
         id: true,
         orderNumber: true,
@@ -947,33 +920,31 @@ export class StaffService {
   }
 
   async updateShiftHistory(id: string, dto: UpdateShiftHistoryDto, actor: AuditActor) {
-    const shift = await this.prisma.waiterShift.findUnique({
-      where: { id },
-      include: { waiter: { select: { name: true } } },
+    const { shift, updated } = await this.prisma.$transaction(async (tx) => {
+      const shift = await this.lockStaffShift(tx, id, actor);
+      const parseTime = (value: string) => new Date(/(?:Z|[+-]\d\d:\d\d)$/i.test(value) ? value : value + '+06:00');
+      const startedAt = dto.startedAt !== undefined ? parseTime(dto.startedAt) : shift.startedAt;
+      const endedAt = dto.endedAt !== undefined ? dto.endedAt ? parseTime(dto.endedAt) : null : shift.endedAt;
+      if (!Number.isFinite(startedAt.getTime()) || (endedAt && !Number.isFinite(endedAt.getTime()))) {
+        throw new BadRequestException('Некорректное время смены');
+      }
+      if (endedAt && endedAt < startedAt) throw new BadRequestException('Время окончания не может быть раньше начала');
+      const now = new Date();
+      if (startedAt > now || (endedAt && endedAt > now)) throw new BadRequestException('Нельзя указать время смены в будущем');
+      if (!endedAt && (!shift.waiter.isActive || !WORK_SHIFT_ROLES.includes(shift.waiter.role))) {
+        throw new BadRequestException('Нельзя открыть смену отключённому сотруднику или владельцу');
+      }
+      const overlap = await tx.waiterShift.findFirst({ where: {
+        waiterId: shift.waiterId, id: { not: id }, ...(endedAt ? { startedAt: { lt: endedAt } } : {}),
+        OR: [{ endedAt: null }, { endedAt: { gt: startedAt } }],
+      }, select: { id: true } });
+      if (overlap) throw new ConflictException('Время пересекается с другой сменой сотрудника');
+      if (endedAt && shift.status === WaiterShiftStatus.active) await this.assertCanCloseStaffShift(tx, shift.waiterId);
+      const updated = await tx.waiterShift.update({ where: { id }, data: {
+        startedAt, endedAt, status: endedAt ? WaiterShiftStatus.closed : WaiterShiftStatus.active,
+      } });
+      return { shift, updated };
     });
-    if (!shift) throw new NotFoundException('Смена не найдена');
-
-    const data: Prisma.WaiterShiftUpdateInput = {};
-    const startedAt = dto.startedAt !== undefined ? new Date(dto.startedAt) : shift.startedAt;
-    const endedAt =
-      dto.endedAt !== undefined
-        ? dto.endedAt
-          ? new Date(dto.endedAt)
-          : null
-        : shift.endedAt;
-    if (Number.isNaN(startedAt.getTime()) || (endedAt && Number.isNaN(endedAt.getTime()))) {
-      throw new BadRequestException('Некорректное время смены');
-    }
-    if (endedAt && endedAt < startedAt) {
-      throw new BadRequestException('Время окончания не может быть раньше начала');
-    }
-    if (dto.startedAt !== undefined) data.startedAt = startedAt;
-    if (dto.endedAt !== undefined) {
-      data.endedAt = endedAt;
-      data.status = endedAt ? WaiterShiftStatus.closed : WaiterShiftStatus.active;
-    }
-
-    const updated = await this.prisma.waiterShift.update({ where: { id }, data });
     await this.audit.log({
       actor,
       actionType: AuditAction.STAFF_UPDATED,
@@ -993,22 +964,17 @@ export class StaffService {
   }
 
   async closeShiftHistory(id: string, actor: AuditActor) {
-    const shift = await this.prisma.waiterShift.findUnique({
-      where: { id },
-      include: { waiter: { select: { name: true } } },
+    const change = await this.prisma.$transaction(async (tx) => {
+      const shift = await this.lockStaffShift(tx, id, actor);
+      if (shift.endedAt || shift.status === WaiterShiftStatus.closed) return null;
+      const endedAt = new Date();
+      if (endedAt < shift.startedAt) throw new BadRequestException('Нельзя закрыть смену раньше начала');
+      await this.assertCanCloseStaffShift(tx, shift.waiterId);
+      await tx.waiterShift.update({ where: { id }, data: { endedAt, status: WaiterShiftStatus.closed } });
+      return { shift, endedAt };
     });
-    if (!shift) throw new NotFoundException('Смена не найдена');
-    if (shift.endedAt || shift.status === WaiterShiftStatus.closed) {
-      return { ok: true };
-    }
-    const endedAt = new Date();
-    if (endedAt < shift.startedAt) {
-      throw new BadRequestException('Нельзя закрыть смену раньше начала');
-    }
-    await this.prisma.waiterShift.update({
-      where: { id },
-      data: { endedAt, status: WaiterShiftStatus.closed },
-    });
+    if (!change) return { ok: true };
+    const { shift, endedAt } = change;
     await this.audit.log({
       actor,
       actionType: AuditAction.STAFF_UPDATED,
@@ -1019,5 +985,23 @@ export class StaffService {
       newValue: { endedAt: endedAt.toISOString(), status: WaiterShiftStatus.closed },
     });
     return { ok: true };
+  }
+
+  private async lockStaffShift(tx: Prisma.TransactionClient, id: string, actor: AuditActor) {
+    const before = await tx.waiterShift.findUnique({ where: { id }, select: { cafeId: true } });
+    if (!before) throw new NotFoundException('Смена не найдена');
+    if (before.cafeId) await lockFinance(tx, before.cafeId);
+    const shift = await tx.waiterShift.findUnique({ where: { id }, include: {
+      waiter: { select: { name: true, role: true, isActive: true } },
+    } });
+    if (!shift) throw new NotFoundException('Смена не найдена');
+    this.assertCanManageRole(actor, shift.waiter.role);
+    return shift;
+  }
+
+  private async assertCanCloseStaffShift(tx: Prisma.TransactionClient, employeeId: string) {
+    if (await tx.order.count({ where: { waiterId: employeeId, status: { notIn: CLOSED_ORDER_STATUSES } } })) {
+      throw new ConflictException('Нельзя завершить смену, пока есть активные заказы');
+    }
   }
 }

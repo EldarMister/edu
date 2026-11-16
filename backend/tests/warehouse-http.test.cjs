@@ -60,7 +60,7 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     assert.equal((await request(keeperToken, '/admin/warehouse/purchases')).status, 403);
     const supplyPath = `/admin/warehouse/ingredients/${ingredient.id}/supplies`;
     assert.equal((await request(reportReaderToken, supplyPath)).status, 200, 'reading supplies does not require receiving permission');
-    assert.equal((await request(reportReaderToken, '/admin/warehouse/purchases')).status, 403);
+    assert.equal((await request(reportReaderToken, '/admin/warehouse/purchases')).status, 200, 'reading purchases requires costs, not receiving permission');
     for (const token of [keeperToken, chefToken, outsiderToken]) {
       assert.equal((await request(token, supplyPath)).status, 403);
     }
@@ -213,9 +213,10 @@ test('HTTP: warehouse action permissions and cost visibility are enforced by the
     assert.deepEqual(await (await request(chefToken, `/admin/warehouse/preparation/batches?warehouseId=${emptyWarehouse.id}`)).json(), []);
     assert.equal((await request(chefToken, `/admin/warehouse/preparation/batches?warehouseId=${foreignWarehouse.id}`)).status, 404);
     assert.equal((await request(chefToken, `/admin/warehouse/preparation/batches/${foreignBatch.id}`)).status, 404);
-    assert.equal((await request(readerToken, '/admin/warehouse/preparation/batches')).status, 403);
+    assert.equal((await request(readerToken, '/admin/warehouse/preparation/batches')).status, 200, 'reading production does not require posting permission');
     assert.equal((await request(outsiderToken, '/admin/warehouse/preparation/batches')).status, 403);
 
+    await checkReadonlyWarehouse({ db, request, actor: reportReader, token: reportReaderToken, ingredient });
     await checkPurchaseExport({ db, request, ownerToken, actor: reportReader, actorToken: reportReaderToken, outsiderToken });
   } finally {
     await db.stockMovement.deleteMany({ where: { cafeId: { in: [cafe.id, foreign.id] } } });
@@ -244,8 +245,8 @@ async function checkPurchaseExport({ db, request, ownerToken, actor, actorToken,
   } });
   for (const excluded of ['export', 'receive', 'costs', 'section']) {
     await setPermission(excluded);
-    assert.equal((await request(actorToken, exportPath)).status, 403);
-    assert.equal((await request(actorToken, base)).status, excluded === 'export' ? 200 : 403);
+    assert.equal((await request(actorToken, exportPath)).status, excluded === 'receive' ? 200 : 403);
+    assert.equal((await request(actorToken, base)).status, ['export', 'receive'].includes(excluded) ? 200 : 403);
   }
   assert.equal((await request(outsiderToken, exportPath)).status, 403);
   await setPermission();
@@ -284,4 +285,32 @@ async function checkPurchaseExport({ db, request, ownerToken, actor, actorToken,
   for (const invalid of ['columns=number,unexpected', 'columns=number,number', 'columns=', 'from=2026-02-30', 'dateSort=random', 'status=deleted', 'suppliers=', 'categories=']) {
     assert.equal((await request(ownerToken, `${exportPath}?${invalid}`)).status, 400, invalid);
   }
+}
+
+async function checkReadonlyWarehouse({ db, request, actor, token, ingredient }) {
+  const permissions = { sections: { warehouse: true }, readOnlySections: ['warehouse'], actions: {
+    warehouseCosts: true, warehouseReports: true, warehouseReceive: true, warehouseSettings: true,
+    warehouseCount: true, warehouseWriteoff: true, warehouseProduce: true, warehouseApprove: true,
+  } };
+  await db.user.update({ where: { id: actor.id }, data: { permissions } });
+  for (const path of ['purchases', 'purchases/overview', `purchases/last-prices?ingredientIds=${ingredient.id}`, 'documents', 'documents/writeoff-options',
+    'preparation/batches', 'processing', 'suppliers', 'packages', 'locations']) {
+    assert.equal((await request(token, `/admin/warehouse/${path}`)).status, 200, `read-only warehouse can read ${path}`);
+  }
+  const draft = await db.warehouseDocument.findFirstOrThrow({ where: { cafeId: actor.cafeId } });
+  assert.equal((await request(token, `/admin/warehouse/documents/${draft.id}`)).status, 200);
+  for (const [path, method] of [
+    ['purchases', 'POST'], ['documents', 'POST'], ['processing', 'POST'], ['suppliers', 'POST'],
+    ['packages', 'POST'], ['locations', 'POST'], [`ingredients/${ingredient.id}`, 'PATCH'],
+    [`documents/${draft.id}/reverse`, 'POST'],
+  ]) {
+    assert.equal((await request(token, `/admin/warehouse/${path}`, method, {})).status, 403,
+      `read-only warehouse cannot ${method} ${path}, even with a stale explicit action grant`);
+  }
+  await db.user.update({ where: { id: actor.id }, data: {
+    permissions: { ...permissions, actions: { ...permissions.actions, warehouseCosts: false } },
+  } });
+  assert.equal((await request(token, '/admin/warehouse/purchases')).status, 403, 'view-only does not grant cost access');
+  const stock = await (await request(token, '/admin/warehouse/ingredients')).json();
+  assert.equal(stock.find((row) => row.id === ingredient.id).avgCost, null);
 }
