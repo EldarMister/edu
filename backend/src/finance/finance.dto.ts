@@ -9,11 +9,13 @@ export class FinanceQueryDto {
   @IsOptional() @Matches(datePattern) to?: string;
   @IsOptional() @Matches(monthPattern) month?: string;
   @IsOptional() @IsString() @Length(1, 120) accountId?: string;
+  @IsOptional() @Matches(/^[\w-]{1,120}(,[\w-]{1,120}){0,99}$/) accountIds?: string;
 }
 
 export class FinanceAccountUpdateDto {
   @IsOptional() @IsString() @Length(1, 120) name?: string;
   @IsOptional() @IsBoolean() isDefault?: boolean;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(-MAX_MONEY) @Max(MAX_MONEY) openingBalance?: number;
 }
 
 export class FinanceAccountCreateDto {
@@ -26,15 +28,18 @@ export class FinanceAccountCreateDto {
 class FinanceCategoryGrantsDto {
   @IsOptional() @IsArray() @ArrayMaxSize(200) @IsString({ each: true }) @Length(1, 120, { each: true }) userIds?: string[];
   @IsOptional() @IsArray() @ArrayMaxSize(200) @IsString({ each: true }) @Length(1, 120, { each: true }) positionIds?: string[];
+  @IsOptional() @IsString() @Length(1, 120) parentId?: string | null;
+  @IsOptional() @IsBoolean() showOnPos?: boolean;
 }
 
 export class FinanceCategoryUpdateDto extends FinanceCategoryGrantsDto {
   @IsOptional() @IsString() @Length(1, 120) name?: string;
+  @IsOptional() @IsIn(['income', 'expense', 'both']) kind?: 'income' | 'expense' | 'both';
 }
 
 export class FinanceCategoryCreateDto extends FinanceCategoryGrantsDto {
   @IsString() @Length(1, 120) name!: string;
-  @IsIn(['income', 'expense']) kind!: 'income' | 'expense';
+  @IsIn(['income', 'expense', 'both']) kind!: 'income' | 'expense' | 'both';
 }
 
 class MoneyPostDto {
@@ -66,7 +71,9 @@ export class SalaryAccrualDto extends MoneyPostDto {
 }
 
 export class PayrollReportDto {
-  @Matches(monthPattern) month!: string;
+  @IsOptional() @Matches(monthPattern) month?: string;
+  @IsOptional() @Matches(datePattern) from?: string;
+  @IsOptional() @Matches(datePattern) to?: string;
 }
 
 export class SalaryPaymentDto extends MoneyPostDto {

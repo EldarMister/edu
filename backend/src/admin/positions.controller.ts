@@ -1,7 +1,7 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsIn, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { IsIn, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
@@ -52,6 +52,11 @@ class UpdatePositionDto {
 class CreatePositionDto extends UpdatePositionDto {
   @IsIn(assignableRoles)
   role!: Role;
+}
+
+class RemovePositionDto {
+  @IsOptional() @IsUUID()
+  replacementPositionId?: string | null;
 }
 
 @Controller('admin/positions')
@@ -121,20 +126,42 @@ export class PositionsController {
   }
 
   @Delete(':id')
-  async remove(@CurrentUser() actor: AuthUser, @Param('id') id: string) {
+  async remove(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() dto: RemovePositionDto = {}) {
     const cafeId = this.cafe(actor);
-    const before = await this.find(cafeId, id);
-    if (before._count.users) throw new ConflictException('Сначала назначьте сотрудникам другую должность');
-    try {
-      await this.prisma.staffPosition.delete({ where: { cafeId_id: { cafeId, id } } });
-    } catch (error) {
+    const { before, replacement, transferred } = await this.prisma.$transaction(async (db) => {
+      await lockFinance(db, cafeId);
+      const before = await this.find(cafeId, id, db);
+      if (before._count.users && dto.replacementPositionId === undefined) {
+        throw new ConflictException('Выберите должность, на которую будут переведены сотрудники');
+      }
+      const replacementId = dto.replacementPositionId;
+      const replacement = replacementId ? await this.find(cafeId, replacementId, db) : null;
+      if (replacement && (replacement.id === before.id || replacement.role !== before.role)) {
+        throw new BadRequestException('Выберите другую должность с той же базовой ролью');
+      }
+      const transferred = replacementId !== undefined ? (await db.user.updateMany({
+        where: { cafeId, positionId: id, role: before.role },
+        data: { positionId: replacement?.id ?? null, permissions: Prisma.DbNull },
+      })).count : 0;
+      if (transferred !== before._count.users) {
+        throw new ConflictException('Проверьте должности сотрудников и попробуйте ещё раз');
+      }
+      await db.$executeRaw`
+        UPDATE finance_categories
+        SET position_ids = array_remove(position_ids, ${id})
+        WHERE cafe_id = ${cafeId} AND position_ids @> ARRAY[${id}]::text[]
+      `;
+      await db.staffPosition.delete({ where: { cafeId_id: { cafeId, id } } });
+      return { before, replacement, transferred };
+    }).catch((error: unknown) => {
       if (error instanceof Prisma.PrismaClientKnownRequestError && ['P2003', 'P2014'].includes(error.code)) {
-        throw new ConflictException('Сначала назначьте сотрудникам другую должность');
+        throw new ConflictException('Список сотрудников изменился. Повторите удаление');
       }
       throw error;
-    }
+    });
     await this.audit.log({ actor, actionType: AuditAction.POSITION_DELETED, entityType: AuditEntity.POSITION,
-      entityId: id, description: `Удалена должность «${before.name}»`, oldValue: { name: before.name, role: before.role } });
+      entityId: id, description: `Удалена должность «${before.name}»`, oldValue: { name: before.name, role: before.role },
+      metadata: { replacementPositionId: replacement?.id ?? null, transferred } });
     return { ok: true };
   }
 

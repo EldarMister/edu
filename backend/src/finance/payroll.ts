@@ -1,6 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { OrderStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
-import { warehouseDay } from '../warehouse/report-range';
+import { warehouseDateRange, warehouseDay } from '../warehouse/report-range';
 
 type Db = Prisma.TransactionClient;
 const DAY = 86_400_000;
@@ -21,6 +21,7 @@ export function salaryRates(rate?: Record<keyof SalaryRates, Prisma.Decimal>): S
 
 type ClosedShift = { startedAt: Date; endedAt: Date | null };
 type TimeSpan = { start: number; end: number };
+type PayrollWindow = ReturnType<typeof payrollMonth>;
 
 export function payrollMonth(month: string) {
   if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new BadRequestException('Укажите месяц начисления');
@@ -31,7 +32,7 @@ export function payrollMonth(month: string) {
   return { start, end, days: (end - start) / DAY };
 }
 
-export function payrollWorkTime(shifts: ClosedShift[], month: ReturnType<typeof payrollMonth>) {
+export function payrollWorkTime(shifts: ClosedShift[], month: PayrollWindow) {
   const periods: TimeSpan[] = [];
   let count = 0;
   for (const { startedAt, endedAt } of shifts) {
@@ -66,21 +67,37 @@ export function calculatePayroll(
   rates: SalaryRates, work: ReturnType<typeof payrollWorkTime>, monthDays: number,
   personalSales: Prisma.Decimal, shiftSales: Prisma.Decimal,
 ) {
-  return new Prisma.Decimal(rates.hourly).mul(work.milliseconds).div(HOUR)
-    .add(new Prisma.Decimal(rates.perShift).mul(work.shifts))
-    .add(new Prisma.Decimal(rates.monthly).mul(work.days).div(monthDays))
-    .add(personalSales.mul(rates.personalPercent).div(100))
-    .add(shiftSales.mul(rates.shiftPercent).div(100))
-    .toDecimalPlaces(2);
+  return Object.values(payrollAmounts(rates, work, monthDays, personalSales, shiftSales))
+    .reduce((sum, amount) => sum.add(amount), zero);
 }
 
-export async function payrollReport(db: Db, cafeId: string, month: string, onlyUserId?: string) {
-  const window = payrollMonth(month);
+function payrollAmounts(
+  rates: SalaryRates, work: ReturnType<typeof payrollWorkTime>, monthDays: number,
+  personalSales: Prisma.Decimal, shiftSales: Prisma.Decimal,
+) {
+  let total = zero;
+  function roundedComponent(amount: Prisma.Decimal) {
+    const before = total.toDecimalPlaces(2);
+    total = total.add(amount);
+    return total.toDecimalPlaces(2).sub(before);
+  }
+  return {
+    hourlyPay: roundedComponent(new Prisma.Decimal(rates.hourly).mul(work.milliseconds).div(HOUR)),
+    shiftPay: roundedComponent(new Prisma.Decimal(rates.perShift).mul(work.shifts)),
+    monthlyPay: roundedComponent(new Prisma.Decimal(rates.monthly).mul(work.days).div(monthDays)),
+    personalCommission: roundedComponent(personalSales.mul(rates.personalPercent).div(100)),
+    shiftCommission: roundedComponent(shiftSales.mul(rates.shiftPercent).div(100)),
+  };
+}
+
+export async function payrollReport(db: Db, cafeId: string, month: string, onlyUserId?: string, window = payrollMonth(month)) {
   const [employees, accruals, shifts] = await Promise.all([
     db.user.findMany({
       where: { cafeId, role: { not: Role.OWNER }, ...(onlyUserId ? { id: onlyUserId } : {}), OR: [
         { isActive: true }, { waiterShifts: { some: {
           cafeId, status: WaiterShiftStatus.closed, startedAt: { lt: new Date(window.end) }, endedAt: { gt: new Date(window.start) },
+        } } }, { orders: { some: {
+          cafeId, status: OrderStatus.paid, closedAt: { gte: new Date(window.start), lt: new Date(window.end) },
         } } },
       ] },
       select: { id: true, name: true, role: true, isActive: true, position: { select: {
@@ -152,7 +169,8 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     const personalSales = paidByEmployee.get(employee.id) ?? zero;
     const shiftSales = rates.shiftPercent > 0
       ? work.periods.reduce((total, { start, end }) => total.add(priorSales(end).sub(priorSales(start))), zero) : zero;
-    const estimate = calculatePayroll(rates, work, window.days, personalSales, shiftSales);
+    const amounts = payrollAmounts(rates, work, window.days, personalSales, shiftSales);
+    const estimate = Object.values(amounts).reduce((total, amount) => total.add(amount), zero);
     const booked = totals.get(employee.id) ?? { accrued: zero, paid: zero };
     const tracked = employee.role === Role.WAITER || work.periods.length > 0;
     return {
@@ -161,6 +179,8 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
       hours: tracked ? Math.round(work.milliseconds / HOUR * 100) / 100 : null,
       shifts: tracked ? work.shifts : null, days: tracked ? work.days : null,
       rateMonth: employee.position?.salaryRates[0]?.effectiveMonth ?? null, rates,
+      hourlyPay: Number(amounts.hourlyPay), shiftPay: Number(amounts.shiftPay), monthlyPay: Number(amounts.monthlyPay),
+      personalCommission: Number(amounts.personalCommission), shiftCommission: Number(amounts.shiftCommission),
       personalSales: Number(personalSales), shiftSales: Number(shiftSales), estimate: Number(estimate),
       available: employee.isActive ? Number(Prisma.Decimal.max(zero, estimate.sub(booked.accrued))) : 0,
       accrued: Number(booked.accrued), paid: Number(booked.paid), due: Number(booked.accrued.sub(booked.paid)),
@@ -174,10 +194,52 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     staff.push({
       userId: record.userId, name: record.employeeName, positionId: null, position: '',
       hours: null, shifts: null, days: null, rateMonth: null, rates: salaryRates(), personalSales: 0, shiftSales: 0,
+      hourlyPay: 0, shiftPay: 0, monthlyPay: 0, personalCommission: 0, shiftCommission: 0,
       estimate: 0, available: 0, accrued: Number(booked.accrued), paid: Number(booked.paid), due: Number(booked.accrued.sub(booked.paid)),
     });
   }
   return { staff: staff.sort((a, b) => a.name.localeCompare(b.name, 'ru')), records };
+}
+
+export function payrollPeriods(from: string, to: string) {
+  const range = warehouseDateRange(from, to)!;
+  const start = range.gte!.getTime();
+  const end = range.lte!.getTime() + 1;
+  const lastMonth = to.slice(0, 7);
+  const periods: { month: string; window: PayrollWindow }[] = [];
+  for (let month = from.slice(0, 7); month <= lastMonth;) {
+    if (periods.length >= 12) throw new BadRequestException('Выберите период не длиннее 12 календарных месяцев');
+    const window = payrollMonth(month);
+    periods.push({ month, window: { ...window, start: Math.max(start, window.start), end: Math.min(end, window.end) } });
+    if (month === lastMonth) break;
+    month = warehouseDay(new Date(window.end)).slice(0, 7);
+  }
+  return periods;
+}
+
+const totalsKeys = ['hourlyPay', 'shiftPay', 'monthlyPay', 'personalCommission', 'shiftCommission',
+  'personalSales', 'shiftSales', 'estimate', 'available', 'accrued', 'paid', 'due'] as const;
+const activityKeys = ['hours', 'shifts', 'days'] as const;
+
+export async function payrollPeriodReport(db: Db, cafeId: string, from: string, to: string) {
+  const periods = payrollPeriods(from, to);
+  const staff = new Map<string, Awaited<ReturnType<typeof payrollReport>>['staff'][number]>();
+  const records: Awaited<ReturnType<typeof payrollReport>>['records'] = [];
+  for (const { month, window } of periods) {
+    const report = await payrollReport(db, cafeId, month, undefined, window);
+    records.push(...report.records);
+    for (const row of report.staff) {
+      const previous = staff.get(row.userId);
+      if (previous) {
+        for (const key of totalsKeys) row[key] = new Prisma.Decimal(previous[key]).add(row[key]).toNumber();
+        for (const key of activityKeys) {
+          if (previous[key] !== null || row[key] !== null) row[key] = Number(((previous[key] ?? 0) + (row[key] ?? 0)).toFixed(2));
+        }
+      }
+      staff.set(row.userId, row);
+    }
+  }
+  return { staff: [...staff.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru')), records };
 }
 
 export const currentPayrollMonth = () => warehouseDay(new Date()).slice(0, 7);

@@ -9,6 +9,16 @@ export function entryLabel(entry: FinanceEntry) {
   return entry.reversalOf ? 'Сторно' : entryLabels[entry.kind] ?? entry.kind;
 }
 
+export function entryCategoryLabel(entry: FinanceEntry, categoryName?: string) {
+  if (entry.reversalOf) return entryLabel(entry);
+  if (categoryName) return categoryName;
+  if (entry.kind !== 'transfer' && (entry.sourceKey?.startsWith('cash-pos:')
+    || entry.sourceKey?.startsWith('cash-open:') || (entry.cashShiftId && ['sale', 'refund', 'adjustment'].includes(entry.kind)))) {
+    return 'Кассовые смены';
+  }
+  return entryLabel(entry);
+}
+
 const formatter = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const dateFormatter = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Asia/Bishkek', dateStyle: 'short', timeStyle: 'short' });
 const bishkekDate = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Bishkek', year: 'numeric', month: '2-digit', day: '2-digit' });

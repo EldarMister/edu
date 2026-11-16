@@ -43,7 +43,8 @@ export function useStaffPositionMutations() {
     onSuccess: refresh,
   });
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete(endpoint + '/' + id),
+    mutationFn: ({ id, replacementPositionId }: { id: string; replacementPositionId?: string | null }) =>
+      api.delete(endpoint + '/' + id, { data: { replacementPositionId } }),
     onSuccess: refresh,
   });
   return { save, remove };

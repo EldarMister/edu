@@ -1107,11 +1107,20 @@ function StaffEditor({
   const { markSaved } = useEditorDirty(dirty);
 
   const pending = create.isPending || update.isPending;
-  const systemRole = (value: string) => value === 'KITCHEN' || value === 'BAR' ? value : roles.find((role) => role === value);
-  const stationRole = member?.role === 'BAR' ? 'BAR' : 'KITCHEN';
+  const systemRole = (value: string) => (['WAITER', 'ADMIN', 'OWNER', 'KITCHEN', 'BAR'] as const).find((role) => role === value);
+  const assignedPosition = positions.data?.find((position) => position.id === positionId);
+  const stationRole = (assignedPosition?.role ?? member?.role) === 'BAR' ? 'BAR' : 'KITCHEN';
   const selectedRole = systemRole(assignment);
-  const role = selectedRole ?? stationRole;
-  const matchingPositions = (positions.data ?? []).filter((position) => position.role === role);
+  const role = assignedPosition?.role ?? selectedRole ?? stationRole;
+  const positionOptions = [
+    { value: 'WAITER', label: ROLE_LABEL.WAITER }, ...stationOptions,
+    ...roles.slice(1).map((value) => ({ value, label: ROLE_LABEL[value] })),
+    ...(positions.data ?? []).map(({ id, name }) => ({ value: 'position:' + id, label: name })),
+  ];
+  const chosenPosition = positionId ? 'position:' + positionId : assignment;
+  if (!positionOptions.some(({ value }) => value === chosenPosition)) {
+    positionOptions.push({ value: chosenPosition, label: member?.positionName ?? ROLE_LABEL[role] });
+  }
   const positionPatch = canAssignPosition && positionId !== (member?.positionId ?? '')
     ? { positionId: positionId || null }
     : {};
@@ -1171,22 +1180,29 @@ function StaffEditor({
         <DocumentField label="Номер телефона">
           <input className="input h-9 w-full !rounded-md text-sm" type="tel" value={phone} placeholder="+996" required onChange={(e) => setPhone(e.target.value)} />
         </DocumentField>
-        <DocumentField label="Роль или станция">
+        <DocumentField label="Должность">
           <Select
-            ariaLabel="Роль или станция"
+            ariaLabel="Должность"
             className="h-9 w-full !rounded-md !text-sm"
-            value={assignment}
+            value={chosenPosition}
             disabled={!canChangeRole}
             onChange={(value) => {
+              const nextPosition = positions.data?.find(({ id }) => 'position:' + id === value);
+              if (nextPosition) {
+                setPositionId(nextPosition.id);
+                if (nextPosition.role !== role) setAssignment(nextPosition.role);
+                return;
+              }
               setAssignment(value);
-              if ((systemRole(value) ?? stationRole) !== role) setPositionId('');
+              setPositionId('');
             }}
-            options={[{ value: 'WAITER', label: ROLE_LABEL.WAITER }, ...stationOptions, ...roles.slice(1).map((value) => ({ value, label: ROLE_LABEL[value] }))]}
+            options={positionOptions}
           />
         </DocumentField>
-        {canAssignPosition && (matchingPositions.length > 0 || positionId) && <DocumentField label="Должность">
-          <Select ariaLabel="Должность" className="h-9 w-full !rounded-md !text-sm" value={positionId} onChange={setPositionId}
-            options={[{ value: '', label: 'Стандартные права роли' }, ...matchingPositions.map(({ id, name }) => ({ value: id, label: name }))]} />
+        {assignedPosition && (role === 'KITCHEN' || role === 'BAR') && <DocumentField label="Станция">
+          <Select ariaLabel="Станция" className="h-9 w-full !rounded-md !text-sm" value={assignment} onChange={setAssignment}
+            disabled={!canChangeRole}
+            options={[{ value: role, label: 'Станция по умолчанию' }, ...stationOptions.filter(({ value }) => value !== 'KITCHEN' && value !== 'BAR')]} />
         </DocumentField>}
         </fieldset>
         <h2 className="mb-4 mt-6 border-b border-border pb-2 text-base font-medium text-text-primary">Доступ к EDU POS</h2>

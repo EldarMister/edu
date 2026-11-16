@@ -19,3 +19,16 @@ export async function ensureFinanceAccounts(tx: Prisma.TransactionClient, cafeId
   const noncash = await getDefault('noncash', 'Расчётный счёт');
   return { cash, noncash };
 }
+
+export async function ensureCollectionAccount(tx: Prisma.TransactionClient, cafeId: string) {
+  const accounts = await tx.financeAccount.findMany({ where: { cafeId } });
+  const current = accounts.find(({ isCollection }) => isCollection);
+  if (current) return current;
+  const safe = accounts.find(({ name, isDefault, type }) =>
+    type === 'cash' && !isDefault && name.trim().toLocaleLowerCase('ru') === 'сейф');
+  if (safe) return tx.financeAccount.update({ where: { cafeId, id: safe.id }, data: { isCollection: true } });
+  const names = new Set(accounts.map(({ name }) => name.toLocaleLowerCase('ru')));
+  let name = 'Сейф';
+  for (let suffix = 2; names.has(name.toLocaleLowerCase('ru')); suffix++) name = `Сейф (${suffix})`;
+  return tx.financeAccount.create({ data: { cafeId, name, type: 'cash', isCollection: true } });
+}

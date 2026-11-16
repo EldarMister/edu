@@ -267,6 +267,7 @@ enum FinanceAccountType {
 enum FinanceCategoryKind {
   income
   expense
+  both
 }
 
 enum FinanceEntryKind {
@@ -285,6 +286,7 @@ model FinanceAccount {
   name           String
   type           FinanceAccountType
   isDefault      Boolean            @default(false) @map("is_default")
+  isCollection   Boolean            @default(false) @map("is_collection")
   openingBalance Decimal            @default(0) @map("opening_balance") @db.Decimal(18, 2)
   createdAt      DateTime           @default(now()) @map("created_at")
   cafe           Cafe               @relation(fields: [cafeId], references: [id], onDelete: Cascade)
@@ -301,14 +303,19 @@ model FinanceCategory {
   cafeId      String              @map("cafe_id")
   name        String
   kind        FinanceCategoryKind
+  parentId    String?             @map("parent_id")
+  showOnPos   Boolean             @default(false) @map("show_on_pos")
   userIds     String[]            @default([]) @map("user_ids")
   positionIds String[]            @default([]) @map("position_ids")
   createdAt   DateTime            @default(now()) @map("created_at")
   cafe        Cafe                @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  parent      FinanceCategory?    @relation("FinanceCategoryParent", fields: [cafeId, parentId], references: [cafeId, id], onDelete: NoAction)
+  children    FinanceCategory[]   @relation("FinanceCategoryParent")
   entries     FinanceEntry[]
 
   @@unique([cafeId, id])
   @@unique([cafeId, kind, name])
+  @@index([cafeId, parentId])
   @@map("finance_categories")
 }
 
@@ -343,6 +350,7 @@ model FinanceEntry {
   counterpartyAccountId String?          @map("counterparty_account_id")
   salaryAccrualId       String?          @map("salary_accrual_id")
   cashShiftId           String?          @map("cash_shift_id")
+  pendingCashShift      Boolean          @default(false) @map("pending_cash_shift")
   actorId               String?          @map("actor_id")
   sourceKey             String?          @map("source_key")
   note                  String?

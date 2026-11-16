@@ -1,161 +1,221 @@
-import { Fragment, useState, type ReactNode } from 'react';
-import { Modal } from '@/components/Modal';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { usePermissions } from '@/hooks/usePermissions';
+import { IconTables } from '../../components/icons';
 import type { CashFlow, FinanceAccount, FinanceCategory, FinanceEntry } from './api';
-import { entryLabels, financeDateTime, financeDay, financeMoney } from './finance-format';
-import { FinanceTable } from './CashShiftsPage';
+import { buildCashFlowTable, flowCell, type FlowColumn, type FlowLine, type FlowMovement } from './cash-flow-table';
 import { downloadRegister } from './FinanceRegister';
+import './cash-flow-table.css';
 
-type Bucket = { key: string; label: string; opening: number; income: number; expense: number; closing: number };
-type Movement = { id: string; at: string; month: string; accountId: string; group: string; label: string; note: string; cents: number };
-type Direction = 'income' | 'expense';
-const cents = (value: number) => Math.round(value * 100);
-const monthFormat = new Intl.DateTimeFormat('ru-RU', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-const shortMonthFormat = new Intl.DateTimeFormat('ru-RU', { month: 'long', timeZone: 'UTC' });
+const money = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const percent = new Intl.NumberFormat('ru-RU', { style: 'percent', maximumFractionDigits: 2 });
+const date = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeZone: 'Asia/Bishkek' });
+const types = [{ label: 'карта', type: 'noncash' }, { label: 'наличн.', type: 'cash' }] as const;
 
-function monthsFor(flow: CashFlow, from: string, to: string) {
-  const amounts = new Map<string, { income: number; expense: number }>();
-  for (const day of flow.days) {
-    const key = day.date.slice(0, 7);
-    const amount = amounts.get(key) ?? { income: 0, expense: 0 };
-    amount.income += cents(day.income);
-    amount.expense += cents(day.expense);
-    amounts.set(key, amount);
-  }
-  let balance = cents(flow.opening);
-  const months: Bucket[] = [];
-  const start = new Date(from.slice(0, 7) + '-01T00:00:00Z');
-  const end = new Date(to.slice(0, 7) + '-01T00:00:00Z');
-  for (const cursor = start; cursor <= end; cursor.setUTCMonth(cursor.getUTCMonth() + 1)) {
-    const key = cursor.toISOString().slice(0, 7);
-    const { income, expense } = amounts.get(key) ?? { income: 0, expense: 0 };
-    const closing = balance + income - expense;
-    const month = (from.slice(0, 4) === to.slice(0, 4) ? shortMonthFormat : monthFormat).format(cursor);
-    months.push({ key, label: month[0].toLocaleUpperCase('ru') + month.slice(1), opening: balance, income, expense, closing });
-    balance = closing;
-  }
-  months.push({
-    key: 'total', label: 'За период', opening: cents(flow.opening), income: cents(flow.income),
-    expense: cents(flow.expense), closing: cents(flow.closing),
-  });
-  return months;
-}
+type Detail = { key: string; label: string; trigger: HTMLButtonElement; movements: FlowMovement[] };
 
-function movementsFor(accounts: FinanceAccount[], categories: FinanceCategory[], entries: FinanceEntry[], from: string, to: string, transfers: boolean) {
-  const categoryNames = new Map(categories.map(({ id, name }) => [id, name]));
-  const accountIds = new Set(accounts.map(({ id }) => id));
-  const movements: Movement[] = [];
-  for (const account of accounts) {
-    const day = financeDay(new Date(account.createdAt));
-    if (!account.openingBalance || day < from || day > to) continue;
-    movements.push({ id: 'opening:' + account.id, at: account.createdAt, month: day.slice(0, 7), accountId: account.id,
-      group: 'opening', label: 'Начальный баланс', note: 'Начальный баланс счёта', cents: cents(account.openingBalance) });
-  }
-  for (const entry of entries) {
-    if (!accountIds.has(entry.accountId) || !entry.amount || entry.reversalOf || entry.reversedAt || (entry.kind === 'transfer' && !transfers)) continue;
-    const day = financeDay(new Date(entry.occurredAt));
-    if (day < from || day > to) continue;
-    movements.push({ id: entry.id, at: entry.occurredAt, month: day.slice(0, 7), accountId: entry.accountId,
-      group: entry.categoryId ? 'category:' + entry.categoryId : entry.kind,
-      label: (entry.categoryId && categoryNames.get(entry.categoryId)) || entryLabels[entry.kind],
-      note: entry.note || '—', cents: cents(entry.amount) });
-  }
-  return movements;
-}
-
-export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, selectedAccount, accountFilter, period }: {
+export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, selectedAccounts, setAccounts, period }: {
   flow: CashFlow; accounts: FinanceAccount[]; categories: FinanceCategory[]; entries: FinanceEntry[];
-  from: string; to: string; selectedAccount: string;
-  accountFilter: ReactNode; period: ReactNode;
+  from: string; to: string; selectedAccounts: string; setAccounts: (value: string) => void; period: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState<Direction[]>([]);
-  const [detail, setDetail] = useState<{ label: string; rows: Movement[] } | null>(null);
-  const buckets = monthsFor(flow, from, to);
-  const names = new Map(accounts.map(({ id, name }) => [id, name]));
-  const movements = movementsFor(accounts, categories, entries, from, to, !!selectedAccount);
-  const groups = (['income', 'expense'] as const).map((direction) => {
-    const rows = movements.filter((item) => direction === 'income' ? item.cents > 0 : item.cents < 0);
-    const byCategory = new Map<string, { label: string; rows: Movement[] }>();
-    for (const item of rows) {
-      const category = byCategory.get(item.group) ?? { label: item.label, rows: [] };
-      category.rows.push(item);
-      byCategory.set(item.group, category);
+  const { canAction } = usePermissions();
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const [detail, setDetail] = useState<Detail | null>(null);
+  const [showAmounts, setShowAmounts] = useState(false);
+  const [showPercent, setShowPercent] = useState(false);
+  const scope = useMemo(() => new Set(selectedAccounts.split(',').filter(Boolean)), [selectedAccounts]);
+  const includedAccounts = useMemo(() => !scope.size ? accounts : accounts.filter(({ id }) => scope.has(id)), [accounts, scope]);
+  const { periods, lines, byAccount } = useMemo(
+    () => buildCashFlowTable(flow, includedAccounts, categories, entries, from, to, selectedAccounts),
+    [flow, includedAccounts, categories, entries, from, to, selectedAccounts],
+  );
+  const scopeLabel = scope.size ? includedAccounts.map(({ name }) => name).join(', ') : 'Все счета';
+  const columns = periods.flatMap((bucket): FlowColumn[] => [
+    { id: bucket.key, label: showAmounts || showPercent ? bucket.shortLabel + ', всего' : bucket.label, period: bucket },
+    ...(showAmounts ? types.map(({ label, type }) =>
+      ({ id: bucket.key + ':' + type, label: bucket.shortLabel + ', ' + label, period: bucket, type })) : []),
+    ...(showPercent ? types.map(({ label, type }) =>
+      ({ id: bucket.key + ':' + type + ':%', label: bucket.shortLabel + ', ' + label + ' %', period: bucket, type, percent: true })) : []),
+  ]);
+
+  function toggle(id: string) {
+    setExpanded((list) => list.includes(id) ? list.filter((key) => key !== id) : [...list, id]);
+  }
+
+  function toPercent(line: FlowLine, column: FlowColumn, cents: number) {
+    const total = flowCell(line, { ...column, type: undefined }, byAccount).cents;
+    if (!total) return '—';
+    return percent.format(cents ? cents / total : 0);
+  }
+
+  function exportReport() {
+    function exportLines(visible: FlowLine[], depth: number): (string | number)[][] {
+      return visible.flatMap((line) => [
+        ['  '.repeat(depth) + line.label, ...columns.map((column) => {
+          const { cents } = flowCell(line, column, byAccount);
+          return column.percent ? toPercent(line, column, cents) : cents / 100;
+        })],
+        ...exportLines(line.children ?? [], depth + 1),
+      ]);
     }
-    return { direction, label: direction === 'income' ? 'Поступления' : 'Расходы', rows, byCategory };
-  });
-  const matching = (bucket: Bucket, rows: Movement[]) =>
-    bucket.key === 'total' ? rows : rows.filter(({ month }) => month === bucket.key);
-  const value = (bucket: Bucket, rows: Movement[]) => matching(bucket, rows).reduce((total, row) => total + row.cents, 0);
-  const signed = (bucket: Bucket, direction: Direction) => direction === 'income' ? bucket.income : 0 - bucket.expense;
-  const summary = [
-    { label: 'Деньги в начале периода', get: (bucket: Bucket) => bucket.opening },
-    { label: 'Деньги в конце периода', get: (bucket: Bucket) => bucket.closing },
-    { label: 'Чистый денежный поток', get: (bucket: Bucket) => bucket.closing - bucket.opening },
-  ];
-  const exportRows = [
-    ['Статья', ...buckets.map(({ label }) => label)],
-    ...groups.flatMap(({ label, direction, byCategory }) => [
-      [label, ...buckets.map((bucket) => signed(bucket, direction) / 100)],
-      ...Array.from(byCategory.values(), (category) =>
-        [category.label, ...buckets.map((bucket) => value(bucket, category.rows) / 100)]),
-    ]),
-    ...summary.map(({ label, get }) => [label, ...buckets.map((bucket) => get(bucket) / 100)]),
-  ];
-  const amountCell = (bucket: Bucket, label: string, amount: number, rows: Movement[]) => {
-    const visible = matching(bucket, rows);
-    return <td key={bucket.key} className="whitespace-nowrap text-right tabular-nums">
-      {visible.length ? <button type="button" className="hover:text-primary"
-        aria-label={label + ', ' + bucket.label + ', ' + financeMoney(amount / 100)}
-        onClick={() => setDetail({ label: label + ' · ' + bucket.label, rows: visible })}>
-        {financeMoney(amount / 100)} <span className="text-text-muted" aria-hidden="true">⌄</span>
-      </button> : financeMoney(amount / 100)}
-    </td>;
-  };
-  return <section className="min-w-0">
-    <div className="poster-toolbar print:hidden">
-      {accountFilter}
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        <button type="button" className="btn-secondary btn-md"
-          onClick={() => downloadRegister('Движение денег ' + from + ' — ' + to, [
-            ['Движение денег', names.get(selectedAccount) ?? 'Все счета', from, to], ...exportRows,
-          ])}>Экспорт CSV</button>
+    downloadRegister('Движение денег ' + from + ' — ' + to, [
+      ['Движение денег', scopeLabel, from, to],
+      ['Статья', ...columns.map(({ label }) => label)], ...exportLines(lines, 0),
+    ]);
+  }
+
+  function renderRows(visible: FlowLine[], prefix = '', depth = 0): ReactNode[] {
+    return visible.flatMap((line) => {
+      const id = prefix + '/' + line.id;
+      const isExpanded = expanded.includes(id);
+      return [
+        <tr key={id} className={depth === 0 ? 'cash-flow-total' : undefined}>
+          <th scope="row" className="cash-flow-label" style={{ paddingLeft: 12 + depth * 17 }}>
+            {line.children?.length ? <button type="button" aria-expanded={isExpanded} onClick={() => toggle(id)}>
+              <span aria-hidden="true">{isExpanded ? '▾' : '▸'}</span>{line.label}
+            </button> : <span>{line.label}</span>}
+          </th>
+          {columns.map((column) => {
+            const { cents, movements } = flowCell(line, column, byAccount);
+            const value = column.percent ? toPercent(line, column, cents) : money.format(cents / 100);
+            const cell = id + ':' + column.id;
+            return <td key={column.id}>
+              {movements.length && !column.percent ? <button type="button" className="cash-flow-amount"
+                aria-label={line.label + ', ' + column.label + ', ' + value}
+                aria-haspopup="dialog" aria-expanded={detail?.key === cell}
+                onClick={(event) => setDetail({ key: cell, label: line.label + ' · ' + column.label, trigger: event.currentTarget, movements })}>
+                {value} <span aria-hidden="true">▾</span>
+              </button> : <span className="cash-flow-static">{value}</span>}
+            </td>;
+          })}
+        </tr>,
+        ...(isExpanded ? renderRows(line.children ?? [], id, depth + 1) : []),
+      ];
+    });
+  }
+
+  return <section className="cash-flow-report min-w-0">
+    <div className="cash-flow-toolbar">
+      <CashFlowAccountFilter accounts={accounts} selected={scope} onChange={(value) => {
+        setDetail(null);
+        setAccounts(value);
+      }} />
+      <div className="cash-flow-tools">
+        {flow.accountOpening && <details className="cash-flow-column-menu">
+          <summary className="finance-tool"><IconTables /> Столбцы <span aria-hidden="true">▾</span></summary>
+          <div>
+            <label><input type="checkbox" checked={showAmounts} onChange={(event) => setShowAmounts(event.target.checked)} /> Карта и наличные, деньги</label>
+            <label><input type="checkbox" checked={showPercent} onChange={(event) => setShowPercent(event.target.checked)} /> Карта и наличные, %</label>
+          </div>
+        </details>}
+        {canAction('exportReports') && <button type="button" className="finance-tool" onClick={exportReport}>Экспорт CSV</button>}
         {period}
       </div>
     </div>
-    <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Движение денег по месяцам">
-      <table className="poster-register-table w-full min-w-[680px] text-left text-sm">
-        <thead><tr><th scope="col">Статья</th>
-          {buckets.map(({ key, label }) => <th key={key} scope="col" className="min-w-28 whitespace-nowrap text-right">{label}</th>)}
+    <div className="cash-flow-scroll" tabIndex={0} role="region" aria-label="Движение денег по месяцам">
+      <table className="cash-flow-grid">
+        <thead><tr>
+          <th scope="col" className="cash-flow-label"><span className="sr-only">Статья</span></th>
+          {columns.map(({ id, label }) => <th key={id} scope="col">{label}</th>)}
         </tr></thead>
-        <tbody>
-          {groups.map(({ direction, label, rows, byCategory }) => <Fragment key={direction}>
-            <tr className="bg-background font-semibold">
-              <th scope="row" className="px-4 py-3">
-                <button type="button" className="inline-flex items-center gap-2 text-left font-semibold" aria-expanded={expanded.includes(direction)}
-                  onClick={() => setExpanded((list) => list.includes(direction) ? list.filter((key) => key !== direction) : [...list, direction])}>
-                  <span aria-hidden="true">{expanded.includes(direction) ? '⌄' : '›'}</span>{label}
-                </button>
-              </th>
-              {buckets.map((bucket) => amountCell(bucket, label, signed(bucket, direction), rows))}
-            </tr>
-            {expanded.includes(direction) && (byCategory.size
-              ? Array.from(byCategory, ([key, category]) => <tr key={key}>
-                <th scope="row" className="py-3 pr-4 font-normal"><span className="block pl-5">{category.label}</span></th>
-                {buckets.map((bucket) => amountCell(bucket, category.label, value(bucket, category.rows), category.rows))}
-              </tr>)
-              : <tr><td className="py-3 pl-8 text-text-muted" colSpan={buckets.length + 1}>Нет операций за период</td></tr>)}
-          </Fragment>)}
-          {summary.map(({ label, get }) => <tr key={label} className="bg-background font-semibold">
-            <th scope="row" className="px-4 py-3"><span className="font-semibold">{label}</span></th>
-            {buckets.map((bucket) => <td key={bucket.key} className="whitespace-nowrap text-right tabular-nums">{financeMoney(get(bucket) / 100)}</td>)}
-          </tr>)}
-        </tbody>
+        <tbody>{renderRows(lines)}</tbody>
       </table>
     </div>
-    {detail && <Modal open title={detail.label} onClose={() => setDetail(null)} panelClassName="max-w-3xl">
-      <FinanceTable headers={['Дата', 'Категория', 'Счёт', 'Комментарий', 'Сумма']} amounts={[4]}
-        rows={[...detail.rows].sort((a, b) => a.at.localeCompare(b.at)).map((row) => ({ key: row.id, cells: [
-          financeDateTime(row.at), row.label, names.get(row.accountId) ?? '—', row.note, financeMoney(row.cents / 100),
-        ] }))} />
-    </Modal>}
+    {detail && <CashFlowDetail detail={detail} accounts={byAccount} close={() => setDetail(null)} />}
   </section>;
+}
+
+function CashFlowAccountFilter({ accounts, selected, onChange }: {
+  accounts: FinanceAccount[]; selected: Set<string>; onChange: (value: string) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const [draft, setDraft] = useState(selected);
+  const menu = useRef<HTMLDetailsElement>(null);
+  const chosen = accounts.filter(({ id }) => selected.has(id));
+  const caption = chosen.length === 1 ? chosen[0].name : chosen.length > 1 ? 'Счета · ' + chosen.length : 'Счёт';
+  const filtered = accounts.filter(({ name }) => name.toLocaleLowerCase('ru').includes(search.trim().toLocaleLowerCase('ru')));
+  return <details ref={menu} className="cash-flow-column-menu cash-flow-account-filter" onToggle={(event) => {
+    if (event.currentTarget.open) {
+      setSearch('');
+      setDraft(new Set(selected));
+    }
+  }}>
+    <summary className="finance-tool" aria-label="Счёт">{caption} <span aria-hidden="true">▾</span></summary>
+    <div>
+      <div className="cash-flow-filter-actions">
+        <button type="button" className="text-primary" onClick={() => setDraft(new Set(accounts.map(({ id }) => id)))}>Выбрать все</button>
+        <button type="button" className="text-primary" onClick={() => setDraft(new Set())}>Очистить</button>
+      </div>
+      <input className="input w-full" aria-label="Поиск счёта" placeholder="Поиск…" value={search} onChange={(event) => setSearch(event.target.value)} />
+      <div className="cash-flow-account-options">
+        {filtered.map(({ id, name }) => <label key={id}><input type="checkbox" checked={draft.has(id)} onChange={() => setDraft((current) => {
+          const next = new Set(current);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+        })} /> {name}</label>)}
+        {!filtered.length && <p className="p-2 text-sm text-text-muted">Счета не найдены</p>}
+      </div>
+      <button type="button" className="btn-primary btn-md w-full" onClick={() => {
+        onChange(draft.size === accounts.length ? '' : [...draft].sort().join(','));
+        menu.current?.removeAttribute('open');
+      }}>Применить</button>
+    </div>
+  </details>;
+}
+
+function CashFlowDetail({ detail, accounts, close }: { detail: Detail; accounts: Map<string, FinanceAccount>; close: () => void }) {
+  const panel = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const popup = panel.current;
+    if (!popup) return;
+    const { bottom, top, right } = detail.trigger.getBoundingClientRect();
+    const below = window.innerHeight - bottom - 8;
+    const above = top - 8;
+    const placeAbove = below < popup.offsetHeight + 4 && above > below;
+    const space = (placeAbove ? above : below) - 4;
+    popup.style.maxHeight = Math.max(96, space) + 'px';
+    popup.style.left = Math.max(8, Math.min(right - popup.offsetWidth, window.innerWidth - popup.offsetWidth - 8)) + 'px';
+    popup.style.top = Math.max(8, placeAbove ? top - popup.offsetHeight - 4 : bottom + 4) + 'px';
+    popup.querySelector('button')?.focus({ preventScroll: true });
+  }, [detail]);
+
+  useEffect(() => {
+    function dismiss(event: PointerEvent) {
+      if (event.target instanceof Node && !panel.current?.contains(event.target) && !detail.trigger.contains(event.target)) close();
+    }
+    function escape(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      close();
+      detail.trigger.focus({ preventScroll: true });
+    }
+    function onScroll(event: Event) {
+      if (!(event.target instanceof Node) || !panel.current?.contains(event.target)) close();
+    }
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    window.addEventListener('resize', close);
+    window.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener('pointerdown', dismiss);
+      document.removeEventListener('keydown', escape);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('scroll', onScroll, true);
+    };
+  }, [close, detail]);
+
+  return createPortal(<div ref={panel} className="cash-flow-detail" role="dialog" aria-label={detail.label}>
+    <button type="button" aria-label="Закрыть операции" className="cash-flow-close" onClick={() => {
+      close();
+      detail.trigger.focus({ preventScroll: true });
+    }}>×</button>
+    <table>
+      <thead><tr>{['Дата', 'Категория', 'Комментарий', 'Сумма', 'Счёт'].map((label) => <th scope="col" key={label}>{label}</th>)}</tr></thead>
+      <tbody>{[...detail.movements].sort((a, b) => b.at.localeCompare(a.at)).map((movement) => <tr key={movement.id}>
+        <td>{date.format(new Date(movement.at))}</td><td>{movement.category}</td><td>{movement.note}</td>
+        <td>{money.format(movement.cents / 100)}</td><td>{accounts.get(movement.accountId)?.name ?? '—'}</td>
+      </tr>)}</tbody>
+    </table>
+  </div>, document.body);
 }

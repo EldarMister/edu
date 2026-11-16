@@ -1,10 +1,13 @@
-import { BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, Patch, Post, Query } from '@nestjs/common';
 import { CashShift, Prisma, Role } from '@prisma/client';
-import { IsBoolean, IsNumber, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsBoolean, IsISO8601, IsIn, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min } from 'class-validator';
+import { AuditAction, AuditEntity } from '../audit/audit.constants';
+import { AuditModule } from '../audit/audit.module';
+import { AuditService } from '../audit/audit.service';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { hasPermission } from '../common/permissions';
-import { ensureFinanceAccounts, lockFinance } from '../finance/finance-ledger';
+import { ensureCollectionAccount, ensureFinanceAccounts, lockFinance } from '../finance/finance-ledger';
 import { PrismaService } from '../prisma/prisma.service';
 import { warehouseDateRange } from '../warehouse/report-range';
 
@@ -38,13 +41,61 @@ class CashShiftHistoryDto {
   to?: string;
 }
 
+class CashOperationDto {
+  @IsIn(['income', 'expense', 'collection'])
+  kind!: 'income' | 'expense' | 'collection';
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(9999999999.99)
+  amount!: number;
+
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  note?: string;
+
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  occurredAt?: string;
+}
+
+class CreateCashOperationDto extends CashOperationDto {
+  @IsString()
+  @Matches(/^[a-zA-Z0-9_-]{1,65}$/)
+  requestKey!: string;
+}
+
+class CashCountDto {
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(9999999999.99)
+  openingAmount?: number;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(9999999999.99)
+  actualAmount?: number;
+}
+
+const posKey = 'cash-pos:';
+const openKey = 'cash-open:';
+const closeKey = 'cash-close:';
+
 export function cashShiftEnabled(tx: Prisma.TransactionClient, cafeId: string) {
   return tx.settings.findFirst({ where: { cafeId }, select: { cashShiftsEnabled: true } });
 }
 
 async function drawerDelta(tx: Prisma.TransactionClient, shift: CashShift) {
   const result = await tx.financeEntry.aggregate({
-    where: { cafeId: shift.cafeId, accountId: shift.accountId, cashShiftId: shift.id }, _sum: { amount: true },
+    where: { cafeId: shift.cafeId, accountId: shift.accountId, cashShiftId: shift.id,
+      OR: [{ sourceKey: null }, { sourceKey: { notIn: [openKey + shift.id, closeKey + shift.id] } }] }, _sum: { amount: true },
   });
   return result._sum.amount ?? new Prisma.Decimal(0);
 }
@@ -59,9 +110,91 @@ function serialize(shift: CashShift, expected = shift.expectedAmount ?? shift.op
   };
 }
 
+type Db = Prisma.TransactionClient;
+type CashOperation = CashOperationDto;
+
+async function findShift(db: Db, cafeId: string, id: string) {
+  const shift = await db.cashShift.findFirst({ where: { cafeId, id } });
+  if (!shift) throw new NotFoundException('Кассовая смена не найдена');
+  return shift;
+}
+
+async function cashCategory(db: Db, cafeId: string, operation: CashOperation, atRegister: boolean) {
+  if (!operation.categoryId) return null;
+  if (operation.kind === 'collection') throw new BadRequestException('Категория нужна только для внесения или расхода');
+  const category = await db.financeCategory.findFirst({ where: {
+    cafeId, id: operation.categoryId, ...(atRegister ? { showOnPos: true } : {}), kind: { in: [operation.kind, 'both'] },
+  }, select: { id: true } });
+  if (!category) throw new BadRequestException('Выберите категорию, доступную для этой операции');
+  return category.id;
+}
+
+async function saveAdjustment(db: Db, shift: CashShift, actorId: string, phase: 'open' | 'close', amount: Prisma.Decimal) {
+  const { cafeId, accountId } = shift;
+  const sourceKey = (phase === 'open' ? openKey : closeKey) + shift.id;
+  if (amount.isZero()) {
+    await db.financeEntry.deleteMany({ where: { cafeId, sourceKey } });
+    return;
+  }
+  await db.financeEntry.upsert({
+    where: { cafeId_sourceKey: { cafeId, sourceKey } }, update: { amount, actorId },
+    create: { cafeId, accountId, actorId, amount, kind: 'adjustment', sourceKey,
+      // Opening reconciliation sits outside the drawer formula because the counted cash is the baseline.
+      cashShiftId: shift.id, pendingCashShift: !shift.closedAt, occurredAt: phase === 'open' ? shift.openedAt : shift.closedAt!,
+      note: phase === 'open' ? 'Сверка наличных при открытии смены' : 'Сверка наличных при закрытии смены' },
+  });
+}
+
+async function recalculateClosedShift(db: Db, shift: CashShift, actorId: string) {
+  if (!shift.closedAt || shift.actualAmount == null) return;
+  const expectedAmount = shift.openingAmount.add(await drawerDelta(db, shift));
+  const difference = shift.actualAmount.sub(expectedAmount);
+  await db.cashShift.update({ where: { id: shift.id }, data: { expectedAmount, difference } });
+  await saveAdjustment(db, shift, actorId, 'close', difference);
+}
+
+function cashOperationDate(shift: CashShift, input: CashOperation, previous?: Date) {
+  const at = input.occurredAt ? new Date(input.occurredAt) : previous ?? shift.closedAt ?? new Date();
+  if (!Number.isFinite(at.getTime()) || at < shift.openedAt || at > (shift.closedAt ?? new Date())) {
+    throw new BadRequestException('Укажите дату и время в пределах кассовой смены');
+  }
+  return at;
+}
+
+async function storeOperation(db: Db, shift: CashShift, actorId: string, input: CashOperation,
+  categoryId: string | null, sourceKey: string, occurredAt: Date, previous?: { id: string; counterpartyAccountId: string | null }) {
+  const { cafeId, id: cashShiftId, accountId } = shift;
+  const transfer = input.kind === 'collection';
+  const destination = transfer
+    ? previous?.counterpartyAccountId ?? (await ensureCollectionAccount(db, cafeId)).id : null;
+  const amount = new Prisma.Decimal(input.amount).mul(input.kind === 'income' ? 1 : -1);
+  const data = { kind: transfer ? 'transfer' as const : input.kind as 'income' | 'expense',
+    amount, categoryId, counterpartyAccountId: destination, occurredAt, note: input.note?.trim() || null };
+  const pendingCashShift = !shift.closedAt;
+  if (pendingCashShift && amount.isNegative()) {
+    const before = previous ? await db.financeEntry.findUnique({ where: { id: previous.id }, select: { amount: true } }) : null;
+    const remaining = shift.openingAmount.add(await drawerDelta(db, shift)).sub(before?.amount ?? 0).add(amount);
+    if (remaining.isNegative()) throw new BadRequestException('Сумма больше остатка наличных в кассе');
+  }
+  const entry = previous
+    ? await db.financeEntry.update({ where: { id: previous.id }, data })
+    : await db.financeEntry.create({ data: { ...data, cafeId, cashShiftId, accountId, actorId, sourceKey, pendingCashShift } });
+  if (destination) {
+    const incoming = { ...data, accountId: destination, amount: amount.negated(), counterpartyAccountId: accountId };
+    await db.financeEntry.upsert({
+      where: { cafeId_sourceKey: { cafeId, sourceKey: sourceKey + ':in' } }, update: incoming,
+      create: { ...incoming, cafeId, cashShiftId, actorId, sourceKey: sourceKey + ':in', pendingCashShift },
+    });
+  } else if (previous?.counterpartyAccountId) {
+    await db.financeEntry.deleteMany({ where: { cafeId, sourceKey: sourceKey + ':in' } });
+  }
+  await recalculateClosedShift(db, shift, actorId);
+  return entry;
+}
+
 @Injectable()
 export class CashShiftsService {
-  constructor(private readonly db: PrismaService) {}
+  constructor(private readonly db: PrismaService, private readonly audit: AuditService) {}
 
   async list(cafeId: string, includeHistory: boolean, period: CashShiftHistoryDto = {}) {
     const openedAt = includeHistory ? warehouseDateRange(period.from, period.to) : undefined;
@@ -77,43 +210,161 @@ export class CashShiftsService {
       const staff = await tx.user.findMany({ where: { cafeId, id: { in: [...new Set(shifts.flatMap((shift) =>
         [shift.openedById, ...(shift.closedById ? [shift.closedById] : [])]))] } }, select: { id: true, name: true } });
       const names = new Map(staff.map(({ id, name }) => [id, name]));
-      const transfers = await tx.financeEntry.findMany({
-        where: { cafeId, cashShiftId: { in: shifts.map(({ id }) => id) }, kind: 'transfer' },
-        select: { id: true, cashShiftId: true, sourceKey: true, amount: true },
+      const shiftsById = new Map(shifts.map((shift) => [shift.id, shift]));
+      const reconciliations = await tx.financeEntry.findMany({
+        where: { cafeId, OR: [{ cashShiftId: { in: [...shiftsById.keys()] }, kind: 'transfer' },
+          { sourceKey: { in: shifts.map(({ id }) => openKey + id) } }] },
+        select: { id: true, accountId: true, kind: true, cashShiftId: true, sourceKey: true, amount: true,
+          counterparty: { select: { isCollection: true } } },
       });
-      const reversed = new Set(transfers.flatMap(({ sourceKey }) => sourceKey?.startsWith('void:') ? [sourceKey.slice(5)] : []));
+      const reversed = new Set(reconciliations.flatMap(({ sourceKey }) => sourceKey?.startsWith('void:') ? [sourceKey.slice(5)] : []));
       const collected = new Map<string, Prisma.Decimal>();
-      for (const transfer of transfers) {
-        const { id, cashShiftId, sourceKey, amount } = transfer;
-        if (cashShiftId && amount.lt(0) && !sourceKey?.startsWith('void:') && !reversed.has(id)) {
+      const openings = new Map<string, number>();
+      for (const { id, accountId, cashShiftId, sourceKey, kind, amount, counterparty } of reconciliations) {
+        if (sourceKey?.startsWith(openKey)) openings.set(sourceKey.slice(openKey.length), amount.toNumber());
+        if (kind === 'transfer' && counterparty?.isCollection && cashShiftId && shiftsById.get(cashShiftId)?.accountId === accountId
+          && amount.lt(0) && !sourceKey?.startsWith('void:') && !reversed.has(id)) {
           collected.set(cashShiftId, (collected.get(cashShiftId) ?? new Prisma.Decimal(0)).sub(amount));
         }
       }
-      const named = (shift: ReturnType<typeof serialize>) => ({
+      const [total, earlier] = includeHistory ? await Promise.all([
+        tx.cashShift.count({ where: { cafeId } }),
+        history.length ? tx.cashShift.count({ where: { cafeId, openedAt: { lt: history[history.length - 1].openedAt } } }) : 0,
+      ]) : [0, 0];
+      const named = (shift: ReturnType<typeof serialize>, number: number) => ({
         ...shift, openedByName: names.get(shift.openedById) ?? null,
         closedByName: shift.closedById ? names.get(shift.closedById) ?? null : null,
         collectionAmount: collected.get(shift.id)?.toNumber() ?? 0,
+        openingDifference: openings.get(shift.id) ?? 0,
+        number,
       });
       return {
         enabled: settings?.cashShiftsEnabled ?? false,
-        current: current ? named(serialize(current, current.openingAmount.add(await drawerDelta(tx, current)))) : null,
-        history: history.map((shift) => named(serialize(shift))),
+        current: current ? named(serialize(current, current.openingAmount.add(await drawerDelta(tx, current))), total) : null,
+        history: history.map((shift, index) => named(serialize(shift), earlier + history.length - index)),
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
   async movements(cafeId: string, id: string) {
-    const shift = await this.db.cashShift.findFirst({ where: { cafeId, id } });
-    if (!shift) throw new NotFoundException('Кассовая смена не найдена');
-    const rows = await this.db.financeEntry.findMany({
-      where: { cafeId, accountId: shift.accountId, OR: [{ cashShiftId: id }, { sourceKey: 'cash-open:' + id }] },
-      select: { id: true, occurredAt: true, kind: true, sourceKey: true, note: true, amount: true, category: { select: { name: true } } },
-      orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+    return this.db.$transaction(async (db) => {
+      const shift = await findShift(db, cafeId, id);
+      const rows = await db.financeEntry.findMany({
+        where: { cafeId, OR: [
+          { cashShiftId: id }, { sourceKey: openKey + id },
+          { cashShiftId: null, account: { type: 'noncash' }, kind: { in: ['sale', 'refund'] },
+            occurredAt: { gte: shift.openedAt, lte: shift.closedAt ?? new Date() } },
+        ] },
+        select: { id: true, accountId: true, actorId: true, occurredAt: true, kind: true, sourceKey: true,
+          note: true, amount: true, category: { select: { id: true, name: true } },
+          counterparty: { select: { isCollection: true } } },
+        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+      });
+      const reversed = new Set(rows.flatMap(({ sourceKey }) => sourceKey?.startsWith('void:') ? [sourceKey.slice(5)] : []));
+      const names = new Map((await db.user.findMany({ where: { cafeId,
+        id: { in: [...new Set(rows.flatMap(({ actorId }) => actorId ? [actorId] : []))] },
+      }, select: { id: true, name: true } })).map(({ id, name }) => [id, name]));
+      return rows.filter(({ id: entryId, accountId, kind, sourceKey }) =>
+        !sourceKey?.startsWith('void:') && !reversed.has(entryId)
+        && (accountId === shift.accountId || kind === 'sale' || kind === 'refund'))
+        .map(({ category, counterparty, accountId, actorId, sourceKey, ...row }) => ({
+          ...row, category: category?.name ?? null, categoryId: category?.id ?? null,
+          actorName: actorId ? names.get(actorId) ?? null : null, amount: row.amount.toNumber(),
+          cash: accountId === shift.accountId, editable: !!sourceKey?.startsWith(posKey),
+          collection: row.kind === 'transfer' && row.amount.lt(0) && counterparty?.isCollection === true,
+          reconciliation: sourceKey?.startsWith(openKey) ? 'open' : sourceKey?.startsWith(closeKey) ? 'close' : null,
+        }));
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async operationCategories(cafeId: string, atRegister: boolean) {
+    const categories = await this.db.financeCategory.findMany({
+      where: { cafeId, ...(atRegister ? { showOnPos: true } : {}) }, orderBy: { name: 'asc' },
+      select: { id: true, parentId: true, name: true, kind: true },
     });
-    return rows.map(({ category, sourceKey, ...row }) => ({
-      ...row, category: category?.name ?? null, amount: row.amount.toNumber(),
-      reconciliation: sourceKey?.startsWith('cash-open:') ? 'open' : sourceKey?.startsWith('cash-close:') ? 'close' : null,
-    }));
+    return categories;
+  }
+
+  async createOperation(cafeId: string, actor: AuthUser, id: string, input: CreateCashOperationDto) {
+    return this.db.$transaction(async (db) => {
+      await lockFinance(db, cafeId);
+      const shift = await findShift(db, cafeId, id);
+      const sourceKey = posKey + input.requestKey;
+      const atRegister = actor.role === Role.WAITER;
+      const existing = await db.financeEntry.findUnique({ where: { cafeId_sourceKey: { cafeId, sourceKey } } });
+      if (existing) {
+        const amount = new Prisma.Decimal(input.amount).mul(input.kind === 'income' ? 1 : -1);
+        const kind = input.kind === 'collection' ? 'transfer' : input.kind;
+        if (existing.cashShiftId !== id || existing.actorId !== actor.id || existing.kind !== kind
+          || !existing.amount.eq(amount) || existing.categoryId !== (input.categoryId ?? null)
+          || existing.note !== (input.note?.trim() || null)
+          || (input.occurredAt && new Date(input.occurredAt).getTime() !== existing.occurredAt.getTime())) {
+          throw new ConflictException('Этот запрос уже использован для другой операции');
+        }
+        return existing;
+      }
+      if (atRegister && (shift.closedAt || input.occurredAt)) throw new ConflictException('Операцию можно провести только в открытой смене');
+      const categoryId = await cashCategory(db, cafeId, input, actor.role !== Role.OWNER);
+      return storeOperation(db, shift, actor.id, input, categoryId, sourceKey, cashOperationDate(shift, input));
+    });
+  }
+
+  async updateOperation(cafeId: string, actor: AuthUser, id: string, entryId: string, input?: CashOperationDto) {
+    const result = await this.db.$transaction(async (db) => {
+      await lockFinance(db, cafeId);
+      const shift = await findShift(db, cafeId, id);
+      const original = await db.financeEntry.findFirst({ where: { cafeId, id: entryId, cashShiftId: id,
+        accountId: shift.accountId, sourceKey: { startsWith: posKey } } });
+      if (!original?.sourceKey) throw new NotFoundException('Ручная операция смены не найдена');
+      if (input) {
+        const categoryId = input.categoryId === original.categoryId && input.kind === original.kind
+          ? original.categoryId : await cashCategory(db, cafeId, input, actor.role !== Role.OWNER);
+        const updated = await storeOperation(db, shift, actor.id, input, categoryId, original.sourceKey,
+          cashOperationDate(shift, input, original.occurredAt), original);
+        return { original, updated };
+      }
+      await db.financeEntry.deleteMany({ where: { cafeId, sourceKey: { in: [original.sourceKey, original.sourceKey + ':in'] } } });
+      await recalculateClosedShift(db, shift, actor.id);
+      return { original, updated: null };
+    });
+    const snapshot = ({ kind, amount, categoryId, occurredAt, note }: typeof result.original) =>
+      ({ kind, amount: amount.toNumber(), categoryId, occurredAt: occurredAt.toISOString(), note });
+    await this.audit.log({ actor, actionType: AuditAction.FINANCE_TRANSACTION_UPDATED, entityType: AuditEntity.FINANCE_TRANSACTION,
+      entityId: entryId, description: result.updated ? 'Изменена операция кассовой смены' : 'Удалена операция кассовой смены',
+      oldValue: snapshot(result.original), newValue: result.updated ? snapshot(result.updated) : null });
+    return { id: entryId };
+  }
+
+  async correctCashCount(cafeId: string, actor: AuthUser, id: string, input: CashCountDto) {
+    const { before, updated } = await this.db.$transaction(async (db) => {
+      await lockFinance(db, cafeId);
+      const before = await findShift(db, cafeId, id);
+      if (input.actualAmount != null && !before.closedAt) throw new ConflictException('Пересчитайте кассу при закрытии смены');
+      const openingAmount = input.openingAmount == null ? before.openingAmount : new Prisma.Decimal(input.openingAmount);
+      const actualAmount = input.actualAmount == null ? before.actualAmount : new Prisma.Decimal(input.actualAmount);
+      const changedOpening = openingAmount.sub(before.openingAmount);
+      if (!changedOpening.isZero()) {
+        const adjustment = await db.financeEntry.findUnique({ where: { cafeId_sourceKey: { cafeId, sourceKey: openKey + id } } });
+        await saveAdjustment(db, before, actor.id, 'open', (adjustment?.amount ?? new Prisma.Decimal(0)).add(changedOpening));
+      }
+      const actualDelta = actualAmount?.sub(before.actualAmount ?? 0);
+      if (actualDelta && !actualDelta.isZero()) {
+        const next = await db.cashShift.findFirst({ where: { cafeId, accountId: before.accountId, openedAt: { gt: before.openedAt } },
+          orderBy: { openedAt: 'asc' } });
+        if (next) {
+          const nextOpening = await db.financeEntry.findUnique({ where: { cafeId_sourceKey: { cafeId, sourceKey: openKey + next.id } } });
+          await saveAdjustment(db, next, actor.id, 'open', (nextOpening?.amount ?? new Prisma.Decimal(0)).sub(actualDelta));
+        }
+      }
+      const updated = await db.cashShift.update({ where: { id }, data: { openingAmount, actualAmount } });
+      await recalculateClosedShift(db, updated, actor.id);
+      return { before, updated };
+    });
+    await this.audit.log({ actor, actionType: AuditAction.FINANCE_TRANSACTION_UPDATED, entityType: AuditEntity.FINANCE_TRANSACTION,
+      entityId: id, description: 'Уточнён остаток кассовой смены',
+      oldValue: { opening: before.openingAmount.toNumber(), actual: before.actualAmount?.toNumber() ?? null },
+      newValue: { opening: updated.openingAmount.toNumber(), actual: updated.actualAmount?.toNumber() ?? null } });
+    return { id };
   }
 
   async setting(cafeId: string, enabled: boolean) {
@@ -137,17 +388,13 @@ export class CashShiftsService {
         throw new ConflictException('Кассовая смена уже открыта');
       }
       const { cash } = await ensureFinanceAccounts(tx, cafeId);
-      const movement = await tx.financeEntry.aggregate({ where: { cafeId, accountId: cash.id }, _sum: { amount: true } });
+      await ensureCollectionAccount(tx, cafeId);
+      const movement = await tx.financeEntry.aggregate({ where: { cafeId, accountId: cash.id, pendingCashShift: false }, _sum: { amount: true } });
       const bookBalance = cash.openingBalance.add(movement._sum.amount ?? 0);
       const openingAmount = new Prisma.Decimal(amount);
-      const shift = await tx.cashShift.create({ data: { cafeId, accountId: cash.id, openedById: actorId, openingAmount } });
+      const shift = await tx.cashShift.create({ data: { cafeId, accountId: cash.id, openedById: actorId, openingAmount, openedAt: new Date() } });
       const difference = openingAmount.sub(bookBalance);
-      if (!difference.isZero()) {
-        await tx.financeEntry.create({ data: {
-          cafeId, accountId: cash.id, actorId, amount: difference, kind: 'adjustment',
-          sourceKey: 'cash-open:' + shift.id, note: 'Сверка наличных при открытии смены', occurredAt: shift.openedAt,
-        } });
-      }
+      await saveAdjustment(tx, shift, actorId, 'open', difference);
       return serialize(shift);
     });
   }
@@ -168,15 +415,11 @@ export class CashShiftsService {
       }
       const difference = actualAmount.sub(expectedAmount);
       const closedAt = new Date();
-      if (!difference.isZero()) {
-        // Snapshot the expected amount before adding the reconciliation entry.
-        await tx.financeEntry.create({ data: {
-          cafeId, accountId: shift.accountId, cashShiftId: shift.id, actorId, amount: difference, kind: 'adjustment',
-          sourceKey: 'cash-close:' + shift.id, note: 'Сверка наличных при закрытии смены', occurredAt: closedAt,
-        } });
-      }
-      return serialize(await tx.cashShift.update({ where: { id: shift.id },
-        data: { closedAt, closedById: actorId, expectedAmount, actualAmount, difference } }));
+      const updated = await tx.cashShift.update({ where: { id: shift.id },
+        data: { closedAt, closedById: actorId, expectedAmount, actualAmount, difference } });
+      await saveAdjustment(tx, updated, actorId, 'close', difference);
+      await tx.financeEntry.updateMany({ where: { cafeId, cashShiftId: shift.id, pendingCashShift: true }, data: { pendingCashShift: false } });
+      return serialize(updated);
     });
   }
 }
@@ -204,6 +447,35 @@ class CashShiftsController {
     return this.shifts.movements(this.access(user), id);
   }
 
+  @Get('operation-categories')
+  operationCategories(@CurrentUser() user: AuthUser) {
+    return this.shifts.operationCategories(this.access(user), user.role !== Role.OWNER);
+  }
+
+  @Post(':id/operations')
+  createOperation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() input: CreateCashOperationDto) {
+    return this.shifts.createOperation(this.access(user), user, id, input);
+  }
+
+  @Patch(':id/operations/:entryId')
+  @Roles(Role.OWNER, Role.ADMIN)
+  updateOperation(@CurrentUser() user: AuthUser, @Param('id') id: string,
+    @Param('entryId') entryId: string, @Body() input: CashOperationDto) {
+    return this.shifts.updateOperation(this.access(user), user, id, entryId, input);
+  }
+
+  @Delete(':id/operations/:entryId')
+  @Roles(Role.OWNER, Role.ADMIN)
+  deleteOperation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('entryId') entryId: string) {
+    return this.shifts.updateOperation(this.access(user), user, id, entryId);
+  }
+
+  @Patch(':id/counts')
+  @Roles(Role.OWNER, Role.ADMIN)
+  correctCashCount(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() input: CashCountDto) {
+    return this.shifts.correctCashCount(this.access(user), user, id, input);
+  }
+
   @Patch('setting')
   @Roles(Role.OWNER)
   setting(@CurrentUser() user: AuthUser, @Body() body: CashShiftsSettingDto) {
@@ -221,5 +493,5 @@ class CashShiftsController {
   }
 }
 
-@Module({ controllers: [CashShiftsController], providers: [CashShiftsService] })
+@Module({ imports: [AuditModule], controllers: [CashShiftsController], providers: [CashShiftsService] })
 export class CashShiftsModule {}

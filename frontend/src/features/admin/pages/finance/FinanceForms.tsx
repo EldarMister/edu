@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { Modal } from '@/components/Modal';
+import { DatePicker } from '@/components/DatePicker';
 import { apiError } from '@/lib/api';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { EditorPage } from '../warehouse/EditorPage';
@@ -9,8 +10,9 @@ import {
   type TransactionKind, useFinanceWrites, usePayroll,
 } from './api';
 import { entryLabel, financeDateTime, financeDay, financeLocalTime, financeMoney, parseMoney } from './finance-format';
+import { categoryAccepts, categoryAncestors, categoryOptions } from './category-options';
 
-const accountTypes = [{ value: 'cash', label: 'Наличные' }, { value: 'noncash', label: 'Безналичные' }] as const;
+const accountTypes = [{ value: 'cash', label: 'Наличные' }, { value: 'noncash', label: 'Безналичный счёт' }] as const;
 const categoryKinds = [{ value: 'income', label: 'Доход' }, { value: 'expense', label: 'Расход' }] as const;
 const transactionTypes = [categoryKinds[1], categoryKinds[0], { value: 'transfer', label: 'Перевод' }] as const;
 const optionFor = ({ id, name }: { id: string; name: string }) => ({ value: id, label: name });
@@ -54,8 +56,10 @@ function OperationKind<T extends string>({ label, options, value, onChange }: {
   </DocumentField>;
 }
 
-function Comment({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  return <DocumentField label="Комментарий"><textarea className="input w-full" value={value} onChange={(event) => onChange(event.target.value)} maxLength={500} rows={3} /></DocumentField>;
+function Comment({ value, onChange, compact = false }: { value: string; onChange: (value: string) => void; compact?: boolean }) {
+  const input = { className: 'input w-full', value, maxLength: 500,
+    onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value) };
+  return <DocumentField label="Комментарий">{compact ? <input {...input} /> : <textarea {...input} rows={3} />}</DocumentField>;
 }
 
 function FormPage({ children, title, onClose, onSubmit, submitLabel = 'Сохранить', disabled = false, dialog = false, suspended = false }: {
@@ -110,21 +114,21 @@ export function AccountForm({ account, onClose }: { account?: FinanceAccount; on
   const { saveAccount } = useFinanceWrites();
   const [name, setName] = useState(account?.name ?? '');
   const [type, setType] = useState<AccountType>(account?.type ?? 'noncash');
-  const [opening, setOpening] = useState('0,00');
+  const [opening, setOpening] = useState(() => (account?.openingBalance ?? 0).toFixed(2).replace('.', ','));
   const [isDefault, setDefault] = useState(account?.isDefault ?? false);
-  const openingBalance = account?.openingBalance ?? parseMoney(opening);
+  const openingBalance = parseMoney(opening);
   return <FormPage title={account ? 'Редактирование счёта' : 'Добавление счёта'} onClose={onClose}
     disabled={!name.trim() || openingBalance == null}
     onSubmit={() => saveAccount.mutateAsync({ id: account?.id, values: { name: name.trim(), type, openingBalance: openingBalance!, isDefault } })}>
     <DocumentField label="Название"><input className="input w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></DocumentField>
     <DocumentField label="Валюта"><input className="input w-full" value="Кыргызский сом (KGS)" readOnly /></DocumentField>
-    {account ? <DocumentField label="Тип"><p className="pt-2">{accountTypes.find((entry) => entry.value === type)?.label}</p></DocumentField>
+    {account ? <DocumentField label="Тип"><input className="input w-full" value={accountTypes.find((entry) => entry.value === type)?.label ?? ''} readOnly /></DocumentField>
       : <Choice label="Тип" value={type} onChange={setType} options={accountTypes} />}
-    {account ? <DocumentField label="Начальный баланс"><p className="pt-2">{financeMoney(account.openingBalance)}</p></DocumentField>
-      : <Amount label="Начальный баланс" value={opening} onChange={setOpening} hint="Остаток денег на счёте на момент создания" />}
+    <Amount label="Начальный баланс" value={opening} onChange={setOpening} hint="Остаток денег на счёте на момент создания" />
     <DocumentField label="Зачисление продаж">
-      <label className="flex items-center gap-2 pt-2"><input type="checkbox" checked={isDefault} disabled={account?.isDefault}
-        onChange={(event) => setDefault(event.target.checked)} /> Счёт для {type === 'cash' ? 'наличных' : 'безналичных'} оплат</label>
+      {account?.isCollection ? <p className="pt-2">Сейф для инкассаций</p>
+        : <label className="flex items-center gap-2 pt-2"><input type="checkbox" checked={isDefault} disabled={account?.isDefault}
+          onChange={(event) => setDefault(event.target.checked)} /> Счёт для {type === 'cash' ? 'наличных' : 'безналичных'} оплат</label>}
     </DocumentField>
   </FormPage>;
 }
@@ -146,25 +150,46 @@ function GrantList({ label, options, value, onChange }: {
   </DocumentField>;
 }
 
-export function CategoryForm({ category, employees, positions, onClose }: {
+export function CategoryForm({ category, categories, employees, positions, onClose }: {
   category?: FinanceCategory;
+  categories: FinanceCategory[];
   employees: { id: string; name: string }[];
   positions: { id: string; name: string }[];
   onClose: () => void;
 }) {
   const { saveCategory } = useFinanceWrites();
   const [name, setName] = useState(category?.name ?? '');
-  const [kind, setKind] = useState<CategoryKind>(category?.kind ?? 'expense');
+  const [income, setIncome] = useState(() => !!category && categoryAccepts(category, 'income'));
+  const [expense, setExpense] = useState(() => !!category && categoryAccepts(category, 'expense'));
+  const [parentId, setParent] = useState(category?.parentId ?? '');
+  const [showOnPos, setShowOnPos] = useState(category?.showOnPos ?? false);
   const [userIds, setUserIds] = useState(category?.userIds ?? []);
   const [positionIds, setPositionIds] = useState(category?.positionIds ?? []);
-  return <FormPage title={category ? 'Редактирование категории' : 'Добавление категории транзакций'} disabled={!name.trim()} onClose={onClose}
-    onSubmit={() => saveCategory.mutateAsync({ id: category?.id, values: { name: name.trim(), kind, userIds, positionIds } })}>
+  const kind: CategoryKind = income ? (expense ? 'both' : 'income') : 'expense';
+  const byId = new Map(categories.map((entry) => [entry.id, entry]));
+  const parentOptions = categoryOptions(categories, (entry) => !category || (entry.id !== category.id
+    && !categoryAncestors(entry, byId).some(({ id }) => id === category.id)));
+  return <FormPage title={category ? 'Редактирование категории' : 'Добавление категории транзакций'}
+    disabled={!name.trim() || (!income && !expense)} onClose={onClose}
+    onSubmit={() => saveCategory.mutateAsync({ id: category?.id, values: { name: name.trim(), kind, parentId: parentId || null, showOnPos, userIds, positionIds } })}>
     <DocumentField label="Название"><input className="input w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></DocumentField>
-    {category ? <DocumentField label="Допустимые транзакции"><p className="pt-2">{categoryKinds.find((entry) => entry.value === kind)?.label}</p></DocumentField>
-      : <OperationKind label="Допустимые транзакции" value={kind} onChange={setKind} options={categoryKinds} />}
-    <DocumentField label="Доступ"><p className="pt-2 text-text-secondary">Владелец всегда может проводить операции по этой категории. Отметьте сотрудников или должности, которым хотите дать доступ.</p></DocumentField>
-    <GrantList label="Должности" options={positions} value={positionIds} onChange={setPositionIds} />
-    <GrantList label="Сотрудники" options={employees} value={userIds} onChange={setUserIds} />
+    <Choice label="Родительская категория" value={parentId} onChange={setParent} options={parentOptions} empty="Главный уровень" />
+    <DocumentField label="Допустимые транзакции">
+      <div className="grid gap-2 py-2">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={income} onChange={(event) => setIncome(event.target.checked)} />Доходы</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={expense} onChange={(event) => setExpense(event.target.checked)} />Расходы</label>
+      </div>
+    </DocumentField>
+    <OperationKind label="Показывать на кассе" value={showOnPos ? 'yes' : 'no'} onChange={(value) => setShowOnPos(value === 'yes')}
+      options={[{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }]} />
+    <div className="border-t border-border pt-4">
+      <h2 className="mb-3 font-semibold text-text-primary">Доступ к категории</h2>
+      <div className="grid gap-4">
+        <GrantList label="Должности" options={positions} value={positionIds} onChange={setPositionIds} />
+        <GrantList label="Сотрудники" options={employees} value={userIds} onChange={setUserIds} />
+        <p className="text-sm text-text-secondary">Если доступ никому не выдан, проводить операции в админ-панели может только владелец.</p>
+      </div>
+    </div>
   </FormPage>;
 }
 
@@ -179,41 +204,42 @@ export function TransactionForm({ accounts, categories, owner, initialAccountId,
   const { postTransaction } = useFinanceWrites();
   const [requestKey] = useState(() => crypto.randomUUID());
   const initialCategory = categories.find(({ id }) => id === initialCategoryId);
-  const [kind, setKind] = useState<TransactionKind>(() => initialCategory?.kind ??
-    (owner || categories.some((entry) => entry.kind === 'expense') ? 'expense' : 'income'));
-  const [accountId, setAccount] = useState(() => accounts.find(({ id }) => id === initialAccountId)?.id ??
-    accounts.find((account) => account.isDefault)?.id ?? accounts[0]?.id ?? '');
+  const [kind, setKind] = useState<TransactionKind>(() => initialCategory?.kind === 'income' ? 'income'
+    : owner || categories.some((entry) => categoryAccepts(entry, 'expense')) ? 'expense' : 'income');
+  const [accountId, setAccount] = useState(() => accounts.find(({ id }) => id === initialAccountId)?.id ?? '');
   const [categoryId, setCategory] = useState(initialCategory?.id ?? '');
   const [destinationAccountId, setDestination] = useState('');
   const [amount, setAmount] = useState('');
-  const [time, setTime] = useState('');
+  const [localNow] = useState(financeLocalTime);
+  const [date, setDate] = useState(localNow.slice(0, 10));
+  const [time, setTime] = useState(localNow.slice(11));
   const [note, setNote] = useState('');
-  const currentTime = financeLocalTime();
   const validAmount = parseMoney(amount);
-  const effectiveTime = time ? new Date(time + ':00+06:00') : null;
-  const validDate = !effectiveTime || (Number.isFinite(effectiveTime.getTime()) && effectiveTime.getTime() <= Date.now());
-  const eligible = categories.filter((category) => category.kind === kind);
-  const types = owner ? transactionTypes : transactionTypes.filter(({ value }) => categories.some((category) => category.kind === value));
-  return <FormPage title="Новая транзакция" onClose={onClose} dialog
+  const effectiveTime = new Date(date + 'T' + time + ':00+06:00');
+  const validDate = Number.isFinite(effectiveTime.getTime()) && effectiveTime.getTime() <= Date.now();
+  const eligible = categoryOptions(categories, (category) => categoryAccepts(category, kind));
+  const types = owner ? transactionTypes : transactionTypes.filter(({ value }) => categories.some((category) => categoryAccepts(category, value)));
+  return <FormPage title="Добавить транзакцию" onClose={onClose} dialog
     disabled={!accountId || !validDate || !(validAmount != null && validAmount > 0) || (kind === 'transfer' ? !destinationAccountId : !owner && !categoryId)}
     onSubmit={() => postTransaction.mutateAsync({
       kind, accountId, amount: validAmount!, categoryId: kind === 'transfer' ? undefined : categoryId || undefined,
       destinationAccountId: kind === 'transfer' ? destinationAccountId : undefined, requestKey,
-      note: note.trim() || undefined, occurredAt: effectiveTime?.toISOString(),
+      note: note.trim() || undefined, occurredAt: date + 'T' + time === localNow ? undefined : effectiveTime.toISOString(),
     })}>
     <OperationKind label="Тип" value={kind} options={types} onChange={(next) => { setKind(next); setCategory(''); }} />
     <Amount label="Сумма" value={amount} onChange={setAmount} />
-    <Choice label={kind === 'transfer' ? 'Со счёта' : 'Счёт'} value={accountId} options={accounts.map(optionFor)} empty="Выберите счёт"
+    <Choice label={kind === 'income' ? 'На счёт' : 'Со счёта'} value={accountId} options={accounts.map(optionFor)} empty="Выберите счёт"
       onChange={(value) => { setAccount(value); if (value === destinationAccountId) setDestination(''); }} />
     {kind === 'transfer' && <Choice label="На счёт" value={destinationAccountId} onChange={setDestination}
       options={accounts.filter(({ id }) => id !== accountId).map(optionFor)} empty="Выберите счёт" />}
-    {kind !== 'transfer' && <Choice label="Категория" value={categoryId} onChange={setCategory} options={eligible.map(optionFor)}
-      empty={owner ? 'Без категории' : 'Выберите категорию'} />}
-    <DocumentField label="Дата и время">
-      <input type="datetime-local" className="input w-full" value={time || currentTime} onChange={(event) => setTime(event.target.value)} max={currentTime} />
-      <span className="mt-1 block text-xs text-text-muted">По умолчанию — время проведения (Бишкек).</span>
+    {kind !== 'transfer' && <Choice label="Категория" value={categoryId} onChange={setCategory} options={eligible} empty="Выберите категорию" />}
+    <DocumentField label="Дата транзакции">
+      <div className="flex flex-wrap gap-2">
+        <DatePicker value={date} onChange={setDate} max={financeDay()} className="input w-[126px]" aria-label="Дата транзакции" required />
+        <input type="time" className="input w-[100px]" aria-label="Время транзакции" value={time} onChange={(event) => setTime(event.target.value)} required />
+      </div>
     </DocumentField>
-    <Comment value={note} onChange={setNote} />
+    <Comment value={note} onChange={setNote} compact />
   </FormPage>;
 }
 
@@ -229,7 +255,7 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
   const [note, setNote] = useState(entry.note ?? '');
   const [showReverse, setShowReverse] = useState(false);
   const changed = categoryId !== (entry.categoryId ?? '') || note.trim() !== (entry.note ?? '');
-  const eligible = categories.filter((category) => category.kind === entry.kind);
+  const eligible = categoryOptions(categories, (category) => categoryAccepts(category, entry.kind) || category.id === entry.categoryId);
   const accountName = (id: string) => accounts.find((account) => account.id === id)?.name ?? '—';
   const title = entry.editable ? 'Редактирование транзакции' : 'Транзакция';
   const fields = <>
@@ -240,7 +266,7 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
     <DocumentField label="Сумма"><p className="font-semibold tabular-nums">{financeMoney(entry.amount)}</p></DocumentField>
     <DocumentField label="Сотрудник"><p>{entry.actorName || '—'}</p></DocumentField>
     {entry.editable ? <>
-      <Choice label="Категория" value={categoryId} onChange={setCategory} options={eligible.map(optionFor)}
+      <Choice label="Категория" value={categoryId} onChange={setCategory} options={eligible}
         empty={owner ? 'Без категории' : 'Выберите категорию'} />
       <Comment value={note} onChange={setNote} />
     </> : <>
@@ -324,10 +350,10 @@ export function AccrualForm({ employees, initialMonth, initialUser, calculated =
       }
     }}>
     <Choice label="Сотрудник" value={userId} onChange={setUser} options={employees.map(optionFor)} empty="Выберите сотрудника" />
-    <DocumentField label="Месяц"><input type="month" className="input w-full" value={month}
+    <DocumentField label="Месяц начисления"><input type="month" className="input w-full" value={month}
       max={calculated ? financeDay().slice(0, 7) : undefined} onChange={(event) => setMonth(event.target.value)} required /></DocumentField>
     {calculated ? <>
-      <DocumentField label="К начислению"><p className="pt-2 tabular-nums">{financeMoney(validAmount)}</p></DocumentField>
+      <DocumentField label="К начислению за месяц"><p className="pt-2 tabular-nums">{financeMoney(validAmount)}</p></DocumentField>
       {summary && <p className="text-sm text-text-muted">По ставкам {financeMoney(summary.estimate)}. Уже начислено {financeMoney(summary.accrued)}.</p>}
       {calculatedReport.isError && <p role="alert" className="text-sm text-danger">{apiError(calculatedReport.error)}</p>}
     </> : <Amount label="Сумма" value={amount} onChange={setAmount} />}

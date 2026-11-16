@@ -68,7 +68,7 @@ export function printRegister(title: string, output: Output) {
 }
 
 export function FinanceRegister({
-  title, columns, rows, filters, tools, empty, totals, defaultColumns,
+  title, columns, rows, filters, tools, empty, totals, defaultColumns, reportActions = true,
 }: {
   title: string;
   columns: RegisterColumn[];
@@ -78,6 +78,7 @@ export function FinanceRegister({
   empty: string;
   totals?: Record<string, Cell>;
   defaultColumns?: string[];
+  reportActions?: boolean;
 }) {
   const [selection, setSelection] = useState<string[]>();
   const [showColumns, setShowColumns] = useState(false);
@@ -103,7 +104,7 @@ export function FinanceRegister({
         {defaultColumns && <button type="button" className="finance-tool" onClick={() => setShowColumns(true)}>
           <IconTables aria-hidden="true" /> Столбцы
         </button>}
-        {rows.length > 0 && <>
+        {reportActions && rows.length > 0 && <>
           {canAction('exportReports') && <button type="button" className="finance-tool" onClick={() => downloadRegister(title, output())}>
             <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7">
               <path d="M12 3v12m-4-8 4-4 4 4M6 13H4v7h16v-7h-2" />

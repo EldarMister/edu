@@ -62,7 +62,7 @@ export class FinanceController {
 
   @Get('payroll')
   payrollReport(@CurrentUser() actor: AuthUser, @Query() query: PayrollReportDto) {
-    return this.finance.payroll(actor, query.month);
+    return this.finance.payroll(actor, query);
   }
 
   @Post('payroll/calculated')

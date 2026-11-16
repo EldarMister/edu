@@ -3,14 +3,15 @@ import { api } from '@/lib/api';
 import type { PositionSalary } from '../positions-api';
 
 export type AccountType = 'cash' | 'noncash';
-export type CategoryKind = 'income' | 'expense';
-export type TransactionKind = CategoryKind | 'transfer';
+export type CategoryKind = 'income' | 'expense' | 'both';
+export type TransactionKind = Exclude<CategoryKind, 'both'> | 'transfer';
 export type EntryKind = TransactionKind | 'sale' | 'refund' | 'salary' | 'adjustment';
 export interface FinanceAccount {
   id: string;
   name: string;
   type: AccountType;
   isDefault: boolean;
+  isCollection?: boolean;
   openingBalance: number | null;
   createdAt: string;
   balance: number | null;
@@ -19,6 +20,8 @@ export interface FinanceCategory {
   id: string;
   name: string;
   kind: CategoryKind;
+  parentId: string | null;
+  showOnPos?: boolean;
   userIds: string[];
   positionIds: string[];
 }
@@ -27,6 +30,8 @@ export interface FinanceEntry {
   accountId: string;
   kind: EntryKind;
   amount: number;
+  balanceAfter?: number;
+  createdAt?: string;
   categoryId?: string;
   counterpartyAccountId?: string;
   note?: string;
@@ -54,6 +59,7 @@ export interface CashFlow {
   income: number;
   expense: number;
   closing: number;
+  accountOpening?: Record<string, number>;
   days: { date: string; income: number; expense: number; net: number; balance: number }[];
 }
 interface Choice { id: string; name: string }
@@ -80,6 +86,8 @@ export interface CashShift {
   actualAmount: number | null;
   difference: number | null;
   collectionAmount: number;
+  openingDifference: number;
+  number: number;
 }
 interface CashShifts {
   enabled: boolean;
@@ -100,7 +108,7 @@ export function useFinanceAccess(enabled: boolean) {
   });
 }
 
-export function useFinance(params: { from?: string; to?: string; month?: string; accountId?: string }, enabled = true) {
+export function useFinance(params: { from?: string; to?: string; month?: string; accountId?: string; accountIds?: string }, enabled = true) {
   return useQuery({
     queryKey: [...financeKey, 'overview', params],
     queryFn: async () => (await api.get<FinanceData>(entrypoint, { params })).data,
@@ -110,7 +118,7 @@ export function useFinance(params: { from?: string; to?: string; month?: string;
 }
 
 type AccountInput = { name: string; type: AccountType; openingBalance?: number; isDefault?: boolean };
-type CategoryInput = { name: string; kind: CategoryKind; userIds: string[]; positionIds: string[] };
+type CategoryInput = Pick<FinanceCategory, 'name' | 'kind' | 'parentId' | 'showOnPos' | 'userIds' | 'positionIds'>;
 type TransactionInput = {
   kind: TransactionKind;
   accountId: string;
@@ -131,21 +139,27 @@ export function useFinanceWrites() {
     saveAccount: useMutation({
       mutationFn: ({ id, values }: { id?: string; values: AccountInput }) => {
         if (!id) return api.post(entrypoint + '/accounts', values);
-        return api.patch(entrypoint + '/accounts/' + id, { name: values.name, isDefault: values.isDefault });
+        return api.patch(entrypoint + '/accounts/' + id, {
+          name: values.name, isDefault: values.isDefault, openingBalance: values.openingBalance,
+        });
       }, onSuccess,
     }),
     saveCategory: useMutation({
-      mutationFn: ({ id, values }: { id?: string; values: CategoryInput }) => {
-        if (!id) return api.post(entrypoint + '/categories', values);
-        const { name, userIds, positionIds } = values;
-        return api.patch(entrypoint + '/categories/' + id, { name, userIds, positionIds });
-      }, onSuccess,
+      mutationFn: ({ id, values }: { id?: string; values: CategoryInput }) => id
+        ? api.patch(entrypoint + '/categories/' + id, values)
+        : api.post(entrypoint + '/categories', values),
+      onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
+    }),
+    setCategoryVisibility: useMutation({
+      mutationFn: ({ id, showOnPos }: { id: string; showOnPos: boolean }) =>
+        api.patch(entrypoint + '/categories/' + id, { showOnPos }),
+      onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
     }),
     postTransaction: useMutation({
       mutationFn: (values: TransactionInput) => api.post(entrypoint + '/transactions', values), onSuccess,
     }),
     editTransaction: useMutation({
-      mutationFn: ({ id, categoryId, note }: { id: string; categoryId: string | null; note: string }) =>
+      mutationFn: ({ id, categoryId, note }: { id: string; categoryId?: string | null; note?: string }) =>
         api.patch(entrypoint + '/transactions/' + id, { categoryId, note }), onSuccess,
     }),
     reverseTransaction: useMutation({
@@ -176,6 +190,11 @@ export interface PayrollStaffRow {
   rates: PositionSalary;
   personalSales: number;
   shiftSales: number;
+  hourlyPay: number;
+  shiftPay: number;
+  monthlyPay: number;
+  personalCommission: number;
+  shiftCommission: number;
   estimate: number;
   available: number;
   accrued: number;
@@ -191,10 +210,13 @@ export interface PayrollReport {
   })[];
 }
 
-export function usePayroll(month: string, enabled = true) {
+export function usePayroll(period: string | { from: string; to: string }, enabled = true) {
+  const params = typeof period === 'string' ? { month: period } : period;
+  const valid = typeof period === 'string' ? /^\d{4}-(0[1-9]|1[0-2])$/.test(period)
+    : Boolean(period.from && period.to && period.from <= period.to);
   return useQuery({
-    queryKey: [...financeKey, 'payroll', month], enabled: enabled && /^\d{4}-(0[1-9]|1[0-2])$/.test(month),
-    queryFn: async () => (await api.get<PayrollReport>(entrypoint + '/payroll', { params: { month } })).data,
+    queryKey: [...financeKey, 'payroll', params], enabled: enabled && valid,
+    queryFn: async () => (await api.get<PayrollReport>(entrypoint + '/payroll', { params })).data,
   });
 }
 

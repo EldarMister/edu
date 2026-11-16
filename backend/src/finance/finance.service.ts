@@ -8,10 +8,10 @@ import { warehouseDay } from '../warehouse/report-range';
 import {
   FinanceAccountCreateDto, FinanceAccountUpdateDto, FinanceCategoryCreateDto, FinanceCategoryUpdateDto,
   FinanceQueryDto, FinanceTransactionDto, SalaryAccrualDto, SalaryPaymentDto,
-  FinanceTransactionMetadataDto,
+  FinanceTransactionMetadataDto, PayrollReportDto,
 } from './finance.dto';
 import { ensureFinanceAccounts, lockFinance } from './finance-ledger';
-import { currentPayrollMonth, payrollReport } from './payroll';
+import { currentPayrollMonth, payrollPeriodReport, payrollReport } from './payroll';
 
 type Db = Prisma.TransactionClient;
 const dayMs = 86_400_000;
@@ -142,6 +142,23 @@ export function buildCashFlow(
   return { opening: Number(opening), income: Number(income), expense: Number(expense), closing: Number(opening.add(income).sub(expense)), days: rows };
 }
 
+export function cashFlowAccountOpenings(
+  accounts: Pick<FinanceAccount, 'id' | 'createdAt' | 'openingBalance'>[],
+  before: { accountId: string; _sum: { amount: Prisma.Decimal | null } }[],
+  from: Date,
+) {
+  const balances = new Map(before.map(({ accountId, _sum }) => [accountId, _sum.amount ?? zero]));
+  return Object.fromEntries(accounts.map((account) => {
+    const opening = (balances.get(account.id) ?? zero).add(account.createdAt < from ? account.openingBalance : zero);
+    return [account.id, Number(opening)];
+  }));
+}
+
+export function cashFlowIncludesEntry(entry: Pick<FinanceEntry, 'kind' | 'counterpartyAccountId'>, accountIds: Set<string> | null) {
+  return entry.kind !== 'transfer' || (accountIds !== null
+    && (!entry.counterpartyAccountId || !accountIds.has(entry.counterpartyAccountId)));
+}
+
 @Injectable()
 export class FinanceService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditService) {}
@@ -159,6 +176,8 @@ export class FinanceService {
     if (!(await this.access(user)).allowed) throw new ForbiddenException();
     const bounds = period(query);
     const month = query.month ?? monthOf(new Date());
+    const scopedAccounts = query.accountIds?.split(',') ?? (query.accountId ? [query.accountId] : null);
+    const accountFilter = scopedAccounts ? { accountId: { in: scopedAccounts } } : {};
     // Existing cafés are seeded by the migration; new cafés obtain their defaults on first use.
     if (await this.prisma.financeAccount.count({ where: { cafeId, isDefault: true } }) !== 2) {
       await this.prisma.$transaction((db) => ensureFinanceAccounts(db, cafeId));
@@ -170,17 +189,17 @@ export class FinanceService {
       const accounts = await db.financeAccount.findMany({ where: { cafeId }, orderBy: [{ type: 'asc' }, { name: 'asc' }] });
       const entries = await db.financeEntry.findMany({
         where: {
-          cafeId, occurredAt: { gte: bounds.from, lt: bounds.to }, ...(query.accountId ? { accountId: query.accountId } : {}),
+          cafeId, pendingCashShift: false, occurredAt: { gte: bounds.from, lt: bounds.to }, ...accountFilter,
           ...(canManage ? {} : { actorId: user.id, categoryId: { in: categories.map(({ id }) => id) }, kind: { in: ['income', 'expense'] } }),
         },
-        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        orderBy: [{ occurredAt: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
       });
       const authors = await db.user.findMany({ where: { cafeId, id: { in: [...new Set(entries.flatMap(({ actorId }) => actorId ? [actorId] : []))] } },
         select: { id: true, name: true } });
       const authorNames = new Map(authors.map(({ id, name }) => [id, name]));
       const reversals = canManage ? entries : await db.financeEntry.findMany({
-        where: { cafeId, sourceKey: { startsWith: reversalKey }, occurredAt: { gte: bounds.from, lt: bounds.to },
-          ...(query.accountId ? { accountId: query.accountId } : {}) },
+        where: { cafeId, pendingCashShift: false, sourceKey: { startsWith: reversalKey }, occurredAt: { gte: bounds.from, lt: bounds.to },
+          ...accountFilter },
         select: { sourceKey: true, createdAt: true },
       });
       const reversedAt = new Map<string, Date>();
@@ -203,14 +222,30 @@ export class FinanceService {
       });
       if (!canManage) return {
         canManage, accounts: accounts.map(({ id, name, type, isDefault, createdAt }) => ({ id, name, type, isDefault, createdAt, openingBalance: null, balance: null })),
-        entries: entryRows, categories: categories.map(({ id, name, kind }) => ({ id, name, kind, userIds: [], positionIds: [] })),
+        entries: entryRows, categories: categories.map(({ id, name, kind, parentId, showOnPos }) => ({
+          id, name, kind, parentId, showOnPos, userIds: [], positionIds: [],
+        })),
         payroll: [], employees: [], positions: [], flow: null,
       };
-      const balances = await db.financeEntry.groupBy({ by: ['accountId'], where: { cafeId }, _sum: { amount: true } });
+      const balances = await db.financeEntry.groupBy({ by: ['accountId'], where: { cafeId, pendingCashShift: false }, _sum: { amount: true } });
       const byAccount = new Map(balances.map((row) => [row.accountId, row._sum.amount]));
-      const before = await db.financeEntry.aggregate({ where: {
-        cafeId, occurredAt: { lt: bounds.from }, ...(query.accountId ? { accountId: query.accountId } : {}),
+      const before = await db.financeEntry.groupBy({ by: ['accountId'], where: {
+        cafeId, pendingCashShift: false, occurredAt: { lt: bounds.from }, ...accountFilter,
       }, _sum: { amount: true } });
+      const scopeIds = scopedAccounts ? new Set(scopedAccounts) : null;
+      const flowAccounts = accounts.filter((account) => !scopeIds || scopeIds.has(account.id));
+      const beforeTotal = before.reduce((sum, { _sum }) => sum.add(_sum.amount ?? zero), zero);
+      const runningBalance = new Map(before.map(({ accountId, _sum }) => [accountId, _sum.amount ?? zero]));
+      const accountById = new Map(accounts.map((account) => [account.id, account]));
+      const entryBalances = new Map<string, number>();
+      for (let index = entries.length - 1; index >= 0; index--) {
+        const entry = entries[index];
+        const subtotal = (runningBalance.get(entry.accountId) ?? zero).add(entry.amount);
+        runningBalance.set(entry.accountId, subtotal);
+        const account = accountById.get(entry.accountId);
+        const initial = account && account.createdAt <= entry.occurredAt ? account.openingBalance : zero;
+        entryBalances.set(entry.id, Number(subtotal.add(initial)));
+      }
       const payroll = await db.salaryAccrual.findMany({
         where: { cafeId, month }, orderBy: [{ employeeName: 'asc' }, { createdAt: 'desc' }],
         include: { payments: { select: { amount: true } } },
@@ -220,7 +255,7 @@ export class FinanceService {
       const positions = await db.staffPosition.findMany({ where: { cafeId, role: Role.ADMIN },
         select: { id: true, name: true }, orderBy: { name: 'asc' } });
       return {
-        canManage, entries: entryRows, categories, employees, positions,
+        canManage, entries: entryRows.map((entry) => ({ ...entry, balanceAfter: entryBalances.get(entry.id) })), categories, employees, positions,
         accounts: accounts.map((account) => ({
           ...account, openingBalance: Number(account.openingBalance),
           balance: Number(account.openingBalance.add(byAccount.get(account.id) ?? zero)),
@@ -228,9 +263,12 @@ export class FinanceService {
         payroll: payroll.map(({ payments, ...line }) => ({
           ...line, amount: Number(line.amount), paidAmount: Number(payments.reduce((sum, payment) => sum.sub(payment.amount), zero)),
         })),
-        flow: buildCashFlow(accounts.filter((account) => !query.accountId || account.id === query.accountId),
-          before._sum.amount ?? zero, entries.filter(({ id, sourceKey }) => !reversedAt.has(id) && !reversalTarget(sourceKey)),
-          bounds.from, bounds.to, !!query.accountId),
+        flow: {
+          ...buildCashFlow(flowAccounts, beforeTotal, entries.filter((entry) =>
+            !reversedAt.has(entry.id) && !reversalTarget(entry.sourceKey) && cashFlowIncludesEntry(entry, scopeIds)),
+            bounds.from, bounds.to, true),
+          accountOpening: cashFlowAccountOpenings(flowAccounts, before, bounds.from),
+        },
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
@@ -255,9 +293,12 @@ export class FinanceService {
       const account = await findAccount(db, cafeId, id);
       const name = input.name == null ? account.name : title(input.name);
       await this.accountName(db, cafeId, name, id);
+      if (input.isDefault && account.isCollection) throw new BadRequestException('Сейф для инкассаций нельзя использовать как счёт для оплат');
       if (input.isDefault === false && account.isDefault) throw new BadRequestException('Назначьте другой счёт этого типа основным');
       if (input.isDefault && !account.isDefault) await this.clearDefault(db, cafeId, account.type);
-      return db.financeAccount.update({ where: { cafeId, id }, data: { name, isDefault: input.isDefault ?? account.isDefault } });
+      return db.financeAccount.update({ where: { cafeId, id }, data: {
+        name, isDefault: input.isDefault ?? account.isDefault, openingBalance: input.openingBalance ?? account.openingBalance,
+      } });
     });
   }
 
@@ -287,11 +328,24 @@ export class FinanceService {
       await lockFinance(db, cafeId);
       const previous = id ? await db.financeCategory.findFirst({ where: { cafeId, id } }) : null;
       if (id && !previous) throw new NotFoundException('Категория не найдена');
-      const kind = previous?.kind ?? ('kind' in input ? input.kind : null);
+      const kind = input.kind ?? previous?.kind;
       if (!kind) throw new BadRequestException('Выберите тип категории');
       const name = title(input.name ?? previous?.name ?? '');
+      const parentId = input.parentId === undefined ? previous?.parentId ?? null : input.parentId;
+      if (parentId && parentId !== previous?.parentId) {
+        const categoryParents = new Map((await db.financeCategory.findMany({
+          where: { cafeId }, select: { id: true, parentId: true },
+        })).map((category) => [category.id, category.parentId]));
+        if (!categoryParents.has(parentId)) throw new BadRequestException('Родительская категория не найдена');
+        const visited = new Set<string>();
+        for (let ancestor: string | null = parentId; ancestor; ancestor = categoryParents.get(ancestor) ?? null) {
+          if (ancestor === id || visited.has(ancestor)) throw new BadRequestException('Нельзя вложить категорию в себя или в её подкатегорию');
+          visited.add(ancestor);
+        }
+      }
       if (await db.financeCategory.findFirst({
-        where: { cafeId, kind, name: { equals: name, mode: 'insensitive' }, ...(id ? { id: { not: id } } : {}) },
+        where: { cafeId, kind: kind === 'both' ? undefined : { in: [kind, 'both'] },
+          name: { equals: name, mode: 'insensitive' }, ...(id ? { id: { not: id } } : {}) },
       })) throw new ConflictException('Категория с таким названием уже существует');
       const userIds = [...new Set(input.userIds ?? previous?.userIds ?? [])];
       const positionIds = [...new Set(input.positionIds ?? previous?.positionIds ?? [])];
@@ -303,9 +357,9 @@ export class FinanceService {
       if (addedPositions.length && await db.staffPosition.count({
         where: { cafeId, id: { in: addedPositions }, role: Role.ADMIN },
       }) !== addedPositions.length) throw new BadRequestException('Выберите должности администраторов этого заведения');
-      const data = { name, userIds, positionIds };
+      const data = { name, kind, parentId, userIds, positionIds, showOnPos: input.showOnPos ?? previous?.showOnPos ?? false };
       return id ? db.financeCategory.update({ where: { cafeId, id }, data })
-        : db.financeCategory.create({ data: { cafeId, kind, ...data } });
+        : db.financeCategory.create({ data: { cafeId, ...data } });
     });
   }
 
@@ -329,7 +383,7 @@ export class FinanceService {
         if (categoryId) {
           const category = await db.financeCategory.findFirst({ where: { ...grantWhere(user), id: categoryId } });
           if (!category) throw new ForbiddenException('Категория недоступна');
-          if (category.kind !== before.kind) throw new BadRequestException('Категория не соответствует типу операции');
+          if (category.kind !== 'both' && category.kind !== before.kind) throw new BadRequestException('Категория не соответствует типу операции');
         }
       }
       const comment = input.note === undefined ? before.note : note(input.note);
@@ -415,7 +469,7 @@ export class FinanceService {
       if (!transfer && input.categoryId) {
         category = await db.financeCategory.findFirst({ where: { ...grantWhere(user), id: input.categoryId } });
         if (!category) throw new ForbiddenException('Категория недоступна');
-        if (category.kind !== input.kind) throw new BadRequestException('Категория не соответствует типу операции');
+        if (category.kind !== 'both' && category.kind !== input.kind) throw new BadRequestException('Категория не соответствует типу операции');
       }
       if (!transfer && user.role !== Role.OWNER && !category) throw new ForbiddenException('Выберите разрешённую категорию');
       const existing = await db.financeEntry.findFirst({ where: { cafeId, sourceKey } });
@@ -444,10 +498,17 @@ export class FinanceService {
     });
   }
 
-  async payroll(user: AuthUser, month: string) {
+  async payroll(user: AuthUser, { month, from, to }: PayrollReportDto) {
     const cafeId = ownerOnly(user);
-    return this.prisma.$transaction((db) => payrollReport(db, cafeId, month), {
+    if (month && !from && !to) {
+      return this.prisma.$transaction((db) => payrollReport(db, cafeId, month), {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      });
+    }
+    if (month || !from || !to) throw new BadRequestException('Выберите период зарплаты');
+    return this.prisma.$transaction((db) => payrollPeriodReport(db, cafeId, from, to), {
       isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      timeout: 15_000,
     });
   }
 

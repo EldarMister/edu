@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DatePicker } from '@/components/DatePicker';
 import { financeDay } from './finance-format';
 
@@ -6,9 +6,27 @@ export function FinancePeriod({ from, to, onApply }: {
   from: string; to: string; onApply: (period: { from: string; to: string }) => void;
 }) {
   const details = useRef<HTMLDetailsElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState({ from, to });
   const today = financeDay();
   const format = (value: string) => value.split('-').reverse().join('.');
+
+  function placePanel() {
+    const container = details.current;
+    const popover = panel.current;
+    if (!container?.open || !popover) return;
+    const rectangle = container.getBoundingClientRect();
+    const width = popover.offsetWidth;
+    const rightmost = document.documentElement.clientWidth - width - 8;
+    const left = Math.max(8, Math.min(rectangle.right - width, rightmost));
+    popover.style.left = left - rectangle.left + 'px';
+  }
+
+  useEffect(() => {
+    window.addEventListener('resize', placePanel);
+    return () => window.removeEventListener('resize', placePanel);
+  }, []);
+
   function apply(next: { from: string; to: string }) {
     onApply(next);
     details.current?.removeAttribute('open');
@@ -17,12 +35,15 @@ export function FinancePeriod({ from, to, onApply }: {
     apply({ from: financeDay(new Date(Date.now() - (days - 1) * 86400000)), to: today });
   }
   return <details ref={details} className="relative" onToggle={(event) => {
-    if (event.currentTarget.open) setDraft({ from, to });
+    if (event.currentTarget.open) {
+      setDraft({ from, to });
+      placePanel();
+    }
   }}>
     <summary className="btn-secondary btn-md cursor-pointer list-none whitespace-nowrap" aria-label="Период">
       {from && to ? format(from) + ' — ' + format(to) : 'Период'} <span aria-hidden="true">⌄</span>
     </summary>
-    <div className="absolute right-0 z-20 mt-2 w-72 rounded-xl border border-border bg-card p-3 shadow-lg">
+    <div ref={panel} className="absolute z-20 mt-2 w-72 max-w-[calc(100vw-16px)] rounded-xl border border-border bg-card p-3 shadow-lg">
       <div className="mb-3 flex gap-2">
         <button className="btn-secondary btn-md" type="button" onClick={() => preset(7)}>7 дней</button>
         <button className="btn-secondary btn-md" type="button" onClick={() => preset(30)}>30 дней</button>

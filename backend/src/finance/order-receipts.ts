@@ -10,22 +10,23 @@ export async function recordOrderReceipts(
     where: { cafeId, orderId, status: PaymentStatus.paid },
     select: { id: true, method: true, amount: true },
   });
+  const received = payments.filter(({ amount }) => amount.gt(0));
+  if (!received.length) return;
   const accounts = await ensureFinanceAccounts(tx, cafeId);
-  const hasCash = payments.some(({ method, amount }) => method === PaymentMethod.cash && amount.gt(0));
-  const shift = hasCash ? await tx.cashShift.findFirst({ where: { cafeId, closedAt: null } }) : null;
-  if (hasCash && !shift) {
+  const shift = await tx.cashShift.findFirst({ where: { cafeId, closedAt: null } });
+  if (!shift) {
     const settings = await tx.settings.findFirst({ where: { cafeId }, select: { cashShiftsEnabled: true } });
-    if (settings?.cashShiftsEnabled) throw new ConflictException('Откройте кассовую смену перед оплатой наличными');
+    if (settings?.cashShiftsEnabled) throw new ConflictException('Откройте кассовую смену перед оплатой');
   }
-  const data = payments.filter(({ amount }) => amount.gt(0)).map(({ id, amount, method }) => {
+  const data = received.map(({ id, amount, method }) => {
     const cash = method === PaymentMethod.cash;
     return {
       cafeId, actorId, amount, kind: 'sale' as const, sourceKey: 'sale:' + id,
       accountId: cash ? shift?.accountId ?? accounts.cash.id : accounts.noncash.id,
-      cashShiftId: cash ? shift?.id : null, occurredAt: now, note: 'Оплата заказа',
+      cashShiftId: shift?.id, pendingCashShift: !!shift, occurredAt: shift && now < shift.openedAt ? shift.openedAt : now, note: 'Оплата заказа',
     };
   });
-  if (data.length) await tx.financeEntry.createMany({ data, skipDuplicates: true });
+  await tx.financeEntry.createMany({ data, skipDuplicates: true });
 }
 
 export async function reverseOrderReceipts(
@@ -46,11 +47,13 @@ export async function reverseOrderReceipts(
   if (sales.some((sale) => sale.account.type === 'cash' && settings?.cashShiftsEnabled && shift?.accountId !== sale.accountId)) {
     throw new ConflictException('Для возврата наличных откройте смену на исходном кассовом счёте');
   }
+  const occurredAt = new Date();
   await tx.financeEntry.createMany({
     data: sales.map((sale) => ({
       cafeId, actorId, accountId: sale.accountId, kind: 'refund', amount: sale.amount.negated(),
-      sourceKey: 'refund:' + sale.sourceKey, cashShiftId: shift?.accountId === sale.accountId ? shift.id : null,
-      note: 'Отмена оплаты заказа',
+      sourceKey: 'refund:' + sale.sourceKey, cashShiftId: shift?.id,
+      pendingCashShift: !!shift,
+      occurredAt, note: 'Отмена оплаты заказа',
     })),
     skipDuplicates: true,
   });

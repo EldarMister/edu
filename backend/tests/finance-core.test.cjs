@@ -4,7 +4,7 @@ const { test } = require('node:test');
 const { randomUUID } = require('node:crypto');
 const { Prisma } = require('@prisma/client');
 const { validate } = require('class-validator');
-const { FinanceService, buildCashFlow } = require('../src/finance/finance.service.ts');
+const { FinanceService, buildCashFlow, cashFlowAccountOpenings, cashFlowIncludesEntry } = require('../src/finance/finance.service.ts');
 const { FinanceAccountCreateDto, FinanceCategoryCreateDto } = require('../src/finance/finance.dto.ts');
 const { OrdersService } = require('../src/orders/orders.service.ts');
 
@@ -64,6 +64,31 @@ test('cash flow uses business dates, includes openings once and cancels internal
   const perAccount = buildCashFlow(accounts.slice(0, 1), dec(0), entries.slice(0, 3), from, to, true);
   assert.equal(perAccount.expense, 65.5);
   assert.equal(perAccount.closing, 134.5);
+});
+
+test('cash flow includes only transfers across the selected account boundary and retains per-account opening balances', () => {
+  const from = date('2026-11-15T18:00:00Z');
+  const scope = new Set(['drawer', 'bank']);
+  const moves = [
+    { kind: 'transfer', counterpartyAccountId: 'bank', amount: dec(-20), occurredAt: from },
+    { kind: 'transfer', counterpartyAccountId: 'drawer', amount: dec(20), occurredAt: from },
+    { kind: 'transfer', counterpartyAccountId: 'safe', amount: dec(-15), occurredAt: from },
+    { kind: 'expense', counterpartyAccountId: null, amount: dec(-3.5), occurredAt: from },
+  ];
+  const accounts = [
+    { id: 'drawer', createdAt: date('2026-10-01T00:00:00Z'), openingBalance: dec(50) },
+    { id: 'bank', createdAt: from, openingBalance: dec(12) },
+  ];
+  const before = [
+    { accountId: 'drawer', _sum: { amount: dec(-10) } },
+    { accountId: 'bank', _sum: { amount: dec(8) } },
+  ];
+  assert.deepEqual(cashFlowAccountOpenings(accounts, before, from), { drawer: 40, bank: 8 });
+  const report = buildCashFlow(accounts, dec(-2), moves.filter((entry) => cashFlowIncludesEntry(entry, scope)), from,
+    date('2026-11-16T18:00:00Z'), true);
+  assert.deepEqual({ opening: report.opening, income: report.income, expense: report.expense, closing: report.closing },
+    { opening: 48, income: 12, expense: 18.5, closing: 41.5 });
+  assert.equal(moves.filter((entry) => cashFlowIncludesEntry(entry, null)).length, 1);
 });
 
 test('creation DTOs require the name', async () => {

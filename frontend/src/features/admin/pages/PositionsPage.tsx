@@ -14,6 +14,7 @@ import { parseMoney } from './finance/finance-format';
 import type { ActionKey, Role } from '@/types';
 
 const systemRoles = [{ value: 'OWNER', label: 'Владелец' }, ...POSITION_ROLES] as const;
+const roleDefault = 'role-default';
 const roleDots: Record<Role, string> = {
   OWNER: 'bg-success', ADMIN: 'bg-primary/70', WAITER: 'bg-primary', KITCHEN: 'bg-success/75', BAR: 'bg-warning',
 };
@@ -36,7 +37,13 @@ export function PositionsPage() {
   const [roleFilter, setRoleFilter] = usePageFilter('role');
   const [sortDirection, setSortDirection] = usePageFilter('sort', 'asc');
   const [removePosition, setRemovePosition] = useState<StaffPosition | null>(null);
+  const [replacementId, setReplacementId] = useState('');
   const { remove } = useStaffPositionMutations();
+  const replacementOptions = removePosition ? [
+    { value: roleDefault, label: (systemRoles.find(({ value }) => value === removePosition.role)?.label ?? '') + ' (стандартная)' },
+    ...(query.data ?? []).filter(({ id, role }) => id !== removePosition.id && role === removePosition.role)
+      .map(({ id, name }) => ({ value: id, label: name })),
+  ] : [];
   const term = search.trim().toLocaleLowerCase('ru');
   const rows = [
     ...systemRoles.map(({ value, label }) => ({ id: 'system:' + value, name: label, role: value, access: rightsSummary(value), position: null })),
@@ -89,10 +96,10 @@ export function PositionsPage() {
                 aria-label={`Редактировать должность ${name}`} onClick={() => openEditor({ type: 'position', id })}>→</button>
               <Select ariaLabel={`Действия должности ${name}`} placeholder="⋮" value=""
                 className="!h-8 !w-8 !justify-center !rounded-md !border-transparent !bg-transparent !p-0 !text-lg [&>span]:!text-primary [&>svg]:hidden"
-                options={[{ value: 'edit', label: 'Редактировать' }, ...(position.employees > 0 ? [] : [{ value: 'delete', label: 'Удалить' }])]}
+                options={[{ value: 'edit', label: 'Редактировать' }, { value: 'delete', label: 'Удалить' }]}
                 onChange={(action) => {
                   if (action === 'edit') openEditor({ type: 'position', id });
-                  if (action === 'delete') { remove.reset(); setRemovePosition(position); }
+                  if (action === 'delete') { remove.reset(); setReplacementId(''); setRemovePosition(position); }
                 }} />
             </div>}</td>
           </tr>)}</tbody>
@@ -101,9 +108,16 @@ export function PositionsPage() {
       {!rows.length && <p role="status" className="p-8 text-center text-text-muted">Должности не найдены</p>}
     </QueryState>
     {removePosition && <Modal open title="Удалить должность?" onClose={() => { if (!remove.isPending) setRemovePosition(null); }}
-      footer={<button type="button" className="btn-danger btn-md" disabled={remove.isPending}
-        onClick={() => remove.mutate(removePosition.id, { onSuccess: () => setRemovePosition(null) })}>Удалить</button>}>
+      footer={<button type="button" className="btn-danger btn-md" disabled={remove.isPending || (removePosition.employees > 0 && !replacementId)}
+        onClick={() => remove.mutate({
+          id: removePosition.id, replacementPositionId: replacementId === roleDefault ? null : replacementId || undefined,
+        }, { onSuccess: () => setRemovePosition(null) })}>Удалить</button>}>
       <p>Должность «{removePosition.name}» будет удалена.</p>
+      {removePosition.employees > 0 && <div className="mt-4 space-y-2">
+        <p className="text-sm">Выберите новую должность для сотрудников ({removePosition.employees}).</p>
+        <Select ariaLabel="Новая должность" className="w-full" value={replacementId} placeholder="Выберите должность"
+          onChange={setReplacementId} options={replacementOptions} disabled={remove.isPending} />
+      </div>}
       {remove.error && <p role="alert" className="mt-2 text-danger">{apiError(remove.error)}</p>}
     </Modal>}
   </div>;
