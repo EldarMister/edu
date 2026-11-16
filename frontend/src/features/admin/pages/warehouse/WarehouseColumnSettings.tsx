@@ -8,9 +8,10 @@ export function visibleWarehouseColumns<Key extends string>(value: string, defau
   return [required, ...[...requested].filter((key): key is Key => key !== required && defaults.includes(key as Key))];
 }
 
-export function WarehouseColumnSettings<Key extends string>({ columns, defaults, label, onClose, onApply }: {
+export function WarehouseColumnSettings<Key extends string>({ columns, defaults, resetColumns = defaults, label, onClose, onApply }: {
   columns: Key[];
   defaults: Key[];
+  resetColumns?: Key[];
   label: (key: Key) => string;
   onClose: () => void;
   onApply: (selected: Key[], reset: boolean) => void;
@@ -45,7 +46,7 @@ export function WarehouseColumnSettings<Key extends string>({ columns, defaults,
       <div className="flex flex-wrap justify-between gap-2">
         <button type="button" className="btn-secondary btn-md" onClick={() => {
           setOrder(defaults);
-          setSelected(defaults);
+          setSelected(resetColumns);
           setReset(true);
         }}>Сбросить к стандартным</button>
         <button type="button" className="btn-primary btn-md"
