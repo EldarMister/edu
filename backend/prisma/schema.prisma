@@ -414,6 +414,7 @@ model StaffPosition {
   cafeId      String   @map("cafe_id")
   name        String
   role        Role
+  isStarter   Boolean  @default(false) @map("is_starter")
   permissions Json
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")

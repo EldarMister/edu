@@ -15,7 +15,6 @@ import { parseMoney } from './finance/finance-format';
 import type { ActionKey, Role } from '@/types';
 
 const systemRoles = [{ value: 'OWNER', label: 'Владелец' }, ...POSITION_ROLES] as const;
-const roleDefault = 'role-default';
 const roleDots: Record<Role, string> = {
   OWNER: 'bg-success', ADMIN: 'bg-primary/70', WAITER: 'bg-primary', KITCHEN: 'bg-success/75', BAR: 'bg-warning',
 };
@@ -40,14 +39,13 @@ export function PositionsPage() {
   const [removePosition, setRemovePosition] = useState<StaffPosition | null>(null);
   const [replacementId, setReplacementId] = useState('');
   const { remove } = useStaffPositionMutations();
-  const replacementOptions = removePosition ? [
-    { value: roleDefault, label: (systemRoles.find(({ value }) => value === removePosition.role)?.label ?? '') + ' (стандартная)' },
-    ...(query.data ?? []).filter(({ id, role }) => id !== removePosition.id && role === removePosition.role)
-      .map(({ id, name }) => ({ value: id, label: name })),
-  ] : [];
+  const replacementOptions = removePosition
+    ? (query.data ?? []).filter(({ id, role }) => id !== removePosition.id && role === removePosition.role)
+      .map(({ id, name }) => ({ value: id, label: name }))
+    : [];
   const term = search.trim().toLocaleLowerCase('ru');
   const rows = [
-    ...systemRoles.map(({ value, label }) => ({ id: 'system:' + value, name: label, role: value, access: rightsSummary(value), position: null })),
+    { id: 'system:OWNER', name: 'Владелец', role: 'OWNER' as const, access: rightsSummary('OWNER'), position: null },
     ...(query.data ?? []).map((position) => ({ ...position, access: rightsSummary(position.role, position.permissions), position })),
   ].filter((row) => row.name.toLocaleLowerCase('ru').includes(term) && (!roleFilter || row.role === roleFilter))
     .sort((a, b) => (sortDirection === 'desc' ? -1 : 1) * a.name.localeCompare(b.name, 'ru'));
@@ -107,7 +105,7 @@ export function PositionsPage() {
                 }}>
                 <IconTrash className="h-4 w-4" />
               </button>
-            </div> : <span className="text-xs text-text-muted">Системная</span>}</td>
+            </div> : <span className="text-xs text-text-muted">Владелец аккаунта</span>}</td>
           </tr>)}</tbody>
         </table>
       </div>
@@ -116,13 +114,17 @@ export function PositionsPage() {
     {removePosition && <Modal open title="Удалить должность?" onClose={() => { if (!remove.isPending) setRemovePosition(null); }}
       footer={<button type="button" className="btn-danger btn-md" disabled={remove.isPending || (removePosition.employees > 0 && !replacementId)}
         onClick={() => remove.mutate({
-          id: removePosition.id, replacementPositionId: replacementId === roleDefault ? null : replacementId || undefined,
+          id: removePosition.id, replacementPositionId: replacementId || undefined,
         }, { onSuccess: () => setRemovePosition(null) })}>Удалить</button>}>
       <p>Должность «{removePosition.name}» будет удалена.</p>
       {removePosition.employees > 0 && <div className="mt-4 space-y-2">
-        <p className="text-sm">Выберите новую должность для сотрудников ({removePosition.employees}).</p>
-        <Select ariaLabel="Новая должность" className="w-full" value={replacementId} placeholder="Выберите должность"
-          onChange={setReplacementId} options={replacementOptions} disabled={remove.isPending} />
+        {replacementOptions.length ? <>
+          <p className="text-sm">Выберите новую должность для сотрудников ({removePosition.employees}).</p>
+          <Select ariaLabel="Новая должность" className="w-full" value={replacementId} placeholder="Выберите должность"
+            onChange={setReplacementId} options={replacementOptions} disabled={remove.isPending} />
+        </> : <p className="text-sm">
+          Создайте другую должность с той же базовой ролью, чтобы перевести сотрудников ({removePosition.employees}).
+        </p>}
       </div>}
       {remove.error && <p role="alert" className="mt-2 text-danger">{apiError(remove.error)}</p>}
     </Modal>}

@@ -19,6 +19,11 @@ async function main() {
   });
 
   // --- Пользователи (вход по телефону + пароль) ---
+  const positions = await prisma.staffPosition.findMany({
+    where: { cafeId: cafe.id, isStarter: true },
+    select: { id: true, role: true },
+  });
+  const positionByRole = new Map(positions.map(({ id, role }) => [role, id]));
   const users = [
     { name: 'Иванов И.', phone: '+70000000001', role: Role.WAITER, password: 'waiter123' },
     { name: 'Петров А.', phone: '+70000000002', role: Role.KITCHEN, password: 'kitchen123' },
@@ -31,7 +36,7 @@ async function main() {
     await prisma.user.upsert({
       where: { phone: u.phone },
       update: { name: u.name, role: u.role, passwordHash, isActive: true },
-      create: { cafeId: cafe.id, name: u.name, phone: u.phone, role: u.role, passwordHash },
+      create: { cafeId: cafe.id, name: u.name, phone: u.phone, role: u.role, passwordHash, positionId: positionByRole.get(u.role) },
     });
   }
   console.log(`✓ ${users.length} пользователей`);

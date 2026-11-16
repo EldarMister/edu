@@ -131,7 +131,7 @@ export class PositionsController {
     const { before, replacement, transferred } = await this.prisma.$transaction(async (db) => {
       await lockFinance(db, cafeId);
       const before = await this.find(cafeId, id, db);
-      if (before._count.users && dto.replacementPositionId === undefined) {
+      if (before._count.users && !dto.replacementPositionId) {
         throw new ConflictException('Выберите должность, на которую будут переведены сотрудники');
       }
       const replacementId = dto.replacementPositionId;
@@ -139,9 +139,9 @@ export class PositionsController {
       if (replacement && (replacement.id === before.id || replacement.role !== before.role)) {
         throw new BadRequestException('Выберите другую должность с той же базовой ролью');
       }
-      const transferred = replacementId !== undefined ? (await db.user.updateMany({
+      const transferred = replacement ? (await db.user.updateMany({
         where: { cafeId, positionId: id, role: before.role },
-        data: { positionId: replacement?.id ?? null, permissions: Prisma.DbNull },
+        data: { positionId: replacement.id, permissions: Prisma.DbNull },
       })).count : 0;
       if (transferred !== before._count.users) {
         throw new ConflictException('Проверьте должности сотрудников и попробуйте ещё раз');

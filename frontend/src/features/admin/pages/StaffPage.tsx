@@ -132,7 +132,9 @@ export function StaffPage() {
   const currentUser = useAuth((s) => s.user);
   const { isOwner, canAction } = usePermissions();
   const canManageStaff = isOwner || canAction('manageStaff');
-  const canEditMember = (member: StaffMember) => canManageStaff && (isOwner || (member.role !== 'ADMIN' && !member.positionId));
+  const canEditMember = (member: StaffMember) => canManageStaff && (isOwner || (
+    member.role !== 'ADMIN' && member.role !== 'OWNER' && (!member.positionId || member.positionIsStarter === true)
+  ));
   const positionKey = (member: StaffMember) => member.positionId ?? member.role;
   const positionLabel = (member: StaffMember) => member.positionName ?? tr(ROLE_LABEL[member.role]);
   const positionChoices = new Map((staffQ.data ?? []).map((member) => [positionKey(member), positionLabel(member)]));
@@ -1014,14 +1016,17 @@ function StaffEditor({
   const stationRole = (assignedPosition?.role ?? member?.role) === 'BAR' ? 'BAR' : 'KITCHEN';
   const selectedRole = systemRole(assignment);
   const role = assignedPosition?.role ?? selectedRole ?? stationRole;
-  const positionOptions = [
+  const positionOptions = canAssignPosition ? [
+    { value: 'OWNER', label: ROLE_LABEL.OWNER },
+    ...(positions.data ?? []).map(({ id, name }) => ({ value: 'position:' + id, label: name })),
+  ] : [
     { value: 'WAITER', label: ROLE_LABEL.WAITER }, ...stationOptions,
     ...roles.slice(1).map((value) => ({ value, label: ROLE_LABEL[value] })),
-    ...(positions.data ?? []).map(({ id, name }) => ({ value: 'position:' + id, label: name })),
   ];
-  const chosenPosition = positionId ? 'position:' + positionId : assignment;
-  if (!positionOptions.some(({ value }) => value === chosenPosition)) {
-    positionOptions.push({ value: chosenPosition, label: member?.positionName ?? ROLE_LABEL[role] });
+  const chosenPosition = positionId ? 'position:' + positionId : !member && canAssignPosition && assignment !== 'OWNER' ? '' : assignment;
+  if (member && !positionOptions.some(({ value }) => value === chosenPosition)) {
+    const fallbackLabel = stationOptions.find(({ value }) => value === assignment)?.label ?? ROLE_LABEL[role];
+    positionOptions.push({ value: chosenPosition, label: member.positionName ?? fallbackLabel });
   }
   const positionPatch = canAssignPosition && positionId !== (member?.positionId ?? '')
     ? { positionId: positionId || null }
@@ -1029,7 +1034,7 @@ function StaffEditor({
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (saving.current) return;
+    if (saving.current || !chosenPosition) return;
     if (!isEdit && !password) {
       setError('Укажите пароль');
       return;
@@ -1072,7 +1077,7 @@ function StaffEditor({
       footer={
         <div className="flex flex-wrap justify-end gap-2">
           <button type="button" className="btn-secondary btn-md" disabled={pending} onClick={close}>Отмена</button>
-          <button type="submit" form={formId} className="btn-primary btn-md" disabled={pending}>
+          <button type="submit" form={formId} className="btn-primary btn-md" disabled={pending || !chosenPosition}>
             {pending ? <Spinner /> : 'Сохранить'}
           </button>
         </div>
@@ -1092,6 +1097,7 @@ function StaffEditor({
               ariaLabel="Должность"
               className="h-9 w-full !rounded-md !text-sm"
               value={chosenPosition}
+              placeholder="Выберите должность"
               disabled={!canChangeRole}
               onChange={(value) => {
                 const nextPosition = positions.data?.find(({ id }) => 'position:' + id === value);

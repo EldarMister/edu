@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
+import { lockFinance } from '../finance/finance-ledger';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import {
   CreateStaffDto,
@@ -15,10 +16,24 @@ import {
   WaiterOrdersReportQueryDto,
 } from './dto';
 import {
+  ACTION_KEYS,
   EmployeePermissions,
+  getDefaultPermissionsByRole,
   resolvePermissions,
   sanitizePermissionsInput,
+  SECTION_KEYS,
 } from '../common/permissions';
+
+const staffPositionSelect = { id: true, name: true, role: true, isStarter: true, permissions: true } satisfies Prisma.StaffPositionSelect;
+type StaffPosition = Prisma.StaffPositionGetPayload<{ select: typeof staffPositionSelect }>;
+
+function isManageableStarter(role: Role, position: StaffPosition | null) {
+  if (!position?.isStarter || position.role !== role) return false;
+  const baseline = getDefaultPermissionsByRole(role);
+  const effective = resolvePermissions(role, position.permissions);
+  return SECTION_KEYS.every((key) => !effective.sections[key] || baseline.sections[key])
+    && ACTION_KEYS.every((key) => !effective.actions[key] || baseline.actions[key]);
+}
 
 const STAFF_SELECT = {
   id: true,
@@ -26,7 +41,7 @@ const STAFF_SELECT = {
   phone: true,
   role: true,
   positionId: true,
-  position: { select: { id: true, name: true, role: true, permissions: true } },
+  position: { select: staffPositionSelect },
   prepStation: true,
   isActive: true,
   permissions: true,
@@ -47,7 +62,12 @@ export class StaffService {
   /** Подставить итоговые (resolved) права вместо «сырого» json из БД. */
   private withPermissions({ position, ...user }: Prisma.UserGetPayload<{ select: typeof STAFF_SELECT }>) {
     const assigned = position?.role === user.role ? position : null;
-    return { ...user, positionName: assigned?.name ?? null, permissions: resolvePermissions(user.role, assigned?.permissions ?? user.permissions) };
+    return {
+      ...user,
+      positionName: assigned?.name ?? null,
+      positionIsStarter: isManageableStarter(user.role, assigned),
+      permissions: resolvePermissions(user.role, assigned?.permissions ?? user.permissions),
+    };
   }
 
   /** Кто может редактировать права: владелец, либо право editPermissions/manageStaff. */
@@ -63,10 +83,21 @@ export class StaffService {
     }
   }
 
-  private assertCanManagePositionAccount(actor: AuditActor, user: { role: Role; positionId: string | null }) {
-    if (!this.isOwner(actor) && (user.positionId || user.role === Role.ADMIN)) {
+  private assertCanManagePositionAccount(
+    actor: AuditActor, user: { role: Role; positionId: string | null; position?: StaffPosition | null },
+  ) {
+    if (!this.isOwner(actor) && (user.role === Role.ADMIN || (user.positionId && !isManageableStarter(user.role, user.position ?? null)))) {
       throw new ForbiddenException('Этим сотрудником управляет владелец заведения');
     }
+  }
+
+  private async starterPositionId(tx: Prisma.TransactionClient, actor: AuthUser, role: Role) {
+    if (!actor.cafeId || role === Role.OWNER) return null;
+    const starter = await tx.staffPosition.findFirst({
+      where: { cafeId: actor.cafeId, role, isStarter: true },
+      select: staffPositionSelect,
+    });
+    return starter && (this.isOwner(actor) || isManageableStarter(role, starter)) ? starter.id : null;
   }
 
   private async checkPosition(tx: Prisma.TransactionClient, actor: AuthUser, positionId: string, role: Role) {
@@ -199,10 +230,12 @@ export class StaffService {
     const passwordHash = await bcrypt.hash(dto.password, 10);
     const created = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
+      if (actor.cafeId) await lockFinance(tx, actor.cafeId);
       const prepStation = await staffStation(tx, dto.role, dto.prepStation);
       if (dto.positionId) await this.checkPosition(tx, actor, dto.positionId, dto.role);
+      const positionId = dto.positionId === undefined ? await this.starterPositionId(tx, actor, dto.role) : dto.positionId;
       return tx.user.create({
-        data: { name: dto.name, phone, role: dto.role, prepStation, passwordHash, positionId: dto.positionId },
+        data: { name: dto.name, phone, role: dto.role, prepStation, passwordHash, positionId },
         select: STAFF_SELECT,
       });
     });
@@ -249,7 +282,8 @@ export class StaffService {
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
-      const current = await tx.user.findUnique({ where: { id } });
+      if (actor.cafeId) await lockFinance(tx, actor.cafeId);
+      const current = await tx.user.findUnique({ where: { id }, select: STAFF_SELECT });
       if (!current) throw new NotFoundException('Сотрудник не найден');
       this.assertCanManageRole(actor, current.role);
       const role = dto.role ?? current.role;
@@ -263,8 +297,12 @@ export class StaffService {
         if (dto.positionId) await this.checkPosition(tx, actor, dto.positionId, role);
         data.positionId = dto.positionId;
         data.permissions = Prisma.DbNull;
-      } else if (current.positionId && role !== current.role) {
-        throw new BadRequestException('Выберите должность для новой роли');
+      } else if (role !== current.role) {
+        if (current.positionId && !current.position?.isStarter) {
+          throw new BadRequestException('Выберите должность для новой роли');
+        }
+        data.positionId = await this.starterPositionId(tx, actor, role);
+        data.permissions = Prisma.DbNull;
       }
       if (dto.prepStation !== undefined || role !== current.role) {
         data.prepStation = await staffStation(tx, role, dto.prepStation);
@@ -290,36 +328,33 @@ export class StaffService {
     return this.withPermissions(updated);
   }
 
-  async remove(id: string, actor: AuditActor) {
-    const actorId = actor.id;
-    const user = await this.prisma.user.findUnique({ where: { id } });
-    if (!user) throw new NotFoundException('Сотрудник не найден');
-    this.assertCanManageRole(actor, user.role);
-    this.assertCanManagePositionAccount(actor, user);
-    if (id === actorId) {
+  async remove(id: string, actor: AuthUser) {
+    if (id === actor.id) {
       throw new ForbiddenException('Нельзя удалить самого себя');
     }
-    const hasOrders = await this.prisma.order.count({ where: { waiterId: id } });
-    let result: unknown;
-    if (hasOrders > 0) {
-      // Есть история — мягко отключаем.
-      result = await this.prisma.user.update({
-        where: { id },
-        data: { isActive: false },
-        select: STAFF_SELECT,
-      });
-    } else {
-      await this.prisma.user.delete({ where: { id } });
-      result = { ok: true };
-    }
+    const { user, result, softDeleted } = await this.prisma.$transaction(async (tx) => {
+      if (actor.cafeId) await lockFinance(tx, actor.cafeId);
+      const user = await tx.user.findUnique({ where: { id }, select: STAFF_SELECT });
+      if (!user) throw new NotFoundException('Сотрудник не найден');
+      this.assertCanManageRole(actor, user.role);
+      this.assertCanManagePositionAccount(actor, user);
+
+      const hasOrders = await tx.order.count({ where: { waiterId: id } });
+      if (hasOrders > 0) {
+        const result = await tx.user.update({ where: { id }, data: { isActive: false }, select: STAFF_SELECT });
+        return { user, result, softDeleted: true };
+      }
+      await tx.user.delete({ where: { id } });
+      return { user, result: { ok: true }, softDeleted: false };
+    });
     await this.audit.log({
       actor,
       actionType: AuditAction.STAFF_DELETED,
       entityType: AuditEntity.STAFF,
       entityId: id,
-      description: `${actor.name ?? 'Сотрудник'} удалил сотрудника ${user.name}${hasOrders > 0 ? ' (отключён, есть история заказов)' : ''}`,
+      description: `${actor.name ?? 'Сотрудник'} удалил сотрудника ${user.name}${softDeleted ? ' (отключён, есть история заказов)' : ''}`,
       oldValue: { name: user.name, role: user.role, phone: user.phone },
-      metadata: { softDeleted: hasOrders > 0 },
+      metadata: { softDeleted },
     });
     return result;
   }

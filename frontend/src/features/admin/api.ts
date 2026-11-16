@@ -81,6 +81,7 @@ export interface StaffMember {
   prepStation?: string | null;
   positionId?: string | null;
   positionName?: string | null;
+  positionIsStarter?: boolean;
   id: string;
   name: string;
   phone: string;
