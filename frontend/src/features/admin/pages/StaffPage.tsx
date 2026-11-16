@@ -3,6 +3,7 @@ import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'rea
 import type { Role } from '@/types';
 import { useStaffPositions } from './positions-api';
 import { Modal } from '@/components/Modal';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
@@ -13,11 +14,9 @@ import { usePreparationStations, usePreparationStationUpdates } from '@/features
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { IconPlus, IconEdit, IconTrash } from '../components/icons';
-import { EmployeePermissionsModal } from '../components/EmployeePermissionsModal';
 import { WaiterOrdersReport } from './WaiterOrdersReport';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
-import { EditorPage, useEditorDirty } from './warehouse/EditorPage';
 import { DocumentField } from './warehouse/WarehouseUi';
 import { useEditorRoute } from './warehouse/workspace-route';
 import {
@@ -43,27 +42,11 @@ const ROLE_LABEL: Record<Role, string> = {
   KITCHEN: 'Кухня',
   BAR: 'Бар',
 };
-const EMPLOYEE_PAGE_SIZE = 25;
-const POSITION_DOT: Record<Role, string> = {
-  OWNER: 'bg-primary',
-  ADMIN: 'bg-primary/70',
-  WAITER: 'bg-primary/80',
-  KITCHEN: 'bg-success',
-  BAR: 'bg-warning',
-};
 
 function IconRefresh(p: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
       <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-    </svg>
-  );
-}
-function IconKey(p: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
-      <circle cx="7.5" cy="15.5" r="3.5" />
-      <path d="M10 13l8-8m-2 0h3v3" />
     </svg>
   );
 }
@@ -121,12 +104,10 @@ export function StaffPage() {
   const stations = usePreparationStations().data ?? [];
   usePreparationStationUpdates();
   const stationNames = new Map(stations.map(({ id, name }) => [id, name]));
-  const [tab, setTab] = useState<'employees' | 'current' | 'history' | 'waiter-orders'>('employees');
+  const [tab, setTab] = useState<'current' | 'history' | 'waiter-orders'>('current');
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeePosition, setEmployeePosition] = useState('');
   const [employeeStatus, setEmployeeStatus] = useState('');
-  const [employeeSort, setEmployeeSort] = useState<'asc' | 'desc'>('asc');
-  const [employeePage, setEmployeePage] = useState(1);
   const [showWaiterReportBadge, setShowWaiterReportBadge] = useState(
     () => Date.now() < WAITER_REPORT_BADGE_EXPIRES_AT,
   );
@@ -139,12 +120,12 @@ export function StaffPage() {
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const staffEditor = editor?.type === 'employee' ? editor : null;
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
-  const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null);
 
   const reportQ = useShiftReport(date, tab === 'current');
   const historyQ = useShiftHistory(historyFilters, tab === 'history');
   const shiftActions = useShiftHistoryActions();
   const staffQ = useStaff('', '');
+  const currentShiftLoading = reportQ.isFetching || staffQ.isFetching;
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const tr = useT();
@@ -158,16 +139,20 @@ export function StaffPage() {
   const employeeTerm = employeeSearch.trim().toLocaleLowerCase('ru');
   const employeePhone = employeeTerm.replace(/[^\d]/g, '');
   const looksLikePhone = !!employeePhone && /^[+\d ()-]+$/.test(employeeTerm);
-  const employees = (staffQ.data ?? []).filter((member) =>
-    (!employeePosition || positionKey(member) === employeePosition) &&
-    (!employeeStatus || member.isActive === (employeeStatus === 'active')) &&
-    (!employeeTerm || member.name.toLocaleLowerCase('ru').includes(employeeTerm) ||
-      (looksLikePhone && (member.phone ?? '').replace(/[^\d]/g, '').includes(employeePhone))),
-  ).sort((a, b) => (employeeSort === 'asc' ? 1 : -1) * a.name.localeCompare(b.name, 'ru') || a.id.localeCompare(b.id));
-  const employeePages = Math.max(1, Math.ceil(employees.length / EMPLOYEE_PAGE_SIZE));
-  const visibleEmployeePage = Math.min(employeePage, employeePages);
-  const firstEmployee = (visibleEmployeePage - 1) * EMPLOYEE_PAGE_SIZE;
-  const visibleEmployees = employees.slice(firstEmployee, firstEmployee + EMPLOYEE_PAGE_SIZE);
+  const reportRows = reportQ.data ?? [];
+  const memberById = new Map((staffQ.data ?? []).map((member) => [member.id, member]));
+  const reportById = new Map(reportRows.map((row) => [row.waiterId, row]));
+  const rows = (staffQ.data?.map(({ id, name, role }) => ({ id, name, role }))
+    ?? reportRows.map(({ waiterId, name, role }) => ({ id: waiterId, name, role })))
+    .filter(({ id, name }) => {
+      const member = memberById.get(id);
+      return (!employeePosition || (member && positionKey(member) === employeePosition))
+        && (!employeeStatus || member?.isActive === (employeeStatus === 'active'))
+        && (!employeeTerm || name.toLocaleLowerCase('ru').includes(employeeTerm)
+          || (looksLikePhone && (member?.phone ?? '').replace(/[^\d]/g, '').includes(employeePhone)));
+    })
+    .sort((a, b) => Number(b.role === 'WAITER') - Number(a.role === 'WAITER') || a.name.localeCompare(b.name, 'ru'));
+  const editorMember = staffEditor?.id ? memberById.get(staffEditor.id) : undefined;
 
   useEffect(() => {
     if (!showWaiterReportBadge) return;
@@ -180,8 +165,6 @@ export function StaffPage() {
     return () => window.clearTimeout(timer);
   }, [showWaiterReportBadge]);
 
-  const rows = reportQ.data ?? [];
-  const memberById = new Map((staffQ.data ?? []).map((m) => [m.id, m]));
   const staffOptions = useMemo(
     () => [
       { value: '', label: 'Все сотрудники' },
@@ -210,11 +193,12 @@ export function StaffPage() {
 
   function exportCsv() {
     const head = ['Сотрудник', 'Роль', 'Смена', 'Оборот', 'Касса (должен)', 'Касса (сдал)', 'Разница'];
-    const lines = rows.map((r) => {
-      const fin = r.isWaiter
-        ? [shiftLabel(r), r.turnover, r.cashDue, r.cashHanded, r.difference]
+    const lines = rows.map(({ id, name, role }) => {
+      const row = reportById.get(id);
+      const fin = row?.isWaiter
+        ? [shiftLabel(row), row.turnover, row.cashDue, row.cashHanded, row.difference]
         : ['—', '—', '—', '—', '—'];
-      return [r.name, tr(ROLE_LABEL[r.role]), ...fin]
+      return [name, tr(ROLE_LABEL[role]), ...fin]
         .map((c) => `"${String(c).replace(/"/g, '""')}"`)
         .join(';');
     });
@@ -261,113 +245,25 @@ export function StaffPage() {
     }
   }
 
-  if (staffEditor) {
-    const member = staffEditor.id ? memberById.get(staffEditor.id) : null;
-    if (!canManageStaff || (member && !canEditMember(member))) {
-      return <EditorPage title="Карточка сотрудника" onClose={closeEditor}><p role="alert">Недостаточно прав для редактирования.</p></EditorPage>;
-    }
-    if (staffEditor.id && !member) return <EditorPage title="Карточка сотрудника" onClose={closeEditor}>
-      {staffQ.isPending ? <Spinner /> : <p role="alert">{staffQ.isError ? apiError(staffQ.error) : 'Сотрудник не найден.'}</p>}
-    </EditorPage>;
-    return <>
-      <StaffEditor key={staffEditor.id ?? 'new'} member={member ?? null} onClose={closeEditor}
-        onManagePermissions={member && isOwner && member.role === 'ADMIN' && !member.positionId && member.id !== currentUser?.id
-          ? () => setPermissionsFor(member) : undefined} />
-      {permissionsFor && permissionsFor.id === member?.id && <EmployeePermissionsModal member={permissionsFor} onClose={() => setPermissionsFor(null)} />}
-    </>;
-  }
-
   return (
     <div className="space-y-3">
-      {tab === 'employees' && <section className="overflow-hidden rounded-2xl border border-border bg-card">
-        <WorkspaceHeaderCount count={staffQ.isSuccess ? employees.length : undefined} />
-        <div className="flex flex-wrap items-center gap-2 px-3 py-4 sm:px-4">
-          <WorkspaceSearch className="[&_.input]:h-8 [&_.input]:w-full [&_.input]:rounded-full [&_.input]:pl-8 [&_.input]:pr-8 [&_.input]:text-[13px]"
-            label="Поиск сотрудников" placeholder="Поиск..." value={employeeSearch}
-            onChange={(value) => { setEmployeeSearch(value); setEmployeePage(1); }} />
-          <Select className="h-8 !rounded-md !px-2.5 !text-[13px]" ariaLabel="Должность" placeholder="Должность"
-            value={employeePosition || 'all'} onChange={(value) => { setEmployeePosition(value); setEmployeePage(1); }} options={[
-              { value: '', label: 'Все должности' }, ...Array.from(positionChoices, ([value, label]) => ({ value, label })),
-            ]} />
-          <Select className="h-8 !rounded-md !px-2.5 !text-[13px]" ariaLabel="Статус сотрудника" placeholder="+ Фильтр"
-            value={employeeStatus || 'all'} onChange={(value) => { setEmployeeStatus(value); setEmployeePage(1); }} options={[
-              { value: '', label: 'Все сотрудники' }, { value: 'active', label: 'Активные' }, { value: 'inactive', label: 'Неактивные' },
-            ]} />
-          {(employeeSearch || employeePosition || employeeStatus) && <button type="button" className="h-8 px-1 text-sm text-primary"
-            onClick={() => { setEmployeeSearch(''); setEmployeePosition(''); setEmployeeStatus(''); setEmployeePage(1); }}>Сбросить</button>}
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <button type="button" className="h-8 px-2 text-[13px] text-primary hover:underline" onClick={() => setTab('current')}>Отчёты по сменам</button>
-            {canManageStaff && <button type="button" className="btn-primary h-8 rounded-md px-3 text-sm"
-              aria-label={tr('Добавить сотрудника')} onClick={() => openEditor({ type: 'employee' })}>{tr('Добавить')}</button>}
+      {tab !== 'waiter-orders' && <div className="flex flex-wrap items-center justify-between gap-3">
+        {tab === 'current' && <>
+          <WorkspaceHeaderCount count={staffQ.data || reportQ.data ? rows.length : undefined} />
+          <div className="flex flex-wrap items-center gap-2">
+            <WorkspaceSearch label="Поиск сотрудников" placeholder="Поиск сотрудников" value={employeeSearch}
+              onChange={setEmployeeSearch} />
+            <Select ariaLabel="Должность" placeholder="Должность" className="h-9" value={employeePosition}
+              onChange={setEmployeePosition} options={[
+                { value: '', label: 'Все должности' }, ...Array.from(positionChoices, ([value, label]) => ({ value, label })),
+              ]} />
+            <Select ariaLabel="Статус сотрудника" placeholder="Статус" className="h-9" value={employeeStatus}
+              onChange={setEmployeeStatus} options={[
+                { value: '', label: 'Все сотрудники' }, { value: 'active', label: 'Активные' }, { value: 'inactive', label: 'Неактивные' },
+              ]} />
           </div>
-        </div>
-        {staffQ.isPending ? <div className="flex justify-center py-12"><Spinner /></div>
-          : staffQ.isError ? <div className="space-y-2 px-4 pb-4">
-            <p role="alert" className="text-danger">{apiError(staffQ.error)}</p>
-            <button type="button" className="btn-secondary btn-md" onClick={() => void staffQ.refetch()}>Повторить</button>
-          </div> : <>
-            <div className="relative overflow-x-auto">
-              <table className="w-full min-w-[620px] table-fixed text-left text-sm">
-                <colgroup><col className="w-[27%]" /><col className="w-[20%]" /><col /><col className="w-[19%]" /><col className="w-[86px]" /></colgroup>
-                <thead className="border-b border-border text-[13px] text-text-muted"><tr>
-                  <th scope="col" className="px-4 py-3 font-medium" aria-sort={employeeSort === 'asc' ? 'ascending' : 'descending'}>
-                    <button type="button" className="inline-flex items-center gap-2 hover:text-primary"
-                      onClick={() => { setEmployeeSort(employeeSort === 'asc' ? 'desc' : 'asc'); setEmployeePage(1); }}>
-                      Имя <span aria-hidden="true">{employeeSort === 'asc' ? '↑' : '↓'}</span>
-                    </button>
-                  </th>
-                  {['Телефон', 'Должность', 'Статус'].map((label) =>
-                    <th key={label} scope="col" className="px-3 py-3 font-medium">{label}</th>)}
-                  <th scope="col"><span className="sr-only">Действия</span></th>
-                </tr></thead>
-                <tbody>{visibleEmployees.map((member) => {
-                  const canEdit = canEditMember(member);
-                  const canRemove = canEdit && member.id !== currentUser?.id;
-                  return <tr key={member.id} className="h-12 border-b border-border last:border-b-0 hover:bg-background/55">
-                    <td className="truncate px-4 py-2" title={member.name}><span>{member.name}</span></td>
-                    <td className="truncate px-3 py-2 tabular-nums">{member.phone || '—'}</td>
-                    <td className="px-3 py-2"><span className="flex min-w-0 items-center gap-2">
-                      <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${POSITION_DOT[member.role]}`} />
-                      <span className="truncate" title={positionLabel(member)}>{positionLabel(member)}</span>
-                    </span></td>
-                    <td className="px-3 py-2"><span className={member.isActive ? 'text-text-primary' : 'text-text-muted'}>
-                      {member.isActive ? 'Активен' : 'Неактивен'}
-                    </span></td>
-                    <td className="pr-2">{canEdit && <div className="flex justify-end gap-1">
-                      <button type="button" className="grid h-8 w-8 place-items-center rounded-md text-primary hover:bg-background"
-                        aria-label={`Изменить: ${member.name}`} onClick={() => openEditor({ type: 'employee', id: member.id })}>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-                          <path d="M5 12h14m-6-6 6 6-6 6" />
-                        </svg>
-                      </button>
-                      {canRemove && <Select value="" ariaLabel={`Действия сотрудника: ${member.name}`} placeholder="⋮"
-                        className="!h-8 !w-7 !justify-center !rounded-md !border-transparent !bg-transparent !p-0 !text-lg [&>span]:!text-primary [&>svg]:hidden"
-                        options={[{ value: 'remove', label: tr('Удалить') }]}
-                        onChange={() => setPendingDelete({ id: member.id, name: member.name })} />}
-                    </div>}</td>
-                  </tr>;
-                })}
-                {!employees.length && <tr><td colSpan={5} className="p-8 text-center text-text-muted">Сотрудники не найдены</td></tr>}</tbody>
-              </table>
-            </div>
-            {!!employees.length && <div className="flex flex-wrap items-center gap-3 border-t border-border bg-background/55 px-3 py-2 text-[13px]">
-              <div className="flex items-center gap-1">
-                <EmployeePageButton label="Первая страница" glyph="«" disabled={visibleEmployeePage <= 1} onClick={() => setEmployeePage(1)} />
-                <EmployeePageButton label="Предыдущая страница" glyph="‹" disabled={visibleEmployeePage <= 1}
-                  onClick={() => setEmployeePage(visibleEmployeePage - 1)} />
-                <span className="px-1 tabular-nums">Страница {visibleEmployeePage} из {employeePages}</span>
-                <EmployeePageButton label="Следующая страница" glyph="›" disabled={visibleEmployeePage >= employeePages}
-                  onClick={() => setEmployeePage(visibleEmployeePage + 1)} />
-                <EmployeePageButton label="Последняя страница" glyph="»" disabled={visibleEmployeePage >= employeePages}
-                  onClick={() => setEmployeePage(employeePages)} />
-              </div>
-              <span className="tabular-nums text-text-muted">{firstEmployee + 1}–{firstEmployee + visibleEmployees.length} из {employees.length}</span>
-            </div>}
-          </>}
-      </section>}
-      {tab !== 'employees' && tab !== 'waiter-orders' && <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-text-primary">{tr('Персонал и отчет по сменам')}</h2>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        </>}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {tab === 'current' && (
             <>
               <span className="text-sm text-text-secondary">{tr('Дата смены:')}</span>
@@ -377,16 +273,17 @@ export function StaffPage() {
                 onChange={(value) => setDate(value)}
               />
               <button
-                onClick={() => reportQ.refetch()}
-                disabled={reportQ.isFetching}
+                onClick={() => Promise.all([reportQ.refetch(), staffQ.refetch()])}
+                disabled={currentShiftLoading}
                 className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background"
               >
-                <IconRefresh className={`h-4 w-4 ${reportQ.isFetching ? 'animate-spin' : ''}`} />
+                <IconRefresh className={`h-4 w-4 ${currentShiftLoading ? 'animate-spin' : ''}`} />
                 {tr('Обновить')}
               </button>
               <button
                 onClick={exportCsv}
-                className="h-9 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background"
+                disabled={!reportQ.data || !rows.length}
+                className="h-9 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background disabled:opacity-50"
               >
                 {tr('Экспорт')}
               </button>
@@ -401,8 +298,7 @@ export function StaffPage() {
         </div>
       </div>}
 
-      {tab !== 'employees' && <div className="no-scrollbar flex items-center gap-5 overflow-x-auto border-b border-border">
-        <TabButton active={false} onClick={() => setTab('employees')}>Сотрудники</TabButton>
+      <div className="no-scrollbar flex items-center gap-5 overflow-x-auto border-b border-border">
         <TabButton active={tab === 'current'} onClick={() => setTab('current')}>
           Текущая смена
         </TabButton>
@@ -419,7 +315,7 @@ export function StaffPage() {
             )}
           </span>
         </TabButton>
-      </div>}
+      </div>
 
       {tab === 'history' && (
         <HistoryFilters
@@ -437,12 +333,14 @@ export function StaffPage() {
         <WaiterOrdersReport staff={staffQ.data ?? []} staffLoading={staffQ.isLoading} />
       ) : tab === 'current' ? (
         <div className="overflow-hidden rounded-xl border border-border bg-white">
-        {reportQ.isLoading ? (
+        {staffQ.isError && <p role="alert" className="px-4 py-2.5 text-sm text-danger">Список сотрудников не обновился. {apiError(staffQ.error)}</p>}
+        {reportQ.isError && <p role="alert" className="px-4 py-2.5 text-sm text-danger">Отчёт по смене не загрузился. {apiError(reportQ.error)}</p>}
+        {!staffQ.data && !reportQ.data && (staffQ.isLoading || reportQ.isLoading) ? (
           <div className="flex justify-center py-12 text-primary">
             <Spinner className="h-6 w-6" />
           </div>
         ) : rows.length === 0 ? (
-          <p className="py-12 text-center text-text-muted">{tr('Нет данных за выбранную дату')}</p>
+          <p className="py-12 text-center text-text-muted">Сотрудники не найдены</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] text-sm">
@@ -459,42 +357,47 @@ export function StaffPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
-                  const isWaiter = row.isWaiter;
-                  const open = isWaiter && expanded === row.waiterId;
+                {rows.map(({ id, name, role }) => {
+                  const row = reportById.get(id);
+                  const waiterReport = row?.isWaiter ? row : undefined;
+                  const open = expanded === id;
+                  const difference = row?.difference ?? 0;
                   const diffCls =
-                    Math.round(row.difference) === 0
+                    Math.round(difference) === 0
                       ? 'text-text-secondary'
-                      : row.difference > 0
+                      : difference > 0
                         ? 'text-success'
                         : 'text-danger';
-                  const member = memberById.get(row.waiterId);
+                  const member = memberById.get(id);
                   const canEdit = !!member && canEditMember(member);
                   const openEdit = () => {
                     if (member) openEditor({ type: 'employee', id: member.id });
                   };
                   return (
-                    <FragmentRow key={row.waiterId}>
+                    <FragmentRow key={id}>
                       <tr
-                        className={`border-b border-border ${isWaiter ? 'cursor-pointer hover:bg-background/50' : ''}`}
-                        onClick={isWaiter ? () => setExpanded(open ? null : row.waiterId) : undefined}
+                        className={`border-b border-border ${waiterReport ? 'cursor-pointer hover:bg-background/50' : ''}`}
+                        onClick={waiterReport ? () => setExpanded(open ? null : id) : undefined}
                       >
                         <td className="px-2 py-2.5 align-middle">
-                          {isWaiter && <Chevron open={open} />}
+                          {waiterReport && <Chevron open={open} />}
                         </td>
                         <td className="px-3 py-2.5">
-                          <div className="font-medium text-text-primary">{row.name}</div>
-                          <div className="text-xs text-text-muted">{member?.positionName ?? stationNames.get(member?.prepStation ?? (row.role === 'KITCHEN' ? 'kitchen' : row.role === 'BAR' ? 'bar' : '')) ?? tr(ROLE_LABEL[row.role])}</div>
+                          <div className="font-medium text-text-primary">{name}</div>
+                          <div className="text-xs text-text-muted">
+                            {member?.positionName ?? stationNames.get(member?.prepStation ?? (role === 'KITCHEN' ? 'kitchen' : role === 'BAR' ? 'bar' : '')) ?? tr(ROLE_LABEL[role])}
+                            {member?.isActive === false && ' · Неактивен'}
+                          </div>
                         </td>
-                        {isWaiter ? (
+                        {waiterReport ? (
                           <>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{shiftLabel(row)}</td>
-                            <td className="px-3 py-2.5 text-right font-medium text-text-primary">{money(row.turnover)}</td>
-                            <td className="px-3 py-2.5 text-right text-text-secondary">{money(row.cashDue)}</td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{shiftLabel(waiterReport)}</td>
+                            <td className="px-3 py-2.5 text-right font-medium text-text-primary">{money(waiterReport.turnover)}</td>
+                            <td className="px-3 py-2.5 text-right text-text-secondary">{money(waiterReport.cashDue)}</td>
                             <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                              <CashHandedCell row={row} date={date} />
+                              <CashHandedCell row={waiterReport} date={date} />
                             </td>
-                            <td className={`px-3 py-2.5 text-right font-medium ${diffCls}`}>{signedMoney(row.difference)}</td>
+                            <td className={`px-3 py-2.5 text-right font-medium ${diffCls}`}>{signedMoney(difference)}</td>
                           </>
                         ) : (
                           // Кухня / бар / админ / владелец — без официантских финансовых колонок.
@@ -507,16 +410,16 @@ export function StaffPage() {
                             <IconBtn title={tr('Изменить')} onClick={openEdit}>
                               <IconEdit className="h-4 w-4" />
                             </IconBtn>
-                            {row.waiterId !== currentUser?.id && <IconBtn title={tr('Удалить')} danger onClick={() => setPendingDelete({ id: row.waiterId, name: row.name })}>
+                            {id !== currentUser?.id && <IconBtn title={tr('Удалить')} danger onClick={() => setPendingDelete({ id, name })}>
                               <IconTrash className="h-4 w-4" />
                             </IconBtn>}
                           </div>}
                         </td>
                       </tr>
-                      {open && (
+                      {open && waiterReport && (
                         <tr className="border-b border-border bg-background/30">
                           <td colSpan={8} className="px-3 py-3">
-                            <ShiftDetails row={row} onEdit={canEdit ? openEdit : undefined} />
+                            <ShiftDetails row={waiterReport} onEdit={canEdit ? openEdit : undefined} />
                           </td>
                         </tr>
                       )}
@@ -539,6 +442,15 @@ export function StaffPage() {
         />
       ) : null}
 
+      {staffEditor && (
+        !canManageStaff || (editorMember && !canEditMember(editorMember))
+          ? <Modal open title="Карточка сотрудника" onClose={closeEditor}><p role="alert">Недостаточно прав для редактирования.</p></Modal>
+          : staffEditor.id && !editorMember
+            ? <Modal open title="Карточка сотрудника" onClose={closeEditor}>
+              {staffQ.isPending ? <Spinner /> : <p role="alert">{staffQ.isError ? apiError(staffQ.error) : 'Сотрудник не найден.'}</p>}
+            </Modal>
+            : <StaffEditor key={staffEditor.id ?? 'new'} member={editorMember ?? null} onClose={closeEditor} />
+      )}
       {editingShift && (
         <ShiftEditModal row={editingShift} onClose={() => setEditingShift(null)} />
       )}
@@ -1057,23 +969,12 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
   );
 }
 
-function EmployeePageButton({ label, glyph, disabled, onClick }: {
-  label: string; glyph: string; disabled: boolean; onClick: () => void;
-}) {
-  return <button type="button" aria-label={label} disabled={disabled} onClick={onClick}
-    className="grid h-7 w-7 place-items-center rounded text-lg leading-none text-primary hover:bg-background disabled:text-text-muted disabled:opacity-50">
-    {glyph}
-  </button>;
-}
-
 function StaffEditor({
   member,
   onClose,
-  onManagePermissions,
 }: {
   member: StaffMember | null;
   onClose: () => void;
-  onManagePermissions?: () => void;
 }) {
   const isEdit = !!member;
   const { create, update } = useStaffMutations();
@@ -1107,6 +1008,7 @@ function StaffEditor({
   const { markSaved } = useEditorDirty(dirty);
 
   const pending = create.isPending || update.isPending;
+  const close = () => { if (!saving.current) onClose(); };
   const systemRole = (value: string) => (['WAITER', 'ADMIN', 'OWNER', 'KITCHEN', 'BAR'] as const).find((role) => role === value);
   const assignedPosition = positions.data?.find((position) => position.id === positionId);
   const stationRole = (assignedPosition?.role ?? member?.role) === 'BAR' ? 'BAR' : 'KITCHEN';
@@ -1162,89 +1064,76 @@ function StaffEditor({
   }
 
   return (
-    <EditorPage
-      onClose={() => { if (!saving.current) onClose(); }}
-      title={isEdit ? 'Редактирование карточки сотрудника' : 'Добавление карточки сотрудника'}
+    <Modal
+      open
+      onClose={close}
+      title={isEdit ? 'Редактировать сотрудника' : 'Добавить сотрудника'}
+      panelClassName="max-w-xl"
       footer={
-        <button type="submit" form={formId} className="btn-primary btn-md" disabled={pending}>
-          {pending ? <Spinner /> : 'Сохранить'}
-        </button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="btn-secondary btn-md" disabled={pending} onClick={close}>Отмена</button>
+          <button type="submit" form={formId} className="btn-primary btn-md" disabled={pending}>
+            {pending ? <Spinner /> : 'Сохранить'}
+          </button>
+        </div>
       }
     >
       <form id={formId} onSubmit={onSubmit}
-        className="px-4 py-4 sm:px-6 sm:[&_.document-field]:grid-cols-[minmax(180px,230px)_minmax(0,470px)]">
-        <fieldset disabled={pending} className="space-y-3.5">
-        <DocumentField label="Имя и фамилия сотрудника">
-          <input className="input h-9 w-full !rounded-md text-sm" value={name} required onChange={(e) => setName(e.target.value)} />
-        </DocumentField>
-        <DocumentField label="Номер телефона">
-          <input className="input h-9 w-full !rounded-md text-sm" type="tel" value={phone} placeholder="+996" required onChange={(e) => setPhone(e.target.value)} />
-        </DocumentField>
-        <DocumentField label="Должность">
-          <Select
-            ariaLabel="Должность"
-            className="h-9 w-full !rounded-md !text-sm"
-            value={chosenPosition}
-            disabled={!canChangeRole}
-            onChange={(value) => {
-              const nextPosition = positions.data?.find(({ id }) => 'position:' + id === value);
-              if (nextPosition) {
-                setPositionId(nextPosition.id);
-                if (nextPosition.role !== role) setAssignment(nextPosition.role);
-                return;
-              }
-              setAssignment(value);
-              setPositionId('');
-            }}
-            options={positionOptions}
-          />
-        </DocumentField>
-        {assignedPosition && (role === 'KITCHEN' || role === 'BAR') && <DocumentField label="Станция">
-          <Select ariaLabel="Станция" className="h-9 w-full !rounded-md !text-sm" value={assignment} onChange={setAssignment}
-            disabled={!canChangeRole}
-            options={[{ value: role, label: 'Станция по умолчанию' }, ...stationOptions.filter(({ value }) => value !== 'KITCHEN' && value !== 'BAR')]} />
-        </DocumentField>}
-        </fieldset>
-        <h2 className="mb-4 mt-6 border-b border-border pb-2 text-base font-medium text-text-primary">Доступ к EDU POS</h2>
-        <fieldset disabled={pending} className="space-y-3.5">
-        <DocumentField label={isEdit ? 'Новый пароль' : 'Пароль для входа'}>
-          <input
-            className="input h-9 w-full !rounded-md text-sm"
-            type="password"
-            autoComplete="new-password"
-            required={!isEdit}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={isEdit ? 'Оставьте пустым' : 'Пароль для входа'}
-          />
-        </DocumentField>
-        {isEdit && (
-          <DocumentField label="Статус">
-            <label className="flex items-center gap-2.5 pt-2.5 text-sm text-text-secondary">
-              <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
-              Может входить в систему
-            </label>
+        className="py-2 sm:[&_.document-field]:grid-cols-[minmax(0,155px)_minmax(0,1fr)]">
+        <fieldset disabled={pending} className="space-y-3">
+          <DocumentField label="Имя и фамилия сотрудника">
+            <input className="input h-9 w-full !rounded-md text-sm" value={name} autoFocus required onChange={(e) => setName(e.target.value)} />
           </DocumentField>
-        )}
-        {onManagePermissions && (
-          <button
-            type="button"
-            onClick={onManagePermissions}
-            className="mt-1 inline-flex items-center justify-between gap-4 rounded-lg border border-border bg-white px-3 py-2.5 text-left text-sm font-medium text-text-primary transition-colors hover:border-primary/40 hover:bg-background"
-          >
-            <span className="flex items-center gap-2.5">
-              <IconKey className="h-[18px] w-[18px] text-text-muted" />
-              Права доступа
-            </span>
-            <svg className="h-4 w-4 text-text-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m9 6 6 6-6 6" />
-            </svg>
-          </button>
-        )}
+          <DocumentField label="Номер телефона">
+            <input className="input h-9 w-full !rounded-md text-sm" type="tel" value={phone} placeholder="+996" required onChange={(e) => setPhone(e.target.value)} />
+          </DocumentField>
+          <DocumentField label="Должность">
+            <Select
+              ariaLabel="Должность"
+              className="h-9 w-full !rounded-md !text-sm"
+              value={chosenPosition}
+              disabled={!canChangeRole}
+              onChange={(value) => {
+                const nextPosition = positions.data?.find(({ id }) => 'position:' + id === value);
+                if (nextPosition) {
+                  setPositionId(nextPosition.id);
+                  if (nextPosition.role !== role) setAssignment(nextPosition.role);
+                  return;
+                }
+                setAssignment(value);
+                setPositionId('');
+              }}
+              options={positionOptions}
+            />
+          </DocumentField>
+          {assignedPosition && (role === 'KITCHEN' || role === 'BAR') && <DocumentField label="Станция">
+            <Select ariaLabel="Станция" className="h-9 w-full !rounded-md !text-sm" value={assignment} onChange={setAssignment}
+              disabled={!canChangeRole}
+              options={[{ value: role, label: 'Станция по умолчанию' }, ...stationOptions.filter(({ value }) => value !== 'KITCHEN' && value !== 'BAR')]} />
+          </DocumentField>}
+          <DocumentField label={isEdit ? 'Новый пароль' : 'Пароль для входа'}>
+            <input
+              className="input h-9 w-full !rounded-md text-sm"
+              type="password"
+              autoComplete="new-password"
+              required={!isEdit}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={isEdit ? 'Оставьте пустым' : 'Пароль для входа'}
+            />
+          </DocumentField>
+          {isEdit && (
+            <DocumentField label="Статус">
+              <label className="flex items-center gap-2.5 pt-2.5 text-sm text-text-secondary">
+                <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+                Может входить в систему
+              </label>
+            </DocumentField>
+          )}
         </fieldset>
         {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
       </form>
-    </EditorPage>
+    </Modal>
   );
 }
 

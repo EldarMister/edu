@@ -859,16 +859,6 @@ export interface StaffInput {
   password?: string;
   isActive?: boolean;
 }
-/** Сохранить права доступа сотрудника. Возвращает актуальные permissions. */
-export function useUpdatePermissions() {
-  const invalidate = useInvalidate([['admin', 'staff']]);
-  return useMutation({
-    mutationFn: ({ id, ...body }: { id: string } & EmployeePermissions) =>
-      api.patch<StaffMember>(`/admin/staff/${id}/permissions`, body).then((r) => r.data),
-    onSuccess: invalidate,
-  });
-}
-
 export function useStaffMutations() {
   const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'positions']]);
   const create = useMutation({

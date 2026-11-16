@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { Toggle } from '@/components/Toggle';
-import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { CashShiftSettings } from './CashShiftControls';
 import { API_URL, apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
@@ -62,21 +61,7 @@ interface Form {
 const RECEIPT_LIMIT = 120;
 
 export function SettingsPage() {
-  const { canSection } = usePermissions();
-  return canSection('settings') ? <CafeSettings /> : <AppearanceSettings />;
-}
-
-function AppearanceSettings() {
-  const t = useT();
-
-  return (
-    <section className="card p-5" aria-labelledby="appearance-heading">
-      <h2 id="appearance-heading" className="mb-3 text-[17px] font-semibold text-text-primary">
-        {t('Внешний вид')}
-      </h2>
-      <ThemeSwitch />
-    </section>
-  );
+  return usePermissions().canSection('settings') ? <CafeSettings /> : null;
 }
 
 function PrinterSettings() {
@@ -110,7 +95,6 @@ function PrinterSettings() {
         <p className="text-sm text-text-muted">{t('Выберите принтер в системном окне печати.')}</p>
         <button type="button" className="btn-secondary btn-md" onClick={testPrint}>{t('Пробная печать')}</button>
         {printError && <p role="alert" className="text-sm text-danger">{t('Разрешите всплывающие окна и повторите печать.')}</p>}
-        <div className="border-t border-border pt-3"><ThemeSwitch /></div>
       </div>
     </section>
   );
@@ -177,7 +161,6 @@ function CafeSettings() {
   if (isError || !form || !data) {
     return (
       <div className="space-y-4">
-        <AppearanceSettings />
         <div className="rounded-xl border border-danger/20 bg-danger/5 px-4 py-3 text-sm text-danger">
           {apiError(error)}
         </div>

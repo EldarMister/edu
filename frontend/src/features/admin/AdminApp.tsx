@@ -8,7 +8,7 @@ import type { SectionKey } from '@/types';
 import { useT } from '@/lib/i18n';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
-import { AppVersion } from '@/components/AppVersion';
+import { SidebarProfile } from './components/SidebarProfile';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import { beep } from '@/lib/sound';
@@ -27,7 +27,6 @@ import {
   IconPrinter,
   IconWarehouse,
   IconMoney,
-  IconLogout,
 } from './components/icons';
 import { StatisticsPage } from './pages/StatisticsPage';
 import { STATISTICS_NAV, statisticsView, type StatisticsView } from './pages/statisticsViews';
@@ -133,7 +132,7 @@ type Section =
   | 'reconcile'
   | 'settings';
 
-// perm — ключ права раздела (управляется через «Права доступа» сотрудника).
+// perm — ключ доступа к разделу.
 // adminOnly — раздел структурно только для админа (владельцу не показываем).
 const SECTIONS: {
   key: Section;
@@ -179,7 +178,7 @@ export function AdminApp() {
   const sections = SECTIONS.filter((s) => {
     if (s.adminOnly && !isAdmin) return false;
     if (s.key === 'finance') return financeNav.length > 0;
-    return s.key === 'settings' || (!!s.perm && canSection(s.perm));
+    return !!s.perm && canSection(s.perm);
   });
   const [route, setRoute] = useSearchParams();
   useWorkspaceScroll();
@@ -445,16 +444,7 @@ export function AdminApp() {
           );
         })}
       </nav>
-      <div className="border-t border-border p-3">
-        <button
-          onClick={onLogout}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium text-text-secondary hover:bg-background"
-        >
-          <IconLogout />
-          {t('Выйти')}
-        </button>
-        <AppVersion className="mt-2" />
-      </div>
+      <SidebarProfile name={user?.name} onLogout={onLogout} />
     </aside>
   );
 
@@ -551,7 +541,7 @@ export function AdminApp() {
               {section === 'staff' && canSection('staff') && (staffView === 'positions' ? <PositionsPage /> : <StaffPage />)}
               {section === 'audit' && canSection('journal') && <AuditPage />}
               {section === 'reconcile' && canSection('paymentReconciliation') && <ReconciliationPage />}
-              {section === 'settings' && <SettingsPage />}
+              {section === 'settings' && canSection('settings') && <SettingsPage />}
             </>
           )}
         </main>

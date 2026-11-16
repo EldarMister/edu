@@ -12,6 +12,9 @@ const editorKeys = ['editor', 'id', 'action', 'itemId', 'editorWarehouse'];
 const scrollPositions = new Map<string, number>();
 function scrollKey(pathname: string, search: string) {
   const params = new URLSearchParams(search);
+  if (params.get('section') === 'staff' && params.get('editor') === 'employee') {
+    editorKeys.forEach((key) => params.delete(key));
+  }
   // Disclosures change the URL for Back navigation without moving the current list.
   ['balanceExpanded', 'catalogueExpanded', 'movementExpanded', 'movementDocuments', 'supplyExpanded',
     'supplyColumns', 'movementColumns', 'movementColumnWidths', 'movementClosedGroups'].forEach((key) => params.delete(key));
