@@ -1,0 +1,101 @@
+/* Sun and cloud design by JustCode14 on Uiverse: https://uiverse.io/JustCode14/red-dingo-61 */
+.theme-switch {
+  position: relative;
+  width: 68px;
+  height: 44px;
+  flex: 0 0 68px;
+  border-radius: 999px;
+}
+
+.theme-switch:focus-visible {
+  outline: 2px solid rgb(var(--edu-primary));
+  outline-offset: 2px;
+}
+
+.theme-switch-sky {
+  position: absolute;
+  inset: 3px 0;
+  overflow: hidden;
+  border-radius: inherit;
+  background-color: #03a9f4;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 14%);
+  transition: background-color 280ms ease;
+}
+
+.theme-switch-orb {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background-color: #ffd04a;
+  transform: translateX(30px);
+  transition: transform 280ms ease, background-color 280ms ease;
+}
+
+.theme-switch-orb::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 35% 34%, #b3becf 2.3px, transparent 2.7px),
+    radial-gradient(circle at 66% 61%, #b3becf 3px, transparent 3.4px),
+    radial-gradient(circle at 38% 78%, #b3becf 1.3px, transparent 1.7px);
+  opacity: 0;
+  transition: opacity 280ms ease;
+  content: '';
+}
+
+.theme-switch-cloud {
+  position: absolute;
+  bottom: -8px;
+  left: -2px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 15px 8px 0 -6px #fff;
+  transition: transform 280ms ease;
+}
+
+.theme-switch-stars {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 57% 27%, #fff 1.1px, transparent 1.5px),
+    radial-gradient(circle at 77% 43%, #fff 1.4px, transparent 1.8px),
+    radial-gradient(circle at 61% 71%, #fff 1px, transparent 1.4px),
+    radial-gradient(circle at 89% 66%, #fff 0.8px, transparent 1.2px),
+    radial-gradient(circle at 86% 21%, #fff 0.7px, transparent 1.1px);
+  opacity: 0;
+  transition: opacity 280ms ease;
+}
+
+.theme-switch[aria-checked='true'] .theme-switch-sky {
+  background-color: #20263d;
+}
+
+.theme-switch[aria-checked='true'] .theme-switch-orb {
+  background-color: #edf0f5;
+  transform: translateX(0);
+}
+
+.theme-switch[aria-checked='true'] .theme-switch-cloud {
+  transform: translateY(26px);
+}
+
+.theme-switch[aria-checked='true'] .theme-switch-stars,
+.theme-switch[aria-checked='true'] .theme-switch-orb::before {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-switch-sky,
+  .theme-switch-orb,
+  .theme-switch-orb::before,
+  .theme-switch-cloud,
+  .theme-switch-stars {
+    transition: none;
+  }
+}

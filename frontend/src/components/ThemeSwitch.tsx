@@ -1,6 +1,6 @@
-import { Toggle } from '@/components/Toggle';
 import { useT } from '@/lib/i18n';
 import { useTheme } from '@/store/theme';
+import './theme-switch.css';
 
 export function ThemeSwitch() {
   const t = useT();
@@ -14,7 +14,20 @@ export function ThemeSwitch() {
         <p className="text-sm font-medium text-text-primary">{title}</p>
         <p className="text-xs text-text-muted">{t('На этом устройстве')}</p>
       </div>
-      <Toggle ariaLabel={title} checked={theme === 'dark'} onChange={(checked) => setTheme(checked ? 'dark' : 'light')} />
+      <button
+        type="button"
+        role="switch"
+        aria-label={title}
+        aria-checked={theme === 'dark'}
+        className="theme-switch"
+        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+      >
+        <span aria-hidden="true" className="theme-switch-sky">
+          <span className="theme-switch-stars" />
+          <span className="theme-switch-cloud" />
+          <span className="theme-switch-orb" />
+        </span>
+      </button>
     </div>
   );
 }
