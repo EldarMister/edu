@@ -3,7 +3,7 @@ import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
-import { ACTION_KEYS, ACTION_LABELS, getDefaultPermissionsByRole, SECTION_KEYS, SECTION_LABELS } from '@/lib/permissions';
+import { ACTION_KEYS, ACTION_LABELS, getDefaultPermissionsByRole, resolvePermissions, SECTION_KEYS, SECTION_LABELS } from '@/lib/permissions';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { EditorPage } from './warehouse/EditorPage';
@@ -11,16 +11,38 @@ import { DocumentField, QueryState } from './warehouse/WarehouseUi';
 import { useEditorRoute, usePageFilter } from './warehouse/workspace-route';
 import { POSITION_ROLES, useStaffPositionMutations, useStaffPositions, type PositionRole, type PositionSalary, type StaffPosition } from './positions-api';
 import { parseMoney } from './finance/finance-format';
+import type { ActionKey, Role } from '@/types';
+
+const systemRoles = [{ value: 'OWNER', label: 'Владелец' }, ...POSITION_ROLES] as const;
+const roleDots: Record<Role, string> = {
+  OWNER: 'bg-success', ADMIN: 'bg-primary/70', WAITER: 'bg-primary', KITCHEN: 'bg-success/75', BAR: 'bg-warning',
+};
+
+function rightsSummary(role: Role, savedPermissions?: unknown) {
+  const permissions = resolvePermissions(role, savedPermissions);
+  if (role === 'OWNER') return 'Полный доступ';
+  if (role === 'WAITER') return permissions.actions.financeCashShifts ? 'Работа с кассой, кассовые смены' : 'Работа с кассой';
+  if (role === 'KITCHEN') return 'Заказы кухни';
+  if (role === 'BAR') return 'Заказы бара';
+  const sections = SECTION_KEYS.filter((key) => permissions.sections[key]).map((key) => SECTION_LABELS[key]);
+  return sections.join(', ') || 'Без доступа к разделам';
+}
 
 export function PositionsPage() {
   const { isOwner } = usePermissions();
   const query = useStaffPositions(isOwner);
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const [search, setSearch] = usePageFilter('search');
+  const [roleFilter, setRoleFilter] = usePageFilter('role');
+  const [sortDirection, setSortDirection] = usePageFilter('sort', 'asc');
   const [removePosition, setRemovePosition] = useState<StaffPosition | null>(null);
   const { remove } = useStaffPositionMutations();
   const term = search.trim().toLocaleLowerCase('ru');
-  const rows = (query.data ?? []).filter(({ name }) => name.toLocaleLowerCase('ru').includes(term));
+  const rows = [
+    ...systemRoles.map(({ value, label }) => ({ id: 'system:' + value, name: label, role: value, access: rightsSummary(value), position: null })),
+    ...(query.data ?? []).map((position) => ({ ...position, access: rightsSummary(position.role, position.permissions), position })),
+  ].filter((row) => row.name.toLocaleLowerCase('ru').includes(term) && (!roleFilter || row.role === roleFilter))
+    .sort((a, b) => (sortDirection === 'desc' ? -1 : 1) * a.name.localeCompare(b.name, 'ru'));
   if (!isOwner) return <p role="alert">Должностями управляет владелец заведения.</p>;
   if (editor?.type === 'position') {
     if (editor.id) {
@@ -34,36 +56,49 @@ export function PositionsPage() {
     }
     return <PositionEditor key="new" onClose={closeEditor} />;
   }
-  return <div className="card min-w-0 overflow-hidden">
+  return <div className="min-w-0 overflow-hidden rounded-t-2xl bg-card text-sm">
     <WorkspaceHeaderCount count={query.isSuccess ? rows.length : undefined} />
-    <div className="poster-toolbar flex flex-wrap items-center gap-3 p-4">
-      <WorkspaceSearch className="[&_.input]:pl-8 [&_.input]:pr-8" label="Поиск должностей" value={search} onChange={setSearch} />
-      <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: 'position' })}>Добавить должность</button>
+    <div className="flex flex-wrap items-center gap-2 p-4">
+      <WorkspaceSearch className="[&_.input]:h-9 [&_.input]:rounded-full [&_.input]:pl-8 [&_.input]:pr-8"
+        label="Поиск должностей" placeholder="Поиск..." value={search} onChange={setSearch} />
+      <Select ariaLabel="Фильтр должностей" className="h-9 !rounded-md !px-2 !text-sm" value={roleFilter} onChange={setRoleFilter}
+        options={[{ value: '', label: '+ Фильтр' }, ...systemRoles.map(({ value, label }) => ({ value, label }))]} />
+      <button type="button" className="btn-primary btn-md ml-auto" aria-label="Добавить должность"
+        onClick={() => openEditor({ type: 'position' })}>Добавить</button>
     </div>
     <QueryState pending={query.isPending} error={query.error}>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[440px] text-left text-sm">
+      <div className="relative overflow-x-auto">
+        <table className="w-full min-w-[560px] text-left text-sm">
           <thead><tr className="border-b border-border text-text-muted">
-            <th scope="col" className="px-4 py-3 font-medium">Название</th>
-            <th scope="col" className="px-4 py-3 font-medium">Базовая роль</th>
-            <th scope="col" className="px-4 py-3 font-medium">Сотрудники</th>
+            <th scope="col" className="w-[42%] px-3 py-3 font-normal" aria-sort={sortDirection === 'desc' ? 'descending' : 'ascending'}>
+              <button type="button" className="text-left" onClick={() => setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc')}>
+                Название должности <span aria-hidden>{sortDirection === 'desc' ? '↓' : '↑'}</span>
+              </button>
+            </th>
+            <th scope="col" className="px-3 py-3 font-normal">Права доступа</th>
             <th scope="col"><span className="sr-only">Действия</span></th>
           </tr></thead>
-          <tbody>{rows.map((position) => <tr className="border-b border-border last:border-0" key={position.id}>
-            <td className="px-4 py-3"><button type="button" className="text-primary" onClick={() => openEditor({ type: 'position', id: position.id })}>{position.name}</button></td>
-            <td className="px-4 py-3">{POSITION_ROLES.find(({ value }) => value === position.role)?.label}</td>
-            <td className="px-4 py-3 tabular-nums">{position.employees}</td>
-            <td className="px-4 py-3"><div className="flex justify-end gap-4">
-              <button type="button" className="text-primary" aria-label={`Редактировать должность ${position.name}`}
-                onClick={() => openEditor({ type: 'position', id: position.id })}>Ред.</button>
-              <button type="button" className="text-danger disabled:text-text-muted" disabled={position.employees > 0}
-                title={position.employees > 0 ? 'Сначала назначьте сотрудникам другую должность' : undefined}
-                onClick={() => { remove.reset(); setRemovePosition(position); }}>Удалить</button>
+          <tbody>{rows.map(({ id, name, role, access, position }) => <tr className="h-12 border-b border-border hover:bg-background/60" key={id}>
+            <td className="px-3 py-2"><div className="flex items-center gap-2">
+              <span aria-hidden className={'h-2 w-2 shrink-0 rounded-full ' + roleDots[role]} />
+              {position ? <button type="button" className="text-left" onClick={() => openEditor({ type: 'position', id })}>{name}</button> : name}
             </div></td>
+            <td className="px-3 py-2">{access}</td>
+            <td className="w-20 px-3 py-2">{position && <div className="flex items-center justify-end gap-1">
+              <button type="button" className="inline-flex h-8 w-8 items-center justify-center text-lg text-primary"
+                aria-label={`Редактировать должность ${name}`} onClick={() => openEditor({ type: 'position', id })}>→</button>
+              <Select ariaLabel={`Действия должности ${name}`} placeholder="⋮" value=""
+                className="!h-8 !w-8 !justify-center !rounded-md !border-transparent !bg-transparent !p-0 !text-lg [&>span]:!text-primary [&>svg]:hidden"
+                options={[{ value: 'edit', label: 'Редактировать' }, ...(position.employees > 0 ? [] : [{ value: 'delete', label: 'Удалить' }])]}
+                onChange={(action) => {
+                  if (action === 'edit') openEditor({ type: 'position', id });
+                  if (action === 'delete') { remove.reset(); setRemovePosition(position); }
+                }} />
+            </div>}</td>
           </tr>)}</tbody>
         </table>
       </div>
-      {!rows.length && <p role="status" className="p-8 text-center text-text-muted">{term ? 'Должности не найдены' : 'Дополнительных должностей пока нет'}</p>}
+      {!rows.length && <p role="status" className="p-8 text-center text-text-muted">Должности не найдены</p>}
     </QueryState>
     {removePosition && <Modal open title="Удалить должность?" onClose={() => { if (!remove.isPending) setRemovePosition(null); }}
       footer={<button type="button" className="btn-danger btn-md" disabled={remove.isPending}
@@ -86,7 +121,7 @@ function PositionEditor({ position, onClose }: { position?: StaffPosition; onClo
   const formId = useId();
   const [name, setName] = useState(position?.name ?? '');
   const [role, setRole] = useState<PositionRole>(position?.role ?? 'WAITER');
-  const [permissions, setPermissions] = useState(() => position?.permissions ?? getDefaultPermissionsByRole(role));
+  const [permissions, setPermissions] = useState(() => resolvePermissions(role, position?.permissions));
   const [rates, setRates] = useState(() => Object.fromEntries(payFields.map(({ key }) =>
     [key, position?.salary?.[key] ? String(position.salary[key]) : ''])) as Record<keyof PositionSalary, string>);
   const { save } = useStaffPositionMutations();
@@ -95,6 +130,8 @@ function PositionEditor({ position, onClose }: { position?: StaffPosition; onClo
     return [key, value !== null && value >= 0 && (!percent || value <= 100) ? value : null] as const;
   });
   const validSalary = parsed.every(([, value]) => value !== null);
+  const registerActions: ActionKey[] = role === 'ADMIN' ? ['closeShift', 'financeCashShifts']
+    : role === 'WAITER' ? ['financeCashShifts'] : [];
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -103,11 +140,21 @@ function PositionEditor({ position, onClose }: { position?: StaffPosition; onClo
     save.mutate({ id: position?.id, name: name.trim(), role, permissions, salary }, { onSuccess: onClose });
   }
 
-  return <EditorPage title={position ? 'Редактирование должности' : 'Новая должность'} onClose={onClose}
+  function actionControl(key: ActionKey) {
+    return <label className="flex items-start gap-2 py-1 text-sm" key={key}>
+      <input type="checkbox" className="mt-0.5" checked={permissions.actions[key]} onChange={({ target }) => {
+        const checked = target.checked;
+        setPermissions((current) => ({ ...current, actions: { ...current.actions, [key]: checked } }));
+      }} />
+      {ACTION_LABELS[key]}
+    </label>;
+  }
+
+  return <EditorPage title={position ? 'Редактирование должности' : 'Добавление должности'} onClose={onClose}
     footer={<button form={formId} type="submit" className="btn-primary btn-md" disabled={save.isPending || !name.trim() || !validSalary}>Сохранить</button>}>
-    <form id={formId} className="max-w-4xl space-y-5 p-4" onSubmit={submit}>
-      <DocumentField label="Название">
-        <input aria-label="Название должности" maxLength={80} required className="input w-full" value={name} disabled={save.isPending}
+    <form id={formId} className="max-w-[760px] space-y-6 px-4 py-3 sm:px-6" onSubmit={submit}>
+      <DocumentField label="Название должности">
+        <input maxLength={80} required className="input w-full" value={name} disabled={save.isPending}
           onChange={({ target }) => setName(target.value)} />
       </DocumentField>
       <DocumentField label="Базовая роль">
@@ -117,29 +164,38 @@ function PositionEditor({ position, onClose }: { position?: StaffPosition; onClo
             if (next) { setRole(next); setPermissions(getDefaultPermissionsByRole(next)); }
           }} />
       </DocumentField>
-      {role === 'ADMIN' && <fieldset disabled={save.isPending} className="space-y-3">
-        <legend className="font-semibold">Разделы</legend>
-        <div className="grid gap-2 sm:grid-cols-2">{SECTION_KEYS.map((key) => <label className="flex items-center gap-2" key={key}>
-          <input type="checkbox" checked={permissions.sections[key]} onChange={({ target }) => {
-            const checked = target.checked;
-            setPermissions((current) => ({ ...current, sections: { ...current.sections, [key]: checked } }));
-          }} />
-          {SECTION_LABELS[key]}
-        </label>)}</div>
+      {registerActions.length > 0 && <fieldset disabled={save.isPending} className="space-y-3">
+        <legend className="w-full border-b border-border pb-2 text-lg font-semibold">Доступ к кассе</legend>
+        {registerActions.map(actionControl)}
       </fieldset>}
-      {(role === 'ADMIN' || role === 'WAITER') && <fieldset disabled={save.isPending} className="space-y-3">
-        <legend className="font-semibold">Действия</legend>
-        <div className="grid gap-2 sm:grid-cols-2">{ACTION_KEYS.filter((key) => role === 'ADMIN' || key === 'financeCashShifts').map((key) =>
-          <label className="flex items-center gap-2" key={key}>
-            <input type="checkbox" checked={permissions.actions[key]} onChange={({ target }) => {
-              const checked = target.checked;
-              setPermissions((current) => ({ ...current, actions: { ...current.actions, [key]: checked } }));
-            }} />
-            {ACTION_LABELS[key]}
-          </label>)}</div>
+      {role === 'ADMIN' && <fieldset disabled={save.isPending} className="space-y-3">
+        <legend className="w-full border-b border-border pb-2 text-lg font-semibold">Доступ к админ-панели</legend>
+        <table className="w-full text-sm">
+          <thead><tr className="border-b border-border text-text-muted">
+            <th scope="col" className="py-2 text-left font-normal">Разделы</th>
+            <th scope="col" className="w-[25%] px-1 py-2 font-normal">Без доступа</th>
+            <th scope="col" className="w-[25%] px-1 py-2 font-normal">Доступ</th>
+          </tr></thead>
+          <tbody>{SECTION_KEYS.map((key) => <tr key={key} className="border-b border-border">
+            <th scope="row" className="py-2 text-left font-normal">{SECTION_LABELS[key]}</th>
+            {[false, true].map((allowed) => <td key={String(allowed)} className="text-center">
+              <input type="radio" name={formId + key} aria-label={(allowed ? 'Доступ' : 'Без доступа') + ' · ' + SECTION_LABELS[key]}
+                checked={permissions.sections[key] === allowed} onChange={() => setPermissions((current) => ({
+                  ...current, sections: { ...current.sections, [key]: allowed },
+                }))} />
+            </td>)}
+          </tr>)}</tbody>
+        </table>
+        <details className="py-1">
+          <summary className="cursor-pointer text-sm text-primary">Дополнительные права</summary>
+          <div className="mt-2 grid gap-x-3 sm:grid-cols-2">
+            {ACTION_KEYS.filter((key) => !registerActions.includes(key)).map(actionControl)}
+          </div>
+        </details>
       </fieldset>}
       <fieldset disabled={save.isPending} className="space-y-3">
-        <legend className="font-semibold">Расчёт зарплаты</legend>
+        <legend className="w-full border-b border-border pb-2 text-lg font-semibold">Расчёт зарплаты</legend>
+        <p className="pt-2 text-sm font-medium">Фиксированная ставка</p>
         <div className="grid gap-3 sm:grid-cols-3">{payFields.filter(({ percent }) => !percent).map(({ key, label }) =>
           <label key={key} className="grid gap-1 text-sm text-text-secondary">{label}
             <input className="input min-w-0" inputMode="decimal" placeholder="0" value={rates[key]}

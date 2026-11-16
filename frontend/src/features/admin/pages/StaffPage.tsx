@@ -1,5 +1,5 @@
 import { DatePicker, DateTimePicker } from '@/components/DatePicker';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { Role } from '@/types';
 import { useStaffPositions } from './positions-api';
 import { Modal } from '@/components/Modal';
@@ -17,6 +17,9 @@ import { EmployeePermissionsModal } from '../components/EmployeePermissionsModal
 import { WaiterOrdersReport } from './WaiterOrdersReport';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
+import { EditorPage, useEditorDirty } from './warehouse/EditorPage';
+import { DocumentField } from './warehouse/WarehouseUi';
+import { useEditorRoute } from './warehouse/workspace-route';
 import {
   useShiftReport,
   useSetCashHanded,
@@ -39,6 +42,14 @@ const ROLE_LABEL: Record<Role, string> = {
   WAITER: 'Официант',
   KITCHEN: 'Кухня',
   BAR: 'Бар',
+};
+const EMPLOYEE_PAGE_SIZE = 25;
+const POSITION_DOT: Record<Role, string> = {
+  OWNER: 'bg-primary',
+  ADMIN: 'bg-primary/70',
+  WAITER: 'bg-primary/80',
+  KITCHEN: 'bg-success',
+  BAR: 'bg-warning',
 };
 
 function IconRefresh(p: { className?: string }) {
@@ -114,6 +125,8 @@ export function StaffPage() {
   const [employeeSearch, setEmployeeSearch] = useState('');
   const [employeePosition, setEmployeePosition] = useState('');
   const [employeeStatus, setEmployeeStatus] = useState('');
+  const [employeeSort, setEmployeeSort] = useState<'asc' | 'desc'>('asc');
+  const [employeePage, setEmployeePage] = useState(1);
   const [showWaiterReportBadge, setShowWaiterReportBadge] = useState(
     () => Date.now() < WAITER_REPORT_BADGE_EXPIRES_AT,
   );
@@ -123,7 +136,8 @@ export function StaffPage() {
   const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
   const [editingShift, setEditingShift] = useState<ShiftHistoryRow | null>(null);
   const [closingShift, setClosingShift] = useState<ShiftHistoryRow | null>(null);
-  const [editing, setEditing] = useState<StaffMember | null | 'new'>(null);
+  const { editor, openEditor, closeEditor } = useEditorRoute();
+  const staffEditor = editor?.type === 'employee' ? editor : null;
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
   const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null);
 
@@ -137,15 +151,23 @@ export function StaffPage() {
   const currentUser = useAuth((s) => s.user);
   const { isOwner, canAction } = usePermissions();
   const canManageStaff = isOwner || canAction('manageStaff');
+  const canEditMember = (member: StaffMember) => canManageStaff && (isOwner || (member.role !== 'ADMIN' && !member.positionId));
   const positionKey = (member: StaffMember) => member.positionId ?? member.role;
   const positionLabel = (member: StaffMember) => member.positionName ?? tr(ROLE_LABEL[member.role]);
   const positionChoices = new Map((staffQ.data ?? []).map((member) => [positionKey(member), positionLabel(member)]));
   const employeeTerm = employeeSearch.trim().toLocaleLowerCase('ru');
+  const employeePhone = employeeTerm.replace(/[^\d]/g, '');
+  const looksLikePhone = !!employeePhone && /^[+\d ()-]+$/.test(employeeTerm);
   const employees = (staffQ.data ?? []).filter((member) =>
     (!employeePosition || positionKey(member) === employeePosition) &&
     (!employeeStatus || member.isActive === (employeeStatus === 'active')) &&
-    (!employeeTerm || member.name.toLocaleLowerCase('ru').includes(employeeTerm) || member.phone.includes(employeeTerm)),
-  ).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    (!employeeTerm || member.name.toLocaleLowerCase('ru').includes(employeeTerm) ||
+      (looksLikePhone && (member.phone ?? '').replace(/[^\d]/g, '').includes(employeePhone))),
+  ).sort((a, b) => (employeeSort === 'asc' ? 1 : -1) * a.name.localeCompare(b.name, 'ru') || a.id.localeCompare(b.id));
+  const employeePages = Math.max(1, Math.ceil(employees.length / EMPLOYEE_PAGE_SIZE));
+  const visibleEmployeePage = Math.min(employeePage, employeePages);
+  const firstEmployee = (visibleEmployeePage - 1) * EMPLOYEE_PAGE_SIZE;
+  const visibleEmployees = employees.slice(firstEmployee, firstEmployee + EMPLOYEE_PAGE_SIZE);
 
   useEffect(() => {
     if (!showWaiterReportBadge) return;
@@ -239,48 +261,110 @@ export function StaffPage() {
     }
   }
 
+  if (staffEditor) {
+    const member = staffEditor.id ? memberById.get(staffEditor.id) : null;
+    if (!canManageStaff || (member && !canEditMember(member))) {
+      return <EditorPage title="Карточка сотрудника" onClose={closeEditor}><p role="alert">Недостаточно прав для редактирования.</p></EditorPage>;
+    }
+    if (staffEditor.id && !member) return <EditorPage title="Карточка сотрудника" onClose={closeEditor}>
+      {staffQ.isPending ? <Spinner /> : <p role="alert">{staffQ.isError ? apiError(staffQ.error) : 'Сотрудник не найден.'}</p>}
+    </EditorPage>;
+    return <>
+      <StaffEditor key={staffEditor.id ?? 'new'} member={member ?? null} onClose={closeEditor}
+        onManagePermissions={member && isOwner && member.role === 'ADMIN' && !member.positionId && member.id !== currentUser?.id
+          ? () => setPermissionsFor(member) : undefined} />
+      {permissionsFor && permissionsFor.id === member?.id && <EmployeePermissionsModal member={permissionsFor} onClose={() => setPermissionsFor(null)} />}
+    </>;
+  }
+
   return (
     <div className="space-y-3">
-      {tab === 'employees' && <>
+      {tab === 'employees' && <section className="overflow-hidden rounded-2xl border border-border bg-card">
         <WorkspaceHeaderCount count={staffQ.isSuccess ? employees.length : undefined} />
-        <div className="poster-toolbar flex flex-wrap items-center gap-2">
-          <WorkspaceSearch className="[&_.input]:pl-8 [&_.input]:pr-8" label="Поиск сотрудников"
-            value={employeeSearch} onChange={setEmployeeSearch} />
-          <Select className="h-10" ariaLabel="Должность" value={employeePosition} onChange={setEmployeePosition} options={[
-            { value: '', label: 'Все должности' }, ...Array.from(positionChoices, ([value, label]) => ({ value, label })),
-          ]} />
-          <Select className="h-10" ariaLabel="Статус сотрудника" value={employeeStatus} onChange={setEmployeeStatus} options={[
-            { value: '', label: 'Все сотрудники' }, { value: 'active', label: 'Активные' }, { value: 'inactive', label: 'Неактивные' },
-          ]} />
-          <button type="button" className="btn-secondary btn-md" onClick={() => setTab('current')}>Отчёты по сменам</button>
-          {canManageStaff && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => setEditing('new')}>
-            <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
-          </button>}
+        <div className="flex flex-wrap items-center gap-2 px-3 py-4 sm:px-4">
+          <WorkspaceSearch className="[&_.input]:h-8 [&_.input]:w-full [&_.input]:rounded-full [&_.input]:pl-8 [&_.input]:pr-8 [&_.input]:text-[13px]"
+            label="Поиск сотрудников" placeholder="Поиск..." value={employeeSearch}
+            onChange={(value) => { setEmployeeSearch(value); setEmployeePage(1); }} />
+          <Select className="h-8 !rounded-md !px-2.5 !text-[13px]" ariaLabel="Должность" placeholder="Должность"
+            value={employeePosition || 'all'} onChange={(value) => { setEmployeePosition(value); setEmployeePage(1); }} options={[
+              { value: '', label: 'Все должности' }, ...Array.from(positionChoices, ([value, label]) => ({ value, label })),
+            ]} />
+          <Select className="h-8 !rounded-md !px-2.5 !text-[13px]" ariaLabel="Статус сотрудника" placeholder="+ Фильтр"
+            value={employeeStatus || 'all'} onChange={(value) => { setEmployeeStatus(value); setEmployeePage(1); }} options={[
+              { value: '', label: 'Все сотрудники' }, { value: 'active', label: 'Активные' }, { value: 'inactive', label: 'Неактивные' },
+            ]} />
+          {(employeeSearch || employeePosition || employeeStatus) && <button type="button" className="h-8 px-1 text-sm text-primary"
+            onClick={() => { setEmployeeSearch(''); setEmployeePosition(''); setEmployeeStatus(''); setEmployeePage(1); }}>Сбросить</button>}
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <button type="button" className="h-8 px-2 text-[13px] text-primary hover:underline" onClick={() => setTab('current')}>Отчёты по сменам</button>
+            {canManageStaff && <button type="button" className="btn-primary h-8 rounded-md px-3 text-sm"
+              aria-label={tr('Добавить сотрудника')} onClick={() => openEditor({ type: 'employee' })}>{tr('Добавить')}</button>}
+          </div>
         </div>
-        {staffQ.isPending ? <Spinner /> : staffQ.isError ? <p role="alert" className="text-danger">{apiError(staffQ.error)}</p>
-          : <div className="card overflow-x-auto">
-            <table className="w-full min-w-[580px] text-left text-sm">
-              <thead className="border-b border-border text-text-muted"><tr>
-                {['Имя', 'Телефон', 'Должность', 'Статус', 'Действия'].map((label) =>
-                  <th key={label} scope="col" className="px-4 py-3 font-medium">{label}</th>)}
-              </tr></thead>
-              <tbody>{employees.map((member) => {
-                const canEdit = canManageStaff && (isOwner || (member.role !== 'ADMIN' && !member.positionId));
-                return <tr key={member.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3">{member.name}</td><td className="px-4 py-3">{member.phone || '—'}</td>
-                  <td className="px-4 py-3">{positionLabel(member)}</td>
-                  <td className="px-4 py-3">{member.isActive ? 'Активен' : 'Неактивен'}</td>
-                  <td className="px-4 py-3">{canEdit && <div className="flex justify-end gap-2">
-                    <IconBtn title={tr('Изменить')} onClick={() => setEditing(member)}><IconEdit className="h-4 w-4" /></IconBtn>
-                    {member.id !== currentUser?.id && <IconBtn title={tr('Удалить')} danger
-                      onClick={() => setPendingDelete({ id: member.id, name: member.name })}><IconTrash className="h-4 w-4" /></IconBtn>}
-                  </div>}</td>
-                </tr>;
-              })}
-              {!employees.length && <tr><td colSpan={5} className="p-8 text-center text-text-muted">Сотрудники не найдены</td></tr>}</tbody>
-            </table>
-          </div>}
-      </>}
+        {staffQ.isPending ? <div className="flex justify-center py-12"><Spinner /></div>
+          : staffQ.isError ? <div className="space-y-2 px-4 pb-4">
+            <p role="alert" className="text-danger">{apiError(staffQ.error)}</p>
+            <button type="button" className="btn-secondary btn-md" onClick={() => void staffQ.refetch()}>Повторить</button>
+          </div> : <>
+            <div className="relative overflow-x-auto">
+              <table className="w-full min-w-[620px] table-fixed text-left text-sm">
+                <colgroup><col className="w-[27%]" /><col className="w-[20%]" /><col /><col className="w-[19%]" /><col className="w-[86px]" /></colgroup>
+                <thead className="border-b border-border text-[13px] text-text-muted"><tr>
+                  <th scope="col" className="px-4 py-3 font-medium" aria-sort={employeeSort === 'asc' ? 'ascending' : 'descending'}>
+                    <button type="button" className="inline-flex items-center gap-2 hover:text-primary"
+                      onClick={() => { setEmployeeSort(employeeSort === 'asc' ? 'desc' : 'asc'); setEmployeePage(1); }}>
+                      Имя <span aria-hidden="true">{employeeSort === 'asc' ? '↑' : '↓'}</span>
+                    </button>
+                  </th>
+                  {['Телефон', 'Должность', 'Статус'].map((label) =>
+                    <th key={label} scope="col" className="px-3 py-3 font-medium">{label}</th>)}
+                  <th scope="col"><span className="sr-only">Действия</span></th>
+                </tr></thead>
+                <tbody>{visibleEmployees.map((member) => {
+                  const canEdit = canEditMember(member);
+                  const canRemove = canEdit && member.id !== currentUser?.id;
+                  return <tr key={member.id} className="h-12 border-b border-border last:border-b-0 hover:bg-background/55">
+                    <td className="truncate px-4 py-2" title={member.name}><span>{member.name}</span></td>
+                    <td className="truncate px-3 py-2 tabular-nums">{member.phone || '—'}</td>
+                    <td className="px-3 py-2"><span className="flex min-w-0 items-center gap-2">
+                      <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${POSITION_DOT[member.role]}`} />
+                      <span className="truncate" title={positionLabel(member)}>{positionLabel(member)}</span>
+                    </span></td>
+                    <td className="px-3 py-2"><span className={member.isActive ? 'text-text-primary' : 'text-text-muted'}>
+                      {member.isActive ? 'Активен' : 'Неактивен'}
+                    </span></td>
+                    <td className="pr-2">{canEdit && <div className="flex justify-end gap-1">
+                      <button type="button" className="grid h-8 w-8 place-items-center rounded-md text-primary hover:bg-background"
+                        aria-label={`Изменить: ${member.name}`} onClick={() => openEditor({ type: 'employee', id: member.id })}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+                          <path d="M5 12h14m-6-6 6 6-6 6" />
+                        </svg>
+                      </button>
+                      {canRemove && <Select value="" ariaLabel={`Действия сотрудника: ${member.name}`} placeholder="⋮"
+                        className="!h-8 !w-7 !justify-center !rounded-md !border-transparent !bg-transparent !p-0 !text-lg [&>span]:!text-primary [&>svg]:hidden"
+                        options={[{ value: 'remove', label: tr('Удалить') }]}
+                        onChange={() => setPendingDelete({ id: member.id, name: member.name })} />}
+                    </div>}</td>
+                  </tr>;
+                })}
+                {!employees.length && <tr><td colSpan={5} className="p-8 text-center text-text-muted">Сотрудники не найдены</td></tr>}</tbody>
+              </table>
+            </div>
+            {!!employees.length && <div className="flex flex-wrap items-center gap-3 border-t border-border bg-background/55 px-3 py-2 text-[13px]">
+              <div className="flex items-center gap-1">
+                <EmployeePageButton label="Первая страница" glyph="«" disabled={visibleEmployeePage <= 1} onClick={() => setEmployeePage(1)} />
+                <EmployeePageButton label="Предыдущая страница" glyph="‹" disabled={visibleEmployeePage <= 1}
+                  onClick={() => setEmployeePage(visibleEmployeePage - 1)} />
+                <span className="px-1 tabular-nums">Страница {visibleEmployeePage} из {employeePages}</span>
+                <EmployeePageButton label="Следующая страница" glyph="›" disabled={visibleEmployeePage >= employeePages}
+                  onClick={() => setEmployeePage(visibleEmployeePage + 1)} />
+                <EmployeePageButton label="Последняя страница" glyph="»" disabled={visibleEmployeePage >= employeePages}
+                  onClick={() => setEmployeePage(employeePages)} />
+              </div>
+              <span className="tabular-nums text-text-muted">{firstEmployee + 1}–{firstEmployee + visibleEmployees.length} из {employees.length}</span>
+            </div>}
+          </>}
+      </section>}
       {tab !== 'employees' && tab !== 'waiter-orders' && <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold text-text-primary">{tr('Персонал и отчет по сменам')}</h2>
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -310,7 +394,7 @@ export function StaffPage() {
           )}
           {canManageStaff && <button
             className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
-            onClick={() => setEditing('new')}
+            onClick={() => openEditor({ type: 'employee' })}
           >
             <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
           </button>}
@@ -385,9 +469,9 @@ export function StaffPage() {
                         ? 'text-success'
                         : 'text-danger';
                   const member = memberById.get(row.waiterId);
-                  const canEdit = !!member && canManageStaff && (isOwner || (member.role !== 'ADMIN' && !member.positionId));
+                  const canEdit = !!member && canEditMember(member);
                   const openEdit = () => {
-                    if (member) setEditing(member);
+                    if (member) openEditor({ type: 'employee', id: member.id });
                   };
                   return (
                     <FragmentRow key={row.waiterId}>
@@ -444,7 +528,7 @@ export function StaffPage() {
           </div>
         )}
         </div>
-      ) : (
+      ) : tab === 'history' ? (
         <ShiftHistoryTable
           data={historyQ.data}
           isLoading={historyQ.isLoading}
@@ -453,25 +537,8 @@ export function StaffPage() {
           onEdit={setEditingShift}
           onClose={setClosingShift}
         />
-      )}
+      ) : null}
 
-      {editing !== null && (
-        <StaffModal
-          member={editing === 'new' ? null : editing}
-          onClose={() => setEditing(null)}
-          onManagePermissions={
-            editing !== 'new' && editing && isOwner && editing.role === 'ADMIN' && !editing.positionId && editing.id !== currentUser?.id
-              ? () => {
-                  setPermissionsFor(editing);
-                  setEditing(null);
-                }
-              : undefined
-          }
-        />
-      )}
-      {permissionsFor && (
-        <EmployeePermissionsModal member={permissionsFor} onClose={() => setPermissionsFor(null)} />
-      )}
       {editingShift && (
         <ShiftEditModal row={editingShift} onClose={() => setEditingShift(null)} />
       )}
@@ -990,7 +1057,16 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
   );
 }
 
-function StaffModal({
+function EmployeePageButton({ label, glyph, disabled, onClick }: {
+  label: string; glyph: string; disabled: boolean; onClick: () => void;
+}) {
+  return <button type="button" aria-label={label} disabled={disabled} onClick={onClick}
+    className="grid h-7 w-7 place-items-center rounded text-lg leading-none text-primary hover:bg-background disabled:text-text-muted disabled:opacity-50">
+    {glyph}
+  </button>;
+}
+
+function StaffEditor({
   member,
   onClose,
   onManagePermissions,
@@ -1004,7 +1080,8 @@ function StaffModal({
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(member?.name ?? '');
   const [phone, setPhone] = useState(member?.phone ?? '');
-  const [assignment, setAssignment] = useState(member?.prepStation ?? member?.role ?? 'WAITER');
+  const initialAssignment = member?.prepStation ?? member?.role ?? 'WAITER';
+  const [assignment, setAssignment] = useState(initialAssignment);
   const [positionId, setPositionId] = useState(member?.positionId ?? '');
   const currentUser = useAuth((state) => state.user);
   const { isOwner } = usePermissions();
@@ -1023,6 +1100,11 @@ function StaffModal({
   const [password, setPassword] = useState('');
   const [isActive, setIsActive] = useState(member?.isActive ?? true);
   const [error, setError] = useState('');
+  const formId = useId();
+  const saving = useRef(false);
+  const dirty = name !== (member?.name ?? '') || phone !== (member?.phone ?? '') || assignment !== initialAssignment ||
+    positionId !== (member?.positionId ?? '') || !!password || isActive !== (member?.isActive ?? true);
+  const { markSaved } = useEditorDirty(dirty);
 
   const pending = create.isPending || update.isPending;
   const systemRole = (value: string) => value === 'KITCHEN' || value === 'BAR' ? value : roles.find((role) => role === value);
@@ -1034,7 +1116,14 @@ function StaffModal({
     ? { positionId: positionId || null }
     : {};
 
-  async function onSubmit() {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving.current) return;
+    if (!isEdit && !password) {
+      setError('Укажите пароль');
+      return;
+    }
+    saving.current = true;
     setError('');
     const prepStation = selectedRole ? null : assignment;
     try {
@@ -1051,41 +1140,41 @@ function StaffModal({
         });
         push({ message: 'Сотрудник обновлён', at: new Date().toISOString() });
       } else {
-        if (!password) {
-          setError('Укажите пароль');
-          return;
-        }
         await create.mutateAsync({ name, phone, role, password, prepStation, ...positionPatch });
         push({ message: 'Сотрудник добавлен', at: new Date().toISOString() });
       }
+      markSaved();
       onClose();
     } catch (err) {
       setError(apiError(err));
+    } finally {
+      saving.current = false;
     }
   }
 
   return (
-    <Modal
-      open
-      onClose={onClose}
-      title={isEdit ? 'Изменить сотрудника' : 'Новый сотрудник'}
+    <EditorPage
+      onClose={() => { if (!saving.current) onClose(); }}
+      title={isEdit ? 'Редактирование карточки сотрудника' : 'Добавление карточки сотрудника'}
       footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={pending} onClick={onSubmit}>
-          {pending ? <Spinner /> : isEdit ? 'Сохранить' : 'Добавить'}
+        <button type="submit" form={formId} className="btn-primary btn-md" disabled={pending}>
+          {pending ? <Spinner /> : 'Сохранить'}
         </button>
       }
     >
-      <div className="space-y-3">
-        <Field label="Имя">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label="Телефон">
-          <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
-        </Field>
-        <Field label="Роль или станция">
+      <form id={formId} onSubmit={onSubmit}
+        className="px-4 py-4 sm:px-6 sm:[&_.document-field]:grid-cols-[minmax(180px,230px)_minmax(0,470px)]">
+        <fieldset disabled={pending} className="space-y-3.5">
+        <DocumentField label="Имя и фамилия сотрудника">
+          <input className="input h-9 w-full !rounded-md text-sm" value={name} required onChange={(e) => setName(e.target.value)} />
+        </DocumentField>
+        <DocumentField label="Номер телефона">
+          <input className="input h-9 w-full !rounded-md text-sm" type="tel" value={phone} placeholder="+996" required onChange={(e) => setPhone(e.target.value)} />
+        </DocumentField>
+        <DocumentField label="Роль или станция">
           <Select
             ariaLabel="Роль или станция"
-            className="h-11 w-full"
+            className="h-9 w-full !rounded-md !text-sm"
             value={assignment}
             disabled={!canChangeRole}
             onChange={(value) => {
@@ -1094,31 +1183,38 @@ function StaffModal({
             }}
             options={[{ value: 'WAITER', label: ROLE_LABEL.WAITER }, ...stationOptions, ...roles.slice(1).map((value) => ({ value, label: ROLE_LABEL[value] }))]}
           />
-        </Field>
-        {canAssignPosition && (matchingPositions.length > 0 || positionId) && <Field label="Должность">
-          <Select ariaLabel="Должность" className="h-11 w-full" value={positionId} onChange={setPositionId}
+        </DocumentField>
+        {canAssignPosition && (matchingPositions.length > 0 || positionId) && <DocumentField label="Должность">
+          <Select ariaLabel="Должность" className="h-9 w-full !rounded-md !text-sm" value={positionId} onChange={setPositionId}
             options={[{ value: '', label: 'Стандартные права роли' }, ...matchingPositions.map(({ id, name }) => ({ value: id, label: name }))]} />
-        </Field>}
-        <Field label={isEdit ? 'Новый пароль (если менять)' : 'Пароль'}>
+        </DocumentField>}
+        </fieldset>
+        <h2 className="mb-4 mt-6 border-b border-border pb-2 text-base font-medium text-text-primary">Доступ к EDU POS</h2>
+        <fieldset disabled={pending} className="space-y-3.5">
+        <DocumentField label={isEdit ? 'Новый пароль' : 'Пароль для входа'}>
           <input
-            className="input"
+            className="input h-9 w-full !rounded-md text-sm"
             type="password"
+            autoComplete="new-password"
+            required={!isEdit}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder={isEdit ? 'Оставьте пустым' : 'Пароль для входа'}
           />
-        </Field>
+        </DocumentField>
         {isEdit && (
-          <label className="flex items-center gap-2.5 pt-1 text-sm text-text-secondary">
-            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
-            Активен (может входить в систему)
-          </label>
+          <DocumentField label="Статус">
+            <label className="flex items-center gap-2.5 pt-2.5 text-sm text-text-secondary">
+              <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+              Может входить в систему
+            </label>
+          </DocumentField>
         )}
         {onManagePermissions && (
           <button
             type="button"
             onClick={onManagePermissions}
-            className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-white px-3 py-2.5 text-left text-sm font-medium text-text-primary transition-colors hover:border-primary/40 hover:bg-background"
+            className="mt-1 inline-flex items-center justify-between gap-4 rounded-lg border border-border bg-white px-3 py-2.5 text-left text-sm font-medium text-text-primary transition-colors hover:border-primary/40 hover:bg-background"
           >
             <span className="flex items-center gap-2.5">
               <IconKey className="h-[18px] w-[18px] text-text-muted" />
@@ -1129,9 +1225,10 @@ function StaffModal({
             </svg>
           </button>
         )}
-        {error && <p className="text-sm text-danger">{error}</p>}
-      </div>
-    </Modal>
+        </fieldset>
+        {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
+      </form>
+    </EditorPage>
   );
 }
 

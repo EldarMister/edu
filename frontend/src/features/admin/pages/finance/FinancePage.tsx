@@ -7,14 +7,21 @@ import { WorkspaceSearch } from '../WorkspaceSearch';
 import { EditorPage } from '../warehouse/EditorPage';
 import { QueryState } from '../warehouse/WarehouseUi';
 import { useEditorRoute, usePageFilters } from '../warehouse/workspace-route';
-import { type FinanceAccount, type FinanceCategory, type FinanceEntry, useFinance, usePayroll } from './api';
-import { CashShiftsPage, FinanceTable } from './CashShiftsPage';
+import { useListPeriod } from '../warehouse/ListPeriodFilter';
+import { useFinance, usePayroll } from './api';
+import { CashShiftsPage } from './CashShiftsPage';
+import { CashFlowMatrix } from './CashFlowMatrix';
+import { FinancePeriod } from './FinancePeriod';
 import { AccountForm, AccrualForm, CategoryForm, PayoutForm, TransactionDetail, TransactionForm } from './FinanceForms';
-import { cashFlowHeaders, cashFlowSummary, entryLabel, entryLabels, exportCashFlow, financeDateTime, financeDay, financeMoney } from './finance-format';
+import { FinanceRegister } from './FinanceRegister';
+import { entryLabel, entryLabels, financeDateTime, financeDay, financeMoney } from './finance-format';
 import type { FinanceView } from './navigation';
+import { PayrollRegister } from './PayrollRegister';
 
 const nameSort = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, 'ru');
 const filterByName = (value: string, term: string) => value.toLocaleLowerCase('ru').includes(term.trim().toLocaleLowerCase('ru'));
+const transactionDay = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', timeZone: 'Asia/Bishkek' });
+const transactionColumns = ['date', 'category', 'note', 'amount', 'account'];
 
 export function FinancePage({ view }: { view: FinanceView }) {
   return view === 'cashShifts' ? <CashShiftsPage /> : <FinanceReport view={view} />;
@@ -24,25 +31,35 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   const route = useEditorRoute();
   const { editor, openEditor, closeEditor } = route;
   const [today] = useState(() => financeDay());
+  const start = new Date(today.slice(0, 7) + '-01T00:00:00Z');
+  start.setUTCMonth(start.getUTCMonth() - 2);
   const [{
     financeFrom: from, financeTo: to, financeSearch: search, financeScope: scope,
     financeKind: kind, financeCategory: categoryId, payrollPosition,
   }, setFilters] = usePageFilters({
-    financeFrom: today.slice(0, 7) + '-01', financeTo: today, financeSearch: '',
+    financeFrom: view === 'cashFlow' ? start.toISOString().slice(0, 10) : today.slice(0, 7) + '-01', financeTo: today, financeSearch: '',
     financeScope: '', financeKind: '', financeCategory: '', payrollPosition: '',
   });
   const [month, setMonth] = useState(today.slice(0, 7));
+  const transactionPeriod = useListPeriod('financeTransaction', 'all');
+  const [ascending, setAscending] = useState(view !== 'transactions');
+  const toggleSort = () => setAscending((current) => !current);
   const setSearch = (value: string) => setFilters({ financeSearch: value });
   const setScope = (value: string) => setFilters({ financeScope: value });
   const hasDates = view === 'transactions' || view === 'cashFlow';
   const rangeValid = !hasDates || (!!from && !!to && from <= to);
   const finance = useFinance({
-    from, to, month: view === 'payroll' ? month : undefined,
+    from: view === 'transactions' ? transactionPeriod.range.dateFrom ?? '2000-01-01' : from,
+    to: view === 'transactions' ? transactionPeriod.range.dateTo ?? today : to,
+    month: view === 'payroll' ? month : undefined,
     accountId: view === 'cashFlow' ? scope || undefined : undefined,
   }, rangeValid);
   const salary = usePayroll(month, view === 'payroll');
   const [salaryHistoryId, setSalaryHistory] = useState<string | null>(null);
   const data = finance.data;
+  const addButton = (label: string, type: string) => <button type="button" className="btn-primary btn-md"
+    onClick={() => openEditor({ type })}>{label}</button>;
+  const quickSearch = <WorkspaceSearch value={search} onChange={setSearch} label="Быстрый поиск" />;
   const dateFilters = hasDates && <div className="flex flex-wrap items-center gap-2">
     <DatePicker value={from} onChange={(value) => setFilters({ financeFrom: value })} max={to || today} className="input w-[125px]" aria-label="С даты" />
     <span className="text-text-muted">—</span>
@@ -79,7 +96,9 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
 
   const toolbar = (filters: ReactNode, add?: { label: string; editor: string }, showSearch = true) => <div className="poster-toolbar">
     {showSearch && <WorkspaceSearch value={search} onChange={setSearch} label="Быстрый поиск" />}
-    {dateFilters}
+      {view === 'cashFlow'
+        ? <FinancePeriod from={from} to={to} onApply={(period) => setFilters({ financeFrom: period.from, financeTo: period.to })} />
+        : dateFilters}
     {filters}
     {add && <button type="button" className="btn-primary btn-md ml-auto" onClick={() => openEditor({ type: add.editor })}>{add.label}</button>}
   </div>;
@@ -94,127 +113,86 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   </>;
 
   if (view === 'accounts') {
-    const accounts = data.accounts.filter(({ name, type }) => (!scope || type === scope) && filterByName(name, search)).sort(nameSort);
+    const accounts = data.accounts.filter(({ name, type }) => (!scope || type === scope) && filterByName(name, search))
+      .sort((a, b) => ascending ? nameSort(a, b) : nameSort(b, a));
+    const total = accounts.reduce((sum, account) => sum + (account.balance ?? 0), 0);
     return <>
       <WorkspaceHeaderCount count={accounts.length} />
-      {toolbar(<Select ariaLabel="Тип счёта" value={scope} onChange={setScope} options={[
-        { value: '', label: 'Все счета' }, { value: 'cash', label: 'Наличные' }, { value: 'noncash', label: 'Безналичные' },
-      ]} />, data.canManage ? { label: 'Добавить счёт', editor: 'financeAccount' } : undefined)}
-      {data.canManage && <p className="mb-3 px-3 text-sm text-text-secondary">
-        Здесь учитываются операции с момента запуска «Финансов». Для нового счёта укажите начальный остаток, а для существующего — внесите разницу через «Транзакции».
-      </p>}
-      <FinanceTable headers={['Название', 'Тип', 'Баланс', '']} amounts={[2]}
-        totals={accounts.length > 0 && data.canManage ? [
-          'Итого', null, financeMoney(accounts.reduce((sum, account) => sum + (account.balance ?? 0), 0)), null,
-        ] : undefined}
-        rows={accounts.map((account) => ({ key: account.id, cells: [
-          <div className="flex flex-wrap items-center gap-2">
+      <FinanceRegister title="Счета" columns={[
+        { key: 'name', label: 'Название', width: '45%', sort: { ascending, toggle: toggleSort } },
+        { key: 'type', label: 'Тип', width: '29%' },
+        { key: 'balance', label: 'Баланс', numeric: true },
+      ]} defaultColumns={['name', 'type', 'balance']}
+        filters={<>{quickSearch}<RegisterFilter active={!!scope}><Select ariaLabel="Тип счёта" value={scope} onChange={setScope} options={[
+          { value: '', label: 'Все счета' }, { value: 'cash', label: 'Наличные' }, { value: 'noncash', label: 'Безналичные' },
+        ]} /></RegisterFilter></>}
+        tools={data.canManage && addButton('Добавить счёт', 'financeAccount')}
+        totals={data.canManage ? { name: { value: 'Итого' }, balance: { value: total, display: financeMoney(total) } } : undefined}
+        rows={accounts.map((account) => ({ id: account.id, values: {
+          name: { value: account.name, display: <div className="flex flex-wrap items-center gap-2">
             <Link className="text-primary hover:underline" to={{ search: new URLSearchParams({
               section: 'finance', view: 'cashFlow', financeScope: account.id,
             }).toString() }}>{account.name}</Link>
             {account.isDefault && <span className="text-xs text-text-muted">Для оплат</span>}
-          </div>,
-          account.type === 'cash' ? 'Наличные' : 'Безналичные',
-          <span className={account.balance != null && account.balance < 0 ? 'text-danger' : undefined}>{financeMoney(account.balance)}</span>,
-          data.canManage && <EditButton name={account.name} onClick={() => openEditor({ type: 'financeAccount', id: account.id })} />,
-        ] }))} empty="Счета не найдены" />
+          </div> },
+          type: { value: account.type === 'cash' ? 'Наличные' : 'Безналичные' },
+          balance: { value: account.balance, display: <span className={account.balance == null || account.balance === 0 ? 'text-text-muted'
+            : account.balance < 0 ? 'text-danger' : undefined}>{financeMoney(account.balance)}</span> },
+        }, action: data.canManage && <EditButton name={account.name} onClick={() => openEditor({ type: 'financeAccount', id: account.id })} /> }))}
+        empty="Счета не найдены" />
+      {data.canManage && <p className="mt-4 px-3 text-sm text-text-secondary">
+        Здесь учитываются операции с момента запуска «Финансов». Начальный остаток указывается при добавлении счёта.
+      </p>}
     </>;
   }
 
   if (view === 'categories') {
-    const categories = data.categories.filter(({ name, kind }) => (!scope || kind === scope) && filterByName(name, search)).sort(nameSort);
+    const categories = data.categories.filter(({ name, kind }) => (!scope || kind === scope) && filterByName(name, search))
+      .sort((a, b) => ascending ? nameSort(a, b) : nameSort(b, a));
     const employeeNames = new Map(data.employees.map(({ id, name }) => [id, name]));
     const positionNames = new Map(data.positions.map(({ id, name }) => [id, name]));
     return <>
       <WorkspaceHeaderCount count={categories.length} />
-      {toolbar(<Select ariaLabel="Тип категории" value={scope} onChange={setScope} options={[
-        { value: '', label: 'Все категории' }, { value: 'income', label: 'Доходы' }, { value: 'expense', label: 'Расходы' },
-      ]} />, data.canManage ? { label: 'Добавить категорию', editor: 'financeCategory' } : undefined)}
-      <FinanceTable headers={['Название', 'Допустимые транзакции', 'Доступ', '']} rows={categories.map((category) => ({ key: category.id, cells: [
-        category.name, entryLabels[category.kind], ['Владелец',
-          ...category.positionIds.map((id) => positionNames.get(id)).filter(Boolean),
-          ...category.userIds.map((id) => employeeNames.get(id)).filter(Boolean),
-        ].join(', '),
-        data.canManage && <EditButton name={category.name} onClick={() => openEditor({ type: 'financeCategory', id: category.id })} />,
-      ] }))} empty="Категории транзакций не найдены" />
+      <FinanceRegister title="Категории" columns={[
+        { key: 'name', label: 'Название', width: '37%', sort: { ascending, toggle: toggleSort } },
+        { key: 'type', label: 'Допустимые транзакции', width: '25%' },
+        { key: 'access', label: 'Кто может проводить' },
+      ]}
+        filters={<>{quickSearch}<RegisterFilter active={!!scope}><Select ariaLabel="Тип категории" value={scope} onChange={setScope} options={[
+          { value: '', label: 'Все категории' }, { value: 'income', label: 'Доходы' }, { value: 'expense', label: 'Расходы' },
+        ]} /></RegisterFilter></>}
+        tools={data.canManage && addButton('Добавить категорию', 'financeCategory')}
+        rows={categories.map((category) => {
+          const delegates = [
+            ...category.positionIds.map((id) => positionNames.get(id)), ...category.userIds.map((id) => employeeNames.get(id)),
+          ].filter(Boolean);
+          const access = delegates.length ? ['Владелец', ...delegates].join(', ') : 'Только владелец';
+          return { id: category.id, values: {
+            name: { value: category.name },
+            type: { value: category.kind === 'income' ? 'Только доходы' : 'Только расходы' },
+            access: { value: access, display: <span className="text-text-secondary">{access}</span> },
+          }, action: data.canManage && <EditButton name={category.name} onClick={() => openEditor({ type: 'financeCategory', id: category.id })} /> };
+        })} empty="Категории транзакций не найдены" />
     </>;
   }
 
-  if (view === 'payroll') {
-    const staff = salary.data?.staff ?? [];
-    const payroll = staff.filter((entry) => filterByName(entry.name, search) &&
-      (!payrollPosition || entry.position === payrollPosition));
-    const history = payroll.find(({ userId }) => userId === salaryHistoryId);
-    const records = history ? salary.data?.records.filter(({ userId }) => userId === history.userId) ?? [] : [];
-    const positions = [...new Set(staff.map((row) => row.position).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'ru'));
-    const totals = payroll.reduce((sum, row) => ({
-      estimate: sum.estimate + row.estimate, accrued: sum.accrued + row.accrued, paid: sum.paid + row.paid, due: sum.due + row.due,
-    }), { estimate: 0, accrued: 0, paid: 0, due: 0 });
-    return <>
-      <WorkspaceHeaderCount count={payroll.length} />
-      {toolbar(<>
-        <label className="flex items-center gap-2 text-text-secondary">Месяц
-          <input type="month" className="input" value={month} max={today.slice(0, 7)}
-            onChange={(event) => { if (event.target.value) { setMonth(event.target.value); setSalaryHistory(null); } }} />
-        </label>
-        <Select ariaLabel="Должность" value={payrollPosition} onChange={(value) => setFilters({ payrollPosition: value })}
-          options={[{ value: '', label: 'Все должности' }, ...positions.map((position) => ({ label: position, value: position }))]} />
-      </>, data.canManage && data.employees.length ? { label: 'Начислить зарплату', editor: 'financeAccrual' } : undefined)}
-      <p className="mb-3 px-3 text-sm text-text-secondary">
-        Расчёт по ставкам должности учитывает закрытые рабочие смены и оплаченные заказы. Деньги списываются при выплате.
-      </p>
-      <QueryState pending={salary.isPending} error={salary.error}>
-        <FinanceTable headers={['Сотрудник', 'Должность', 'Часы', 'Смены', 'По ставкам', 'Начислено', 'Выплачено', 'К выплате', '']}
-          amounts={[2, 3, 4, 5, 6, 7]}
-          totals={payroll.length ? ['Итого', null, null, null, financeMoney(totals.estimate), financeMoney(totals.accrued),
-            financeMoney(totals.paid), financeMoney(totals.due), null] : undefined}
-          rows={payroll.map((entry) => ({ key: entry.userId, cells: [
-            <button type="button" className="text-primary" aria-expanded={history?.userId === entry.userId}
-              onClick={() => setSalaryHistory(history?.userId === entry.userId ? null : entry.userId)}>{entry.name}</button>,
-            entry.position || '—', entry.hours ?? '—', entry.shifts ?? '—', entry.rateMonth ? financeMoney(entry.estimate) : '—',
-            financeMoney(entry.accrued), financeMoney(entry.paid), financeMoney(entry.due),
-            data.canManage && entry.available > 0 && <button type="button" className="text-primary"
-              onClick={() => openEditor({ type: 'financeAccrual', id: entry.userId, action: 'calculated' })}>Начислить по расчёту</button>,
-          ] }))} empty="Сотрудники не найдены" />
-      </QueryState>
-      {salary.isError && <button type="button" className="btn-secondary btn-md" onClick={() => void salary.refetch()}>Повторить</button>}
-      {history && <section className="mt-5" aria-label={'Начисления: ' + history.name}>
-        <h3 className="mb-3 px-3 font-semibold">Начисления — {history.name}</h3>
-        <FinanceTable headers={['Дата', 'Вид начисления', 'Начислено', 'Выплачено', 'К выплате', 'Комментарий', '']} amounts={[2, 3, 4]}
-          rows={records.map((entry) => ({ key: entry.id, cells: [
-            financeDateTime(entry.createdAt), entry.calculation ? 'По ставкам должности' : 'Вручную',
-            financeMoney(entry.amount), financeMoney(entry.paidAmount), financeMoney(entry.amount - entry.paidAmount), entry.note || '—',
-            data.canManage && data.accounts.length > 0 && entry.amount > entry.paidAmount
-              ? <button type="button" className="text-primary" onClick={() => openEditor({ type: 'financePayout', id: entry.id })}>Выплатить</button> : null,
-          ] }))} empty="За этот месяц нет начислений" />
-      </section>}
-    </>;
-  }
+  if (view === 'payroll') return <PayrollRegister report={salary} month={month} latestMonth={today.slice(0, 7)}
+    changeMonth={(value) => { setMonth(value); setSalaryHistory(null); }}
+    search={search} changeSearch={setSearch} position={payrollPosition}
+    changePosition={(value) => setFilters({ payrollPosition: value })}
+    historyId={salaryHistoryId} changeHistory={setSalaryHistory}
+    canAccrue={data.canManage && data.employees.length > 0} canPay={data.canManage && data.accounts.length > 0}
+    openEditor={openEditor} />;
 
   if (view === 'cashFlow') {
     const flow = data.flow;
     const accounts = data.accounts.filter((account) => !scope || account.id === scope);
-    return <>
-      {toolbar(<>
-        <Select ariaLabel="Счёт" value={scope} onChange={setScope}
-          options={[{ value: '', label: 'Все счета' }, ...data.accounts.map(({ id, name }) => ({ value: id, label: name }))]} />
-        {flow && <button type="button" className="btn-secondary btn-md ml-auto"
-          onClick={() => exportCashFlow(flow, from, to, scope ? accounts[0]?.name ?? 'Выбранный счёт' : 'Все счета')}>Экспорт CSV</button>}
-      </>, undefined, false)}
-      {flow ? <>
-        <dl className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-          {cashFlowSummary(flow).map(([label, amount]) => <div key={label} className="rounded-xl border border-border px-4 py-3">
-            <dt className="text-sm text-text-muted">{label}</dt><dd className="text-lg font-semibold tabular-nums">{financeMoney(amount)}</dd>
-          </div>)}
-        </dl>
-        <FinanceTable headers={cashFlowHeaders} amounts={[1, 2, 3, 4]}
-          rows={flow.days.map((day) => ({ key: day.date, cells: [
-            day.date.split('-').reverse().join('.'), financeMoney(day.income), financeMoney(day.expense), financeMoney(day.net), financeMoney(day.balance),
-          ] }))} empty="За этот период нет движений" />
-        <CashFlowDetails accounts={accounts} categories={data.categories} entries={data.entries} from={from} to={to}
-          includeTransfers={!!scope} />
-      </> : <p role="alert" className="text-text-muted">Отчёт недоступен.</p>}
-    </>;
+    return flow ? <CashFlowMatrix key={[from, to, scope].join(':')} flow={flow} accounts={accounts}
+      categories={data.categories} entries={data.entries} from={from} to={to} selectedAccount={scope}
+      accountFilter={<Select ariaLabel="Счёт" className="poster-filter w-48" value={scope} onChange={setScope}
+        options={[{ value: '', label: 'Все счета' }, ...data.accounts.map(({ id, name }) => ({ value: id, label: name }))]} />}
+      period={<FinancePeriod from={from} to={to} onApply={(period) => setFilters({ financeFrom: period.from, financeTo: period.to })} />} />
+      : <p role="alert" className="text-text-muted">Отчёт недоступен.</p>;
   }
 
   const accountNames = new Map(data.accounts.map(({ id, name }) => [id, name]));
@@ -222,37 +200,60 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   const transactions = data.entries.filter((entry) => (!scope || entry.accountId === scope) &&
     (!kind || (entry.reversalOf ? kind === 'reversal' : entry.kind === kind)) &&
     (!categoryId || entry.categoryId === categoryId) &&
-    filterByName([entry.note, entry.actorName, accountNames.get(entry.accountId), entry.categoryId && categoryNames.get(entry.categoryId)].filter(Boolean).join(' '), search));
+    filterByName([entry.note, entry.actorName, accountNames.get(entry.accountId), entry.categoryId && categoryNames.get(entry.categoryId)].filter(Boolean).join(' '), search))
+    .sort((a, b) => ascending ? a.occurredAt.localeCompare(b.occurredAt) : b.occurredAt.localeCompare(a.occurredAt));
   const selectedEntry = data.entries.find(({ id }) => id === transactionEditor?.id);
+  const total = transactions.reduce((sum, entry) => sum + Math.round(entry.amount * 100), 0) / 100;
   return <>
     <WorkspaceHeaderCount count={transactions.length} />
-    {toolbar(<>
-      <Select ariaLabel="Счёт" value={scope} onChange={setScope}
-        options={[{ value: '', label: 'Все счета' }, ...data.accounts.map(({ id, name }) => ({ value: id, label: name }))]} />
-      <Select ariaLabel="Тип транзакции" value={kind} onChange={(value) => setFilters({ financeKind: value })}
-        options={[{ value: '', label: 'Все операции' }, ...Object.entries(entryLabels).map(([value, label]) => ({ value, label })),
-          { value: 'reversal', label: 'Сторно' }]} />
-      {data.categories.length > 0 && <Select ariaLabel="Категория транзакции" value={categoryId} onChange={(value) => setFilters({ financeCategory: value })}
-        options={[{ value: '', label: 'Все категории' }, ...data.categories.map(({ id, name }) => ({ value: id, label: name }))]} />}
-      {(scope || kind || categoryId || search) && <button type="button" className="btn-secondary btn-md"
-        onClick={() => setFilters({ financeScope: '', financeKind: '', financeCategory: '', financeSearch: '' })}>Сбросить фильтры</button>}
-    </>, data.accounts.length && (data.canManage || data.categories.length) ? { label: 'Добавить транзакцию', editor: 'financeTransaction' } : undefined)}
-    <FinanceTable headers={['Дата', 'Категория', 'Комментарий', 'Сумма', 'Счёт', 'Тип', 'Сотрудник', '']} amounts={[3]}
-      rows={transactions.map((entry) => ({ key: entry.id, cells: [
-        financeDateTime(entry.occurredAt), entry.categoryId ? categoryNames.get(entry.categoryId) ?? '—' : '—',
-        entry.note || '—',
-        <span className={entry.amount < 0 ? 'text-danger' : 'text-success'}>{financeMoney(entry.amount)}</span>,
-        entry.counterpartyAccountId
-          ? [accountNames.get(entry.accountId) ?? '—', entry.amount < 0 ? '→' : '←', accountNames.get(entry.counterpartyAccountId) ?? '—'].join(' ')
-          : accountNames.get(entry.accountId) ?? '—',
-        <span>{entryLabel(entry)}{entry.reversedAt && <span className="ml-2 text-xs text-text-muted">Сторнировано</span>}</span>,
-        entry.actorName || '—',
-        <button type="button" className="text-primary hover:underline"
+    <FinanceRegister title="Транзакции" columns={[
+      { key: 'date', label: 'Дата', width: '15%', sort: { ascending, toggle: toggleSort } },
+      { key: 'category', label: 'Категория', width: '15%' },
+      { key: 'note', label: 'Комментарий' },
+      { key: 'amount', label: 'Сумма', width: '14%', numeric: true },
+      { key: 'account', label: 'Счёт', width: '29%' },
+      { key: 'type', label: 'Тип' }, { key: 'actor', label: 'Сотрудник' },
+    ]} defaultColumns={transactionColumns}
+      filters={<>{quickSearch}
+        {data.categories.length > 0 && <Select ariaLabel="Категория транзакции" value={categoryId}
+          onChange={(value) => setFilters({ financeCategory: value })}
+          options={[{ value: '', label: 'Категория' }, ...data.categories.map(({ id, name }) => ({ value: id, label: name }))]} />}
+        <Select ariaLabel="Счёт" value={scope} onChange={setScope}
+          options={[{ value: '', label: 'Счёт' }, ...data.accounts.map(({ id, name }) => ({ value: id, label: name }))]} />
+        <RegisterFilter active={!!kind}>
+          <Select ariaLabel="Тип транзакции" value={kind} onChange={(value) => setFilters({ financeKind: value })}
+            options={[{ value: '', label: 'Все операции' }, ...Object.entries(entryLabels).map(([value, label]) => ({ value, label })),
+              { value: 'reversal', label: 'Сторно' }]} />
+        </RegisterFilter>
+        {(scope || kind || categoryId || search) && <button type="button" className="finance-tool"
+          onClick={() => setFilters({ financeScope: '', financeKind: '', financeCategory: '', financeSearch: '' })}>Сбросить</button>}
+      </>}
+      tools={<>{transactionPeriod.filter}
+        {data.accounts.length > 0 && (data.canManage || data.categories.length > 0) && addButton('Добавить транзакцию', 'financeTransaction')}
+      </>}
+      totals={{ date: { value: 'Итого' }, amount: { value: total, display: <span className={total < 0 ? 'text-danger' : undefined}>{financeMoney(total)}</span> } }}
+      rows={transactions.map((entry) => ({
+        id: entry.id,
+        values: {
+          date: { value: financeDateTime(entry.occurredAt), display: <time dateTime={entry.occurredAt} title={financeDateTime(entry.occurredAt)}>
+            {transactionDay.format(new Date(entry.occurredAt))}
+          </time> },
+          category: { value: !entry.reversalOf && entry.categoryId ? categoryNames.get(entry.categoryId) ?? entryLabel(entry) : entryLabel(entry) },
+          note: { value: entry.note || '—', display: <span>{entry.note || '—'}
+            {entry.reversedAt && <span className="ml-2 text-xs text-text-muted">Сторнировано</span>}
+          </span> },
+          amount: { value: entry.amount, display: <span className={entry.amount < 0 ? 'text-danger' : undefined}>{financeMoney(entry.amount)}</span> },
+          account: { value: entry.counterpartyAccountId
+            ? [accountNames.get(entry.accountId) ?? '—', entry.amount < 0 ? '→' : '←', accountNames.get(entry.counterpartyAccountId) ?? '—'].join(' ')
+            : accountNames.get(entry.accountId) ?? '—' },
+          type: { value: entryLabel(entry) }, actor: { value: entry.actorName || '—' },
+        },
+        action: <button type="button" className="text-primary hover:underline"
           aria-label={(entry.editable ? 'Редактировать транзакцию ' : 'Открыть транзакцию ') + financeDateTime(entry.occurredAt)}
           onClick={() => openEditor({ type: 'financeTransaction', id: entry.id })}>
           {entry.editable ? 'Ред.' : 'Открыть'}
         </button>,
-      ] }))} empty="За этот период нет транзакций по выбранным условиям" />
+      }))} empty="За этот период нет транзакций по выбранным условиям" />
     {transactionEditor && (selectedEntry ? <TransactionDetail key={selectedEntry.id} entry={selectedEntry} accounts={data.accounts}
       categories={data.categories} owner={data.canManage} onClose={closeEditor} />
       : !transactionEditor.id && data.accounts.length > 0 ? <TransactionForm accounts={data.accounts}
@@ -267,57 +268,9 @@ function EditButton({ name, onClick }: { name: string; onClick: () => void }) {
   return <button type="button" className="text-primary" aria-label={'Редактировать ' + name} onClick={onClick}>Ред.</button>;
 }
 
-function CashFlowDetails({ accounts, categories, entries, from, to, includeTransfers }: {
-  accounts: FinanceAccount[];
-  categories: FinanceCategory[];
-  entries: FinanceEntry[];
-  from: string;
-  to: string;
-  includeTransfers: boolean;
-}) {
-  const names = new Map(accounts.map(({ id, name }) => [id, name]));
-  const categoryNames = new Map(categories.map(({ id, name }) => [id, name]));
-  const initial = accounts.flatMap(({ id, openingBalance, createdAt }) => {
-    const day = financeDay(new Date(createdAt));
-    return openingBalance && day >= from && day <= to ? [{
-      id: 'opening-' + id, accountId: id, occurredAt: createdAt, amount: openingBalance,
-      group: 'opening', label: 'Начальный баланс', note: 'Начальный баланс счёта',
-    }] : [];
-  });
-  const motions = entries.filter((entry) => !entry.reversedAt && !entry.reversalOf &&
-    names.has(entry.accountId) && (includeTransfers || entry.kind !== 'transfer')).map((entry) => ({
-    ...entry, group: entry.categoryId ? 'category:' + entry.categoryId : entry.kind,
-    label: (entry.categoryId && categoryNames.get(entry.categoryId)) || entryLabel(entry),
-  }));
-  const all = [...initial, ...motions].sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
-  if (!all.length) return null;
-
-  return <div className="mt-4 grid gap-3 lg:grid-cols-2">
-    {(['Поступления', 'Расходы'] as const).map((label) => {
-      const income = label === 'Поступления';
-      const groups = new Map<string, { items: typeof all; cents: number }>();
-      for (const item of all) {
-        if (income ? item.amount <= 0 : item.amount >= 0) continue;
-        const group = groups.get(item.group) ?? { items: [], cents: 0 };
-        group.items.push(item);
-        group.cents += Math.round(Math.abs(item.amount) * 100);
-        groups.set(item.group, group);
-      }
-      return <section className="min-w-0 rounded-xl border border-border bg-card p-4" key={label}>
-        <h2 className="mb-2 font-semibold">{label} по категориям</h2>
-        {groups.size === 0 && <p className="text-sm text-text-muted">За этот период нет операций</p>}
-        {[...groups.entries()].sort(([, a], [, b]) => b.cents - a.cents).map(([key, { cents, items }]) => (
-          <details className="border-b border-border last:border-0" key={key}>
-            <summary className="cursor-pointer py-2">
-              {items[0].label}<span className="float-right font-medium tabular-nums">{financeMoney(cents / 100)}</span>
-            </summary>
-            <FinanceTable headers={['Дата', 'Счёт', 'Сумма', 'Комментарий']} amounts={[2]}
-              rows={items.map((item) => ({ key: item.id, cells: [
-                financeDateTime(item.occurredAt), names.get(item.accountId), financeMoney(item.amount), item.note || '—',
-              ] }))} />
-          </details>
-        ))}
-      </section>;
-    })}
-  </div>;
+function RegisterFilter({ active, children }: { active: boolean; children: ReactNode }) {
+  return <details className="finance-extra-filter">
+    <summary>{active ? 'Фильтр •' : '+ Фильтр'}</summary>
+    <div>{children}</div>
+  </details>;
 }

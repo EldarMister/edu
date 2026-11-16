@@ -12,7 +12,7 @@ import { entryLabel, financeDateTime, financeDay, financeLocalTime, financeMoney
 
 const accountTypes = [{ value: 'cash', label: 'Наличные' }, { value: 'noncash', label: 'Безналичные' }] as const;
 const categoryKinds = [{ value: 'income', label: 'Доход' }, { value: 'expense', label: 'Расход' }] as const;
-const transactionTypes = [...categoryKinds, { value: 'transfer', label: 'Перевод' }] as const;
+const transactionTypes = [categoryKinds[1], categoryKinds[0], { value: 'transfer', label: 'Перевод' }] as const;
 const optionFor = ({ id, name }: { id: string; name: string }) => ({ value: id, label: name });
 
 function Choice<T extends string>({ label, value, onChange, options, empty }: {
@@ -30,9 +30,27 @@ function Choice<T extends string>({ label, value, onChange, options, empty }: {
   </DocumentField>;
 }
 
-function Amount({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+function Amount({ label, value, onChange, hint }: { label: string; value: string; onChange: (value: string) => void; hint?: string }) {
   return <DocumentField label={label}>
     <input className="input w-full tabular-nums" inputMode="decimal" value={value} onChange={(event) => onChange(event.target.value)} placeholder="0,00" maxLength={17} />
+    {hint && <small className="mt-1.5 block text-text-muted">{hint}</small>}
+  </DocumentField>;
+}
+
+function OperationKind<T extends string>({ label, options, value, onChange }: {
+  label: string;
+  options: readonly { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  const group = useId();
+  return <DocumentField label={label}>
+    <span className="finance-operation-kind">
+      {options.map((option) => <label key={option.value}>
+        <input type="radio" name={group} value={option.value} checked={option.value === value} onChange={() => onChange(option.value)} />
+        <span>{option.label}</span>
+      </label>)}
+    </span>
   </DocumentField>;
 }
 
@@ -57,8 +75,12 @@ function FormPage({ children, title, onClose, onSubmit, submitLabel = 'Сохр�
   const [error, setError] = useState('');
   const { markSaved } = useEditorDirty(dirty);
   const close = () => { if (!busy.current) onClose(); };
-  const footer =
+  const save =
     <button form={id} type="submit" className="btn-primary btn-md" disabled={disabled || saving}>{saving ? 'Сохранение…' : submitLabel}</button>;
+  const footer = dialog ? <div className="finance-transaction-footer">
+    {save}
+    <button type="button" className="btn-secondary btn-md" onClick={close} disabled={saving}>Отменить</button>
+  </div> : save;
   const body = <form id={id} onChangeCapture={() => setDirty(true)} onSubmit={async (event) => {
       event.preventDefault();
       if (disabled || busy.current) return;
@@ -80,26 +102,26 @@ function FormPage({ children, title, onClose, onSubmit, submitLabel = 'Сохр�
       {error && <p className="mt-4 text-sm text-danger" role="alert">{error}</p>}
     </form>;
   return dialog
-    ? <Modal open title={title} onClose={close} footer={footer} panelClassName="max-w-xl" suspended={suspended}>{body}</Modal>
+    ? <Modal open title={title} onClose={close} footer={footer} panelClassName="finance-transaction-modal max-w-[520px]" suspended={suspended}>{body}</Modal>
     : <EditorPage title={title} onClose={close} footer={footer}>{body}</EditorPage>;
 }
 
 export function AccountForm({ account, onClose }: { account?: FinanceAccount; onClose: () => void }) {
   const { saveAccount } = useFinanceWrites();
   const [name, setName] = useState(account?.name ?? '');
-  const [type, setType] = useState<AccountType>(account?.type ?? 'cash');
-  const [opening, setOpening] = useState(String(account?.openingBalance ?? 0));
+  const [type, setType] = useState<AccountType>(account?.type ?? 'noncash');
+  const [opening, setOpening] = useState('0,00');
   const [isDefault, setDefault] = useState(account?.isDefault ?? false);
-  const openingBalance = parseMoney(opening);
-  return <FormPage title={account ? 'Редактирование счёта' : 'Новый счёт'} onClose={onClose}
+  const openingBalance = account?.openingBalance ?? parseMoney(opening);
+  return <FormPage title={account ? 'Редактирование счёта' : 'Добавление счёта'} onClose={onClose}
     disabled={!name.trim() || openingBalance == null}
     onSubmit={() => saveAccount.mutateAsync({ id: account?.id, values: { name: name.trim(), type, openingBalance: openingBalance!, isDefault } })}>
     <DocumentField label="Название"><input className="input w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></DocumentField>
-    <DocumentField label="Валюта"><p className="pt-2">Кыргызский сом</p></DocumentField>
+    <DocumentField label="Валюта"><input className="input w-full" value="Кыргызский сом (KGS)" readOnly /></DocumentField>
     {account ? <DocumentField label="Тип"><p className="pt-2">{accountTypes.find((entry) => entry.value === type)?.label}</p></DocumentField>
       : <Choice label="Тип" value={type} onChange={setType} options={accountTypes} />}
     {account ? <DocumentField label="Начальный баланс"><p className="pt-2">{financeMoney(account.openingBalance)}</p></DocumentField>
-      : <Amount label="Начальный баланс" value={opening} onChange={setOpening} />}
+      : <Amount label="Начальный баланс" value={opening} onChange={setOpening} hint="Остаток денег на счёте на момент создания" />}
     <DocumentField label="Зачисление продаж">
       <label className="flex items-center gap-2 pt-2"><input type="checkbox" checked={isDefault} disabled={account?.isDefault}
         onChange={(event) => setDefault(event.target.checked)} /> Счёт для {type === 'cash' ? 'наличных' : 'безналичных'} оплат</label>
@@ -135,11 +157,11 @@ export function CategoryForm({ category, employees, positions, onClose }: {
   const [kind, setKind] = useState<CategoryKind>(category?.kind ?? 'expense');
   const [userIds, setUserIds] = useState(category?.userIds ?? []);
   const [positionIds, setPositionIds] = useState(category?.positionIds ?? []);
-  return <FormPage title={category ? 'Редактирование категории' : 'Новая категория'} disabled={!name.trim()} onClose={onClose}
+  return <FormPage title={category ? 'Редактирование категории' : 'Добавление категории транзакций'} disabled={!name.trim()} onClose={onClose}
     onSubmit={() => saveCategory.mutateAsync({ id: category?.id, values: { name: name.trim(), kind, userIds, positionIds } })}>
     <DocumentField label="Название"><input className="input w-full" value={name} onChange={(event) => setName(event.target.value)} maxLength={120} required /></DocumentField>
-    {category ? <DocumentField label="Тип"><p className="pt-2">{categoryKinds.find((entry) => entry.value === kind)?.label}</p></DocumentField>
-      : <Choice label="Тип" value={kind} onChange={setKind} options={categoryKinds} />}
+    {category ? <DocumentField label="Допустимые транзакции"><p className="pt-2">{categoryKinds.find((entry) => entry.value === kind)?.label}</p></DocumentField>
+      : <OperationKind label="Допустимые транзакции" value={kind} onChange={setKind} options={categoryKinds} />}
     <DocumentField label="Доступ"><p className="pt-2 text-text-secondary">Владелец всегда может проводить операции по этой категории. Отметьте сотрудников или должности, которым хотите дать доступ.</p></DocumentField>
     <GrantList label="Должности" options={positions} value={positionIds} onChange={setPositionIds} />
     <GrantList label="Сотрудники" options={employees} value={userIds} onChange={setUserIds} />
@@ -166,31 +188,32 @@ export function TransactionForm({ accounts, categories, owner, initialAccountId,
   const [amount, setAmount] = useState('');
   const [time, setTime] = useState('');
   const [note, setNote] = useState('');
+  const currentTime = financeLocalTime();
   const validAmount = parseMoney(amount);
   const effectiveTime = time ? new Date(time + ':00+06:00') : null;
   const validDate = !effectiveTime || (Number.isFinite(effectiveTime.getTime()) && effectiveTime.getTime() <= Date.now());
   const eligible = categories.filter((category) => category.kind === kind);
-  const types = owner ? transactionTypes : categoryKinds.filter(({ value }) => categories.some((category) => category.kind === value));
-  return <FormPage title="Новая транзакция" onClose={onClose} submitLabel="Провести" dialog
+  const types = owner ? transactionTypes : transactionTypes.filter(({ value }) => categories.some((category) => category.kind === value));
+  return <FormPage title="Новая транзакция" onClose={onClose} dialog
     disabled={!accountId || !validDate || !(validAmount != null && validAmount > 0) || (kind === 'transfer' ? !destinationAccountId : !owner && !categoryId)}
     onSubmit={() => postTransaction.mutateAsync({
       kind, accountId, amount: validAmount!, categoryId: kind === 'transfer' ? undefined : categoryId || undefined,
       destinationAccountId: kind === 'transfer' ? destinationAccountId : undefined, requestKey,
       note: note.trim() || undefined, occurredAt: effectiveTime?.toISOString(),
     })}>
-    <Choice label="Тип" value={kind} options={types} onChange={(next) => { setKind(next); setCategory(''); }} />
-    {kind !== 'transfer' && <Choice label="Категория" value={categoryId} onChange={setCategory} options={eligible.map(optionFor)}
-      empty={owner ? 'Без категории' : 'Выберите категорию'} />}
+    <OperationKind label="Тип" value={kind} options={types} onChange={(next) => { setKind(next); setCategory(''); }} />
+    <Amount label="Сумма" value={amount} onChange={setAmount} />
     <Choice label={kind === 'transfer' ? 'Со счёта' : 'Счёт'} value={accountId} options={accounts.map(optionFor)} empty="Выберите счёт"
       onChange={(value) => { setAccount(value); if (value === destinationAccountId) setDestination(''); }} />
     {kind === 'transfer' && <Choice label="На счёт" value={destinationAccountId} onChange={setDestination}
       options={accounts.filter(({ id }) => id !== accountId).map(optionFor)} empty="Выберите счёт" />}
-    <DocumentField label="Дата и время (Бишкек)">
-      <input type="datetime-local" className="input w-full" value={time} onChange={(event) => setTime(event.target.value)} max={financeLocalTime()} />
-      <span className="mt-1 block text-xs text-text-muted">По умолчанию используется время проведения.</span>
+    {kind !== 'transfer' && <Choice label="Категория" value={categoryId} onChange={setCategory} options={eligible.map(optionFor)}
+      empty={owner ? 'Без категории' : 'Выберите категорию'} />}
+    <DocumentField label="Дата и время">
+      <input type="datetime-local" className="input w-full" value={time || currentTime} onChange={(event) => setTime(event.target.value)} max={currentTime} />
+      <span className="mt-1 block text-xs text-text-muted">По умолчанию — время проведения (Бишкек).</span>
     </DocumentField>
     <Comment value={note} onChange={setNote} />
-    <Amount label="Сумма" value={amount} onChange={setAmount} />
   </FormPage>;
 }
 
@@ -234,7 +257,7 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
       disabled={(!owner && !categoryId) || !changed}
       onSubmit={() => editTransaction.mutateAsync({ id: entry.id, categoryId: categoryId || null, note: note.trim() })}>
       {fields}
-    </FormPage> : <Modal open title={title} onClose={onClose} panelClassName="max-w-xl" suspended={showReverse}>
+    </FormPage> : <Modal open title={title} onClose={onClose} panelClassName="finance-transaction-modal max-w-[520px]" suspended={showReverse}>
       <div className="space-y-4">{fields}</div>
     </Modal>}
     {showReverse && <ReverseTransactionDialog entry={entry} onClose={() => setShowReverse(false)} onSuccess={() => {

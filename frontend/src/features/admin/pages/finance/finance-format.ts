@@ -1,4 +1,4 @@
-import type { CashFlow, EntryKind, FinanceEntry } from './api';
+import type { EntryKind, FinanceEntry } from './api';
 
 export const entryLabels: Record<EntryKind, string> = {
   income: 'Доход', expense: 'Расход', transfer: 'Перевод', sale: 'Продажа', refund: 'Возврат',
@@ -26,36 +26,4 @@ export function parseMoney(value: string): number | null {
   const text = value.trim().replace(',', '.');
   if (!/^-?\d{1,10}(?:\.\d{1,2})?$/.test(text)) return null;
   return Number(text);
-}
-export const cashFlowHeaders = ['Дата', 'Поступления', 'Расходы', 'Чистый поток', 'Остаток на конец дня'];
-
-export function cashFlowSummary(flow: CashFlow): [string, number][] {
-  return [
-    ['Остаток на начало', flow.opening],
-    ['Поступления', flow.income],
-    ['Расходы', flow.expense],
-    ['Чистый поток', flow.closing - flow.opening],
-    ['Остаток на конец', flow.closing],
-  ];
-}
-
-export function exportCashFlow(flow: CashFlow, from: string, to: string, account: string) {
-  const rows: (string | number)[][] = [
-    ['Движение денег', account, from, to],
-    ...cashFlowSummary(flow),
-    [],
-    cashFlowHeaders,
-    ...flow.days.map(({ date, income, expense, net, balance }) => [date, income, expense, net, balance]),
-  ];
-  const csv = rows.map((row) => row.map((value) => {
-    if (typeof value === 'number') return value.toFixed(2).replace('.', ',');
-    const text = /^[=+@-]/.test(value.trimStart()) ? "'" + value : value;
-    return '"' + text.replaceAll('"', '""') + '"';
-  }).join(';')).join('\r\n');
-  const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `Движение денег ${from} — ${to}.csv`;
-  link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
