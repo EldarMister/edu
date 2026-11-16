@@ -448,7 +448,7 @@ export function AdminApp() {
           );
         })}
       </nav>
-      <div className="px-3 py-3"><WorkspaceLinks current="admin" /></div>
+      <WorkspaceLinks current="admin" />
       <SidebarProfile name={user?.name} onLogout={onLogout} />
     </aside>
   );
