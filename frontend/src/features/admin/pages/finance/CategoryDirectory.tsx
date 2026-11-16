@@ -1,9 +1,13 @@
 import { useState, type ReactNode } from 'react';
+import { Modal } from '@/components/Modal';
+import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
 import { WorkspaceHeaderCount } from '../WorkspaceHeader';
+import { QueryState } from '../warehouse/WarehouseUi';
 import { FinanceRegister } from './FinanceRegister';
-import { useFinanceWrites, type FinanceCategory } from './api';
-import { categoryAccepts, categoryAncestors } from './category-options';
+import { FinanceRowMenu } from './FinanceRowMenu';
+import { useFinanceCategoryRemoval, useFinanceWrites, type FinanceCategory } from './api';
+import { categoryAccepts, categoryAncestors, categoryOptions } from './category-options';
 
 const categoryType = { income: 'Только доходы', expense: 'Только расходы', both: 'Доходы и расходы' };
 
@@ -20,6 +24,7 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
   edit?: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState<string[]>([]);
+  const [removing, setRemoving] = useState<FinanceCategory | null>(null);
   const { setCategoryVisibility } = useFinanceWrites();
   const byId = new Map(categories.map((category) => [category.id, category]));
   const descendants = new Map<string | null, FinanceCategory[]>();
@@ -72,8 +77,47 @@ export function CategoryDirectory({ categories, employees, positions, search, ki
             disabled={setCategoryVisibility.isPending} className="finance-category-switch"
             onClick={() => setCategoryVisibility.mutate({ id: category.id, showOnPos: !category.showOnPos })}><span /></button> },
           access: { value: access, display: <span className="text-text-secondary">{access}</span> },
-        }, action: edit && <button type="button" className="text-primary" aria-label={'Редактировать ' + category.name}
-          onClick={() => edit(category.id)}>Ред.</button> };
+        }, action: edit && <div className="flex items-center justify-end gap-2">
+          <button type="button" className="text-primary" aria-label={'Редактировать ' + category.name}
+            onClick={() => edit(category.id)}>Ред.</button>
+          <FinanceRowMenu label={category.name} action="Удалить" onAction={() => setRemoving(category)} />
+        </div> };
       })} empty="Категории транзакций не найдены" />
+    {removing && <CategoryRemovalDialog key={removing.id} category={removing} categories={categories} onClose={() => setRemoving(null)} />}
   </>;
+}
+
+function CategoryRemovalDialog({ category, categories, onClose }: {
+  category: FinanceCategory; categories: FinanceCategory[]; onClose: () => void;
+}) {
+  const plan = useFinanceCategoryRemoval(category.id);
+  const { deleteCategory } = useFinanceWrites();
+  const [replacementId, setReplacementId] = useState('');
+  const replacementIds = new Set(plan.data?.replacementIds);
+  const choices = categoryOptions(categories, ({ id }) => replacementIds.has(id));
+  const valid = plan.data && (plan.data.entryCount === 0 || replacementIds.has(replacementId));
+  const close = () => { if (!deleteCategory.isPending) onClose(); };
+
+  return <Modal open title="Удаление категории" onClose={close} footer={<div className="flex justify-end gap-2">
+    <button type="button" className="btn-secondary btn-md" disabled={deleteCategory.isPending} onClick={close}>Отмена</button>
+    <button type="button" className="btn-danger btn-md" disabled={!valid || plan.isError || deleteCategory.isPending}
+      onClick={() => deleteCategory.mutate({ id: category.id, replacementId: replacementId || undefined }, { onSuccess: onClose })}>
+      Удалить
+    </button>
+  </div>}>
+    <div className="space-y-3">
+      <p>Удалить категорию «{category.name}»?</p>
+      <QueryState pending={plan.isPending} error={plan.error} />
+      {plan.data && <>
+        {plan.data.entryCount > 0 && <>
+          <p className="text-text-secondary">Выберите, куда перенести транзакции. Суммы и остатки по счетам сохранятся.</p>
+          {choices.length > 0 ? <Select value={replacementId} onChange={setReplacementId} options={choices}
+            ariaLabel="Категория для переноса" placeholder="Выберите категорию" disabled={deleteCategory.isPending} />
+            : <p role="alert" className="text-danger">Сначала создайте категорию, подходящую для переноса транзакций.</p>}
+        </>}
+        {plan.data.childCount > 0 && <p className="text-text-secondary">Подкатегории перейдут на уровень выше.</p>}
+      </>}
+      {deleteCategory.error && <p role="alert" className="text-danger">{apiError(deleteCategory.error)}</p>}
+    </div>
+  </Modal>;
 }

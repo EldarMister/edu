@@ -289,12 +289,14 @@ model FinanceAccount {
   isCollection   Boolean            @default(false) @map("is_collection")
   openingBalance Decimal            @default(0) @map("opening_balance") @db.Decimal(18, 2)
   createdAt      DateTime           @default(now()) @map("created_at")
+  archivedAt     DateTime?          @map("archived_at")
   cafe           Cafe               @relation(fields: [cafeId], references: [id], onDelete: Cascade)
   entries        FinanceEntry[]     @relation("FinanceAccountEntries")
   counterEntries FinanceEntry[]    @relation("FinanceCounterAccount")
 
   @@unique([cafeId, id])
   @@unique([cafeId, name])
+  @@index([cafeId, archivedAt])
   @@map("finance_accounts")
 }
 
@@ -705,8 +707,31 @@ model CashShift {
   actualAmount   Decimal?  @map("actual_amount") @db.Decimal(14, 2)
   difference     Decimal?  @db.Decimal(14, 2)
 
+  deletedOperations CashShiftDeletedOperation[]
+
   @@index([cafeId, openedAt])
   @@map("cash_shifts")
+}
+
+model CashShiftDeletedOperation {
+  id            String           @id
+  cafeId        String           @map("cafe_id")
+  cashShiftId   String           @map("cash_shift_id")
+  sourceKey     String           @map("source_key")
+  kind          FinanceEntryKind
+  amount        Decimal          @db.Decimal(18, 2)
+  category      String?
+  note          String?
+  actorName     String?          @map("actor_name")
+  occurredAt    DateTime         @map("occurred_at")
+  deletedById   String           @map("deleted_by_id")
+  deletedByName String?          @map("deleted_by_name")
+  deletedAt     DateTime         @default(now()) @map("deleted_at")
+  shift         CashShift        @relation(fields: [cashShiftId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, sourceKey])
+  @@index([cafeId, cashShiftId, occurredAt], map: "cash_shift_deleted_operations_shift_history_idx")
+  @@map("cash_shift_deleted_operations")
 }
 
 model WaiterShift {

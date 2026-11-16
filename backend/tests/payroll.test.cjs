@@ -84,10 +84,42 @@ test('payroll report clips shifts and sales to a custom period and applies each 
   assert.equal(row.personalCommission, 10);
   assert.equal(row.shiftCommission, 40);
   assert.equal(row.estimate, 1170);
+  assert.deepEqual(row.ratesByMonth.map(({ month, rates }) => [month, rates.hourly, rates.monthly]), [
+    ['2026-11', 100, 3000], ['2026-12', 200, 6200],
+  ]);
 });
 
 test('payroll rejects invalid dates and periods that touch more than twelve months', () => {
   assert.throws(() => payrollPeriods('2026-02-30', '2026-03-01'), /некорректная дата/);
   assert.throws(() => payrollPeriods('2026-10-03', '2026-10-02'), /Начало периода/);
   assert.throws(() => payrollPeriods('2026-01-01', '2027-01-01'), /12 календарных месяцев/);
+});
+
+test('payroll shows the actual sales bases for fixed-rate staff even when no commission is configured', async () => {
+  const worker = { id: 'waiter', name: 'Сотрудник', role: 'WAITER', isActive: true, position: {
+    id: 'position', name: 'Официант', salaryRates: [{ effectiveMonth: '2026-11', hourly: 100,
+      perShift: 0, monthly: 0, personalPercent: 0, shiftPercent: 0 }],
+  } };
+  const orders = [
+    ['2026-11-30T09:00:00+06:00', worker.id, 30],
+    ['2026-11-30T11:00:00+06:00', worker.id, 75],
+    ['2026-11-30T11:30:00+06:00', 'other', 150],
+    ['2026-11-30T12:00:00+06:00', null, 50],
+  ].map(([date, waiterId, amount]) => ({
+    closedAt: new Date(date), waiterId, finalAmount: new Prisma.Decimal(amount),
+  }));
+  const db = {
+    user: { findMany: async () => [worker] },
+    salaryAccrual: { findMany: async () => [] },
+    waiterShift: { findMany: async () => [{
+      waiterId: worker.id, ...shift('2026-11-30T10:00:00+06:00', '2026-11-30T12:00:00+06:00'),
+    }] },
+    order: { findMany: async () => orders },
+  };
+  const { staff: [row] } = await payrollPeriodReport(db, 'cafe', '2026-11-30', '2026-11-30');
+  assert.equal(row.personalSales, 105);
+  assert.equal(row.shiftSales, 225);
+  assert.equal(row.personalCommission, 0);
+  assert.equal(row.shiftCommission, 0);
+  assert.equal(row.estimate, 200);
 });

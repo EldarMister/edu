@@ -53,6 +53,18 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
 
     const category = await db.financeCategory.create({ data: { cafeId, name: 'Visible', kind: 'both', showOnPos: true } });
     const hidden = await db.financeCategory.create({ data: { cafeId, name: 'Hidden', kind: 'expense' } });
+    const depositRequest = operation('income', 13, { categoryId: category.id, note: 'Удалённое внесение' });
+    const deposit = await shifts.createOperation(cafeId, waiter, shift.id, depositRequest);
+    assert.equal((await shifts.list(cafeId, true)).current.expectedAmount, 263);
+    await shifts.updateOperation(cafeId, owner, shift.id, deposit.id);
+    await shifts.updateOperation(cafeId, owner, shift.id, deposit.id);
+    await assert.rejects(shifts.createOperation(cafeId, waiter, shift.id, depositRequest), { status: 409 });
+    await assert.rejects(shifts.updateOperation(cafeId, owner, shift.id, deposit.id, { kind: 'income', amount: 15 }), { status: 409 });
+    const deletedDeposit = (await shifts.movements(cafeId, shift.id)).find(({ id }) => id === deposit.id);
+    assert.deepEqual([deletedDeposit.amount, deletedDeposit.category, deletedDeposit.note, deletedDeposit.actorName,
+      deletedDeposit.deletedByName, deletedDeposit.editable], [13, 'Visible', 'Удалённое внесение', 'WAITER', 'OWNER', false]);
+    assert.ok(deletedDeposit.deletedAt instanceof Date);
+    assert.equal((await shifts.list(cafeId, true)).current.expectedAmount, 250);
     await assert.rejects(shifts.createOperation(cafeId, waiter, shift.id, operation('expense', 1, { categoryId: hidden.id })), { status: 400 });
     await shifts.createOperation(cafeId, waiter, shift.id, operation('income', 20, { categoryId: category.id }));
     const expense = await shifts.createOperation(cafeId, waiter, shift.id, operation('expense', 30, { categoryId: category.id }));
@@ -68,9 +80,18 @@ test('PostgreSQL: shift settlement posts sales and both collection legs once and
     assert.equal(retry.id, closed.id);
     assert.equal(closed.difference, -5);
     assert.deepEqual(await balance(), { cash: 135, card: 80, safe: 100 });
+    const removedCollection = await shifts.createOperation(cafeId, owner, shift.id, operation('collection', 12, { note: 'Удалённая инкассация' }));
+    assert.equal((await shifts.list(cafeId, true)).history[0].collectionAmount, 112);
+    assert.deepEqual(await balance(), { cash: 135, card: 80, safe: 112 });
+    await shifts.updateOperation(cafeId, owner, shift.id, removedCollection.id);
+    assert.deepEqual(await balance(), { cash: 135, card: 80, safe: 100 });
     const report = await shifts.movements(cafeId, shift.id);
     assert.equal(report.filter((entry) => !entry.cash).reduce((total, entry) => total + entry.amount, 0), 80);
-    assert.equal(report.filter((entry) => entry.kind === 'transfer').length, 1);
+    assert.equal(report.filter((entry) => entry.kind === 'transfer' && !entry.deletedAt).length, 1);
+    const deletedCollection = report.find(({ id }) => id === removedCollection.id);
+    assert.deepEqual([deletedCollection.collection, deletedCollection.amount, deletedCollection.deletedByName], [true, -12, 'OWNER']);
+    const ledger = await finance.overview(owner, {});
+    assert.ok(!ledger.entries.some(({ id }) => id === deposit.id || id === removedCollection.id));
     assert.equal((await shifts.list(cafeId, true)).history[0].collectionAmount, 100);
     assert.equal(await db.financeEntry.count({ where: { cafeId, pendingCashShift: true } }), 0);
 

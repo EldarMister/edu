@@ -65,8 +65,46 @@
 .report-period-grid button[data-edge='true'] { background: rgb(var(--edu-primary)); color: white; }
 .report-period-hint { padding-top: 8px; color: rgb(var(--edu-text-muted)); font-size: 12px; }
 
+.report-period-panel--confirm { grid-template-columns: minmax(0, 1fr) 155px; }
+.report-period-panel--confirm .report-period-presets { grid-column: 2; grid-row: 1; border-left: 1px solid rgb(var(--edu-border)); padding-left: 10px; }
+.report-period-panel--confirm .report-period-presets button { border-color: transparent; }
+.report-period-panel--confirm .report-period-calendar { grid-column: 1; grid-row: 1; border: 0; padding: 0; }
+.report-period-panel--confirm .report-period-month { background: transparent; }
+.report-period-panel--confirm .report-period-month select { border-color: transparent; font-weight: 600; }
+.report-period-panel--confirm .report-period-grid { gap: 1px; }
+.report-period-panel--confirm .report-period-grid button[aria-pressed='true'] { border-radius: 0; background: rgb(var(--edu-primary) / .82); color: white; }
+.report-period-panel--confirm .report-period-grid button[data-edge='true'] { border-radius: 4px; background: rgb(var(--edu-primary)); color: white; }
+.report-period-months { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.report-period-submonth {
+  display: flex;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 5px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.report-period-confirm {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgb(var(--edu-border));
+  color: rgb(var(--edu-text-muted));
+}
+.report-period-confirm span { margin-left: auto; }
+
+@media (max-width: 639px) {
+  .report-period-months { display: block; }
+  .report-period-previous-grid { display: none; }
+}
+
 @media (max-width: 479px) {
   .report-period-panel { grid-template-columns: minmax(0, 1fr); }
   .report-period-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .report-period-calendar { border-left: 0; border-top: 1px solid rgb(var(--edu-border)); padding: 8px 0 0; }
+  .report-period-panel--confirm .report-period-presets { grid-column: 1; grid-row: 1; padding: 0; border: 0; }
+  .report-period-panel--confirm .report-period-calendar { grid-row: 2; }
 }

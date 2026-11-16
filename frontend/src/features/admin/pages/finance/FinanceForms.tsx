@@ -193,50 +193,73 @@ export function CategoryForm({ category, categories, employees, positions, onClo
   </FormPage>;
 }
 
-export function TransactionForm({ accounts, categories, owner, initialAccountId, initialCategoryId, onClose }: {
+export function TransactionForm({ accounts, categories, owner, entry, initialAccountId, initialCategoryId, onClose }: {
   accounts: FinanceAccount[];
   categories: FinanceCategory[];
   owner: boolean;
+  entry?: FinanceEntry;
   initialAccountId?: string;
   initialCategoryId?: string;
   onClose: () => void;
 }) {
-  const { postTransaction } = useFinanceWrites();
+  const { postTransaction, editTransactionDetails } = useFinanceWrites();
   const [requestKey] = useState(() => crypto.randomUUID());
-  const initialCategory = categories.find(({ id }) => id === initialCategoryId);
-  const [kind, setKind] = useState<TransactionKind>(() => initialCategory?.kind === 'income' ? 'income'
-    : owner || categories.some((entry) => categoryAccepts(entry, 'expense')) ? 'expense' : 'income');
-  const [accountId, setAccount] = useState(() => accounts.find(({ id }) => id === initialAccountId)?.id ?? '');
+  const initialCategory = categories.find(({ id }) => id === (entry?.categoryId ?? initialCategoryId));
+  const incoming = entry?.kind === 'transfer' && entry.amount > 0;
+  const [kind, setKind] = useState<TransactionKind>(() => {
+    if (entry?.kind === 'income' || entry?.kind === 'expense' || entry?.kind === 'transfer') return entry.kind;
+    if (initialCategory?.kind === 'income') return 'income';
+    return owner || categories.some((category) => categoryAccepts(category, 'expense')) ? 'expense' : 'income';
+  });
+  const [accountId, setAccount] = useState(() => {
+    const id = entry ? incoming ? entry.counterpartyAccountId : entry.accountId : initialAccountId;
+    return accounts.find((account) => account.id === id)?.id ?? '';
+  });
   const [categoryId, setCategory] = useState(initialCategory?.id ?? '');
-  const [destinationAccountId, setDestination] = useState('');
-  const [amount, setAmount] = useState('');
-  const [localNow] = useState(financeLocalTime);
-  const [date, setDate] = useState(localNow.slice(0, 10));
-  const [time, setTime] = useState(localNow.slice(11));
-  const [note, setNote] = useState('');
+  const [destinationAccountId, setDestination] = useState(() => (incoming ? entry.accountId : entry?.counterpartyAccountId) ?? '');
+  const [amount, setAmount] = useState(() => entry ? String(Math.abs(entry.amount)).replace('.', ',') : '');
+  const [initialDateTime] = useState(() => financeLocalTime(entry ? new Date(entry.occurredAt) : undefined));
+  const [date, setDate] = useState(initialDateTime.slice(0, 10));
+  const [hour, setHour] = useState(initialDateTime.slice(11, 13));
+  const [minute, setMinute] = useState(initialDateTime.slice(14, 16));
+  const [note, setNote] = useState(entry?.note ?? '');
   const validAmount = parseMoney(amount);
+  const time = [hour, minute].map((part) => part.padStart(2, '0')).join(':');
   const effectiveTime = new Date(date + 'T' + time + ':00+06:00');
-  const validDate = Number.isFinite(effectiveTime.getTime()) && effectiveTime.getTime() <= Date.now();
+  const validTime = /^\d{1,2}$/.test(hour) && Number(hour) < 24 && /^\d{1,2}$/.test(minute) && Number(minute) < 60;
+  const validDate = validTime && Number.isFinite(effectiveTime.getTime()) && effectiveTime.getTime() <= Date.now();
   const eligible = categoryOptions(categories, (category) => categoryAccepts(category, kind));
   const types = owner ? transactionTypes : transactionTypes.filter(({ value }) => categories.some((category) => categoryAccepts(category, value)));
-  return <FormPage title="Добавить транзакцию" onClose={onClose} dialog
+  return <FormPage title={entry ? 'Редактирование транзакции' : 'Добавить транзакцию'} onClose={onClose} dialog
     disabled={!accountId || !validDate || !(validAmount != null && validAmount > 0) || (kind === 'transfer' ? !destinationAccountId : !owner && !categoryId)}
-    onSubmit={() => postTransaction.mutateAsync({
-      kind, accountId, amount: validAmount!, categoryId: kind === 'transfer' ? undefined : categoryId || undefined,
-      destinationAccountId: kind === 'transfer' ? destinationAccountId : undefined, requestKey,
-      note: note.trim() || undefined, occurredAt: date + 'T' + time === localNow ? undefined : effectiveTime.toISOString(),
-    })}>
+    onSubmit={() => {
+      const values = {
+        kind, accountId, amount: validAmount!, categoryId: kind === 'transfer' ? undefined : categoryId || undefined,
+        destinationAccountId: kind === 'transfer' ? destinationAccountId : undefined,
+        note: note.trim() || undefined, occurredAt: date + 'T' + time === initialDateTime ? undefined : effectiveTime.toISOString(),
+      };
+      return entry ? editTransactionDetails.mutateAsync({ id: entry.id, values }) : postTransaction.mutateAsync({ ...values, requestKey });
+    }}>
     <OperationKind label="Тип" value={kind} options={types} onChange={(next) => { setKind(next); setCategory(''); }} />
     <Amount label="Сумма" value={amount} onChange={setAmount} />
-    <Choice label={kind === 'income' ? 'На счёт' : 'Со счёта'} value={accountId} options={accounts.map(optionFor)} empty="Выберите счёт"
-      onChange={(value) => { setAccount(value); if (value === destinationAccountId) setDestination(''); }} />
     {kind === 'transfer' && <Choice label="На счёт" value={destinationAccountId} onChange={setDestination}
       options={accounts.filter(({ id }) => id !== accountId).map(optionFor)} empty="Выберите счёт" />}
+    <Choice label={kind === 'income' ? 'На счёт' : 'Со счёта'} value={accountId}
+      options={accounts.filter(({ id }) => kind !== 'transfer' || id !== destinationAccountId).map(optionFor)} empty="Выберите счёт"
+      onChange={(value) => { setAccount(value); if (value === destinationAccountId) setDestination(''); }} />
     {kind !== 'transfer' && <Choice label="Категория" value={categoryId} onChange={setCategory} options={eligible} empty="Выберите категорию" />}
     <DocumentField label="Дата транзакции">
-      <div className="flex flex-wrap gap-2">
-        <DatePicker value={date} onChange={setDate} max={financeDay()} className="input w-[126px]" aria-label="Дата транзакции" required />
-        <input type="time" className="input w-[100px]" aria-label="Время транзакции" value={time} onChange={(event) => setTime(event.target.value)} required />
+      <div className="finance-transaction-date">
+        <DatePicker value={date} onChange={setDate} max={financeDay()} className="input w-[118px]" aria-label="Дата транзакции" required />
+        <span className="inline-flex items-center gap-1">
+          <input className="input w-11 px-1 text-center tabular-nums" aria-label="Часы транзакции" inputMode="numeric"
+            value={hour} onChange={(event) => setHour(event.target.value)} onBlur={() => setHour(hour.length === 1 ? '0' + hour : hour)}
+            pattern="[0-9]{1,2}" maxLength={2} required />
+          <span aria-hidden="true">:</span>
+          <input className="input w-11 px-1 text-center tabular-nums" aria-label="Минуты транзакции" inputMode="numeric"
+            value={minute} onChange={(event) => setMinute(event.target.value)} onBlur={() => setMinute(minute.length === 1 ? '0' + minute : minute)}
+            pattern="[0-9]{1,2}" maxLength={2} required />
+        </span>
       </div>
     </DocumentField>
     <Comment value={note} onChange={setNote} compact />
@@ -257,12 +280,17 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
   const changed = categoryId !== (entry.categoryId ?? '') || note.trim() !== (entry.note ?? '');
   const eligible = categoryOptions(categories, (category) => categoryAccepts(category, entry.kind) || category.id === entry.categoryId);
   const accountName = (id: string) => accounts.find((account) => account.id === id)?.name ?? '—';
+  const primary = accountName(entry.accountId);
+  const counterparty = entry.counterpartyName ?? (entry.counterpartyAccountId ? accountName(entry.counterpartyAccountId) : '—');
+  const incoming = entry.kind === 'transfer' && entry.amount > 0;
   const title = entry.editable ? 'Редактирование транзакции' : 'Транзакция';
   const fields = <>
     <DocumentField label="Тип"><p>{entryLabel(entry)}</p></DocumentField>
     <DocumentField label="Дата и время"><p>{financeDateTime(entry.occurredAt)}</p></DocumentField>
-    <DocumentField label="Счёт"><p>{accountName(entry.accountId)}</p></DocumentField>
-    {entry.counterpartyAccountId && <DocumentField label="Связанный счёт"><p>{accountName(entry.counterpartyAccountId)}</p></DocumentField>}
+    {entry.kind === 'transfer' ? <>
+      <DocumentField label="На счёт"><p>{incoming ? primary : counterparty}</p></DocumentField>
+      <DocumentField label="Со счёта"><p>{incoming ? counterparty : primary}</p></DocumentField>
+    </> : <DocumentField label="Счёт"><p>{primary}</p></DocumentField>}
     <DocumentField label="Сумма"><p className="font-semibold tabular-nums">{financeMoney(entry.amount)}</p></DocumentField>
     <DocumentField label="Сотрудник"><p>{entry.actorName || '—'}</p></DocumentField>
     {entry.editable ? <>
@@ -273,9 +301,9 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
       <DocumentField label="Категория"><p>{categories.find((category) => category.id === entry.categoryId)?.name ?? '—'}</p></DocumentField>
       <DocumentField label="Комментарий"><p className="whitespace-pre-wrap">{entry.note || '—'}</p></DocumentField>
     </>}
-    {entry.reversedAt && <p className="text-text-secondary">Сторнировано {financeDateTime(entry.reversedAt)}</p>}
+    {entry.reversedAt && <p className="text-text-secondary">Удалена {financeDateTime(entry.reversedAt)}</p>}
     {entry.reversible && <button type="button" className="btn-secondary btn-md" disabled={changed} onClick={() => setShowReverse(true)}>
-      Отменить транзакцию
+      Удалить транзакцию
     </button>}
   </>;
   return <>
@@ -293,23 +321,22 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
   </>;
 }
 
-function ReverseTransactionDialog({ entry, onClose, onSuccess }: { entry: FinanceEntry; onClose: () => void; onSuccess: () => void }) {
+export function ReverseTransactionDialog({ entry, onClose, onSuccess }: { entry: FinanceEntry; onClose: () => void; onSuccess: () => void }) {
   const formId = useId();
   const busy = useRef(false);
-  const [reason, setReason] = useState('');
   const { reverseTransaction } = useFinanceWrites();
   const close = () => { if (!busy.current) onClose(); };
-  return <Modal open title="Отменить транзакцию?" onClose={close} footer={<div className="flex justify-end gap-2">
+  return <Modal open title="Удалить транзакцию?" onClose={close} footer={<div className="flex justify-end gap-2">
     <button type="button" className="btn-secondary btn-md" onClick={close} disabled={reverseTransaction.isPending}>Отмена</button>
     <button type="submit" form={formId} className="btn-danger btn-md"
-      disabled={!reason.trim() || reverseTransaction.isPending}>Отменить транзакцию</button>
+      disabled={reverseTransaction.isPending}>Удалить</button>
   </div>}>
     <form id={formId} className="grid gap-3" onSubmit={async (event) => {
       event.preventDefault();
-      if (busy.current || !reason.trim()) return;
+      if (busy.current) return;
       busy.current = true;
       try {
-        await reverseTransaction.mutateAsync({ id: entry.id, reason: reason.trim() });
+        await reverseTransaction.mutateAsync({ id: entry.id, reason: 'Удалено из журнала транзакций' });
         onSuccess();
       } catch {
         // The mutation error remains available in the dialog.
@@ -317,11 +344,7 @@ function ReverseTransactionDialog({ entry, onClose, onSuccess }: { entry: Financ
         busy.current = false;
       }
     }}>
-      <p className="text-text-secondary">В журнале появится обратная операция, которая скорректирует баланс счёта.</p>
-      <label className="grid gap-1.5">Причина
-        <textarea className="input w-full" rows={3} maxLength={500} value={reason}
-          onChange={(event) => setReason(event.target.value)} disabled={reverseTransaction.isPending} />
-      </label>
+      <p className="text-text-secondary">Транзакция исчезнет из текущего списка, а баланс счёта пересчитается.</p>
       {reverseTransaction.error && <p role="alert" className="text-danger">{apiError(reverseTransaction.error)}</p>}
     </form>
   </Modal>;

@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import {
-  FinanceAccountCreateDto, FinanceAccountUpdateDto, FinanceCategoryCreateDto, FinanceCategoryUpdateDto,
+  FinanceAccountCreateDto, FinanceAccountUpdateDto, FinanceCategoryCreateDto, FinanceCategoryDeleteDto, FinanceCategoryUpdateDto,
   FinanceQueryDto, FinanceTransactionDto, SalaryAccrualDto, SalaryPaymentDto,
-  FinanceTransactionMetadataDto, FinanceTransactionReverseDto,
+  FinanceTransactionEditDto, FinanceTransactionMetadataDto, FinanceTransactionReverseDto,
 } from './finance.dto';
 import { FinanceService } from './finance.service';
 import { PayrollReportDto } from './finance.dto';
@@ -35,6 +35,21 @@ export class FinanceController {
     return this.finance.updateAccount(actor, id, input);
   }
 
+  @Get('accounts/trash')
+  trashedAccounts(@CurrentUser() actor: AuthUser) {
+    return this.finance.trashedAccounts(actor);
+  }
+
+  @Delete('accounts/:id')
+  archiveAccount(@CurrentUser() actor: AuthUser, @Param('id') id: string) {
+    return this.finance.archiveAccount(actor, id);
+  }
+
+  @Post('accounts/:id/restore')
+  restoreAccount(@CurrentUser() actor: AuthUser, @Param('id') id: string) {
+    return this.finance.restoreAccount(actor, id);
+  }
+
   @Post('categories')
   createCategory(@CurrentUser() actor: AuthUser, @Body() input: FinanceCategoryCreateDto) {
     return this.finance.createCategory(actor, input);
@@ -45,6 +60,16 @@ export class FinanceController {
     return this.finance.updateCategory(actor, id, input);
   }
 
+  @Get('categories/:id/removal')
+  categoryRemoval(@CurrentUser() actor: AuthUser, @Param('id') id: string) {
+    return this.finance.categoryRemoval(actor, id);
+  }
+
+  @Delete('categories/:id')
+  deleteCategory(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() input: FinanceCategoryDeleteDto) {
+    return this.finance.deleteCategory(actor, id, input?.replacementId);
+  }
+
   @Post('transactions')
   post(@CurrentUser() actor: AuthUser, @Body() input: FinanceTransactionDto) {
     return this.finance.post(actor, input);
@@ -53,6 +78,12 @@ export class FinanceController {
   @Patch('transactions/:id')
   updateTransaction(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() input: FinanceTransactionMetadataDto) {
     return this.finance.updateTransaction(actor, id, input);
+  }
+
+  @Patch('transactions/:id/details')
+  @Roles(Role.OWNER)
+  editTransaction(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() input: FinanceTransactionEditDto) {
+    return this.finance.editTransaction(actor, id, input);
   }
 
   @Post('transactions/:id/reverse')

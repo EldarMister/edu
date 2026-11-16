@@ -32,6 +32,8 @@ const ACTION_LABELS: Record<string, string> = {
   POSITION_UPDATED: 'Изменение должности',
   POSITION_DELETED: 'Удаление должности',
   FINANCE_TRANSACTION_UPDATED: 'Изменение транзакции',
+  FINANCE_ACCOUNT_ARCHIVED: 'Счёт перемещён в корзину',
+  FINANCE_ACCOUNT_RESTORED: 'Счёт восстановлен',
   SETTINGS_UPDATED: 'Изменение настроек',
 };
 

@@ -26,8 +26,8 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
   const scope = useMemo(() => new Set(selectedAccounts.split(',').filter(Boolean)), [selectedAccounts]);
   const includedAccounts = useMemo(() => !scope.size ? accounts : accounts.filter(({ id }) => scope.has(id)), [accounts, scope]);
   const { periods, lines, byAccount } = useMemo(
-    () => buildCashFlowTable(flow, includedAccounts, categories, entries, from, to, selectedAccounts),
-    [flow, includedAccounts, categories, entries, from, to, selectedAccounts],
+    () => buildCashFlowTable(flow, includedAccounts, categories, entries, from, to),
+    [flow, includedAccounts, categories, entries, from, to],
   );
   const scopeLabel = scope.size ? includedAccounts.map(({ name }) => name).join(', ') : 'Все счета';
   const columns = periods.flatMap((bucket): FlowColumn[] => [

@@ -24,8 +24,8 @@ export async function ensureCollectionAccount(tx: Prisma.TransactionClient, cafe
   const accounts = await tx.financeAccount.findMany({ where: { cafeId } });
   const current = accounts.find(({ isCollection }) => isCollection);
   if (current) return current;
-  const safe = accounts.find(({ name, isDefault, type }) =>
-    type === 'cash' && !isDefault && name.trim().toLocaleLowerCase('ru') === 'сейф');
+  const safe = accounts.find(({ name, isDefault, type, archivedAt }) =>
+    type === 'cash' && !isDefault && !archivedAt && name.trim().toLocaleLowerCase('ru') === 'сейф');
   if (safe) return tx.financeAccount.update({ where: { cafeId, id: safe.id }, data: { isCollection: true } });
   const names = new Set(accounts.map(({ name }) => name.toLocaleLowerCase('ru')));
   let name = 'Сейф';

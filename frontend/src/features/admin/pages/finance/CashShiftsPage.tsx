@@ -13,7 +13,7 @@ import { CashOperationDialog, type CashOperation } from './CashOperationDialog';
 
 export function FinanceTable({ headers, rows, empty = 'Нет записей', amounts = [], totals }: {
   headers: string[];
-  rows: { key: string; cells: ReactNode[] }[];
+  rows: { key: string; cells: ReactNode[]; deleted?: boolean }[];
   empty?: ReactNode;
   amounts?: number[];
   totals?: ReactNode[];
@@ -23,8 +23,10 @@ export function FinanceTable({ headers, rows, empty = 'Нет записей', a
       <thead><tr>{headers.map((label, index) => <th key={index} scope="col" className={amounts.includes(index) ? 'text-right' : undefined}>
         {label || <span className="sr-only">Действия</span>}
       </th>)}</tr></thead>
-      <tbody>{rows.length ? rows.map(({ key, cells }) => <tr key={key}>
-        {cells.map((cell, index) => <td key={index} className={amounts.includes(index) ? 'text-right tabular-nums' : undefined}>{cell}</td>)}
+      <tbody>{rows.length ? rows.map(({ key, cells, deleted }) => <tr key={key}>
+        {cells.map((cell, index) => <td key={index} className={amounts.includes(index) ? 'text-right tabular-nums' : undefined}>
+          {deleted && index < cells.length - 1 ? <s className="text-text-muted">{cell}</s> : cell}
+        </td>)}
       </tr>) : empty != null && <tr><td colSpan={headers.length} className="py-10 text-center text-text-muted">{empty}</td></tr>}</tbody>
       {totals && <tfoot className="border-t border-border bg-background font-semibold"><tr>
         {totals.map((cell, index) => <td key={index} className={'px-4 py-3 ' + (amounts.includes(index) ? 'text-right tabular-nums' : '')}>{cell}</td>)}
@@ -111,6 +113,8 @@ type ShiftEntry = {
   id: string; occurredAt: string; kind: EntryKind; category: string | null; categoryId: string | null;
   note: string | null; actorName: string | null; amount: number; cash: boolean; editable: boolean;
   collection?: boolean;
+  deletedAt?: string;
+  deletedByName?: string | null;
   reconciliation: 'open' | 'close' | null;
 };
 
@@ -129,7 +133,7 @@ function CashShiftDetails({ shift }: { shift: CashShift }) {
     mutationFn: (id: string) => api.delete(endpoint + '/operations/' + id),
     onSuccess: async () => { await refresh(); setDeleteOperation(null); },
   });
-  const movements = entries.data?.filter((entry) => !entry.reconciliation) ?? [];
+  const movements = entries.data?.filter((entry) => !entry.reconciliation && !entry.deletedAt) ?? [];
   const sum = (predicate: (entry: ShiftEntry) => boolean) =>
     Math.round(movements.reduce((total, entry) => total + (predicate(entry) ? entry.amount : 0), 0) * 100) / 100;
   const revenue = (entry: ShiftEntry) => entry.kind === 'sale' || entry.kind === 'refund';
@@ -169,16 +173,19 @@ function CashShiftDetails({ shift }: { shift: CashShift }) {
             <button type="button" className="text-sm text-primary hover:underline" onClick={() => setOperation('create')}>+ Добавить транзакцию</button>
           </div>
           <FinanceTable headers={['Дата и время', 'Тип', 'Категория', 'Сотрудник', 'Комментарий', 'Сумма', '']} amounts={[5]}
-        rows={(entries.data ?? []).map((entry) => ({ key: entry.id, cells: [
+        rows={(entries.data ?? []).map((entry) => ({ key: entry.id, deleted: !!entry.deletedAt, cells: [
           financeDateTime(entry.occurredAt), entry.reconciliation === 'open' ? 'Сверка при открытии'
             : entry.reconciliation === 'close' ? 'Сверка при закрытии'
               : entry.collection ? 'Инкассация'
                 : revenue(entry) ? shiftEntryLabel[entry.kind] + (entry.cash ? ' наличными' : ' безналично') : shiftEntryLabel[entry.kind],
           entry.category ?? (entry.editable ? 'Кассовые смены' : '—'), entry.actorName ?? '—', entry.note ?? '—',
-          <span className={entry.kind === 'income' ? 'text-success' : entry.kind === 'expense' ? 'text-danger' : undefined}>
+          <span className={entry.deletedAt ? undefined : entry.kind === 'income' ? 'text-success' : entry.kind === 'expense' ? 'text-danger' : undefined}>
             {financeMoney(entry.amount)}
           </span>,
-          entry.editable && <div className="flex gap-3">
+          entry.deletedAt ? <div className="text-xs text-text-muted">
+            <p>{entry.deletedByName ? 'Удалена · ' + entry.deletedByName : 'Удалена'}</p>
+            <time dateTime={entry.deletedAt}>{financeDateTime(entry.deletedAt)}</time>
+          </div> : entry.editable && <div className="flex gap-3">
             <button type="button" className="text-primary hover:underline"
               onClick={() => setOperation({ ...entry, kind: entry.kind === 'transfer' ? 'collection' : entry.kind as 'income' | 'expense' })}>Ред.</button>
             <button type="button" className="text-text-muted hover:text-danger" aria-label="Удалить транзакцию"
@@ -197,7 +204,7 @@ function CashShiftDetails({ shift }: { shift: CashShift }) {
         <button type="button" className="btn-danger btn-md" disabled={remove.isPending} onClick={() => remove.mutate(deleteOperation.id)}>Удалить</button>
         <button type="button" className="btn-secondary btn-md" disabled={remove.isPending} onClick={() => setDeleteOperation(null)}>Отмена</button>
       </div>}>
-      <p>Операция на {financeMoney(Math.abs(deleteOperation.amount))} будет удалена. Книжный баланс смены пересчитается.</p>
+      <p>Операция на {financeMoney(Math.abs(deleteOperation.amount))} останется в истории смены с отметкой об удалении. Книжный баланс пересчитается.</p>
       {remove.error && <p role="alert" className="mt-2 text-danger">{apiError(remove.error)}</p>}
     </Modal>}
   </div>;

@@ -27,9 +27,8 @@ const bishkekTime = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Bishkek',
 export const financeMoney = (value: number | null | undefined) => value == null ? '—' : formatter.format(value) + ' с';
 export const financeDateTime = (value: string | null | undefined) => value ? dateFormatter.format(new Date(value)) : '—';
 export const financeDay = (date: Date = new Date()) => bishkekDate.format(date);
-export function financeLocalTime() {
-  const now = new Date();
-  return bishkekDate.format(now) + 'T' + bishkekTime.format(now);
+export function financeLocalTime(date = new Date()) {
+  return bishkekDate.format(date) + 'T' + bishkekTime.format(date);
 }
 
 export function parseMoney(value: string): number | null {

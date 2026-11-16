@@ -34,12 +34,15 @@ export interface FinanceEntry {
   createdAt?: string;
   categoryId?: string;
   counterpartyAccountId?: string;
+  counterpartyName?: string;
+  counterpartyArchived?: boolean;
   note?: string;
   occurredAt: string;
   actorName?: string;
   sourceKey?: string;
   cashShiftId?: string;
   editable?: boolean;
+  detailsEditable?: boolean;
   reversible?: boolean;
   reversedAt?: string | null;
   reversalOf?: string | null;
@@ -58,9 +61,11 @@ export interface CashFlow {
   opening: number;
   income: number;
   expense: number;
+  transfers?: number;
   closing: number;
   accountOpening?: Record<string, number>;
-  days: { date: string; income: number; expense: number; net: number; balance: number }[];
+  firstFinancialDay?: string;
+  days: { date: string; income: number; expense: number; transfers?: number; net: number; balance: number }[];
 }
 interface Choice { id: string; name: string }
 interface FinanceData {
@@ -118,8 +123,20 @@ export function useFinance(params: { from?: string; to?: string; month?: string;
 }
 
 type AccountInput = { name: string; type: AccountType; openingBalance?: number; isDefault?: boolean };
+interface TrashedAccount extends Pick<FinanceAccount, 'id' | 'name' | 'type'> {
+  archivedAt: string;
+  balance: number;
+}
+
+export function useTrashedFinanceAccounts() {
+  return useQuery({
+    queryKey: [...financeKey, 'accounts-trash'],
+    queryFn: async () => (await api.get<TrashedAccount[]>(entrypoint + '/accounts/trash')).data,
+    retry: false,
+  });
+}
 type CategoryInput = Pick<FinanceCategory, 'name' | 'kind' | 'parentId' | 'showOnPos' | 'userIds' | 'positionIds'>;
-type TransactionInput = {
+type TransactionValues = {
   kind: TransactionKind;
   accountId: string;
   categoryId?: string;
@@ -127,10 +144,19 @@ type TransactionInput = {
   amount: number;
   note?: string;
   occurredAt?: string;
-  requestKey: string;
 };
 type AccrualInput = { userId: string; month: string; amount: number; note?: string; requestKey: string };
 type PayoutInput = { accountId: string; amount: number; note?: string; requestKey: string };
+
+export function useFinanceCategoryRemoval(id: string) {
+  return useQuery({
+    queryKey: [...financeKey, 'category-removal', id],
+    queryFn: async () => (await api.get<{ entryCount: number; childCount: number; replacementIds: string[] }>(
+      entrypoint + '/categories/' + id + '/removal',
+    )).data,
+    retry: false,
+  });
+}
 
 export function useFinanceWrites() {
   const cache = useQueryClient();
@@ -144,6 +170,14 @@ export function useFinanceWrites() {
         });
       }, onSuccess,
     }),
+    archiveAccount: useMutation({
+      mutationFn: (id: string) => api.delete(entrypoint + '/accounts/' + id),
+      onSuccess,
+    }),
+    restoreAccount: useMutation({
+      mutationFn: (id: string) => api.post(entrypoint + '/accounts/' + id + '/restore'),
+      onSuccess,
+    }),
     saveCategory: useMutation({
       mutationFn: ({ id, values }: { id?: string; values: CategoryInput }) => id
         ? api.patch(entrypoint + '/categories/' + id, values)
@@ -155,8 +189,17 @@ export function useFinanceWrites() {
         api.patch(entrypoint + '/categories/' + id, { showOnPos }),
       onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
     }),
+    deleteCategory: useMutation({
+      mutationFn: ({ id, replacementId }: { id: string; replacementId?: string }) =>
+        api.delete(entrypoint + '/categories/' + id, { data: { replacementId } }),
+      onSuccess: () => Promise.all([onSuccess(), cache.invalidateQueries({ queryKey: cashShiftKey })]),
+    }),
     postTransaction: useMutation({
-      mutationFn: (values: TransactionInput) => api.post(entrypoint + '/transactions', values), onSuccess,
+      mutationFn: (values: TransactionValues & { requestKey: string }) => api.post(entrypoint + '/transactions', values), onSuccess,
+    }),
+    editTransactionDetails: useMutation({
+      mutationFn: ({ id, values }: { id: string; values: TransactionValues }) => api.patch(entrypoint + '/transactions/' + id + '/details', values),
+      onSuccess,
     }),
     editTransaction: useMutation({
       mutationFn: ({ id, categoryId, note }: { id: string; categoryId?: string | null; note?: string }) =>
@@ -188,6 +231,7 @@ export interface PayrollStaffRow {
   days: number | null;
   rateMonth: string | null;
   rates: PositionSalary;
+  ratesByMonth?: { month: string; rates: PositionSalary }[];
   personalSales: number;
   shiftSales: number;
   hourlyPay: number;

@@ -2,18 +2,21 @@ import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { DatePicker } from '@/components/DatePicker';
 import { Select } from '@/components/Select';
+import { IconTrash } from '../../components/icons';
 import { WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { EditorPage } from '../warehouse/EditorPage';
 import { QueryState } from '../warehouse/WarehouseUi';
 import { useEditorRoute, usePageFilters } from '../warehouse/workspace-route';
 import { useListPeriod } from '../warehouse/ListPeriodFilter';
-import { useFinance, useFinanceWrites, usePayroll } from './api';
+import { useFinance, useFinanceWrites, usePayroll, type FinanceAccount } from './api';
+import { AccountTrashPage, ArchiveAccountDialog } from './AccountTrashPage';
 import { CashShiftsPage } from './CashShiftsPage';
 import { CashFlowMatrix } from './CashFlowMatrix';
 import { FinancePeriod } from './FinancePeriod';
-import { AccountForm, AccrualForm, CategoryForm, PayoutForm, TransactionDetail, TransactionForm } from './FinanceForms';
+import { AccountForm, AccrualForm, CategoryForm, PayoutForm, ReverseTransactionDialog, TransactionDetail, TransactionForm } from './FinanceForms';
 import { FinanceRegister } from './FinanceRegister';
+import { FinanceRowMenu } from './FinanceRowMenu';
 import { CategoryDirectory } from './CategoryDirectory';
 import { TransactionCell } from './TransactionCell';
 import { categoryAccepts, categoryAncestors, categoryOptions } from './category-options';
@@ -61,6 +64,8 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   }, rangeValid);
   const salary = usePayroll({ from: payrollFrom, to: payrollTo }, view === 'payroll');
   const [salaryHistoryId, setSalaryHistory] = useState<string | null>(null);
+  const [reversingEntryId, setReversingEntryId] = useState<string | null>(null);
+  const [archivingAccount, setArchivingAccount] = useState<FinanceAccount | null>(null);
   const data = finance.data;
   const addButton = (label: string, type: string) => <button type="button" className="btn-primary btn-md"
     onClick={() => openEditor({ type })}>{label}</button>;
@@ -74,6 +79,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   const transactionEditor = view === 'transactions' && editor?.type === 'financeTransaction' ? editor : null;
   if (data && editor && !transactionEditor) {
     if (data.canManage) {
+      if (view === 'accounts' && editor.type === 'financeAccountTrash') return <AccountTrashPage onClose={closeEditor} />;
       if (view === 'accounts' && editor.type === 'financeAccount') {
         const account = data.accounts.find(({ id }) => id === editor.id);
         if (!editor.id || account) return <AccountForm key={editor.id ?? 'new'} account={account} onClose={closeEditor} />;
@@ -132,7 +138,12 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
         filters={<>{quickSearch}<RegisterFilter active={!!scope}><Select ariaLabel="Тип счёта" value={scope} onChange={setScope} options={[
           { value: '', label: 'Все счета' }, { value: 'cash', label: 'Наличные' }, { value: 'noncash', label: 'Безналичные' },
         ]} /></RegisterFilter></>}
-        tools={data.canManage && addButton('Добавить счёт', 'financeAccount')}
+        tools={data.canManage && <>
+          <button type="button" className="finance-tool" onClick={() => openEditor({ type: 'financeAccountTrash' })}>
+            <IconTrash aria-hidden="true" /> Корзина
+          </button>
+          {addButton('Добавить счёт', 'financeAccount')}
+        </>}
         totals={data.canManage ? { name: { value: 'Итого' }, balance: { value: total, display: financeMoney(total) } } : undefined}
         rows={accounts.map((account) => ({ id: account.id, values: {
           name: { value: account.name, display: <div className="flex flex-wrap items-center gap-2">
@@ -147,8 +158,11 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
           <EditButton name={account.name} onClick={() => openEditor({ type: 'financeAccount', id: account.id })} />
           <Link className="text-primary text-base" title="Движение денег" aria-label={'Движение денег: ' + account.name}
             to={{ search: new URLSearchParams({ section: 'finance', view: 'cashFlow', financeScope: account.id }).toString() }}>→</Link>
+          {!account.isDefault && !account.isCollection && <FinanceRowMenu label={account.name} action="Удалить"
+            onAction={() => setArchivingAccount(account)} />}
         </div> }))}
         empty="Счета не найдены" />
+      {archivingAccount && <ArchiveAccountDialog account={archivingAccount} onClose={() => setArchivingAccount(null)} />}
     </>;
   }
 
@@ -175,7 +189,8 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
     const flow = data.flow;
     return flow ? <CashFlowMatrix flow={flow} accounts={data.accounts}
       categories={data.categories} entries={data.entries} from={from} to={to} selectedAccounts={scope} setAccounts={setScope}
-      period={<FinancePeriod from={from} to={to} onApply={(period) => setFilters({ financeFrom: period.from, financeTo: period.to })} />} />
+      period={<FinancePeriod from={from} to={to} allFrom={flow.firstFinancialDay}
+        onApply={(period) => setFilters({ financeFrom: period.from, financeTo: period.to })} />} />
       : <p role="alert" className="text-text-muted">Отчёт недоступен.</p>;
   }
 
@@ -190,15 +205,18 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   const expenseCategories = editCategoryChoices('expense');
   const selectedCategories = new Set(categoryId ? data.categories.filter((category) => category.id === categoryId
     || categoryAncestors(category, categoriesById).some(({ id }) => id === categoryId)).map(({ id }) => id) : []);
+  const showDeleted = kind === 'reversal';
   const transactions = data.entries.filter((entry) => (!scope || entry.accountId === scope) &&
-    (scope || entry.kind !== 'transfer' || !entry.counterpartyAccountId || entry.amount < 0) &&
-    (!kind || (entry.reversalOf ? kind === 'reversal' : entry.kind === kind)) &&
+    (scope || entry.kind !== 'transfer' || !entry.counterpartyAccountId || entry.counterpartyArchived || entry.amount < 0) &&
+    (showDeleted ? !!(entry.reversalOf || entry.reversedAt) : !entry.reversalOf && !entry.reversedAt && (!kind || entry.kind === kind)) &&
     (!categoryId || (entry.categoryId && selectedCategories.has(entry.categoryId))) &&
-    filterByName([entry.note, entry.actorName, accountNames.get(entry.accountId), entry.counterpartyAccountId && accountNames.get(entry.counterpartyAccountId),
+    filterByName([entry.note, entry.actorName, accountNames.get(entry.accountId),
+      entry.counterpartyAccountId && (accountNames.get(entry.counterpartyAccountId) ?? entry.counterpartyName),
       entry.categoryId && categoriesById.get(entry.categoryId)?.name].filter(Boolean).join(' '), search))
     .sort((a, b) => (ascending ? 1 : -1) * (a.occurredAt.localeCompare(b.occurredAt)
       || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id)));
   const selectedEntry = data.entries.find(({ id }) => id === transactionEditor?.id);
+  const reversingEntry = data.entries.find(({ id }) => id === reversingEntryId);
   const total = transactions.reduce((sum, entry) => sum + (!scope && entry.kind === 'transfer' ? 0 : Math.round(entry.amount * 100)), 0) / 100;
   return <>
     <WorkspaceHeaderCount count={transactions.length} />
@@ -220,7 +238,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
         <RegisterFilter active={!!kind}>
           <Select ariaLabel="Тип транзакции" value={kind} onChange={(value) => setFilters({ financeKind: value })}
             options={[{ value: '', label: 'Все операции' }, ...Object.entries(entryLabels).map(([value, label]) => ({ value, label })),
-              { value: 'reversal', label: 'Сторно' }]} />
+              { value: 'reversal', label: 'Удалённые' }]} />
         </RegisterFilter>
         {(scope || kind || categoryId || search) && <button type="button" className="finance-tool"
           onClick={() => setFilters({ financeScope: '', financeKind: '', financeCategory: '', financeSearch: '' })}>Сбросить</button>}
@@ -228,11 +246,16 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
       tools={<>{transactionPeriod.filter}
         {data.accounts.length > 0 && (data.canManage || data.categories.length > 0) && addButton('Добавить транзакцию', 'financeTransaction')}
       </>}
-      totals={{ date: { value: 'Итого' }, amount: { value: total, display: <span className={total < 0 ? 'text-danger' : undefined}>{financeMoney(total)}</span> } }}
-      rows={transactions.map((entry) => {
-        const categoryLabel = entryCategoryLabel(entry, entry.categoryId ? categoriesById.get(entry.categoryId)?.name : undefined);
-        const comment = <span>{entry.note || '—'}{entry.reversedAt && <span className="ml-2 text-xs text-text-muted">Сторнировано</span>}</span>;
+      totals={showDeleted ? undefined : { date: { value: 'Итого' }, amount: { value: total, display: <span className={total < 0 ? 'text-danger' : undefined}>{financeMoney(total)}</span> } }}
+      rows={transactions.map((entry, index) => {
+        const categoryLabel = entry.kind === 'transfer' && !entry.reversalOf ? 'Переводы'
+          : entryCategoryLabel(entry, entry.categoryId ? categoriesById.get(entry.categoryId)?.name : undefined);
+        const comment = <span>{entry.note || '—'}{entry.reversedAt && <span className="ml-2 text-xs text-text-muted">Удалена</span>}</span>;
+        const showDate = !index || financeDay(new Date(entry.occurredAt)) !== financeDay(new Date(transactions[index - 1].occurredAt));
         const amount = !scope && entry.kind === 'transfer' ? Math.abs(entry.amount) : entry.amount;
+        const accountName = accountNames.get(entry.accountId) ?? '—';
+        const counterpartyName = entry.counterpartyAccountId
+          ? accountNames.get(entry.counterpartyAccountId) ?? entry.counterpartyName ?? '—' : null;
         const available = entry.kind === 'income' ? incomeCategories : expenseCategories;
         const currentCategory = entry.categoryId;
         const editOptions = entry.editable && currentCategory && !available.some(({ value }) => value === currentCategory)
@@ -240,7 +263,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
         return {
           id: entry.id,
           values: {
-            date: { value: financeDateTime(entry.occurredAt), display: <time dateTime={entry.occurredAt} title={financeDateTime(entry.occurredAt)}>
+            date: { value: financeDateTime(entry.occurredAt), display: <time className={showDate ? undefined : 'sr-only'} dateTime={entry.occurredAt} title={financeDateTime(entry.occurredAt)}>
               {transactionDay.format(new Date(entry.occurredAt))}
             </time> },
             category: { value: categoryLabel, display: entry.editable ? <TransactionCell field="category" value={entry.categoryId ?? ''}
@@ -251,25 +274,33 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
             balance: { value: entry.balanceAfter ?? null, display: <span className={entry.balanceAfter != null && entry.balanceAfter < 0 ? 'text-danger' : undefined}>
               {financeMoney(entry.balanceAfter)}
             </span> },
-            account: { value: entry.counterpartyAccountId
-              ? [accountNames.get(entry.accountId) ?? '—', entry.amount < 0 ? '→' : '←', accountNames.get(entry.counterpartyAccountId) ?? '—'].join(' ')
-              : accountNames.get(entry.accountId) ?? '—' },
+            account: { value: counterpartyName
+              ? (entry.amount < 0 ? [accountName, counterpartyName] : [counterpartyName, accountName]).join(' → ')
+              : accountName },
             type: { value: entryLabel(entry) }, actor: { value: entry.actorName || '—' },
           },
-          action: <button type="button" className="text-primary hover:underline"
-            aria-label={(entry.editable ? 'Редактировать транзакцию ' : 'Открыть транзакцию ') + financeDateTime(entry.occurredAt)}
-            onClick={() => openEditor({ type: 'financeTransaction', id: entry.id })}>
-            {entry.editable ? 'Ред.' : 'Открыть'}
-          </button>,
+          action: <div className="flex items-center justify-end gap-2">
+            <button type="button" className="text-primary hover:underline"
+              aria-label={(entry.detailsEditable || entry.editable ? 'Редактировать транзакцию ' : 'Открыть транзакцию ') + financeDateTime(entry.occurredAt)}
+              onClick={() => openEditor({ type: 'financeTransaction', id: entry.id })}>
+              {entry.detailsEditable || entry.editable ? 'Ред.' : 'Открыть'}
+            </button>
+            {entry.reversible && <FinanceRowMenu label={entry.note || financeDateTime(entry.occurredAt)}
+              action="Удалить" onAction={() => setReversingEntryId(entry.id)} />}
+          </div>,
         };
       })} empty="За этот период нет транзакций по выбранным условиям" />
-    {transactionEditor && (selectedEntry ? <TransactionDetail key={selectedEntry.id} entry={selectedEntry} accounts={data.accounts}
-      categories={data.categories} owner={data.canManage} onClose={closeEditor} />
+    {transactionEditor && (selectedEntry ? selectedEntry.detailsEditable
+      ? <TransactionForm key={selectedEntry.id} entry={selectedEntry} accounts={data.accounts} categories={data.categories} owner onClose={closeEditor} />
+      : <TransactionDetail key={selectedEntry.id} entry={selectedEntry} accounts={data.accounts}
+        categories={data.categories} owner={data.canManage} onClose={closeEditor} />
       : !transactionEditor.id && data.accounts.length > 0 ? <TransactionForm accounts={data.accounts}
         categories={data.categories} owner={data.canManage} initialAccountId={scope} initialCategoryId={categoryId} onClose={closeEditor} />
       : <EditorPage title="Транзакция недоступна" onClose={closeEditor}>
         <p role="alert" className="text-text-secondary">Проверьте период или права доступа к транзакции.</p>
       </EditorPage>)}
+    {reversingEntry && <ReverseTransactionDialog key={reversingEntry.id} entry={reversingEntry}
+      onClose={() => setReversingEntryId(null)} onSuccess={() => setReversingEntryId(null)} />}
   </>;
 }
 

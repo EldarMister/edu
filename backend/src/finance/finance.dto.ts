@@ -42,18 +42,29 @@ export class FinanceCategoryCreateDto extends FinanceCategoryGrantsDto {
   @IsIn(['income', 'expense', 'both']) kind!: 'income' | 'expense' | 'both';
 }
 
-class MoneyPostDto {
+export class FinanceCategoryDeleteDto {
+  @IsOptional() @IsString() @Length(1, 120) replacementId?: string;
+}
+
+class MoneyFieldsDto {
   @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01) @Max(MAX_MONEY) amount!: number;
   @IsOptional() @IsString() @Length(0, 500) note?: string;
+}
+
+class MoneyPostDto extends MoneyFieldsDto {
   @IsUUID() requestKey!: string;
 }
 
-export class FinanceTransactionDto extends MoneyPostDto {
+export class FinanceTransactionEditDto extends MoneyFieldsDto {
   @IsIn(['income', 'expense', 'transfer']) kind!: 'income' | 'expense' | 'transfer';
   @IsString() @Length(1, 120) accountId!: string;
   @IsOptional() @IsString() @Length(1, 120) categoryId?: string;
   @IsOptional() @IsString() @Length(1, 120) destinationAccountId?: string;
   @IsOptional() @IsISO8601({ strict: true }) occurredAt?: string;
+}
+
+export class FinanceTransactionDto extends FinanceTransactionEditDto {
+  @IsUUID() requestKey!: string;
 }
 
 export class FinanceTransactionMetadataDto {

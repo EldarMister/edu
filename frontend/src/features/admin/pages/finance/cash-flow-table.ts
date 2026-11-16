@@ -1,7 +1,7 @@
 import type { AccountType, CashFlow, FinanceAccount, FinanceCategory, FinanceEntry } from './api';
 import { entryCategoryLabel, financeDay } from './finance-format';
 
-export type FlowMovement = { id: string; at: string; month: string; accountId: string; category: string; note: string; cents: number; internalTransfer: boolean };
+export type FlowMovement = { id: string; at: string; month: string; accountId: string; category: string; note: string; cents: number; transfer: boolean };
 export type FlowLine = {
   id: string; label: string; movements?: FlowMovement[]; children?: FlowLine[];
   measure?: 'opening' | 'closing' | 'net'; accountId?: string;
@@ -16,7 +16,7 @@ const upperFirst = (value: string) => value.slice(0, 1).toLocaleUpperCase('ru') 
 const totalKey = 'total';
 
 export function buildCashFlowTable(flow: CashFlow, accounts: FinanceAccount[], categories: FinanceCategory[], entries: FinanceEntry[],
-  from: string, to: string, selectedAccount: string) {
+  from: string, to: string) {
   const byAccount = new Map(accounts.map((account) => [account.id, account]));
   const byCategory = new Map(categories.map((category) => [category.id, category]));
   const movements: FlowMovement[] = [];
@@ -24,7 +24,7 @@ export function buildCashFlowTable(flow: CashFlow, accounts: FinanceAccount[], c
 
   function add(movement: FlowMovement, categoryId?: string) {
     movements.push(movement);
-    if (movement.internalTransfer) return;
+    if (movement.transfer) return;
     const group = groups[movement.cents > 0 ? 'income' : 'expense'];
     const categoryPath: Pick<FinanceCategory, 'id' | 'name'>[] = [];
     const visited = new Set<string>();
@@ -44,21 +44,14 @@ export function buildCashFlowTable(flow: CashFlow, accounts: FinanceAccount[], c
     }
   }
 
-  for (const account of accounts) {
-    const day = financeDay(new Date(account.createdAt));
-    if (!account.openingBalance || day < from || day > to) continue;
-    add({ id: 'opening:' + account.id, at: account.createdAt, month: day.slice(0, 7), accountId: account.id,
-      category: 'Начальный баланс', note: 'Начальный баланс счёта', cents: amountCents(account.openingBalance), internalTransfer: false });
-  }
   for (const entry of entries) {
     if (!byAccount.has(entry.accountId) || !entry.amount || entry.reversalOf || entry.reversedAt) continue;
     const day = financeDay(new Date(entry.occurredAt));
     if (day < from || day > to) continue;
-    const internalTransfer = entry.kind === 'transfer'
-      && (!selectedAccount || (!!entry.counterpartyAccountId && byAccount.has(entry.counterpartyAccountId)));
+    const transfer = entry.kind === 'transfer';
     add({ id: entry.id, at: entry.occurredAt, month: day.slice(0, 7), accountId: entry.accountId,
-      category: entryCategoryLabel(entry, entry.categoryId ? byCategory.get(entry.categoryId)?.name : undefined),
-      note: entry.note || '—', cents: amountCents(entry.amount), internalTransfer }, entry.categoryId);
+      category: transfer ? 'Переводы' : entryCategoryLabel(entry, entry.categoryId ? byCategory.get(entry.categoryId)?.name : undefined),
+      note: entry.note || '—', cents: amountCents(entry.amount), transfer }, entry.categoryId);
   }
 
   const accountMoves = new Map<string, Map<string, number>>();
@@ -108,6 +101,20 @@ export function buildCashFlowTable(flow: CashFlow, accounts: FinanceAccount[], c
     return children.length ? [{ id: direction, label: direction === 'income' ? 'Поступления' : 'Расходы',
       movements: children.flatMap(({ movements: entries }) => entries ?? []), children }] : [];
   });
+  const transfers = movements.filter(({ transfer }) => transfer);
+  if (transfers.length) {
+    const byTransferAccount = new Map<string, FlowMovement[]>();
+    for (const transfer of transfers) {
+      const accountMovements = byTransferAccount.get(transfer.accountId) ?? [];
+      accountMovements.push(transfer);
+      byTransferAccount.set(transfer.accountId, accountMovements);
+    }
+    lines.push({ id: 'transfers', label: 'Переводы', movements: transfers,
+      children: accounts.flatMap(({ id, name }) => {
+        const rows = byTransferAccount.get(id);
+        return rows ? [{ id, label: name, movements: rows }] : [];
+      }) });
+  }
   lines.push(balanceLines('opening', 'Деньги в начале периода'), balanceLines('closing', 'Деньги в конце периода'),
     { id: 'net', label: 'Чистый денежный поток', measure: 'net', movements });
   return { periods, lines, byAccount };
@@ -122,8 +129,7 @@ export function flowCell(line: FlowLine, column: FlowColumn, byAccount: Map<stri
   const { period, type } = column;
   const movements = (line.movements ?? []).filter((movement) =>
     (period.key === totalKey || movement.month === period.key)
-    && (!type || byAccount.get(movement.accountId)?.type === type)
-    && (!movement.internalTransfer || type));
+    && (!type || byAccount.get(movement.accountId)?.type === type));
   if (!line.measure) return { movements, cents: movements.reduce((total, movement) => total + movement.cents, 0) };
   let balance = period.balance;
   if (line.accountId || type) {

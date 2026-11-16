@@ -117,21 +117,21 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     }),
   ]);
   const ratesByEmployee = new Map(employees.map(({ id, position }) => [id, salaryRates(position?.salaryRates[0])]));
-  const personalIds = employees.filter(({ id }) => (ratesByEmployee.get(id)?.personalPercent ?? 0) > 0).map(({ id }) => id);
-  const teamSalesEnabled = [...ratesByEmployee.values()].some(({ shiftPercent }) => shiftPercent > 0);
+  const employeeIds = employees.map(({ id }) => id);
+  const hasClosedShifts = shifts.length > 0;
   const paidByEmployee = new Map<string, Prisma.Decimal>();
   const paidOrders: { at: number; cumul: Prisma.Decimal }[] = [];
-  if (personalIds.length || teamSalesEnabled) {
+  if (employeeIds.length) {
     const orders = await db.order.findMany({
       where: { cafeId, status: OrderStatus.paid, closedAt: { gte: new Date(window.start), lt: new Date(window.end) },
-        ...(teamSalesEnabled ? {} : { waiterId: { in: personalIds } }) },
+        ...(hasClosedShifts ? {} : { waiterId: { in: employeeIds } }) },
       select: { closedAt: true, waiterId: true, finalAmount: true },
       orderBy: { closedAt: 'asc' },
     });
     let cumul = zero;
     for (const order of orders) {
       if (order.waiterId) paidByEmployee.set(order.waiterId, (paidByEmployee.get(order.waiterId) ?? zero).add(order.finalAmount));
-      if (teamSalesEnabled && order.closedAt) {
+      if (hasClosedShifts && order.closedAt) {
         cumul = cumul.add(order.finalAmount);
         paidOrders.push({ at: order.closedAt.getTime(), cumul });
       }
@@ -167,8 +167,7 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     const rates = ratesByEmployee.get(employee.id)!;
     const work = payrollWorkTime(byEmployee.get(employee.id) ?? [], window);
     const personalSales = paidByEmployee.get(employee.id) ?? zero;
-    const shiftSales = rates.shiftPercent > 0
-      ? work.periods.reduce((total, { start, end }) => total.add(priorSales(end).sub(priorSales(start))), zero) : zero;
+    const shiftSales = work.periods.reduce((total, { start, end }) => total.add(priorSales(end).sub(priorSales(start))), zero);
     const amounts = payrollAmounts(rates, work, window.days, personalSales, shiftSales);
     const estimate = Object.values(amounts).reduce((total, amount) => total.add(amount), zero);
     const booked = totals.get(employee.id) ?? { accrued: zero, paid: zero };
@@ -224,11 +223,15 @@ const activityKeys = ['hours', 'shifts', 'days'] as const;
 export async function payrollPeriodReport(db: Db, cafeId: string, from: string, to: string) {
   const periods = payrollPeriods(from, to);
   const staff = new Map<string, Awaited<ReturnType<typeof payrollReport>>['staff'][number]>();
+  const ratesByEmployee = new Map<string, { month: string; rates: SalaryRates }[]>();
   const records: Awaited<ReturnType<typeof payrollReport>>['records'] = [];
   for (const { month, window } of periods) {
     const report = await payrollReport(db, cafeId, month, undefined, window);
     records.push(...report.records);
     for (const row of report.staff) {
+      const ratesByMonth = ratesByEmployee.get(row.userId) ?? [];
+      ratesByMonth.push({ month, rates: row.rates });
+      ratesByEmployee.set(row.userId, ratesByMonth);
       const previous = staff.get(row.userId);
       if (previous) {
         for (const key of totalsKeys) row[key] = new Prisma.Decimal(previous[key]).add(row[key]).toNumber();
@@ -239,7 +242,11 @@ export async function payrollPeriodReport(db: Db, cafeId: string, from: string, 
       staff.set(row.userId, row);
     }
   }
-  return { staff: [...staff.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru')), records };
+  return {
+    staff: [...staff.values()].sort((a, b) => a.name.localeCompare(b.name, 'ru'))
+      .map((row) => ({ ...row, ratesByMonth: ratesByEmployee.get(row.userId) ?? [] })),
+    records,
+  };
 }
 
 export const currentPayrollMonth = () => warehouseDay(new Date()).slice(0, 7);

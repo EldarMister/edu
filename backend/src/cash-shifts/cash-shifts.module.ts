@@ -249,22 +249,28 @@ export class CashShiftsService {
   async movements(cafeId: string, id: string) {
     return this.db.$transaction(async (db) => {
       const shift = await findShift(db, cafeId, id);
-      const rows = await db.financeEntry.findMany({
-        where: { cafeId, OR: [
-          { cashShiftId: id }, { sourceKey: openKey + id },
-          { cashShiftId: null, account: { type: 'noncash' }, kind: { in: ['sale', 'refund'] },
-            occurredAt: { gte: shift.openedAt, lte: shift.closedAt ?? new Date() } },
-        ] },
-        select: { id: true, accountId: true, actorId: true, occurredAt: true, kind: true, sourceKey: true,
-          note: true, amount: true, category: { select: { id: true, name: true } },
-          counterparty: { select: { isCollection: true } } },
-        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
-      });
+      const [rows, deleted] = await Promise.all([
+        db.financeEntry.findMany({
+          where: { cafeId, OR: [
+            { cashShiftId: id }, { sourceKey: openKey + id },
+            { cashShiftId: null, account: { type: 'noncash' }, kind: { in: ['sale', 'refund'] },
+              occurredAt: { gte: shift.openedAt, lte: shift.closedAt ?? new Date() } },
+          ] },
+          select: { id: true, accountId: true, actorId: true, occurredAt: true, kind: true, sourceKey: true,
+            note: true, amount: true, category: { select: { id: true, name: true } },
+            counterparty: { select: { isCollection: true } } },
+        }),
+        db.cashShiftDeletedOperation.findMany({
+          where: { cafeId, cashShiftId: id },
+          select: { id: true, kind: true, amount: true, category: true, note: true, actorName: true, occurredAt: true,
+            deletedAt: true, deletedByName: true },
+        }),
+      ]);
       const reversed = new Set(rows.flatMap(({ sourceKey }) => sourceKey?.startsWith('void:') ? [sourceKey.slice(5)] : []));
       const names = new Map((await db.user.findMany({ where: { cafeId,
         id: { in: [...new Set(rows.flatMap(({ actorId }) => actorId ? [actorId] : []))] },
       }, select: { id: true, name: true } })).map(({ id, name }) => [id, name]));
-      return rows.filter(({ id: entryId, accountId, kind, sourceKey }) =>
+      const active = rows.filter(({ id: entryId, accountId, kind, sourceKey }) =>
         !sourceKey?.startsWith('void:') && !reversed.has(entryId)
         && (accountId === shift.accountId || kind === 'sale' || kind === 'refund'))
         .map(({ category, counterparty, accountId, actorId, sourceKey, ...row }) => ({
@@ -274,6 +280,10 @@ export class CashShiftsService {
           collection: row.kind === 'transfer' && row.amount.lt(0) && counterparty?.isCollection === true,
           reconciliation: sourceKey?.startsWith(openKey) ? 'open' : sourceKey?.startsWith(closeKey) ? 'close' : null,
         }));
+      return [...active, ...deleted.map((row) => ({
+        ...row, amount: row.amount.toNumber(), categoryId: null, cash: true, editable: false,
+        collection: row.kind === 'transfer', reconciliation: null,
+      }))].sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime() || a.id.localeCompare(b.id));
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
   }
 
@@ -303,6 +313,9 @@ export class CashShiftsService {
         }
         return existing;
       }
+      if (await db.cashShiftDeletedOperation.findUnique({ where: { cafeId_sourceKey: { cafeId, sourceKey } }, select: { id: true } })) {
+        throw new ConflictException('Операция с таким запросом уже была удалена');
+      }
       if (atRegister && (shift.closedAt || input.occurredAt)) throw new ConflictException('Операцию можно провести только в открытой смене');
       const categoryId = await cashCategory(db, cafeId, input, actor.role !== Role.OWNER);
       return storeOperation(db, shift, actor.id, input, categoryId, sourceKey, cashOperationDate(shift, input));
@@ -314,8 +327,15 @@ export class CashShiftsService {
       await lockFinance(db, cafeId);
       const shift = await findShift(db, cafeId, id);
       const original = await db.financeEntry.findFirst({ where: { cafeId, id: entryId, cashShiftId: id,
-        accountId: shift.accountId, sourceKey: { startsWith: posKey } } });
-      if (!original?.sourceKey) throw new NotFoundException('Ручная операция смены не найдена');
+        accountId: shift.accountId, sourceKey: { startsWith: posKey } },
+        include: { category: { select: { name: true } } } });
+      if (!original?.sourceKey) {
+        const deleted = await db.cashShiftDeletedOperation.findFirst({ where: { id: entryId, cafeId, cashShiftId: id },
+          select: { id: true } });
+        if (!deleted) throw new NotFoundException('Ручная операция смены не найдена');
+        if (input) throw new ConflictException('Эту операцию уже удалили');
+        return null;
+      }
       if (input) {
         const categoryId = input.categoryId === original.categoryId && input.kind === original.kind
           ? original.categoryId : await cashCategory(db, cafeId, input, actor.role !== Role.OWNER);
@@ -323,11 +343,18 @@ export class CashShiftsService {
           cashOperationDate(shift, input, original.occurredAt), original);
         return { original, updated };
       }
+      const author = original.actorId ? await db.user.findFirst({ where: { id: original.actorId, cafeId }, select: { name: true } }) : null;
+      await db.cashShiftDeletedOperation.create({ data: {
+        id: original.id, cafeId, cashShiftId: shift.id, sourceKey: original.sourceKey, kind: original.kind, amount: original.amount,
+        category: original.category?.name ?? 'Кассовые смены', note: original.note, actorName: author?.name ?? null,
+        occurredAt: original.occurredAt, deletedById: actor.id, deletedByName: actor.name,
+      } });
       await db.financeEntry.deleteMany({ where: { cafeId, sourceKey: { in: [original.sourceKey, original.sourceKey + ':in'] } } });
       await recalculateClosedShift(db, shift, actor.id);
       return { original, updated: null };
     });
-    const snapshot = ({ kind, amount, categoryId, occurredAt, note }: typeof result.original) =>
+    if (!result) return { id: entryId };
+    const snapshot = ({ kind, amount, categoryId, occurredAt, note }: Pick<typeof result.original, 'kind' | 'amount' | 'categoryId' | 'occurredAt' | 'note'>) =>
       ({ kind, amount: amount.toNumber(), categoryId, occurredAt: occurredAt.toISOString(), note });
     await this.audit.log({ actor, actionType: AuditAction.FINANCE_TRANSACTION_UPDATED, entityType: AuditEntity.FINANCE_TRANSACTION,
       entityId: entryId, description: result.updated ? 'Изменена операция кассовой смены' : 'Удалена операция кассовой смены',

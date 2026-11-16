@@ -26,18 +26,18 @@
 .finance-extra-filter { position: relative; }
 .finance-extra-filter summary { cursor: pointer; list-style: none; color: rgb(var(--edu-link)); font-size: 14px; }
 .finance-extra-filter > div { position: absolute; z-index: 5; top: calc(100% + 8px); left: 0; min-width: 184px; padding: 8px; border: 1px solid rgb(var(--edu-border)); border-radius: 8px; background: rgb(var(--edu-card)); box-shadow: var(--edu-shadow-soft); }
-.finance-operation-kind { display: inline-flex; align-items: stretch; max-width: 100%; border: 1px solid rgb(var(--edu-border)); border-radius: 6px; }
-.finance-operation-kind label { position: relative; cursor: pointer; }
-.finance-operation-kind label + label { border-left: 1px solid rgb(var(--edu-border)); }
-.finance-operation-kind label:first-child { border-radius: 5px 0 0 5px; }
-.finance-operation-kind label:last-child { border-radius: 0 5px 5px 0; }
+.finance-operation-kind { display: inline-flex; flex-wrap: wrap; align-items: stretch; max-width: 100%; gap: 2px; }
+.finance-operation-kind label { position: relative; border-radius: 5px; cursor: pointer; }
 .finance-operation-kind input { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; opacity: 0; }
-.finance-operation-kind span { display: block; padding: 7px 15px; border-radius: inherit; color: rgb(var(--edu-link)); }
-.finance-operation-kind input:checked + span { background: rgb(var(--edu-link) / .12); color: rgb(var(--edu-text)); font-weight: 600; }
+.finance-operation-kind span { display: block; padding: 5px 10px; border-radius: inherit; color: rgb(var(--edu-link)); }
+.finance-operation-kind input:checked + span { background: rgb(var(--edu-primary)); color: white; font-weight: 600; }
 .finance-operation-kind input:focus-visible + span { outline: 2px solid rgb(var(--edu-link)); outline-offset: -2px; }
+.finance-transaction-date { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .finance-transaction-footer { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (min-width: 640px) {
   .modal-backdrop:has(.finance-transaction-modal) { align-items: flex-start; padding-top: min(5vh, 44px); }
+  .finance-transaction-modal[data-modal-panel] { border-radius: 6px; }
+  .finance-transaction-modal > div:has(> .finance-transaction-footer) { background: rgb(var(--edu-background)); }
   .finance-transaction-modal .document-field { grid-template-columns: 115px minmax(0, 1fr); gap: 12px; }
   .finance-transaction-footer { margin-left: 127px; }
 }
