@@ -14,7 +14,7 @@ const groups: { key: string; label: string; sections: SectionKey[] }[] = [
   { key: 'finance', label: 'Финансы', sections: ['finance', 'paymentReconciliation'] },
   { key: 'menu', label: 'Меню', sections: ['menu'] },
   { key: 'warehouse', label: 'Склад', sections: ['warehouse'] },
-  { key: 'staff', label: 'Доступ / сотрудники', sections: ['staff'] },
+  { key: 'staff', label: 'Персонал', sections: ['staff'] },
   { key: 'settings', label: 'Настройки / залы', sections: ['settings', 'tables'] },
 ];
 const payFields: { key: keyof PositionSalary; label: string; percent?: boolean }[] = [

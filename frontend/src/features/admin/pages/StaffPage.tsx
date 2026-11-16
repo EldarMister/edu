@@ -985,7 +985,7 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
   );
 }
 
-export function StaffEditor({
+function StaffEditor({
   member,
   onClose,
 }: {
@@ -1115,7 +1115,7 @@ export function StaffEditor({
               Не удалось загрузить должности. <button type="button" className="underline" onClick={() => positions.refetch()}>Повторить</button>
             </p>}
             {canAssignPosition && positions.isSuccess && !positions.data.length && <p role="status" className="mt-2 text-xs text-text-muted">
-              {isOwner ? 'Сначала создайте должность в разделе «Доступ → Должности».' : 'Нет доступных должностей. Владелец должен настроить права и должности.'}
+              {isOwner ? 'Сначала создайте должность в разделе «Персонал → Должности».' : 'Нет доступных должностей. Владелец должен настроить права и должности.'}
             </p>}
           </DocumentField>
           {hasStation && <DocumentField label="Станция приготовления">
