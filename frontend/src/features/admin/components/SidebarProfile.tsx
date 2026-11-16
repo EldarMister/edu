@@ -46,7 +46,7 @@ export function SidebarProfile({ name, onLogout }: { name?: string; onLogout: ()
     </button>
     {open && <section id={id} aria-label={t('Профиль')}
       className="absolute bottom-full left-3 right-3 z-30 mb-2 rounded-xl border border-border bg-card p-2 shadow-lg">
-      <div className="px-2 py-2"><ThemeSwitch /></div>
+      <div className="px-2"><ThemeSwitch compact /></div>
       <div className="mt-1 border-t border-border pt-1">
         <button type="button" onClick={onLogout}
           className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-text-secondary hover:bg-background hover:text-text-primary">
