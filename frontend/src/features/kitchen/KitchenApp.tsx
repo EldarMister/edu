@@ -19,6 +19,8 @@ import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
 import { KitchenHandControl } from './hand-control/KitchenHandControl';
 import { KitchenStats } from './KitchenStats';
+import { useListPeriod } from '@/features/admin/pages/warehouse/ListPeriodFilter';
+import { calendarDate, warehouseDay } from '@/features/admin/pages/warehouse/warehouse-period';
 import { usePreparationStations, usePreparationStationUpdates } from './stations';
 
 const TABS: { key: KitchenTab; label: string }[] = [
@@ -26,7 +28,6 @@ const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'in_work', label: 'В работе' },
   { key: 'ready', label: 'Завершенные' },
   { key: 'rejected', label: 'Отказанные' },
-  { key: 'cancelled', label: 'Отменённые' },
 ];
 
 /** Сколько секунд показывается блок отмены, прежде чем действие уйдёт официанту. */
@@ -92,10 +93,10 @@ export function KitchenApp({
   const [actingId, setActingId] = useState<string | null>(null);
   const [stopListOpen, setStopListOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
-  const [historyRange, setHistoryRange] = useState({ from: '', to: '' });
-  const historyTab = tab === 'ready' || tab === 'rejected' || tab === 'cancelled';
+  const historyPeriod = useListPeriod('kitchenHistory', 'today');
+  const historyTab = tab === 'ready' || tab === 'rejected';
 
-  const ordersQ = useKitchenOrders(tab, station, historyTab && historyRange.from && historyRange.to ? historyRange : undefined);
+  const ordersQ = useKitchenOrders(tab, station, historyTab ? { from: historyPeriod.range.dateFrom ?? '2000-01-01', to: historyPeriod.range.dateTo ?? calendarDate(warehouseDay()) } : undefined);
   const accept = useAccept(station);
   const readyItems = useReadyItems(station);
   const rejectItems = useRejectItems(station);
@@ -198,19 +199,6 @@ export function KitchenApp({
     }}>
       <OfflineBanner />
 
-      {showSettings && <header className="flex shrink-0 items-center gap-4 border-b border-border bg-card px-4 py-3 sm:px-5">
-        <button type="button" autoFocus onClick={closeSettings} className="btn-secondary btn-md">← Назад</button>
-        <h1 className="text-xl font-semibold text-text-primary">Настройки</h1>
-      </header>}
-      {canChangeOrders && <KitchenHandControl showSettings={showSettings} />}
-      {showSettings && !canChangeOrders && <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        <div className="mx-auto w-full max-w-2xl space-y-4">
-          <WorkShiftSettingsCard />
-          <section aria-label="Внешний вид" className="card p-4"><ThemeSwitch /></section>
-        </div>
-      </main>}
-
-      <div className={showSettings ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
       {/* Шапка */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
         <div className="flex min-w-0 items-center gap-3">
@@ -263,21 +251,23 @@ export function KitchenApp({
               onClick={() => {
                 setTab(t.key);
                 setShowStats(false);
+                setSettingsOpen(false);
               }}
               className={`shrink-0 rounded-lg px-4 py-2 text-[15px] font-medium transition-colors ${
-                !showStats && tab === t.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
+                !showSettings && !showStats && tab === t.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
               }`}
             >
               {t.label}
-              {!showStats && tab === t.key && counts > 0 && (
+              {!showSettings && !showStats && tab === t.key && counts > 0 && (
                 <span className="ml-2 rounded-full bg-paper/25 px-1.5 text-xs">{counts}</span>
               )}
             </button>
           ))}
         </div>
         <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
+          {!showSettings && !showStats && historyTab && historyPeriod.filter}
           <button
-            onClick={() => setShowStats((v) => !v)}
+            onClick={() => { setSettingsOpen(false); setShowStats((v) => !v); }}
             className={`shrink-0 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
               showStats
                 ? 'border-primary bg-primary text-white'
@@ -286,8 +276,11 @@ export function KitchenApp({
           >
             Статистика
           </button>
-          {canOpenSettings && <button type="button" ref={settingsButton} onClick={() => setSettingsOpen(true)}
-            className="shrink-0 rounded-lg border border-primary bg-white px-3.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5">
+          {canOpenSettings && <button type="button" ref={settingsButton} aria-pressed={showSettings}
+            onClick={() => { setShowStats(false); setSettingsOpen(!showSettings); }}
+            className={`shrink-0 rounded-lg border border-primary px-3.5 py-2 text-sm font-medium transition-colors ${
+              showSettings ? 'bg-primary text-white' : 'bg-white text-primary hover:bg-primary/5'
+            }`}>
             Настройки
           </button>}
           {canChangeStopList && <button
@@ -299,30 +292,17 @@ export function KitchenApp({
         </div>
       </div>
 
-      {!showStats && historyTab && (
-        <div className="flex shrink-0 flex-wrap items-end gap-3 border-b border-border bg-white px-5 py-2 text-sm">
-          <label className="text-text-secondary">С даты
-            <input type="date" className="input ml-2" value={historyRange.from} max={historyRange.to || undefined}
-              onChange={(event) => {
-                const from = event.target.value;
-                setHistoryRange((range) => ({ from, to: !from ? '' : !range.to || from > range.to ? from : range.to }));
-              }} />
-          </label>
-          <label className="text-text-secondary">По дату
-            <input type="date" className="input ml-2" value={historyRange.to} min={historyRange.from || undefined}
-              onChange={(event) => {
-                const to = event.target.value;
-                setHistoryRange((range) => ({ to, from: !to ? '' : !range.from || to < range.from ? to : range.from }));
-              }} />
-          </label>
-          <button className="btn-secondary btn-md" onClick={() => setHistoryRange({ from: '', to: '' })}>Сегодня</button>
-        </div>
-      )}
-
       {!canChangeOrders && <p className="border-b border-border bg-card px-5 py-2 text-sm text-text-muted">Заказы доступны только для просмотра.</p>}
 
-      {/* Статистика кухни */}
-      {showStats ? (
+      {canChangeOrders && <KitchenHandControl showSettings={showSettings} />}
+      {showSettings && !canChangeOrders && <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="mx-auto w-full max-w-2xl space-y-4">
+          <WorkShiftSettingsCard />
+          <section aria-label="Внешний вид" className="card p-4"><ThemeSwitch /></section>
+        </div>
+      </main>}
+
+      {!showSettings && (showStats ? (
         <main className="flex-1 overflow-y-auto">
           <KitchenStats station={station} />
         </main>
@@ -346,9 +326,7 @@ export function KitchenApp({
                 ? 'Нет заказов в работе'
                 : tab === 'ready'
                   ? 'Завершённых заказов нет'
-                  : tab === 'cancelled'
-                    ? 'Отменённых заказов нет'
-                    : 'Отказанных заказов нет'}
+                  : 'Отказанных заказов нет'}
           </p>
         ) : (
           // Masonry через CSS-колонки: карточки разной высоты упаковываются
@@ -376,8 +354,7 @@ export function KitchenApp({
           </div>
         )}
       </main>
-      )}
-      </div>
+      ))}
 
       {/* Нижний блок отмены действия с таймером */}
       {pending && (

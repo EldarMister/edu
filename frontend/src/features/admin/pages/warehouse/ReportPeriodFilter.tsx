@@ -220,7 +220,7 @@ export function ReportPeriodFilter({ preset, today, range, label: dialogLabel = 
         className={`report-period-panel ${confirmSelection ? 'report-period-panel--confirm' : ''}`}
         style={position ?? { width: `min(${confirmSelection ? 680 : 432}px, calc(100vw - 16px))`, visibility: 'hidden' }}>
         <div className="report-period-presets">
-          {REPORT_PERIODS.filter(({ value }) => includeAll || value !== 'all').map(({ value, label: caption }) =>
+          {REPORT_PERIODS.filter(({ value }) => value !== 'month' && (includeAll || value !== 'all')).map(({ value, label: caption }) =>
             <button type="button" key={value} aria-pressed={!choosingRange && (pending?.preset ?? preset) === value}
               onClick={() => choosePreset(value)}>{value === 'all' ? allCaption
                 : confirmSelection && value === 'currentMonth' ? monthName(today.getUTCMonth())

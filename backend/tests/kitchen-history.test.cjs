@@ -62,9 +62,11 @@ test('served, waiting-payment and paid orders retain station completion time', a
   assert.ok(entries.every((entry) => entry.stationHistoryAt.getTime() === at(11).getTime()));
 });
 
-test('history rejects invalid dates and caps the date range', async () => {
+test('history rejects invalid dates and accepts longer calendar ranges', async () => {
   const { service, requests } = fixture([]);
   await assert.rejects(service.findByTab('ready', 'bar', '2026-02-30'), { status: 400 });
-  await assert.rejects(service.findByTab('ready', 'bar', '2026-10-01', '2026-11-05'), { status: 400 });
+  await assert.rejects(service.findByTab('ready', 'bar', '2026-11-05', '2026-10-01'), { status: 400 });
   assert.equal(requests.length, 0);
+  assert.deepEqual(await service.findByTab('ready', 'bar', '2026-10-01', '2026-11-05'), []);
+  assert.equal(requests.length, 1);
 });

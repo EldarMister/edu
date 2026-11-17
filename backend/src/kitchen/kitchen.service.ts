@@ -83,8 +83,8 @@ function historyRange(from?: string, to?: string) {
   const today = new Date(Date.now() + 6 * 3_600_000).toISOString().slice(0, 10);
   const start = parseHistoryDate(from ?? to ?? today);
   const end = new Date(parseHistoryDate(to ?? from ?? today).getTime() + 86_400_000);
-  if (end <= start || end.getTime() - start.getTime() > 31 * 86_400_000) {
-    throw new BadRequestException('Выберите период истории не больше 31 дня');
+  if (end <= start) {
+    throw new BadRequestException('Конец периода должен быть не раньше начала');
   }
   return { gte: start, lt: end };
 }
