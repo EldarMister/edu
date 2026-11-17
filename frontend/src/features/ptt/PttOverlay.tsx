@@ -302,10 +302,10 @@ export function PttOverlay({
   const effectiveButtonHidden = buttonHidden || overlayOpen;
 
   useEffect(() => {
-    if (!isMobile || effectiveButtonHidden || open || docked) return;
+    if (effectiveButtonHidden || open || docked) return;
     const timer = window.setTimeout(() => setDocked(true), 5000);
     return () => window.clearTimeout(timer);
-  }, [isMobile, effectiveButtonHidden, open, docked]);
+  }, [effectiveButtonHidden, open, docked]);
   const sender = useAudioPttSender(channel, true);
   const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
 
@@ -437,7 +437,7 @@ export function PttOverlay({
       {!effectiveButtonHidden && !open && (
         <div
           className="fixed right-2 z-[70] flex h-14 w-14 items-center justify-center transition-transform motion-reduce:transition-none"
-          style={{ bottom: floatingBottom, transform: isMobile && docked ? 'translateX(40px)' : undefined }}
+          style={{ bottom: floatingBottom, transform: docked ? 'translateX(40px)' : undefined }}
         >
           {/* Кольцо вокруг кнопки — только пока идёт передача или приём. */}
           {outerSpeaking && (
@@ -450,12 +450,12 @@ export function PttOverlay({
             type="button"
             aria-label="Рация"
             onClick={() => {
-              if (isMobile && docked) setDocked(false);
+              if (docked) setDocked(false);
               else setOpen(true);
             }}
             className={`ptt-no-select relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:scale-95 ${outerView.circle}`}
           >
-            <span className={isMobile && docked ? '-translate-x-4 scale-75' : undefined}>
+            <span className={docked ? '-translate-x-4 scale-75' : undefined}>
               <RadioIcon size={25} />
             </span>
           </button>
