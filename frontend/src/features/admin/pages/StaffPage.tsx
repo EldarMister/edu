@@ -16,7 +16,7 @@ import { useAuth } from '@/store/auth';
 import { usePreparationStations, usePreparationStationUpdates } from '@/features/kitchen/stations';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
-import { IconPlus, IconEdit, IconTrash } from '../components/icons';
+import { IconPlus, IconEdit, IconTrash, IconEye, IconEyeOff } from '../components/icons';
 import { WaiterOrdersReport } from './WaiterOrdersReport';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
 import { WorkspaceSearch } from './WorkspaceSearch';
@@ -1005,6 +1005,7 @@ function StaffEditor({
   const positions = useAssignableStaffPositions(canAssignPosition);
   const stations = usePreparationStations().data ?? [];
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isActive, setIsActive] = useState(member?.isActive ?? true);
   const [error, setError] = useState('');
   const formId = useId();
@@ -1124,15 +1125,22 @@ function StaffEditor({
             <p className="mt-2 text-xs text-text-muted">Определяет, заказы какого цеха видит сотрудник.</p>
           </DocumentField>}
           <DocumentField label={isEdit ? 'Новый пароль' : 'Пароль для входа'}>
-            <input
-              className="input h-9 w-full !rounded-md text-sm"
-              type="password"
-              autoComplete="new-password"
-              required={!isEdit}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder={isEdit ? 'Оставьте пустым' : 'Пароль для входа'}
-            />
+            <div className="relative">
+              <input
+                className="input h-9 w-full !rounded-md !pr-11 text-sm"
+                aria-label={isEdit ? 'Новый пароль' : 'Пароль для входа'}
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                required={!isEdit}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={isEdit ? 'Оставьте пустым' : 'Пароль для входа'}
+              />
+              <button type="button" className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-text-muted hover:text-text-primary"
+                aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'} onClick={() => setShowPassword((visible) => !visible)}>
+                {showPassword ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
+              </button>
+            </div>
           </DocumentField>
           {isEdit && (
             <DocumentField label="Статус">

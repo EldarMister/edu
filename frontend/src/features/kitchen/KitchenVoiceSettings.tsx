@@ -17,6 +17,7 @@ import {
   type KitchenVoiceSettings as KitchenVoiceSettingsType,
 } from '@/services/kitchenVoiceSettings';
 import { KITCHEN_VOICE_TEST_SCENARIOS, WAITER_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
+import { WorkShiftSettingsCard } from '@/features/settings/WorkShiftBanner';
 
 export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode }) {
   return <VoiceSettings handControl={handControl} />;
@@ -131,14 +132,15 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
   );
 
   if (!waiterId) {
-    return <div className="mx-auto w-full max-w-2xl">
+    return <div className="mx-auto w-full max-w-2xl space-y-4">
+      <WorkShiftSettingsCard />
       <section aria-label="Озвучка" className="card px-4 py-4 sm:px-6">
         <h2 className="text-base font-semibold">Озвучка</h2>
         {controls}
         <Section>{preview}</Section>
       </section>
-      {handControl && <section aria-label="Управление рукой" className="card mt-4 px-4 py-3 sm:px-6">{handControl}</section>}
-      <section aria-label="Внешний вид" className="card mt-4 px-4 py-4 sm:px-6"><ThemeSwitch /></section>
+      {handControl && <section aria-label="Управление рукой" className="card px-4 py-3 sm:px-6">{handControl}</section>}
+      <section aria-label="Внешний вид" className="card px-4 py-4 sm:px-6"><ThemeSwitch /></section>
     </div>;
   }
 

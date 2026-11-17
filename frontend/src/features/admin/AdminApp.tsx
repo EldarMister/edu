@@ -186,7 +186,8 @@ export function AdminApp() {
   });
   const [route, setRoute] = useSearchParams();
   useWorkspaceScroll();
-  const section = (route.get('section') || (isOwner ? 'stats' : 'orders')) as Section;
+  const legacyStations = route.get('section') === 'menu' && route.get('view') === 'stations';
+  const section = (legacyStations ? 'staff' : route.get('section') || (isOwner ? 'stats' : 'orders')) as Section;
   const warehousePolicy = useWarehousePolicy(canSection('warehouse'));
   const warehouseLocations = useWarehouseLocations(canSection('warehouse'));
   function setSection(next: Section) {
@@ -216,8 +217,12 @@ export function AdminApp() {
     if (section === 'finance' && isAdmin && financeAccess.isPending) return;
     if (sections.length > 0 && !sections.some((s) => s.key === section)) {
       setSection(sections[0].key);
+    } else if (legacyStations) {
+      const next = new URLSearchParams(route);
+      next.set('section', 'staff');
+      setRoute(next, { replace: true });
     }
-  }, [sections, section, isAdmin, financeAccess.isPending]);
+  }, [sections, section, isAdmin, financeAccess.isPending, legacyStations, route, setRoute]);
 
   useEffect(() => {
     if (!mobileNav) {
@@ -529,10 +534,9 @@ export function AdminApp() {
               {section === 'receipts' && isAdmin && canSection('checks') && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
               {section === 'menu' && canSection('menu') && <>
-                {menuView === 'stations' && <StationsPage />}
                 {menuView === 'categories' && <MenuCategoriesPage />}
                 {menuView === 'ingredientCategories' && canSection('warehouse') && <IngredientCategoriesPage />}
-                {menuView !== 'stations' && menuView !== 'categories' && menuView !== 'ingredientCategories' && <MenuPage view={menuView} />}
+                {menuView !== 'categories' && menuView !== 'ingredientCategories' && <MenuPage view={menuView} />}
               </>}
               {section === 'warehouse' && canSection('warehouse') && (
                 <WarehouseSection
@@ -544,7 +548,11 @@ export function AdminApp() {
                 />
               )}
               {section === 'finance' && financeView && <FinancePage key={financeView} view={financeView} />}
-              {section === 'staff' && canSection('staff') && (staffView === 'positions' ? <PositionsPage /> : <StaffPage key={staffTab} initialTab={staffTab} />)}
+              {section === 'staff' && canSection('staff') && <>
+                {staffView === 'stations' && <StationsPage />}
+                {staffView === 'positions' && <PositionsPage />}
+                {staffView === 'employees' && <StaffPage key={staffTab} initialTab={staffTab} />}
+              </>}
               {section === 'audit' && canSection('journal') && <AuditPage />}
               {section === 'reconcile' && canSection('paymentReconciliation') && <ReconciliationPage />}
               {section === 'settings' && canSection('settings') && <SettingsPage />}

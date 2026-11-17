@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
-import { Spinner } from '@/components/Spinner';
+import { ShiftCard } from '@/features/settings/ShiftCard';
 import { AppVersion } from '@/components/AppVersion';
 import { disconnectSocket } from '@/lib/socket';
 import { timeHM } from '@/lib/format';
@@ -63,39 +63,8 @@ export function WaiterProfile({
         </svg>
       </button>
 
-      {trackShift && <div className="card p-5">
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-[15px] font-semibold text-text-primary">{t('Смена')}</h3>
-          <span
-            className={`shrink-0 rounded-full px-3 py-1 text-xs font-medium ${
-              shiftActive ? 'bg-success/10 text-success' : 'bg-background text-text-muted'
-            }`}
-          >
-            {shiftActive ? t('Смена активна') : t('Не начата')}
-          </span>
-        </div>
-
-        {shiftActive && (
-          <div className="mt-4 flex items-center justify-between gap-4 text-sm">
-            <span className="text-text-muted">{t('Начало')}</span>
-            <span className="font-medium text-text-primary">{timeHM(shift.startedAt)}</span>
-          </div>
-        )}
-
-        <button
-          className="btn-primary btn-lg mt-4 w-full"
-          disabled={shiftLoading || shiftPending}
-          onClick={shiftActive ? onEndShift : onStartShift}
-        >
-          {shiftPending || shiftLoading ? (
-            <Spinner />
-          ) : shiftActive ? (
-            t('Закончить смену')
-          ) : (
-            t('Начать смену')
-          )}
-        </button>
-      </div>}
+      {trackShift && <ShiftCard startedAt={shiftActive ? shift.startedAt : undefined}
+        busy={shiftLoading || shiftPending} onAction={shiftActive ? onEndShift : onStartShift} />}
 
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3">

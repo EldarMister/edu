@@ -39,7 +39,7 @@ import {
   type AdminCategory,
 } from '../api';
 
-export function MenuPage({ view }: { view: Exclude<MenuView, 'categories' | 'ingredientCategories' | 'stations'> }) {
+export function MenuPage({ view }: { view: Exclude<MenuView, 'categories' | 'ingredientCategories'> }) {
   if (view === 'ingredients' || view === 'preparations')
     return <MenuStockCatalogue key={view} view={view} />;
   return <MenuDishList key={view} view={view} />;

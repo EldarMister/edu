@@ -1,15 +1,25 @@
-import { useState, type ReactNode } from 'react';
+import { createContext, useContext, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { api, apiError } from '@/lib/api';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
+import { useNotifications } from '@/store/notifications';
+import type { WaiterShift } from '@/types';
 import { financeKey } from '@/features/admin/pages/finance/api';
 import { ShiftRequiredScreen } from '@/features/waiter/ShiftRequiredScreen';
+import { ShiftSummaryModal } from '@/features/waiter/ShiftSummaryModal';
+import { ShiftCard } from './ShiftCard';
 
 type WorkShift = { id: string; startedAt: string; endedAt: string | null; autoCloseAt: string | null };
 export const workShiftKey = ['staff', 'work-shift'] as const;
+const WorkShiftActions = createContext<{ startedAt: string; busy: boolean; finish: () => void } | null>(null);
+
+export function WorkShiftSettingsCard() {
+  const shift = useContext(WorkShiftActions);
+  return shift && <ShiftCard startedAt={shift.startedAt} busy={shift.busy} onAction={shift.finish} />;
+}
 
 function useWorkShift() {
   const user = useAuth((state) => state.user);
@@ -26,11 +36,35 @@ export function WorkShiftGate({ children }: { children: ReactNode }) {
   const { enabled, query, queryKey } = useWorkShift();
   const qc = useQueryClient();
   const [starting, setStarting] = useState(false);
+  const [summary, setSummary] = useState<WaiterShift | null>(null);
   const logout = useAuth((state) => state.logout);
+  const notify = useNotifications((state) => state.push);
   const refresh = () => { if (enabled) void qc.invalidateQueries({ queryKey: workShiftKey }); };
   useSocketEvent('waiter:shift_started', refresh);
   useSocketEvent('waiter:shift_ended', refresh);
-  if (!enabled || (!starting && query.data && !query.data.endedAt)) return <>{children}</>;
+  const end = useMutation({
+    mutationFn: async () => (await api.post<WaiterShift>('/staff/shifts/end')).data,
+    onSuccess: (shift) => {
+      setSummary(shift);
+      qc.setQueryData(queryKey, null);
+      void qc.invalidateQueries({ queryKey: ['admin', 'staff'] });
+      void qc.invalidateQueries({ queryKey: financeKey });
+    },
+    onError: (err) => {
+      notify({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+      refresh();
+    },
+  });
+  if (!enabled) return <>{children}</>;
+  const current = query.data?.endedAt ? null : query.data;
+  // Keep settings mounted while the end request and its summary are on screen.
+  if (!starting && (current || end.isPending || summary)) {
+    const startedAt = current?.startedAt ?? summary?.startedAt ?? '';
+    return <WorkShiftActions.Provider value={{ startedAt, busy: end.isPending || !!summary, finish: () => end.mutate() }}>
+      {children}
+      <ShiftSummaryModal shift={summary} open={!!summary} onClose={() => setSummary(null)} />
+    </WorkShiftActions.Provider>;
+  }
 
   async function start() {
     try {

@@ -8,7 +8,7 @@ import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { Spinner } from '@/components/Spinner';
 import { Select } from '@/components/Select';
 import { ThemeSwitch } from '@/components/ThemeSwitch';
-import { WorkShiftBanner } from '@/features/settings/WorkShiftBanner';
+import { WorkShiftSettingsCard } from '@/features/settings/WorkShiftBanner';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { disconnectSocket } from '@/lib/socket';
 import { usePushNotifications } from '@/lib/push';
@@ -85,7 +85,8 @@ export function KitchenApp({
   const [showStats, setShowStats] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsButton = useRef<HTMLButtonElement>(null);
-  const canOpenSettings = canChangeOrders || user?.role === 'BAR';
+  const tracksShift = !!user && user.role !== 'OWNER' && user.permissions?.workShiftRequired !== false;
+  const canOpenSettings = canChangeOrders || user?.role === 'BAR' || tracksShift;
   const showSettings = settingsOpen && canOpenSettings;
   const [now, setNow] = useState(() => Date.now());
   const [actingId, setActingId] = useState<string | null>(null);
@@ -203,7 +204,10 @@ export function KitchenApp({
       </header>}
       {canChangeOrders && <KitchenHandControl showSettings={showSettings} />}
       {showSettings && !canChangeOrders && <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
-        <section aria-label="Внешний вид" className="card mx-auto max-w-2xl p-4"><ThemeSwitch /></section>
+        <div className="mx-auto w-full max-w-2xl space-y-4">
+          <WorkShiftSettingsCard />
+          <section aria-label="Внешний вид" className="card p-4"><ThemeSwitch /></section>
+        </div>
       </main>}
 
       <div className={showSettings ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
@@ -248,7 +252,6 @@ export function KitchenApp({
         </div>
       </header>
       <WorkspaceLinks current="production" />
-      <WorkShiftBanner />
 
       {/* Вкладки + Стоп-лист */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-3 py-2.5 sm:flex-nowrap sm:px-5">
