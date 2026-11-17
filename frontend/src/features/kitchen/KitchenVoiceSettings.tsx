@@ -3,7 +3,6 @@ import { Toggle } from '@/components/Toggle';
 import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { Modal } from '@/components/Modal';
 import { useT } from '@/lib/i18n';
-import { useAuth } from '@/store/auth';
 import { kitchenVoice } from '@/services/kitchenVoice';
 import { waiterVoice } from '@/services/waiterVoice';
 import {
@@ -29,7 +28,6 @@ export function WaiterVoiceSettings({ userId }: { userId: string }) {
 
 function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; waiterId?: string }) {
   const t = useT();
-  const isKitchen = useAuth((state) => state.user?.role === 'KITCHEN');
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState<KitchenVoiceSettingsType>(() =>
     waiterId ? getWaiterVoiceSettings(waiterId) : getKitchenVoiceSettings(),
@@ -37,28 +35,10 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
   const [testing, setTesting] = useState(false);
   const [waiterScenarioIndex, setWaiterScenarioIndex] = useState(0);
   const [testMessage, setTestMessage] = useState('');
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  const title = waiterId ? t('Настройки озвучки') : 'Настройки озвучки кухни';
+  const title = t('Настройки озвучки');
   useEffect(() => {
     if (!waiterId) return subscribeKitchenVoiceSettings(setSettings);
   }, [waiterId]);
-
-  useEffect(() => {
-    if (!open || waiterId) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open, waiterId]);
 
   function patch(next: Partial<KitchenVoiceSettingsType>) {
     setSettings(waiterId ? saveWaiterVoiceSettings(waiterId, next) : saveKitchenVoiceSettings(next));
@@ -121,8 +101,6 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
         />
       </Section>
 
-      {handControl}
-
       <Section>
         <p className="mb-3 font-semibold text-text-primary">{t('Скорость озвучки')}</p>
         <SpeedSlider
@@ -131,7 +109,6 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
           onChange={(rate) => patch({ speechRate: rate })}
         />
       </Section>
-      {!waiterId && isKitchen && <Section><ThemeSwitch /></Section>}
     </>
   );
 
@@ -153,8 +130,20 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
     </>
   );
 
+  if (!waiterId) {
+    return <div className="mx-auto w-full max-w-2xl">
+      <section aria-label="Озвучка" className="card px-4 py-4 sm:px-6">
+        <h2 className="text-base font-semibold">Озвучка</h2>
+        {controls}
+        <Section>{preview}</Section>
+      </section>
+      {handControl && <section aria-label="Управление рукой" className="card mt-4 px-4 py-3 sm:px-6">{handControl}</section>}
+      <section aria-label="Внешний вид" className="card mt-4 px-4 py-4 sm:px-6"><ThemeSwitch /></section>
+    </div>;
+  }
+
   return (
-    <div ref={rootRef} className="relative">
+    <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -167,25 +156,12 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
         aria-haspopup="dialog"
       >
         <SpeakerIcon />
-        {waiterId ? title : 'Озвучка'}
-        {!waiterId && <ChevronIcon open={open} />}
+        {title}
       </button>
 
-      {waiterId ? (
-        <Modal open={open} onClose={() => setOpen(false)} title={title} bottomSheet panelClassName="max-w-xl" footer={preview}>
-          {controls}
-        </Modal>
-      ) : open && (
-        <div
-          role="dialog"
-          aria-label={title}
-          className="absolute right-0 top-[calc(100%+10px)] z-50 max-h-[calc(100dvh-6rem)] w-[calc(100vw-2rem)] max-w-[320px] overflow-y-auto rounded-xl border border-border bg-white p-4 text-sm shadow-soft"
-        >
-          <h3 className="text-[15px] font-semibold text-text-secondary">{title}</h3>
-          {controls}
-          <Section>{preview}</Section>
-        </div>
-      )}
+      <Modal open={open} onClose={() => setOpen(false)} title={title} bottomSheet panelClassName="max-w-xl" footer={preview}>
+        {controls}
+      </Modal>
     </div>
   );
 }
@@ -311,25 +287,6 @@ function SpeakerIcon() {
       <path d="M11 5 6 9H3v6h3l5 4V5Z" />
       <path d="M15.5 8.5a5 5 0 0 1 0 7" />
       <path d="M18.5 5.5a9 9 0 0 1 0 13" />
-    </svg>
-  );
-}
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={`transition-transform ${open ? 'rotate-180' : ''}`}
-      aria-hidden
-    >
-      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/store/auth';
@@ -7,7 +7,6 @@ import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { Spinner } from '@/components/Spinner';
 import { Select } from '@/components/Select';
-import { Modal } from '@/components/Modal';
 import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { WorkShiftBanner } from '@/features/settings/WorkShiftBanner';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
@@ -85,6 +84,9 @@ export function KitchenApp({
   const [tab, setTab] = useState<KitchenTab>('new');
   const [showStats, setShowStats] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsButton = useRef<HTMLButtonElement>(null);
+  const canOpenSettings = canChangeOrders || user?.role === 'BAR';
+  const showSettings = settingsOpen && canOpenSettings;
   const [now, setNow] = useState(() => Date.now());
   const [actingId, setActingId] = useState<string | null>(null);
   const [stopListOpen, setStopListOpen] = useState(false);
@@ -184,10 +186,27 @@ export function KitchenApp({
 
   const undoSecondsLeft = pending ? Math.max(0, Math.ceil((pending.deadline - now) / 1000)) : 0;
 
+  function closeSettings() {
+    setSettingsOpen(false);
+    requestAnimationFrame(() => settingsButton.current?.focus());
+  }
+
   return (
-    <div data-hand-scope className="flex h-full flex-col bg-background">
+    <div data-hand-scope className="flex h-full flex-col bg-background" onKeyDown={(event) => {
+      if (showSettings && event.key === 'Escape') closeSettings();
+    }}>
       <OfflineBanner />
 
+      {showSettings && <header className="flex shrink-0 items-center gap-4 border-b border-border bg-card px-4 py-3 sm:px-5">
+        <button type="button" autoFocus onClick={closeSettings} className="btn-secondary btn-md">← Назад</button>
+        <h1 className="text-xl font-semibold text-text-primary">Настройки</h1>
+      </header>}
+      {canChangeOrders && <KitchenHandControl showSettings={showSettings} />}
+      {showSettings && !canChangeOrders && <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        <section aria-label="Внешний вид" className="card mx-auto max-w-2xl p-4"><ThemeSwitch /></section>
+      </main>}
+
+      <div className={showSettings ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
       {/* Шапка */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
         <div className="flex items-baseline gap-3">
@@ -216,11 +235,6 @@ export function KitchenApp({
         <div className="flex items-center gap-4 text-sm">
           {canSection('warehouse')&&<Link to="/warehouse" className="text-primary">Склад и техкарты</Link>}
           <ConnectionStatus />
-          {user?.role === 'BAR' && (
-            <button type="button" onClick={() => setSettingsOpen(true)} className="text-text-muted hover:text-text-primary">
-              Настройки
-            </button>
-          )}
           {pushNotifications.status !== 'subscribed' &&
             pushNotifications.status !== 'unsupported' &&
             pushNotifications.status !== 'checking' && (
@@ -235,11 +249,6 @@ export function KitchenApp({
       </header>
       <WorkspaceLinks current="production" />
       <WorkShiftBanner />
-      {user?.role === 'BAR' && (
-        <Modal open={settingsOpen} onClose={() => setSettingsOpen(false)} title="Настройки">
-          <ThemeSwitch />
-        </Modal>
-      )}
 
       {/* Вкладки + Стоп-лист */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-3 py-2.5 sm:flex-nowrap sm:px-5">
@@ -273,7 +282,10 @@ export function KitchenApp({
           >
             Статистика
           </button>
-          {canChangeOrders && <KitchenHandControl />}
+          {canOpenSettings && <button type="button" ref={settingsButton} onClick={() => setSettingsOpen(true)}
+            className="shrink-0 rounded-lg border border-primary bg-white px-3.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5">
+            Настройки
+          </button>}
           {canChangeStopList && <button
             onClick={() => setStopListOpen(true)}
             className="shrink-0 rounded-lg border border-primary bg-white px-3.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
@@ -361,6 +373,7 @@ export function KitchenApp({
         )}
       </main>
       )}
+      </div>
 
       {/* Нижний блок отмены действия с таймером */}
       {pending && (

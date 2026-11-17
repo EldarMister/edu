@@ -21,7 +21,7 @@
 .finance-category-name { display: flex; align-items: center; gap: 6px; }
 .finance-category-expander { flex: 0 0 24px; width: 24px; text-align: center; }
 .finance-category-switch { display: inline-flex; align-items: center; width: 36px; height: 20px; padding: 2px; border-radius: 10px; background: rgb(var(--edu-border)); }
-.finance-category-switch[aria-checked='true'] { justify-content: flex-end; background: rgb(var(--edu-success)); }
+.finance-category-switch[aria-checked='true'] { justify-content: flex-end; background: rgb(var(--edu-primary)); }
 .finance-category-switch > span { width: 16px; height: 16px; border-radius: 50%; background: #fff; }
 .finance-extra-filter { position: relative; }
 .finance-extra-filter summary { cursor: pointer; list-style: none; color: rgb(var(--edu-link)); font-size: 14px; }

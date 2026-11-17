@@ -38,8 +38,7 @@ function targetAt(scope: HTMLElement, point: Point): HTMLElement | null {
 }
 
 /** Mount once inside [data-hand-scope]. Mark the order list with [data-hand-scroll]. */
-export function KitchenHandControl() {
-  const root = useRef<HTMLDivElement>(null);
+export function KitchenHandControl({ showSettings }: { showSettings: boolean }) {
   const cursor = useRef<HTMLDivElement>(null);
   const session = useRef<HandCameraSession | null>(null);
   const gesture = useRef(new PinchGesture<Target>());
@@ -86,8 +85,8 @@ export function KitchenHandControl() {
       onDiagnostics: () => {},
       onSample: (sample, now) => {
         const metrics = handMetrics(sample);
-        const scope = root.current?.closest<HTMLElement>('[data-hand-scope]');
         const pointer = cursor.current;
+        const scope = pointer?.closest<HTMLElement>('[data-hand-scope]');
         if (!mounted || !metrics || !scope || !pointer) { clearPointer(); return; }
         const elapsed = now - lastSample.current;
         if (elapsed > 450 && position.current) clearPointer();
@@ -160,18 +159,20 @@ export function KitchenHandControl() {
   }
 
   return (
-    <div ref={root} className="hand-control">
-      <KitchenVoiceSettings handControl={
-        <div className="border-t border-border pt-3">
-          <div className="flex items-center justify-between gap-4 py-2">
-            <span className="font-medium text-text-primary">Управление рукой</span>
-            <Toggle ariaLabel="Управление рукой" checked={running} onChange={toggle} />
-          </div>
-          {(running || status === 'paused') && <p className="mt-1 text-xs text-text-muted" role="status">{status === 'paused' ? 'Камера остановлена. Включите тумблер для продолжения.' : STATUS[status]}</p>}
-          {error && <p className="mt-1 text-xs text-danger" role="alert">{error}</p>}
-        </div>
-      } />
+    <>
+      {showSettings && <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        <KitchenVoiceSettings handControl={
+          <>
+            <div className="flex items-center justify-between gap-4 py-2">
+              <span className="font-medium text-text-primary">Управление рукой</span>
+              <Toggle ariaLabel="Управление рукой" checked={running} onChange={toggle} />
+            </div>
+            {(running || status === 'paused') && <p className="mt-1 text-xs text-text-muted" role="status">{status === 'paused' ? 'Камера остановлена. Включите тумблер для продолжения.' : STATUS[status]}</p>}
+            {error && <p className="mt-1 text-xs text-danger" role="alert">{error}</p>}
+          </>
+        } />
+      </main>}
       <div ref={cursor} className="hand-control-cursor" aria-hidden="true" />
-    </div>
+    </>
   );
 }
