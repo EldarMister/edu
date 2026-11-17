@@ -84,9 +84,10 @@ export function useActiveOrders() {
   });
 }
 
-export function useCurrentShift() {
+export function useCurrentShift(enabled = true) {
   return useQuery({
     queryKey: ['waiter', 'shift', 'current'],
+    enabled,
     queryFn: async () => (await api.get<WaiterShift | null>('/waiter/shifts/current')).data,
   });
 }

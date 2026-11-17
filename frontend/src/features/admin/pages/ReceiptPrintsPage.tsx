@@ -18,7 +18,8 @@ export function ReceiptPrintsPage() {
   const q = useReceiptPrintRequests();
   const { approve, printed, reject } = useReceiptPrintActions();
   const fiscalizeForPrint = useFiscalizeForPrint();
-  const fiscalEnabled = usePublicSettings().data?.fiscalEnabled ?? false;
+  const settings = usePublicSettings();
+  const fiscalEnabled = settings.data?.fiscalEnabled ?? false;
   const push = useNotifications((s) => s.push);
   const [directPendingId, setDirectPendingId] = useState<string | null>(null);
   const [detailsOrderId, setDetailsOrderId] = useState<string | null>(null);
@@ -217,7 +218,9 @@ export function ReceiptPrintsPage() {
       ) : (
         <>
           {renderSection(t('Запрошенные на печать'), requestedItems, t('Запросов на печать нет'))}
-          {renderSection(t('Доступные к печати'), availableItems, t('Доступных заказов к печати нет'))}
+          {settings.isSuccess && !settings.data.receiptPrintRequestsOnly && renderSection(
+            t('Доступные к печати'), availableItems, t('Доступных заказов к печати нет'),
+          )}
         </>
       )}
       <OrderDetailsModal

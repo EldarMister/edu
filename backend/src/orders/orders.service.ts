@@ -291,7 +291,7 @@ export class OrdersService {
       }
     }
 
-    await this.shifts.getRequiredActiveShift(waiterId);
+    await this.shifts.shiftForTerminalOrder(waiterId);
 
     const table = await this.prisma.table.findUnique({ where: { id: dto.tableId } });
     if (!table || !table.isActive) {
@@ -319,7 +319,7 @@ export class OrdersService {
           const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
           const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
           await this.ensureOrderStations(tx, itemsData);
-        const activeShift = await this.shifts.getRequiredActiveShift(waiterId, tx);
+        const activeShift = await this.shifts.shiftForTerminalOrder(waiterId, tx);
         const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
         const totals = this.calcTotals(itemsData, serviceChargeAmount);
         const businessDate = this.businessDateOf();
@@ -334,7 +334,7 @@ export class OrdersService {
             businessDate,
             tableId: dto.tableId,
             waiterId,
-            waiterShiftId: activeShift.id,
+            waiterShiftId: activeShift?.id ?? null,
             status: initialStatus,
             comment: dto.comment,
             idempotencyKey: dto.idempotencyKey,
@@ -690,7 +690,7 @@ export class OrdersService {
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const activeShift = await this.shifts.getRequiredActiveShift(actor.id, tx);
+      const activeShift = await this.shifts.shiftForTerminalOrder(actor.id, tx);
       const result = await tx.order.updateMany({
         where: {
           id: orderId,
@@ -700,7 +700,7 @@ export class OrdersService {
         },
         data: {
           waiterId: actor.id,
-          waiterShiftId: activeShift.id,
+          waiterShiftId: activeShift?.id ?? null,
         },
       });
       if (result.count !== 1) return null;
@@ -1109,7 +1109,7 @@ export class OrdersService {
       throw new BadRequestException('Заказ уже закрыт');
     }
 
-    const activeShift = await this.shifts.getRequiredActiveShift(waiterId);
+    const activeShift = await this.shifts.shiftForTerminalOrder(waiterId);
 
     const actionType = 'add_items';
     if (idempotencyKey) {
@@ -1164,7 +1164,7 @@ export class OrdersService {
         data: {
           status: nextStatus,
           requiresWaiterDecision: false,
-          waiterShiftId: activeShift.id,
+          waiterShiftId: activeShift?.id ?? null,
         },
       });
       return { applied: true, ingredientStockWarnings, createdItemIds: createdItems.map(i => i.id) };
@@ -2036,7 +2036,7 @@ export class OrdersService {
     });
     if (!item) throw new NotFoundException('Отказанное блюдо не найдено');
 
-    const activeShift = await this.shifts.getRequiredActiveShift(waiterId);
+    const activeShift = await this.shifts.shiftForTerminalOrder(waiterId);
     const oldName = this.orderItemName(item);
     const { itemsData } = await this.buildItemsData([replacement]);
     const replacementData = itemsData[0];
@@ -2075,7 +2075,7 @@ export class OrdersService {
       }
       const updatedOrder = await tx.order.update({
         where: { id: orderId },
-        data: { status: nextStatus, requiresWaiterDecision: pending > 0, waiterShiftId: activeShift.id },
+        data: { status: nextStatus, requiresWaiterDecision: pending > 0, waiterShiftId: activeShift?.id ?? null },
         include: orderInclude,
       });
       return Object.assign(updatedOrder, { ingredientStockWarnings });
@@ -3079,15 +3079,15 @@ export class OrdersService {
       throw new BadRequestException('Стол уже закреплён за этим официантом');
     }
 
-    const shift = await this.prisma.waiterShift.findFirst({
-      where: { waiterId, status: WaiterShiftStatus.active },
-    });
     const fromWaiterId = order.waiterId;
 
-    const updated = await this.prisma.order.update({
-      where: { id: order.id },
-      data: { waiterId, waiterShiftId: shift?.id ?? null },
-      include: orderInclude,
+    const updated = await this.prisma.$transaction(async (db) => {
+      const shift = await this.shifts.shiftForTerminalOrder(waiterId, db);
+      return db.order.update({
+        where: { id: order.id },
+        data: { waiterId, waiterShiftId: shift?.id ?? null },
+        include: orderInclude,
+      });
     });
 
     // История передачи (ТЗ §18 — audit log). fromWaiterId не null: метод доступен только
@@ -3127,23 +3127,21 @@ export class OrdersService {
     return updated;
   }
 
-  /** Официанты на активной смене — для модалки «Передать стол». */
+  /** Сотрудники, которые сейчас могут принимать заказы на кассе. */
   async availableWaiters() {
-    const shifts = await this.prisma.waiterShift.findMany({
-      where: { status: WaiterShiftStatus.active, waiter: { isActive: true } },
-      select: { waiterId: true, waiter: { select: { id: true, name: true, role: true, permissions: true, position: { select: { role: true, permissions: true } } } } },
-      orderBy: { startedAt: 'asc' },
+    const employees = await this.prisma.user.findMany({
+      where: { isActive: true },
+      select: {
+        id: true, name: true, role: true, permissions: true,
+        position: { select: { role: true, permissions: true } },
+        waiterShifts: { where: { status: WaiterShiftStatus.active }, select: { id: true }, take: 1 },
+      },
+      orderBy: { name: 'asc' },
     });
-    const seen = new Set<string>();
-    const list: { id: string; name: string }[] = [];
-    for (const s of shifts) {
-      if (!resolveUserPermissions(s.waiter).terminalAccess) continue;
-      if (!seen.has(s.waiterId)) {
-        seen.add(s.waiterId);
-        list.push({ id: s.waiter.id, name: s.waiter.name });
-      }
-    }
-    return list;
+    return employees.filter((employee) => {
+      const permissions = resolveUserPermissions(employee);
+      return permissions.terminalAccess && (permissions.workShiftRequired === false || employee.waiterShifts.length > 0);
+    }).map(({ id, name }) => ({ id, name }));
   }
 
   // ---------- Real-time helpers ----------

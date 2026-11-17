@@ -1009,6 +1009,7 @@ model Settings {
   payCard                      Boolean @default(true) @map("pay_card")
   qrImageUrl                   String? @map("qr_image_url") // data URL загруженного QR-кода (один на заведение)
   printerConnected             Boolean @default(false) @map("printer_connected")
+  receiptPrintRequestsOnly     Boolean @default(false) @map("receipt_print_requests_only")
   allowNegativeIngredientStock Boolean @default(false) @map("allow_negative_ingredient_stock")
   warehouseProductionEnabled Boolean @default(false) @map("warehouse_production_enabled")
   warehouseProcessingEnabled Boolean @default(false) @map("warehouse_processing_enabled")

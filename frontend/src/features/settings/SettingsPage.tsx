@@ -30,6 +30,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 type FiscalProvider = '' | 'ekassa' | 'yakassa' | 'mock';
 
 interface Form {
+  receiptPrintRequestsOnly: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;
@@ -123,6 +124,7 @@ function CafeSettings() {
   useEffect(() => {
     if (data) {
       setForm({
+        receiptPrintRequestsOnly: data.receiptPrintRequestsOnly ?? false,
         waiterOrderPermissions: data.waiterOrderPermissions ?? DEFAULT_WAITER_PERMISSIONS,
         cafeName: data.cafeName,
         address: data.address,
@@ -173,6 +175,7 @@ function CafeSettings() {
   }
 
   const toSettingsInput = (source: Form): SettingsInput => ({
+    ...(isOwner ? { receiptPrintRequestsOnly: source.receiptPrintRequestsOnly } : {}),
     waiterOrderPermissions: source.waiterOrderPermissions,
     cafeName: source.cafeName,
     address: source.address,
@@ -371,6 +374,15 @@ function CafeSettings() {
               <p>Фискальный чек формируется только через подключенную ККМ или онлайн-кассу.</p>
             </div>
             <PrinterSettings />
+            {isOwner && <section className="card space-y-2 p-5">
+              <h3 className="font-semibold">Список печати счетов и чеков</h3>
+              <select className="input w-full" aria-label="Список печати счетов и чеков"
+                value={form.receiptPrintRequestsOnly ? 'requests' : 'all'} disabled={update.isPending}
+                onChange={(event) => set('receiptPrintRequestsOnly', event.target.value === 'requests')}>
+                <option value="all">Все доступные счета и чеки</option>
+                <option value="requests">Только по заявкам официантов</option>
+              </select>
+            </section>}
             {isOwner && <CashShiftSettings />}
 
             {/* Гео-проверка QR-заказа — рядом со статусом принтера */}

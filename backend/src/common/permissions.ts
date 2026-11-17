@@ -46,6 +46,7 @@ export interface EmployeePermissions {
   readOnlySections?: SectionKey[];
   terminalAccess?: boolean;
   adminAccess?: boolean;
+  workShiftRequired?: boolean;
 }
 
 export const READ_ONLY_SECTION_KEYS: SectionKey[] = ['orders', 'tables', 'menu', 'warehouse', 'staff', 'checks', 'settings', 'finance'];
@@ -148,13 +149,14 @@ export function resolvePermissions(role: Role, stored: unknown): EmployeePermiss
   const def = getDefaultPermissionsByRole(role);
   if (role === Role.OWNER) return def;
   if (!stored || typeof stored !== 'object') return def;
-  const s = stored as { sections?: unknown; actions?: unknown; readOnlySections?: unknown; terminalAccess?: unknown; adminAccess?: unknown };
+  const s = stored as { sections?: unknown; actions?: unknown; readOnlySections?: unknown; terminalAccess?: unknown; adminAccess?: unknown; workShiftRequired?: unknown };
   const permissions: EmployeePermissions = {
     sections: pick(SECTION_KEYS, s.sections, def.sections),
     actions: pick(ACTION_KEYS, s.actions, def.actions),
     terminalAccess: typeof s.terminalAccess === 'boolean' ? s.terminalAccess : def.terminalAccess,
     adminAccess: typeof s.adminAccess === 'boolean' ? s.adminAccess : def.adminAccess,
   };
+  if (typeof s.workShiftRequired === 'boolean') permissions.workShiftRequired = s.workShiftRequired;
   if (Array.isArray(s.readOnlySections)) {
     const selected = s.readOnlySections;
     permissions.readOnlySections = READ_ONLY_SECTION_KEYS.filter((key) => permissions.sections[key] && selected.includes(key));

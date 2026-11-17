@@ -38,6 +38,7 @@ export type ActionKey =
 export interface EmployeePermissions {
   terminalAccess?: boolean;
   adminAccess?: boolean;
+  workShiftRequired?: boolean;
   sections: Record<SectionKey, boolean>;
   actions: Record<ActionKey, boolean>;
   readOnlySections?: SectionKey[];

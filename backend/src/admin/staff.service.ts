@@ -7,7 +7,7 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
 import { lockFinance } from '../finance/finance-ledger';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { assertStaffWorkspaceChange, canManagePosition, losesOperationalAccess } from './staff-access';
+import { assertNoActiveWorkShifts, assertStaffWorkspaceChange, canManagePosition, disablesWorkTracking, losesOperationalAccess } from './staff-access';
 import { syncEmployeeSalary } from '../finance/employee-salary';
 import { payrollWorkTime } from '../finance/payroll';
 import { warehouseDateRange, warehouseDay } from '../warehouse/report-range';
@@ -333,9 +333,11 @@ export class StaffService {
       const positionChanged = (position?.id ?? null) !== current.positionId;
       if (role !== current.role || positionChanged) {
         this.assertCanManagePositionAccount(actor, { role, positionId: position?.id ?? null, position });
-        const losesTerminal = losesOperationalAccess({ role: current.role, permissions: resolveUserPermissions(current) },
-          { role, permissions: position?.permissions });
-        if (actor.cafeId && (role !== current.role || losesTerminal)) await assertStaffWorkspaceChange(tx, actor.cafeId, [id]);
+        const before = { role: current.role, permissions: resolveUserPermissions(current) };
+        const next = { role, permissions: position?.permissions };
+        const losesAccess = losesOperationalAccess(before, next);
+        if (actor.cafeId && (role !== current.role || losesAccess)) await assertStaffWorkspaceChange(tx, actor.cafeId, [id], 'сменой должности');
+        else if (disablesWorkTracking(before, next)) await assertNoActiveWorkShifts(tx, [id]);
         data.role = role;
         data.positionId = position?.id ?? null;
         data.permissions = Prisma.DbNull;

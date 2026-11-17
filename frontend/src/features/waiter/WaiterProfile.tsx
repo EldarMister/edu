@@ -12,6 +12,7 @@ import type { PushStatus } from '@/lib/push';
 
 export function WaiterProfile({
   shift,
+  trackShift,
   shiftLoading,
   shiftPending,
   onStartShift,
@@ -21,6 +22,7 @@ export function WaiterProfile({
   onOpenCabinet,
 }: {
   shift: WaiterShift | null;
+  trackShift: boolean;
   shiftLoading: boolean;
   shiftPending: boolean;
   onStartShift: () => void;
@@ -61,7 +63,7 @@ export function WaiterProfile({
         </svg>
       </button>
 
-      <div className="card p-5">
+      {trackShift && <div className="card p-5">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-[15px] font-semibold text-text-primary">{t('Смена')}</h3>
           <span
@@ -93,7 +95,7 @@ export function WaiterProfile({
             t('Начать смену')
           )}
         </button>
-      </div>
+      </div>}
 
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3">

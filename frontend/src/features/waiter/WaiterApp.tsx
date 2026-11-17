@@ -96,7 +96,8 @@ export function WaiterApp() {
   const categoriesQ = useCategories();
   const dishesQ = useDishes();
   const ordersQ = useActiveOrders();
-  const currentShiftQ = useCurrentShift();
+  const trackShift = user?.permissions?.workShiftRequired !== false;
+  const currentShiftQ = useCurrentShift(trackShift);
 
   const cart = useCart();
   const create = useCreateOrder();
@@ -149,7 +150,8 @@ export function WaiterApp() {
   // Смена не начата → показываем экран-оверлей «Смена не начата» поверх контента вкладок.
   // Профиль остаётся доступным (там можно начать смену, посмотреть свои данные, выйти).
   const shiftActive = !!activeShift && activeShift.status === 'active';
-  const showShiftGate = (!shiftActive || shiftBusy) && tab !== 'profile';
+  const canWork = !trackShift || shiftActive;
+  const showShiftGate = trackShift && (!shiftActive || shiftBusy) && tab !== 'profile';
 
   // Самый свежий активный заказ по каждому столу (бэкенд отдаёт по убыванию даты).
   const ordersByTable = useMemo(() => {
@@ -489,7 +491,7 @@ export function WaiterApp() {
   }
 
   async function claimQr(order: Order) {
-    if (!activeShift) {
+    if (!canWork) {
       push({ message: t('Сначала начните смену в профиле.'), type: 'error', at: new Date().toISOString() });
       return;
     }
@@ -651,7 +653,7 @@ export function WaiterApp() {
 
   async function submitCart() {
     if (!selectedTable) return;
-    if (!activeShift) {
+    if (!canWork) {
       push({ message: t('Сначала начните смену в профиле.'), type: 'error', at: new Date().toISOString() });
       return;
     }
@@ -819,7 +821,7 @@ export function WaiterApp() {
           mode={editing ? 'edit' : activeOrder ? 'add' : 'create'}
           orderNumber={activeOrder?.orderNumber}
           submitting={create.isPending || addItems.isPending || editOrder.isPending}
-          canSubmit={!!activeShift}
+          canSubmit={canWork}
           sendLabel={cartSendLabel}
           onSubmit={editing ? saveEditOrder : submitCart}
           onCancelEdit={cancelEditing}
@@ -834,6 +836,7 @@ export function WaiterApp() {
   const profilePanel = (
     <WaiterProfile
       shift={activeShift}
+      trackShift={trackShift}
       shiftLoading={currentShiftQ.isFetching}
       shiftPending={shiftPending}
       onStartShift={() =>
@@ -872,17 +875,17 @@ export function WaiterApp() {
         <DesktopNav current={desktopView} onChange={(next) => changeTab(next)} />
         <div className="flex items-center gap-3">
           <ConnectionStatus />
-          <span className={`text-xs ${activeShift ? 'text-success' : 'text-text-muted'}`}>
+          {trackShift && <span className={`text-xs ${activeShift ? 'text-success' : 'text-text-muted'}`}>
             <span className="hidden sm:inline">{activeShift ? t('Смена активна') : t('Смена не начата')}</span>
             <span className="sm:hidden">{activeShift ? t('Смена активна') : t('Нет смены')}</span>
-          </span>
+          </span>}
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
         </div>
       </header>
       <WorkspaceLinks current="terminal" />
       <OfflineBanner inHeader />
       </div>
-      <CashShiftBanner promptOnEntry={shiftActive && !showShiftGate && tab !== 'profile' && !paymentOrder} />
+      <CashShiftBanner promptOnEntry={canWork && !showShiftGate && tab !== 'profile' && !paymentOrder} />
 
       {showPushBanner && (
         <BackgroundPushBanner onEnable={pushNotifications.enable} />
@@ -960,7 +963,7 @@ export function WaiterApp() {
       {/* Оверлей «Смена не начата» поверх контента вкладок (нижняя навигация остаётся видна) */}
       {showShiftGate && (
         <div className="absolute inset-0 z-30">
-          <ShiftRequiredScreen onBusyChange={setShiftBusy} />
+          <ShiftRequiredScreen onBusyChange={setShiftBusy} startShift={() => startShift.mutateAsync()} />
         </div>
       )}
       </div>
@@ -987,7 +990,7 @@ export function WaiterApp() {
         open={cartSheetOpen && tab === 'menu' && !replacementTarget}
         onClose={() => setCartSheetOpen(false)}
         submitting={create.isPending || addItems.isPending || editOrder.isPending}
-        canSubmit={!!activeShift}
+        canSubmit={canWork}
         submitLabel={cartSubmitLabel}
         onSubmit={async () => {
           await (editing ? saveEditOrder() : submitCart());

@@ -193,34 +193,37 @@ export class ReceiptPrintsService {
     return dto;
   }
 
-  /** Список для администратора: приоритетные заявки официантов + заказы, доступные к печати 24 часа. */
+  /** Заявки всегда в приоритете. Остальные документы зависят от режима заведения. */
   async listPending() {
     await this.purgeExpired();
 
     const printableCutoff = new Date(Date.now() - PRINTABLE_ORDER_TTL_MS);
 
-    const [requests, orders] = await Promise.all([
+    const [requests, settings] = await Promise.all([
       this.prisma.receiptPrintRequest.findMany({
         where: { status: { in: [ReceiptPrintStatus.pending, ReceiptPrintStatus.approved] } },
         orderBy: { createdAt: 'asc' },
         include: withWaiter,
       }),
-      this.prisma.order.findMany({
-        where: {
-          OR: [
-            { status: { in: PRELIMINARY_ORDER_STATUSES }, updatedAt: { gte: printableCutoff } },
-            { status: OrderStatus.paid, closedAt: { gte: printableCutoff } },
-            { status: OrderStatus.paid, closedAt: null, updatedAt: { gte: printableCutoff } },
-          ],
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-        include: {
-          table: { select: { number: true } },
-          waiter: { select: { id: true, name: true } },
-        },
-      }),
+      this.prisma.settings.findFirst({ select: { receiptPrintRequestsOnly: true } }),
     ]);
+    if (settings?.receiptPrintRequestsOnly) return requests.map((request) => this.serialize(request));
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        OR: [
+          { status: { in: PRELIMINARY_ORDER_STATUSES }, updatedAt: { gte: printableCutoff } },
+          { status: OrderStatus.paid, closedAt: { gte: printableCutoff } },
+          { status: OrderStatus.paid, closedAt: null, updatedAt: { gte: printableCutoff } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: {
+        table: { select: { number: true } },
+        waiter: { select: { id: true, name: true } },
+      },
+    });
 
     const activeRequestKeys = new Set(requests.map((r) => `${r.orderId}:${r.type}`));
     const printableOrders = orders.filter((order) => {

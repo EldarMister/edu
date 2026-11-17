@@ -37,7 +37,7 @@ test('PostgreSQL: unified stock covers direct sales, recipes, production, stages
       const preparation = new PreparationProductionService(db), locations = new WarehouseLocationsService(db, events);
       const main = (await locations.list(cafe.id)).locations.find(w => w.isDefault);
       const bar = await locations.save(cafe.id, 'Бар');
-      const orders = new OrdersService(db, events, { getRequiredActiveShift: async () => shift }, { notifyRole: async () => {}, notifyUser: async () => {}, notifyWaiter: async () => {} }, settings, { recalculateDishes: async () => {} }, audit, stock);
+      const orders = new OrdersService(db, events, { shiftForTerminalOrder: async () => shift }, { notifyRole: async () => {}, notifyUser: async () => {}, notifyWaiter: async () => {} }, settings, { recalculateDishes: async () => {} }, audit, stock);
       let tableNumber = 100;
       const order = async (items) => {
         const table = await db.table.create({ data: { hallId: hall.id, number: tableNumber++ } });

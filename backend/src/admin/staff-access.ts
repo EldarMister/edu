@@ -12,6 +12,20 @@ export function losesOperationalAccess(before: PositionAccess, after: PositionAc
     || (old.adminAccess && !next.adminAccess && !next.terminalAccess && after.role !== Role.KITCHEN && after.role !== Role.BAR);
 }
 
+export function disablesWorkTracking(before: PositionAccess, after: PositionAccess) {
+  return resolvePermissions(before.role, before.permissions).workShiftRequired !== false
+    && resolvePermissions(after.role, after.permissions).workShiftRequired === false;
+}
+
+export async function assertNoActiveWorkShifts(db: Prisma.TransactionClient, userIds: string[]) {
+  if (!userIds.length) return;
+  const shift = await db.waiterShift.findFirst({
+    where: { waiterId: { in: userIds }, status: WaiterShiftStatus.active },
+    select: { id: true },
+  });
+  if (shift) throw new ConflictException('Перед отключением учёта завершите открытые рабочие смены.');
+}
+
 /** Managers may assign only workspaces below management and permissions they hold themselves. */
 export function canManagePosition(actor: AuthUser, position: PositionAccess): boolean {
   if (actor.role === Role.OWNER) return true;

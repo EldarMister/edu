@@ -156,6 +156,12 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
           <p className="text-xs text-text-muted">Для повара или бармена. Конкретный цех выбирается в карточке сотрудника.</p>
         </div>
       </details>
+      <fieldset disabled={save.isPending}>
+        <legend className="mb-2 text-lg font-semibold">Рабочие смены</legend>
+        <Check label="Учитывать рабочие смены" checked={permissions.workShiftRequired !== false}
+          onChange={(checked) => setPermissions((current) => ({ ...current, workShiftRequired: checked }))} />
+        <p className="text-sm text-text-muted">Сотрудник начинает смену перед работой. Часы и смены попадают в табель и расчёт зарплаты.</p>
+      </fieldset>
       <fieldset disabled={save.isPending} className="space-y-4">
         <legend className="mb-2 text-lg font-semibold">Расчёт зарплаты</legend>
         <p className="text-sm text-text-muted">Выберите один или несколько способов. Расчёт и выплата — в «Финансы → Зарплата».</p>

@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { lockFinance } from '../finance/finance-ledger';
 import { currentPayrollMonth, salaryRates, type SalaryRates } from '../finance/payroll';
 import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
-import { assertStaffWorkspaceChange, losesOperationalAccess } from './staff-access';
+import { assertNoActiveWorkShifts, assertStaffWorkspaceChange, disablesWorkTracking, losesOperationalAccess } from './staff-access';
 import { syncEmployeeSalary } from '../finance/employee-salary';
 
 const assignableRoles = [Role.ADMIN, Role.WAITER, Role.KITCHEN, Role.BAR];
@@ -111,9 +111,14 @@ export class PositionsController {
       await lockFinance(db, cafeId);
       const before = await this.find(cafeId, id, db);
       const permissions = positionPermissions(before.role, dto.permissions ?? before.permissions);
-      if (losesOperationalAccess(before, { role: before.role, permissions })) {
+      const next = { role: before.role, permissions };
+      const losesAccess = losesOperationalAccess(before, next);
+      const disablesTracking = disablesWorkTracking(before, next);
+      if (losesAccess || disablesTracking) {
         const users = await db.user.findMany({ where: { cafeId, positionId: id }, select: { id: true } });
-        await assertStaffWorkspaceChange(db, cafeId, users.map((user) => user.id), 'отключением рабочего доступа');
+        const userIds = users.map(({ id }) => id);
+        if (losesAccess) await assertStaffWorkspaceChange(db, cafeId, userIds, 'отключением рабочего доступа');
+        else await assertNoActiveWorkShifts(db, userIds);
       }
       const oldSalary = salaryRates(before.salaryRates[0]);
       if (dto.salary && (Object.keys(oldSalary) as (keyof SalaryRates)[]).some((key) => dto.salary![key] !== oldSalary[key])) {
@@ -157,9 +162,10 @@ export class PositionsController {
         throw new BadRequestException('Выберите другую должность');
       }
       const users = await db.user.findMany({ where: { cafeId, positionId: id }, select: { id: true, role: true } });
-      const losesTerminal = replacement && losesOperationalAccess(before, replacement);
+      const losesAccess = replacement && losesOperationalAccess(before, replacement);
       const changedUsers = replacement ? users.filter((user) => user.role !== replacement.role).map((user) => user.id) : [];
-      if (losesTerminal) await assertStaffWorkspaceChange(db, cafeId, users.map((user) => user.id), 'отключением доступа к кассе');
+      if (losesAccess) await assertStaffWorkspaceChange(db, cafeId, users.map((user) => user.id), 'сменой должности');
+      else if (replacement && disablesWorkTracking(before, replacement)) await assertNoActiveWorkShifts(db, users.map(({ id }) => id));
       if (changedUsers.length) await assertStaffWorkspaceChange(db, cafeId, changedUsers);
       const prepStation = replacement && changedUsers.length ? await staffStation(db, replacement.role) : undefined;
       const transferred = replacement ? (await db.user.updateMany({

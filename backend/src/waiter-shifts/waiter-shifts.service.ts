@@ -71,11 +71,14 @@ export class WaiterShiftsService {
     };
   }
 
-  async getRequiredActiveShift(waiterId: string, client: PrismaClientLike = this.prisma) {
+  async shiftForTerminalOrder(waiterId: string, client: PrismaClientLike = this.prisma) {
     const employee = await client.user.findUnique({ where: { id: waiterId }, include: { position: true } });
     if (employee?.cafeId && client !== this.prisma) await lockFinance(client as Prisma.TransactionClient, employee.cafeId);
     const latest = await client.user.findUnique({ where: { id: waiterId }, include: { position: true } });
-    if (!latest?.isActive || !resolveUserPermissions(latest).terminalAccess) throw new ForbiddenException('Нет доступа к кассе');
+    if (!latest?.isActive) throw new ForbiddenException('Нет доступа к кассе');
+    const permissions = resolveUserPermissions(latest);
+    if (!permissions.terminalAccess) throw new ForbiddenException('Нет доступа к кассе');
+    if (permissions.workShiftRequired === false) return null;
     const shift = await this.current(waiterId, client);
     if (!shift) {
       throw new BadRequestException('Сначала начните смену.');
@@ -101,6 +104,9 @@ export class WaiterShiftsService {
       const terminal = allowedRoles.length === 1 && allowedRoles[0] === Role.WAITER;
       if (!currentEmployee?.isActive || (terminal ? !resolveUserPermissions(currentEmployee).terminalAccess : !allowedRoles.includes(currentEmployee.role))) {
         throw new ForbiddenException('Сотрудник отключён или его рабочее место изменилось');
+      }
+      if (resolveUserPermissions(currentEmployee).workShiftRequired === false) {
+        throw new BadRequestException('Для вашей должности учёт смен отключён.');
       }
       const active = await this.current(waiterId, tx);
       if (active) throw new BadRequestException('Смена уже активна.');

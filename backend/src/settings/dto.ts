@@ -1,7 +1,10 @@
-import { IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { WaiterOrderPermissions } from '../orders/order-policy';
 
 export class UpdateSettingsDto {
+  @ValidateIf((_object, value) => value !== undefined) @IsBoolean()
+  receiptPrintRequestsOnly?: boolean;
+
   @IsOptional() @IsObject()
   waiterOrderPermissions?: WaiterOrderPermissions;
   // ---- Интеграция доставки ----

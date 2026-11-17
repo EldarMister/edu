@@ -45,7 +45,7 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
       const ingredient = await db.ingredient.create({ data: { name: 'Test rice', unitType: 'mass', displayUnit: 'g', stock: 100000, avgCost: 1, valuationKnown: true } });
       await db.recipeItem.create({ data: { dishId: dishes[0].id, ingredientId: ingredient.id, amount: 10 } });
       const settings = new SettingsService(db, audit, events);
-      const orders = new OrdersService(db, events, { getRequiredActiveShift: async () => shift }, push, settings, { recalculateDishes: async () => {} }, audit, new IngredientStockService());
+      const orders = new OrdersService(db, events, { shiftForTerminalOrder: async () => shift }, push, settings, { recalculateDishes: async () => {} }, audit, new IngredientStockService());
       const initialSettings = await settings.ensure();
       let tableNumber = 100;
       const newOrder = async (items = [{ dishId: dishes[0].id, quantity: 2 }]) => {

@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { PaymentMethod, Prisma, Settings } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { PaymentMethod, Prisma, Role, Settings } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
@@ -12,6 +12,7 @@ import { getCafeId } from '../tenant/tenant-context';
 
 /** Человекочитаемые названия полей настроек для описаний аудита. */
 const SETTINGS_FIELD_LABELS: Record<string, string> = {
+  receiptPrintRequestsOnly: 'режим списка печати',
   waiterOrderPermissions: 'права официантов на изменение заказов',
   cafeName: 'название кафе',
   address: 'адрес',
@@ -136,6 +137,7 @@ export class SettingsService {
       // Лёгкая версионированная ссылка вместо тяжёлого base64 — кэшируется браузером.
       qrImageUrl: s.qrImageUrl ? `/settings/qr?ref=${encodeURIComponent(s.id)}&v=${s.updatedAt.getTime()}` : null,
       printerConnected: s.printerConnected,
+      receiptPrintRequestsOnly: s.receiptPrintRequestsOnly,
       // Включена ли ККМ — без раскрытия ключей (нужно фронтенду для подсказок/гейтинга).
       fiscalEnabled: !!s.fiscalProvider,
       deliveryEnabled: s.deliveryEnabled,
@@ -171,6 +173,9 @@ export class SettingsService {
   }
 
   async update(dto: UpdateSettingsDto, actor: AuditActor) {
+    if (dto.receiptPrintRequestsOnly !== undefined && actor.role !== Role.OWNER) {
+      throw new ForbiddenException('Режим печати меняет только владелец');
+    }
     const current = await this.ensure();
 
     // Проверка: хотя бы один способ оплаты должен остаться включённым.

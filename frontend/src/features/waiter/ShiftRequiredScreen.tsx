@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
-import { useStartShift } from './api';
 
 type Phase = 'idle' | 'loading' | 'success';
 
@@ -29,9 +28,12 @@ const TEXT: Record<Phase, { title: string; subtitle: string }> = {
  * success — галочка в синем круге, затем плавный переход в раздел.
  * onBusyChange(true) — запуск пошёл: родитель удерживает оверлей до конца анимации.
  */
-export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boolean) => void }) {
+export function ShiftRequiredScreen({ onBusyChange, startShift, idleSubtitle = TEXT.idle.subtitle }: {
+  onBusyChange: (busy: boolean) => void;
+  startShift: () => Promise<unknown>;
+  idleSubtitle?: string;
+}) {
   const push = useNotifications((s) => s.push);
-  const startShift = useStartShift();
   const [phase, setPhase] = useState<Phase>('idle');
   const [fadingOut, setFadingOut] = useState(false);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -56,32 +58,27 @@ export function ShiftRequiredScreen({ onBusyChange }: { onBusyChange: (busy: boo
     return () => clearTimeout(done);
   }, [fadingOut, onBusyChange]);
 
-  function onStart() {
+  async function onStart() {
     if (phase !== 'idle') return;
     onBusyChange(true);
     setPhase('loading');
     const startedAt = Date.now();
-    startShift.mutate(undefined, {
-      onSuccess: () => {
-        const remaining = Math.max(MIN_LOADING_MS - (Date.now() - startedAt), 0);
-        successTimerRef.current = setTimeout(() => {
-          successTimerRef.current = null;
-          setPhase('success');
-        }, remaining);
-      },
-      onError: (err) => {
-        if (successTimerRef.current) {
-          clearTimeout(successTimerRef.current);
-          successTimerRef.current = null;
-        }
-        setPhase('idle');
-        onBusyChange(false);
-        push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
-      },
-    });
+    try {
+      await startShift();
+      const remaining = Math.max(MIN_LOADING_MS - (Date.now() - startedAt), 0);
+      successTimerRef.current = setTimeout(() => {
+        successTimerRef.current = null;
+        setPhase('success');
+      }, remaining);
+    } catch (err) {
+      setPhase('idle');
+      onBusyChange(false);
+      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
   }
 
-  const { title, subtitle } = TEXT[phase];
+  const { title } = TEXT[phase];
+  const subtitle = phase === 'idle' ? idleSubtitle : TEXT[phase].subtitle;
 
   return (
     <div

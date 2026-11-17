@@ -28,6 +28,9 @@ const { TablesService } = require('../src/tables/tables.service.ts');
 const { WaiterShiftsController } = require('../src/waiter-shifts/waiter-shifts.controller.ts');
 const { WaiterShiftsService } = require('../src/waiter-shifts/waiter-shifts.service.ts');
 const { SettingsService } = require('../src/settings/settings.service.ts');
+const { SettingsController } = require('../src/settings/settings.controller.ts');
+const { ReceiptPrintsService } = require('../src/receipt-prints/receipt-prints.service.ts');
+const { ReceiptPrintsController } = require('../src/receipt-prints/receipt-prints.controller.ts');
 const { IngredientStockService } = require('../src/warehouse/ingredient-stock.service.ts');
 const { getDefaultPermissionsByRole } = require('../src/common/permissions.ts');
 const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
@@ -53,10 +56,11 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
     [OrdersService, orders], [PaymentsService, new PaymentsService(db, orders, settings)],
     [WaiterShiftsService, shifts], [StaffService, staff], [TablesService, new TablesService(db, events)],
     [JwtStrategy, new JwtStrategy(db)],
+    [SettingsService, settings], [ReceiptPrintsService, new ReceiptPrintsService(db, events, {}, push)],
   ].map(([provide, useValue]) => ({ provide, useValue }));
   class HttpFixtureModule {}
   Module({ imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
-    controllers: [AuthController, OrdersController, PaymentsController, WaiterShiftsController, StaffController, PositionsController, TablesController], providers })(HttpFixtureModule);
+    controllers: [AuthController, OrdersController, PaymentsController, WaiterShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController], providers })(HttpFixtureModule);
   const app = await NestFactory.create(HttpFixtureModule, { logger: false });
   app.setGlobalPrefix('api');
   app.use((_req, _res, next) => runWithTenant({}, next));
@@ -150,6 +154,8 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
     await t.test('terminal revocation waits for live work, then invalidates existing tokens immediately', async () => {
       const permissions = { ...fixture.permissions, terminalAccess: false };
       await request(`/admin/positions/${fixture.mixedPosition.id}`, { token: sessions.owner, workspace: 'admin', method: 'PATCH', status: 409,
+        body: { name: fixture.mixedPosition.name, permissions: { ...fixture.permissions, workShiftRequired: false } } });
+      await request(`/admin/positions/${fixture.mixedPosition.id}`, { token: sessions.owner, workspace: 'admin', method: 'PATCH', status: 409,
         body: { name: fixture.mixedPosition.name, permissions } });
       await request(`/orders/${mixedOrder.id}/served`, { token: sessions.mixed, workspace: 'terminal', method: 'POST', status: 201 });
       await request('/payments', { token: sessions.mixed, workspace: 'terminal', method: 'POST', status: 201, body: { orderId: mixedOrder.id, method: 'cash' } });
@@ -160,6 +166,37 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       assert.equal(account.access.terminal, false);
       assert.equal(account.access.admin, true);
       await request('/admin/staff', { token: sessions.mixed, workspace: 'admin' });
+    });
+    await t.test('position disables work tracking and keeps order creation and payment available', async () => {
+      const token = sessions.mixed;
+      const owner = { token: sessions.owner, workspace: 'admin' };
+      const terminal = { token, workspace: 'terminal' };
+      await request(`/admin/positions/${fixture.mixedPosition.id}`, { ...owner, method: 'PATCH', body: {
+        name: fixture.mixedPosition.name, permissions: { ...fixture.permissions, workShiftRequired: false },
+      } });
+      assert.equal((await request('/auth/me', terminal)).permissions.workShiftRequired, false);
+      await request('/waiter/shifts/start', { ...terminal, method: 'POST', status: 400 });
+      const table = await newTable();
+      const order = await request('/orders', { ...terminal, method: 'POST', status: 201,
+        body: { tableId: table.id, items: [{ dishId: fixture.dish.id, quantity: 1 }] } });
+      assert.equal((await db.order.findUnique({ where: { id: order.id } })).waiterShiftId, null);
+      const targets = await request('/tables/available-waiters', terminal);
+      assert.ok(targets.some(({ id }) => id === fixture.mixed.id));
+      await request(`/orders/${order.id}/served`, { ...terminal, method: 'POST', status: 201 });
+      await request('/payments', { ...terminal, method: 'POST', status: 201, body: { orderId: order.id, method: 'cash' } });
+    });
+    await t.test('owner can restrict the print queue to actual waiter requests', async () => {
+      const owner = { token: sessions.owner, workspace: 'admin' };
+      const admin = { token: sessions.admin, workspace: 'admin' };
+      const ticket = await request('/receipt-prints', { token: sessions.mixed, workspace: 'terminal', method: 'POST', status: 201,
+        body: { orderId: mixedOrder.id, type: 'receipt' } });
+      assert.ok((await request('/receipt-prints', admin)).some(({ source }) => source === 'order'));
+      await request('/admin/settings', { ...admin, method: 'PATCH', status: 403, body: { receiptPrintRequestsOnly: true } });
+      await request('/admin/settings', { ...owner, method: 'PATCH', body: { receiptPrintRequestsOnly: true } });
+      const filtered = await request('/receipt-prints', admin);
+      assert.deepEqual(filtered.map(({ id, source }) => [id, source]), [[ticket.id, 'request']]);
+      await request('/admin/settings', { ...owner, method: 'PATCH', body: { receiptPrintRequestsOnly: false } });
+      assert.ok((await request('/receipt-prints', admin)).some(({ source }) => source === 'order'));
     });
   } finally {
     await app.close();

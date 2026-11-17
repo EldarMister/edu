@@ -256,6 +256,7 @@ export function AdminApp() {
     void qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] });
   });
   useSocketEvent('settings:updated', () => {
+    void invalidateReceipts();
     void qc.invalidateQueries({ queryKey: cashShiftKey });
     qc.invalidateQueries({ queryKey: ['settings'] });
     qc.invalidateQueries({ queryKey: ['admin', 'warehouse', 'locations'] });

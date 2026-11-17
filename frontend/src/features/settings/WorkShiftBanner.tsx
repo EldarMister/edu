@@ -1,58 +1,93 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@/components/Modal';
+import { Spinner } from '@/components/Spinner';
 import { api, apiError } from '@/lib/api';
-import { useSocketEvent } from '@/lib/socket';
+import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { financeKey } from '@/features/admin/pages/finance/api';
+import { ShiftRequiredScreen } from '@/features/waiter/ShiftRequiredScreen';
 
 type WorkShift = { id: string; startedAt: string; endedAt: string | null; autoCloseAt: string | null };
 export const workShiftKey = ['staff', 'work-shift'] as const;
 
-/** Own work time is independent of cash register shifts and back-office access. */
-export function WorkShiftBanner() {
+function useWorkShift() {
   const user = useAuth((state) => state.user);
-  const enabled = !!user && user.role !== 'OWNER';
-  const qc = useQueryClient();
-  const [confirmEnd, setConfirmEnd] = useState(false);
+  const enabled = !!user && user.role !== 'OWNER' && user.permissions?.workShiftRequired !== false;
+  const queryKey = [...workShiftKey, user?.id];
   const query = useQuery({
-    queryKey: [...workShiftKey, user?.id], enabled, retry: false, refetchInterval: 30_000,
+    queryKey, enabled, retry: false, refetchInterval: 30_000,
     queryFn: async () => (await api.get<WorkShift | null>('/staff/shifts/current')).data,
   });
+  return { enabled, query, queryKey };
+}
+
+export function WorkShiftGate({ children }: { children: ReactNode }) {
+  const { enabled, query, queryKey } = useWorkShift();
+  const qc = useQueryClient();
+  const [starting, setStarting] = useState(false);
+  const logout = useAuth((state) => state.logout);
   const refresh = () => { if (enabled) void qc.invalidateQueries({ queryKey: workShiftKey }); };
   useSocketEvent('waiter:shift_started', refresh);
   useSocketEvent('waiter:shift_ended', refresh);
+  if (!enabled || (!starting && query.data && !query.data.endedAt)) return <>{children}</>;
+
+  async function start() {
+    try {
+      const { data } = await api.post<WorkShift>('/staff/shifts/start');
+      qc.setQueryData(queryKey, data);
+    } catch (err) {
+      refresh();
+      throw err;
+    }
+  }
+
+  return <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-white">
+    <div className="flex shrink-0 justify-end px-4 pt-3">
+      <button type="button" className="btn-secondary btn-md" onClick={() => { disconnectSocket(); logout(); }}>Выйти</button>
+    </div>
+    <div className="min-h-[420px] flex-1">
+      {starting || (!query.isPending && !query.isError) ? (
+        <ShiftRequiredScreen onBusyChange={setStarting} startShift={start} idleSubtitle="Начните смену, чтобы приступить к работе." />
+      ) : <div className="grid h-full place-content-center justify-items-center gap-4 px-4 text-center">
+        {query.isPending ? <Spinner /> : <>
+          <p role="alert">{apiError(query.error)}</p>
+          <button type="button" className="btn-secondary btn-md" onClick={() => void query.refetch()}>Повторить</button>
+        </>}
+      </div>}
+    </div>
+  </main>;
+}
+
+/** Own work time is independent of cash register shifts. */
+export function WorkShiftBanner() {
+  const { enabled, query, queryKey } = useWorkShift();
+  const qc = useQueryClient();
+  const [confirmEnd, setConfirmEnd] = useState(false);
   const change = useMutation({
-    mutationFn: async (action: 'start' | 'end') => (await api.post<WorkShift>(`/staff/shifts/${action}`)).data,
+    mutationFn: () => api.post<WorkShift>('/staff/shifts/end'),
     onSuccess: async () => {
       setConfirmEnd(false);
-      await Promise.all([qc.invalidateQueries({ queryKey: workShiftKey }),
-        qc.invalidateQueries({ queryKey: ['admin', 'staff'] }), qc.invalidateQueries({ queryKey: financeKey })]);
+      qc.setQueryData(queryKey, null);
+      await Promise.all([qc.invalidateQueries({ queryKey: ['admin', 'staff'] }), qc.invalidateQueries({ queryKey: financeKey })]);
     },
-    onError: refresh,
+    onError: () => void qc.invalidateQueries({ queryKey: workShiftKey }),
   });
-  if (!enabled) return null;
   const current = query.data;
-  const started = current && !current.endedAt;
+  if (!enabled || !current || current.endedAt) return null;
   const time = (value: string) => new Date(value).toLocaleTimeString('ru-RU', { timeZone: 'Asia/Bishkek', hour: '2-digit', minute: '2-digit' });
   return <>
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-2 text-sm">
       <div>
-        <p className="font-medium">{query.isPending ? 'Загрузка рабочей смены…' : started
-          ? `Рабочая смена с ${time(current.startedAt)}` : 'Рабочая смена не начата'}</p>
-        <p className="text-xs text-text-muted">{started
-          ? 'Время учитывается для табеля и расчёта зарплаты.' : 'Начните смену, чтобы учитывать рабочее время.'}</p>
-        {started && current.autoCloseAt && <p className="text-xs text-text-muted">Автозавершение через 20 часов после начала: {time(current.autoCloseAt)}.</p>}
-        {(query.error || change.error) && <p role="alert" className="mt-1 text-xs text-danger">{apiError(change.error ?? query.error)}</p>}
+        <p className="font-medium">Рабочая смена с {time(current.startedAt)}</p>
+        <p className="text-xs text-text-muted">Время учитывается для табеля и расчёта зарплаты.</p>
+        {current.autoCloseAt && <p className="text-xs text-text-muted">Автозавершение через 20 часов после начала: {time(current.autoCloseAt)}.</p>}
       </div>
-      {query.isError ? <button className="btn-secondary btn-md" onClick={() => query.refetch()}>Повторить</button>
-        : <button type="button" className="btn-secondary btn-md" disabled={query.isPending || change.isPending}
-          onClick={() => { change.reset(); if (started) setConfirmEnd(true); else change.mutate('start'); }}>
-          {change.isPending ? 'Сохранение…' : started ? 'Завершить рабочую смену' : 'Начать рабочую смену'}
-        </button>}
+      <button type="button" className="btn-secondary btn-md" disabled={change.isPending}
+        onClick={() => { change.reset(); setConfirmEnd(true); }}>Завершить рабочую смену</button>
     </div>
-    {confirmEnd && started && <Modal open title="Завершить рабочую смену?" onClose={() => { if (!change.isPending) setConfirmEnd(false); }}
-      footer={<button className="btn-primary btn-md" disabled={change.isPending} onClick={() => change.mutate('end')}>Завершить смену</button>}>
+    {confirmEnd && <Modal open title="Завершить рабочую смену?" onClose={() => { if (!change.isPending) setConfirmEnd(false); }}
+      footer={<button className="btn-primary btn-md" disabled={change.isPending} onClick={() => change.mutate()}>Завершить смену</button>}>
       <p>Рабочее время с {time(current.startedAt)} будет сохранено в табеле. При следующем выходе на работу начните новую смену.</p>
       {change.error && <p role="alert" className="mt-3 text-danger">{apiError(change.error)}</p>}
     </Modal>}

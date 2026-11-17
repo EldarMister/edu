@@ -12,6 +12,7 @@ export function resolveQrSrc(value: string | null | undefined): string | null {
 }
 
 export interface Settings {
+  receiptPrintRequestsOnly: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   id: string;
   cafeId: string | null;
@@ -53,6 +54,7 @@ export interface Settings {
 }
 
 export interface PublicSettings {
+  receiptPrintRequestsOnly: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;

@@ -22,6 +22,7 @@ import { AdminApp } from '@/features/admin/AdminApp';
 import { QrMenuApp } from '@/features/qr/QrMenuApp';
 import { QueueApp } from '@/features/queue/QueueApp';
 import { PlatformApp } from '@/features/platform/PlatformApp';
+import { WorkShiftGate } from '@/features/settings/WorkShiftBanner';
 
 export function App() {
   const user = useAuth((s) => s.user);
@@ -119,7 +120,7 @@ export function App() {
           path="/kitchen/*"
           element={
             <ProtectedRoute workspace="kitchen">
-              <KitchenApp />
+              <WorkShiftGate><KitchenApp /></WorkShiftGate>
             </ProtectedRoute>
           }
         />
@@ -128,19 +129,19 @@ export function App() {
           path="/bar/*"
           element={
             <ProtectedRoute workspace="bar">
-              <BarApp />
+              <WorkShiftGate><BarApp /></WorkShiftGate>
             </ProtectedRoute>
           }
         />
 
-        <Route path="/warehouse/*" element={<ProtectedRoute workspace="warehouse"><WarehouseStaffApp/></ProtectedRoute>}/>
+        <Route path="/warehouse/*" element={<ProtectedRoute workspace="warehouse"><WorkShiftGate><WarehouseStaffApp /></WorkShiftGate></ProtectedRoute>}/>
 
         {/* Этап 6 — администратор, Этап 7 — владелец (одна панель, нав зависит от роли) */}
         <Route
           path="/admin/*"
           element={
             <ProtectedRoute workspace="admin">
-              <AdminApp />
+              <WorkShiftGate><AdminApp /></WorkShiftGate>
             </ProtectedRoute>
           }
         />
