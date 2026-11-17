@@ -213,7 +213,11 @@ export function KitchenApp({
       <div className={showSettings ? 'hidden' : 'flex min-h-0 flex-1 flex-col'}>
       {/* Шапка */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
-        <div className="flex items-baseline gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="shrink-0 text-[26px] font-medium tracking-tight text-text-primary">
+            {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+          </span>
+          <span aria-hidden="true" className="shrink-0 text-text-muted">|</span>
           {canAccessBoth ? <Select
             ariaLabel="Станция приготовления"
             className="h-10 max-w-[45vw]"
@@ -232,9 +236,6 @@ export function KitchenApp({
           /> : <span className="text-sm font-medium text-text-primary">
             {availableStations[0]?.name ?? (assignedStation === 'bar' ? 'Бар' : assignedStation === 'kitchen' ? 'Кухня' : 'Станция приготовления')}
           </span>}
-          <span className="text-[26px] font-medium tracking-tight text-text-primary">
-            {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-          </span>
         </div>
         <div className="flex items-center gap-4 text-sm">
           {canSection('warehouse')&&<Link to="/warehouse" className="text-primary">Склад и техкарты</Link>}

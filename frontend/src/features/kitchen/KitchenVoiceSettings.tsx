@@ -90,16 +90,18 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
       </Section>
 
       <Section>
-        <SettingRow
-          label={t(waiterId ? 'Звук уведомлений' : 'Уведомления')}
-          checked={settings.notificationsEnabled}
-          onChange={(value) => patch({ notificationsEnabled: value })}
-        />
-        <SettingRow
-          label={t('Голосовая озвучка')}
-          checked={settings.voiceEnabled}
-          onChange={(value) => patch({ voiceEnabled: value })}
-        />
+        <div className={waiterId ? undefined : 'grid gap-x-8 sm:grid-cols-2'}>
+          <SettingRow
+            label={t(waiterId ? 'Звук уведомлений' : 'Уведомления')}
+            checked={settings.notificationsEnabled}
+            onChange={(value) => patch({ notificationsEnabled: value })}
+          />
+          <SettingRow
+            label={t('Голосовая озвучка')}
+            checked={settings.voiceEnabled}
+            onChange={(value) => patch({ voiceEnabled: value })}
+          />
+        </div>
       </Section>
 
       <Section>
@@ -139,8 +141,10 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
         {controls}
         <Section>{preview}</Section>
       </section>
-      {handControl && <section aria-label="Управление рукой" className="card px-4 py-3 sm:px-6">{handControl}</section>}
-      <section aria-label="Внешний вид" className="card px-4 py-4 sm:px-6"><ThemeSwitch /></section>
+      <div className={`grid gap-4 ${handControl ? 'sm:grid-cols-2' : ''}`}>
+        {handControl && <section aria-label="Управление рукой" className="card px-4 py-3 sm:px-6">{handControl}</section>}
+        <section aria-label="Внешний вид" className="card px-4 py-3 sm:px-6"><ThemeSwitch /></section>
+      </div>
     </div>;
   }
 
