@@ -18,6 +18,7 @@ import {
 } from '@/services/kitchenVoiceSettings';
 import { KITCHEN_VOICE_TEST_SCENARIOS, WAITER_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
 import { WorkShiftSettingsCard } from '@/features/settings/WorkShiftBanner';
+import { KitchenTapFeedbackSetting } from './KitchenTapFeedback';
 
 export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode }) {
   return <VoiceSettings handControl={handControl} />;
@@ -139,6 +140,7 @@ function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; wai
         <WorkShiftSettingsCard />
         {handControl && <section aria-label="Управление рукой" className="card px-4 py-3 sm:px-6">{handControl}</section>}
         <section aria-label="Внешний вид" className="card px-4 py-3 sm:px-6"><ThemeSwitch /></section>
+        <KitchenTapFeedbackSetting />
       </div>
       <section aria-label="Озвучка" className="card min-w-0 px-4 py-4 sm:px-6">
         <h2 className="text-base font-semibold">Озвучка</h2>

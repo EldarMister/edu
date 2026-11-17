@@ -19,6 +19,7 @@ import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
 import { KitchenHandControl } from './hand-control/KitchenHandControl';
 import { KitchenStats } from './KitchenStats';
+import { KitchenTapFeedback, KitchenTapFeedbackSetting } from './KitchenTapFeedback';
 import { useListPeriod } from '@/features/admin/pages/warehouse/ListPeriodFilter';
 import { calendarDate, warehouseDay } from '@/features/admin/pages/warehouse/warehouse-period';
 import { usePreparationStations, usePreparationStationUpdates } from './stations';
@@ -198,6 +199,7 @@ export function KitchenApp({
       if (showSettings && event.key === 'Escape') closeSettings();
     }}>
       <OfflineBanner />
+      <KitchenTapFeedback />
 
       {/* Шапка */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
@@ -299,6 +301,7 @@ export function KitchenApp({
         <div className="mx-auto w-full max-w-2xl space-y-4">
           <WorkShiftSettingsCard />
           <section aria-label="Внешний вид" className="card p-4"><ThemeSwitch /></section>
+          <KitchenTapFeedbackSetting />
         </div>
       </main>}
 

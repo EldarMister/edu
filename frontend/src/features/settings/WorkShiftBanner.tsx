@@ -18,7 +18,7 @@ const WorkShiftActions = createContext<{ startedAt: string; busy: boolean; finis
 
 export function WorkShiftSettingsCard() {
   const shift = useContext(WorkShiftActions);
-  return shift && <ShiftCard startedAt={shift.startedAt} busy={shift.busy} onAction={shift.finish} />;
+  return shift && <ShiftCard startedAt={shift.startedAt} busy={shift.busy} onAction={shift.finish} showElapsed />;
 }
 
 function useWorkShift() {
