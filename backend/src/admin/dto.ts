@@ -6,7 +6,6 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
-  IsObject,
   IsOptional,
   IsString,
   IsUUID,
@@ -352,17 +351,6 @@ export class UpdateStaffDto {
 
   @IsOptional() @IsString()
   password?: string;
-}
-
-// ---------- Права доступа сотрудника ----------
-export class UpdatePermissionsDto {
-  // Доступ к разделам: { warehouse: true, ... }. Неизвестные ключи отбрасываются на сервере.
-  @IsOptional() @IsObject()
-  sections?: Record<string, boolean>;
-
-  // Дополнительные права (действия): { editMenu: true, ... }.
-  @IsOptional() @IsObject()
-  actions?: Record<string, boolean>;
 }
 
 // ---------- Отчёт по сменам: фиксация сдачи наличных ----------

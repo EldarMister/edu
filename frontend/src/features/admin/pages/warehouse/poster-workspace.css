@@ -14,6 +14,11 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
 .poster-select-menu > button[data-highlighted='true'] { background: light-dark(#edf3ff, var(--edu-selected)); color: rgb(var(--edu-link)); }
 .poster-select-menu > button[aria-selected='true'] { font-weight: 500; }
 .workspace-back { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 36px; }
+.owner-workspace {
+  --edu-workspace-surface: rgb(var(--edu-card));
+  background: var(--edu-workspace-surface);
+}
+
 .poster-workspace { background: rgb(var(--edu-card)); font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; font-size: 14px; }
 .workspace-nav-collapse {
   display: grid;
@@ -29,7 +34,7 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace .workspace-default-title h1 { font-size: 20px; font-weight: 500; }
 .poster-workspace .workspace-title-slot h1 { font-size: 24px; font-weight: 500; line-height: 30px; }
 :is(.poster-workspace.workspace-main, .poster-workspace .workspace-main) { padding: 16px 20px 0; background: rgb(var(--edu-card)); }
-.poster-workspace .card { border: 0; border-radius: 0; box-shadow: none; background: rgb(var(--edu-card)); }
+.poster-workspace .card:where(:not([data-modal-panel])) { border: 0; border-radius: 0; box-shadow: none; background: rgb(var(--edu-card)); }
 .poster-workspace .input,
 .poster-workspace button.rounded-xl.border,
 .poster-workspace select.input { height: 36px; min-height: 36px; padding-left: 10px; padding-right: 10px; border-radius: 8px; font-size: 14px; }
@@ -209,7 +214,9 @@ div.poster-select-menu { border-radius: 8px; padding: 3px; box-shadow: 0 3px 10p
 .poster-workspace :is(.poster-list-empty, .poster-directory-empty) p { margin-top: 6px; color: rgb(var(--edu-text-muted)); font-size: 14px; }
 .poster-workspace .poster-directory-table > tbody > tr > td.poster-directory-empty { display: table-cell; height: 210px; vertical-align: middle; text-align: center; }
 .poster-workspace:has(.poster-document--modern),
-.poster-workspace:has(.poster-document--modern) :is(.workspace-main, .workspace-header, [data-editor-page]) { background: light-dark(#f3f5f7, rgb(var(--edu-background))); }
+.poster-workspace:has(.poster-document--modern) :is(.workspace-main, .workspace-header, [data-editor-page]) {
+  background: var(--edu-workspace-surface, light-dark(#f3f5f7, rgb(var(--edu-background))));
+}
 .poster-workspace:has(.poster-document--modern) .workspace-header { min-height: 56px; padding: 10px 24px; border-bottom: 0; }
 .poster-workspace:has(.poster-document--modern) .workspace-title-slot h1 { font-size: 20px; line-height: 24px; font-weight: 500; }
 :is(.poster-workspace:has(.poster-document--modern).workspace-main, .poster-workspace:has(.poster-document--modern) .workspace-main) { padding: 8px 24px 0; }

@@ -462,7 +462,7 @@ export function AdminApp() {
   return (
     <WorkspaceHeaderProvider>
     <div
-      className="flex h-full bg-background"
+      className={`flex h-full ${isOwner ? 'owner-workspace' : 'bg-background'}`}
       onTouchStart={handleAppTouchStart}
       onTouchMove={handleAppTouchMove}
       onTouchEnd={handleAppTouchEnd}

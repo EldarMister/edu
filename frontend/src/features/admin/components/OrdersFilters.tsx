@@ -1,6 +1,5 @@
 import { Select, type SelectOption } from '@/components/Select';
 import { useT } from '@/lib/i18n';
-import { OrdersDateFilter } from './OrdersDateFilter';
 
 export type OrderSort = 'default' | 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
 
@@ -32,15 +31,11 @@ type Props = {
   paymentMethod: string;
   waiterId: string;
   waiterOptions: SelectOption[];
-  period: string;
-  customDate: string;
   sort: OrderSort;
   search: string;
   onTabChange: (value: string) => void;
   onPaymentMethodChange: (value: string) => void;
   onWaiterChange: (value: string) => void;
-  onPeriodChange: (value: string) => void;
-  onCustomDateChange: (value: string) => void;
   onSortChange: (value: OrderSort) => void;
   onSearchChange: (value: string) => void;
 };
@@ -53,7 +48,6 @@ export function OrdersFilters(props: Props) {
       <Select className={`${ctrl} orders-status-select`} value={props.tab} onChange={props.onTabChange} options={STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-payment-select`} value={props.paymentMethod} onChange={props.onPaymentMethodChange} options={PAYMENT_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))} />
       <Select className={`${ctrl} orders-waiter-select`} value={props.waiterId} onChange={props.onWaiterChange} options={props.waiterOptions} />
-      <OrdersDateFilter period={props.period} date={props.customDate} onPeriodChange={props.onPeriodChange} onDateChange={props.onCustomDateChange} />
       <Select className={`${ctrl} orders-sort-select`} value={props.sort} onChange={(value) => props.onSortChange(value as OrderSort)} options={SORT_OPTIONS.map((option) => ({ ...option, label: tr(option.label) }))} />
       <OrdersSearchField value={props.search} onChange={props.onSearchChange} />
     </div>

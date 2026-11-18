@@ -389,7 +389,7 @@ model User {
   role         Role
   prepStation  String?  @map("prep_station")
   isActive     Boolean  @default(true) @map("is_active")
-  // Права доступа сотрудника (разделы/действия). null = дефолты по роли.
+  // Совместимость со старыми записями; права сотрудников задаются в StaffPosition.
   permissions  Json?    @map("permissions")
   positionId   String?  @map("position_id")
   position     StaffPosition? @relation(fields: [cafeId, positionId], references: [cafeId, id], onDelete: Restrict)

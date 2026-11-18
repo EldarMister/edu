@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { StaffService } from './staff.service';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -9,7 +9,6 @@ import {
   SetCashHandedDto,
   ShiftHistoryQueryDto,
   WaiterOrdersReportQueryDto,
-  UpdatePermissionsDto,
   UpdateShiftHistoryDto,
   UpdateStaffDto,
 } from './dto';
@@ -89,8 +88,8 @@ export class StaffController {
   }
 
   @Patch(':id/permissions')
-  updatePermissions(@Param('id') id: string, @Body() dto: UpdatePermissionsDto, @CurrentUser() actor: AuthUser) {
-    return this.staff.updatePermissions(id, dto, actor);
+  updatePermissions() {
+    throw new ForbiddenException('Измените права в разделе «Должности»');
   }
 
   @Patch(':id')

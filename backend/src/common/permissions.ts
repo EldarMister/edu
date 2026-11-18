@@ -2,7 +2,7 @@ import { Role } from '@prisma/client';
 
 /**
  * Права доступа сотрудника: к разделам (sections) и к действиям (actions).
- * Хранятся в User.permissions (Json?). Пусто/невалидно — берём дефолты по роли.
+ * Хранятся в StaffPosition.permissions. Пусто/невалидно — берём дефолты по роли.
  */
 export const SECTION_KEYS = [
   'statistics',
@@ -63,8 +63,7 @@ const allActions = (value: boolean): Record<ActionKey, boolean> =>
 
 /**
  * Дефолтные права по роли. Подобраны так, чтобы НЕ менять текущее поведение:
- * админ по умолчанию видит ровно те разделы, что и раньше (owner-only скрыты),
- * владелец — всё. Владелец может расширить права админа вручную через модалку.
+ * админ по умолчанию видит рабочие разделы, владелец — все разделы.
  */
 export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
   switch (role) {

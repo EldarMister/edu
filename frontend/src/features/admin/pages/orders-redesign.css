@@ -71,98 +71,10 @@
 .orders-waiter-select { width: 188px; }
 .orders-sort-select { width: 177px; }
 
-.orders-date-filter {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 10px;
-  min-width: 164px;
-}
-
-.orders-period-wrap,
-.orders-search-wrap {
-  position: relative;
-}
-
-.orders-period-trigger {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 164px;
-  padding: 0 11px;
-  text-align: left;
-}
-
-.orders-period-trigger > span {
-  flex: 1;
-  white-space: nowrap;
-}
-
-.orders-period-trigger svg {
-  width: 17px;
-  height: 17px;
-  flex: none;
-  color: light-dark(#64799e, rgb(var(--edu-text-muted)));
-}
-
-.orders-period-trigger .orders-chevron { width: 15px; height: 15px; }
-
-.orders-period-menu {
-  position: absolute;
-  z-index: 35;
-  top: calc(100% + 7px);
-  border: 1px solid light-dark(#e1e8f3, rgb(var(--edu-border)));
-  border-radius: 13px;
-  background: rgb(var(--edu-card));
-  box-shadow: 0 14px 34px rgba(29, 54, 94, .14), 0 3px 8px rgba(29, 54, 94, .05);
-}
-
-.orders-period-menu {
-  left: 0;
-  min-width: 195px;
-  padding: 5px;
-}
-
-.orders-period-menu button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 38px;
-  padding: 7px 11px;
-  border-radius: 8px;
-  color: light-dark(#354767, rgb(var(--edu-text-secondary)));
-  font-size: 14px;
-  text-align: left;
-  transition: background .15s, color .15s;
-}
-
-.orders-period-menu button:hover,
-.orders-period-menu button:focus-visible {
-  background: light-dark(#f2f6fe, var(--edu-raised));
-  outline: none;
-}
-
-.orders-period-menu button.is-selected {
-  background: light-dark(#edf4ff, var(--edu-selected));
-  color: rgb(var(--edu-link));
-  font-weight: 650;
-}
-
-.orders-period-menu svg {
-  width: 15px;
-  height: 15px;
-}
-
-.orders-date-input {
-  width: 166px;
-  padding: 0 37px 0 13px;
-  font-weight: 500;
-}
-
-.orders-date-input::placeholder,
 .orders-search-input::placeholder { color: light-dark(#93a3be, rgb(var(--edu-text-light))); font-weight: 400; }
 
 .orders-search-wrap {
+  position: relative;
   flex: 1 1 205px;
   min-width: 195px;
   max-width: 310px;
@@ -278,20 +190,12 @@
 @media (max-width: 800px) {
   .orders-summary { gap: 6px 10px; }
   .orders-summary-separator { display: none; }
-  .orders-date-filter.is-custom { flex-wrap: wrap; }
-  .orders-filters > .orders-filter-control,
-  .orders-period-trigger { width: min(100%, 190px); }
+  .orders-filters > .orders-filter-control { width: min(100%, 190px); }
   .orders-search-wrap { max-width: none; }
   .orders-table-scroll { max-height: calc(100vh - 300px); }
 }
 @media (max-width: 480px) {
   .orders-filters > .orders-filter-control,
-  .orders-date-filter,
-  .orders-period-wrap,
-  .orders-period-trigger,
   .orders-search-wrap { width: 100%; max-width: none; }
-  .orders-date-filter.is-custom { display: grid; grid-template-columns: 1fr 1fr; }
-  .orders-date-filter.is-custom .orders-period-trigger,
-  .orders-date-input { width: 100%; }
   .orders-table-scroll { max-height: calc(100vh - 380px); }
 }

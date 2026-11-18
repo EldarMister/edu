@@ -35,7 +35,6 @@ div.date-picker {
 }
 .date-picker:focus-within, .date-picker.is-open {
   border-color: light-dark(#397eff, rgb(var(--edu-link)));
-  box-shadow: 0 0 0 3px rgb(var(--edu-focus) / .11);
 }
 .date-picker.is-invalid {
   border-color: light-dark(#dc2626, #a95562);
@@ -68,7 +67,6 @@ div.date-picker {
   border: 1px solid light-dark(#e1e8f3, rgb(var(--edu-border)));
   border-radius: 13px;
   background: rgb(var(--edu-card));
-  box-shadow: 0 14px 34px rgba(29, 54, 94, .14), 0 3px 8px rgba(29, 54, 94, .05);
   padding: 15px 16px 11px;
 }
 

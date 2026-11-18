@@ -11,6 +11,8 @@ import { OrdersTable } from '../components/OrdersTable';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff, useUpdateOrderStatus } from '../api';
+import { WorkspaceHeaderActions } from './WorkspaceHeader';
+import { useListPeriod } from './warehouse/ListPeriodFilter';
 import './orders-redesign.css';
 
 const MANUAL_STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
@@ -30,37 +32,11 @@ function sortRequest(sort: OrderSort): { sort: 'default' | 'date' | 'amount'; so
   return { sort: 'default' };
 }
 
-const ymd = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-/** Диапазон дат по выбранному периоду (неделя — 7 дней, месяц — 30 дней, как в статистике). */
-function periodRange(period: string, customDate: string): { dateFrom?: string; dateTo?: string } {
-  const today = new Date();
-  const minus = (n: number) => {
-    const d = new Date(today);
-    d.setDate(d.getDate() - n);
-    return d;
-  };
-  switch (period) {
-    case 'today':
-      return { dateFrom: ymd(today), dateTo: ymd(today) };
-    case 'week':
-      return { dateFrom: ymd(minus(6)), dateTo: ymd(today) };
-    case 'month':
-      return { dateFrom: ymd(minus(29)), dateTo: ymd(today) };
-    case 'custom':
-      return customDate ? { dateFrom: customDate, dateTo: customDate } : {};
-    default:
-      return {};
-  }
-}
-
 export function OrdersPage() {
   const [tab, setTab] = useState('all');
   const [paymentMethod, setPaymentMethod] = useState('');
   const [waiterId, setWaiterId] = useState('');
-  const [period, setPeriod] = useState('all');
-  const [customDate, setCustomDate] = useState('');
+  const period = useListPeriod('orders');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<OrderSort>('default');
 
@@ -83,8 +59,7 @@ export function OrdersPage() {
     ...(waiters.data ?? []).map((w) => ({ value: w.id, label: w.name })),
   ];
 
-  const dateFilter = periodRange(period, customDate);
-  const filters = { search, paymentMethod, waiterId, ...dateFilter };
+  const filters = { search, paymentMethod, waiterId, ...period.range };
   const requestSort = sortRequest(sort);
 
   const ordersQ = useAdminOrdersInfinite({ tab, ...requestSort, ...filters });
@@ -153,6 +128,7 @@ export function OrdersPage() {
 
   return (
     <div className="orders-redesign">
+      <WorkspaceHeaderActions>{period.filter}</WorkspaceHeaderActions>
       {/* Inline-сводка под заголовком */}
       <div className="orders-summary">
         <Sum label={tr('Всего заказов')} value={s ? s.total : '—'} />
@@ -171,15 +147,11 @@ export function OrdersPage() {
         paymentMethod={paymentMethod}
         waiterId={waiterId}
         waiterOptions={waiterOptions}
-        period={period}
-        customDate={customDate}
         sort={sort}
         search={search}
         onTabChange={setTab}
         onPaymentMethodChange={setPaymentMethod}
         onWaiterChange={setWaiterId}
-        onPeriodChange={setPeriod}
-        onCustomDateChange={setCustomDate}
         onSortChange={setSort}
         onSearchChange={setSearch}
       />

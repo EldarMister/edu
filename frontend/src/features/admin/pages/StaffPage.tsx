@@ -6,7 +6,6 @@ import { positionAccessSummary } from './position-permissions';
 import { parseMoney } from './finance/finance-format';
 import { Modal } from '@/components/Modal';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
-import { EditorPage } from './warehouse/EditorPage';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
@@ -248,21 +247,22 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
     }
   }
 
-  if (staffEditor) {
+  function renderStaffEditor() {
+    if (!staffEditor) return null;
     if (!canManageStaff || (editorMember && !canEditMember(editorMember))) {
-      return <EditorPage title="Карточка сотрудника" onClose={closeEditor}><p role="alert">Недостаточно прав для редактирования.</p></EditorPage>;
+      return <Modal open title="Карточка сотрудника" onClose={closeEditor}><p role="alert">Недостаточно прав для редактирования.</p></Modal>;
     }
     if (staffEditor.id && !editorMember) {
-      return <EditorPage title="Карточка сотрудника" onClose={closeEditor}>
+      return <Modal open title="Карточка сотрудника" onClose={closeEditor}>
         {staffQ.isPending ? <Spinner /> : <p role="alert">{staffQ.isError ? apiError(staffQ.error) : 'Сотрудник не найден.'}</p>}
-      </EditorPage>;
+      </Modal>;
     }
     return <StaffEditor key={staffEditor.id ?? 'new'} member={editorMember ?? null} onClose={closeEditor} />;
   }
 
   return (
     <div className="space-y-3">
-      {tab !== 'waiter-orders' && <div className="flex flex-wrap items-center justify-between gap-3">
+      {tab !== 'waiter-orders' && <div className="flex flex-wrap items-start justify-between gap-3">
         {tab === 'current' && <>
           <WorkspaceHeaderCount count={staffQ.data || reportQ.data ? rows.length : undefined} />
           <div className="flex flex-wrap items-center gap-2">
@@ -278,12 +278,24 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
               ]} />
           </div>
         </>}
+        {tab === 'history' && (
+          <HistoryFilters
+            filters={historyFilters}
+            setFilters={setHistoryFilters}
+            staffOptions={staffOptions}
+            roleOptions={roleOptions}
+            loading={historyQ.isFetching}
+            onRefresh={() => historyQ.refetch()}
+            onExport={exportHistoryCsv}
+          />
+        )}
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {tab === 'current' && (
             <>
               <span className="text-sm text-text-secondary">{tr('Дата смены:')}</span>
               <DatePicker
-                className="h-9 rounded-lg border border-border bg-white px-2.5 text-sm text-text-primary outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+                aria-label={tr('Дата смены')}
+                className="h-9 rounded-lg border border-border bg-white px-2.5 text-sm text-text-primary"
                 value={date}
                 onChange={(value) => setDate(value)}
               />
@@ -331,18 +343,6 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
           </span>
         </TabButton>
       </div>
-
-      {tab === 'history' && (
-        <HistoryFilters
-          filters={historyFilters}
-          setFilters={setHistoryFilters}
-          staffOptions={staffOptions}
-          roleOptions={roleOptions}
-          loading={historyQ.isFetching}
-          onRefresh={() => historyQ.refetch()}
-          onExport={exportHistoryCsv}
-        />
-      )}
 
       {tab === 'waiter-orders' ? (
         <WaiterOrdersReport staff={staffQ.data ?? []} staffLoading={staffQ.isLoading} />
@@ -457,6 +457,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
         />
       ) : null}
 
+      {renderStaffEditor()}
       {editingShift && (
         <ShiftEditModal row={editingShift} onClose={() => setEditingShift(null)} />
       )}
@@ -558,9 +559,10 @@ function HistoryFilters({
     { value: 'custom', label: 'Произвольный период' },
   ];
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2" role="group" aria-label="Фильтры истории смен">
       <div className="w-full sm:w-44">
         <Select
+          ariaLabel="Период истории смен"
           className="h-10 w-full"
           value={filters.period}
           onChange={(v) => setFilters((f) => ({ ...f, period: v as ShiftHistoryPeriod }))}
@@ -572,7 +574,8 @@ function HistoryFilters({
           <div className="flex items-center gap-2">
             <span className="text-sm text-text-muted">с</span>
             <DatePicker
-              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+              aria-label="Начало периода"
+              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm"
               value={filters.from ?? ''}
               onChange={(value) => setFilters((f) => ({ ...f, from: value }))}
             />
@@ -580,7 +583,8 @@ function HistoryFilters({
           <div className="flex items-center gap-2">
             <span className="text-sm text-text-muted">по</span>
             <DatePicker
-              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+              aria-label="Конец периода"
+              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm"
               value={filters.to ?? ''}
               onChange={(value) => setFilters((f) => ({ ...f, to: value }))}
             />
@@ -1070,12 +1074,13 @@ function StaffEditor({
   }
 
   return (
-    <EditorPage
+    <Modal
+      open
       onClose={close}
       title={isEdit ? 'Карточка сотрудника' : 'Добавление сотрудника'}
-      pinnedFooter
+      panelClassName="max-w-3xl"
       footer={
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <button type="button" className="btn-secondary btn-md" disabled={pending} onClick={close}>Отмена</button>
           <button type="submit" form={formId} className="btn-primary btn-md" disabled={pending || !validAssignment}>
             {pending ? <Spinner /> : 'Сохранить'}
@@ -1084,7 +1089,7 @@ function StaffEditor({
       }
     >
       <form id={formId} onSubmit={onSubmit}
-        className="max-w-[800px] py-2 sm:[&_.document-field]:grid-cols-[minmax(0,230px)_minmax(0,1fr)]">
+        className="py-2 sm:px-2 sm:[&_.document-field]:grid-cols-[minmax(0,210px)_minmax(0,1fr)]">
         <fieldset disabled={pending} className="space-y-3">
           <DocumentField label="Имя и фамилия сотрудника">
             <input className="input h-9 w-full !rounded-md text-sm" value={name} autoFocus required onChange={(e) => setName(e.target.value)} />
@@ -1153,7 +1158,7 @@ function StaffEditor({
         </fieldset>
         {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
       </form>
-    </EditorPage>
+    </Modal>
   );
 }
 

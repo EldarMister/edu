@@ -15,18 +15,15 @@ import { CLOSED_ORDER_STATUSES, WORK_SHIFT_ROLES } from '../waiter-shifts/waiter
 import {
   CreateStaffDto,
   ShiftHistoryQueryDto,
-  UpdatePermissionsDto,
   UpdateShiftHistoryDto,
   UpdateStaffDto,
   WaiterOrdersReportQueryDto,
 } from './dto';
 import {
   ACTION_KEYS,
-  EmployeePermissions,
   getDefaultPermissionsByRole,
   resolvePermissions,
   resolveUserPermissions,
-  sanitizePermissionsInput,
   SECTION_KEYS,
 } from '../common/permissions';
 
@@ -75,13 +72,6 @@ export class StaffService {
       canManage: actor ? canManagePosition(actor, { role: user.role, permissions: assigned?.permissions ?? user.permissions }) : undefined,
       permissions: resolvePermissions(user.role, assigned?.permissions ?? user.permissions),
     };
-  }
-
-  /** Кто может редактировать права: владелец, либо право editPermissions/manageStaff. */
-  private canEditPermissions(actor: AuthUser): boolean {
-    if (actor.role === Role.OWNER) return true;
-    const perms = actor.permissions ?? resolvePermissions(actor.role as Role, null);
-    return perms.actions.editPermissions === true || perms.actions.manageStaff === true;
   }
 
   private assertCanManageRole(actor: AuditActor, role: Role) {
@@ -189,49 +179,6 @@ export class StaffService {
       throw new ForbiddenException('Только владелец может просматривать владельцев');
     }
     return this.withPermissions(user, actor);
-  }
-
-  /** Обновить права доступа сотрудника. */
-  async updatePermissions(id: string, dto: UpdatePermissionsDto, actor: AuthUser) {
-    if (!this.canEditPermissions(actor)) {
-      throw new ForbiddenException('Недостаточно прав для изменения прав доступа');
-    }
-    const user = await this.prisma.user.findUnique({ where: { id }, select: STAFF_SELECT });
-    if (!user) throw new NotFoundException('Сотрудник не найден');
-    // Права доступа настраиваются только для администраторов. Для официантов,
-    // кухни, бара и владельца используются фиксированные права по роли.
-    if (user.role !== Role.ADMIN) {
-      throw new ForbiddenException('Права доступа можно менять только у администратора');
-    }
-    // Нельзя редактировать собственные права (защита от само-эскалации).
-    if (id === actor.id) {
-      throw new ForbiddenException('Нельзя менять собственные права доступа');
-    }
-    if (user.positionId) {
-      throw new ForbiddenException('Измените права в разделе «Должности»');
-    }
-    this.assertCanManagePositionAccount(actor, user);
-
-    const permissions: EmployeePermissions = sanitizePermissionsInput(user.role, {
-      sections: dto.sections,
-      actions: dto.actions,
-    });
-
-    const updated = await this.prisma.user.update({
-      where: { id },
-      data: { permissions: permissions as unknown as Prisma.InputJsonValue },
-      select: STAFF_SELECT,
-    });
-    await this.audit.log({
-      actor,
-      actionType: AuditAction.STAFF_UPDATED,
-      entityType: AuditEntity.STAFF,
-      entityId: id,
-      description: `${actor.name ?? 'Сотрудник'} изменил права доступа сотрудника ${user.name}`,
-      oldValue: { permissions: user.permissions } as unknown as Prisma.InputJsonValue,
-      newValue: { permissions } as unknown as Prisma.InputJsonValue,
-    });
-    return this.withPermissions(updated);
   }
 
   private normalizePhone(phone: string) {
