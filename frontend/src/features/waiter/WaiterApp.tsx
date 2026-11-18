@@ -1144,7 +1144,7 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`flex h-full flex-col bg-white px-1 ${title || action ? 'py-2' : 'pb-0 pt-0.5'} md:rounded-2xl md:border md:border-border md:bg-card md:p-2 md:shadow-card xl:p-4`}>
+    <section className={`flex h-full flex-col bg-white px-1 ${title || action ? 'py-2' : 'pb-0 pt-0.5'} md:rounded-2xl md:border md:border-border/60 md:bg-card md:p-2 md:shadow-card xl:p-4`}>
       {(title || action) && (
         <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
           {title ? (
