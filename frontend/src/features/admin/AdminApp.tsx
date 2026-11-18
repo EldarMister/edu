@@ -194,6 +194,14 @@ export function AdminApp() {
     setRoute(view ? { section: next, view } : { section: next });
   }
   const [mobileNav, setMobileNav] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const restoreSidebarFocus = useRef(false);
+  useEffect(() => {
+    if (!restoreSidebarFocus.current) return;
+    restoreSidebarFocus.current = false;
+    sidebarToggleRef.current?.focus();
+  }, [sidebarExpanded]);
   const [collapsedSection, setCollapsedSection] = useState<Section | null>(null);
   const statsView = statisticsView(route.get('view'));
   const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
@@ -370,10 +378,33 @@ export function AdminApp() {
     return () => { document.title = previous; };
   }, [pageTitle]);
 
+  const sidebarToggleLabel = sidebarExpanded ? 'Свернуть боковую панель' : 'Развернуть боковую панель';
+  const sidebarToggle = (
+    <button
+      ref={sidebarToggleRef}
+      type="button"
+      className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-text-muted hover:bg-background hover:text-text-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
+      aria-label={sidebarToggleLabel}
+      title={sidebarToggleLabel}
+      aria-controls="desktop-sidebar"
+      aria-expanded={sidebarExpanded}
+      onClick={() => {
+        restoreSidebarFocus.current = true;
+        setSidebarExpanded((expanded) => !expanded);
+      }}
+    >
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+        <rect x="3" y="4.5" width="18" height="15" rx="3" />
+        <path d="M9 5v14" />
+      </svg>
+    </button>
+  );
+
   const renderSidebar = (variant: 'desktop' | 'mobile') => (
     <aside className="workspace-sidebar flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
-      <div className="workspace-brand flex h-16 items-center px-5">
+      <div className="workspace-brand flex h-16 items-center justify-between gap-2 px-5">
         <BrandLogo />
+        {variant === 'desktop' && sidebarToggle}
       </div>
       <nav className="workspace-nav app-scrollbar-subtle min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
         {sections.map((s) => {
@@ -472,7 +503,9 @@ export function AdminApp() {
       onTouchCancel={handleAppTouchEnd}
     >
       {/* Desktop sidebar */}
-      <div className="hidden lg:block">{renderSidebar('desktop')}</div>
+      <div id="desktop-sidebar" className={sidebarExpanded ? 'hidden lg:block' : 'hidden'}>
+        {sidebarExpanded && renderSidebar('desktop')}
+      </div>
 
       {/* Mobile drawer */}
       {mobileNav && (
@@ -515,6 +548,10 @@ export function AdminApp() {
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
+            {!sidebarExpanded && <div className="hidden shrink-0 items-center gap-2 border-r border-border pr-3 lg:flex">
+              <BrandLogo />
+              {sidebarToggle}
+            </div>}
             <WorkspaceTitleSlot><h1 className="text-xl font-semibold text-text-primary lg:text-2xl">
               {pageTitle}
             </h1></WorkspaceTitleSlot>
