@@ -99,6 +99,7 @@ export function OrderPanel({
   onReplaceRejectedItem,
   onRemoveRejectedItem,
   onCancelReadyItem,
+  onInsufficientPermissions,
   onCancelOrder,
   onEdit,
 }: {
@@ -130,6 +131,7 @@ export function OrderPanel({
   const settings = usePublicSettings();
   const policies = settings.data?.waiterOrderPermissions;
   const editable = waiterOrderPermission(order, 'edit', policies).allowed;
+  const billItemPermission = billItem ? waiterItemPermission(order, billItem, 'cancel', policies) : null;
   const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
   const finalCancelReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
 
@@ -360,29 +362,30 @@ export function OrderPanel({
         footer={
           <div className="space-y-2">
             <button
-              className="btn-danger btn-lg w-full font-semibold"
-              disabled={submitting || !billItem || !waiterItemPermission(order, billItem, 'cancel', policies).allowed}
+              className={`${billItemPermission?.allowed ? 'btn-danger' : 'btn-primary'} btn-lg w-full font-semibold`}
+              disabled={submitting || !billItem}
               onClick={() => {
                 if (!billItem) return;
-                onCancelReadyItem(billItem, finalCancelReason);
+                if (billItemPermission?.allowed) onCancelReadyItem(billItem, finalCancelReason);
+                else onInsufficientPermissions();
                 setBillItem(null);
               }}
             >
-              {submitting ? <Spinner /> : t('Отменить блюдо')}
+              {submitting ? <Spinner /> : t(billItemPermission?.allowed ? 'Отменить блюдо' : 'Позвать администратора')}
             </button>
           </div>
         }
       >
         {billItem && (
           <div className="space-y-3">
-            {!waiterItemPermission(order, billItem, 'cancel', policies).allowed && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{waiterItemPermission(order, billItem, 'cancel', policies).reason}</p>}
+            {billItemPermission && !billItemPermission.allowed && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{billItemPermission.reason}</p>}
             <div className="rounded-xl border border-border bg-background px-3 py-2">
               <p className="font-medium text-text-primary">{orderItemDisplayName(billItem)}</p>
               <p className="mt-1 text-sm text-text-muted">
                 ×{billItem.quantity} · {money(billItem.finalPrice)}
               </p>
             </div>
-            <div>
+            {billItemPermission?.allowed && <div>
               <p className="mb-2 text-sm font-medium text-text-secondary">{t('Причина отмены')}</p>
               <div className="space-y-2">
                 {ITEM_CANCEL_REASONS.map((reason) => (
@@ -412,7 +415,7 @@ export function OrderPanel({
                   onChange={(e) => setCancelOther(e.target.value)}
                 />
               )}
-            </div>
+            </div>}
           </div>
         )}
       </Modal>

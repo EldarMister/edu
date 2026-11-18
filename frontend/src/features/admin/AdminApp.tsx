@@ -205,7 +205,9 @@ export function AdminApp() {
   }
   const [mobileNav, setMobileNav] = useState(false);
   const [sidebarMode, setSidebarMode] = useState<SidebarMode>('expanded');
-  const [sidebarFlyout, setSidebarFlyout] = useState<{ section: Section; anchor: HTMLButtonElement } | null>(null);
+  const [sidebarFlyout, setSidebarFlyout] = useState<{ section: Section; anchor: HTMLButtonElement; pinned: boolean } | null>(null);
+  const flyoutTimer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(flyoutTimer.current), []);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const restoreSidebarFocus = useRef(false);
   useEffect(() => {
@@ -213,6 +215,13 @@ export function AdminApp() {
     restoreSidebarFocus.current = false;
     sidebarToggleRef.current?.focus();
   }, [sidebarMode]);
+
+  function scheduleFlyoutClose(section: Section) {
+    clearTimeout(flyoutTimer.current);
+    flyoutTimer.current = setTimeout(() => {
+      setSidebarFlyout((current) => current?.section === section && !current.pinned ? null : current);
+    }, 220);
+  }
   const [collapsedSection, setCollapsedSection] = useState<Section | null>(null);
   const statsView = statisticsView(route.get('view'));
   const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
@@ -458,13 +467,26 @@ export function AdminApp() {
                 aria-controls={flyout ? childrenId : undefined}
                 aria-current={active ? 'page' : undefined}
                 className={`workspace-nav-section grid h-10 w-full place-items-center rounded-xl transition-colors ${active ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
+                onPointerEnter={(event) => {
+                  if (!hasChildren || event.pointerType !== 'mouse') return;
+                  clearTimeout(flyoutTimer.current);
+                  const anchor = event.currentTarget;
+                  setSidebarFlyout((current) => current?.section === s.key ? current : { section: s.key, anchor, pinned: false });
+                }}
+                onPointerLeave={(event) => {
+                  if (event.pointerType === 'mouse' && flyout && !flyout.pinned) scheduleFlyoutClose(s.key);
+                }}
                 onClick={(event) => {
-                  if (hasChildren) setSidebarFlyout(flyout ? null : { section: s.key, anchor: event.currentTarget });
+                  clearTimeout(flyoutTimer.current);
+                  if (hasChildren) setSidebarFlyout(flyout?.pinned ? null : { section: s.key, anchor: event.currentTarget, pinned: true });
                   else go(s.key);
                 }}>
                 <Icon />
               </button>
-              {flyout && <SidebarFlyout id={childrenId} label={t(s.label)} anchor={flyout.anchor} onClose={() => setSidebarFlyout(null)}>
+              {flyout && <SidebarFlyout id={childrenId} label={t(s.label)} anchor={flyout.anchor}
+                focusOnOpen={flyout.pinned} onClose={() => setSidebarFlyout(null)}
+                onPointerEnter={() => clearTimeout(flyoutTimer.current)}
+                onPointerLeave={() => { if (!flyout.pinned) scheduleFlyoutClose(s.key); }}>
                 {children.map((item) => {
                   const selected = active && currentView === item.key;
                   return <button key={item.key} type="button" aria-current={selected ? 'page' : undefined}

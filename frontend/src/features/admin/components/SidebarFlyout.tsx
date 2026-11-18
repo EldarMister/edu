@@ -1,13 +1,16 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
-export function SidebarFlyout({ id, label, anchor, onClose, children, align = 'start' }: {
+export function SidebarFlyout({ id, label, anchor, onClose, children, align = 'start', focusOnOpen = true, onPointerEnter, onPointerLeave }: {
   id: string;
   label: string;
   anchor: HTMLButtonElement;
   onClose: () => void;
   children: ReactNode;
   align?: 'start' | 'end';
+  focusOnOpen?: boolean;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const close = useRef(onClose);
@@ -33,11 +36,11 @@ export function SidebarFlyout({ id, label, anchor, onClose, children, align = 's
     function onEscape(event: KeyboardEvent) {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       event.preventDefault();
+      const restoreFocus = element?.contains(document.activeElement);
       close.current();
-      anchor.focus();
+      if (restoreFocus) anchor.focus();
     }
     place();
-    element.querySelector<HTMLElement>('button, a[href]')?.focus({ preventScroll: true });
     window.addEventListener('resize', place);
     window.addEventListener('scroll', place, true);
     document.addEventListener('pointerdown', onOutside);
@@ -50,9 +53,15 @@ export function SidebarFlyout({ id, label, anchor, onClose, children, align = 's
     };
   }, [anchor, align]);
 
+  useLayoutEffect(() => {
+    if (focusOnOpen) panel.current?.querySelector<HTMLElement>('button, a[href]')?.focus({ preventScroll: true });
+  }, [anchor, focusOnOpen]);
+
   return createPortal(
     <div ref={panel} id={id} role="group" aria-label={label}
       className="workspace-sidebar-flyout fixed z-50 max-h-[calc(100dvh-16px)] w-56 overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-soft"
+      onPointerEnter={(event) => { if (event.pointerType === 'mouse') onPointerEnter?.(); }}
+      onPointerLeave={(event) => { if (event.pointerType === 'mouse') onPointerLeave?.(); }}
       onBlur={(event) => {
         if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget) && event.relatedTarget !== anchor) onClose();
       }}>

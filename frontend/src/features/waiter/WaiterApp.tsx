@@ -2,7 +2,7 @@ import { ModifierPicker } from './ModifierPicker';
 import type { CartModifiers } from './cart';
 import { usePublicSettings } from '@/features/settings/api';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Order, CartLine, DishVariant, WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
@@ -127,6 +127,11 @@ export function WaiterApp() {
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [administratorCallTarget, setAdministratorCallTarget] = useState<Order | null>(null);
+  const administratorPromptAudio = useRef<HTMLAudioElement>(null);
+  useEffect(() => {
+    const audio = administratorPromptAudio.current;
+    return () => audio?.pause();
+  }, []);
   const [pendingCancel, setPendingCancel] = useState<PendingCancel | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [cabinetOpen, setCabinetOpen] = useState(false);
@@ -444,15 +449,31 @@ export function WaiterApp() {
 
   function requestOrderCancellation(order: Order) {
     const permission = waiterOrderPermission(order, 'cancel', settings.data?.waiterOrderPermissions);
-    if (!permission.allowed) { push({ message: `${permission.reason} Отмените разрешённые позиции отдельно.`, type: 'error', at: new Date().toISOString() }); return; }
+    if (!permission.allowed) {
+      openAdministratorPrompt(order);
+      return;
+    }
     setCancelTarget(order);
+  }
+
+  function openAdministratorPrompt(order: Order) {
+    setAdministratorCallTarget(order);
+    const audio = administratorPromptAudio.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    void audio.play().catch(() => undefined);
+  }
+
+  function closeAdministratorPrompt() {
+    administratorPromptAudio.current?.pause();
+    setAdministratorCallTarget(null);
   }
 
   async function callAdministrator() {
     if (!administratorCallTarget) return;
     try {
       await administratorCall.mutateAsync(administratorCallTarget.id);
-      setAdministratorCallTarget(null);
+      closeAdministratorPrompt();
       push({
         message: t('Администратор вызван'),
         type: 'success',
@@ -810,7 +831,7 @@ export function WaiterApp() {
           onReplaceRejectedItem={(item) => replaceRejectedFromOrder(displayedOrder, item)}
           onRemoveRejectedItem={(item) => removeRejectedFromOrder(displayedOrder, item)}
           onCancelReadyItem={(item, reason) => cancelReadyItemFromOrder(displayedOrder, item, reason)}
-          onInsufficientPermissions={() => setAdministratorCallTarget(displayedOrder)}
+          onInsufficientPermissions={() => openAdministratorPrompt(displayedOrder)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}
         />
@@ -1043,9 +1064,10 @@ export function WaiterApp() {
         onConfirm={confirmCancelOrder}
       />
 
+      <audio ref={administratorPromptAudio} src="/sounds/call-administrator.mp3" preload="auto" />
       <InsufficientPermissionsModal
         open={!!administratorCallTarget}
-        onClose={() => setAdministratorCallTarget(null)}
+        onClose={closeAdministratorPrompt}
         onCallAdministrator={callAdministrator}
         submitting={administratorCall.isPending}
       />

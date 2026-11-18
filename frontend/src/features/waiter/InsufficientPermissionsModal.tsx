@@ -18,10 +18,11 @@ export function InsufficientPermissionsModal({
     <Modal open={open} onClose={onClose} panelClassName="max-w-lg overflow-hidden">
       <div className="flex flex-col items-center px-2 pb-2 pt-3 text-center sm:px-8 sm:pb-5 sm:pt-5">
         <img
-          src="/insufficient-permissions.png"
-          width={738}
-          height={517}
-          className="h-auto w-full max-w-[300px] object-contain sm:max-w-[330px]"
+          src="/chef-no-no-loop.webp"
+          width={640}
+          height={788}
+          className="h-auto max-h-[min(260px,36dvh)] w-auto max-w-full object-contain"
+          fetchPriority="high"
           alt=""
         />
         <h2 className="mt-2 text-[28px] font-bold tracking-tight text-text-primary sm:text-[32px]">
