@@ -64,7 +64,7 @@ export function WaiterProfile({
       </button>
 
       {trackShift && <ShiftCard startedAt={shiftActive ? shift.startedAt : undefined}
-        busy={shiftLoading || shiftPending} onAction={shiftActive ? onEndShift : onStartShift} />}
+        busy={shiftLoading || shiftPending} onAction={shiftActive ? onEndShift : onStartShift} showElapsed />}
 
       <div className="card p-5">
         <div className="flex items-center justify-between gap-3">

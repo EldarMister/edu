@@ -868,7 +868,7 @@ export function WaiterApp() {
     <div className="flex h-full flex-col bg-background">
       {/* Шапка */}
       <div className="relative shrink-0">
-      <header className="flex items-center justify-between gap-4 border-b border-border bg-white py-2 pl-2 pr-4 sm:pl-4">
+      <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-white py-2 pl-2 pr-4 sm:pl-4 xl:flex-nowrap xl:gap-4">
         <div className="flex items-center gap-2">
           <BrandLogo />
         </div>
@@ -893,12 +893,12 @@ export function WaiterApp() {
 
       <div className="relative flex min-h-0 flex-1 flex-col">
       {/* DESKTOP: 3 колонки */}
-      <main className="hidden flex-1 gap-4 overflow-hidden p-4 lg:flex">
+      <main className="hidden min-w-0 flex-1 gap-2 overflow-hidden p-2 md:flex xl:gap-4 xl:p-4">
         {desktopView === 'tables' ? (
           <>
-            <div className="w-[360px] shrink-0">{tablesPanel}</div>
+            <div className="min-w-0 w-[22%] max-w-[360px] shrink-0">{tablesPanel}</div>
             <div className="min-w-0 flex-1">{menuPanel}</div>
-            <div className="w-[380px] shrink-0">{rightPanel}</div>
+            <div className="min-w-0 w-[26%] max-w-[380px] shrink-0">{rightPanel}</div>
           </>
         ) : desktopView === 'orders' ? (
           <div className="mx-auto flex h-full w-full max-w-3xl flex-col overflow-hidden">
@@ -928,7 +928,7 @@ export function WaiterApp() {
       </main>
 
       {/* MOBILE: одна панель + нижняя навигация */}
-      <main className="flex-1 overflow-hidden bg-white px-1 pb-0 pt-0.5 lg:hidden">
+      <main className="flex-1 overflow-hidden bg-white px-1 pb-0 pt-0.5 md:hidden">
         {tab === 'tables' && tablesPanel}
         {tab === 'menu' && mobileMenuNode}
         {tab === 'cart' && rightPanel}
@@ -1000,7 +1000,7 @@ export function WaiterApp() {
 
       {/* Блок отмены действия с таймером — пока отмена заказа не ушла на сервер */}
       {pendingCancel && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 lg:bottom-6 lg:px-5">
+        <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 md:bottom-6 md:px-5">
           <div className="pointer-events-auto flex w-full max-w-2xl items-center gap-3.5 rounded-2xl border border-border bg-white px-4 py-3.5 shadow-soft sm:px-5">
             <UndoActionIcon />
             <div className="min-w-0 flex-1">
@@ -1144,9 +1144,9 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`flex h-full flex-col bg-white px-1 ${title || action ? 'py-2' : 'pb-0 pt-0.5'} lg:rounded-2xl lg:border lg:border-border lg:bg-card lg:p-4 lg:shadow-card`}>
+    <section className={`flex h-full flex-col bg-white px-1 ${title || action ? 'py-2' : 'pb-0 pt-0.5'} md:rounded-2xl md:border md:border-border md:bg-card md:p-2 md:shadow-card xl:p-4`}>
       {(title || action) && (
-        <div className="mb-3 flex shrink-0 items-center justify-between gap-2">
+        <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
           {title ? (
             <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
           ) : (
@@ -1202,7 +1202,7 @@ function DesktopNav({
   ];
 
   return (
-    <nav className="hidden items-center gap-1 lg:flex">
+    <nav className="hidden items-center gap-1 md:flex">
       {items.map((item) => {
         const active = current === item.key;
         return (
@@ -1241,7 +1241,7 @@ function BottomNav({
 }) {
   const t = useT();
   return (
-    <nav className="relative z-50 grid shrink-0 grid-cols-4 border-t border-border bg-white pb-[env(safe-area-inset-bottom)] lg:hidden">
+    <nav className="relative z-50 grid shrink-0 grid-cols-4 border-t border-border bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
       {NAV.map((n) => {
         const active = tab === n.key;
         const badge = n.key === 'orders' ? ordersCount : 0;
@@ -1295,7 +1295,7 @@ function MenuCartBar({
 }) {
   const hasItems = count > 0;
   return (
-    <div className="shrink-0 border-t border-border bg-white px-2 py-2 lg:hidden">
+    <div className="shrink-0 border-t border-border bg-white px-2 py-2 md:hidden">
       <div className="flex items-center gap-2">
         <button
           type="button"
