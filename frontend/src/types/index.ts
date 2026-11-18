@@ -83,10 +83,21 @@ export interface TableItem {
   occupiedBy?: { id: string; name: string } | null;
 }
 
+export interface FloorPlanTable {
+  tableId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  shape: 'rectangle' | 'round';
+  label?: string;
+}
+
 export interface Hall {
   id: string;
   name: string;
   tables: TableItem[];
+  floorPlan?: FloorPlanTable[] | null;
 }
 
 export interface Category {

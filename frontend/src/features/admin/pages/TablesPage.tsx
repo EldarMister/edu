@@ -8,10 +8,14 @@ import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { IconEdit, IconTrash, IconPlus, IconQr } from '../components/icons';
 import { TableQrModal } from '../components/TableQrModal';
+import { HallFloorPlanEditor } from '../components/HallFloorPlanEditor';
+import { usePageFilter } from './warehouse/workspace-route';
+import { usePublicSettings } from '@/features/settings/api';
 import {
   useAdminHalls,
   useTablesOverview,
   useHallMutations,
+  useFloorPlanMutations,
   useTableMutations,
   type AdminHall,
   type AdminTableItem,
@@ -21,6 +25,9 @@ export function TablesPage() {
   const editable = usePermissions().canEditSection('tables');
   const overview = useTablesOverview();
   const hallsQ = useAdminHalls();
+  const settings = usePublicSettings();
+  const { setMode } = useFloorPlanMutations();
+  const [view, setView] = usePageFilter('view');
   const { remove: removeHall } = useHallMutations();
   const { remove: removeTable } = useTableMutations();
   const push = useNotifications((s) => s.push);
@@ -36,6 +43,16 @@ export function TablesPage() {
 
   const o = overview.data;
   const halls = hallsQ.data ?? [];
+  const mapView = view === 'map';
+
+  async function changeMode(useMap: boolean) {
+    if (!editable || setMode.isPending) return;
+    try {
+      await setMode.mutateAsync(useMap);
+    } catch (error) {
+      push({ message: apiError(error), type: 'error', at: new Date().toISOString() });
+    }
+  }
 
   useEffect(() => {
     if (accordionReady || halls.length === 0) return;
@@ -73,6 +90,25 @@ export function TablesPage() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
+        <div role="group" aria-label="Раздел столов" className="inline-flex gap-1 rounded-xl border border-border bg-white p-1">
+          <button type="button" aria-pressed={!mapView} className={`rounded-lg px-3 py-2 text-sm ${!mapView ? 'bg-primary text-white' : 'text-text-secondary'}`}
+            onClick={() => setView('')}>Список столов</button>
+          <button type="button" aria-pressed={mapView} className={`rounded-lg px-3 py-2 text-sm ${mapView ? 'bg-primary text-white' : 'text-text-secondary'}`}
+            onClick={() => setView('map')}>Карта зала</button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-text-muted">Выбор стола на кассе</span>
+          <div role="group" aria-label="Выбор стола на кассе" className="inline-flex gap-1 rounded-xl border border-border bg-white p-1">
+            <button type="button" aria-pressed={settings.isSuccess && !settings.data?.useFloorPlan} disabled={!editable || !settings.isSuccess || setMode.isPending}
+              className="rounded-lg px-3 py-2 text-sm text-text-secondary aria-pressed:bg-primary aria-pressed:text-white disabled:opacity-70"
+              onClick={() => { if (settings.data?.useFloorPlan) void changeMode(false); }}>Обычные кнопки</button>
+            <button type="button" aria-pressed={settings.data?.useFloorPlan === true} disabled={!editable || !settings.isSuccess || setMode.isPending}
+              className="rounded-lg px-3 py-2 text-sm text-text-secondary aria-pressed:bg-primary aria-pressed:text-white disabled:opacity-70"
+              onClick={() => { if (!settings.data?.useFloorPlan) void changeMode(true); }}>Карта зала</button>
+          </div>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
           <Sum label={tr('Залов')} value={o?.hallsCount ?? '—'} />
           <Sep />
@@ -91,6 +127,13 @@ export function TablesPage() {
         <div className="flex justify-center py-12 text-primary">
           <Spinner className="h-6 w-6" />
         </div>
+      ) : hallsQ.isError ? (
+        <p role="alert" className="text-sm text-danger">{apiError(hallsQ.error)}</p>
+      ) : mapView ? (
+        <HallFloorPlanEditor halls={halls} editable={editable}
+          onAdd={(hall) => setTableModal({ hall, table: null })}
+          onEdit={(hall, table) => setTableModal({ hall, table })}
+          onRemove={delTable} />
       ) : (
         <div className="space-y-3">
           {halls.map((hall) => {

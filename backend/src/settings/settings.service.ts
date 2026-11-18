@@ -138,6 +138,7 @@ export class SettingsService {
       qrImageUrl: s.qrImageUrl ? `/settings/qr?ref=${encodeURIComponent(s.id)}&v=${s.updatedAt.getTime()}` : null,
       printerConnected: s.printerConnected,
       receiptPrintRequestsOnly: s.receiptPrintRequestsOnly,
+      useFloorPlan: s.useFloorPlan,
       // Включена ли ККМ — без раскрытия ключей (нужно фронтенду для подсказок/гейтинга).
       fiscalEnabled: !!s.fiscalProvider,
       deliveryEnabled: s.deliveryEnabled,

@@ -29,6 +29,5 @@ export function positionAccessSummary(role: Role, stored?: unknown) {
   if (role === 'KITCHEN' || role === 'BAR') parts.push(role === 'KITCHEN' ? 'Экран кухни' : 'Экран бара');
   if (permissions.adminAccess) parts.push(...SECTION_KEYS.filter((key) => permissions.sections[key]).map((key) => SECTION_LABELS[key]
     + (permissions.readOnlySections?.includes(key) ? ' (просмотр)' : '')));
-  else if ((role === 'KITCHEN' || role === 'BAR') && permissions.sections.warehouse) parts.push('Техкарты и остатки');
   return parts.join(', ') || 'Доступ не назначен';
 }

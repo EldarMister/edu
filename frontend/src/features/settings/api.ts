@@ -54,6 +54,7 @@ export interface Settings {
 }
 
 export interface PublicSettings {
+  useFloorPlan?: boolean;
   receiptPrintRequestsOnly: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;

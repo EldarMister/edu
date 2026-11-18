@@ -153,16 +153,6 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
           <Select ariaLabel="Экран приготовления" value={production ? role : 'ADMIN'} disabled={!!position || save.isPending}
             options={[{ value: 'ADMIN', label: 'Не используется' }, { value: 'KITCHEN', label: 'Кухня' }, { value: 'BAR', label: 'Бар' }]}
             onChange={(value) => setRole(value as PositionRole)} />
-          {production && !permissions.adminAccess && <DocumentField label="Доступ к складу">
-            <Select ariaLabel="Доступ к складу" value={level(['warehouse'])} disabled={save.isPending}
-              options={[
-                { value: 'none', label: 'Нет доступа' },
-                { value: 'view', label: 'Только просмотр техкарт и остатков' },
-                { value: 'full', label: 'Просмотр и изменение склада' },
-                ...(level(['warehouse']) === 'custom' ? [{ value: 'custom', label: 'Индивидуальные ограничения' }] : []),
-              ]}
-              onChange={(value) => { if (value !== 'custom') setLevel(['warehouse'], value); }} />
-          </DocumentField>}
           <p className="text-xs text-text-muted">Для повара или бармена. Конкретный цех выбирается в карточке сотрудника.</p>
         </div>
       </details>

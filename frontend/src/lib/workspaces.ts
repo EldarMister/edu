@@ -17,7 +17,7 @@ export function canOpenWorkspace(user: AuthUser, target: WorkspaceDestination) {
   const permissions = resolvePermissions(user.role, user.permissions);
   if (target === 'terminal') return access.terminal;
   if (target === 'admin') return access.admin;
-  if (target === 'warehouse') return permissions.sections.warehouse && (access.admin || !!access.production);
+  if (target === 'warehouse') return permissions.sections.warehouse && access.admin;
   return access.production === target || (access.admin && permissions.sections.orders);
 }
 
@@ -46,6 +46,7 @@ export function workspacePermissions(user: AuthUser, workspace: Workspace) {
     return permissions;
   }
   const permissions = getDefaultPermissionsByRole(user.role);
+  if (!base.adminAccess || !base.sections.warehouse) return permissions;
   permissions.sections.warehouse = base.sections.warehouse;
   permissions.readOnlySections = base.readOnlySections?.filter((section) => section === 'warehouse');
   for (const action of Object.keys(permissions.actions) as (keyof typeof permissions.actions)[]) {

@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { Hall, TableStatus } from '@/types';
 import { TABLE_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
+import { FloorPlan, layoutFloorTables } from '@/components/FloorPlan';
 
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
 const TABLE_GAP = 12;
@@ -22,13 +23,16 @@ export function TablesGrid({
   halls,
   selectedTableId,
   onSelect,
+  useMap = false,
 }: {
   halls: Hall[];
   selectedTableId: string | null;
   onSelect: (tableId: string) => void;
+  useMap?: boolean;
 }) {
   const t = useT();
-  const [hallId, setHallId] = useState(halls[0]?.id ?? '');
+  const [hallId, setHallId] = useState(() => halls.find((hall) =>
+    hall.tables.some(({ id }) => id === selectedTableId))?.id ?? halls[0]?.id ?? '');
   const hall = halls.find((h) => h.id === hallId) ?? halls[0];
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
@@ -72,7 +76,7 @@ export function TablesGrid({
       </div>
 
       <div ref={viewportRef} className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
-        <div
+        {useMap && hall ? <WaiterFloorPlan hall={hall} selectedTableId={selectedTableId} onSelect={onSelect} /> : <div
           className="grid items-start justify-center"
           style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, ${side}px))`, gap: TABLE_GAP, fontSize: tableFontSize }}
         >
@@ -97,7 +101,7 @@ export function TablesGrid({
               </button>
             );
           })}
-        </div>
+        </div>}
       </div>
 
       {/* Легенда */}
@@ -111,4 +115,29 @@ export function TablesGrid({
       </div>
     </div>
   );
+}
+
+function WaiterFloorPlan({ hall, selectedTableId, onSelect }: {
+  hall: Hall;
+  selectedTableId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const t = useT();
+  const tables = new Map(hall.tables.map((table) => [table.id, table]));
+  if (!tables.size) return <p className="p-3 text-sm text-text-muted">{t('В этом зале пока нет столов')}</p>;
+  return <FloorPlan placements={layoutFloorTables(hall.tables, hall.floorPlan)} renderTable={(placement, style) => {
+    const table = tables.get(placement.tableId)!;
+    const status = TABLE_STATUS[table.status];
+    const selected = table.id === selectedTableId;
+    const name = placement.label || `${t('Стол')} ${table.number}`;
+    const description = [name, t(status.label), table.occupiedBy?.name].filter(Boolean).join(' · ');
+    return <button key={table.id} type="button" style={style} className="floor-plan-table flex-col gap-0.5 overflow-hidden px-1"
+      data-shape={placement.shape} data-selected={selected} aria-pressed={selected}
+      aria-label={description} title={description} onClick={() => onSelect(table.id)}>
+      {!selected && <span className={`absolute right-[15%] top-[15%] h-2 w-2 shrink-0 rounded-full ${status.dot}`} />}
+      <span className="max-w-full truncate text-sm font-semibold">{placement.label || table.number}</span>
+      {table.occupiedBy && placement.width >= 6 &&
+        <span className="max-w-full truncate text-[10px] opacity-80">{table.occupiedBy.name}</span>}
+    </button>;
+  }} />;
 }

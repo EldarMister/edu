@@ -360,12 +360,19 @@ export function AdminApp() {
 
   const current = sections.find((s) => s.key === section) ?? sections[0];
   const currentViewLabel = section === 'stats'
-    ? STATISTICS_NAV.find((item) => item.key === statsView)?.label
+    ? statsView === 'sales' ? 'Статистика продаж' : STATISTICS_NAV.find((item) => item.key === statsView)?.label
     : section === 'warehouse'
       ? WAREHOUSE_NAV.find((item) => item.key === warehouseView)?.label
       : section === 'menu' ? MENU_NAV.find((item) => item.key === menuView)?.label
         : section === 'finance' ? financeNav.find(({ key }) => key === financeView)?.label
-          : section === 'staff' ? personnelNav.find(({ key }) => key === staffView)?.label : undefined;
+          : section === 'staff' ? personnelNav.find(({ key }) => key === staffView)?.label
+            : section === 'tables' && route.get('view') === 'map' ? 'Карта зала' : undefined;
+  const pageTitle = current ? t(currentViewLabel ?? current.label) : '';
+  useEffect(() => {
+    const previous = document.title;
+    document.title = pageTitle ? `${pageTitle} · EDU POS` : 'EDU POS';
+    return () => { document.title = previous; };
+  }, [pageTitle]);
 
   const renderSidebar = (variant: 'desktop' | 'mobile') => (
     <aside className="workspace-sidebar flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
@@ -513,7 +520,7 @@ export function AdminApp() {
               </svg>
             </button>
             <WorkspaceTitleSlot><h1 className="text-xl font-semibold text-text-primary lg:text-2xl">
-              {current ? t(currentViewLabel ?? current.label) : ''}
+              {pageTitle}
             </h1></WorkspaceTitleSlot>
           </div>
           <div className="contents sm:flex sm:items-center sm:gap-3">

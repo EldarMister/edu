@@ -473,6 +473,8 @@ model Hall {
   name      String
   isActive  Boolean  @default(true) @map("is_active")
   sortOrder Int      @default(0) @map("sort_order")
+  floorPlan Json?    @map("floor_plan")
+  floorPlanVersion Int @default(0) @map("floor_plan_version")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -991,6 +993,7 @@ model AuditLog {
 
 // Настройки заведения (singleton, id = "default"). Этап 8.
 model Settings {
+  useFloorPlan Boolean @default(false) @map("use_floor_plan")
   cashShiftsEnabled            Boolean @default(false) @map("cash_shifts_enabled")
   waiterOrderPermissions Json? @map("waiter_order_permissions")
   cafeId                       String? @unique @map("cafe_id")

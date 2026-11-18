@@ -750,7 +750,7 @@ export function WaiterApp() {
         />
       }
     >
-      <TablesGrid halls={halls} selectedTableId={cart.tableId} onSelect={selectTable} />
+      <TablesGrid halls={halls} selectedTableId={cart.tableId} onSelect={selectTable} useMap={settings.data?.useFloorPlan} />
     </Panel>
   );
 
@@ -1071,6 +1071,7 @@ export function WaiterApp() {
           currentTableId={cart.tableId}
           onPick={pickMenuTable}
           onClose={() => setTablePickerOpen(false)}
+          useMap={settings.data?.useFloorPlan}
         />
       )}
 

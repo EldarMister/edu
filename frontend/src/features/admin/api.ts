@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
-import type { EmployeePermissions, Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
+import type { EmployeePermissions, FloorPlanTable, Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
 
 // ---------- Типы ответов ----------
 export interface AdminTableItem {
@@ -19,6 +19,8 @@ export interface AdminHall {
   isActive: boolean;
   sortOrder: number;
   tables: AdminTableItem[];
+  floorPlan?: FloorPlanTable[] | null;
+  floorPlanVersion?: number;
 }
 export interface AdminCategory {
   id: string;
@@ -491,6 +493,25 @@ export function useTablesOverview() {
 }
 export function useAdminHalls() {
   return useQuery({ queryKey: ['admin', 'halls'], queryFn: () => get<AdminHall[]>('/admin/halls') });
+}
+
+export function useFloorPlanMutations() {
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: async ({ id, version, tables }: { id: string; version: number; tables: FloorPlanTable[] }) =>
+      (await api.put<{ floorPlan: FloorPlanTable[]; floorPlanVersion: number }>(`/admin/halls/${id}/floor-plan`, { version, tables })).data,
+    onSuccess: (plan, { id }) => {
+      qc.setQueryData<AdminHall[]>(['admin', 'halls'], (halls) => halls?.map((hall) =>
+        hall.id === id && (hall.floorPlanVersion ?? 0) <= plan.floorPlanVersion ? { ...hall, ...plan } : hall));
+      void qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
+      void qc.invalidateQueries({ queryKey: ['halls'] });
+    },
+  });
+  const setMode = useMutation({
+    mutationFn: (useFloorPlan: boolean) => api.put('/admin/tables/floor-plan-mode', { useFloorPlan }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
+  });
+  return { save, setMode };
 }
 
 export function useHallMutations() {

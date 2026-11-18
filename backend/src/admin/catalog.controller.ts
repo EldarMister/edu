@@ -4,6 +4,7 @@ import { MenuEntryService } from './menu-entry.service';
 import { MenuEntryDto } from './menu-entry.dto';
 import { Role } from '@prisma/client';
 import { CatalogService } from './catalog.service';
+import { SaveFloorPlanDto, SetFloorPlanModeDto } from './floor-plan.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -52,6 +53,18 @@ export class CatalogController {
   @RequirePermission('sections.tables')
   halls() {
     return this.catalog.hallsWithTables();
+  }
+
+  @Put('halls/:id/floor-plan')
+  @RequirePermission('sections.tables')
+  saveFloorPlan(@Param('id') id: string, @Body() dto: SaveFloorPlanDto) {
+    return this.catalog.saveFloorPlan(id, dto);
+  }
+
+  @Put('tables/floor-plan-mode')
+  @RequirePermission('sections.tables')
+  setFloorPlanMode(@Body() dto: SetFloorPlanModeDto) {
+    return this.catalog.setFloorPlanMode(dto.useFloorPlan);
   }
 
   @Post('halls')

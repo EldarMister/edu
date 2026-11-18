@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, TableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -10,6 +10,7 @@ import { normalizeDishImage, withDishImageRef } from '../dishes/dish-image';
 import { normalizeUnit, unitLabel } from '../warehouse/units';
 import { projectDishStock } from '../warehouse/dish-stock-projection';
 import { assertAssignableStation, defaultCategoryStation, lockStationRouting } from '../kitchen/preparation-stations';
+import { type SaveFloorPlanDto, withinFloorPlan } from './floor-plan.dto';
 import {
   CreateCategoryDto,
   CreateDishDto,
@@ -82,6 +83,41 @@ export class CatalogService {
         },
       },
     });
+  }
+
+  async saveFloorPlan(hallId: string, dto: SaveFloorPlanDto) {
+    const cafeId = getCafeId();
+    if (!cafeId) throw new BadRequestException('Не выбрано заведение');
+    if (dto.tables.some((table) => !withinFloorPlan(table))) {
+      throw new BadRequestException('Столы должны находиться в границах карты');
+    }
+    const tables = dto.tables.map(({ tableId, x, y, width, height, shape, label }) => ({
+      tableId, x, y, width, height, shape, ...(label?.trim() ? { label: label.trim() } : {}),
+    }));
+    const result = await this.prisma.$transaction(async (tx) => {
+      const hall = await tx.hall.findFirst({ where: { id: hallId, cafeId }, select: { id: true } });
+      if (!hall) throw new NotFoundException('Зал не найден');
+      const count = await tx.table.count({
+        where: { cafeId, hallId, isActive: true, id: { in: tables.map(({ tableId }) => tableId) } },
+      });
+      if (count !== tables.length) throw new ConflictException('Список столов изменился. Обновите карту зала');
+      const saved = await tx.hall.updateMany({
+        where: { id: hallId, cafeId, floorPlanVersion: dto.version },
+        data: { floorPlan: tables, floorPlanVersion: { increment: 1 } },
+      });
+      if (!saved.count) throw new ConflictException('Карта зала изменилась. Отмените правки и откройте актуальную версию');
+      return { floorPlan: tables, floorPlanVersion: dto.version + 1 };
+    });
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { hallId, action: 'floor-plan' });
+    return result;
+  }
+
+  async setFloorPlanMode(useFloorPlan: boolean) {
+    const cafeId = getCafeId();
+    if (!cafeId) throw new BadRequestException('Не выбрано заведение');
+    await this.prisma.settings.upsert({ where: { cafeId }, update: { useFloorPlan }, create: { cafeId, useFloorPlan } });
+    this.events.emitBroadcast(SERVER_EVENTS.SETTINGS_UPDATED, { fields: ['useFloorPlan'] });
+    return { useFloorPlan };
   }
 
   async createHall(dto: CreateHallDto) {

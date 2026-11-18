@@ -5,6 +5,7 @@ import { Spinner } from '@/components/Spinner';
 import { TABLE_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
 import type { AvailableWaiter } from './api';
+import { TablesGrid } from './TablesGrid';
 
 // ---------- Маленькие иконки ----------
 const I = ({ d }: { d: string }) => (
@@ -65,18 +66,20 @@ export function TableSelectModal({
   currentTableId,
   onPick,
   onClose,
+  useMap = false,
 }: {
   halls: Hall[];
   currentTableId: string | null;
   onPick: (tableId: string) => void;
   onClose: () => void;
+  useMap?: boolean;
 }) {
   const t = useT();
   const groups = halls.map((h) => ({ name: h.name, tables: h.tables })).filter((g) => g.tables.length > 0);
 
   return (
-    <Modal open onClose={onClose} title={t('Выбор стола')}>
-      <div className="space-y-3">
+    <Modal open onClose={onClose} title={t('Выбор стола')} panelClassName={useMap ? 'max-w-2xl' : undefined}>
+      {useMap ? <TablesGrid halls={halls} selectedTableId={currentTableId} onSelect={onPick} useMap /> : <div className="space-y-3">
         {groups.map((g) => (
           <div key={g.name}>
             <p className="mb-1.5 text-xs font-medium text-text-muted">{g.name}</p>
@@ -105,7 +108,7 @@ export function TableSelectModal({
             </div>
           </div>
         ))}
-      </div>
+      </div>}
     </Modal>
   );
 }

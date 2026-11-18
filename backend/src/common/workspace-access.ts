@@ -37,10 +37,12 @@ export function projectWorkspaceUser(user: AuthUser, requested?: unknown): AuthU
     role = identityRole === Role.OWNER ? Role.OWNER : Role.ADMIN;
   } else {
     permissions = getDefaultPermissionsByRole(identityRole as Role);
-    permissions.sections.warehouse = user.permissions.sections.warehouse;
-    permissions.readOnlySections = user.permissions.readOnlySections?.filter((section) => section === 'warehouse');
-    for (const action of Object.keys(permissions.actions) as (keyof typeof permissions.actions)[]) {
-      if (action.startsWith('warehouse')) permissions.actions[action] = user.permissions.actions[action];
+    if (access.admin && user.permissions.sections.warehouse) {
+      permissions.sections.warehouse = true;
+      permissions.readOnlySections = user.permissions.readOnlySections?.filter((section) => section === 'warehouse');
+      for (const action of Object.keys(permissions.actions) as (keyof typeof permissions.actions)[]) {
+        if (action.startsWith('warehouse')) permissions.actions[action] = user.permissions.actions[action];
+      }
     }
   }
   return { ...user, role, identityRole, workspace: workspace as Workspace, access, permissions };
