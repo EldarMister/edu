@@ -875,10 +875,6 @@ export function WaiterApp() {
         <DesktopNav current={desktopView} onChange={(next) => changeTab(next)} />
         <div className="flex items-center gap-3">
           <ConnectionStatus />
-          {trackShift && <span className={`text-xs ${activeShift ? 'text-success' : 'text-text-muted'}`}>
-            <span className="hidden sm:inline">{activeShift ? t('Смена активна') : t('Смена не начата')}</span>
-            <span className="sm:hidden">{activeShift ? t('Смена активна') : t('Нет смены')}</span>
-          </span>}
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
         </div>
       </header>
@@ -896,7 +892,7 @@ export function WaiterApp() {
       <main className="hidden min-w-0 flex-1 gap-2 overflow-hidden p-2 md:flex xl:gap-4 xl:p-4">
         {desktopView === 'tables' ? (
           <>
-            <div className="min-w-0 w-[22%] max-w-[360px] shrink-0">{tablesPanel}</div>
+            <div className={`min-w-0 shrink-0 ${settings.data?.useFloorPlan ? 'w-[34%] max-w-[620px]' : 'w-[22%] max-w-[360px]'}`}>{tablesPanel}</div>
             <div className="min-w-0 flex-1">{menuPanel}</div>
             <div className="min-w-0 w-[26%] max-w-[380px] shrink-0">{rightPanel}</div>
           </>

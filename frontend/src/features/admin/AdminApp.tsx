@@ -24,7 +24,6 @@ import {
   IconStaff,
   IconSettings,
   IconJournal,
-  IconReconcile,
   IconPrinter,
   IconWarehouse,
   IconMoney,
@@ -41,7 +40,6 @@ import { FinancePage } from './pages/finance/FinancePage';
 import { cashShiftKey, financeKey, useFinanceAccess } from './pages/finance/api';
 import { FINANCE_NAV, PERSONNEL_NAV } from './pages/finance/navigation';
 import { AuditPage } from './pages/AuditPage';
-import { ReconciliationPage } from './pages/ReconciliationPage';
 import { ReceiptPrintsPage } from './pages/ReceiptPrintsPage';
 import { WarehouseSection } from './pages/warehouse/WarehouseSection';
 import { WAREHOUSE_NAV, MENU_NAV, warehouseViewAllowed, warehouseViewInUse, type WarehouseView, type MenuView } from './pages/warehouse/navigation';
@@ -131,7 +129,6 @@ type Section =
   | 'finance'
   | 'staff'
   | 'audit'
-  | 'reconcile'
   | 'settings';
 
 // perm — ключ доступа к разделу.
@@ -152,7 +149,6 @@ const SECTIONS: {
   { key: 'warehouse', label: 'Склад', icon: IconWarehouse, perm: 'warehouse' },
   { key: 'staff', label: 'Персонал', icon: IconStaff, perm: 'staff' },
   { key: 'audit', label: 'Журнал', icon: IconJournal, perm: 'journal' },
-  { key: 'reconcile', label: 'Сверка оплат', icon: IconReconcile, perm: 'paymentReconciliation' },
   { key: 'settings', label: 'Настройки', icon: IconSettings, perm: 'settings' },
 ];
 
@@ -561,7 +557,6 @@ export function AdminApp() {
                 {staffView === 'employees' && <StaffPage key={staffTab} initialTab={staffTab} />}
               </>}
               {section === 'audit' && canSection('journal') && <AuditPage />}
-              {section === 'reconcile' && canSection('paymentReconciliation') && <ReconciliationPage />}
               {section === 'settings' && canSection('settings') && <SettingsPage />}
             </>
           )}

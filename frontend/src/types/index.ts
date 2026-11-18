@@ -12,7 +12,6 @@ export type SectionKey =
   | 'warehouse'
   | 'staff'
   | 'journal'
-  | 'paymentReconciliation'
   | 'checks'
   | 'settings';
 

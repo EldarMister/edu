@@ -13,6 +13,21 @@
     linear-gradient(to bottom, rgb(var(--edu-border) / .42) 1px, transparent 1px);
 }
 
+.floor-plan-scroll[data-fit] {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+.floor-plan-scroll[data-fit] .floor-plan-canvas {
+  flex: none;
+  margin-block: auto;
+  background-image: none;
+  container-type: inline-size;
+}
+
+.floor-plan-table-number { font-size: clamp(15px, 5cqw, 30px); }
+
 .floor-plan-table {
   position: absolute;
   display: flex;

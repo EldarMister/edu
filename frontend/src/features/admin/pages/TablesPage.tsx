@@ -37,12 +37,14 @@ export function TablesPage() {
   const [hallToDelete, setHallToDelete] = useState<{ hall: AdminHall; confirmation: string } | null>(null);
   const hallDeleteConfirmed = !!hallToDelete && hallToDelete.confirmation.trim() === hallToDelete.hall.name.trim();
   const [tableModal, setTableModal] = useState<{ hall: AdminHall; table: AdminTableItem | null } | null>(null);
+  const [tableToDelete, setTableToDelete] = useState<AdminTableItem | null>(null);
   const [qrModal, setQrModal] = useState<{ table: AdminTableItem; hallName: string } | null>(null);
   const [collapsedHalls, setCollapsedHalls] = useState<Set<string>>(() => new Set());
   const [accordionReady, setAccordionReady] = useState(false);
 
   const o = overview.data;
   const halls = hallsQ.data ?? [];
+  const tableToDeleteHall = halls.find((hall) => hall.id === tableToDelete?.hallId);
   const mapView = view === 'map';
 
   async function changeMode(useMap: boolean) {
@@ -69,13 +71,15 @@ export function TablesPage() {
       push({ message: apiError(err), at: new Date().toISOString() });
     }
   }
-  async function delTable(t: AdminTableItem) {
-    if (!confirm(`Удалить стол №${t.number}?`)) return;
-    try {
-      await removeTable.mutateAsync(t.id);
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
-    }
+  function requestTableDelete(table: AdminTableItem) {
+    if (!editable || removeTable.isPending) return;
+    removeTable.reset();
+    setTableToDelete(table);
+  }
+
+  function confirmTableDelete() {
+    if (!editable || !tableToDelete || removeTable.isPending) return;
+    removeTable.mutate(tableToDelete.id, { onSuccess: () => setTableToDelete(null) });
   }
 
   function toggleHall(id: string) {
@@ -118,7 +122,7 @@ export function TablesPage() {
           <Sep />
           <Sum label={tr('Занятых')} value={o?.occupiedCount ?? '—'} />
         </div>
-        {editable && <button className="btn-secondary btn-md" onClick={() => setHallModal('new')}>
+        {editable && !mapView && <button className="btn-secondary btn-md" onClick={() => setHallModal('new')}>
           <IconPlus className="h-4 w-4" /> {tr('Добавить зал')}
         </button>}
       </div>
@@ -133,7 +137,7 @@ export function TablesPage() {
         <HallFloorPlanEditor halls={halls} editable={editable}
           onAdd={(hall) => setTableModal({ hall, table: null })}
           onEdit={(hall, table) => setTableModal({ hall, table })}
-          onRemove={delTable} />
+          onRemove={requestTableDelete} />
       ) : (
         <div className="space-y-3">
           {halls.map((hall) => {
@@ -202,7 +206,7 @@ export function TablesPage() {
                             {editable && <><IconBtn onClick={() => setTableModal({ hall, table: t })} title="Изменить">
                               <IconEdit className="h-4 w-4" />
                             </IconBtn>
-                            <IconBtn onClick={() => delTable(t)} title="Удалить" danger>
+                            <IconBtn onClick={() => requestTableDelete(t)} title="Удалить" danger>
                               <IconTrash className="h-4 w-4" />
                             </IconBtn></>}
                           </div>
@@ -232,6 +236,26 @@ export function TablesPage() {
             <DeleteNameField label="Введите название зала для подтверждения"
               value={hallToDelete.confirmation} disabled={removeHall.isPending}
               onChange={(confirmation) => setHallToDelete({ ...hallToDelete, confirmation })} />
+          </div>
+        </Modal>
+      )}
+      {editable && tableToDelete && (
+        <Modal open title="Удалить стол" onClose={() => !removeTable.isPending && setTableToDelete(null)} footer={
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" autoFocus className="btn-secondary btn-lg" disabled={removeTable.isPending}
+              onClick={() => setTableToDelete(null)}>Отмена</button>
+            <button type="button" className="btn-danger btn-lg font-semibold" disabled={removeTable.isPending}
+              onClick={confirmTableDelete}>
+              {removeTable.isPending ? 'Удаление…' : 'Удалить'}
+            </button>
+          </div>
+        }>
+          <div className="space-y-2 text-sm">
+            <p className="text-text-primary">
+              Удалить стол №{tableToDelete.number}{tableToDeleteHall ? ` из зала «${tableToDeleteHall.name}»` : ''}?
+            </p>
+            <p className="text-text-muted">Стол исчезнет с кассы. История заказов сохранится.</p>
+            {removeTable.error && <p role="alert" className="text-danger">{apiError(removeTable.error)}</p>}
           </div>
         </Modal>
       )}

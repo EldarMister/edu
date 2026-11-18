@@ -125,7 +125,7 @@ function WaiterFloorPlan({ hall, selectedTableId, onSelect }: {
   const t = useT();
   const tables = new Map(hall.tables.map((table) => [table.id, table]));
   if (!tables.size) return <p className="p-3 text-sm text-text-muted">{t('В этом зале пока нет столов')}</p>;
-  return <FloorPlan placements={layoutFloorTables(hall.tables, hall.floorPlan)} renderTable={(placement, style) => {
+  return <FloorPlan fit placements={layoutFloorTables(hall.tables, hall.floorPlan)} renderTable={(placement, style) => {
     const table = tables.get(placement.tableId)!;
     const status = TABLE_STATUS[table.status];
     const selected = table.id === selectedTableId;
@@ -135,7 +135,7 @@ function WaiterFloorPlan({ hall, selectedTableId, onSelect }: {
       data-shape={placement.shape} data-selected={selected} aria-pressed={selected}
       aria-label={description} title={description} onClick={() => onSelect(table.id)}>
       {!selected && <span className={`absolute right-[15%] top-[15%] h-2 w-2 shrink-0 rounded-full ${status.dot}`} />}
-      <span className="max-w-full truncate text-sm font-semibold">{placement.label || table.number}</span>
+      <span className="floor-plan-table-number max-w-full truncate font-semibold">{placement.label || table.number}</span>
       {table.occupiedBy && placement.width >= 6 &&
         <span className="max-w-full truncate text-[10px] opacity-80">{table.occupiedBy.name}</span>}
     </button>;

@@ -9,7 +9,6 @@ export const SECTION_KEYS: SectionKey[] = [
   'warehouse',
   'staff',
   'journal',
-  'paymentReconciliation',
   'checks',
   'settings',
 ];
@@ -43,7 +42,6 @@ export const SECTION_LABELS: Record<SectionKey, string> = {
   warehouse: 'Склад',
   staff: 'Персонал',
   journal: 'Журнал',
-  paymentReconciliation: 'Сверка оплат',
   checks: 'Чеки / Оплата',
   settings: 'Настройки',
 };
@@ -91,7 +89,6 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
           warehouse: true,
           staff: true,
           journal: false,
-          paymentReconciliation: false,
           checks: true,
           settings: false,
         },

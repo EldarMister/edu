@@ -8,8 +8,6 @@ import { AdminOrdersController } from './admin-orders.controller';
 import { AdminOrdersService } from './admin-orders.service';
 import { StatisticsController } from './statistics.controller';
 import { StatisticsService } from './statistics.service';
-import { ReconciliationController } from './reconciliation/reconciliation.controller';
-import { ReconciliationService } from './reconciliation/reconciliation.service';
 import { AdminWarehouseController } from './warehouse.controller';
 import { AdminWarehouseService } from './warehouse.service';
 import { OrdersModule } from '../orders/orders.module';
@@ -25,7 +23,6 @@ import { MenuEntryService } from './menu-entry.service';
     PositionsController,
     AdminOrdersController,
     StatisticsController,
-    ReconciliationController,
     AdminWarehouseController,
   ],
   providers: [
@@ -34,7 +31,6 @@ import { MenuEntryService } from './menu-entry.service';
     StaffService,
     AdminOrdersService,
     StatisticsService,
-    ReconciliationService,
     AdminWarehouseService,
   ],
 })

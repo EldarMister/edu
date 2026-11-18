@@ -30,27 +30,36 @@ export function layoutFloorTables(tables: { id: string }[], saved: FloorPlanTabl
   return tables.map(({ id }) => placements.get(id)!);
 }
 
-export function floorTableStyle(table: FloorPlanTable, rows: number): CSSProperties {
+function floorTableStyle(table: FloorPlanTable, { x, y, columns, rows }: { x: number; y: number; columns: number; rows: number }): CSSProperties {
   return {
-    left: `${100 * table.x / FLOOR_COLUMNS}%`,
-    top: `${100 * table.y / rows}%`,
-    width: `${100 * table.width / FLOOR_COLUMNS}%`,
+    left: `${100 * (table.x - x) / columns}%`,
+    top: `${100 * (table.y - y) / rows}%`,
+    width: `${100 * table.width / columns}%`,
     height: `${100 * table.height / rows}%`,
   };
 }
 
-export function FloorPlan({ placements, renderTable, canvasRef, editing, minRows = 14 }: {
+export function FloorPlan({ placements, renderTable, canvasRef, editing, fit = false }: {
   placements: FloorPlanTable[];
   renderTable: (table: FloorPlanTable, style: CSSProperties) => ReactNode;
   canvasRef?: Ref<HTMLDivElement>;
   editing?: boolean;
-  minRows?: number;
+  fit?: boolean;
 }) {
-  const rows = placements.reduce((max, table) => Math.max(max, table.y + table.height + 2), minRows);
-  return <div className="floor-plan-scroll">
+  let x = 0;
+  let y = 0;
+  let columns = FLOOR_COLUMNS;
+  let rows = placements.reduce((max, table) => Math.max(max, table.y + table.height + 2), 14);
+  if (fit && placements.length) {
+    x = Math.max(0, Math.min(...placements.map((table) => table.x)) - 1);
+    y = Math.max(0, Math.min(...placements.map((table) => table.y)) - 1);
+    columns = Math.max(10, Math.max(...placements.map((table) => table.x + table.width)) - x + 1);
+    rows = Math.max(6, Math.max(...placements.map((table) => table.y + table.height)) - y + 1);
+  }
+  return <div className="floor-plan-scroll" data-fit={fit || undefined}>
     <div ref={canvasRef} className="floor-plan-canvas" data-editing={editing || undefined}
-      style={{ aspectRatio: `${FLOOR_COLUMNS} / ${rows}`, backgroundSize: `${100 / FLOOR_COLUMNS}% ${100 / rows}%` }}>
-      {placements.map((table) => renderTable(table, floorTableStyle(table, rows)))}
+      style={{ aspectRatio: `${columns} / ${rows}`, backgroundSize: `${100 / columns}% ${100 / rows}%` }}>
+      {placements.map((table) => renderTable(table, floorTableStyle(table, { x, y, columns, rows })))}
     </div>
   </div>;
 }
