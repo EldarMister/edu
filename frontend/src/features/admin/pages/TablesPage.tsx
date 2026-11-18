@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Modal } from '@/components/Modal';
+import { DeleteNameField } from '../components/DeleteNameField';
 import { Spinner } from '@/components/Spinner';
 import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
@@ -26,6 +27,8 @@ export function TablesPage() {
   const tr = useT();
 
   const [hallModal, setHallModal] = useState<AdminHall | null | 'new'>(null);
+  const [hallToDelete, setHallToDelete] = useState<{ hall: AdminHall; confirmation: string } | null>(null);
+  const hallDeleteConfirmed = !!hallToDelete && hallToDelete.confirmation.trim() === hallToDelete.hall.name.trim();
   const [tableModal, setTableModal] = useState<{ hall: AdminHall; table: AdminTableItem | null } | null>(null);
   const [qrModal, setQrModal] = useState<{ table: AdminTableItem; hallName: string } | null>(null);
   const [collapsedHalls, setCollapsedHalls] = useState<Set<string>>(() => new Set());
@@ -40,10 +43,11 @@ export function TablesPage() {
     setAccordionReady(true);
   }, [accordionReady, halls]);
 
-  async function delHall(h: AdminHall) {
-    if (!confirm(`Удалить зал «${h.name}»?`)) return;
+  async function delHall() {
+    if (!editable || !hallToDelete || !hallDeleteConfirmed || removeHall.isPending) return;
     try {
-      await removeHall.mutateAsync(h.id);
+      await removeHall.mutateAsync(hallToDelete.hall.id);
+      setHallToDelete(null);
     } catch (err) {
       push({ message: apiError(err), at: new Date().toISOString() });
     }
@@ -122,7 +126,7 @@ export function TablesPage() {
                     <IconBtn onClick={() => setHallModal(hall)} title="Изменить зал">
                       <IconEdit className="h-4 w-4" />
                     </IconBtn>
-                    <IconBtn onClick={() => delHall(hall)} title="Удалить зал" danger>
+                    <IconBtn onClick={() => setHallToDelete({ hall, confirmation: '' })} title="Удалить зал" danger>
                       <IconTrash className="h-4 w-4" />
                     </IconBtn></>}
                     <IconBtn onClick={() => toggleHall(hall.id)} title={collapsed ? 'Развернуть' : 'Свернуть'}>
@@ -172,6 +176,21 @@ export function TablesPage() {
 
       {editable && hallModal !== null && (
         <HallModal hall={hallModal === 'new' ? null : hallModal} onClose={() => setHallModal(null)} />
+      )}
+      {editable && hallToDelete && (
+        <Modal open title="Удалить зал" onClose={() => !removeHall.isPending && setHallToDelete(null)} footer={
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" className="btn-secondary btn-lg" disabled={removeHall.isPending} onClick={() => setHallToDelete(null)}>Отмена</button>
+            <button type="button" className="btn-danger btn-lg font-semibold" disabled={removeHall.isPending || !hallDeleteConfirmed} onClick={delHall}>Удалить</button>
+          </div>
+        }>
+          <div className="space-y-3">
+            <p className="text-sm text-text-secondary">Удалить зал «{hallToDelete.hall.name}»?</p>
+            <DeleteNameField label="Введите название зала для подтверждения"
+              value={hallToDelete.confirmation} disabled={removeHall.isPending}
+              onChange={(confirmation) => setHallToDelete({ ...hallToDelete, confirmation })} />
+          </div>
+        </Modal>
       )}
       {editable && tableModal && (
         <TableModal

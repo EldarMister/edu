@@ -2,6 +2,7 @@ import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
+import { DeleteNameField } from '../components/DeleteNameField';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { minDishUnitPrice, variantNamesLine } from '@/lib/format';
@@ -678,9 +679,12 @@ function DeleteCategorySheet({
   const push = useNotifications((s) => s.push);
   const others = categories.filter((c) => c.id !== category.id);
   const [targetId, setTargetId] = useState(others[0]?.id ?? '');
+  const [confirmation, setConfirmation] = useState('');
+  const confirmed = confirmation.trim() === category.name.trim();
   const hasDishes = category._count.dishes > 0;
 
   async function run(strategy?: 'move' | 'delete', targetCategoryId?: string) {
+    if (!confirmed || remove.isPending) return;
     try {
       await remove.mutateAsync({ id: category.id, strategy, targetCategoryId });
       push({ message: 'Категория удалена', at: new Date().toISOString() });
@@ -691,18 +695,21 @@ function DeleteCategorySheet({
   }
 
   return (
-    <Modal open onClose={onDone} title={`Удалить «${category.name}»`} panelClassName="max-w-md">
+    <Modal open onClose={() => !remove.isPending && onDone()} title={`Удалить «${category.name}»`} footer={
+      <div className={hasDishes ? 'flex justify-end' : 'grid grid-cols-2 gap-2'}>
+        <button type="button" className="btn-secondary btn-lg" disabled={remove.isPending} onClick={onDone}>Отмена</button>
+        {!hasDishes && <button type="button" className="btn-danger btn-lg font-semibold"
+          disabled={remove.isPending || !confirmed} onClick={() => run()}>
+          {remove.isPending ? <Spinner /> : 'Удалить'}
+        </button>}
+      </div>
+    }>
+      <div className="mb-3">
+        <DeleteNameField label="Введите название категории для подтверждения"
+          value={confirmation} disabled={remove.isPending} onChange={setConfirmation} />
+      </div>
       {!hasDishes ? (
-        <div className="space-y-3">
-          <p className="text-sm text-text-secondary">В категории нет блюд. Удалить её?</p>
-          <button
-            className="btn-danger btn-lg w-full font-semibold"
-            disabled={remove.isPending}
-            onClick={() => run()}
-          >
-            {remove.isPending ? <Spinner /> : 'Удалить категорию'}
-          </button>
-        </div>
+        <p className="text-sm text-text-secondary">В категории нет блюд.</p>
       ) : (
         <div className="space-y-4">
           <p className="text-sm text-text-secondary">
@@ -725,7 +732,7 @@ function DeleteCategorySheet({
                 />
                 <button
                   className="btn-primary btn-md shrink-0"
-                  disabled={remove.isPending || !targetId}
+                  disabled={remove.isPending || !confirmed || !targetId}
                   onClick={() => run('move', targetId)}
                 >
                   {remove.isPending ? <Spinner /> : 'Перенести и удалить'}
@@ -741,7 +748,7 @@ function DeleteCategorySheet({
             </p>
             <button
               className="btn-danger btn-md w-full font-semibold"
-              disabled={remove.isPending}
+              disabled={remove.isPending || !confirmed}
               onClick={() => run('delete')}
             >
               {remove.isPending ? <Spinner /> : 'Удалить вместе с блюдами'}

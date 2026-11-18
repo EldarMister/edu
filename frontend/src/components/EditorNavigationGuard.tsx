@@ -34,9 +34,9 @@ export function EditorNavigationGuard() {
   }, []));
   if (blocker.state !== 'blocked') return null;
   return <Modal open title="Есть несохранённые изменения" onClose={() => blocker.reset()} footer={
-    <div className="flex flex-wrap justify-end gap-2">
-      <button type="button" className="btn-secondary btn-md" onClick={() => blocker.proceed()}>Выйти без сохранения</button>
-      <button type="button" autoFocus className="btn-primary btn-md" onClick={() => blocker.reset()}>Продолжить редактирование</button>
+    <div className="grid grid-cols-2 gap-2">
+      <button type="button" autoFocus className="btn-secondary btn-lg h-auto min-h-12 rounded px-2 py-2" onClick={() => blocker.reset()}>Продолжить редактирование</button>
+      <button type="button" className="btn-danger btn-lg h-auto min-h-12 rounded px-2 py-2 font-semibold" onClick={() => blocker.proceed()}>Выйти без сохранения</button>
     </div>
   }><p className="text-sm text-text-secondary">Изменения в документе ещё не сохранены. Остаться на странице и закончить работу?</p></Modal>;
 }

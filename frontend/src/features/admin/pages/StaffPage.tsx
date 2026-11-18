@@ -5,6 +5,7 @@ import { useAssignableStaffPositions } from './positions-api';
 import { positionAccessSummary } from './position-permissions';
 import { parseMoney } from './finance/finance-format';
 import { Modal } from '@/components/Modal';
+import { DeleteNameField } from '../components/DeleteNameField';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -121,7 +122,8 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
   const [closingShift, setClosingShift] = useState<ShiftHistoryRow | null>(null);
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const staffEditor = editor?.type === 'employee' ? editor : null;
-  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string; confirmation: string } | null>(null);
+  const deleteConfirmed = !!pendingDelete && pendingDelete.confirmation.trim() === pendingDelete.name.trim();
 
   const reportQ = useShiftReport(date, tab === 'current');
   const historyQ = useShiftHistory(historyFilters, tab === 'history');
@@ -183,7 +185,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
   ];
 
   async function confirmDelete() {
-    if (!pendingDelete) return;
+    if (!pendingDelete || !deleteConfirmed || remove.isPending) return;
     try {
       const result = await remove.mutateAsync(pendingDelete.id);
       push({ message: result?.isActive === false ? 'Сотрудник отключён. История работы и расчётов сохранена.' : 'Сотрудник удалён', at: new Date().toISOString() });
@@ -425,7 +427,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
                             <IconBtn title={tr('Изменить')} onClick={openEdit}>
                               <IconEdit className="h-4 w-4" />
                             </IconBtn>
-                            {id !== currentUser?.id && <IconBtn title={tr('Удалить')} danger onClick={() => setPendingDelete({ id, name })}>
+                            {id !== currentUser?.id && <IconBtn title={tr('Удалить')} danger onClick={() => setPendingDelete({ id, name, confirmation: '' })}>
                               <IconTrash className="h-4 w-4" />
                             </IconBtn>}
                           </div>}
@@ -498,7 +500,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
               </button>
               <button
                 className="btn-danger btn-lg flex-1 font-semibold"
-                disabled={remove.isPending}
+                disabled={remove.isPending || !deleteConfirmed}
                 onClick={confirmDelete}
               >
                 {remove.isPending ? <Spinner /> : 'Удалить'}
@@ -510,6 +512,11 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
             Удалить сотрудника «{pendingDelete.name}»?
           </p>
           <p className="mt-2 text-sm text-text-muted">Если у сотрудника есть история работы или расчётов, доступ будет отключён, а данные сохранятся. Открытые смены и заказы нужно предварительно закрыть.</p>
+          <div className="mt-3">
+            <DeleteNameField label="Введите имя сотрудника для подтверждения"
+              value={pendingDelete.confirmation} disabled={remove.isPending}
+              onChange={(confirmation) => setPendingDelete({ ...pendingDelete, confirmation })} />
+          </div>
         </Modal>
       )}
     </div>
