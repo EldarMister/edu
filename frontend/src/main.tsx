@@ -6,10 +6,17 @@ import { queryClient } from '@/lib/queryClient';
 import { App } from './App';
 import { EditorNavigationGuard } from '@/components/EditorNavigationGuard';
 import { installAudioUnlock } from '@/lib/audio';
+import { APP_RELOAD_PARAM } from '@/lib/app-update';
 import './index.css';
 import './theme.css';
 
 installAudioUnlock();
+
+const loadedUrl = new URL(window.location.href);
+if (loadedUrl.searchParams.has(APP_RELOAD_PARAM)) {
+  loadedUrl.searchParams.delete(APP_RELOAD_PARAM);
+  window.history.replaceState(window.history.state, '', loadedUrl);
+}
 
 // Точная высота вьюпорта на мобильных. Обновляется при ресайзе и
 // показе клавиатуры, чтобы нижняя навигация не «уезжала» вниз.

@@ -30,12 +30,15 @@ export function layoutFloorTables(tables: { id: string }[], saved: FloorPlanTabl
   return tables.map(({ id }) => placements.get(id)!);
 }
 
-function floorTableStyle(table: FloorPlanTable, { x, y, columns, rows }: { x: number; y: number; columns: number; rows: number }): CSSProperties {
+function floorTableStyle(table: FloorPlanTable, { x, y, columns, rows }: { x: number; y: number; columns: number; rows: number }, fit: boolean): CSSProperties {
+  // Spread table centres over the visible rectangle while keeping each table's proportions.
+  const top = table.y - y + (fit ? table.height / 2 : 0);
   return {
     left: `${100 * (table.x - x) / columns}%`,
-    top: `${100 * (table.y - y) / rows}%`,
+    top: `${100 * top / rows}%`,
     width: `${100 * table.width / columns}%`,
-    height: `${100 * table.height / rows}%`,
+    height: fit ? `${100 * table.height / columns}cqw` : `${100 * table.height / rows}%`,
+    translate: fit ? '0 -50%' : undefined,
   };
 }
 
@@ -49,7 +52,7 @@ export function FloorPlan({ placements, renderTable, canvasRef, editing, fit = f
   let x = 0;
   let y = 0;
   let columns = FLOOR_COLUMNS;
-  let rows = placements.reduce((max, table) => Math.max(max, table.y + table.height + 2), 14);
+  let rows = placements.reduce((max, table) => Math.max(max, table.y + table.height + 2), 32);
   if (fit && placements.length) {
     x = Math.max(0, Math.min(...placements.map((table) => table.x)) - 1);
     y = Math.max(0, Math.min(...placements.map((table) => table.y)) - 1);
@@ -59,7 +62,7 @@ export function FloorPlan({ placements, renderTable, canvasRef, editing, fit = f
   return <div className="floor-plan-scroll" data-fit={fit || undefined}>
     <div ref={canvasRef} className="floor-plan-canvas" data-editing={editing || undefined}
       style={{ aspectRatio: `${columns} / ${rows}`, backgroundSize: `${100 / columns}% ${100 / rows}%` }}>
-      {placements.map((table) => renderTable(table, floorTableStyle(table, { x, y, columns, rows })))}
+      {placements.map((table) => renderTable(table, floorTableStyle(table, { x, y, columns, rows }, fit)))}
     </div>
   </div>;
 }

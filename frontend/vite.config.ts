@@ -6,6 +6,7 @@ import { fileURLToPath, URL } from 'node:url';
 import { createRequire } from 'node:module';
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { APP_RELOAD_PARAM } from './src/lib/app-update';
 
 const pkg = createRequire(import.meta.url)('./package.json') as { version: string };
 
@@ -94,6 +95,7 @@ export default defineConfig({
         // Новый SW активируется сразу — не ждёт закрытия всех вкладок
         skipWaiting: true,
         clientsClaim: true,
+        navigateFallbackDenylist: [new RegExp(`[?&]${APP_RELOAD_PARAM}=\\d+(?:&|$)`)],
         // SW-файл не кэшируется HTTP-кэшем браузера — всегда проверяется с сервера
         // (без этого браузер может игнорировать обновления до 24 часов)
       },

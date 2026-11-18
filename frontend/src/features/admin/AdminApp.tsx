@@ -10,6 +10,7 @@ import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
 import { WorkShiftBanner } from '@/features/settings/WorkShiftBanner';
 import { SidebarProfile } from './components/SidebarProfile';
+import { SidebarFlyout } from './components/SidebarFlyout';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import { beep } from '@/lib/sound';
@@ -50,6 +51,7 @@ import { StationsPage } from './pages/StationsPage';
 import { IngredientCategoriesPage } from './pages/IngredientCategoriesPage';
 import { WorkspaceHeaderProvider, WorkspaceTitleSlot, WorkspaceActionsSlot } from './pages/WorkspaceHeader';
 import './pages/warehouse/poster-workspace.css';
+import './components/sidebar.css';
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -131,6 +133,14 @@ type Section =
   | 'audit'
   | 'settings';
 
+const NEXT_SIDEBAR_MODE = { expanded: 'compact', compact: 'hidden', hidden: 'expanded' } as const;
+type SidebarMode = keyof typeof NEXT_SIDEBAR_MODE;
+const SIDEBAR_TOGGLE_LABELS: Record<SidebarMode, string> = {
+  expanded: 'Свернуть боковую панель до иконок',
+  compact: 'Скрыть боковую панель',
+  hidden: 'Развернуть боковую панель',
+};
+
 // perm — ключ доступа к разделу.
 // adminOnly — раздел структурно только для админа (владельцу не показываем).
 const SECTIONS: {
@@ -194,14 +204,15 @@ export function AdminApp() {
     setRoute(view ? { section: next, view } : { section: next });
   }
   const [mobileNav, setMobileNav] = useState(false);
-  const [sidebarExpanded, setSidebarExpanded] = useState(true);
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>('expanded');
+  const [sidebarFlyout, setSidebarFlyout] = useState<{ section: Section; anchor: HTMLButtonElement } | null>(null);
   const sidebarToggleRef = useRef<HTMLButtonElement>(null);
   const restoreSidebarFocus = useRef(false);
   useEffect(() => {
     if (!restoreSidebarFocus.current) return;
     restoreSidebarFocus.current = false;
     sidebarToggleRef.current?.focus();
-  }, [sidebarExpanded]);
+  }, [sidebarMode]);
   const [collapsedSection, setCollapsedSection] = useState<Section | null>(null);
   const statsView = statisticsView(route.get('view'));
   const warehouseView = (WAREHOUSE_NAV.some((item) => item.key === route.get('view')) ? route.get('view') : 'balances') as WarehouseView;
@@ -378,7 +389,7 @@ export function AdminApp() {
     return () => { document.title = previous; };
   }, [pageTitle]);
 
-  const sidebarToggleLabel = sidebarExpanded ? 'Свернуть боковую панель' : 'Развернуть боковую панель';
+  const sidebarToggleLabel = SIDEBAR_TOGGLE_LABELS[sidebarMode];
   const sidebarToggle = (
     <button
       ref={sidebarToggleRef}
@@ -387,26 +398,28 @@ export function AdminApp() {
       aria-label={sidebarToggleLabel}
       title={sidebarToggleLabel}
       aria-controls="desktop-sidebar"
-      aria-expanded={sidebarExpanded}
+      aria-expanded={sidebarMode !== 'hidden'}
       onClick={() => {
         restoreSidebarFocus.current = true;
-        setSidebarExpanded((expanded) => !expanded);
+        setSidebarFlyout(null);
+        setSidebarMode((mode) => NEXT_SIDEBAR_MODE[mode]);
       }}
     >
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
+      <svg key={sidebarMode} className="workspace-sidebar-toggle-icon" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
         <rect x="3" y="4.5" width="18" height="15" rx="3" />
-        <path d="M9 5v14" />
+        {sidebarMode !== 'hidden' && <path d={sidebarMode === 'compact' ? 'M7 5v14' : 'M10 5v14'} />}
       </svg>
     </button>
   );
 
-  const renderSidebar = (variant: 'desktop' | 'mobile') => (
-    <aside className="workspace-sidebar flex h-full w-52 shrink-0 flex-col border-r border-border bg-white">
-      <div className="workspace-brand flex h-16 items-center justify-between gap-2 px-5">
-        <BrandLogo />
-        {variant === 'desktop' && sidebarToggle}
+  const renderSidebar = (variant: 'desktop' | 'mobile') => {
+    const compact = variant === 'desktop' && sidebarMode !== 'expanded';
+    return <aside className={`workspace-sidebar flex h-full shrink-0 flex-col border-r border-border bg-white ${variant === 'desktop' ? 'w-full' : 'w-52'}`}>
+      <div className={`workspace-brand flex h-16 shrink-0 items-center gap-2 ${compact ? 'justify-center' : 'justify-between px-5'}`}>
+        {!compact && <BrandLogo />}
+        {variant === 'desktop' && sidebarMode !== 'hidden' && sidebarToggle}
       </div>
-      <nav className="workspace-nav app-scrollbar-subtle min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
+      <nav aria-label={t('Разделы')} className={`workspace-nav min-h-0 flex-1 space-y-1 overflow-y-auto py-2 ${compact ? 'no-scrollbar px-2' : 'app-scrollbar-subtle px-3'}`}>
         {sections.map((s) => {
           const Icon = s.icon;
           const active = s.key === section;
@@ -428,6 +441,41 @@ export function AdminApp() {
           const expanded = hasChildren && active && collapsedSection !== s.key;
           const selectedSection = active && !hasChildren;
           const childrenId = `workspace-${variant}-${s.key}-children`;
+          const flyout = compact && sidebarFlyout?.section === s.key ? sidebarFlyout : null;
+          function openView(view: string) {
+            if (s.key === 'warehouse') setWarehouseView(view as WarehouseView);
+            else if (s.key === 'menu') setMenuView(view as MenuView);
+            else if (s.key === 'stats') setStatsView(view as StatisticsView);
+            else setRoute({ section: s.key, view });
+            setMobileNav(false);
+            setSidebarFlyout(null);
+            flyout?.anchor.focus();
+          }
+          if (compact) return (
+            <div key={s.key}>
+              <button type="button" aria-label={t(s.label)} title={t(s.label)}
+                aria-expanded={hasChildren ? !!flyout : undefined}
+                aria-controls={flyout ? childrenId : undefined}
+                aria-current={active ? 'page' : undefined}
+                className={`workspace-nav-section grid h-10 w-full place-items-center rounded-xl transition-colors ${active ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
+                onClick={(event) => {
+                  if (hasChildren) setSidebarFlyout(flyout ? null : { section: s.key, anchor: event.currentTarget });
+                  else go(s.key);
+                }}>
+                <Icon />
+              </button>
+              {flyout && <SidebarFlyout id={childrenId} label={t(s.label)} anchor={flyout.anchor} onClose={() => setSidebarFlyout(null)}>
+                {children.map((item) => {
+                  const selected = active && currentView === item.key;
+                  return <button key={item.key} type="button" aria-current={selected ? 'page' : undefined}
+                    className={`block w-full rounded-lg px-3 py-2.5 text-left text-sm leading-5 ${selected ? 'bg-primary/10 font-medium text-primary' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
+                    onClick={() => openView(item.key)}>
+                    {t(item.label)}
+                  </button>;
+                })}
+              </SidebarFlyout>}
+            </div>
+          );
           return (
             <div key={s.key}>
               <button
@@ -467,13 +515,7 @@ export function AdminApp() {
                             type="button"
                             tabIndex={expanded ? undefined : -1}
                             aria-current={selected ? 'page' : undefined}
-                            onClick={() => {
-                              if (s.key === 'warehouse') setWarehouseView(item.key as WarehouseView);
-                              else if (s.key === 'menu') setMenuView(item.key as MenuView);
-                              else if (s.key === 'stats') setStatsView(item.key as StatisticsView);
-                              else setRoute({ section: s.key, view: item.key });
-                              setMobileNav(false);
-                            }}
+                            onClick={() => openView(item.key)}
                             className={`workspace-nav-child block w-full rounded-lg py-2 pl-[34px] pr-2 text-left text-sm leading-[21px] transition-colors ${selected ? 'bg-primary font-medium text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
                           >
                             {t(item.label)}
@@ -488,10 +530,10 @@ export function AdminApp() {
           );
         })}
       </nav>
-      <WorkspaceLinks current="admin" />
-      <SidebarProfile name={user?.name} onLogout={onLogout} />
-    </aside>
-  );
+      {!compact && <WorkspaceLinks current="admin" />}
+      <SidebarProfile key={variant === 'desktop' ? sidebarMode : 'mobile'} name={user?.name} onLogout={onLogout} compact={compact} />
+    </aside>;
+  };
 
   return (
     <WorkspaceHeaderProvider>
@@ -503,8 +545,10 @@ export function AdminApp() {
       onTouchCancel={handleAppTouchEnd}
     >
       {/* Desktop sidebar */}
-      <div id="desktop-sidebar" className={sidebarExpanded ? 'hidden lg:block' : 'hidden'}>
-        {sidebarExpanded && renderSidebar('desktop')}
+      <div id="desktop-sidebar" data-mode={sidebarMode} aria-hidden={sidebarMode === 'hidden' || undefined}
+        ref={(element) => { if (element) element.inert = sidebarMode === 'hidden'; }}
+        className="workspace-desktop-sidebar hidden shrink-0 lg:block">
+        {renderSidebar('desktop')}
       </div>
 
       {/* Mobile drawer */}
@@ -548,7 +592,7 @@ export function AdminApp() {
                 <path d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            {!sidebarExpanded && <div className="hidden shrink-0 items-center gap-2 border-r border-border pr-3 lg:flex">
+            {sidebarMode === 'hidden' && <div className="hidden shrink-0 items-center gap-2 border-r border-border pr-3 lg:flex">
               <BrandLogo />
               {sidebarToggle}
             </div>}

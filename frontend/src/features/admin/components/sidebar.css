@@ -1,0 +1,38 @@
+.workspace-desktop-sidebar {
+  width: 13rem;
+  overflow: clip;
+  transition: width 220ms ease;
+}
+
+.workspace-desktop-sidebar[data-mode='compact'] { width: 3.5rem; }
+.workspace-desktop-sidebar[data-mode='hidden'] { width: 0; pointer-events: none; }
+
+.workspace-desktop-sidebar > .workspace-sidebar {
+  min-width: 3.5rem;
+  transition: opacity 160ms ease;
+}
+
+.workspace-desktop-sidebar[data-mode='hidden'] > .workspace-sidebar { opacity: 0; }
+
+.workspace-sidebar-toggle-icon {
+  transform-origin: center;
+  animation: workspace-sidebar-toggle 220ms ease both;
+}
+
+.workspace-sidebar-flyout { animation: workspace-sidebar-flyout 140ms ease-out both; }
+
+@keyframes workspace-sidebar-toggle {
+  from { transform: scale(.76); opacity: .55; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes workspace-sidebar-flyout {
+  from { transform: translateX(-5px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-desktop-sidebar,
+  .workspace-desktop-sidebar > .workspace-sidebar { transition: none; }
+  .workspace-sidebar-toggle-icon, .workspace-sidebar-flyout { animation: none; }
+}

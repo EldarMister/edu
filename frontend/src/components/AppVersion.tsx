@@ -19,7 +19,10 @@ export function AppVersion({ className = '' }: { className?: string }) {
     if (taps.current >= TAPS_TO_UPDATE) {
       taps.current = 0;
       setUpdating(true);
-      void refreshAppToLatestVersion();
+      void refreshAppToLatestVersion().then(
+        () => setUpdating(false),
+        () => setUpdating(false),
+      );
       return;
     }
     timer.current = setTimeout(() => {

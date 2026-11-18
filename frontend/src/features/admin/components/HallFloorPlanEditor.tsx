@@ -109,7 +109,7 @@ export function HallFloorPlanEditor({ halls, editable, onAdd, onEdit, onRemove }
     </div>
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     {editable && <p className="text-xs text-text-muted">Перетащите стол, чтобы переместить его. Потяните за угол, чтобы изменить размер. С клавиатуры используйте стрелки, а для изменения размера — Shift и стрелки.</p>}
-    <div className="max-w-4xl">
+    <div className="max-w-[560px]">
       <FloorPlan placements={placements} canvasRef={canvas} editing={editable} renderTable={(table, style) => {
         const number = tablesById.get(table.tableId)?.number;
         const selected = table.tableId === selectedId;

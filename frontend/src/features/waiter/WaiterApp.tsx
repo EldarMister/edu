@@ -892,7 +892,7 @@ export function WaiterApp() {
       <main className="hidden min-w-0 flex-1 gap-2 overflow-hidden p-2 md:flex xl:gap-4 xl:p-4">
         {desktopView === 'tables' ? (
           <>
-            <div className={`min-w-0 shrink-0 ${settings.data?.useFloorPlan ? 'w-[34%] max-w-[620px]' : 'w-[22%] max-w-[360px]'}`}>{tablesPanel}</div>
+            <div className="min-w-0 w-[22%] max-w-[360px] shrink-0">{tablesPanel}</div>
             <div className="min-w-0 flex-1">{menuPanel}</div>
             <div className="min-w-0 w-[26%] max-w-[380px] shrink-0">{rightPanel}</div>
           </>

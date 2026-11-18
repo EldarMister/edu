@@ -20,8 +20,8 @@
 }
 
 .floor-plan-scroll[data-fit] .floor-plan-canvas {
-  flex: none;
-  margin-block: auto;
+  flex: 1 0 auto;
+  min-width: 0;
   background-image: none;
   container-type: inline-size;
 }
