@@ -1,7 +1,7 @@
 import { useId, useState, type FormEvent } from 'react';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
-import { ACTION_LABELS, ACTION_KEYS, getDefaultPermissionsByRole, resolvePermissions, SECTION_KEYS, SECTION_WRITE_ACTIONS } from '@/lib/permissions';
+import { ACTION_LABELS, ACTION_KEYS, getDefaultPermissionsByRole, READ_ONLY_SECTION_KEYS, resolvePermissions, SECTION_KEYS, SECTION_WRITE_ACTIONS } from '@/lib/permissions';
 import type { ActionKey, EmployeePermissions, SectionKey } from '@/types';
 import { EditorPage, useEditorDirty } from './warehouse/EditorPage';
 import { DocumentField } from './warehouse/WarehouseUi';
@@ -10,11 +10,15 @@ import { SECTION_ACTIONS } from './position-permissions';
 import { useStaffPositionMutations, type PositionRole, type PositionSalary, type StaffPosition } from './positions-api';
 
 const groups: { key: string; label: string; sections: SectionKey[] }[] = [
-  { key: 'statistics', label: 'Статистика', sections: ['statistics', 'orders', 'checks', 'journal'] },
-  { key: 'finance', label: 'Финансы', sections: ['finance', 'paymentReconciliation'] },
+  { key: 'statistics', label: 'Статистика', sections: ['statistics'] },
+  { key: 'finance', label: 'Финансы', sections: ['finance'] },
+  { key: 'orders', label: 'Заказы', sections: ['orders'] },
+  { key: 'checks', label: 'Чеки', sections: ['checks'] },
   { key: 'menu', label: 'Меню', sections: ['menu'] },
   { key: 'warehouse', label: 'Склад', sections: ['warehouse'] },
   { key: 'staff', label: 'Персонал', sections: ['staff'] },
+  { key: 'journal', label: 'Журнал', sections: ['journal'] },
+  { key: 'paymentReconciliation', label: 'Сверка оплат', sections: ['paymentReconciliation'] },
   { key: 'settings', label: 'Настройки / залы', sections: ['settings', 'tables'] },
 ];
 const payFields: { key: keyof PositionSalary; label: string; percent?: boolean }[] = [
@@ -70,7 +74,7 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
   function level(sections: SectionKey[]) {
     if (sections.every((key) => !permissions.sections[key])) return 'none';
     if (!sections.every((key) => permissions.sections[key])) return 'custom';
-    const writes = sections.filter((key) => key !== 'statistics' && key !== 'journal' && key !== 'paymentReconciliation');
+    const writes = sections.filter((key) => READ_ONLY_SECTION_KEYS.includes(key));
     if (writes.every((key) => permissions.readOnlySections?.includes(key))) return 'view';
     if (sections.some((key) => permissions.readOnlySections?.includes(key))) return 'custom';
     return sections.every((key) => (SECTION_ACTIONS[key] ?? []).every((action) => permissions.actions[action])) ? 'full' : 'custom';
@@ -82,7 +86,7 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
       for (const key of sections) {
         next.sections[key] = value !== 'none';
         for (const action of SECTION_ACTIONS[key] ?? []) next.actions[action] = value !== 'none';
-        if (value === 'view') {
+        if (value === 'view' && READ_ONLY_SECTION_KEYS.includes(key)) {
           next.readOnlySections.push(key);
           for (const action of SECTION_WRITE_ACTIONS[key] ?? []) next.actions[action] = false;
         }
@@ -122,13 +126,19 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
         {permissions.adminAccess && <>
           <div className="mt-3"><table className="w-full table-fixed text-xs sm:table-auto sm:text-sm">
             <thead><tr><th className="w-[40%] sm:w-auto">Разделы</th><th className="text-center">Нет доступа</th><th className="text-center">Просмотр</th><th className="text-center">Полный доступ</th></tr></thead>
-            <tbody>{groups.map((group) => <tr key={group.key}><td>
-              {group.label}{level(group.sections) === 'custom' && <span className="block text-xs text-text-muted">Индивидуальные ограничения</span>}
-            </td>{(['none', 'view', 'full'] as const).map((value) => <td key={value} className="text-center">
-              <label className="flex min-h-8 cursor-pointer items-center justify-center"><input type="radio" name={`${formId}-${group.key}`} aria-label={`${group.label}: ${value === 'none' ? 'нет доступа' : value === 'view' ? 'просмотр' : 'полный доступ'}`}
-                className="h-4 w-4 cursor-pointer accent-primary" checked={level(group.sections) === value} onChange={() => setLevel(group.sections, value)} />
-              </label>
-            </td>)}</tr>)}</tbody>
+            <tbody>{groups.map((group) => {
+              const currentLevel = level(group.sections);
+              const canEdit = group.sections.some((key) => READ_ONLY_SECTION_KEYS.includes(key));
+              return <tr key={group.key}>
+                <td>{group.label}{currentLevel === 'custom' && <span className="block text-xs text-text-muted">Индивидуальные ограничения</span>}</td>
+                {(['none', 'view', 'full'] as const).map((value) => <td key={value} className="text-center">
+                  {value === 'full' && !canEdit ? <span className="text-text-muted" aria-hidden="true">—</span> :
+                    <label className="flex min-h-8 cursor-pointer items-center justify-center"><input type="radio" name={`${formId}-${group.key}`} aria-label={`${group.label}: ${value === 'none' ? 'нет доступа' : value === 'view' ? 'просмотр' : 'полный доступ'}`}
+                      className="h-4 w-4 cursor-pointer accent-primary" checked={currentLevel === value} onChange={() => setLevel(group.sections, value)} />
+                    </label>}
+                </td>)}
+              </tr>;
+            })}</tbody>
           </table></div>
           <details className="mt-4 text-sm"><summary className="cursor-pointer py-2 text-primary">Отдельные действия и ограничения</summary>
             <div className="grid gap-x-6 sm:grid-cols-2">{ACTION_KEYS.filter((key) => key !== 'editPermissions' && key !== 'financeCashShifts'
