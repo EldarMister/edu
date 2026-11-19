@@ -61,10 +61,10 @@ export function CartLinesList({
                 {l.modifierSelections?.map((option) => <p key={option.optionId} className="text-sm text-text-secondary">+ {option.name} ×{option.quantity}</p>)}
                 {l.excludedIngredientNames?.map((name) => <p key={name} className="text-sm text-warning">Без {name}</p>)}
                 {/* Компактная метка «С собой» — только если позиция навынос. Тап снимает отметку. */}
-                {l.takeaway && (
+                {l.takeaway && onToggleTakeaway && (
                   <button
                     type="button"
-                    onClick={() => onToggleTakeaway?.(key, false)}
+                    onClick={() => onToggleTakeaway(key, false)}
                     aria-label={t('Снять «с собой»')}
                     className="mt-1 inline-flex items-center gap-1 rounded-md border border-border bg-white px-1.5 py-0.5 text-[11px] leading-none text-text-secondary"
                   >

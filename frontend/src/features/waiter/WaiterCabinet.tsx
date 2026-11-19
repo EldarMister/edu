@@ -220,7 +220,7 @@ function OrderRow({
       className="-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-2 rounded-lg px-1 py-2.5 text-left text-sm transition-colors hover:bg-background"
     >
       <span className="w-14 shrink-0 font-medium text-text-primary">{displayOrderNumber(order.orderNumber)}</span>
-      <span className="shrink-0 text-text-muted">{tableLabel} {order.tableNumber}</span>
+      <span className="shrink-0 text-text-muted">{order.source === 'delivery' ? t('Доставка') : `${tableLabel} ${order.tableNumber}`}</span>
       <span className="shrink-0 text-text-light">{timeHM(order.createdAt)}</span>
       <span className="ml-auto shrink-0 font-medium text-text-primary">{money(order.finalAmount)}</span>
       <span className={`shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-medium ${s.cls}`}>{t(s.label)}</span>

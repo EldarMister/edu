@@ -49,11 +49,12 @@ export class CatalogService {
   // ===================== ЗАЛЫ И СТОЛЫ =====================
 
   async tablesOverview() {
+    const physicalTables = { NOT: { hallId: { startsWith: 'delivery-hall:' } } };
     const [hallsCount, tablesCount, activeTables, occupied] = await Promise.all([
       this.prisma.hall.count({ where: { isActive: true } }),
-      this.prisma.table.count(),
-      this.prisma.table.count({ where: { isActive: true } }),
-      this.prisma.table.count({ where: { status: { not: TableStatus.free } } }),
+      this.prisma.table.count({ where: physicalTables }),
+      this.prisma.table.count({ where: { ...physicalTables, isActive: true } }),
+      this.prisma.table.count({ where: { ...physicalTables, status: { not: TableStatus.free } } }),
     ]);
     return {
       hallsCount,
@@ -66,6 +67,7 @@ export class CatalogService {
   /** Залы с действующими столами для управления. Архивные столы в интерфейс не попадают. */
   hallsWithTables() {
     return this.prisma.hall.findMany({
+      where: { NOT: { id: { startsWith: 'delivery-hall:' } } },
       orderBy: { sortOrder: 'asc' },
       include: {
         tables: {
@@ -86,6 +88,7 @@ export class CatalogService {
   }
 
   async saveFloorPlan(hallId: string, dto: SaveFloorPlanDto) {
+    if (hallId.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
     const cafeId = getCafeId();
     if (!cafeId) throw new BadRequestException('Не выбрано заведение');
     if (dto.tables.some((table) => !withinFloorPlan(table))) {
@@ -121,7 +124,9 @@ export class CatalogService {
   }
 
   async createHall(dto: CreateHallDto) {
-    const hall = await this.prisma.hall.create({ data: { name: dto.name, sortOrder: dto.sortOrder ?? 0 } });
+    const hall = await this.prisma.hall.create({
+      data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, useFloorPlan: dto.useFloorPlan },
+    });
     this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { hallId: hall.id, action: 'create-hall' });
     return hall;
   }
@@ -146,6 +151,7 @@ export class CatalogService {
 
   async createTable(dto: CreateTableDto) {
     const { hallId, seats, number } = dto;
+    if (hallId.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
     const result = await this.prisma.$transaction(async (tx) => {
       const cafeId = getCafeId();
       // Serialize table creation per hall and verify access before reading its numbers.
@@ -221,6 +227,7 @@ export class CatalogService {
   }
 
   private async ensureHall(id: string) {
+    if (id.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
     const hall = await this.prisma.hall.findUnique({ where: { id } });
     if (!hall) throw new NotFoundException('Зал не найден');
     return hall;

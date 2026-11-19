@@ -24,6 +24,7 @@ export class HallsService {
     // другому официанту заходить в чужой занятый стол.
     const activeOrders = await this.prisma.order.findMany({
       where: {
+        source: { not: 'delivery' },
         status: { notIn: [OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] },
       },
       orderBy: { createdAt: 'desc' },

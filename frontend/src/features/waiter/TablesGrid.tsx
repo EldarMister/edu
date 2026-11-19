@@ -34,6 +34,7 @@ export function TablesGrid({
   const [hallId, setHallId] = useState(() => halls.find((hall) =>
     hall.tables.some(({ id }) => id === selectedTableId))?.id ?? halls[0]?.id ?? '');
   const hall = halls.find((h) => h.id === hallId) ?? halls[0];
+  const showMap = hall?.useFloorPlan ?? useMap;
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
 
@@ -76,7 +77,7 @@ export function TablesGrid({
       </div>
 
       <div ref={viewportRef} className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
-        {useMap && hall ? <WaiterFloorPlan hall={hall} selectedTableId={selectedTableId} onSelect={onSelect} /> : <div
+        {showMap && hall ? <WaiterFloorPlan hall={hall} selectedTableId={selectedTableId} onSelect={onSelect} /> : <div
           className="grid items-start justify-center"
           style={{ gridTemplateColumns: `repeat(${columns}, minmax(0, ${side}px))`, gap: TABLE_GAP, fontSize: tableFontSize }}
         >

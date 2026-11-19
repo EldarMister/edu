@@ -22,6 +22,7 @@ export function CartSheet({
   submitting,
   canSubmit,
   submitLabel,
+  delivery,
 }: {
   open: boolean;
   onClose: () => void;
@@ -32,6 +33,7 @@ export function CartSheet({
   canSubmit: boolean;
   /** Текст основной кнопки (зависит от режима и направления позиций). */
   submitLabel: string;
+  delivery?: boolean;
 }) {
   const t = useT();
   const { lines, comment, commentOpen, inc, dec, setComment, setCommentOpen, setLineTakeaway, setAllTakeaway, clear } =
@@ -111,7 +113,7 @@ export function CartSheet({
         <div className="shrink-0 px-4 pb-2">
           <div className="flex items-center justify-between gap-2">
             <h2 className="text-lg font-semibold text-text-primary">{t('Корзина')}</h2>
-            {hasLines && (
+            {hasLines && !delivery && (
               <span onPointerDown={(e) => e.stopPropagation()}>
                 <TakeawaySwitch on={allTakeaway} onChange={setAllTakeaway} />
               </span>
@@ -124,7 +126,7 @@ export function CartSheet({
           {!hasLines ? (
             <p className="py-12 text-center text-sm text-text-muted">{t('Корзина пуста')}</p>
           ) : (
-            <CartLinesList lines={lines} inc={inc} dec={dec} onToggleTakeaway={setLineTakeaway} />
+            <CartLinesList lines={lines} inc={inc} dec={dec} onToggleTakeaway={delivery ? undefined : setLineTakeaway} />
           )}
         </div>
 

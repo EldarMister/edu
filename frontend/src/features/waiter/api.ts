@@ -18,6 +18,7 @@ import type { CartLine } from '@/types';
 export interface CabinetRecentOrder {
   id: string;
   orderNumber: string;
+  source?: Order['source'];
   tableNumber: number;
   finalAmount: string;
   status: OrderStatus;
@@ -182,18 +183,25 @@ function linesToItems(lines: CartLine[]) {
   }));
 }
 
+export interface DeliveryDetails {
+  customerName: string;
+  customerPhone: string;
+  deliveryAddress: string;
+}
+
+type OrderDestination = { tableId: string; delivery?: never } | { tableId?: never; delivery: DeliveryDetails };
+
 export function useCreateOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: {
-      tableId: string;
+    mutationFn: async (payload: OrderDestination & {
       comment?: string;
       idempotencyKey: string;
       lines: CartLine[];
     }) => {
       const items = linesToItems(payload.lines);
-      const { data } = await api.post<Order>('/orders', {
-        tableId: payload.tableId,
+      const { data } = await api.post<Order>(payload.delivery ? '/orders/delivery' : '/orders', {
+        ...(payload.delivery ?? { tableId: payload.tableId }),
         comment: payload.comment?.trim() || undefined,
         idempotencyKey: payload.idempotencyKey,
         items,

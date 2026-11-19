@@ -74,9 +74,12 @@ export function OrdersTable({ items, isLoading, error, scrollRef, loadMoreRef, i
                 >
                   <Td className="font-medium text-text-primary">{displayOrderNumber(order.orderNumber)}</Td>
                   <Td className="whitespace-nowrap text-text-secondary">{new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)}</Td>
-                  <Td className="text-text-secondary">{order.source === 'delivery' ? '—' : <>{tr('Стол')} {order.table.number}{hallSuffix(order.table)}</>}</Td>
                   <Td className="text-text-secondary">
-                    {order.source === 'delivery' ? <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{tr('Доставка')}</span> : order.waiter?.name ?? 'QR menu'}
+                    {order.source === 'delivery' ? <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{tr('Доставка')}</span>
+                      : <>{tr('Стол')} {order.table.number}{hallSuffix(order.table)}</>}
+                  </Td>
+                  <Td className="text-text-secondary">
+                    {order.waiter?.name ?? (order.source === 'delivery' ? tr('Онлайн-заказ') : 'QR menu')}
                   </Td>
                   <Td className="text-right font-medium text-text-primary">{money(order.finalAmount)}</Td>
                   <Td className="order-status-cell pl-4"><OrderStatusBadges order={order} size="sm" className="flex flex-nowrap items-center justify-start gap-1" /></Td>

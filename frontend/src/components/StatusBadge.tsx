@@ -3,13 +3,15 @@ import { ORDER_STATUS, TABLE_STATUS, orderStationStatuses } from '@/lib/status';
 import { useT } from '@/lib/i18n';
 import { usePreparationStations } from '@/features/kitchen/stations';
 
-export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?: 'sm' | 'md' }) {
+export function OrderBadge({ status, source, size = 'md' }: { status: OrderStatus; source?: Order['source']; size?: 'sm' | 'md' }) {
   const t = useT();
   const meta = ORDER_STATUS[status];
+  const deliveryStatus = source === 'delivery' && (status === 'ready' ? 'Готов к выдаче'
+    : status === 'picked_up' ? 'В пути' : status === 'served' ? 'Доставлен' : null);
   const sizeCls = size === 'sm' ? 'rounded-md px-2 py-0.5 text-[11px]' : 'rounded-lg px-2.5 py-1 text-xs';
   return (
     <span className={`inline-flex items-center whitespace-nowrap font-medium ${sizeCls} ${meta.badge}`}>
-      {t(meta.label)}
+      {t(deliveryStatus || meta.label)}
     </span>
   );
 }
@@ -31,7 +33,7 @@ export function OrderStatusBadges({
   const chips = orderStationStatuses(order);
   const stations = usePreparationStations(chips.some((chip) => chip.station !== 'kitchen' && chip.station !== 'bar'));
   const sizeCls = size === 'sm' ? 'rounded-md px-2 py-0.5 text-[11px]' : 'rounded-lg px-2.5 py-1 text-xs';
-  if (chips.length === 0) return <OrderBadge status={order.status} size={size} />;
+  if (chips.length === 0) return <OrderBadge status={order.status} source={order.source} size={size} />;
   return (
     <div className={className}>
       {chips.map((c) => (

@@ -22,6 +22,11 @@ const { PaymentsService } = require('../src/payments/payments.service.ts');
 const { StaffController } = require('../src/admin/staff.controller.ts');
 const { StaffService } = require('../src/admin/staff.service.ts');
 const { PositionsController } = require('../src/admin/positions.controller.ts');
+const { CatalogController } = require('../src/admin/catalog.controller.ts');
+const { CatalogService } = require('../src/admin/catalog.service.ts');
+const { MenuEntryService } = require('../src/admin/menu-entry.service.ts');
+const { HallsController } = require('../src/halls/halls.controller.ts');
+const { HallsService } = require('../src/halls/halls.service.ts');
 const { AuditService } = require('../src/audit/audit.service.ts');
 const { TablesController } = require('../src/tables/tables.controller.ts');
 const { TablesService } = require('../src/tables/tables.service.ts');
@@ -56,11 +61,12 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
     [OrdersService, orders], [PaymentsService, new PaymentsService(db, orders, settings)],
     [WaiterShiftsService, shifts], [StaffService, staff], [TablesService, new TablesService(db, events)],
     [JwtStrategy, new JwtStrategy(db)],
+    [CatalogService, new CatalogService(db, events, audit)], [MenuEntryService, {}], [HallsService, new HallsService(db)],
     [SettingsService, settings], [ReceiptPrintsService, new ReceiptPrintsService(db, events, {}, push)],
   ].map(([provide, useValue]) => ({ provide, useValue }));
   class HttpFixtureModule {}
   Module({ imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
-    controllers: [AuthController, OrdersController, PaymentsController, WaiterShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController], providers })(HttpFixtureModule);
+    controllers: [AuthController, OrdersController, PaymentsController, WaiterShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController, CatalogController, HallsController], providers })(HttpFixtureModule);
   const app = await NestFactory.create(HttpFixtureModule, { logger: false });
   app.setGlobalPrefix('api');
   app.use((_req, _res, next) => runWithTenant({}, next));
@@ -197,6 +203,89 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       assert.deepEqual(filtered.map(({ id, source }) => [id, source]), [[ticket.id, 'request']]);
       await request('/admin/settings', { ...owner, method: 'PATCH', body: { receiptPrintRequestsOnly: false } });
       assert.ok((await request('/receipt-prints', admin)).some(({ source }) => source === 'order'));
+    });
+    await t.test('the position grants manual delivery on the terminal and regular orders keep their own tables', async () => {
+      const owner = { token: sessions.owner, workspace: 'admin' };
+      const terminal = { token: sessions.mixed, workspace: 'terminal' };
+      const cookedDish = await runWithTenant({ cafeId: cafe.id }, async () => {
+        const category = await db.category.create({ data: { name: 'Kitchen menu', prepStation: 'kitchen' } });
+        return db.dish.create({ data: { categoryId: category.id, name: 'Soup', price: 100, prepStation: 'kitchen' } });
+      });
+      await request('/admin/settings', { ...owner, method: 'PATCH', body: { serviceChargeAmount: 25 } });
+      const body = {
+        customerName: 'Test recipient', customerPhone: '+996 555 555 555', deliveryAddress: '  Test street 1  ',
+        items: [{ dishId: cookedDish.id, quantity: 1 }, { dishId: fixture.dish.id, quantity: 1 }],
+        idempotencyKey: randomUUID(),
+      };
+      const createDelivery = (actor, payload, status = 201) =>
+        request('/orders/delivery', { ...actor, method: 'POST', body: payload, status });
+      const tableCountBeforeDelivery = (await request('/admin/tables/overview', owner)).tablesCount;
+      await createDelivery(terminal, body, 403);
+      const permissions = { ...fixture.permissions, workShiftRequired: false };
+      await request(`/admin/positions/${fixture.mixedPosition.id}`, { ...owner, method: 'PATCH', body: {
+        name: fixture.mixedPosition.name, permissions: { ...permissions, actions: { ...permissions.actions, createDeliveryOrders: true } },
+      } });
+      await createDelivery({ ...terminal, workspace: 'admin' }, body, 403);
+      await createDelivery({ token: sessions.legacy, workspace: 'terminal' }, body, 403);
+      await createDelivery(terminal, { ...body, deliveryAddress: '   ' }, 400);
+      await createDelivery(terminal, { ...body, customerPhone: 'no phone' }, 400);
+      const [first, second] = await Promise.all([
+        createDelivery(terminal, body),
+        createDelivery(terminal, { ...body, idempotencyKey: randomUUID(), deliveryAddress: 'Test street 2' }),
+      ]);
+      assert.notEqual(first.id, second.id);
+      assert.notEqual(first.orderNumber, second.orderNumber);
+      assert.equal((await createDelivery(terminal, body)).id, first.id);
+      assert.equal(first.waiterId, fixture.mixed.id);
+      assert.equal(first.source, 'delivery');
+      assert.equal(first.externalOrderId, null);
+      assert.equal(first.deliveryAddress, 'Test street 1');
+      assert.equal(first.status, 'sent_to_kitchen');
+      assert.equal(first.serviceChargeAmount, '0');
+      assert.ok(first.items.every(({ takeaway }) => takeaway));
+      assert.ok((await request('/orders/active', terminal)).some(({ id }) => id === first.id));
+      await request(`/orders/${first.id}`, { token: sessions.legacy, workspace: 'terminal', status: 403 });
+      await createDelivery({ token: sessions.owner, workspace: 'terminal' }, body, 409);
+      assert.equal((await request('/halls', terminal)).some(({ id }) => id === first.table.hallId), false);
+      assert.equal((await request('/admin/halls', owner)).some(({ id }) => id === first.table.hallId), false);
+      assert.equal((await request('/admin/tables/overview', owner)).tablesCount, tableCountBeforeDelivery);
+      const action = (name, status = 201, data) =>
+        request(`/orders/${first.id}/${name}`, { ...terminal, method: 'POST', body: data, status });
+      const updated = await action('items', 201, { items: [{ dishId: fixture.dish.id, quantity: 1, takeaway: false }] });
+      assert.equal(updated.finalAmount, '200');
+      assert.ok(updated.items.every(({ takeaway }) => takeaway));
+      await action('picked-up', 400);
+      await runWithTenant({ cafeId: cafe.id }, () => orders.kitchenReadyStation(first.id, fixture.kitchen.id, 'kitchen'));
+      await action('served', 400);
+      assert.equal((await action('picked-up')).status, 'picked_up');
+      await action('items', 400, { items: [{ dishId: fixture.dish.id, quantity: 1 }] });
+      assert.equal((await action('served')).status, 'served');
+      await action('to-payment');
+      const payment = await request('/payments', { ...terminal, method: 'POST', status: 201, body: { orderId: first.id, method: 'cash' } });
+      assert.equal(payment.status, 'paid');
+      assert.equal((await request(`/payments/${first.id}/receipt`, terminal)).source, 'delivery');
+      const ticket = await request('/receipt-prints', { ...terminal, method: 'POST', status: 201,
+        body: { orderId: first.id, type: 'receipt' } });
+      assert.equal(ticket.orderSource, 'delivery');
+      await request(`/admin/positions/${fixture.mixedPosition.id}`, { ...owner, method: 'PATCH', body: {
+        name: fixture.mixedPosition.name, permissions,
+      } });
+      await createDelivery(terminal, { ...body, idempotencyKey: randomUUID() }, 403);
+    });
+    await t.test('each hall can inherit the global floor plan mode or override it on the terminal', async () => {
+      const owner = { token: sessions.owner, workspace: 'admin' };
+      const terminal = { token: sessions.mixed, workspace: 'terminal' };
+      const createHall = (body) => request('/admin/halls', { ...owner, method: 'POST', body, status: 201 });
+      const mapped = await createHall({ name: 'Floor plan', useFloorPlan: true });
+      const buttons = await createHall({ name: 'Numbered buttons', useFloorPlan: false });
+      await request('/admin/tables/floor-plan-mode', { ...owner, method: 'PUT', body: { useFloorPlan: true } });
+      const halls = await request('/halls', terminal);
+      const mode = (id) => halls.find((hall) => hall.id === id).useFloorPlan;
+      assert.equal(mode(fixture.hall.id), null);
+      assert.equal(mode(mapped.id), true);
+      assert.equal(mode(buttons.id), false);
+      await request(`/admin/halls/${mapped.id}`, { ...owner, method: 'PATCH', body: { useFloorPlan: null } });
+      assert.equal((await request('/halls', terminal)).find((hall) => hall.id === mapped.id).useFloorPlan, null);
     });
   } finally {
     await app.close();

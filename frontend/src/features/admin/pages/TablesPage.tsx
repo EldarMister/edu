@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Modal } from '@/components/Modal';
+import { Select } from '@/components/Select';
 import { DeleteNameField } from '../components/DeleteNameField';
 import { Spinner } from '@/components/Spinner';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -101,8 +102,8 @@ export function TablesPage() {
             onClick={() => setView('map')}>Карта зала</button>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm text-text-muted">Выбор стола на кассе</span>
-          <div role="group" aria-label="Выбор стола на кассе" className="inline-flex gap-1 rounded-xl border border-border bg-white p-1">
+          <span className="text-sm text-text-muted">На кассе по умолчанию</span>
+          <div role="group" aria-label="Режим залов на кассе по умолчанию" className="inline-flex gap-1 rounded-xl border border-border bg-white p-1">
             <button type="button" aria-pressed={settings.isSuccess && !settings.data?.useFloorPlan} disabled={!editable || !settings.isSuccess || setMode.isPending}
               className="rounded-lg px-3 py-2 text-sm text-text-secondary aria-pressed:bg-primary aria-pressed:text-white disabled:opacity-70"
               onClick={() => { if (settings.data?.useFloorPlan) void changeMode(false); }}>Обычные кнопки</button>
@@ -157,7 +158,10 @@ export function TablesPage() {
                     <Chevron expanded={!collapsed} />
                     <span className="min-w-0">
                       <span className="block truncate font-semibold text-text-primary">{hall.name}</span>
-                      <span className="block text-xs text-text-muted">{hall.tables.length} {tr('столов')}</span>
+                      <span className="block text-xs text-text-muted">
+                        {hall.tables.length} {tr('столов')}
+                        {hall.useFloorPlan != null && <> · {hall.useFloorPlan ? 'Карта зала' : 'Обычные кнопки'}</>}
+                      </span>
                     </span>
                   </button>
                   {!hall.isActive && (
@@ -333,6 +337,9 @@ function HallModal({ hall, onClose }: { hall: AdminHall | null; onClose: () => v
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(hall?.name ?? '');
   const [isActive, setIsActive] = useState(hall?.isActive ?? true);
+  const [tableDisplay, setTableDisplay] = useState(
+    hall?.useFloorPlan == null ? 'inherit' : hall.useFloorPlan ? 'map' : 'buttons',
+  );
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
@@ -343,8 +350,9 @@ function HallModal({ hall, onClose }: { hall: AdminHall | null; onClose: () => v
       return;
     }
     try {
-      if (isEdit) await update.mutateAsync({ id: hall!.id, name: name.trim(), isActive });
-      else await create.mutateAsync({ name: name.trim() });
+      const data = { name: name.trim(), useFloorPlan: tableDisplay === 'inherit' ? null : tableDisplay === 'map' };
+      if (hall) await update.mutateAsync({ id: hall.id, ...data, isActive });
+      else await create.mutateAsync(data);
       push({ message: isEdit ? 'Зал обновлён' : 'Зал добавлен', at: new Date().toISOString() });
       onClose();
     } catch (err) {
@@ -366,6 +374,19 @@ function HallModal({ hall, onClose }: { hall: AdminHall | null; onClose: () => v
       <div className="space-y-3">
         <Field label="Название зала">
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Основной зал" />
+        </Field>
+        <Field label="Выбор стола на кассе">
+          <Select
+            ariaLabel="Выбор стола на кассе"
+            value={tableDisplay}
+            onChange={setTableDisplay}
+            disabled={pending}
+            options={[
+              { value: 'inherit', label: 'По общей настройке' },
+              { value: 'map', label: 'Карта зала' },
+              { value: 'buttons', label: 'Обычные кнопки' },
+            ]}
+          />
         </Field>
         {isEdit && (
           <label className="flex items-center gap-2.5 text-sm text-text-secondary">

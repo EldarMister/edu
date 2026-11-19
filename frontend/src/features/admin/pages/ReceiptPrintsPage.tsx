@@ -130,7 +130,7 @@ export function ReceiptPrintsPage() {
               )}
             </div>
           </td>
-          <td className="px-4 py-3 text-text-secondary">{r.tableNumber}</td>
+          <td className="px-4 py-3 text-text-secondary">{r.orderSource === 'delivery' ? t('Доставка') : r.tableNumber}</td>
           <td className="px-4 py-3 text-text-secondary">{r.waiterName}</td>
           <td className="px-4 py-3 font-medium text-text-primary">{money(r.amount)}</td>
           <td className="px-4 py-3 text-text-muted">{timeHM(r.createdAt)}</td>

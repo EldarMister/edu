@@ -114,9 +114,11 @@ function receiptRequestVoice(request: ReceiptPrintRequest): string {
   const tableNumber = Number.isInteger(request.tableNumber)
     ? numberToWords(request.tableNumber)
     : String(request.tableNumber);
+  const delivery = request.orderSource === 'delivery';
+  const place = delivery ? 'Доставка' : `Стол номер ${tableNumber}`;
   return (
     request.voice?.text ??
-    `Официант ${request.waiterName} отправил заявку на печать ${documentName}. Стол номер ${tableNumber}.`
+    `${delivery ? '' : 'Официант '}${request.waiterName} отправил заявку на печать ${documentName}. ${place}.`
   );
 }
 import { SettingsPage } from '../settings/SettingsPage';

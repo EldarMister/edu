@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { CartLine, CartSetComponent, Dish, DishVariant } from '@/types';
 import { dishUnitPrice } from '@/lib/format';
 
-interface TableCart {
+interface CartDraft {
   lines: CartLine[];
   comment: string;
   // Открыто ли поле комментария. Закрытое поле НЕ отправляется с заказом,
@@ -12,14 +12,16 @@ interface TableCart {
 
 export type CartModifiers = Pick<CartLine, 'modifierSelections' | 'excludedIngredientIds' | 'excludedIngredientNames'>;
 
+type CartTarget = { kind: 'table'; tableId: string } | { kind: 'delivery'; orderId?: string };
+
 interface CartState {
-  tableId: string | null;
-  // Зеркало корзины активного стола (для удобства потребителей).
+  target: CartTarget | null;
+  // Зеркало активной корзины для меню и панели заказа.
   lines: CartLine[];
   comment: string;
   commentOpen: boolean;
-  // Черновики корзин по каждому столу — не сбрасываются при переключении.
-  carts: Record<string, TableCart>;
+  carts: Record<string, CartDraft>;
+  select: (target: CartTarget | null) => void;
   selectTable: (tableId: string) => void;
   // Переносит текущий черновик корзины на другой стол (смена стола на экране меню).
   moveDraftTo: (targetTableId: string) => void;
@@ -41,7 +43,11 @@ interface CartState {
   clear: () => void;
 }
 
-const EMPTY: TableCart = { lines: [], comment: '', commentOpen: false };
+const EMPTY: CartDraft = { lines: [], comment: '', commentOpen: false };
+
+function draftKey(target: CartTarget) {
+  return target.kind === 'table' ? `table:${target.tableId}` : `delivery:${target.orderId ?? ''}`;
+}
 
 export function cartLineKeyFromParts(dishId: string, variantId?: string | null, weightGrams?: number | null, modifiers?: CartModifiers) {
   const selected = (modifiers?.modifierSelections ?? []).map((option) => `${option.optionId}:${option.quantity}`).sort().join(',');
@@ -83,44 +89,41 @@ export function cartLineUnitPrice(line: CartLine) {
   return dishUnitPrice(String(cartLineBasePrice(line)), line.dish.discountType, line.dish.discountValue);
 }
 
-/** Применяет изменение к корзине активного стола и синхронизирует зеркало. */
-function mutate(s: CartState, fn: (cart: TableCart) => TableCart): Partial<CartState> {
-  if (!s.tableId) return s;
-  const current = s.carts[s.tableId] ?? EMPTY;
+function mutate(s: CartState, fn: (cart: CartDraft) => CartDraft): Partial<CartState> {
+  if (!s.target) return s;
+  const key = draftKey(s.target);
+  const current = s.carts[key] ?? EMPTY;
   const next = fn(current);
   return {
     lines: next.lines,
     comment: next.comment,
     commentOpen: next.commentOpen,
-    carts: { ...s.carts, [s.tableId]: next },
+    carts: { ...s.carts, [key]: next },
   };
 }
 
-export const useCart = create<CartState>((set) => ({
-  tableId: null,
+export const useCart = create<CartState>((set, get) => ({
+  target: null,
   lines: [],
   comment: '',
   commentOpen: false,
   carts: {},
 
-  // Переключение стола сохраняет корзину прежнего и восстанавливает корзину нового.
-  selectTable: (tableId) =>
-    set((s) => {
-      if (s.tableId === tableId) return s;
-      const c = s.carts[tableId] ?? EMPTY;
-      return { tableId, lines: c.lines, comment: c.comment, commentOpen: c.commentOpen };
-    }),
+  select: (target) => set((s) => ({ target, ...(target ? s.carts[draftKey(target)] ?? EMPTY : EMPTY) })),
+  selectTable: (tableId) => get().select({ kind: 'table', tableId }),
 
   // Переносит черновик текущего стола на целевой (перезаписывает его черновик) и переключается.
   moveDraftTo: (targetTableId) =>
     set((s) => {
-      if (!s.tableId || s.tableId === targetTableId) return s;
-      const current = s.carts[s.tableId] ?? EMPTY;
+      if (s.target?.kind !== 'table' || s.target.tableId === targetTableId) return s;
+      const from = draftKey(s.target);
+      const target = { kind: 'table', tableId: targetTableId } as const;
+      const current = s.carts[from] ?? EMPTY;
       const carts = { ...s.carts };
-      delete carts[s.tableId];
-      carts[targetTableId] = current;
+      delete carts[from];
+      carts[draftKey(target)] = current;
       return {
-        tableId: targetTableId,
+        target,
         lines: current.lines,
         comment: current.comment,
         commentOpen: current.commentOpen,
@@ -211,9 +214,9 @@ export const useCart = create<CartState>((set) => ({
   // Очищает корзину активного стола (после отправки заказа).
   clear: () =>
     set((s) => {
-      if (!s.tableId) return { lines: [], comment: '', commentOpen: false };
+      if (!s.target) return EMPTY;
       const carts = { ...s.carts };
-      delete carts[s.tableId];
+      delete carts[draftKey(s.target)];
       return { lines: [], comment: '', commentOpen: false, carts };
     }),
 }));

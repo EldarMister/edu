@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import { ORDER_STATUS } from '@/lib/status';
-import { displayOrderNumber, hallSuffix, money, orderItemDisplayName } from '@/lib/format';
+import { displayOrderNumber, money, orderItemDisplayName, orderPlaceLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
@@ -156,7 +156,7 @@ export function OrderPanel({
         <div className="flex items-center justify-between gap-2">
           <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight text-text-primary">
             {t('Заказ')} {displayOrderNumber(order.orderNumber)}
-            <span className="ml-2 text-[13px] font-normal text-text-muted">{t('Стол')} {order.table.number}{hallSuffix(order.table)}</span>
+            <span className="ml-2 text-[13px] font-normal text-text-muted">{orderPlaceLabel(order, t)}</span>
           </h2>
           <div className="flex shrink-0 items-center gap-2">
             {unclaimedQr && (
@@ -191,6 +191,15 @@ export function OrderPanel({
 
       {/* Позиции — компактный список */}
       <div className="no-scrollbar flex-1 space-y-1.5 overflow-y-auto py-2">
+        {order.source === 'delivery' && order.deliveryAddress && (
+          <div className="mb-2 space-y-1 rounded-lg border border-border px-3 py-2 text-sm">
+            <p className="break-words font-medium text-text-primary">{order.deliveryAddress}</p>
+            <p className="flex flex-wrap gap-x-3 text-text-secondary">
+              {order.deliveryCustomerName && <span>{order.deliveryCustomerName}</span>}
+              {order.deliveryCustomerPhone && <a className="text-primary" href={`tel:${order.deliveryCustomerPhone}`}>{order.deliveryCustomerPhone}</a>}
+            </p>
+          </div>
+        )}
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
           const cancelled = it.status === 'cancelled';
@@ -453,7 +462,7 @@ function PartialRejectionPanel({
         <div className="min-w-0">
           <h2 className="truncate text-[18px] font-semibold leading-tight text-text-primary sm:text-[20px]">
             {t('Заказ')} {displayOrderNumber(order.orderNumber)}
-            <span className="ml-2 text-[14px] font-normal text-text-muted">{t('Стол')} {order.table.number}{hallSuffix(order.table)}</span>
+            <span className="ml-2 text-[14px] font-normal text-text-muted">{orderPlaceLabel(order, t)}</span>
           </h2>
         </div>
         <span className="shrink-0 rounded-lg border border-danger/25 bg-danger/5 px-2.5 py-1 text-[12px] font-medium text-danger">
@@ -576,6 +585,7 @@ function ActionButton({
   const t = useT();
   const [actionCooldown, setActionCooldown] = useState(0);
   const s = order.status;
+  const delivery = order.source === 'delivery';
   const spin = submitting ? <Spinner /> : null;
   const unclaimedQr = order.source === 'qr' && !order.waiter;
   const waitingDecision = s === 'partially_rejected' && order.requiresWaiterDecision;
@@ -628,7 +638,7 @@ function ActionButton({
 
   // «Забрал с кухни» — только если есть готовая позиция, реально отправленная на станцию.
   if (
-    hasReadyStationItem &&
+    !delivery && hasReadyStationItem &&
     !['paid', 'cancelled', 'rejected', 'waiting_payment', 'picked_up', 'served', 'ready'].includes(s)
   ) {
     return (
@@ -641,8 +651,9 @@ function ActionButton({
   // Заказ готов (ready) — независимо от того, есть ли кухонные позиции, показываем «Вынес гостям».
   if (s === 'ready') {
     return (
-      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onServed)}>
-        {cooldownActive ? actionCooldown : spin ?? t('Вынес гостям')}
+      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive}
+        onClick={() => runProtectedAction(delivery ? onPickedUp : onServed)}>
+        {cooldownActive ? actionCooldown : spin ?? t(delivery ? 'Передать курьеру' : 'Вынес гостям')}
       </button>
     );
   }
@@ -658,7 +669,7 @@ function ActionButton({
   if (s === 'picked_up') {
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onServed)}>
-        {cooldownActive ? actionCooldown : spin ?? t('Вынес гостям')}
+        {cooldownActive ? actionCooldown : spin ?? t(delivery ? 'Отметить доставленным' : 'Вынес гостям')}
       </button>
     );
   }

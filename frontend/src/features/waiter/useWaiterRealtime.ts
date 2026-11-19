@@ -56,6 +56,7 @@ function tableNumberVoice(value: unknown): string {
 }
 
 function waiterLocationText(order: Order): string {
+  if (order.source === 'delivery') return 'Доставка.';
   const hall = order.table?.hall?.name?.trim();
   const tableNumber = order.table?.number;
   const tableNumberText =

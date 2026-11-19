@@ -7,7 +7,8 @@ import type { Order, CartLine, DishVariant, WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { clientId } from '@/lib/id';
-import { displayOrderNumber, hallSuffix } from '@/lib/format';
+import { displayOrderNumber, orderPlaceLabel } from '@/lib/format';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useT } from '@/lib/i18n';
 import { useWaiterPushNotifications } from '@/lib/push';
 import { useNotifications } from '@/store/notifications';
@@ -46,7 +47,9 @@ import {
   useCreateReceiptPrintRequest,
   fetchReceipt,
   type AvailableWaiter,
+  type DeliveryDetails,
 } from './api';
+import { DeliveryDetailsModal } from './DeliveryDetailsModal';
 import { useReceiptPrint } from './receiptPrint';
 import { TablesGrid } from './TablesGrid';
 import { DishMenu } from './DishMenu';
@@ -83,6 +86,7 @@ type DesktopTab = 'tables' | 'orders' | 'profile';
 const CANCEL_UNDO_SECONDS = 6;
 type PendingCancel = { order: Order; reason: string; deadline: number };
 type ReplacementTarget = { order: Order; item: Order['items'][number] };
+const EMPTY_DELIVERY_DETAILS: DeliveryDetails = { customerName: '', customerPhone: '', deliveryAddress: '' };
 
 export function WaiterApp() {
   useWaiterRealtime();
@@ -90,6 +94,7 @@ export function WaiterApp() {
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
   const t = useT();
+  const canCreateDelivery = usePermissions().canAction('createDeliveryOrders');
   const pushNotifications = useWaiterPushNotifications(!!user);
 
   const hallsQ = useHalls();
@@ -143,6 +148,10 @@ export function WaiterApp() {
   const [modifierLine, setModifierLine] = useState<CartLine | null>(null);
   const [replacementTarget, setReplacementTarget] = useState<ReplacementTarget | null>(null);
   const [idemKey, setIdemKey] = useState(() => clientId());
+  const [deliveryIdemKey, setDeliveryIdemKey] = useState(() => clientId());
+  const [deliveryDetails, setDeliveryDetails] = useState(EMPTY_DELIVERY_DETAILS);
+  const [deliveryDetailsOpen, setDeliveryDetailsOpen] = useState(false);
+  const [deliveryError, setDeliveryError] = useState('');
   const [addItemsIdemKey, setAddItemsIdemKey] = useState(() => clientId());
   // Пока идёт запуск смены, оверлей «Смена не начата» удерживается до конца анимации.
   const [shiftBusy, setShiftBusy] = useState(false);
@@ -161,7 +170,7 @@ export function WaiterApp() {
   // Самый свежий активный заказ по каждому столу (бэкенд отдаёт по убыванию даты).
   const ordersByTable = useMemo(() => {
     const m = new Map<string, Order>();
-    for (const o of orders) if (!m.has(o.table.id)) m.set(o.table.id, o);
+    for (const o of orders) if (o.source !== 'delivery' && !m.has(o.table.id)) m.set(o.table.id, o);
     return m;
   }, [orders]);
 
@@ -191,12 +200,16 @@ export function WaiterApp() {
     if (lines.length === 1) cart.dec(cartLineKey(lines[0]));
   };
 
-  const selectedTable =
-    halls.flatMap((h) => h.tables).find((t) => t.id === cart.tableId) ?? null;
+  const selectedTableId = cart.target?.kind === 'table' ? cart.target.tableId : null;
+  const deliveryCart = cart.target?.kind === 'delivery' ? cart.target : null;
+  const newDelivery = !!deliveryCart && !deliveryCart.orderId;
+  const selectedTable = halls.flatMap((h) => h.tables).find((t) => t.id === selectedTableId) ?? null;
   const selectedHallName = selectedTable
     ? halls.find((h) => h.id === selectedTable.hallId)?.name
     : undefined;
-  const activeOrder = cart.tableId ? ordersByTable.get(cart.tableId) : undefined;
+  const activeOrder = selectedTableId ? ordersByTable.get(selectedTableId)
+    : deliveryCart?.orderId ? orders.find((order) => order.id === deliveryCart.orderId) : undefined;
+  const canUseMenu = !!(selectedTable || (newDelivery ? canCreateDelivery : deliveryCart && activeOrder));
   const editing = !!editingOrderId && !!activeOrder && activeOrder.id === editingOrderId;
   const viewingOrder = viewingOrderId ? orders.find((o) => o.id === viewingOrderId) : undefined;
   const displayedOrder = viewingOrder ?? activeOrder;
@@ -208,7 +221,9 @@ export function WaiterApp() {
   const cartOnlyNone = cart.lines.length > 0 && !cartStationInfo.hasPrep;
   // Подпись отправки нового заказа: есть кухня (в т.ч. смешанно) → «на кухню»,
   // только бар → «в бар», только без отправки → «Добавить в заказ».
-  const cartSendLabel = cartOnlyNone
+  const cartSendLabel = newDelivery
+    ? t('Данные доставки')
+    : cartOnlyNone
     ? t('Добавить в заказ')
     : cartStationInfo.kitchen
       ? t('Отправить на кухню')
@@ -303,7 +318,7 @@ export function WaiterApp() {
   // Смена стола прямо на экране меню (кнопка рядом с поиском).
   function pickMenuTable(tableId: string) {
     setTablePickerOpen(false);
-    if (tableId === cart.tableId) return;
+    if (tableId === selectedTableId) return;
     const otherWaiter = blockedByOther(tableId);
     if (otherWaiter) {
       push({
@@ -326,6 +341,21 @@ export function WaiterApp() {
     setPendingTableId(null);
   }
 
+  function startDelivery() {
+    if (!canCreateDelivery || !canWork) return;
+    setViewingOrderId(null);
+    setEditingOrderId(null);
+    setReplacementTarget(null);
+    setDeliveryError('');
+    cart.select({ kind: 'delivery' });
+    setTab('menu');
+  }
+
+  function selectOrderCart(order: Order) {
+    if (order.source === 'delivery') cart.select({ kind: 'delivery', orderId: order.id });
+    else cart.selectTable(order.table.id);
+  }
+
   // --- Редактирование заказа (Фаза 1: только пока кухня не приняла заказ) ---
   function startEditOrder(order: Order) {
     const permission = waiterOrderPermission(order, 'edit', settings.data?.waiterOrderPermissions);
@@ -334,7 +364,7 @@ export function WaiterApp() {
       push({ message: 'В заказе есть удалённое из меню блюдо. Используйте отмену отдельной позиции или обратитесь к администратору.', type: 'error', at: new Date().toISOString() }); return;
     }
     setViewingOrderId(null);
-    cart.selectTable(order.table.id);
+    selectOrderCart(order);
     const dishById = new Map((dishesQ.data ?? []).map((d) => [d.id, d]));
     const lines = order.items
       .filter((it) => it.status !== 'rejected' && it.status !== 'cancelled')
@@ -504,7 +534,7 @@ export function WaiterApp() {
 
   function openExistingOrder(order: Order) {
     setViewingOrderId(order.id);
-    cart.selectTable(order.table.id);
+    selectOrderCart(order);
     setTab(order.requiresWaiterDecision ? 'orders' : 'cart');
     if (order.status === 'waiting_payment') {
       setPaymentOrder(order);
@@ -547,7 +577,7 @@ export function WaiterApp() {
       });
       setReplacementTarget(null);
       setViewingOrderId(updated.id);
-      cart.selectTable(updated.table.id);
+      selectOrderCart(updated);
       setTab('orders');
       push({
         message: `${orderItemName(replacementTarget.item)} заменено`,
@@ -624,7 +654,7 @@ export function WaiterApp() {
   function replaceRejectedFromOrder(order: Order, item: Order['items'][number]) {
     setReplacementTarget({ order, item });
     setViewingOrderId(null);
-    cart.selectTable(order.table.id);
+    selectOrderCart(order);
     setTab('menu');
     push({
       message: `${t('Выберите блюдо на замену')}: ${orderItemName(item)}`,
@@ -637,7 +667,7 @@ export function WaiterApp() {
     try {
       const updated = await removeRejectedItem.mutateAsync({ orderId: order.id, itemId: item.id });
       setViewingOrderId(updated.id);
-      cart.selectTable(updated.table.id);
+      selectOrderCart(updated);
       setTab('orders');
       push({ message: `${orderItemName(item)} убрано из заказа`, type: 'success', at: new Date().toISOString() });
     } catch (err) {
@@ -649,7 +679,7 @@ export function WaiterApp() {
     try {
       const updated = await cancelReadyItem.mutateAsync({ orderId: order.id, itemId: item.id, reason });
       setViewingOrderId(updated.id);
-      cart.selectTable(updated.table.id);
+      selectOrderCart(updated);
       setTab('orders');
       push({ message: `${orderItemName(item)} отменено`, type: 'success', at: new Date().toISOString() });
     } catch (err) {
@@ -672,12 +702,18 @@ export function WaiterApp() {
     }
   }
 
-  async function submitCart() {
-    if (!selectedTable) return;
+  async function submitCart(delivery?: DeliveryDetails) {
+    if (!canUseMenu || !cart.lines.length || create.isPending || addItems.isPending) return;
     if (!canWork) {
       push({ message: t('Сначала начните смену в профиле.'), type: 'error', at: new Date().toISOString() });
       return;
     }
+    if (newDelivery && !delivery) {
+      setDeliveryError('');
+      setDeliveryDetailsOpen(true);
+      return;
+    }
+    const destination = newDelivery && delivery ? { delivery } : selectedTable ? { tableId: selectedTable.id } : null;
     try {
       if (activeOrder) {
         await addItems.mutateAsync({
@@ -693,24 +729,33 @@ export function WaiterApp() {
           at: new Date().toISOString(),
         });
         setTab('cart');
-      } else {
+      } else if (destination) {
+        setDeliveryError('');
         await create.mutateAsync({
-          tableId: selectedTable.id,
+          ...destination,
           comment: cart.commentOpen ? cart.comment : '',
-          idempotencyKey: idemKey,
+          idempotencyKey: newDelivery ? deliveryIdemKey : idemKey,
           lines: cart.lines,
         });
         cart.clear();
-        setIdemKey(clientId());
+        if (newDelivery) {
+          cart.select(null);
+          setDeliveryDetailsOpen(false);
+          setDeliveryDetails(EMPTY_DELIVERY_DETAILS);
+          setDeliveryIdemKey(clientId());
+        } else {
+          setIdemKey(clientId());
+        }
         push({
-          message: cartOnlyNone ? t('Заказ создан') : t('Заказ отправлен на кухню'),
+          message: newDelivery ? t('Заказ доставки оформлен') : cartOnlyNone ? t('Заказ создан') : t('Заказ отправлен на кухню'),
           type: 'success',
           at: new Date().toISOString(),
         });
         setTab('orders');
       }
     } catch (err) {
-      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+      if (newDelivery) setDeliveryError(apiError(err));
+      else push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
     }
   }
 
@@ -771,13 +816,17 @@ export function WaiterApp() {
         />
       }
     >
-      <TablesGrid halls={halls} selectedTableId={cart.tableId} onSelect={selectTable} useMap={settings.data?.useFloorPlan} />
+      <TablesGrid halls={halls} selectedTableId={selectedTableId} onSelect={selectTable} useMap={settings.data?.useFloorPlan} />
     </Panel>
+  );
+
+  const deliveryChip = deliveryCart && (
+    <span className="shrink-0 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{t('Доставка')}</span>
   );
 
   // Десктоп: меню в панели с заголовком и чипом стола.
   const menuPanel = (
-    <Panel title={t('Меню')} action={selectedTable ? <TableChip number={selectedTable.number} hallName={selectedHallName} /> : null}>
+    <Panel title={t('Меню')} action={selectedTable ? <TableChip number={selectedTable.number} hallName={selectedHallName} /> : deliveryChip}>
       <DishMenu
         categories={categoriesQ.data ?? []}
         dishes={dishesQ.data ?? []}
@@ -786,7 +835,7 @@ export function WaiterApp() {
         onAdd={addDishToCart}
         onAddSet={addSetToCart}
         onDec={(d) => decDishFromMenu(d.id)}
-        disabled={!selectedTable}
+        disabled={!canUseMenu}
       />
     </Panel>
   );
@@ -802,11 +851,11 @@ export function WaiterApp() {
         onAdd={addDishToCart}
         onAddSet={addSetToCart}
         onDec={(d) => decDishFromMenu(d.id)}
-        disabled={!selectedTable}
+        disabled={!canUseMenu}
         tableSlot={
           selectedTable ? (
             <TableSelectButton number={selectedTable.number} hallName={selectedHallName} onClick={() => setTablePickerOpen(true)} />
-          ) : null
+          ) : deliveryChip
         }
       />
     </section>
@@ -814,7 +863,7 @@ export function WaiterApp() {
 
   const rightPanel = (
     <Panel title={null}>
-      {!selectedTable ? (
+      {!canUseMenu && !displayedOrder ? (
         <EmptyHint text={t('Выберите стол, чтобы открыть заказ')} />
       ) : displayedOrder && !showCart ? (
         <OrderPanel
@@ -838,13 +887,14 @@ export function WaiterApp() {
       ) : (
         <CartPanel
           table={selectedTable}
+          delivery={!!deliveryCart}
           hallName={selectedHallName}
           mode={editing ? 'edit' : activeOrder ? 'add' : 'create'}
           orderNumber={activeOrder?.orderNumber}
           submitting={create.isPending || addItems.isPending || editOrder.isPending}
           canSubmit={canWork}
           sendLabel={cartSendLabel}
-          onSubmit={editing ? saveEditOrder : submitCart}
+          onSubmit={() => void (editing ? saveEditOrder() : submitCart())}
           onCancelEdit={cancelEditing}
           onBlockedSubmit={() =>
             push({ message: t('Сначала начните смену в профиле.'), type: 'error', at: new Date().toISOString() })
@@ -852,6 +902,12 @@ export function WaiterApp() {
         />
       )}
     </Panel>
+  );
+
+  const newDeliveryButton = canCreateDelivery && (
+    <button type="button" className="btn-primary btn-md shrink-0" disabled={!canWork || create.isPending} onClick={startDelivery}>
+      {t('Новая доставка')}
+    </button>
   );
 
   const profilePanel = (
@@ -923,7 +979,10 @@ export function WaiterApp() {
               <div className="mx-auto h-full w-full max-w-xl">{rightPanel}</div>
             ) : (
               <>
-                <h2 className="mb-3 shrink-0 text-lg font-semibold text-text-primary">{t('Активные заказы')}</h2>
+                <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-lg font-semibold text-text-primary">{t('Активные заказы')}</h2>
+                  {newDeliveryButton}
+                </div>
                 <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
                   <OrdersList
                     orders={orders}
@@ -953,7 +1012,7 @@ export function WaiterApp() {
           viewingOrder ? (
             rightPanel
           ) : (
-            <Panel title={t('Активные заказы')}>
+            <Panel title={t('Активные заказы')} action={newDeliveryButton}>
               <div className="no-scrollbar overflow-y-auto">
                 <OrdersList
                   orders={orders}
@@ -993,7 +1052,7 @@ export function WaiterApp() {
           submitting={create.isPending || addItems.isPending || editOrder.isPending}
           submitLabel={cartSubmitLabel}
           onOpenCart={() => setCartSheetOpen(true)}
-          onSubmit={editing ? saveEditOrder : submitCart}
+          onSubmit={() => void (editing ? saveEditOrder() : submitCart())}
         />
       )}
 
@@ -1004,16 +1063,23 @@ export function WaiterApp() {
         setModifierLine(null);
       }} />}
       <CartSheet
-        open={cartSheetOpen && tab === 'menu' && !replacementTarget}
+        open={cartSheetOpen && tab === 'menu' && canUseMenu && !replacementTarget}
         onClose={() => setCartSheetOpen(false)}
         submitting={create.isPending || addItems.isPending || editOrder.isPending}
         canSubmit={canWork}
+        delivery={!!deliveryCart}
         submitLabel={cartSubmitLabel}
         onSubmit={async () => {
           await (editing ? saveEditOrder() : submitCart());
           setCartSheetOpen(false);
         }}
       />
+
+      {deliveryDetailsOpen && newDelivery && canCreateDelivery && (
+        <DeliveryDetailsModal details={deliveryDetails} error={deliveryError} pending={create.isPending}
+          onChange={setDeliveryDetails} onClose={() => setDeliveryDetailsOpen(false)}
+          onSubmit={(details) => void submitCart(details)} />
+      )}
 
       {/* Блок отмены действия с таймером — пока отмена заказа не ушла на сервер */}
       {pendingCancel && (
@@ -1022,7 +1088,7 @@ export function WaiterApp() {
             <UndoActionIcon />
             <div className="min-w-0 flex-1">
               <p className="truncate text-[15px] font-semibold text-text-primary">
-                {displayOrderNumber(pendingCancel.order.orderNumber)} · {t('Стол')} {pendingCancel.order.table.number}{hallSuffix(pendingCancel.order.table)} — {t('отмена заказа')}
+                {displayOrderNumber(pendingCancel.order.orderNumber)} · {orderPlaceLabel(pendingCancel.order, t)} — {t('отмена заказа')}
               </p>
               <p className="text-[13px] text-text-muted">
                 {t('Отменится через')}{' '}
@@ -1086,7 +1152,7 @@ export function WaiterApp() {
       {tablePickerOpen && (
         <TableSelectModal
           halls={halls}
-          currentTableId={cart.tableId}
+          currentTableId={selectedTableId}
           onPick={pickMenuTable}
           onClose={() => setTablePickerOpen(false)}
           useMap={settings.data?.useFloorPlan}

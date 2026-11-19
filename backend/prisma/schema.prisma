@@ -475,6 +475,7 @@ model Hall {
   sortOrder Int      @default(0) @map("sort_order")
   floorPlan Json?    @map("floor_plan")
   floorPlanVersion Int @default(0) @map("floor_plan_version")
+  useFloorPlan Boolean? @map("use_floor_plan")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -652,9 +653,9 @@ model Order {
   tableId                String         @map("table_id")
   // nullable: заказ из QR-меню создаётся без официанта (source=qr).
   waiterId               String?        @map("waiter_id")
-  // Источник заказа: pos — сотрудник, qr — QR-меню, delivery — внешнее приложение.
+  // Источник заказа: pos — в зале, qr — QR-меню, delivery — доставка с кассы или из интеграции.
   source                 String         @default("pos")
-  // Идентификатор и данные внешнего заказа доставки. Для pos/qr остаются null.
+  // Внешний идентификатор есть только у заказов из интеграции.
   externalOrderId        String?        @map("external_order_id")
   deliveryCustomerName   String?        @map("delivery_customer_name")
   deliveryCustomerPhone  String?        @map("delivery_customer_phone")

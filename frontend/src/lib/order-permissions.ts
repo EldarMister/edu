@@ -37,6 +37,9 @@ export function waiterItemPermission(order: Order, item: OrderItem, action: 'can
 }
 
 export function waiterOrderPermission(order: Order, action: 'cancel' | 'edit', policies?: WaiterOrderPermissions) {
+  if (action === 'edit' && order.source === 'delivery' && ['picked_up', 'served', 'waiting_payment'].includes(order.status)) {
+    return { allowed: false, reason: 'Состав доставки уже передан курьеру' };
+  }
   const items = order.items.filter((item) => !['cancelled', 'rejected'].includes(item.status));
   const results = items.map((item) => waiterItemPermission(order, item, action, policies));
   const allowed = results.length > 0 && (action === 'cancel' ? results.every((p) => p.allowed) : results.some((p) => p.allowed));

@@ -66,7 +66,7 @@ export function OrderDetailsModal({
   const infoRows: { label: string; value: React.ReactNode }[][] = [
     [
       { label: 'Статус', value: <OrderStatusBadges order={order} /> },
-      { label: isDelivery ? 'Источник' : 'Официант', value: isDelivery ? 'Доставка' : order.waiter?.name ?? 'QR menu' },
+      { label: isDelivery ? 'Оформил' : 'Официант', value: order.waiter?.name ?? (isDelivery ? 'Онлайн-заказ' : 'QR menu') },
     ],
     [
       { label: 'Дата', value: `${date.toLocaleDateString('ru-RU')} ${timeHM(order.createdAt)}` },
@@ -74,8 +74,8 @@ export function OrderDetailsModal({
     ],
     [
       {
-        label: isDelivery ? 'Внешний заказ' : 'Стол',
-        value: isDelivery ? order.externalOrderId ?? '—' : `Стол ${order.table.number}${hallSuffix(order.table)}`,
+        label: isDelivery ? (order.externalOrderId ? 'Внешний заказ' : 'Тип заказа') : 'Стол',
+        value: isDelivery ? order.externalOrderId ?? 'Доставка' : `Стол ${order.table.number}${hallSuffix(order.table)}`,
       },
       { label: 'Оплата', value: order.paymentMethod ? paymentDisplayLabel(order) : '—' },
     ],

@@ -21,6 +21,7 @@ export type ActionKey =
   | 'exportReports'
   | 'closeShift'
   | 'financeCashShifts'
+  | 'createDeliveryOrders'
   | 'manageStaff'
   | 'editPermissions'
   | 'warehouseReceive'
@@ -97,6 +98,7 @@ export interface Hall {
   name: string;
   tables: TableItem[];
   floorPlan?: FloorPlanTable[] | null;
+  useFloorPlan?: boolean | null;
 }
 
 export interface Category {
@@ -290,6 +292,7 @@ export interface Receipt {
   website?: string | null;
   orderNumber: string;
   tableNumber: number;
+  source?: Order['source'];
   waiter: string;
   date: string;
   items: {
@@ -322,6 +325,7 @@ export interface ReceiptPrintRequest {
   orderId: string;
   orderNumber: string;
   tableNumber: number;
+  orderSource?: Order['source'];
   type: ReceiptPrintType;
   waiterId: string;
   waiterName: string;

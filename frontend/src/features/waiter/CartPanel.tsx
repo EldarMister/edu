@@ -8,6 +8,7 @@ import { CartLinesList, TakeawaySwitch } from './CartItems';
 
 export function CartPanel({
   table,
+  delivery,
   hallName,
   mode,
   orderNumber,
@@ -18,7 +19,8 @@ export function CartPanel({
   onBlockedSubmit,
   onCancelEdit,
 }: {
-  table: TableItem;
+  table: TableItem | null;
+  delivery?: boolean;
   hallName?: string;
   mode: 'create' | 'add' | 'edit';
   orderNumber?: string;
@@ -50,10 +52,12 @@ export function CartPanel({
                 ? `${t('Добавление в')} ${displayOrderNumber(orderNumber ?? '')}`
                 : t('Новый заказ')}
           </h2>
-          <p className="mt-0.5 text-sm text-text-muted">{t('Стол')} {table.number}{hallSuffix({ hall: hallName ? { name: hallName } : null })}</p>
+          <p className="mt-0.5 text-sm text-text-muted">
+            {delivery ? t('Доставка') : table && `${t('Стол')} ${table.number}${hallSuffix({ hall: hallName ? { name: hallName } : null })}`}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-4">
-          {hasLines && <TakeawaySwitch on={allTakeaway} onChange={setAllTakeaway} />}
+          {hasLines && !delivery && <TakeawaySwitch on={allTakeaway} onChange={setAllTakeaway} />}
           {mode === 'edit' && onCancelEdit && (
             <button
               onClick={onCancelEdit}
@@ -68,7 +72,7 @@ export function CartPanel({
       {/* Позиции — компактный список как в мобильной корзине */}
       <div className="no-scrollbar flex-1 overflow-y-auto py-3">
         {hasLines ? (
-          <CartLinesList lines={lines} inc={inc} dec={dec} onToggleTakeaway={setLineTakeaway} priceWidth="w-[88px]" />
+          <CartLinesList lines={lines} inc={inc} dec={dec} onToggleTakeaway={delivery ? undefined : setLineTakeaway} priceWidth="w-[88px]" />
         ) : (
           <p className="py-10 text-center text-sm text-text-muted">
             {t('Выберите блюда из меню, чтобы добавить в заказ')}

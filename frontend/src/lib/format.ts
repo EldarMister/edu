@@ -1,3 +1,5 @@
+import type { Order } from '@/types';
+
 /** Человекочитаемое название способа оплаты. */
 export function paymentMethodLabel(method: string | null | undefined): string {
   switch (method) {
@@ -94,6 +96,10 @@ export function displayOrderNumber(value: string): string {
 export function hallSuffix(table: { hall?: { name?: string } | null } | null | undefined): string {
   const name = table?.hall?.name;
   return name ? ` · ${name}` : '';
+}
+
+export function orderPlaceLabel(order: Pick<Order, 'source' | 'table'>, t: (text: string) => string) {
+  return order.source === 'delivery' ? t('Доставка') : `${t('Стол')} ${order.table.number}${hallSuffix(order.table)}`;
 }
 
 /** Время HH:MM из ISO. */

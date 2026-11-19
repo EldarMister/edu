@@ -75,11 +75,12 @@ export function TableSelectModal({
   useMap?: boolean;
 }) {
   const t = useT();
+  const hasMap = halls.some((hall) => hall.useFloorPlan ?? useMap);
   const groups = halls.map((h) => ({ name: h.name, tables: h.tables })).filter((g) => g.tables.length > 0);
 
   return (
-    <Modal open onClose={onClose} title={t('Выбор стола')} panelClassName={useMap ? 'max-w-2xl' : undefined}>
-      {useMap ? <TablesGrid halls={halls} selectedTableId={currentTableId} onSelect={onPick} useMap /> : <div className="space-y-3">
+    <Modal open onClose={onClose} title={t('Выбор стола')} panelClassName={hasMap ? 'max-w-2xl' : undefined}>
+      {hasMap ? <TablesGrid halls={halls} selectedTableId={currentTableId} onSelect={onPick} useMap={useMap} /> : <div className="space-y-3">
         {groups.map((g) => (
           <div key={g.name}>
             <p className="mb-1.5 text-xs font-medium text-text-muted">{g.name}</p>

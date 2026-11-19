@@ -32,6 +32,7 @@ export function projectWorkspaceUser(user: AuthUser, requested?: unknown): AuthU
     role = Role.WAITER;
     permissions = getDefaultPermissionsByRole(Role.WAITER);
     permissions.actions.financeCashShifts = user.permissions.actions.financeCashShifts;
+    permissions.actions.createDeliveryOrders = user.permissions.actions.createDeliveryOrders;
     permissions.actions.closeShift = user.permissions.actions.closeShift;
   } else if (workspace === 'admin') {
     role = identityRole === Role.OWNER ? Role.OWNER : Role.ADMIN;

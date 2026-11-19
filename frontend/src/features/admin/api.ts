@@ -21,6 +21,7 @@ export interface AdminHall {
   tables: AdminTableItem[];
   floorPlan?: FloorPlanTable[] | null;
   floorPlanVersion?: number;
+  useFloorPlan?: boolean | null;
 }
 export interface AdminCategory {
   id: string;
@@ -472,13 +473,13 @@ export function useFloorPlanMutations() {
 }
 
 export function useHallMutations() {
-  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
+  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview'], ['halls']]);
   const create = useMutation({
-    mutationFn: (b: { name: string }) => api.post('/admin/halls', b).then((r) => r.data),
+    mutationFn: (b: { name: string; useFloorPlan?: boolean | null }) => api.post('/admin/halls', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean }) =>
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; useFloorPlan?: boolean | null }) =>
       api.patch(`/admin/halls/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });

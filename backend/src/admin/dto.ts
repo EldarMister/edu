@@ -24,6 +24,9 @@ export class CreateHallDto {
 
   @IsOptional() @IsInt()
   sortOrder?: number;
+
+  @IsOptional() @IsBoolean()
+  useFloorPlan?: boolean | null;
 }
 export class UpdateHallDto {
   @IsOptional() @IsString() @MaxLength(60)
@@ -34,6 +37,9 @@ export class UpdateHallDto {
 
   @IsOptional() @IsInt()
   sortOrder?: number;
+
+  @IsOptional() @IsBoolean()
+  useFloorPlan?: boolean | null;
 }
 
 // ---------- Столы ----------

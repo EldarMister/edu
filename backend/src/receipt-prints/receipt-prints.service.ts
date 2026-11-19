@@ -14,6 +14,7 @@ import { PushService } from '../push/push.service';
 
 const withWaiter = {
   waiter: { select: { id: true, name: true } },
+  order: { select: { source: true } },
 } satisfies Prisma.ReceiptPrintRequestInclude;
 
 type RequestWithWaiter = Prisma.ReceiptPrintRequestGetPayload<{ include: typeof withWaiter }>;
@@ -90,6 +91,7 @@ export class ReceiptPrintsService {
       priority: true,
       orderId: r.orderId,
       orderNumber: r.orderNumber,
+      orderSource: r.order.source,
       tableNumber: r.tableNumber,
       type: r.type,
       waiterId: r.waiterId,
@@ -103,10 +105,12 @@ export class ReceiptPrintsService {
 
   private withRequestVoice(dto: ReturnType<ReceiptPrintsService['serialize']>) {
     const documentName = dto.type === ReceiptPrintType.preliminary ? 'счёта' : 'чека';
+    const delivery = dto.orderSource === 'delivery';
+    const place = delivery ? 'Доставка' : `Стол номер ${tableNumberVoice(dto.tableNumber)}`;
     return {
       ...dto,
       voice: {
-        text: `Официант ${dto.waiterName} отправил заявку на печать ${documentName}. Стол номер ${tableNumberVoice(dto.tableNumber)}.`,
+        text: `${delivery ? '' : 'Официант '}${dto.waiterName} отправил заявку на печать ${documentName}. ${place}.`,
       },
     };
   }
@@ -120,6 +124,7 @@ export class ReceiptPrintsService {
       priority: false,
       orderId: order.id,
       orderNumber: order.orderNumber,
+      orderSource: order.source,
       tableNumber: order.table.number,
       type,
       waiterId: order.waiterId,
@@ -185,8 +190,9 @@ export class ReceiptPrintsService {
     const dto = this.withRequestVoice(this.serialize(request));
     // Заявка сразу появляется только у администраторов.
     this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, dto);
+    const place = dto.orderSource === 'delivery' ? 'Доставка' : `Стол ${dto.tableNumber}`;
     void this.push.notifyRole(Role.ADMIN, {
-      title: 'Печать чека', body: `Заявка от ${dto.waiterName} · Стол ${dto.tableNumber}`,
+      title: 'Печать чека', body: `Заявка от ${dto.waiterName} · ${place}`,
       orderId: dto.orderId, orderNumber: dto.orderNumber, channel: 'payments',
       notificationId: `receipt:${dto.id}:created`, url: '/admin/receipts',
     }, order.cafeId);

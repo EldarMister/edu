@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
-import { displayOrderNumber, hallSuffix, isSplitPayment, money, orderItemDisplayName, paymentMethodLabel } from '@/lib/format';
+import { displayOrderNumber, isSplitPayment, money, orderItemDisplayName, orderPlaceLabel, paymentMethodLabel } from '@/lib/format';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
@@ -238,7 +238,7 @@ export function PaymentModal({
         <div className="rounded-xl border border-border p-4 text-sm">
           <p className="text-center text-base font-semibold">{receipt.cafeName}</p>
           <p className="mb-3 text-center text-xs text-text-muted">
-            {displayOrderNumber(receipt.orderNumber)} · {t('Стол')} {receipt.tableNumber}
+            {displayOrderNumber(receipt.orderNumber)} · {receipt.source === 'delivery' ? t('Доставка') : `${t('Стол')} ${receipt.tableNumber}`}
           </p>
           <div className="space-y-1">
             {receipt.items.map((it, i) => (
@@ -327,7 +327,7 @@ export function PaymentModal({
       }
     >
       <p className="mb-1 text-sm text-text-muted">
-        {t('Стол')} {order.table.number}{hallSuffix(order.table)} · {displayOrderNumber(order.orderNumber)}
+        {orderPlaceLabel(order, t)} · {displayOrderNumber(order.orderNumber)}
       </p>
       <div className="mb-4 flex items-baseline justify-between">
         <span className="text-text-secondary">{t('К оплате')}</span>

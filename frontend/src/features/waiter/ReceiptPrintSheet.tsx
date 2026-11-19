@@ -184,7 +184,7 @@ export function ReceiptPrintSheet() {
         <div className="flex items-center justify-between font-medium text-text-primary">
           <span>{displayOrderNumber(receipt.orderNumber)}</span>
           <span className="text-text-muted">
-            {t('Стол')} {receipt.tableNumber}
+            {receipt.source === 'delivery' ? t('Доставка') : `${t('Стол')} ${receipt.tableNumber}`}
           </span>
         </div>
         <div className="mt-2 space-y-1">

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Order } from '@/types';
 import { OrderBadge } from '@/components/StatusBadge';
-import { displayOrderNumber, hallSuffix, money, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, orderPlaceLabel, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 
 export function OrdersList({
@@ -67,7 +67,7 @@ export function OrdersList({
                     QR
                   </span>
                 )}
-                <span className="truncate text-sm text-text-muted">{t('Стол')} {o.table.number}{hallSuffix(o.table)}</span>
+                <span className="truncate text-sm text-text-muted">{orderPlaceLabel(o, t)}</span>
               </div>
               <p className="flex items-center gap-1.5 text-xs text-text-light">
                 <ClockIcon />
@@ -77,7 +77,7 @@ export function OrdersList({
 
             {/* Правая часть: статус сверху, сумма снизу — зеркально левой */}
             <div className="flex shrink-0 flex-col items-end justify-between gap-2">
-              <OrderBadge status={o.status} />
+              <OrderBadge status={o.status} source={o.source} />
               {unclaimedQr && (
                 <button
                   type="button"

@@ -81,7 +81,7 @@ export async function printReceipt(
     ${r.website ? `<div class="center muted">Сайт: ${escapeHtml(r.website)}</div>` : ''}
     <div class="center muted">${dateStr}</div>
     <div class="dash"></div>
-    <div class="order-meta">${escapeHtml(orderNumber)} · Стол ${r.tableNumber} · ${escapeHtml(r.waiter)}</div>
+    <div class="order-meta">${escapeHtml(orderNumber)} · ${r.source === 'delivery' ? 'Доставка' : `Стол ${r.tableNumber}`} · ${escapeHtml(r.waiter)}</div>
     <div class="dash"></div>
     <table><colgroup><col style="width:48%"><col style="width:14%"><col style="width:18%"><col style="width:20%"></colgroup><thead><tr><th>Наименование</th><th class="c">Кол-во</th><th class="r">Цена</th><th class="r">Сумма</th></tr></thead><tbody>${rows}</tbody></table>
     <div class="solid"></div>
