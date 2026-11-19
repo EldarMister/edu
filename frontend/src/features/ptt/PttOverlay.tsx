@@ -16,6 +16,22 @@ import {
 } from './types';
 
 const CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
+const POSITION_STORAGE_KEY = 'edu-pos:ptt-button-position';
+
+// Fractions of the available travel so the entire button stays visible after a resize.
+type LauncherPosition = { x: number; y: number };
+
+function readLauncherPosition(): LauncherPosition | null {
+  try {
+    const position = JSON.parse(localStorage.getItem(POSITION_STORAGE_KEY) ?? 'null');
+    if (position && [position.x, position.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
+      return { x: position.x, y: position.y };
+    }
+  } catch {
+    // Storage can be unavailable or have invalid data.
+  }
+  return null;
+}
 
 function defaultChannelForRole(role?: string): PttChannel {
   if (role === 'WAITER') return 'waiters';
@@ -281,6 +297,132 @@ function RadioStatusText({
   );
 }
 
+type LauncherDrag = {
+  id: number;
+  startX: number;
+  startY: number;
+  left: number;
+  top: number;
+  preview: LauncherPosition | null;
+};
+
+function RadioLauncher({ visible, bottom, state, onOpen }: {
+  visible: boolean;
+  bottom: string;
+  state: RadioState;
+  onOpen: () => void;
+}) {
+  const [saved, setSaved] = useState(readLauncherPosition);
+  const [preview, setPreview] = useState<LauncherPosition | null>(null);
+  const [pressed, setPressed] = useState(false);
+  const [docked, setDocked] = useState(false);
+  const wrapper = useRef<HTMLDivElement>(null);
+  const drag = useRef<LauncherDrag | null>(null);
+  const suppressClick = useRef(false);
+
+  useEffect(() => {
+    if (!visible) {
+      drag.current = null;
+      setPreview(null);
+      setPressed(false);
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || saved || pressed || docked) return;
+    const timer = window.setTimeout(() => setDocked(true), 5000);
+    return () => window.clearTimeout(timer);
+  }, [visible, saved, pressed, docked]);
+
+  function startDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (!event.isPrimary || event.button !== 0 || drag.current || !wrapper.current) return;
+    const { left, top } = wrapper.current.getBoundingClientRect();
+    drag.current = { id: event.pointerId, startX: event.clientX, startY: event.clientY, left, top, preview: null };
+    suppressClick.current = false;
+    setPressed(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveDrag(event: PointerEvent<HTMLButtonElement>) {
+    const current = drag.current;
+    if (!current || current.id !== event.pointerId || !wrapper.current) return;
+    const dx = event.clientX - current.startX;
+    const dy = event.clientY - current.startY;
+    if (!current.preview && Math.hypot(dx, dy) < 6) return;
+
+    const viewport = document.documentElement;
+    const maxX = Math.max(1, viewport.clientWidth - wrapper.current.offsetWidth);
+    const maxY = Math.max(1, viewport.clientHeight - wrapper.current.offsetHeight);
+    current.preview = {
+      x: Math.min(1, Math.max(0, (current.left + dx) / maxX)),
+      y: Math.min(1, Math.max(0, (current.top + dy) / maxY)),
+    };
+    setPreview(current.preview);
+  }
+
+  function endDrag(event: PointerEvent<HTMLButtonElement>, save: boolean) {
+    const current = drag.current;
+    if (!current || current.id !== event.pointerId) return;
+    drag.current = null;
+    suppressClick.current = !!current.preview;
+    setPressed(false);
+    setPreview(null);
+    if (save && current.preview) {
+      setSaved(current.preview);
+      setDocked(false);
+      try {
+        localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(current.preview));
+      } catch {
+        // The position still applies while the app is open.
+      }
+    }
+  }
+
+  if (!visible) return null;
+  const position = preview ?? saved;
+  const tucked = !position && docked;
+  const view = STATE_STYLES[state];
+
+  return (
+    <div
+      ref={wrapper}
+      className={`fixed z-[70] flex h-14 w-14 items-center justify-center ${position ? '' : 'right-2 transition-transform motion-reduce:transition-none'}`}
+      style={position
+        ? { left: `${position.x * 100}%`, top: `${position.y * 100}%`, transform: `translate(${-position.x * 100}%, ${-position.y * 100}%)` }
+        : { bottom, transform: tucked ? 'translateX(40px)' : undefined }}
+    >
+      {(state === 'speakingSelf' || state === 'speakingOther') && (
+        <span
+          className={`pointer-events-none absolute animate-ptt-soft-pulse rounded-full border ${view.ring}`}
+          style={{ width: 74, height: 74 }}
+        />
+      )}
+      <button
+        type="button"
+        aria-label="Рация"
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={(event) => endDrag(event, true)}
+        onPointerCancel={(event) => endDrag(event, false)}
+        onLostPointerCapture={(event) => endDrag(event, false)}
+        onClick={(event) => {
+          if (suppressClick.current && event.detail !== 0) {
+            suppressClick.current = false;
+            return;
+          }
+          if (tucked) setDocked(false);
+          else onOpen();
+        }}
+        className={`ptt-no-select relative flex h-14 w-14 cursor-grab touch-none items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:cursor-grabbing active:scale-95 ${view.circle}`}
+      >
+        <span className={tucked ? '-translate-x-4 scale-75' : undefined}>
+          <RadioIcon size={25} />
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export function PttOverlay({
   waiterMode = false,
   buttonHidden = false,
@@ -295,17 +437,11 @@ export function PttOverlay({
   const overlayOpen = useBlockingOverlayOpen();
   const [open, setOpen] = useState(false);
   const panel = useRef<HTMLElement>(null);
-  const [docked, setDocked] = useState(false);
   const [channel, setChannel] = useState<PttChannel>(() => initialChannel(effectiveRole ?? undefined));
   const [onlineCount, setOnlineCount] = useState(0);
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
   const effectiveButtonHidden = buttonHidden || overlayOpen;
 
-  useEffect(() => {
-    if (effectiveButtonHidden || open || docked) return;
-    const timer = window.setTimeout(() => setDocked(true), 5000);
-    return () => window.clearTimeout(timer);
-  }, [effectiveButtonHidden, open, docked]);
   const sender = useAudioPttSender(channel, true);
   const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
 
@@ -429,38 +565,9 @@ export function PttOverlay({
           ? 'Дождитесь освобождения канала'
           : (sender.deniedReason ?? 'Нажмите и удерживайте');
 
-  const outerView = STATE_STYLES[state];
-  const outerSpeaking = state === 'speakingSelf' || state === 'speakingOther';
-
   return (
     <>
-      {!effectiveButtonHidden && !open && (
-        <div
-          className="fixed right-2 z-[70] flex h-14 w-14 items-center justify-center transition-transform motion-reduce:transition-none"
-          style={{ bottom: floatingBottom, transform: docked ? 'translateX(40px)' : undefined }}
-        >
-          {/* Кольцо вокруг кнопки — только пока идёт передача или приём. */}
-          {outerSpeaking && (
-            <span
-              className={`pointer-events-none absolute animate-ptt-soft-pulse rounded-full border ${outerView.ring}`}
-              style={{ width: 74, height: 74 }}
-            />
-          )}
-          <button
-            type="button"
-            aria-label="Рация"
-            onClick={() => {
-              if (docked) setDocked(false);
-              else setOpen(true);
-            }}
-            className={`ptt-no-select relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:scale-95 ${outerView.circle}`}
-          >
-            <span className={docked ? '-translate-x-4 scale-75' : undefined}>
-              <RadioIcon size={25} />
-            </span>
-          </button>
-        </div>
-      )}
+      <RadioLauncher visible={!effectiveButtonHidden && !open} bottom={floatingBottom} state={state} onOpen={() => setOpen(true)} />
 
       {open && (
         <div className="fixed inset-0 z-[90]">
