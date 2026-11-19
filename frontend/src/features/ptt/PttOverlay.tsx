@@ -18,14 +18,19 @@ import {
 const CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
 const POSITION_STORAGE_KEY = 'edu-pos:ptt-button-position';
 
-// Fractions of the available travel so the entire button stays visible after a resize.
+// Fractions of the available travel. Only the drag preview can sit between the two edges.
 type LauncherPosition = { x: number; y: number };
+type DockPosition = LauncherPosition & { x: 0 | 1 };
 
-function readLauncherPosition(): LauncherPosition | null {
+function nearestDock({ x, y }: LauncherPosition): DockPosition {
+  return { x: x < 0.5 ? 0 : 1, y };
+}
+
+function readLauncherPosition(): DockPosition | null {
   try {
     const position = JSON.parse(localStorage.getItem(POSITION_STORAGE_KEY) ?? 'null');
     if (position && [position.x, position.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
-      return { x: position.x, y: position.y };
+      return nearestDock(position);
     }
   } catch {
     // Storage can be unavailable or have invalid data.
@@ -329,10 +334,10 @@ function RadioLauncher({ visible, bottom, state, onOpen }: {
   }, [visible]);
 
   useEffect(() => {
-    if (!visible || saved || pressed || docked) return;
+    if (!visible || pressed || docked) return;
     const timer = window.setTimeout(() => setDocked(true), 5000);
     return () => window.clearTimeout(timer);
-  }, [visible, saved, pressed, docked]);
+  }, [visible, pressed, docked]);
 
   function startDrag(event: PointerEvent<HTMLButtonElement>) {
     if (!event.isPrimary || event.button !== 0 || drag.current || !wrapper.current) return;
@@ -368,10 +373,11 @@ function RadioLauncher({ visible, bottom, state, onOpen }: {
     setPressed(false);
     setPreview(null);
     if (save && current.preview) {
-      setSaved(current.preview);
+      const position = nearestDock(current.preview);
+      setSaved(position);
       setDocked(false);
       try {
-        localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(current.preview));
+        localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(position));
       } catch {
         // The position still applies while the app is open.
       }
@@ -380,16 +386,22 @@ function RadioLauncher({ visible, bottom, state, onOpen }: {
 
   if (!visible) return null;
   const position = preview ?? saved;
-  const tucked = !position && docked;
+  const rightSide = saved?.x !== 0;
+  const tucked = !preview && docked;
+  const dockOffset = tucked ? (rightSide ? 40 : -40) : 0;
   const view = STATE_STYLES[state];
 
   return (
     <div
       ref={wrapper}
-      className={`fixed z-[70] flex h-14 w-14 items-center justify-center ${position ? '' : 'right-2 transition-transform motion-reduce:transition-none'}`}
+      className={`fixed z-[70] flex h-14 w-14 items-center justify-center ${position ? '' : 'right-2'} ${preview ? '' : 'transition-[left,transform] motion-reduce:transition-none'}`}
       style={position
-        ? { left: `${position.x * 100}%`, top: `${position.y * 100}%`, transform: `translate(${-position.x * 100}%, ${-position.y * 100}%)` }
-        : { bottom, transform: tucked ? 'translateX(40px)' : undefined }}
+        ? {
+            left: preview ? `${position.x * 100}%` : rightSide ? 'calc(100% - 8px)' : '8px',
+            top: `${position.y * 100}%`,
+            transform: `translate(${-position.x * 100}%, ${-position.y * 100}%) translateX(${dockOffset}px)`,
+          }
+        : { bottom, transform: tucked ? `translateX(${dockOffset}px)` : undefined }}
     >
       {(state === 'speakingSelf' || state === 'speakingOther') && (
         <span
@@ -415,7 +427,7 @@ function RadioLauncher({ visible, bottom, state, onOpen }: {
         }}
         className={`ptt-no-select relative flex h-14 w-14 cursor-grab touch-none items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:cursor-grabbing active:scale-95 ${view.circle}`}
       >
-        <span className={tucked ? '-translate-x-4 scale-75' : undefined}>
+        <span className={tucked ? `scale-75 ${rightSide ? '-translate-x-4' : 'translate-x-4'}` : undefined}>
           <RadioIcon size={25} />
         </span>
       </button>
