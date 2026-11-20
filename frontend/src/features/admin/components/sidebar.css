@@ -56,6 +56,10 @@
     transform: scale(1.02, 1.07);
   }
 
+  :where(.workspace-nav-children) .workspace-nav-child:hover::before {
+    transform: scaleY(1.07);
+  }
+
   :is(.workspace-nav-section, .workspace-nav-child):hover > .workspace-nav-label {
     transform: scale(1.045);
   }
