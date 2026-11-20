@@ -1,0 +1,26 @@
+.terminal-dialog {
+  transform: translateY(var(--terminal-dialog-closed-offset, 100%));
+}
+
+.terminal-dialog[data-visible='true'] {
+  transform: translateY(0);
+}
+
+@media (min-width: 768px) {
+  .terminal-dialog[data-visible] {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    translate: -50% -50%;
+    width: calc(100% - 2rem);
+    max-height: calc(100dvh - 2rem);
+    border-radius: 1rem;
+    border: 1px solid rgb(var(--edu-border));
+    transform: none;
+    visibility: hidden;
+  }
+
+  .terminal-dialog[data-visible='true'] {
+    transform: none;
+    visibility: visible;
+  }
+}

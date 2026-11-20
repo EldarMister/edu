@@ -1,4 +1,5 @@
 import { SheetHandle } from '@/components/SheetHandle';
+import { useDialogEscape } from './useDialogEscape';
 import { type ReactNode, useEffect, useRef } from 'react';
 
 let openModalCount = 0;
@@ -23,8 +24,7 @@ export function Modal({
   bottomSheet?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
-  const close = useRef(onClose);
-  close.current = onClose;
+  useDialogEscape(panel, open && !suspended, onClose);
   useEffect(() => {
     if (!open) return;
     openModalCount += 1;
@@ -37,15 +37,6 @@ export function Modal({
       document.body.classList.remove('modal-open');
     };
   }, [open]);
-  useEffect(() => {
-    if (!open || suspended) return;
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && panel.current === Array.from(document.querySelectorAll('[data-modal-panel]')).at(-1)) close.current();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, suspended]);
-
   if (!open) return null;
 
   return (

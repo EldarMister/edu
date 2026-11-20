@@ -1,4 +1,6 @@
 import { SheetHandle } from '@/components/SheetHandle';
+import { useDialogEscape } from '@/components/useDialogEscape';
+import { IconX } from '@/features/admin/components/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CartSetComponent, Category, Dish, DishVariant } from '@/types';
 import { dishUnitPrice, minDishUnitPrice, money, variantNamesLine } from '@/lib/format';
@@ -58,6 +60,8 @@ function SheetShell({
   const [render, setRender] = useState(open);
   const [visible, setVisible] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
+  const t = useT();
+  useDialogEscape(panel, open, onClose);
 
   useEffect(() => {
     if (open) {
@@ -92,16 +96,23 @@ function SheetShell({
       {/* Лист */}
       <div
         ref={panel}
-        className="relative z-10 flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft"
+        className="terminal-dialog relative z-10 flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft md:max-w-xl"
+        data-visible={visible}
+        data-modal-panel={open || undefined}
         style={{
-          transform: visible ? 'translateY(0)' : 'translateY(100%)',
           transition: `transform ${SHEET_MS}ms ${SHEET_EASE}`,
         }}
         role="dialog"
+        aria-modal={open}
+        aria-label={title}
       >
-        <SheetHandle panel={panel} onClose={onClose} enabled={open && visible} />
-        <div className="shrink-0 px-4 pb-2">
-          <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+        <SheetHandle panel={panel} onClose={onClose} enabled={open && visible} className="md:hidden" />
+        <div className="shrink-0 px-4 pb-2 md:pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+            <button type="button" onClick={onClose} aria-label={t('Закрыть')}
+              className="hidden shrink-0 rounded-lg p-1 text-text-muted hover:bg-background md:block"><IconX /></button>
+          </div>
           {subtitle && <p className="mt-0.5 text-sm text-text-muted">{subtitle}</p>}
         </div>
         {children}

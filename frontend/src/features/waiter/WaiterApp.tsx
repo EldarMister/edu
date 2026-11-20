@@ -2,7 +2,7 @@ import { ModifierPicker } from './ModifierPicker';
 import type { CartModifiers } from './cart';
 import { usePublicSettings } from '@/features/settings/api';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { Order, CartLine, DishVariant, WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
@@ -80,6 +80,7 @@ import {
   MoveTableModal,
   TransferTableModal,
 } from './TableActions';
+import './terminal-dialogs.css';
 
 type Tab = 'tables' | 'menu' | 'cart' | 'orders' | 'profile';
 type DesktopTab = 'tables' | 'orders' | 'profile';
@@ -89,8 +90,20 @@ const CANCEL_UNDO_SECONDS = 6;
 type PendingCancel = { order: Order; reason: string; deadline: number };
 type ReplacementTarget = { order: Order; item: Order['items'][number] };
 const EMPTY_DELIVERY_DETAILS: DeliveryDetails = { customerName: '', customerPhone: '', deliveryAddress: '' };
+const WIDE_TERMINAL = '(min-width: 768px)';
+
+function subscribeToTerminalSize(onChange: () => void) {
+  const media = window.matchMedia(WIDE_TERMINAL);
+  media.addEventListener('change', onChange);
+  return () => media.removeEventListener('change', onChange);
+}
+
+function isWideTerminal() {
+  return window.matchMedia(WIDE_TERMINAL).matches;
+}
 
 export function WaiterApp() {
+  const wideLayout = useSyncExternalStore(subscribeToTerminalSize, isWideTerminal);
   useWaiterRealtime();
   const settings = usePublicSettings();
   const user = useAuth((s) => s.user);
@@ -1106,7 +1119,7 @@ export function WaiterApp() {
         setModifierLine(null);
       }} />}
       <CartSheet
-        open={cartSheetOpen && tab === 'menu' && canUseMenu && !replacementTarget}
+        open={!wideLayout && cartSheetOpen && tab === 'menu' && canUseMenu && !replacementTarget}
         onClose={() => setCartSheetOpen(false)}
         submitting={create.isPending || addItems.isPending || editOrder.isPending}
         canSubmit={canWork}
@@ -1161,6 +1174,7 @@ export function WaiterApp() {
       {canTakePayment && paymentOrder && (
         <PaymentModal
           order={paymentOrder}
+          wideLayout={wideLayout}
           open={!!paymentOrder}
           onClose={() => setPaymentOrder(null)}
           onPaid={() => {

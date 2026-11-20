@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { SheetHandle } from '@/components/SheetHandle';
+import { useDialogEscape } from '@/components/useDialogEscape';
 import { apiError } from '@/lib/api';
 import type { PaymentMethod } from '@/types';
 import { money } from '@/lib/format';
@@ -178,6 +179,8 @@ export function SplitBillSheet({
   }
 
   const busy = submitting || completing;
+  const close = () => { if (!busy) onClose(); };
+  useDialogEscape(panel, open, close);
 
   return (
     <div className={`fixed inset-0 z-[60] ${open ? '' : 'pointer-events-none'}`} aria-hidden={!open}>
@@ -185,26 +188,28 @@ export function SplitBillSheet({
       <div
         className="absolute inset-0 bg-black/40"
         style={{ transition: `opacity ${SHEET_MS}ms ease`, opacity: open ? 1 : 0 }}
-        onClick={onClose}
+        onClick={close}
       />
 
       {/* Лист */}
       <div
         ref={panel}
-        className="absolute inset-x-0 bottom-0 mx-auto flex max-h-[88vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft sm:bottom-4 sm:rounded-2xl"
+        className="terminal-dialog absolute inset-x-0 bottom-0 mx-auto flex max-h-[88vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft sm:bottom-4 sm:rounded-2xl md:max-w-xl [--terminal-dialog-closed-offset:110%]"
+        data-visible={open}
+        data-modal-panel={open || undefined}
         style={{
-          transform: open ? 'translateY(0)' : 'translateY(110%)',
           transition: `transform ${SHEET_MS}ms ${SHEET_EASE}`,
           paddingBottom: 'env(safe-area-inset-bottom)',
         }}
         role="dialog"
+        aria-modal={open}
         aria-label={t('Разделение счёта')}
       >
-        <SheetHandle panel={panel} onClose={onClose} enabled={open && !busy} />
+        <SheetHandle panel={panel} onClose={close} enabled={open && !busy} className="md:hidden" />
         {/* Шапка */}
         <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
           <h3 className="text-base font-semibold text-text-primary">{t('Разделение счёта')}</h3>
-          <button onClick={onClose} className="text-text-light hover:text-text-secondary" aria-label={t('Назад')}>
+          <button onClick={close} disabled={busy} className="text-text-light hover:text-text-secondary" aria-label={t('Назад')}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M18 6 6 18M6 6l12 12" />
             </svg>

@@ -1,4 +1,6 @@
 import { SheetHandle } from '@/components/SheetHandle';
+import { useDialogEscape } from '@/components/useDialogEscape';
+import { IconX } from '@/features/admin/components/icons';
 import { useEffect, useRef, useState } from 'react';
 import type { Dish, DishVariant } from '@/types';
 import { dishUnitPrice, money } from '@/lib/format';
@@ -25,6 +27,7 @@ export function VariantPickerSheet({
   const [renderDish, setRenderDish] = useState<Dish | null>(dish);
   const [visible, setVisible] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
+  useDialogEscape(panel, !!dish, onClose);
 
   useEffect(() => {
     if (dish) {
@@ -60,17 +63,23 @@ export function VariantPickerSheet({
       />
       <div
         ref={panel}
-        className="absolute inset-x-0 bottom-0 mx-auto flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft"
+        className="terminal-dialog absolute inset-x-0 bottom-0 mx-auto flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft"
+        data-visible={visible}
+        data-modal-panel={dish ? true : undefined}
         style={{
-          transform: visible ? 'translateY(0)' : 'translateY(100%)',
           transition: `transform ${VARIANT_SHEET_MS}ms ${VARIANT_SHEET_EASE}`,
         }}
         role="dialog"
+        aria-modal={!!dish}
         aria-label={t('Выбор варианта')}
       >
-        <SheetHandle panel={panel} onClose={onClose} enabled={!!dish && visible} />
-        <div className="shrink-0 px-4 pb-2">
-          <h2 className="text-xl font-semibold text-text-primary">{renderDish.name}</h2>
+        <SheetHandle panel={panel} onClose={onClose} enabled={!!dish && visible} className="md:hidden" />
+        <div className="shrink-0 px-4 pb-2 md:pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-xl font-semibold text-text-primary">{renderDish.name}</h2>
+            <button type="button" onClick={onClose} aria-label={t('Закрыть')}
+              className="hidden shrink-0 rounded-lg p-1 text-text-muted hover:bg-background md:block"><IconX /></button>
+          </div>
           <p className="mt-3 text-[15px] font-medium text-text-secondary">{t('Выберите размер')}</p>
         </div>
 

@@ -88,7 +88,7 @@ export function CartSheet({
   if (!render) return null;
 
   return (
-    <div className="fixed inset-0 z-40 lg:hidden">
+    <div className="fixed inset-0 z-40 md:hidden">
       {/* Затемнение фона */}
       <div
         className="absolute inset-0 bg-black/40"

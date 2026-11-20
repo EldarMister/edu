@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { SheetHandle } from '@/components/SheetHandle';
+import { useDialogEscape } from '@/components/useDialogEscape';
 import { displayOrderNumber, money, orderItemDisplayName } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { beep } from '@/lib/sound';
@@ -24,6 +25,7 @@ export function ReceiptPrintSheet() {
   const [render, setRender] = useState(open);
   const [visible, setVisible] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
+  useDialogEscape(panel, open, primaryClose);
   const lastAcceptedSoundRequestId = useRef<string | null>(null);
 
   useEffect(() => {
@@ -42,14 +44,6 @@ export function ReceiptPrintSheet() {
     const id = setTimeout(() => setRender(false), SHEET_MS);
     return () => clearTimeout(id);
   }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && primaryClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, status]);
 
   useEffect(() => {
     if (!open || status !== 'printed' || !request) return;
@@ -78,17 +72,19 @@ export function ReceiptPrintSheet() {
 
       <div
         ref={panel}
-        className="absolute inset-x-0 bottom-0 flex max-h-[80vh] flex-col rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] shadow-soft"
+        className="terminal-dialog absolute inset-x-0 bottom-0 flex max-h-[80vh] flex-col rounded-t-2xl bg-white pb-[env(safe-area-inset-bottom)] shadow-soft md:max-w-md"
+        data-visible={visible}
+        data-modal-panel={open || undefined}
         style={{
-          transform: visible ? 'translateY(0)' : 'translateY(100%)',
           transition: `transform ${SHEET_MS}ms ${SHEET_EASE}`,
         }}
         role="dialog"
+        aria-modal={open}
         aria-label={title}
       >
         {/* Шапка */}
-        <SheetHandle panel={panel} onClose={primaryClose} enabled={open} />
-        <div className="relative shrink-0 px-4 pb-1">
+        <SheetHandle panel={panel} onClose={primaryClose} enabled={open} className="md:hidden" />
+        <div className="relative shrink-0 px-4 pb-1 md:pt-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
             <button
