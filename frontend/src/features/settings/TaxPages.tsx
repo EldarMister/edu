@@ -2,6 +2,7 @@ import { useId, useState, type FormEvent } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { apiError } from '@/lib/api';
 import { taxRateLabel } from '@/lib/format';
 import type { MenuTax, MenuTaxType } from '@/types';
@@ -89,7 +90,8 @@ export function TaxesPage() {
     rate: parseRate(filters.rate), sort: filters.sort === 'desc' ? 'desc' : 'asc' };
   const list = useTaxDirectory(queryParams);
   const taxes = list.data ?? [];
-  const columns = visibleWarehouseColumns(filters.taxColumns, defaultColumns);
+  const [savedColumns, saveColumns] = useColumnPreference('settings-taxes');
+  const columns = visibleWarehouseColumns(filters.taxColumns || savedColumns, defaultColumns);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [editor, setEditor] = useState<MenuTax | 'new' | null>(null);
   const [toDelete, setToDelete] = useState<MenuTax | null>(null);
@@ -102,7 +104,6 @@ export function TaxesPage() {
   return <div className="space-y-3">
     <WorkspaceHeaderCount count={list.isSuccess ? taxes.length : undefined} />
     <WorkspaceHeaderActions>
-      <button type="button" className="supply-header-action" onClick={() => setColumnsOpen(true)}>Столбцы</button>
       <TaxTableActions endpoint={TAX_LIST_ENDPOINT} params={{ ...queryParams, columns: columns.join(',') }}
         table={table} canExport={canAction('exportReports')} />
       {editable && <button type="button" className="btn-primary btn-md" onClick={() => setEditor('new')}>Добавить налог</button>}
@@ -123,6 +124,8 @@ export function TaxesPage() {
       </details>
       {(filters.search || filters.type || filters.rate) && <button type="button" className="text-sm text-primary"
         onClick={() => setFilters({ search: '', type: '', rate: '' })}>Сбросить</button>}
+      <button type="button" className="supply-header-action ml-auto shrink-0 print:hidden"
+        onClick={() => setColumnsOpen(true)}>Столбцы</button>
     </div>
     <QueryState pending={list.isPending} error={list.error}>
       <div className="overflow-x-auto">
@@ -157,7 +160,9 @@ export function TaxesPage() {
     </QueryState>
     {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={defaultColumns} label={(key) => labels[key]}
       onClose={() => setColumnsOpen(false)} onApply={(selection) => {
-        setFilters({ taxColumns: selection.join(',') });
+        const value = selection.join(',') === defaultColumns.join(',') ? '' : selection.join(',');
+        saveColumns(value);
+        setFilters({ taxColumns: value });
         setColumnsOpen(false);
       }} />}
     {editor && <TaxEditor tax={editor === 'new' ? undefined : editor} onClose={() => setEditor(null)} />}

@@ -2,6 +2,7 @@ import { Fragment, useRef, useState, type ReactNode } from 'react';
 import { WorkspaceHeaderActions } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { usePageFilter, usePageFilters } from './workspace-route';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { useQuery } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
@@ -135,9 +136,13 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
       ...(expanded.has(id) || conditions.movementDocuments !== id ? {} : { movementDocuments: '' }),
     });
   }
-  const columns = visibleWarehouseColumns(conditions.movementColumns, defaultColumns);
+  const [savedColumns, saveColumns] = useColumnPreference('warehouse-movement');
+  const [storedWidths, storeWidths] = useColumnPreference('warehouse-movement-widths');
+  const columnSelection = conditions.movementColumns || savedColumns;
+  const columnWidths = conditions.movementColumnWidths || storedWidths;
+  const columns = visibleWarehouseColumns(columnSelection, defaultColumns);
   const [resizing, setResizing] = useState<{ key: ReportColumn; width: number } | null>(null);
-  const savedWidths = readColumnWidths(conditions.movementColumnWidths);
+  const savedWidths = readColumnWidths(columnWidths);
   const widths = resizing ? { ...savedWidths, [resizing.key]: resizing.width } : savedWidths;
   const fixedWidth = columns.reduce((total, key) => total + (widths[key] ?? 0), 0);
   const flexibleWeight = columns.reduce((total, key) => total + (widths[key] ? 0 : reportColumns[key].width), 0);
@@ -160,9 +165,11 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
     .sort((a, b) => a.localeCompare(b, 'ru'));
   const hasFilters = Boolean(search || selectedKinds.length || selectedCategories.length || selectedWarehouses.length || nameCondition ||
     onlyWithMovement || conditions.stockPeriod !== 'week' || nameSort !== 'asc' ||
-    conditions.movementColumns || conditions.movementColumnWidths);
+    columnSelection || columnWidths);
   function saveWidth(key: ReportColumn, width: number) {
-    updateConditions({ movementColumnWidths: JSON.stringify({ ...savedWidths, [key]: width }) });
+    const value = JSON.stringify({ ...savedWidths, [key]: width });
+    storeWidths(value);
+    updateConditions({ movementColumnWidths: value });
     setResizing(null);
   }
   function resizeHandle(key: ReportColumn) {
@@ -225,12 +232,16 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
         ) : <Select ariaLabel="Добавить фильтр" value="" placeholder="+ Фильтр"
           options={[{ value: 'name', label: 'Название' }]}
           onChange={() => filter({ movementNameCondition: 'equals', movementNameValue: '' })} />}
-        {hasFilters && <button type="button" className="text-sm text-primary" onClick={() => filter({
-          movementSearch: '', movementKind: '', movementCategory: '', movementOnly: '', movementWarehouses: '',
-          movementNameCondition: '', movementNameValue: '',
-          movementNameSort: 'asc', movementColumns: '', movementColumnWidths: '',
-          warehouse: '', stockPeriod: 'week', stockFrom: '', stockTo: '',
-        })}>Сбросить всё</button>}
+        {hasFilters && <button type="button" className="text-sm text-primary" onClick={() => {
+          saveColumns('');
+          storeWidths('');
+          filter({
+            movementSearch: '', movementKind: '', movementCategory: '', movementOnly: '', movementWarehouses: '',
+            movementNameCondition: '', movementNameValue: '',
+            movementNameSort: 'asc', movementColumns: '', movementColumnWidths: '',
+            warehouse: '', stockPeriod: 'week', stockFrom: '', stockTo: '',
+          });
+        }}>Сбросить всё</button>}
         <WorkspaceHeaderActions>
           <Select ariaLabel="Действия отчёта" className="report-actions-trigger" placeholder={exporting ? '…' : '⋮'} value="" disabled={exporting}
             options={[{ value: 'columns', label: 'Столбцы' },
@@ -244,8 +255,11 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
       {editingColumns && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}
         label={(key) => reportColumns[key].label} onClose={() => setEditingColumns(false)}
         onApply={(selected, resetWidths) => {
+          const value = selected.join(',') === defaultColumns.join(',') ? '' : selected.join(',');
+          saveColumns(value);
+          if (resetWidths) storeWidths('');
           updateConditions({
-            movementColumns: selected.join(',') === defaultColumns.join(',') ? '' : selected.join(','),
+            movementColumns: value,
             ...(resetWidths ? { movementColumnWidths: '' } : {}),
           });
           setEditingColumns(false);

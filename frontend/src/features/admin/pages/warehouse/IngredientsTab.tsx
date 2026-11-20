@@ -296,11 +296,10 @@ export function IngredientsTab({
     <div className={catalogue ? undefined : 'poster-balance-surface'}>
       {catalogue && <WorkspaceHeaderCount count={query.data ? catalogueRows.length : undefined} />}
       {!catalogue && <>
-        <WorkspaceHeaderActions>
-          <button type="button" className="supply-header-action" onClick={() => setColumnsOpen(true)}>Столбцы</button>
-          {canExport && <button type="button" className="supply-header-action" disabled={exporting || !query.isSuccess}
-            onClick={() => void exportBalances()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
-        </WorkspaceHeaderActions>
+        {canExport && <WorkspaceHeaderActions>
+          <button type="button" className="supply-header-action" disabled={exporting || !query.isSuccess}
+            onClick={() => void exportBalances()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>
+        </WorkspaceHeaderActions>}
         {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
           label={(key) => columnSpec(key).label} onClose={() => setColumnsOpen(false)}
           onApply={(selection) => {
@@ -400,6 +399,8 @@ export function IngredientsTab({
           onClick={() => updateBalanceFilters({ search: '', kind: '', category: '', unit: '', stockFilter: '', warehouse: '' })}>
           Сбросить всё
         </button>}
+        {!catalogue && <button type="button" className="supply-header-action ml-auto shrink-0 print:hidden"
+          onClick={() => setColumnsOpen(true)}>Столбцы</button>}
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">

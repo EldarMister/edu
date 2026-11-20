@@ -139,7 +139,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
     const total = accounts.reduce((sum, account) => sum + (account.balance ?? 0), 0);
     return <>
       <WorkspaceHeaderCount count={accounts.length} />
-      <FinanceRegister title="Счета" columns={[
+      <FinanceRegister title="Счета" columnPreference="finance-accounts" columns={[
         { key: 'name', label: 'Название', width: '45%', sort: { ascending, toggle: toggleSort } },
         { key: 'type', label: 'Тип', width: '29%' },
         { key: 'balance', label: 'Баланс', numeric: true },
@@ -229,14 +229,14 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
   const total = transactions.reduce((sum, entry) => sum + (!scope && entry.kind === 'transfer' ? 0 : Math.round(entry.amount * 100)), 0) / 100;
   return <>
     <WorkspaceHeaderCount count={transactions.length} />
-    <FinanceRegister title="Транзакции" columns={[
-      { key: 'date', label: 'Дата', width: '15%', sort: { ascending, toggle: toggleSort } },
-      { key: 'category', label: 'Категория', width: '15%' },
-      { key: 'note', label: 'Комментарий' },
-      { key: 'amount', label: 'Сумма', width: '14%', numeric: true },
-      ...(data.canViewAll ? [{ key: 'balance', label: 'Баланс', width: '14%', numeric: true }] : []),
-      { key: 'account', label: 'Счёт', width: '29%' },
-      { key: 'type', label: 'Тип' }, { key: 'actor', label: 'Сотрудник' },
+    <FinanceRegister title="Транзакции" columnPreference="finance-transactions" columns={[
+      { key: 'date', label: 'Дата', width: 132, sort: { ascending, toggle: toggleSort } },
+      { key: 'category', label: 'Категория', width: 152 },
+      { key: 'note', label: 'Комментарий', width: 220 },
+      { key: 'amount', label: 'Сумма', width: 128, numeric: true },
+      ...(data.canViewAll ? [{ key: 'balance', label: 'Баланс', width: 128, numeric: true }] : []),
+      { key: 'account', label: 'Счёт', width: 156 },
+      { key: 'type', label: 'Тип', width: 112 }, { key: 'actor', label: 'Сотрудник', width: 156 },
     ]} defaultColumns={transactionColumns}
       filters={<>{quickSearch}
         {data.categories.length > 0 && <Select ariaLabel="Категория транзакции" value={categoryId}

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useT } from '@/lib/i18n';
@@ -118,7 +119,8 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
   const [category, setCategory] = useState('');
   const [employee, setEmployee] = useState('');
   const [payment, setPayment] = useState('');
-  const [hidden, setHidden] = useState<string[]>([]);
+  const [hiddenColumns, setHiddenColumns] = useColumnPreference(`statistics-${report}`);
+  const hidden = hiddenColumns.split(',').filter(Boolean);
   const [sort, setSort] = useState({ key: defaultSort[report], ascending: report === 'staff' });
   const [printBlocked, setPrintBlocked] = useState(false);
   const title = t(STATISTICS_NAV.find(({ key }) => key === report)?.label ?? 'Статистика');
@@ -162,7 +164,7 @@ export function StatisticsReport({ report, data, periodControl }: { report: Repo
         <div className="absolute right-0 z-20 mt-1 grid min-w-44 gap-2 rounded-xl border border-border bg-card p-3 shadow-card">
           {allColumns.map(({ key, label }) => <label key={key} className="flex items-center gap-2 whitespace-nowrap text-sm">
             <input type="checkbox" checked={!hidden.includes(key)} disabled={key === firstColumn[report]}
-              onChange={(event) => setHidden(event.target.checked ? hidden.filter((entry) => entry !== key) : [...hidden, key])} />
+              onChange={(event) => setHiddenColumns((event.target.checked ? hidden.filter((entry) => entry !== key) : [...hidden, key]).join(','))} />
             {t(label)}
           </label>)}
         </div>

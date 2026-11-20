@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { IconPrinter, IconTables } from '../../components/icons';
 import { WarehouseColumnSettings } from '../warehouse/WarehouseColumnSettings';
 import './finance-register.css';
@@ -7,7 +8,7 @@ import './finance-register.css';
 export interface RegisterColumn {
   key: string;
   label: string;
-  width?: string;
+  width?: string | number;
   numeric?: boolean;
   sort?: { ascending?: boolean; toggle: () => void };
 }
@@ -68,7 +69,7 @@ export function printRegister(title: string, output: Output) {
 }
 
 export function FinanceRegister({
-  title, columns, rows, filters, tools, empty, totals, defaultColumns, reportActions = true,
+  title, columns, rows, filters, tools, empty, totals, defaultColumns, columnPreference, reportActions = true,
 }: {
   title: string;
   columns: RegisterColumn[];
@@ -78,19 +79,24 @@ export function FinanceRegister({
   empty: string;
   totals?: Record<string, Cell>;
   defaultColumns?: string[];
+  columnPreference?: string;
   reportActions?: boolean;
 }) {
-  const [selection, setSelection] = useState<string[]>();
+  const [selection, setSelection] = useColumnPreference(columnPreference ?? title);
   const [showColumns, setShowColumns] = useState(false);
   const [printError, setPrintError] = useState(false);
   const { canAction } = usePermissions();
   const byKey = new Map(columns.map((column) => [column.key, column]));
   const keys = columns.map(({ key }) => key);
-  const visible = (selection ?? defaultColumns ?? keys).flatMap((key) => {
+  const selectedKeys = selection ? [...new Set(selection.split(','))].filter((key) => byKey.has(key)) : [];
+  const visible = (selectedKeys.length ? selectedKeys : defaultColumns ?? keys).flatMap((key) => {
     const column = byKey.get(key);
     return column ? [column] : [];
   });
   const showActions = rows.some(({ action }) => !!action);
+  const actionWidth = showActions ? 84 : 0;
+  const columnWidth = visible.reduce((total, { width }) => total + (typeof width === 'number' ? width : 0), 0);
+  const minWidth = columnWidth ? Math.max(660, columnWidth + actionWidth) : undefined;
   const output = () => [
     visible.map(({ label }) => label),
     ...rows.map(({ values }) => visible.map(({ key }) => values[key]?.value ?? null)),
@@ -119,10 +125,10 @@ export function FinanceRegister({
     </div>
     {printError && <p className="px-4 py-2 text-sm text-danger" role="alert">Разрешите всплывающие окна для печати отчёта.</p>}
     <div className="finance-register-scroll" tabIndex={0} role="region" aria-label="Таблица">
-      <table className="finance-register-table">
+      <table className="finance-register-table" style={{ minWidth }}>
         <colgroup>
           {visible.map(({ key, width }) => <col key={key} style={{ width }} />)}
-          {showActions && <col style={{ width: '84px' }} />}
+          {showActions && <col style={{ width: actionWidth }} />}
         </colgroup>
         <thead><tr>
           {visible.map(({ key, label, numeric, sort }) => <th scope="col" key={key} className={numeric ? 'finance-register-number text-right' : undefined}
@@ -153,6 +159,6 @@ export function FinanceRegister({
     {showColumns && defaultColumns && <WarehouseColumnSettings columns={visible.map(({ key }) => key)} defaults={keys} resetColumns={defaultColumns}
       label={(key) => byKey.get(key)?.label ?? key}
       onClose={() => setShowColumns(false)}
-      onApply={(selected) => { setSelection(selected); setShowColumns(false); }} />}
+      onApply={(selected) => { setSelection(selected.join(',')); setShowColumns(false); }} />}
   </section>;
 }

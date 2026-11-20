@@ -1,6 +1,7 @@
 import { useRef, useState, type ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
+import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { readAsDataUrl } from '@/lib/image';
@@ -103,14 +104,16 @@ export function ReceiptSettingsPage() {
       {!editable && <p className="text-sm text-text-muted">{t('Настройки доступны только для просмотра.')}</p>}
       <fieldset disabled={!editable || busy} className="min-w-0">
         <section className="card space-y-4 p-5">
-          <label className="grid gap-1.5 text-sm font-medium text-text-secondary">
-            {t('Язык чека')}
-            <select className="input w-full" value={form.receiptLanguage} aria-label={t('Язык чека')}
-              onChange={(event) => set('receiptLanguage', event.target.value === 'ky' ? 'ky' : 'ru')}>
-              <option value="ru">Русский</option>
-              <option value="ky">Кыргызча</option>
-            </select>
-          </label>
+          <div className="grid gap-1.5">
+            <span className="text-sm font-medium text-text-secondary">{t('Язык чека')}</span>
+            <Select className="h-11 w-full" value={form.receiptLanguage} ariaLabel={t('Язык чека')}
+              disabled={!editable || busy}
+              options={[
+                { value: 'ru', label: 'Русский' },
+                { value: 'ky', label: 'Кыргызча' },
+              ]}
+              onChange={(value) => set('receiptLanguage', value === 'ky' ? 'ky' : 'ru')} />
+          </div>
 
           <div className="space-y-3 border-y border-border py-4">
             <h2 className="font-semibold text-text-primary">{t('Реквизиты для товарного чека и счёта')}</h2>
@@ -152,15 +155,16 @@ export function ReceiptSettingsPage() {
             <span className="text-right text-xs text-text-muted">{footerText.length}/{RECEIPT_LIMIT}</span>
           </label>
 
-          {isOwner && <label className="grid gap-1.5 text-sm font-medium text-text-secondary">
-            {t('Список печати счетов и чеков')}
-            <select className="input w-full" value={form.receiptPrintRequestsOnly ? 'requests' : 'all'}
-              aria-label={t('Список печати счетов и чеков')}
-              onChange={(event) => set('receiptPrintRequestsOnly', event.target.value === 'requests')}>
-              <option value="all">{t('Все доступные счета и чеки')}</option>
-              <option value="requests">{t('Только по заявкам официантов')}</option>
-            </select>
-          </label>}
+          {isOwner && <div className="grid gap-1.5">
+            <span className="text-sm font-medium text-text-secondary">{t('Список печати счетов и чеков')}</span>
+            <Select className="h-11 w-full" value={form.receiptPrintRequestsOnly ? 'requests' : 'all'}
+              ariaLabel={t('Список печати счетов и чеков')} disabled={!editable || busy}
+              options={[
+                { value: 'all', label: t('Все доступные счета и чеки') },
+                { value: 'requests', label: t('Только по заявкам официантов') },
+              ]}
+              onChange={(value) => set('receiptPrintRequestsOnly', value === 'requests')} />
+          </div>}
         </section>
 
       </fieldset>

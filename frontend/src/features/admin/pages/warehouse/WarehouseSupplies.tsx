@@ -1,6 +1,7 @@
 import { Fragment, useState, type ReactNode } from 'react';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { api, apiError } from '@/lib/api';
 import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
@@ -64,7 +65,8 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
   const period = useListPeriod('supply');
   const selectedSuppliers = warehouseMultiFilterValues(supplier);
   const selectedCategories = warehouseMultiFilterValues(categories);
-  const columns = visibleWarehouseColumns(conditions.supplyColumns, defaultColumns);
+  const [savedColumns, saveColumns] = useColumnPreference('warehouse-supplies');
+  const columns = visibleWarehouseColumns(conditions.supplyColumns || savedColumns, defaultColumns);
   const expanded = new Set(conditions.supplyExpanded.split(',').filter(Boolean));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -153,7 +155,9 @@ export function SupplyList({ warehouseId, filters, onOpen, onCreate }: {
       {settingsOpen && <WarehouseColumnSettings columns={columns} defaults={defaultColumns}
         label={(key) => supplyColumns[key].label} onClose={() => setSettingsOpen(false)}
         onApply={(selected) => {
-          update({ supplyColumns: selected.join(',') === defaultColumns.join(',') ? '' : selected.join(',') });
+          const value = selected.join(',') === defaultColumns.join(',') ? '' : selected.join(',');
+          saveColumns(value);
+          update({ supplyColumns: value });
           setSettingsOpen(false);
         }} />}
       <div className="poster-toolbar print:hidden">

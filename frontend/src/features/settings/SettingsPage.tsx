@@ -26,8 +26,6 @@ import { usePermissions } from '@/hooks/usePermissions';
 interface Form {
   taxesEnabled: boolean;
   roundOrderTotal: boolean;
-  telegramStockAlertsEnabled: boolean;
-  telegramStockChatId: string;
   waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;
@@ -73,8 +71,6 @@ function CafeSettings() {
     cafeName: data.cafeName,
     taxesEnabled: data.taxesEnabled ?? false,
     roundOrderTotal: data.roundOrderTotal ?? false,
-    telegramStockAlertsEnabled: data.telegramStockAlertsEnabled ?? false,
-    telegramStockChatId: data.telegramStockChatId ?? '',
     address: data.address,
     phone: data.phone,
     phone2: data.phone2,
@@ -110,8 +106,6 @@ function CafeSettings() {
     cafeName: source.cafeName,
     taxesEnabled: source.taxesEnabled,
     roundOrderTotal: source.roundOrderTotal,
-    telegramStockAlertsEnabled: source.telegramStockAlertsEnabled,
-    telegramStockChatId: source.telegramStockChatId.trim(),
     address: source.address,
     phone: source.phone,
     phone2: source.phone2,
@@ -212,23 +206,6 @@ function CafeSettings() {
           <span className="font-semibold">Учитывать налоги</span>
         </label>
         <p className="mt-1 text-sm text-text-muted">Настройте ставки в разделе «Налоги» и назначьте их позициям или категориям меню.</p>
-      </section>
-      <section className="card space-y-3 p-5">
-        <h2 className="font-semibold text-text-primary">{t('Оповещения об остатках')}</h2>
-        <label className="flex cursor-pointer items-center gap-3 text-sm">
-          <input type="checkbox" className="h-4 w-4 accent-primary" checked={form.telegramStockAlertsEnabled}
-            onChange={(event) => set('telegramStockAlertsEnabled', event.target.checked)} />
-          {t('Отправлять в Telegram')}
-        </label>
-        <label className="grid max-w-xs gap-1.5 text-sm text-text-secondary">
-          {t('ID чата Telegram')}
-          <input className="input w-full" inputMode="text" maxLength={17}
-            value={form.telegramStockChatId} onChange={(event) => set('telegramStockChatId', event.target.value)} />
-        </label>
-        <p className="text-sm text-text-muted">{t('Бот сообщает, когда суммарный остаток позиции достигает установленного лимита.')}</p>
-        {form.telegramStockAlertsEnabled && !data.telegramStockBotConfigured && <p className="text-sm text-text-muted">
-          {t('Отправка начнётся после подключения бота на сервере.')}
-        </p>}
       </section>
       {permissions.can('sections.warehouse') && permissions.can('actions.warehouseSettings') && (
         <details className="card p-5"><summary className="cursor-pointer font-semibold">Складской учёт</summary>

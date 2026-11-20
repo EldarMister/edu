@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { usePermissions } from '@/hooks/usePermissions';
 import { IconTables } from '../../components/icons';
 import type { CashFlow, FinanceAccount, FinanceCategory, FinanceEntry } from './api';
@@ -21,8 +22,14 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
   const { canAction } = usePermissions();
   const [expanded, setExpanded] = useState<string[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
-  const [showAmounts, setShowAmounts] = useState(false);
-  const [showPercent, setShowPercent] = useState(false);
+  const [savedColumns, saveColumns] = useColumnPreference('finance-cash-flow');
+  const extraColumns = savedColumns.split(',').filter(Boolean);
+  const showAmounts = extraColumns.includes('amounts');
+  const showPercent = extraColumns.includes('percent');
+
+  function toggleColumn(key: string, checked: boolean) {
+    saveColumns((checked ? [...extraColumns, key] : extraColumns.filter((column) => column !== key)).join(','));
+  }
   const scope = useMemo(() => new Set(selectedAccounts.split(',').filter(Boolean)), [selectedAccounts]);
   const includedAccounts = useMemo(() => !scope.size ? accounts : accounts.filter(({ id }) => scope.has(id)), [accounts, scope]);
   const { periods, lines, byAccount } = useMemo(
@@ -104,8 +111,8 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
         {flow.accountOpening && <details className="cash-flow-column-menu">
           <summary className="finance-tool"><IconTables /> Столбцы <span aria-hidden="true">▾</span></summary>
           <div>
-            <label><input type="checkbox" checked={showAmounts} onChange={(event) => setShowAmounts(event.target.checked)} /> Карта и наличные, деньги</label>
-            <label><input type="checkbox" checked={showPercent} onChange={(event) => setShowPercent(event.target.checked)} /> Карта и наличные, %</label>
+            <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>
+            <label><input type="checkbox" checked={showPercent} onChange={(event) => toggleColumn('percent', event.target.checked)} /> Карта и наличные, %</label>
           </div>
         </details>}
         {canAction('exportReports') && <button type="button" className="finance-tool" onClick={exportReport}>Экспорт CSV</button>}
