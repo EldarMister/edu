@@ -20,6 +20,7 @@ export interface StaffPosition {
   id: string;
   name: string;
   role: PositionRole;
+  fixedWorkspace?: 'terminal' | 'production' | null;
   permissions: EmployeePermissions;
   employees: number;
   salary?: PositionSalary;

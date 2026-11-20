@@ -117,15 +117,15 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
     <form id={formId} className="max-w-[820px] space-y-7" onSubmit={submit}>
       <DocumentField label="Название должности"><input maxLength={80} required className="input w-full" value={name}
         disabled={save.isPending} onChange={(event) => setName(event.target.value)} placeholder="Например, управляющий" /></DocumentField>
-      <fieldset disabled={save.isPending}>
+      {position?.fixedWorkspace !== 'production' && <fieldset disabled={save.isPending}>
         <legend className="mb-2 text-lg font-semibold">Доступ к кассе</legend>
         <Check label="Открывать кассу и оформлять заказы гостей" checked={!!permissions.terminalAccess}
           onChange={(checked) => setPermissions((current) => ({ ...current, terminalAccess: checked }))} />
         {permissions.terminalAccess && <div className="ml-7">
           {terminalActions.map(actionControl)}
         </div>}
-      </fieldset>
-      <fieldset disabled={save.isPending}>
+      </fieldset>}
+      {!position?.fixedWorkspace && <fieldset disabled={save.isPending}>
         <legend className="mb-2 text-lg font-semibold">Доступ к админ-панели</legend>
         <Check label="Вход в админ-панель" checked={!!permissions.adminAccess}
           onChange={(checked) => setPermissions((current) => ({ ...current, adminAccess: checked }))} />
@@ -153,7 +153,7 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
             <p className="mt-2 text-xs text-text-muted">Управление должностями и передача прав доступны владельцу.</p>
           </details>
         </>}
-      </fieldset>
+      </fieldset>}
       <details open={production} className="text-sm"><summary className="cursor-pointer py-2 text-primary">Экран приготовления</summary>
         <div className="mt-3 max-w-lg space-y-2">
           <Select ariaLabel="Экран приготовления" value={production ? role : 'ADMIN'} disabled={!!position || save.isPending}

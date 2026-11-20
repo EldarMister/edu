@@ -20,16 +20,6 @@ const CloseIcon = () => <I d="M18 6 6 18|M6 6l12 12" />;
 const MoveIcon = () => <I d="M5 9l-3 3 3 3|M9 5l3-3 3 3|M15 19l-3 3-3-3|M19 9l3 3-3 3|M2 12h20|M12 2v20" />;
 const TransferIcon = () => <I d="M16 3h5v5|M21 3l-7 7|M8 21H3v-5|M3 21l7-7" />;
 
-// ---------- Chip «Стол X» рядом с «Меню» (десктоп) ----------
-export function TableChip({ number, hallName }: { number: number; hallName?: string }) {
-  const t = useT();
-  return (
-    <span className="inline-flex items-center rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">
-      {t('Стол')} {number}{hallName ? ` · ${hallName}` : ''}
-    </span>
-  );
-}
-
 // ---------- Кнопка выбора стола рядом с поиском (экран меню) ----------
 export function TableSelectButton({
   number,

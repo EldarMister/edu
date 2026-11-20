@@ -41,6 +41,11 @@
 }
 
 .floor-plan-table[data-shape='round'] { border-radius: 999px; }
+
+@media (min-width: 768px) and (min-height: 480px) {
+  .floor-plan-scroll[data-fit] .floor-plan-table { scale: var(--floor-plan-table-scale, 1); }
+}
+
 .floor-plan-table:hover, .floor-plan-table:focus-within { border-color: rgb(var(--edu-focus)); }
 .floor-plan-table[data-selected='true'] {
   z-index: 1;

@@ -74,7 +74,6 @@ import { CancelOrderModal } from './CancelOrderModal';
 import { InsufficientPermissionsModal } from './InsufficientPermissionsModal';
 import {
   TableActionsMenu,
-  TableChip,
   TableSelectButton,
   TableSelectModal,
   CloseTableModal,
@@ -866,9 +865,8 @@ export function WaiterApp() {
     <span className="shrink-0 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary">{t('Доставка')}</span>
   );
 
-  // Десктоп: меню в панели с заголовком и чипом стола.
   const menuPanel = (
-    <Panel title={t('Меню')} action={selectedTable ? <TableChip number={selectedTable.number} hallName={selectedHallName} /> : deliveryChip}>
+    <Panel title={t('Меню')} action={deliveryChip}>
       <DishMenu
         categories={categoriesQ.data ?? []}
         dishes={dishesQ.data ?? []}

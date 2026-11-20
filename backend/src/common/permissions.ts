@@ -52,6 +52,15 @@ export interface EmployeePermissions {
   workShiftRequired?: boolean;
 }
 
+export type FixedWorkspace = 'terminal' | 'production';
+
+export function fixedPositionWorkspace(role: Role, stored: unknown): FixedWorkspace | null {
+  if (!stored || typeof stored !== 'object' || !('fixedWorkspace' in stored)) return null;
+  if (stored.fixedWorkspace === 'terminal' && role === Role.WAITER) return 'terminal';
+  if (stored.fixedWorkspace === 'production' && (role === Role.KITCHEN || role === Role.BAR)) return 'production';
+  return null;
+}
+
 export const READ_ONLY_SECTION_KEYS: SectionKey[] = ['orders', 'tables', 'menu', 'warehouse', 'staff', 'checks', 'settings', 'finance'];
 export const SECTION_WRITE_ACTIONS: Partial<Record<SectionKey, ActionKey[]>> = {
   menu: ['editMenu'], staff: ['manageStaff'], checks: ['refundChecks'],
@@ -161,6 +170,9 @@ export function resolvePermissions(role: Role, stored: unknown): EmployeePermiss
     terminalAccess: typeof s.terminalAccess === 'boolean' ? s.terminalAccess : def.terminalAccess,
     adminAccess: typeof s.adminAccess === 'boolean' ? s.adminAccess : def.adminAccess,
   };
+  const fixedWorkspace = fixedPositionWorkspace(role, stored);
+  if (fixedWorkspace) permissions.adminAccess = false;
+  if (fixedWorkspace === 'production') permissions.terminalAccess = false;
   if (typeof s.workShiftRequired === 'boolean') permissions.workShiftRequired = s.workShiftRequired;
   if (Array.isArray(s.readOnlySections)) {
     const selected = s.readOnlySections;

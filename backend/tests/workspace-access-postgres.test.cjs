@@ -105,6 +105,7 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       const mixed = await makeUser('ADMIN', mixedPosition.id);
       const legacy = await makeUser('WAITER');
       const kitchen = await makeUser('KITCHEN');
+      const bar = await makeUser('BAR');
       const admin = await makeUser('ADMIN');
       const seeded = await db.staffPosition.findMany({ where: { name: { in: ['Касса', 'Кладовщик'] } } });
       const cashierPosition = seeded.find((position) => position.name === 'Касса');
@@ -116,10 +117,10 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       const category = await db.category.create({ data: { name: 'Workspace menu', prepStation: 'none' } });
       const dish = await db.dish.create({ data: { categoryId: category.id, name: 'Water', price: 50, prepStation: 'none' } });
       await settings.ensure();
-      return { owner, mixed, legacy, kitchen, admin, cashier, storekeeper, cashierPosition, storekeeperPosition, mixedPosition, permissions, hall, dish };
+      return { owner, mixed, legacy, kitchen, bar, admin, cashier, storekeeper, cashierPosition, storekeeperPosition, mixedPosition, permissions, hall, dish };
     });
     const sessions = {};
-    for (const name of ['owner', 'mixed', 'legacy', 'kitchen', 'admin', 'cashier', 'storekeeper']) {
+    for (const name of ['owner', 'mixed', 'legacy', 'kitchen', 'bar', 'admin', 'cashier', 'storekeeper']) {
       const session = await request('/auth/login', { method: 'POST', body: { phone: fixture[name].phone, password: 'workspace-test-password' } });
       sessions[name] = session.accessToken;
       assert.equal(session.user.role, fixture[name].role);
@@ -383,6 +384,39 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       assert.equal(mode(buttons.id), false);
       await request(`/admin/halls/${mapped.id}`, { ...owner, method: 'PATCH', body: { useFloorPlan: null } });
       assert.equal((await request('/halls', terminal)).find((hall) => hall.id === mapped.id).useFloorPlan, null);
+    });
+    await t.test('the four default positions keep their workspace limits after edits and renames', async () => {
+      const owner = { token: sessions.owner, workspace: 'admin' };
+      const positions = await request('/admin/positions', owner);
+      for (const [user, name, workspace] of [
+        ['legacy', 'Официант', 'terminal'],
+        ['cashier', 'Касса', 'terminal'],
+        ['kitchen', 'Кухня', 'production'],
+        ['bar', 'Бар', 'production'],
+      ]) {
+        const position = positions.find((row) => row.name === name);
+        assert.equal(position.fixedWorkspace, workspace);
+        const saved = await request(`/admin/positions/${position.id}`, { ...owner, method: 'PATCH', body: {
+          name: `${name} QA`,
+          permissions: { ...position.permissions, fixedWorkspace: null, adminAccess: true, terminalAccess: true },
+        } });
+        assert.equal(saved.fixedWorkspace, workspace);
+        assert.equal(saved.permissions.adminAccess, false);
+        assert.equal(saved.permissions.terminalAccess, workspace === 'terminal');
+
+        await runWithTenant({ cafeId: cafe.id }, () => db.user.update({
+          where: { id: fixture[user].id }, data: { positionId: position.id },
+        }));
+        await request('/admin/staff', { token: sessions[user], workspace: 'admin', status: 403 });
+        if (workspace === 'production') {
+          await request('/orders/active', { token: sessions[user], workspace: 'terminal', status: 403 });
+          await request('/staff/shifts/current', { token: sessions[user], workspace });
+        } else {
+          await request('/orders/active', { token: sessions[user], workspace });
+        }
+      }
+      await request('/admin/staff', { token: sessions.mixed, workspace: 'admin' });
+      await request('/orders/active', { token: sessions.mixed, workspace: 'terminal' });
     });
   } finally {
     await app.close();
