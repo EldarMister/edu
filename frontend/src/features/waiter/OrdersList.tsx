@@ -171,9 +171,7 @@ function OrderActionsMenu({
 
   const settings = usePublicSettings();
   const editPermission = waiterOrderPermission(order, 'edit', settings.data?.waiterOrderPermissions);
-  const cancelPermission = waiterOrderPermission(order, 'cancel', settings.data?.waiterOrderPermissions);
-  const cancellable = cancelPermission.allowed;
-  const canAskAdministrator = !cancellable && !['paid', 'cancelled', 'rejected'].includes(order.status)
+  const canAttemptCancel = !['paid', 'cancelled', 'rejected'].includes(order.status)
     && order.items.some((item) => !['cancelled', 'rejected'].includes(item.status));
   const showEdit = editPermission.allowed;
 
@@ -211,8 +209,8 @@ function OrderActionsMenu({
                 {t('Редактировать заказ')}
               </MenuItem>
             )}
-            <MenuItem disabled={!cancellable && !canAskAdministrator} danger={cancellable} onClick={onCancel}>
-              {t(canAskAdministrator ? 'Позвать администратора' : 'Отменить заказ')}
+            <MenuItem disabled={!canAttemptCancel} danger onClick={onCancel}>
+              {t('Отменить заказ')}
             </MenuItem>
           </div>,
           document.body,

@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Order, CartLine, DishVariant, WaiterShift } from '@/types';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
+import { isAxiosError } from 'axios';
 import { clientId } from '@/lib/id';
 import { displayOrderNumber, orderPlaceLabel } from '@/lib/format';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -487,6 +488,7 @@ export function WaiterApp() {
   }
 
   function openAdministratorPrompt(order: Order) {
+    setCancelTarget(null);
     setAdministratorCallTarget(order);
     const audio = administratorPromptAudio.current;
     if (!audio) return;
@@ -518,7 +520,15 @@ export function WaiterApp() {
     cancelOrder
       .mutateAsync({ orderId: p.order.id, reason: p.reason })
       .then(() => push({ message: t('Заказ отменён'), type: 'success', at: new Date().toISOString() }))
-      .catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }));
+      .catch((err) => showCancellationError(p.order, err));
+  }
+
+  function showCancellationError(order: Order, error: unknown) {
+    if (isAxiosError(error) && error.response?.status === 403) {
+      openAdministratorPrompt(order);
+      return;
+    }
+    push({ message: apiError(error), type: 'error', at: new Date().toISOString() });
   }
 
   function undoCancel() {
@@ -683,11 +693,15 @@ export function WaiterApp() {
       setTab('orders');
       push({ message: `${orderItemName(item)} отменено`, type: 'success', at: new Date().toISOString() });
     } catch (err) {
-      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+      showCancellationError(order, err);
     }
   }
 
   async function cancelAfterPartialRejection(order: Order) {
+    if (!waiterOrderPermission(order, 'cancel', settings.data?.waiterOrderPermissions).allowed) {
+      openAdministratorPrompt(order);
+      return;
+    }
     try {
       await cancelOrder.mutateAsync({
         orderId: order.id,
@@ -698,7 +712,7 @@ export function WaiterApp() {
       setTab('tables');
       push({ message: t('Заказ отменён'), type: 'success', at: new Date().toISOString() });
     } catch (err) {
-      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+      showCancellationError(order, err);
     }
   }
 
@@ -880,6 +894,7 @@ export function WaiterApp() {
           onReplaceRejectedItem={(item) => replaceRejectedFromOrder(displayedOrder, item)}
           onRemoveRejectedItem={(item) => removeRejectedFromOrder(displayedOrder, item)}
           onCancelReadyItem={(item, reason) => cancelReadyItemFromOrder(displayedOrder, item, reason)}
+          cancellationDeniedOpen={!!administratorCallTarget}
           onInsufficientPermissions={() => openAdministratorPrompt(displayedOrder)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}

@@ -99,6 +99,7 @@ export function OrderPanel({
   onReplaceRejectedItem,
   onRemoveRejectedItem,
   onCancelReadyItem,
+  cancellationDeniedOpen,
   onInsufficientPermissions,
   onCancelOrder,
   onEdit,
@@ -116,13 +117,14 @@ export function OrderPanel({
   onReplaceRejectedItem: (item: Order['items'][number]) => void;
   onRemoveRejectedItem: (item: Order['items'][number]) => void;
   onCancelReadyItem: (item: Order['items'][number], reason: string) => void;
+  cancellationDeniedOpen: boolean;
   onInsufficientPermissions: () => void;
   onCancelOrder: () => void;
   /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
   onEdit?: () => void;
 }) {
   const t = useT();
-  const [billItem, setBillItem] = useState<Order['items'][number] | null>(null);
+  const [billItemId, setBillItemId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState<string>(ITEM_CANCEL_REASONS[0]);
   const [cancelOther, setCancelOther] = useState('');
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
@@ -131,9 +133,14 @@ export function OrderPanel({
   const settings = usePublicSettings();
   const policies = settings.data?.waiterOrderPermissions;
   const editable = waiterOrderPermission(order, 'edit', policies).allowed;
+  const billItem = order.items.find((item) => item.id === billItemId);
   const billItemPermission = billItem ? waiterItemPermission(order, billItem, 'cancel', policies) : null;
   const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
   const finalCancelReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
+
+  useEffect(() => {
+    if (cancellationDeniedOpen) setBillItemId(null);
+  }, [cancellationDeniedOpen]);
 
   if (waitingDecision) {
     return (
@@ -214,7 +221,11 @@ export function OrderPanel({
               type="button"
               disabled={!clickable || submitting}
               onClick={() => {
-                setBillItem(it);
+                if (!waiterItemPermission(order, it, 'cancel', policies).allowed) {
+                  onInsufficientPermissions();
+                  return;
+                }
+                setBillItemId(it.id);
                 setCancelReason(ITEM_CANCEL_REASONS[0]);
                 setCancelOther('');
               }}
@@ -364,30 +375,29 @@ export function OrderPanel({
         </div>
       </div>
       <Modal
-        open={!!billItem}
-        onClose={() => setBillItem(null)}
+        open={!!billItem && !cancellationDeniedOpen}
+        onClose={() => setBillItemId(null)}
         title={t('Действие с блюдом')}
         panelClassName="max-w-md"
         footer={
           <div className="space-y-2">
             <button
-              className={`${billItemPermission?.allowed ? 'btn-danger' : 'btn-primary'} btn-lg w-full font-semibold`}
+              className="btn-danger btn-lg w-full font-semibold"
               disabled={submitting || !billItem}
               onClick={() => {
                 if (!billItem) return;
                 if (billItemPermission?.allowed) onCancelReadyItem(billItem, finalCancelReason);
                 else onInsufficientPermissions();
-                setBillItem(null);
+                setBillItemId(null);
               }}
             >
-              {submitting ? <Spinner /> : t(billItemPermission?.allowed ? 'Отменить блюдо' : 'Позвать администратора')}
+              {submitting ? <Spinner /> : t('Отменить блюдо')}
             </button>
           </div>
         }
       >
         {billItem && (
           <div className="space-y-3">
-            {billItemPermission && !billItemPermission.allowed && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{billItemPermission.reason}</p>}
             <div className="rounded-xl border border-border bg-background px-3 py-2">
               <p className="font-medium text-text-primary">{orderItemDisplayName(billItem)}</p>
               <p className="mt-1 text-sm text-text-muted">
