@@ -52,7 +52,7 @@
   }
 
   :is(.workspace-nav-section, .workspace-nav-child):hover::before {
-    opacity: 1;
+    opacity: .55;
     transform: scale(1.02, 1.07);
   }
 
