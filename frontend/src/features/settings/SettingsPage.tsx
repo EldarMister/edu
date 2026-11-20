@@ -5,14 +5,11 @@ import { CashShiftSettings } from './CashShiftControls';
 import { API_URL, apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
-import { useLocale, type Locale } from '@/store/locale';
 import { useAuth } from '@/store/auth';
 import {
-  IconGlobe,
   IconQr,
   IconCash,
   IconCard,
-  IconPrinter,
 } from '../admin/components/icons';
 import {
   useAdminSettings,
@@ -40,7 +37,6 @@ interface Form {
   website: string;
   receiptText: string;
   serviceChargeAmount: string;
-  language: Locale;
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
@@ -69,42 +65,6 @@ export function SettingsPage() {
   </> : null;
 }
 
-function PrinterSettings() {
-  const t = useT();
-  const [printError, setPrintError] = useState(false);
-
-  function testPrint() {
-    setPrintError(false);
-    const target = window.open('', '_blank', 'width=380,height=480');
-    if (!target) {
-      setPrintError(true);
-      return;
-    }
-    target.document.title = t('Пробная печать');
-    const sample = target.document.createElement('p');
-    sample.textContent = `EDU POS · ${t('Пробная печать')}`;
-    sample.style.cssText = 'width: 48mm; margin: 5mm; font: 14px sans-serif';
-    target.document.body.append(sample);
-    target.addEventListener('afterprint', () => target.close(), { once: true });
-    target.focus();
-    target.print();
-  }
-
-  return (
-    <section className="pt-2" aria-labelledby="printer-heading">
-      <div className="mb-3 flex items-center gap-2">
-        <IconPrinter className="h-5 w-5 text-text-secondary" />
-        <h3 id="printer-heading" className="text-[15px] font-semibold text-text-primary">{t('Принтер чеков')}</h3>
-      </div>
-      <div className="space-y-3 rounded-xl border border-border p-3">
-        <p className="text-sm text-text-muted">{t('Выберите принтер в системном окне печати.')}</p>
-        <button type="button" className="btn-secondary btn-md" onClick={testPrint}>{t('Пробная печать')}</button>
-        {printError && <p role="alert" className="text-sm text-danger">{t('Разрешите всплывающие окна и повторите печать.')}</p>}
-      </div>
-    </section>
-  );
-}
-
 function CafeSettings() {
   const permissions = usePermissions();
   const { data, isLoading, isError, error } = useAdminSettings();
@@ -113,7 +73,6 @@ function CafeSettings() {
   const generateDeliveryKey = useGenerateDeliveryApiKey();
   const push = useNotifications((s) => s.push);
   const isOwner = useAuth((s) => s.user?.role === 'OWNER');
-  const setLocale = useLocale((s) => s.setLocale);
   const t = useT();
   const [fiscalCheck, setFiscalCheck] = useState<'ok' | 'fail' | null>(null);
   const [generatedDeliveryKey, setGeneratedDeliveryKey] = useState<string | null>(null);
@@ -131,7 +90,6 @@ function CafeSettings() {
     website: data.website ?? '',
     receiptText: data.receiptText,
     serviceChargeAmount: '0',
-    language: data.language,
     payQr: data.payQr,
     payCash: data.payCash,
     payCard: data.payCard,
@@ -172,7 +130,6 @@ function CafeSettings() {
     instagram: source.instagram,
     website: source.website,
     receiptText: source.receiptText,
-    language: source.language,
     payQr: source.payQr,
     payCash: source.payCash,
     payCard: source.payCard,
@@ -194,8 +151,7 @@ function CafeSettings() {
   const saveSettings = async ({ silent = false }: { silent?: boolean } = {}) => {
     if (!form) return false;
     try {
-      const saved = await update.mutateAsync(toSettingsInput(form));
-      setLocale(saved.language as Locale);
+      await update.mutateAsync(toSettingsInput(form));
       setDraft((current) => current === form ? null : current);
       if (!silent) {
         push({ message: t('Настройки сохранены'), type: 'success', at: new Date().toISOString() });
@@ -219,11 +175,6 @@ function CafeSettings() {
       return;
     }
     setDraft(next);
-  };
-
-  const selectLanguage = (language: Locale) => {
-    set('language', language, 'instant');
-    setLocale(language);
   };
 
   const noMethod = !form.payQr && !form.payCash && !form.payCard;
@@ -359,7 +310,6 @@ function CafeSettings() {
               <p>EDU POS печатает предчек / внутренний товарный чек.</p>
               <p>Фискальный чек формируется только через подключенную ККМ или онлайн-кассу.</p>
             </div>
-            <PrinterSettings />
             {isOwner && <section className="card space-y-2 p-5">
               <h3 className="font-semibold">Список печати счетов и чеков</h3>
               <select className="input w-full" aria-label="Список печати счетов и чеков"
@@ -423,34 +373,6 @@ function CafeSettings() {
 
         {/* Правая колонка */}
         <div className="space-y-4">
-          {/* Язык системы */}
-          <div className="card p-5">
-            <div className="mb-3 flex items-center gap-2">
-              <IconGlobe className="h-5 w-5 text-text-secondary" />
-              <h3 className="text-[15px] font-semibold text-text-primary">{t('Язык системы')}</h3>
-            </div>
-            <div className="flex rounded-xl bg-background p-1">
-              {(
-                [
-                  { value: 'ru', label: 'Русский' },
-                  { value: 'ky', label: 'Кыргызча' },
-                ] as { value: Locale; label: string }[]
-              ).map((l) => (
-                <button
-                  key={l.value}
-                  onClick={() => selectLanguage(l.value)}
-                  className={`flex-1 rounded-lg py-2 text-sm font-medium transition-colors ${
-                    form.language === l.value
-                      ? 'bg-white text-primary shadow-sm'
-                      : 'text-text-muted hover:text-text-secondary'
-                  }`}
-                >
-                  {t(l.label)}
-                </button>
-              ))}
-            </div>
-          </div>
-
           {/* Способы оплаты */}
           <div className="card p-5">
             <h3 className="mb-3 text-[15px] font-semibold text-text-primary">{t('Способы оплаты')}</h3>

@@ -31,6 +31,7 @@ const { AuditService } = require('../src/audit/audit.service.ts');
 const { TablesController } = require('../src/tables/tables.controller.ts');
 const { TablesService } = require('../src/tables/tables.service.ts');
 const { WaiterShiftsController } = require('../src/waiter-shifts/waiter-shifts.controller.ts');
+const { StaffShiftsController } = require('../src/waiter-shifts/staff-shifts.controller.ts');
 const { WaiterShiftsService } = require('../src/waiter-shifts/waiter-shifts.service.ts');
 const { SettingsService } = require('../src/settings/settings.service.ts');
 const { SettingsController } = require('../src/settings/settings.controller.ts');
@@ -66,7 +67,7 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
   ].map(([provide, useValue]) => ({ provide, useValue }));
   class HttpFixtureModule {}
   Module({ imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
-    controllers: [AuthController, OrdersController, PaymentsController, WaiterShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController, CatalogController, HallsController], providers })(HttpFixtureModule);
+    controllers: [AuthController, OrdersController, PaymentsController, WaiterShiftsController, StaffShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController, CatalogController, HallsController], providers })(HttpFixtureModule);
   const app = await NestFactory.create(HttpFixtureModule, { logger: false });
   app.setGlobalPrefix('api');
   app.use((_req, _res, next) => runWithTenant({}, next));
@@ -79,7 +80,8 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
     const response = await fetch(base + path, { method,
       headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(workspace ? { 'X-EDU-Workspace': workspace } : {}) },
       ...(body ? { body: JSON.stringify(body) } : {}) });
-    const value = await response.json();
+    const payload = await response.text();
+    const value = payload ? JSON.parse(payload) : null;
     assert.equal(response.status, status, `${method} ${path}: ${JSON.stringify(value)}`);
     return value;
   };
@@ -190,6 +192,23 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       assert.ok(targets.some(({ id }) => id === fixture.mixed.id));
       await request(`/orders/${order.id}/served`, { ...terminal, method: 'POST', status: 201 });
       await request('/payments', { ...terminal, method: 'POST', status: 201, body: { orderId: order.id, method: 'cash' } });
+    });
+    await t.test('owner and administrator control their own shifts from the admin workspace', async () => {
+      const owner = { token: sessions.owner, workspace: 'admin' };
+      const admin = { token: sessions.admin, workspace: 'admin' };
+      const start = { method: 'POST', status: 201 };
+      assert.equal(await request('/staff/shifts/current', owner), null);
+      const ownerShift = await request('/staff/shifts/start', { ...owner, ...start });
+      assert.equal(ownerShift.waiterId, fixture.owner.id);
+      assert.equal((await request('/staff/shifts/current', owner)).id, ownerShift.id);
+      assert.equal(await request('/staff/shifts/current', admin), null);
+      const adminShift = await request('/staff/shifts/start', { ...admin, ...start });
+      assert.equal(adminShift.waiterId, fixture.admin.id);
+      assert.equal((await request('/staff/shifts/end', { ...admin, ...start })).id, adminShift.id);
+      assert.equal((await request('/staff/shifts/current', owner)).id, ownerShift.id);
+      assert.equal((await request('/staff/shifts/end', { ...owner, ...start })).id, ownerShift.id);
+      assert.equal(await request('/staff/shifts/current', owner), null);
+      await request('/staff/shifts/start', { token: sessions.mixed, workspace: 'admin', method: 'POST', status: 400 });
     });
     await t.test('owner can restrict the print queue to actual waiter requests', async () => {
       const owner = { token: sessions.owner, workspace: 'admin' };

@@ -13,7 +13,7 @@ export const CLOSED_ORDER_STATUSES: OrderStatus[] = [
 ];
 
 type PrismaClientLike = PrismaService | Prisma.TransactionClient;
-export const WORK_SHIFT_ROLES: Role[] = [Role.WAITER, Role.ADMIN, Role.KITCHEN, Role.BAR];
+export const WORK_SHIFT_ROLES: Role[] = [Role.WAITER, Role.ADMIN, Role.KITCHEN, Role.BAR, Role.OWNER];
 export const MAX_WORK_SHIFT_MS = 20 * 60 * 60 * 1000;
 
 export function workShiftView(shift: WaiterShift) {

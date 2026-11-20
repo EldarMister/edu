@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { api, apiError } from '@/lib/api';
@@ -11,29 +12,48 @@ import { financeKey } from '@/features/admin/pages/finance/api';
 import { ShiftRequiredScreen } from '@/features/waiter/ShiftRequiredScreen';
 import { ShiftSummaryModal } from '@/features/waiter/ShiftSummaryModal';
 import { ShiftCard } from './ShiftCard';
+import { useT } from '@/lib/i18n';
 
 type WorkShift = { id: string; startedAt: string; endedAt: string | null; autoCloseAt: string | null };
 export const workShiftKey = ['staff', 'work-shift'] as const;
-const WorkShiftActions = createContext<{ startedAt: string; busy: boolean; finish: () => void } | null>(null);
+const WorkShiftActions = createContext<{
+  startedAt?: string;
+  busy: boolean;
+  loading: boolean;
+  error: unknown;
+  retry: () => void;
+  act: () => void;
+} | null>(null);
 
 export function WorkShiftSettingsCard() {
   const shift = useContext(WorkShiftActions);
-  return shift && <ShiftCard startedAt={shift.startedAt} busy={shift.busy} onAction={shift.finish} showElapsed />;
+  const t = useT();
+  if (!shift) return null;
+  if (shift.loading) return <section className="card p-5"><Spinner /></section>;
+  if (shift.error) return <section className="card space-y-3 p-5">
+    <p role="alert" className="text-sm text-danger">{apiError(shift.error)}</p>
+    <button type="button" className="btn-secondary btn-md" onClick={shift.retry}>{t('Повторить')}</button>
+  </section>;
+  return <ShiftCard startedAt={shift.startedAt} busy={shift.busy} onAction={shift.act} showElapsed />;
 }
 
-function useWorkShift() {
+function useWorkShift(includeOwner = false) {
   const user = useAuth((state) => state.user);
-  const enabled = !!user && user.role !== 'OWNER' && user.permissions?.workShiftRequired !== false;
+  const enabled = !!user && (includeOwner || user.role !== 'OWNER') && user.permissions?.workShiftRequired !== false;
   const queryKey = [...workShiftKey, user?.id];
   const query = useQuery({
     queryKey, enabled, retry: false, refetchInterval: 30_000,
-    queryFn: async () => (await api.get<WorkShift | null>('/staff/shifts/current')).data,
+    queryFn: async ({ signal }) => (await api.get<WorkShift | null>('/staff/shifts/current', { signal })).data || null,
   });
   return { enabled, query, queryKey };
 }
 
-export function WorkShiftGate({ children }: { children: ReactNode }) {
-  const { enabled, query, queryKey } = useWorkShift();
+export function WorkShiftGate({ children, adminWorkspace = false }: { children: ReactNode; adminWorkspace?: boolean }) {
+  const { enabled, query, queryKey } = useWorkShift(adminWorkspace);
+  const [params] = useSearchParams();
+  const isOwner = useAuth((state) => state.user?.role === 'OWNER');
+  const profileOpen = adminWorkspace && params.get('section') === 'profile';
+  const t = useT();
   const qc = useQueryClient();
   const [starting, setStarting] = useState(false);
   const [summary, setSummary] = useState<WaiterShift | null>(null);
@@ -42,9 +62,19 @@ export function WorkShiftGate({ children }: { children: ReactNode }) {
   const refresh = () => { if (enabled) void qc.invalidateQueries({ queryKey: workShiftKey }); };
   useSocketEvent('waiter:shift_started', refresh);
   useSocketEvent('waiter:shift_ended', refresh);
+  const start = useMutation({
+    mutationFn: async () => (await api.post<WorkShift>('/staff/shifts/start')).data,
+    onSuccess: async (shift) => {
+      await qc.cancelQueries({ queryKey, exact: true });
+      qc.setQueryData(queryKey, shift);
+      void qc.invalidateQueries({ queryKey: ['admin', 'staff'] });
+    },
+    onError: refresh,
+  });
   const end = useMutation({
     mutationFn: async () => (await api.post<WaiterShift>('/staff/shifts/end')).data,
-    onSuccess: (shift) => {
+    onSuccess: async (shift) => {
+      await qc.cancelQueries({ queryKey, exact: true });
       setSummary(shift);
       qc.setQueryData(queryKey, null);
       void qc.invalidateQueries({ queryKey: ['admin', 'staff'] });
@@ -58,31 +88,33 @@ export function WorkShiftGate({ children }: { children: ReactNode }) {
   if (!enabled) return <>{children}</>;
   const current = query.data?.endedAt ? null : query.data;
   // Keep settings mounted while the end request and its summary are on screen.
-  if (!starting && (current || end.isPending || summary)) {
-    const startedAt = current?.startedAt ?? summary?.startedAt ?? '';
-    return <WorkShiftActions.Provider value={{ startedAt, busy: end.isPending || !!summary, finish: () => end.mutate() }}>
+  if (!starting && (current || end.isPending || summary || profileOpen || (adminWorkspace && isOwner))) {
+    return <WorkShiftActions.Provider value={{
+      startedAt: current?.startedAt ?? summary?.startedAt,
+      busy: start.isPending || end.isPending || !!summary,
+      loading: query.isPending,
+      error: query.data === undefined ? query.error : null,
+      retry: () => void query.refetch(),
+      act: () => {
+        if (current) end.mutate();
+        else start.mutate(undefined, {
+          onError: (err) => notify({ message: apiError(err), type: 'error', at: new Date().toISOString() }),
+        });
+      },
+    }}>
       {children}
       <ShiftSummaryModal shift={summary} open={!!summary} onClose={() => setSummary(null)} />
     </WorkShiftActions.Provider>;
   }
 
-  async function start() {
-    try {
-      const { data } = await api.post<WorkShift>('/staff/shifts/start');
-      qc.setQueryData(queryKey, data);
-    } catch (err) {
-      refresh();
-      throw err;
-    }
-  }
-
   return <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-white">
-    <div className="flex shrink-0 justify-end px-4 pt-3">
-      <button type="button" className="btn-secondary btn-md" onClick={() => { disconnectSocket(); logout(); }}>Выйти</button>
+    <div className="flex shrink-0 justify-end gap-2 px-4 pt-3">
+      {adminWorkspace && !starting && <Link to="?section=profile" state={{ returnFromProfile: true }} className="btn-secondary btn-md">{t('Личный кабинет')}</Link>}
+      <button type="button" className="btn-secondary btn-md" onClick={() => { disconnectSocket(); logout(); }}>{t('Выйти')}</button>
     </div>
     <div className="min-h-[420px] flex-1">
       {starting || (!query.isPending && !query.isError) ? (
-        <ShiftRequiredScreen onBusyChange={setStarting} startShift={start} idleSubtitle="Начните смену, чтобы приступить к работе." />
+        <ShiftRequiredScreen onBusyChange={setStarting} startShift={() => start.mutateAsync()} idleSubtitle="Начните смену, чтобы приступить к работе." />
       ) : <div className="grid h-full place-content-center justify-items-center gap-4 px-4 text-center">
         {query.isPending ? <Spinner /> : <>
           <p role="alert">{apiError(query.error)}</p>

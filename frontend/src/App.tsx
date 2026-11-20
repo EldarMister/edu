@@ -141,7 +141,7 @@ export function App() {
           path="/admin/*"
           element={
             <ProtectedRoute workspace="admin">
-              <WorkShiftGate><AdminApp /></WorkShiftGate>
+              <WorkShiftGate adminWorkspace><AdminApp /></WorkShiftGate>
             </ProtectedRoute>
           }
         />
@@ -149,7 +149,7 @@ export function App() {
           path="/owner/*"
           element={
             <ProtectedRoute roles={['OWNER']} workspace="admin">
-              <AdminApp />
+              <WorkShiftGate adminWorkspace><AdminApp /></WorkShiftGate>
             </ProtectedRoute>
           }
         />

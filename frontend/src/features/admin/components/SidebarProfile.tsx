@@ -1,12 +1,16 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AppVersion } from '@/components/AppVersion';
-import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { useT } from '@/lib/i18n';
-import { IconLogout } from './icons';
+import { IconLogout, IconStaff } from './icons';
 import { SidebarFlyout } from './SidebarFlyout';
 
-export function SidebarProfile({ name, onLogout, compact = false }: { name?: string; onLogout: () => void; compact?: boolean }) {
+export function SidebarProfile({ name, onOpenProfile, onLogout, compact = false }: {
+  name?: string;
+  onOpenProfile: () => void;
+  onLogout: () => void;
+  compact?: boolean;
+}) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const id = useId();
@@ -34,7 +38,10 @@ export function SidebarProfile({ name, onLogout, compact = false }: { name?: str
   }, [open, compact]);
 
   const controls = <>
-    <div className="px-2"><ThemeSwitch compact /></div>
+    <button type="button" onClick={() => { setOpen(false); onOpenProfile(); }}
+      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-text-secondary hover:bg-background hover:text-text-primary">
+      <IconStaff />{t('Личный кабинет')}
+    </button>
     {compact && <WorkspaceLinks current="admin" />}
     <div className="mt-1 border-t border-border pt-1">
       <button type="button" onClick={onLogout}

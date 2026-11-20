@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import type { TouchEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/store/auth';
@@ -8,8 +8,8 @@ import type { SectionKey } from '@/types';
 import { useT } from '@/lib/i18n';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
-import { WorkShiftBanner } from '@/features/settings/WorkShiftBanner';
 import { SidebarProfile } from './components/SidebarProfile';
+import { AdminProfilePage } from './pages/AdminProfilePage';
 import { SidebarFlyout } from './components/SidebarFlyout';
 import { disconnectSocket, useSocketEvent } from '@/lib/socket';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
@@ -194,6 +194,9 @@ export function AdminApp() {
     return !!s.perm && canSection(s.perm);
   });
   const [route, setRoute] = useSearchParams();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const profileOpen = route.get('section') === 'profile';
   useWorkspaceScroll();
   const legacyStations = route.get('section') === 'menu' && route.get('view') === 'stations';
   const section = (legacyStations ? 'staff' : route.get('section') || (isOwner ? 'stats' : 'orders')) as Section;
@@ -241,6 +244,7 @@ export function AdminApp() {
 
   // Если текущий раздел стал недоступен (право отозвали) — уходим на первый доступный.
   useEffect(() => {
+    if (profileOpen) return;
     if (section === 'finance' && isAdmin && financeAccess.isPending) return;
     if (sections.length > 0 && !sections.some((s) => s.key === section)) {
       setSection(sections[0].key);
@@ -249,7 +253,7 @@ export function AdminApp() {
       next.set('section', 'staff');
       setRoute(next, { replace: true });
     }
-  }, [sections, section, isAdmin, financeAccess.isPending, legacyStations, route, setRoute]);
+  }, [sections, section, isAdmin, financeAccess.isPending, legacyStations, profileOpen, route, setRoute]);
 
   useEffect(() => {
     if (!mobileNav) {
@@ -320,6 +324,16 @@ export function AdminApp() {
   function onLogout() {
     disconnectSocket();
     logout();
+  }
+
+  function openProfile() {
+    if (!profileOpen) setRoute({ section: 'profile' }, { state: { returnFromProfile: true } });
+    setMobileNav(false);
+  }
+
+  function closeProfile() {
+    if (location.state?.returnFromProfile) navigate(-1);
+    else setRoute({}, { replace: true });
   }
 
   function go(s: Section) {
@@ -394,7 +408,7 @@ export function AdminApp() {
         : section === 'finance' ? financeNav.find(({ key }) => key === financeView)?.label
           : section === 'staff' ? personnelNav.find(({ key }) => key === staffView)?.label
             : section === 'tables' && route.get('view') === 'map' ? 'Карта зала' : undefined;
-  const pageTitle = current ? t(currentViewLabel ?? current.label) : '';
+  const pageTitle = profileOpen ? t('Личный кабинет') : current ? t(currentViewLabel ?? current.label) : '';
   useEffect(() => {
     const previous = document.title;
     document.title = pageTitle ? `${pageTitle} · EDU POS` : 'EDU POS';
@@ -558,7 +572,8 @@ export function AdminApp() {
         })}
       </nav>
       {!compact && <WorkspaceLinks current="admin" />}
-      <SidebarProfile key={variant === 'desktop' ? sidebarMode : 'mobile'} name={user?.name} onLogout={onLogout} compact={compact} />
+      <SidebarProfile key={variant === 'desktop' ? sidebarMode : 'mobile'} name={user?.name}
+        onOpenProfile={openProfile} onLogout={onLogout} compact={compact} />
     </aside>;
   };
 
@@ -632,11 +647,10 @@ export function AdminApp() {
             <ConnectionStatus />
           </div>
         </header>
-        <WorkShiftBanner />
         <main
           className={`workspace-main app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${posterWorkspace ? 'poster-workspace' : ''} ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
         >
-          {!current ? (
+          {profileOpen ? <AdminProfilePage onBack={closeProfile} /> : !current ? (
             <NoAccessScreen />
           ) : (
             <>
