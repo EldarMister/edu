@@ -1,7 +1,7 @@
 import { DatePicker } from '@/components/DatePicker';
 import { useMemo, useState } from 'react';
 import { Select } from '@/components/Select';
-import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../components/WorkspacePending';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useWaiterOrdersReport, type StaffMember, type WaiterOrdersReportItem } from '../api';
 
@@ -171,7 +171,7 @@ export function WaiterOrdersReport({ staff, staffLoading }: { staff: StaffMember
 
       <div className="overflow-hidden rounded-xl border border-border">
         {report.isLoading || staffLoading ? (
-          <div className="flex justify-center py-16 text-primary"><Spinner className="h-6 w-6" /></div>
+          <WorkspacePending />
         ) : !selectedWaiterId ? (
           <p className="py-16 text-center text-text-muted">Добавьте официанта, чтобы сформировать отчет</p>
         ) : report.isError ? (

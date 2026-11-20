@@ -3,6 +3,7 @@ import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { DeleteNameField } from '../components/DeleteNameField';
 import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../components/WorkspacePending';
 import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
@@ -93,7 +94,7 @@ export function TablesPage() {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="workspace-stagger space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div role="group" aria-label="Раздел столов" className="inline-flex gap-1 rounded-xl border border-border bg-white p-1">
           <button type="button" aria-pressed={!mapView} className={`rounded-lg px-3 py-2 text-sm ${!mapView ? 'bg-primary text-white' : 'text-text-secondary'}`}
@@ -129,9 +130,7 @@ export function TablesPage() {
       </div>
 
       {hallsQ.isLoading ? (
-        <div className="flex justify-center py-12 text-primary">
-          <Spinner className="h-6 w-6" />
-        </div>
+        <WorkspacePending />
       ) : hallsQ.isError ? (
         <p role="alert" className="text-sm text-danger">{apiError(hallsQ.error)}</p>
       ) : mapView ? (

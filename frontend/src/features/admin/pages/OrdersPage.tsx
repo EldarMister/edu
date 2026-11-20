@@ -130,7 +130,7 @@ export function OrdersPage() {
     <div className="orders-redesign">
       <WorkspaceHeaderActions>{period.filter}</WorkspaceHeaderActions>
       {/* Inline-сводка под заголовком */}
-      <div className="orders-summary">
+      <div className="orders-summary workspace-enter">
         <Sum label={tr('Всего заказов')} value={s ? s.total : '—'} />
         <Sep />
         <Sum label={tr('Оплачено')} value={s ? s.paid : '—'} />

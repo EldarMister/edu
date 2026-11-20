@@ -9,6 +9,7 @@ import { DeleteNameField } from '../components/DeleteNameField';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../components/WorkspacePending';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -353,9 +354,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
         {staffQ.isError && <p role="alert" className="px-4 py-2.5 text-sm text-danger">Список сотрудников не обновился. {apiError(staffQ.error)}</p>}
         {reportQ.isError && <p role="alert" className="px-4 py-2.5 text-sm text-danger">Отчёт по смене не загрузился. {apiError(reportQ.error)}</p>}
         {!staffQ.data && !reportQ.data && (staffQ.isLoading || reportQ.isLoading) ? (
-          <div className="flex justify-center py-12 text-primary">
-            <Spinner className="h-6 w-6" />
-          </div>
+          <WorkspacePending />
         ) : rows.length === 0 ? (
           <p className="py-12 text-center text-text-muted">Сотрудники не найдены</p>
         ) : (
@@ -671,9 +670,7 @@ function ShiftHistoryTable({
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-white">
       {isLoading ? (
-        <div className="flex justify-center py-12 text-primary">
-          <Spinner className="h-6 w-6" />
-        </div>
+        <WorkspacePending />
       ) : rows.length === 0 ? (
         <p className="py-12 text-center text-text-muted">Нет смен за выбранный период</p>
       ) : (

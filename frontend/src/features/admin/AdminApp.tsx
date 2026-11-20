@@ -52,6 +52,7 @@ import { IngredientCategoriesPage } from './pages/IngredientCategoriesPage';
 import { WorkspaceHeaderProvider, WorkspaceTitleSlot, WorkspaceActionsSlot } from './pages/WorkspaceHeader';
 import './pages/warehouse/poster-workspace.css';
 import './components/sidebar.css';
+import './components/workspace-motion.css';
 
 const UNITS = ['ноль', 'один', 'два', 'три', 'четыре', 'пять', 'шесть', 'семь', 'восемь', 'девять'];
 const TEENS = [
@@ -323,7 +324,7 @@ export function AdminApp() {
 
   function go(s: Section) {
     setCollapsedSection(null);
-    setSection(s);
+    if (s !== section || route.has('editor')) setSection(s);
     setMobileNav(false);
   }
 
@@ -426,11 +427,11 @@ export function AdminApp() {
   const renderSidebar = (variant: 'desktop' | 'mobile') => {
     const compact = variant === 'desktop' && sidebarMode !== 'expanded';
     return <aside className={`workspace-sidebar flex h-full shrink-0 flex-col border-r border-border bg-white ${variant === 'desktop' ? 'w-full' : 'w-52'}`}>
-      <div className={`workspace-brand flex h-16 shrink-0 items-center gap-2 ${compact ? 'justify-center' : 'justify-between px-5'}`}>
+      <div className={`workspace-brand workspace-enter flex h-16 shrink-0 items-center gap-2 ${compact ? 'justify-center' : 'justify-between px-5'}`}>
         {!compact && <BrandLogo />}
         {variant === 'desktop' && sidebarMode !== 'hidden' && sidebarToggle}
       </div>
-      <nav aria-label={t('Разделы')} className={`workspace-nav min-h-0 flex-1 space-y-1 overflow-y-auto py-2 ${compact ? 'no-scrollbar px-2' : 'app-scrollbar-subtle px-3'}`}>
+      <nav aria-label={t('Разделы')} className={`workspace-nav workspace-stagger min-h-0 flex-1 space-y-1 overflow-y-auto py-2 ${compact ? 'no-scrollbar px-2' : 'app-scrollbar-subtle px-3'}`}>
         {sections.map((s) => {
           const Icon = s.icon;
           const active = s.key === section;
@@ -454,10 +455,12 @@ export function AdminApp() {
           const childrenId = `workspace-${variant}-${s.key}-children`;
           const flyout = compact && sidebarFlyout?.section === s.key ? sidebarFlyout : null;
           function openView(view: string) {
-            if (s.key === 'warehouse') setWarehouseView(view as WarehouseView);
-            else if (s.key === 'menu') setMenuView(view as MenuView);
-            else if (s.key === 'stats') setStatsView(view as StatisticsView);
-            else setRoute({ section: s.key, view });
+            if (!active || view !== currentView || route.has('editor')) {
+              if (s.key === 'warehouse') setWarehouseView(view as WarehouseView);
+              else if (s.key === 'menu') setMenuView(view as MenuView);
+              else if (s.key === 'stats') setStatsView(view as StatisticsView);
+              else setRoute({ section: s.key, view });
+            }
             setMobileNav(false);
             setSidebarFlyout(null);
             flyout?.anchor.focus();
@@ -620,7 +623,7 @@ export function AdminApp() {
               <BrandLogo />
               {sidebarToggle}
             </div>}
-            <WorkspaceTitleSlot><h1 className="text-xl font-semibold text-text-primary lg:text-2xl">
+            <WorkspaceTitleSlot><h1 key={pageTitle} className="workspace-enter text-xl font-semibold text-text-primary lg:text-2xl">
               {pageTitle}
             </h1></WorkspaceTitleSlot>
           </div>

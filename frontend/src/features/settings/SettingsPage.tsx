@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Spinner } from '@/components/Spinner';
+import { useState } from 'react';
+import { WorkspacePending } from '../admin/components/WorkspacePending';
 import { Toggle } from '@/components/Toggle';
 import { CashShiftSettings } from './CashShiftControls';
 import { API_URL, apiError } from '@/lib/api';
@@ -116,53 +116,41 @@ function CafeSettings() {
   const setLocale = useLocale((s) => s.setLocale);
   const t = useT();
   const [fiscalCheck, setFiscalCheck] = useState<'ok' | 'fail' | null>(null);
-  const [dirty, setDirty] = useState(false);
   const [generatedDeliveryKey, setGeneratedDeliveryKey] = useState<string | null>(null);
 
-  const [form, setForm] = useState<Form | null>(null);
+  const [draft, setDraft] = useState<Form | null>(null);
+  const dirty = draft !== null;
+  const form: Form | null = draft ?? (data ? {
+    receiptPrintRequestsOnly: data.receiptPrintRequestsOnly ?? false,
+    waiterOrderPermissions: data.waiterOrderPermissions ?? DEFAULT_WAITER_PERMISSIONS,
+    cafeName: data.cafeName,
+    address: data.address,
+    phone: data.phone,
+    phone2: data.phone2,
+    instagram: data.instagram ?? '',
+    website: data.website ?? '',
+    receiptText: data.receiptText,
+    serviceChargeAmount: '0',
+    language: data.language,
+    payQr: data.payQr,
+    payCash: data.payCash,
+    payCard: data.payCard,
+    deliveryEnabled: data.deliveryEnabled,
+    qrGeoEnabled: data.qrGeoEnabled,
+    qrGeoLat: data.qrGeoLat,
+    qrGeoLng: data.qrGeoLng,
+    qrGeoRadius: data.qrGeoRadius,
+    queueDisplayEnabled: data.queueDisplayEnabled,
+    queueDisplayMode: data.queueDisplayMode,
+    fiscalProvider: (data.fiscalProvider ?? '') as FiscalProvider,
+    fiscalEkassaApiKey: data.fiscalEkassaApiKey ?? '',
+    fiscalEkassaUrl: data.fiscalEkassaUrl ?? '',
+    fiscalEkassaInn: data.fiscalEkassaInn ?? '',
+    fiscalYakassaApiKey: data.fiscalYakassaApiKey ?? '',
+    fiscalYakassaUrl: data.fiscalYakassaUrl ?? '',
+  } : null);
 
-  useEffect(() => {
-    if (data) {
-      setForm({
-        receiptPrintRequestsOnly: data.receiptPrintRequestsOnly ?? false,
-        waiterOrderPermissions: data.waiterOrderPermissions ?? DEFAULT_WAITER_PERMISSIONS,
-        cafeName: data.cafeName,
-        address: data.address,
-        phone: data.phone,
-        phone2: data.phone2,
-        instagram: data.instagram ?? '',
-        website: data.website ?? '',
-        receiptText: data.receiptText,
-        serviceChargeAmount: '0',
-        language: data.language,
-        payQr: data.payQr,
-        payCash: data.payCash,
-        payCard: data.payCard,
-        deliveryEnabled: data.deliveryEnabled,
-        qrGeoEnabled: data.qrGeoEnabled,
-        qrGeoLat: data.qrGeoLat,
-        qrGeoLng: data.qrGeoLng,
-        qrGeoRadius: data.qrGeoRadius,
-        queueDisplayEnabled: data.queueDisplayEnabled,
-        queueDisplayMode: data.queueDisplayMode,
-        fiscalProvider: (data.fiscalProvider ?? '') as FiscalProvider,
-        fiscalEkassaApiKey: data.fiscalEkassaApiKey ?? '',
-        fiscalEkassaUrl: data.fiscalEkassaUrl ?? '',
-        fiscalEkassaInn: data.fiscalEkassaInn ?? '',
-        fiscalYakassaApiKey: data.fiscalYakassaApiKey ?? '',
-        fiscalYakassaUrl: data.fiscalYakassaUrl ?? '',
-      });
-      setDirty(false);
-    }
-  }, [data?.updatedAt]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  if (isLoading) {
-    return (
-      <div className="flex justify-center py-16 text-primary">
-        <Spinner className="h-7 w-7" />
-      </div>
-    );
-  }
+  if (isLoading) return <WorkspacePending />;
 
   if (isError || !form || !data) {
     return (
@@ -208,7 +196,7 @@ function CafeSettings() {
     try {
       const saved = await update.mutateAsync(toSettingsInput(form));
       setLocale(saved.language as Locale);
-      setDirty(false);
+      setDraft((current) => current === form ? null : current);
       if (!silent) {
         push({ message: t('Настройки сохранены'), type: 'success', at: new Date().toISOString() });
       }
@@ -230,8 +218,7 @@ function CafeSettings() {
       });
       return;
     }
-    setForm(next);
-    setDirty(true);
+    setDraft(next);
   };
 
   const selectLanguage = (language: Locale) => {
@@ -252,8 +239,7 @@ function CafeSettings() {
       (pos) => {
         const lat = Number(pos.coords.latitude.toFixed(6));
         const lng = Number(pos.coords.longitude.toFixed(6));
-        setForm((f) => (f ? { ...f, qrGeoLat: lat, qrGeoLng: lng } : f));
-        setDirty(true);
+        setDraft((current) => ({ ...(current ?? form), qrGeoLat: lat, qrGeoLng: lng }));
         push({ message: t('Координаты получены. Нажмите «Сохранить изменения»'), type: 'success', at: new Date().toISOString() });
       },
       () => push({ message: t('Не удалось получить геолокацию. Разрешите доступ.'), type: 'error', at: new Date().toISOString() }),
@@ -296,7 +282,7 @@ function CafeSettings() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="workspace-stagger space-y-4">
       {permissions.can('sections.warehouse') && permissions.can('actions.warehouseSettings') && (
         <details className="card p-5"><summary className="cursor-pointer font-semibold">Складской учёт</summary>
           <div className="mt-4"><AccountingSettings /></div>

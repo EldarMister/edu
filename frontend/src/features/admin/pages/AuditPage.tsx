@@ -1,6 +1,6 @@
 import { DatePicker } from '@/components/DatePicker';
 import { useState } from 'react';
-import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../components/WorkspacePending';
 import { timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useAuditLogs, useAuditFilters, type AuditLogEntry } from '../api';
@@ -146,14 +146,12 @@ export function AuditPage() {
       {/* Список */}
       <div className="card overflow-hidden">
         {logsQ.isLoading ? (
-          <div className="flex justify-center py-12 text-primary">
-            <Spinner className="h-6 w-6" />
-          </div>
+          <WorkspacePending />
         ) : !data || data.items.length === 0 ? (
           <p className="py-12 text-center text-text-muted">{tr('Записей не найдено')}</p>
         ) : (
           <>
-            <ul className="divide-y divide-border">
+            <ul className="workspace-enter divide-y divide-border">
               {data.items.map((log) => (
                 <AuditRow key={log.id} log={log} />
               ))}

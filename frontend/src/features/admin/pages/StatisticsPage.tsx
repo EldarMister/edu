@@ -1,7 +1,7 @@
 import { DatePicker } from '@/components/DatePicker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/Modal';
-import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../components/WorkspacePending';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
 import { money } from '@/lib/format';
@@ -74,18 +74,16 @@ export function StatisticsPage({ view }: { view: StatisticsView }) {
         <p role="alert" className="text-danger">{apiError(activeQuery.error)}</p>
         <button type="button" className="btn-secondary btn-md" onClick={() => void activeQuery.refetch()}>{t('Повторить')}</button>
       </div> : activeQuery.isPending ? (
-        <div className="flex justify-center py-20 text-primary">
-          <Spinner className="h-7 w-7" />
-        </div>
-      ) : view !== 'overview' ? reportsQ.data && <>
+        <WorkspacePending />
+      ) : view !== 'overview' ? reportsQ.data && <div key={view} className="workspace-stagger space-y-4">
         {view === 'sales' && reportsQ.data.sales.length > 0 && <section className="card p-4 sm:p-5">
           <h2 className="mb-4 font-semibold text-text-primary">{t('Выручка за период')}</h2>
           <RevenueChart data={[...reportsQ.data.sales].sort((a, b) => a.date.localeCompare(b.date))
             .map(({ date, revenue }) => ({ label: chartDay.format(new Date(date + 'T00:00:00Z')), amount: revenue }))} />
         </section>}
         <StatisticsReport key={view} report={view} data={reportsQ.data} periodControl={periodControl} />
-      </> : d && (
-        <>
+      </div> : d && (
+        <div key={view} className="workspace-stagger space-y-4">
           {/* Метрики: десктоп — две карточки */}
           <div className="hidden gap-4 lg:grid lg:grid-cols-2">
             <MetricCard icon={<IconOrders />} label={ORDERS_LABEL[period]} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
@@ -150,7 +148,7 @@ export function StatisticsPage({ view }: { view: StatisticsView }) {
               onViewAll={setViewAll}
             />
           </div>
-        </>
+        </div>
       )}
 
       <Modal open={!!viewAll} onClose={() => setViewAll(null)} title={viewAll?.title} panelClassName="max-w-md">

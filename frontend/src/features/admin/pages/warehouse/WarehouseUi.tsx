@@ -1,7 +1,7 @@
 import { Children, cloneElement, isValidElement, useContext, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { EditorFooterTarget } from './EditorPage';
-import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../../components/WorkspacePending';
 import { apiError } from '@/lib/api';
 
 export function QueryState({
@@ -15,12 +15,7 @@ export function QueryState({
   empty?: boolean;
   children?: ReactNode;
 }) {
-  if (pending)
-    return (
-      <div className="flex justify-center p-10">
-        <Spinner />
-      </div>
-    );
+  if (pending) return <WorkspacePending />;
   if (error)
     return (
       <p role="alert" className="p-4 text-sm text-danger">

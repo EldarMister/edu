@@ -5,6 +5,7 @@ import { Modal } from '@/components/Modal';
 import { DeleteNameField } from '../components/DeleteNameField';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../components/WorkspacePending';
 import { minDishUnitPrice, variantNamesLine } from '@/lib/format';
 import { resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
@@ -184,9 +185,7 @@ function MenuDishList({ view }: { view: MenuView }) {
         />
       )}
       {dishesQ.isPending ? (
-        <div className="py-12">
-          <Spinner />
-        </div>
+        <WorkspacePending />
       ) : dishesQ.isError ? (
         <ListLoadError
           error={dishesQ.error}
@@ -472,7 +471,7 @@ export function MenuCategoriesPage() {
         )}
       </div>
       {categoriesQ.isPending ? (
-        <Spinner />
+        <WorkspacePending />
       ) : categoriesQ.isError ? (
         <ListLoadError
           error={categoriesQ.error}

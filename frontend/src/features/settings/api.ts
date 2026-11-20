@@ -88,8 +88,6 @@ export function useAdminSettings() {
   return useQuery({
     queryKey: ['settings', 'admin'],
     queryFn: async () => (await api.get<Settings>('/admin/settings')).data,
-    staleTime: 0,
-    refetchOnMount: 'always',
   });
 }
 

@@ -2,6 +2,7 @@ import type { RefObject } from 'react';
 import type { Order } from '@/types';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from './WorkspacePending';
 import { usePermissions } from '@/hooks/usePermissions';
 import { displayOrderNumber, hallSuffix, money, paymentCell, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -32,7 +33,7 @@ export function OrdersTable({ items, isLoading, error, scrollRef, loadMoreRef, i
   return (
     <div className="orders-table-card">
       {isLoading ? (
-        <div className="flex justify-center py-12 text-primary"><Spinner className="h-6 w-6" /></div>
+        <WorkspacePending />
       ) : error ? (
         <div className="px-4 py-12 text-center">
           <p className="font-medium text-danger">{tr('Не удалось загрузить заказы')}</p>

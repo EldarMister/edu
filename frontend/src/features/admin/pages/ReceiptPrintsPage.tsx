@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../components/WorkspacePending';
 import { usePermissions } from '@/hooks/usePermissions';
 import { api, apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
@@ -210,11 +210,9 @@ export function ReceiptPrintsPage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="workspace-stagger space-y-4">
       {q.isLoading ? (
-        <div className="flex justify-center rounded-xl border border-border bg-white py-16 text-primary">
-          <Spinner className="h-7 w-7" />
-        </div>
+        <WorkspacePending />
       ) : (
         <>
           {renderSection(t('Запрошенные на печать'), requestedItems, t('Запросов на печать нет'))}
