@@ -37,9 +37,9 @@ export function WorkShiftSettingsCard() {
   return <ShiftCard startedAt={shift.startedAt} busy={shift.busy} onAction={shift.act} showElapsed />;
 }
 
-function useWorkShift(includeOwner = false) {
+function useWorkShift() {
   const user = useAuth((state) => state.user);
-  const enabled = !!user && (includeOwner || user.role !== 'OWNER') && user.permissions?.workShiftRequired !== false;
+  const enabled = !!user && user.role !== 'OWNER' && user.permissions?.workShiftRequired !== false;
   const queryKey = [...workShiftKey, user?.id];
   const query = useQuery({
     queryKey, enabled, retry: false, refetchInterval: 30_000,
@@ -49,9 +49,8 @@ function useWorkShift(includeOwner = false) {
 }
 
 export function WorkShiftGate({ children, adminWorkspace = false }: { children: ReactNode; adminWorkspace?: boolean }) {
-  const { enabled, query, queryKey } = useWorkShift(adminWorkspace);
+  const { enabled, query, queryKey } = useWorkShift();
   const [params] = useSearchParams();
-  const isOwner = useAuth((state) => state.user?.role === 'OWNER');
   const profileOpen = adminWorkspace && params.get('section') === 'profile';
   const t = useT();
   const qc = useQueryClient();
@@ -88,7 +87,7 @@ export function WorkShiftGate({ children, adminWorkspace = false }: { children: 
   if (!enabled) return <>{children}</>;
   const current = query.data?.endedAt ? null : query.data;
   // Keep settings mounted while the end request and its summary are on screen.
-  if (!starting && (current || end.isPending || summary || profileOpen || (adminWorkspace && isOwner))) {
+  if (!starting && (current || end.isPending || summary || profileOpen)) {
     return <WorkShiftActions.Provider value={{
       startedAt: current?.startedAt ?? summary?.startedAt,
       busy: start.isPending || end.isPending || !!summary,

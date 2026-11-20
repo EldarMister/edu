@@ -149,7 +149,7 @@ export function App() {
           path="/owner/*"
           element={
             <ProtectedRoute roles={['OWNER']} workspace="admin">
-              <WorkShiftGate adminWorkspace><AdminApp /></WorkShiftGate>
+              <AdminApp />
             </ProtectedRoute>
           }
         />

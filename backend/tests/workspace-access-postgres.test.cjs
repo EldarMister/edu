@@ -193,21 +193,20 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       await request(`/orders/${order.id}/served`, { ...terminal, method: 'POST', status: 201 });
       await request('/payments', { ...terminal, method: 'POST', status: 201, body: { orderId: order.id, method: 'cash' } });
     });
-    await t.test('owner and administrator control their own shifts from the admin workspace', async () => {
+    await t.test('staff shifts follow the assigned position and exclude the owner in the admin workspace', async () => {
       const owner = { token: sessions.owner, workspace: 'admin' };
       const admin = { token: sessions.admin, workspace: 'admin' };
-      const start = { method: 'POST', status: 201 };
+      const change = { method: 'POST', status: 201 };
       assert.equal(await request('/staff/shifts/current', owner), null);
-      const ownerShift = await request('/staff/shifts/start', { ...owner, ...start });
-      assert.equal(ownerShift.waiterId, fixture.owner.id);
-      assert.equal((await request('/staff/shifts/current', owner)).id, ownerShift.id);
+      await request('/staff/shifts/start', { ...owner, ...change, status: 403 });
+      await request('/staff/shifts/end', { ...owner, ...change, status: 403 });
       assert.equal(await request('/staff/shifts/current', admin), null);
-      const adminShift = await request('/staff/shifts/start', { ...admin, ...start });
+      const adminShift = await request('/staff/shifts/start', { ...admin, ...change });
       assert.equal(adminShift.waiterId, fixture.admin.id);
-      assert.equal((await request('/staff/shifts/end', { ...admin, ...start })).id, adminShift.id);
-      assert.equal((await request('/staff/shifts/current', owner)).id, ownerShift.id);
-      assert.equal((await request('/staff/shifts/end', { ...owner, ...start })).id, ownerShift.id);
+      assert.equal((await request('/staff/shifts/current', admin)).id, adminShift.id);
       assert.equal(await request('/staff/shifts/current', owner), null);
+      assert.equal((await request('/staff/shifts/end', { ...admin, ...change })).id, adminShift.id);
+      assert.equal(await request('/staff/shifts/current', admin), null);
       await request('/staff/shifts/start', { token: sessions.mixed, workspace: 'admin', method: 'POST', status: 400 });
     });
     await t.test('owner can restrict the print queue to actual waiter requests', async () => {

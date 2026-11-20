@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { AppVersion } from '@/components/AppVersion';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { useT } from '@/lib/i18n';
 import { IconLogout, IconStaff } from './icons';
@@ -38,6 +39,7 @@ export function SidebarProfile({ name, onOpenProfile, onLogout, compact = false 
   }, [open, compact]);
 
   const controls = <>
+    <div className="px-2"><ThemeSwitch compact /></div>
     <button type="button" onClick={() => { setOpen(false); onOpenProfile(); }}
       className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-sm text-text-secondary hover:bg-background hover:text-text-primary">
       <IconStaff />{t('Личный кабинет')}
