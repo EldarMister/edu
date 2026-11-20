@@ -4,7 +4,7 @@ import { useT } from '@/lib/i18n';
 import { money } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 import { NumberTicker } from '@/components/NumberTicker';
-import { useCart, cartTotals, type CartRounding } from './cart';
+import { useCart, cartTotals } from './cart';
 import { CartLinesList, TakeawaySwitch } from './CartItems';
 
 // Длительность и плавность открытия/закрытия листа.
@@ -24,7 +24,7 @@ export function CartSheet({
   canSubmit,
   submitLabel,
   delivery,
-  rounding,
+  roundTotal,
 }: {
   open: boolean;
   onClose: () => void;
@@ -36,12 +36,12 @@ export function CartSheet({
   /** Текст основной кнопки (зависит от режима и направления позиций). */
   submitLabel: string;
   delivery?: boolean;
-  rounding?: CartRounding;
+  roundTotal?: boolean;
 }) {
   const t = useT();
   const { lines, comment, commentOpen, inc, dec, setComment, setCommentOpen, setLineTakeaway, setAllTakeaway, clear } =
     useCart();
-  const totals = cartTotals(lines, rounding);
+  const totals = cartTotals(lines, roundTotal);
   const hasLines = lines.length > 0;
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
 
@@ -146,10 +146,6 @@ export function CartSheet({
           )}
 
           <div className="space-y-1 border-t border-border pt-3">
-            {totals.serviceCharge > 0 && <div className="flex justify-between text-sm text-text-muted">
-              <span>{t('Обслуживание')}</span>
-              <span>{money(totals.serviceCharge)}</span>
-            </div>}
             {totals.roundingAmount > 0 && <div className="flex justify-between text-sm text-text-muted">
               <span>{t('Округление')}</span>
               <span>−{money(totals.roundingAmount)}</span>

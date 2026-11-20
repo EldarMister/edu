@@ -108,6 +108,7 @@ export class SettingsService {
     } = s;
     return {
       ...safe,
+      serviceChargeAmount: '0',
       waiterOrderPermissions: normalizeWaiterOrderPermissions(s.waiterOrderPermissions),
       deliveryApiKeyConfigured: !!_secretHash,
       telegramStockBotConfigured: !!process.env.TELEGRAM_STOCK_BOT_TOKEN?.trim(),
@@ -142,7 +143,7 @@ export class SettingsService {
       instagram: s.instagram,
       website: s.website,
       receiptText: s.receiptText,
-      serviceChargeAmount: s.serviceChargeAmount,
+      serviceChargeAmount: '0',
       roundOrderTotal: s.roundOrderTotal,
       language: s.language,
       paymentMethods: this.enabledMethodsOf(s),
@@ -224,7 +225,7 @@ export class SettingsService {
       data.waiterOrderPermissions = validateWaiterOrderPermissions(dto.waiterOrderPermissions);
     }
     if (dto.serviceChargeAmount !== undefined) {
-      data.serviceChargeAmount = new Prisma.Decimal(round2(dto.serviceChargeAmount));
+      data.serviceChargeAmount = new Prisma.Decimal(0);
     }
 
     // ККМ: пустой провайдер = выключить (храним null, чтобы isEnabled() был false).
@@ -349,8 +350,4 @@ export class SettingsService {
     if (s.payCard) list.push(PaymentMethod.card);
     return list;
   }
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

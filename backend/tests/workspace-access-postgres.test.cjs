@@ -309,7 +309,12 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
         const category = await db.category.create({ data: { name: 'Kitchen menu', prepStation: 'kitchen' } });
         return db.dish.create({ data: { categoryId: category.id, name: 'Soup', price: 100, prepStation: 'kitchen' } });
       });
-      await request('/admin/settings', { ...owner, method: 'PATCH', body: { serviceChargeAmount: 25 } });
+      await request('/admin/settings', { ...owner, method: 'PATCH', status: 400, body: { serviceChargeAmount: 25 } });
+      await runWithTenant({ cafeId: cafe.id }, async () => {
+        const { id } = await db.settings.findFirstOrThrow({ select: { id: true } });
+        await db.settings.update({ where: { id }, data: { serviceChargeAmount: 25 } });
+      });
+      assert.equal((await request('/admin/settings', owner)).serviceChargeAmount, '0');
       const body = {
         customerName: 'Test recipient', customerPhone: '+996 555 555 555', deliveryAddress: '  Test street 1  ',
         items: [{ dishId: cookedDish.id, quantity: 1 }, { dishId: fixture.dish.id, quantity: 1 }],
@@ -317,12 +322,23 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       };
       const createDelivery = (actor, payload, status = 201) =>
         request('/orders/delivery', { ...actor, method: 'POST', body: payload, status });
+      const orderTable = await newTable();
       const tableCountBeforeDelivery = (await request('/admin/tables/overview', owner)).tablesCount;
       await createDelivery(terminal, body, 403);
       const permissions = { ...fixture.permissions, workShiftRequired: false };
       await request(`/admin/positions/${fixture.mixedPosition.id}`, { ...owner, method: 'PATCH', body: {
         name: fixture.mixedPosition.name, permissions: { ...permissions, actions: { ...permissions.actions, createDeliveryOrders: true } },
       } });
+      const tableOrder = await request('/orders', { ...terminal, method: 'POST', status: 201, body: {
+        tableId: orderTable.id, items: [{ dishId: fixture.dish.id, quantity: 1 }], idempotencyKey: randomUUID(),
+      } });
+      assert.equal(tableOrder.serviceChargeAmount, '0');
+      assert.equal(tableOrder.finalAmount, '50');
+      const updatedTableOrder = await request(`/orders/${tableOrder.id}/items`, { ...terminal, method: 'POST', status: 201, body: {
+        items: [{ dishId: fixture.dish.id, quantity: 1 }],
+      } });
+      assert.equal(updatedTableOrder.serviceChargeAmount, '0');
+      assert.equal(updatedTableOrder.finalAmount, '100');
       await createDelivery({ ...terminal, workspace: 'admin' }, body, 403);
       await createDelivery({ token: sessions.legacy, workspace: 'terminal' }, body, 403);
       await createDelivery(terminal, { ...body, deliveryAddress: '   ' }, 400);

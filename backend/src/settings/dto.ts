@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
+import { Equals, IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { WaiterOrderPermissions } from '../orders/order-policy';
 
 export class UpdateSettingsDto {
@@ -59,7 +59,8 @@ export class UpdateSettingsDto {
   @ValidateIf((_object, value) => value !== undefined) @Matches(/^(?:-?[1-9]\d{0,15})?$/)
   telegramStockChatId?: string;
 
-  @IsOptional() @IsNumber() @Min(0) @Max(100000)
+  @ValidateIf((_object, value) => value !== undefined)
+  @Equals(0, { message: 'Отдельная плата за обслуживание отключена' })
   serviceChargeAmount?: number;
 
   @IsOptional() @IsIn(['ru', 'ky'])

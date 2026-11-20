@@ -33,7 +33,6 @@ interface Form {
   phone2: string;
   instagram: string;
   website: string;
-  serviceChargeAmount: string;
   payQr: boolean;
   payCash: boolean;
   payCard: boolean;
@@ -76,7 +75,6 @@ function CafeSettings() {
     phone2: data.phone2,
     instagram: data.instagram ?? '',
     website: data.website ?? '',
-    serviceChargeAmount: '0',
     payQr: data.payQr,
     payCash: data.payCash,
     payCard: data.payCard,

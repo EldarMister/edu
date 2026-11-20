@@ -2,6 +2,7 @@ import { useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
+import { Toggle } from '@/components/Toggle';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { api, apiError } from '@/lib/api';
 import { money, taxRateLabel } from '@/lib/format';
@@ -10,6 +11,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { routingOptions, usePreparationStations } from '@/features/kitchen/stations';
 import { useAdminCategories, type AdminDish } from '../api';
+import { IconPlus } from '../components/icons';
 import { dishTaxInput, dishTaxValue, MenuTaxSelect } from '../../settings/MenuTaxSelect';
 import { useIngredients, type Ingredient, type Recipe, type RecipeMetadata } from './warehouse/api';
 import { EditorPage } from './warehouse/EditorPage';
@@ -268,7 +270,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
 
   const variantCards = <div className="space-y-3">
     {activeVariants.map((variant, index) => <VariantCard key={variant.key} value={variant} index={index}
-      count={activeVariants.length} isGoods={isGoods}
+      count={activeVariants.length} isGoods={isGoods} disabled={!canEdit || busy}
       cost={canCosts && isGoods && variant.id ? ingredientCost(variant.stockIngredientId ?? dish?.stockIngredientId)?.avgCost : undefined}
       showCost={canCosts && isGoods} onChange={(value) => changeVariant(variant.key, value)}
       onMove={(direction) => moveVariant(index, index + direction)}
@@ -279,8 +281,15 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
         draggedVariant.current = null;
       }}
       onRemove={() => setVariants((current) => current.filter((item) => item.key !== variant.key))} />)}
-    <button type="button" className="btn-secondary btn-md" onClick={addVariant}>+ Добавить вариант</button>
+    <button type="button" className="btn-ghost btn-md px-2 text-primary" onClick={addVariant}>+ Добавить вариант</button>
   </div>;
+
+  const priceLabel = priceBasis && form.isWeighted ? 'Цена за ' + priceBasis : 'Цена продажи';
+  const priceInput = <PriceInput label={priceLabel} value={form.price} onChange={(price) => patch({ price })} />;
+  const priceMetrics = canCosts && <PriceMetrics
+    cost={isGoods ? productCost : recipeCost?.complete ? recipeCost.total : null}
+    price={!activeVariants.length && (isGoods || !form.isWeighted) ? form.price : undefined}
+    costLabel={isGoods ? 'Себестоимость по складу' : 'Себестоимость базового состава'} />;
 
   return (
     <EditorPage title={title} onClose={() => !busy && onClose()} footer={
@@ -297,110 +306,115 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
         {error && <p role="alert" className="min-w-0 grow text-sm text-danger">{error}</p>}
       </div>
     }>
-      <form id={formId} className="mx-auto min-w-0 max-w-6xl space-y-5" noValidate
+      <form id={formId} className="min-w-0 max-w-6xl space-y-5 pt-1 sm:space-y-6 sm:pt-2" noValidate
         onSubmit={(event) => {
           if (event.target !== event.currentTarget) return;
           event.preventDefault();
           void save();
         }}>
-        <fieldset ref={startRef} disabled={!canEdit || busy} className="grid min-w-0 scroll-mt-4 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.62fr)]">
-          <section className="space-y-4 rounded-xl border border-border p-4 sm:p-5">
-            <h2 className="font-semibold">Основное</h2>
-            <Field label="Название" htmlFor={formId + '-name'}>
-              <input id={formId + '-name'} ref={nameRef} className="input" value={form.name} maxLength={120}
-                onChange={(event) => patch({ name: event.target.value })}
-                placeholder={isGoods ? 'Например, лимонад 0,5 л' : 'Например, капучино'} required />
-            </Field>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-              <Field label="Категория">
-                <Select ariaLabel="Категория" className="h-11 w-full" value={form.categoryId}
-                  onChange={(value) => patch({ categoryId: value })}
-                  options={[{ value: '', label: 'Выберите категорию' }, ...categories.map(({ id, name }) => ({ value: id, label: name }))]} />
-              </Field>
-              <Field label="Цех приготовления">
-                <Select ariaLabel="Цех приготовления" className="h-11 w-full" value={form.prepStation}
-                  onChange={(value) => patch({ prepStation: value })}
-                  options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, form.prepStation)]} />
-              </Field>
-            </div>
-            <Field label="Налог">
-              <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!canEdit || busy}
-                categoryTaxId={categories.find((category) => category.id === form.categoryId)?.taxId} />
-            </Field>
-          </section>
-          <section className="min-w-0 rounded-xl border border-border p-4 sm:p-5">
-            <h2 className="mb-3 font-semibold">Обложка</h2>
+        <fieldset ref={startRef} disabled={!canEdit || busy} aria-label="Основные параметры"
+          className="grid min-w-0 max-w-3xl scroll-mt-4 gap-3 sm:gap-4">
+          <FormRow label="Название" htmlFor={formId + '-name'}>
+            <input id={formId + '-name'} ref={nameRef} className="input" value={form.name} maxLength={120}
+              onChange={(event) => patch({ name: event.target.value })}
+              placeholder={isGoods ? 'Например, лимонад 0,5 л' : 'Например, капучино'} required />
+          </FormRow>
+          <FormRow label="Категория">
+            <Select ariaLabel="Категория" className="h-11 w-full" value={form.categoryId} disabled={!canEdit || busy}
+              onChange={(value) => patch({ categoryId: value })}
+              options={[{ value: '', label: 'Выберите категорию' }, ...categories.map(({ id, name }) => ({ value: id, label: name }))]} />
+          </FormRow>
+          <FormRow label="Цех приготовления">
+            <Select ariaLabel="Цех приготовления" className="h-11 w-full" value={form.prepStation} disabled={!canEdit || busy}
+              onChange={(value) => patch({ prepStation: value })}
+              options={[{ value: '', label: 'По категории' }, ...routingOptions(stations, form.prepStation)]} />
+          </FormRow>
+          <FormRow label="Налог">
+            <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!canEdit || busy}
+              categoryTaxId={categories.find((category) => category.id === form.categoryId)?.taxId} />
+          </FormRow>
+          <FormRow label="Обложка">
             <CoverEditor name={form.name} imageUrl={form.imageUrl} photoUrl={photoUrl} loading={photoBusy}
               onUrl={setPhotoUrl} onBusy={setPhotoBusy} onError={setError}
-              onImage={(imageUrl) => patch({ imageUrl })} />
-          </section>
-          <section className="space-y-3 rounded-xl border border-border p-4 sm:p-5 lg:col-span-2">
-            <h2 className="font-semibold">Продажа</h2>
-            <div className="flex flex-wrap gap-x-6 gap-y-2">
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isAvailable}
-                onChange={(event) => patch({ isAvailable: event.target.checked })} />Доступно для заказа</label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.isWeighted}
-                disabled={activeVariants.length > 0 || (isGoods && withVariants) || weightedLocked}
-                onChange={(event) => patch({ isWeighted: event.target.checked })} />
-                {isGoods ? 'Весовой товар' : 'Весовое блюдо'}
-              </label>
-            </div>
-            {form.isWeighted && <div className="grid max-w-xl gap-3 rounded-lg bg-background p-3 sm:grid-cols-2">
+              onImage={(imageUrl) => patch({ imageUrl })}>
+              <div className="grid gap-3">
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  Доступно для заказа
+                  <Toggle checked={form.isAvailable} onChange={(isAvailable) => patch({ isAvailable })} />
+                </label>
+                <label className="flex items-center justify-between gap-3 text-sm">
+                  {isGoods ? 'Весовой товар' : 'Весовое блюдо'}
+                  <Toggle checked={form.isWeighted} onChange={(isWeighted) => patch({ isWeighted })}
+                    disabled={activeVariants.length > 0 || (isGoods && withVariants) || weightedLocked} />
+                </label>
+              </div>
+            </CoverEditor>
+            {form.isWeighted && <div className="mt-2 grid gap-3 border-l-2 border-border pl-3 min-[430px]:grid-cols-2">
               <Field label="Мера весовой позиции">
                 <Select ariaLabel="Мера весовой позиции" className="h-11 w-full" value={form.weightedMeasure}
-                  disabled={!!dish && isGoods}
+                  disabled={!canEdit || busy || (!!dish && isGoods)}
                   onChange={(value) => patch({ weightedMeasure: value as 'weight' | 'volume' })}
                   options={[{ value: 'weight', label: 'г / кг' }, { value: 'volume', label: 'мл / л' }]} />
               </Field>
               <Field label="Цена указана за">
                 <Select ariaLabel="Количество в цене" className="h-11 w-full" value={String(form.weightedPriceBase)}
-                  onChange={(value) => patch({ weightedPriceBase: Number(value) })} options={weightedPriceUnits} />
+                  disabled={!canEdit || busy} onChange={(value) => patch({ weightedPriceBase: Number(value) })}
+                  options={weightedPriceUnits} />
               </Field>
             </div>}
-          </section>
+          </FormRow>
         </fieldset>
 
-        <fieldset disabled={!canEdit || busy} className="min-w-0 rounded-xl border border-border p-4 sm:p-5">
-          <h2 className="mb-3 font-semibold">{isGoods ? 'Цена товара' : 'Цена и варианты порций'}</h2>
-          {isGoods && <div role="group" aria-label="Формат товара" className="mb-4 grid gap-2 sm:grid-cols-2">
-            <ModeOption name={formId + '-mode'} checked={!withVariants} label="Одна позиция"
-              description="Одна цена и общий остаток" onSelect={() => setWithVariants(false)} />
-            <ModeOption name={formId + '-mode'} checked={withVariants} label="С вариантами"
-              description="Отдельные цены и остатки" disabled={form.isWeighted} onSelect={() => {
-                setWithVariants(true);
-                if (!variants.length) addVariant();
-              }} />
-          </div>}
-          {isGoods && withVariants ? variantCards : <>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {!activeVariants.length && <Field label={priceBasis && form.isWeighted ? 'Цена за ' + priceBasis : 'Цена продажи'}>
-                <PriceInput label="Цена продажи" value={form.price} onChange={(price) => patch({ price })} />
-              </Field>}
-              {isGoods && !form.isWeighted && <Field label="Единица учёта">
-                <Select ariaLabel="Единица учёта" className="h-11 w-full" value={form.unit}
-                  disabled={!!dish?.stockIngredientId} onChange={(unit) => patch({ unit })} options={unitLabelOptions(form.unit)} />
-              </Field>}
+        <fieldset disabled={!canEdit || busy} aria-label="Цена и варианты" className="min-w-0 max-w-3xl border-t border-border pt-5">
+          {isGoods ? <FormRow label="Цена товара">
+            <div role="group" aria-label="Формат товара" className="divide-y divide-border rounded-xl border border-border">
+              <div className={!withVariants ? 'bg-background/50' : undefined}>
+                <ModeOption name={formId + '-mode'} checked={!withVariants} label="Без вариантов"
+                  description="Одна цена и общий остаток" onSelect={() => setWithVariants(false)} />
+                {!withVariants && <div className="space-y-3 px-4 pb-4">
+                  <div className="grid gap-3 min-[430px]:grid-cols-2">
+                    <Field label={priceLabel}>{priceInput}</Field>
+                    {!form.isWeighted && <Field label="Единица учёта">
+                      <Select ariaLabel="Единица учёта" className="h-11 w-full" value={form.unit}
+                        disabled={!canEdit || busy || !!dish?.stockIngredientId}
+                        onChange={(unit) => patch({ unit })} options={unitLabelOptions(form.unit)} />
+                    </Field>}
+                  </div>
+                  {priceMetrics}
+                </div>}
+              </div>
+              <div className={withVariants ? 'bg-background/50' : undefined}>
+                <ModeOption name={formId + '-mode'} checked={withVariants} label="С вариантами"
+                  description="Отдельные цены и остатки" disabled={form.isWeighted} onSelect={() => {
+                    setWithVariants(true);
+                    if (!variants.length) addVariant();
+                  }} />
+                {withVariants && <div className="px-4 pb-4">{variantCards}</div>}
+              </div>
             </div>
-            {canCosts && <PriceMetrics
-              cost={isGoods ? productCost : recipeCost?.complete ? recipeCost.total : null}
-              price={!activeVariants.length && (isGoods || !form.isWeighted) ? form.price : undefined}
-              costLabel={isGoods ? 'Себестоимость по складу' : 'Себестоимость базового состава'} />}
-            {!isGoods && !form.isWeighted && <div className="mt-4 border-t border-border pt-4">{variantCards}</div>}
-          </>}
+          </FormRow> : <div className="grid gap-4">
+            {(!activeVariants.length || canCosts) && <FormRow label={activeVariants.length ? 'Расчёт себестоимости' : priceLabel}>
+              <div className="flex flex-wrap items-start gap-x-5 gap-y-3">
+                {!activeVariants.length && <div className="w-full min-[480px]:w-44">{priceInput}</div>}
+                {priceMetrics}
+              </div>
+            </FormRow>}
+            {!form.isWeighted && <FormRow label="Варианты порций">{variantCards}</FormRow>}
+          </div>}
         </fieldset>
 
-        <fieldset disabled={!canEdit || busy} className="min-w-0">
-          <details className="rounded-xl border border-border p-4 sm:p-5">
-            <summary className="cursor-pointer font-semibold">Дополнительно</summary>
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <Field label="Описание">
-                <textarea aria-label="Описание" className="input min-h-24 py-2.5" value={form.description} maxLength={300}
+        <fieldset disabled={!canEdit || busy} className="min-w-0 max-w-3xl">
+          <details className="border-t border-border pt-4">
+            <summary className="w-fit cursor-pointer text-sm font-semibold text-primary">Дополнительно</summary>
+            <div className="mt-4 grid gap-3 sm:gap-4">
+              <FormRow label="Описание" htmlFor={formId + '-description'}>
+                <textarea id={formId + '-description'} className="input min-h-24 py-2.5" value={form.description} maxLength={300}
                   onChange={(event) => patch({ description: event.target.value })} />
-              </Field>
-              <Field label="Название для озвучки">
-                <input aria-label="Название для озвучки" className="input" value={form.voiceName} maxLength={120}
+              </FormRow>
+              <FormRow label="Название для озвучки" htmlFor={formId + '-voice-name'}>
+                <input id={formId + '-voice-name'} className="input" value={form.voiceName} maxLength={120}
                   placeholder="Как произносить вслух" onChange={(event) => patch({ voiceName: event.target.value })} />
-              </Field>
+              </FormRow>
             </div>
           </details>
         </fieldset>
@@ -433,10 +447,17 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
   );
 }
 
-function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
-  const className = 'mb-1.5 block text-sm font-medium text-text-secondary';
+function FormRow({ label, htmlFor, children }: { label: string; htmlFor?: string; children: ReactNode }) {
+  const labelClass = 'text-sm font-medium text-text-secondary sm:pt-2.5';
+  return <div className="grid min-w-0 gap-1.5 sm:grid-cols-[10rem_minmax(0,1fr)] sm:gap-x-5">
+    {htmlFor ? <label htmlFor={htmlFor} className={labelClass}>{label}</label> : <div className={labelClass}>{label}</div>}
+    <div className="min-w-0">{children}</div>
+  </div>;
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return <div className="min-w-0">
-    {htmlFor ? <label htmlFor={htmlFor} className={className}>{label}</label> : <p className={className}>{label}</p>}
+    <p className="mb-1.5 text-sm font-medium text-text-secondary">{label}</p>
     {children}
   </div>;
 }
@@ -444,10 +465,9 @@ function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; 
 function ModeOption({ name, checked, label, description, onSelect, disabled }: {
   name: string; checked: boolean; label: string; description: string; onSelect: () => void; disabled?: boolean;
 }) {
-  return <label className={'flex cursor-pointer items-start gap-3 rounded-lg border p-3 has-[:disabled]:cursor-default ' +
-    (checked ? 'border-primary/45 bg-primary/5' : 'border-border')}>
+  return <label className="flex min-h-12 cursor-pointer items-start gap-3 px-4 py-3 has-[:disabled]:cursor-default">
     <input className="mt-1 shrink-0" type="radio" name={name} checked={checked} onChange={onSelect} disabled={disabled} />
-    <span className="min-w-0"><span className="block text-sm font-semibold">{label}</span>
+    <span className="min-w-0"><span className={'block text-sm font-semibold ' + (checked ? 'text-primary' : 'text-text-primary')}>{label}</span>
       <span className="block text-xs text-text-muted">{description}</span></span>
   </label>;
 }
@@ -456,7 +476,7 @@ function PriceInput({ label, value, onChange, minimum = 0 }: {
   label: string; value: string; onChange: (price: string) => void; minimum?: number;
 }) {
   return <div className="relative">
-    <input aria-label={label} type="number" min={minimum} step="0.01" inputMode="decimal" className="input pr-9"
+    <input aria-label={label} type="number" min={minimum} step="0.01" inputMode="decimal" className="input !pr-9"
       value={value} onChange={(event) => onChange(event.target.value)} />
     <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm text-text-muted">с</span>
   </div>;
@@ -471,8 +491,8 @@ function PriceMetrics({ cost, price, costLabel = 'Себестоимость' }:
   </dl>;
 }
 
-function VariantCard({ value, index, count, isGoods, cost, showCost, onChange, onMove, onRemove, onDragStart, onDragEnd, onDrop }: {
-  value: VariantDraft; index: number; count: number; isGoods: boolean;
+function VariantCard({ value, index, count, isGoods, disabled, cost, showCost, onChange, onMove, onRemove, onDragStart, onDragEnd, onDrop }: {
+  value: VariantDraft; index: number; count: number; isGoods: boolean; disabled: boolean;
   cost?: Ingredient['avgCost']; showCost: boolean; onChange: (value: Partial<VariantDraft>) => void;
   onMove: (direction: -1 | 1) => void; onRemove: () => void;
   onDragStart?: () => void; onDragEnd: () => void; onDrop: () => void;
@@ -492,7 +512,7 @@ function VariantCard({ value, index, count, isGoods, cost, showCost, onChange, o
         <button type="button" aria-label={'Удалить ' + caption} className="btn-ghost h-8 px-2 text-danger" onClick={onRemove}>Удалить</button>
       </div>
     </div>
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[2fr_1fr_1fr]">
+    <div className="grid gap-3 min-[430px]:grid-cols-2 xl:grid-cols-[1.5fr_1fr_1fr]">
       <Field label="Название варианта">
         <input aria-label="Название варианта" className="input" placeholder="Например, 250 мл" value={value.name}
           maxLength={120} onChange={(event) => onChange({ name: event.target.value })} />
@@ -502,19 +522,23 @@ function VariantCard({ value, index, count, isGoods, cost, showCost, onChange, o
       </Field>
       <Field label="Единица учёта">
         <Select ariaLabel={'Единица учёта ' + caption} className="h-11 w-full" value={value.unit}
-          disabled={isGoods && !!value.id} onChange={(unit) => onChange({ unit })} options={unitLabelOptions(value.unit)} />
+          disabled={disabled || (isGoods && !!value.id)} onChange={(unit) => onChange({ unit })} options={unitLabelOptions(value.unit)} />
       </Field>
     </div>
     {showCost && <PriceMetrics cost={cost} price={value.price} costLabel="Себестоимость по складу" />}
   </div>;
 }
 
-function CoverEditor({ name, imageUrl, photoUrl, loading, onUrl, onImage, onBusy, onError }: {
+function CoverEditor({ name, imageUrl, photoUrl, loading, onUrl, onImage, onBusy, onError, children }: {
   name: string; imageUrl: string; photoUrl: string; loading: boolean;
   onUrl: (value: string) => void; onImage: (value: string) => void;
   onBusy: (value: boolean) => void; onError: (value: string) => void;
+  children: ReactNode;
 }) {
   const input = useRef<HTMLInputElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const [expanded, setExpanded] = useState(false);
 
   function previewUrl() {
     const value = photoUrl.trim();
@@ -527,7 +551,13 @@ function CoverEditor({ name, imageUrl, photoUrl, loading, onUrl, onImage, onBusy
     onError('');
   }
 
-  return <div className="space-y-3">
+  return <div className="space-y-3" onKeyDown={(event) => {
+    if (expanded && event.key === 'Escape') {
+      event.stopPropagation();
+      setExpanded(false);
+      trigger.current?.focus();
+    }
+  }}>
     <input ref={input} hidden type="file" accept="image/png,image/jpeg,image/webp"
       onChange={async (event) => {
         const file = event.target.files?.[0];
@@ -548,21 +578,31 @@ function CoverEditor({ name, imageUrl, photoUrl, loading, onUrl, onImage, onBusy
           onBusy(false);
         }
       }} />
-    <div className="flex flex-wrap items-center gap-3">
-      <button type="button" aria-label="Загрузить обложку" onClick={() => input.current?.click()}
-        className="relative flex h-24 w-32 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-dashed border-border bg-background hover:border-primary">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+      <button ref={trigger} type="button" aria-label={imageUrl ? 'Изменить обложку' : 'Добавить обложку'}
+        aria-expanded={expanded} aria-controls={panelId} onClick={() => setExpanded(!expanded)}
+        className={'flex h-24 w-32 items-center justify-center overflow-hidden rounded-lg border bg-background text-primary transition-colors hover:border-primary ' +
+          (expanded ? 'border-primary' : 'border-border')}>
         {loading ? <Spinner /> : imageUrl ? <img src={resolveApiImage(imageUrl) ?? undefined} alt={name || 'Фото позиции'}
-          className="h-full w-full object-cover" /> : <span className="text-xs font-medium text-primary">Загрузить фото</span>}
+          className="h-full w-full object-cover" /> : <span className="flex items-center gap-1.5 whitespace-nowrap text-xs font-medium">
+          <span aria-hidden="true"><IconPlus className="h-4 w-4" /></span> Добавить фото
+        </span>}
       </button>
-      {imageUrl && <button type="button" className="btn-ghost btn-md text-danger" onClick={() => {
-        onImage(''); onUrl(''); onError('');
-      }}>Удалить фото</button>}
+      {children}
     </div>
-    <div className="flex gap-2">
-      <input aria-label="Ссылка на фото" className="input min-w-0 flex-1" type="url" placeholder="https://…"
-        value={photoUrl} onChange={(event) => onUrl(event.target.value)}
-        onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); previewUrl(); } }} />
-      <button type="button" className="btn-secondary btn-md shrink-0" disabled={!photoUrl.trim()} onClick={previewUrl}>По ссылке</button>
+    <div id={panelId} hidden={!expanded} className="rounded-xl border border-border bg-background/50 px-3.5 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn-secondary btn-md" onClick={() => input.current?.click()}>Выбрать файл</button>
+        {imageUrl && <button type="button" className="btn-ghost btn-md text-danger" onClick={() => {
+          onImage(''); onUrl(''); onError('');
+        }}>Удалить фото</button>}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <input aria-label="Ссылка на фото" className="input min-w-0 flex-[1_1_11rem]" type="url" placeholder="https://…"
+          value={photoUrl} onChange={(event) => onUrl(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); previewUrl(); } }} />
+        <button type="button" className="btn-secondary btn-md shrink-0" disabled={!photoUrl.trim()} onClick={previewUrl}>По ссылке</button>
+      </div>
     </div>
   </div>;
 }

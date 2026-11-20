@@ -4,7 +4,7 @@ import { warehouseDay } from '../warehouse/report-range';
 
 export const statisticsOrderSelect = {
   id: true, createdAt: true, closedAt: true, waiterId: true, finalAmount: true,
-  paymentMethod: true, discountAmount: true, serviceChargeAmount: true,
+  paymentMethod: true, discountAmount: true,
   waiter: { select: { name: true } },
   payments: { select: { method: true, amount: true, status: true } },
   items: {
@@ -32,7 +32,7 @@ type Product = { id: string; name: string; categoryId: string; category: string;
   quantity: number; gross: number; discount: number; revenue: number; cost: number | null };
 type Category = { id: string; name: string; quantity: number; revenue: number; cost: number | null };
 type Staff = { id: string; name: string; orders: number; revenue: number; seconds: number; cost: number | null };
-type Sale = { date: string; orders: number; revenue: number; discount: number; serviceCharge: number };
+type Sale = { date: string; orders: number; revenue: number; discount: number };
 type Payments = { date: string; orders: number; cash: number; card: number; qr: number; other: number };
 
 const money = (value: number) => Number(new Prisma.Decimal(value).toDecimalPlaces(2));
@@ -117,11 +117,10 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
   for (const order of orders) {
     if (!order.closedAt) continue;
     const date = warehouseDay(order.closedAt);
-    const sale = sales.get(date) ?? { date, orders: 0, revenue: 0, discount: 0, serviceCharge: 0 };
+    const sale = sales.get(date) ?? { date, orders: 0, revenue: 0, discount: 0 };
     sale.orders++;
     sale.revenue += Number(order.finalAmount);
     sale.discount += Number(order.discountAmount);
-    sale.serviceCharge += Number(order.serviceChargeAmount);
     sales.set(date, sale);
     const payment = payments.get(date) ?? { date, orders: 0, cash: 0, card: 0, qr: 0, other: 0 };
     payment.orders++;
@@ -163,7 +162,7 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
 
   return {
     sales: [...sales.values()].sort(byDate).map((row) => ({ ...row, revenue: money(row.revenue), avgCheck: money(row.revenue / row.orders),
-      discount: money(row.discount), serviceCharge: money(row.serviceCharge) })),
+      discount: money(row.discount) })),
     payments: [...payments.values()].sort(byDate).map((row) => ({ ...row, cash: money(row.cash), card: money(row.card),
       qr: money(row.qr), other: money(row.other), total: money(row.cash + row.card + row.qr + row.other) })),
     staff: [...staff.values()].sort(byRevenue).map(({ cost, seconds, ...row }) => ({ ...row, revenue: money(row.revenue),

@@ -234,7 +234,6 @@ export function WaiterApp() {
   const canUseMenu = !!(selectedTable || (newDelivery ? canCreateDelivery : deliveryCart && activeOrder));
   const editing = !!editingOrderId && !!activeOrder && activeOrder.id === editingOrderId;
   const roundCart = activeOrder ? editing && activeOrder.roundOrderTotal : settings.data?.roundOrderTotal;
-  const cartRounding = roundCart ? { serviceCharge: deliveryCart ? 0 : Number(settings.data?.serviceChargeAmount ?? 0) } : undefined;
   const viewingOrder = viewingOrderId ? orders.find((o) => o.id === viewingOrderId) : undefined;
   const displayedOrder = viewingOrder ?? activeOrder;
   const showCart = !viewingOrder && (cart.lines.length > 0 || !activeOrder);
@@ -944,7 +943,7 @@ export function WaiterApp() {
         <CartPanel
           table={selectedTable}
           delivery={!!deliveryCart}
-          rounding={cartRounding}
+          roundTotal={roundCart}
           hallName={selectedHallName}
           mode={editing ? 'edit' : activeOrder ? 'add' : 'create'}
           orderNumber={activeOrder?.orderNumber}
@@ -1107,7 +1106,7 @@ export function WaiterApp() {
       {tab === 'menu' && !replacementTarget && !showShiftGate && (
         <MenuCartBar
           count={cart.lines.length}
-          total={cartTotals(cart.lines, cartRounding).final}
+          total={cartTotals(cart.lines, roundCart).final}
           submitting={create.isPending || addItems.isPending || editOrder.isPending}
           submitLabel={cartSubmitLabel}
           onOpenCart={() => setCartSheetOpen(true)}
@@ -1127,7 +1126,7 @@ export function WaiterApp() {
         submitting={create.isPending || addItems.isPending || editOrder.isPending}
         canSubmit={canWork}
         delivery={!!deliveryCart}
-        rounding={cartRounding}
+        roundTotal={roundCart}
         submitLabel={cartSubmitLabel}
         onSubmit={async () => {
           await (editing ? saveEditOrder() : submitCart());

@@ -519,7 +519,7 @@ export class QrService {
     const labelById = new Map(visibleGuests.map((g) => [g.id, g.guestLabel]));
     const visibleItems = session.items.filter((item) => activeGuestIds.has(item.guestId));
     const settings = visibleItems.length > 0 ? await this.prisma.settings.findFirst({
-      select: { roundOrderTotal: true, serviceChargeAmount: true },
+      select: { roundOrderTotal: true },
     }) : null;
     const rounding = settings?.roundOrderTotal ?? false;
     let total = 0;
@@ -547,8 +547,7 @@ export class QrService {
       };
     });
 
-    const serviceCharge = settings?.roundOrderTotal ? Number(settings.serviceChargeAmount) : 0;
-    const beforeRounding = round2(total + serviceCharge);
+    const beforeRounding = round2(total);
     const payable = rounding ? Math.floor(beforeRounding) : beforeRounding;
 
     return {
@@ -565,7 +564,7 @@ export class QrService {
       activeGuestCount: visibleGuests.length,
       totalAmount: String(payable),
       ...(rounding && {
-        rounding: { serviceCharge, amount: round2(beforeRounding - payable) },
+        rounding: { serviceCharge: 0, amount: round2(beforeRounding - payable) },
       }),
       submittedOrderId: session.submittedOrderId,
     };

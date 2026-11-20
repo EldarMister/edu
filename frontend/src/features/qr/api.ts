@@ -109,7 +109,7 @@ export interface QrSession {
   itemCount: number;
   activeGuestCount: number;
   totalAmount: string;
-  rounding?: { serviceCharge: number; amount: number };
+  rounding?: { amount: number };
   submittedOrderId: string | null;
 }
 
@@ -239,11 +239,11 @@ function recalcSessionTotals(session: QrSession): QrSession {
     return { ...item, lineTotal: String(lineTotal) };
   });
   const activeGuestCount = Math.max(session.activeGuestCount, new Set(items.map((item) => item.guestId)).size);
-  const beforeRounding = round2(totalAmount + (rounding?.serviceCharge ?? 0));
+  const beforeRounding = round2(totalAmount);
   const payable = rounding ? roundOrderAmount(beforeRounding) : beforeRounding;
   return {
     ...session, items, itemCount, activeGuestCount, totalAmount: String(payable),
-    ...(rounding && { rounding: { ...rounding, amount: round2(beforeRounding - payable) } }),
+    ...(rounding && { rounding: { amount: round2(beforeRounding - payable) } }),
   };
 }
 

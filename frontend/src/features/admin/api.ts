@@ -237,7 +237,7 @@ type ProductStats = {
 
 export interface StatisticsReports {
   range: { from: string | null; to: string };
-  sales: { date: string; revenue: number; orders: number; avgCheck: number; discount: number; serviceCharge: number }[];
+  sales: { date: string; revenue: number; orders: number; avgCheck: number; discount: number }[];
   products: ProductStats[];
   categories: { id: string; name: string; quantity: number; revenue: number; cost: number | null; profit: number | null }[];
   staff: { id: string; name: string; revenue: number; orders: number; avgCheck: number; avgSeconds: number | null; profit: number | null }[];

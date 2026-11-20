@@ -22,7 +22,7 @@ const avgCheck = cash('avgCheck', 'Средний чек');
 const methods = [cash('cash', 'Наличные'), cash('card', 'Карта'), cash('qr', 'QR-код'), cash('other', 'Другие оплаты')];
 
 const columns: Record<Report, Column[]> = {
-  sales: [date, orders, revenue, avgCheck, cash('discount', 'Скидка'), cash('serviceCharge', 'Обслуживание')],
+  sales: [date, orders, revenue, avgCheck, cash('discount', 'Скидка')],
   products: [{ key: 'category', label: 'Категория' }, { key: 'name', label: 'Товар' }, { key: 'waiter', label: 'Официант' },
     quantity, cash('gross', 'Валовый оборот'), cash('discount', 'Скидка'), revenue, profit],
   staff: [{ key: 'name', label: 'Официант' }, revenue, profit, orders, avgCheck,

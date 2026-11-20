@@ -9,11 +9,12 @@ const qrData = (text, mime = 'png') => `data:image/${mime};base64,${Buffer.from(
 
 function fixture() {
   const rows = [
-    { id: 'settings-a', cafeId: 'cafe-a', cafeName: 'Cafe A', qrImageUrl: qrData('bank-a'), updatedAt: new Date('2026-10-10T10:00:00Z'), payQr: true, payCash: true, payCard: false },
+    { id: 'settings-a', cafeId: 'cafe-a', cafeName: 'Cafe A', serviceChargeAmount: 25, qrImageUrl: qrData('bank-a'), updatedAt: new Date('2026-10-10T10:00:00Z'), payQr: true, payCash: true, payCard: false },
     { id: 'settings-b', cafeId: 'cafe-b', cafeName: 'Cafe B', qrImageUrl: qrData('bank-b', 'jpeg'), updatedAt: new Date('2026-10-10T11:00:00Z'), payQr: true, payCash: true, payCard: false },
   ];
-  const calls = { created: 0, first: 0, unique: [] };
+  const calls = { created: 0, first: 0, upsert: 0, unique: [] };
   const prisma = { settings: {
+    upsert: async ({ where }) => { calls.upsert++; return rows.find(row => row.cafeId === where.cafeId); },
     findFirst: async () => { calls.first++; return rows.find(row => !getCafeId() || row.cafeId === getCafeId()) ?? null; },
     findUnique: async ({ where }) => { calls.unique.push(where); return rows.find(row => row.id === where.id) ?? null; },
     create: async () => { calls.created++; throw new Error('Public QR request must not create settings'); },
@@ -30,6 +31,7 @@ test('payment QR URLs and public image lookup target the exact cafe with no JWT'
   const { service, calls } = fixture();
   const a = await runWithTenant({ cafeId: 'cafe-a' }, () => service.getPublic());
   const b = await runWithTenant({ cafeId: 'cafe-b' }, () => service.getPublic());
+  assert.equal(a.serviceChargeAmount, '0');
   const refA = new URL(a.qrImageUrl, 'https://example.test').searchParams.get('ref');
   const refB = new URL(b.qrImageUrl, 'https://example.test').searchParams.get('ref');
   assert.notEqual(refA, refB);
@@ -39,7 +41,8 @@ test('payment QR URLs and public image lookup target the exact cafe with no JWT'
   assert.equal(imgA.mime, 'image/png');
   assert.equal(imgB.buffer.toString(), 'bank-b');
   assert.equal(imgB.mime, 'image/jpeg');
-  assert.equal(calls.first, 2, 'Image lookup must not fall back to unscoped ensure()');
+  assert.equal(calls.upsert, 2);
+  assert.equal(calls.first, 0, 'Image lookup must not fall back to unscoped ensure()');
   assert.equal(calls.created, 0);
 });
 

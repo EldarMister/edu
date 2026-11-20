@@ -29,7 +29,6 @@ export interface Settings extends Partial<ReceiptPrintSettings> {
   instagram: string | null;
   website: string | null;
   receiptText: string;
-  serviceChargeAmount: string;
   language: 'ru' | 'ky';
   payQr: boolean;
   payCash: boolean;
@@ -71,7 +70,6 @@ export interface PublicSettings {
   instagram: string | null;
   website: string | null;
   receiptText: string;
-  serviceChargeAmount: string;
   language: 'ru' | 'ky';
   paymentMethods: PaymentMethod[];
   qrImageUrl: string | null;
@@ -98,9 +96,7 @@ export function useAdminSettings() {
   });
 }
 
-export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'queueDisplayCode' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount' | 'telegramStockBotConfigured'>> & {
-  serviceChargeAmount?: number;
-};
+export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'queueDisplayCode' | 'updatedAt' | 'printerConnected' | 'telegramStockBotConfigured'>>;
 
 /** Проверка соединения с ККМ (кнопка в блоке настроек). */
 export function useTestFiscalConnection() {
@@ -132,16 +128,9 @@ export function useUpdateSettings() {
       await qc.cancelQueries({ queryKey: ['settings', 'admin'] });
       const previous = qc.getQueryData<Settings>(['settings', 'admin']);
       if (previous) {
-        const { serviceChargeAmount, ...restPatch } = patch;
-        const optimisticPatch: Partial<Settings> = {
-          ...restPatch,
-          ...(serviceChargeAmount !== undefined
-            ? { serviceChargeAmount: String(serviceChargeAmount) }
-            : {}),
-        };
         qc.setQueryData<Settings>(['settings', 'admin'], {
           ...previous,
-          ...optimisticPatch,
+          ...patch,
           updatedAt: new Date().toISOString(),
         });
       }

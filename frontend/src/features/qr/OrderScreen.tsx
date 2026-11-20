@@ -133,11 +133,8 @@ export function OrderScreen({
           </div>
           <span className="pb-1 text-[13px] text-text-muted">{pluralItems(session.itemCount)}</span>
         </div>
-        {session.rounding && (session.rounding.serviceCharge > 0 || session.rounding.amount > 0) && (
-          <div className="mb-2 flex flex-wrap gap-x-3 text-sm text-text-muted">
-            {session.rounding.serviceCharge > 0 && <span>Обслуживание +{money(session.rounding.serviceCharge)}</span>}
-            {session.rounding.amount > 0 && <span>Округление −{money(session.rounding.amount)}</span>}
-          </div>
+        {session.rounding && session.rounding.amount > 0 && (
+          <div className="mb-2 text-sm text-text-muted">Округление −{money(session.rounding.amount)}</div>
         )}
         <button
           type="button"

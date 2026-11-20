@@ -221,11 +221,7 @@ export const useCart = create<CartState>((set, get) => ({
     }),
 }));
 
-export interface CartRounding {
-  serviceCharge: number;
-}
-
-export function cartTotals(lines: CartLine[], rounding?: CartRounding) {
+export function cartTotals(lines: CartLine[], roundTotal = false) {
   let total = 0;
   let discount = 0;
   let roundedLineSum = 0;
@@ -238,8 +234,7 @@ export function cartTotals(lines: CartLine[], rounding?: CartRounding) {
     roundedLineSum += Math.round(unitFinal * l.quantity * 100) / 100;
     count += l.quantity;
   }
-  const serviceCharge = lines.length > 0 ? (rounding?.serviceCharge ?? 0) : 0;
-  const beforeRounding = rounding ? roundedLineSum + serviceCharge : total - discount;
-  const final = rounding ? roundOrderAmount(beforeRounding) : beforeRounding;
-  return { total, discount, final, count, serviceCharge, roundingAmount: Math.round((beforeRounding - final) * 100) / 100 };
+  const beforeRounding = roundTotal ? roundedLineSum : total - discount;
+  const final = roundTotal ? roundOrderAmount(beforeRounding) : beforeRounding;
+  return { total, discount, final, count, roundingAmount: Math.round((beforeRounding - final) * 100) / 100 };
 }

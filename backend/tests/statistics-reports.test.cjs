@@ -26,7 +26,7 @@ const movement = {
 
 test('daily sales, payment splits and report dimensions aggregate the same closed check in Bishkek', () => {
   const result = buildStatisticsReports([order], [movement], true);
-  assert.deepEqual(result.sales, [{ date: '2026-11-16', orders: 1, revenue: 60, discount: 5, serviceCharge: 5, avgCheck: 60 }]);
+  assert.deepEqual(result.sales, [{ date: '2026-11-16', orders: 1, revenue: 60, discount: 5, avgCheck: 60 }]);
   assert.deepEqual(result.payments, [{ date: '2026-11-16', orders: 1, cash: 20, card: 40, qr: 0, other: 0, total: 60 }]);
   const [product] = result.products;
   assert.deepEqual({ ...product, id: undefined }, { id: undefined, name: 'Эспрессо · Двойной',
