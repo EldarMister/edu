@@ -1,5 +1,6 @@
 import { useId, useState, type FormEvent } from 'react';
 import { Select } from '@/components/Select';
+import { IconEdit } from '../components/icons';
 import { Modal } from '@/components/Modal';
 import { usePreparationStations, usePreparationStationUpdates, useSavePreparationStation, type PreparationStation } from '@/features/kitchen/stations';
 import { useAuth } from '@/store/auth';
@@ -70,7 +71,14 @@ export function StationsPage() {
             onClick={() => openEditor({ type: 'station', id: station.id })}>{station.name}</button>
             : <span className="block truncate" title={station.name}>{station.name}</span>}</td>
           <td className={station.isActive ? '' : 'text-text-muted'}>{station.isActive ? 'Активна' : 'В архиве'}</td>
-          <td>{owner && <div className="poster-row-actions"><button type="button" aria-label={`Редактировать станцию: ${station.name}`} onClick={() => openEditor({ type: 'station', id: station.id })}>Ред.</button></div>}</td>
+          <td>{owner && <div className="poster-row-actions">
+            <button type="button" title="Редактировать"
+              aria-label={`Редактировать станцию: ${station.name}`}
+              className="group inline-flex items-center rounded-lg p-1.5 transition-colors hover:bg-background"
+              onClick={() => openEditor({ type: 'station', id: station.id })}>
+              <IconEdit className="h-4 w-4 text-text-muted group-hover:text-primary" />
+            </button>
+          </div>}</td>
         </tr>)}
         {!rows.length && <tr><td colSpan={3} className="poster-directory-empty text-center text-text-muted">Станции не найдены</td></tr>}
         </tbody>

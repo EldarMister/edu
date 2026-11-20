@@ -97,7 +97,12 @@ export function KitchenApp({
   const historyPeriod = useListPeriod('kitchenHistory', 'today');
   const historyTab = tab === 'ready' || tab === 'rejected';
 
-  const ordersQ = useKitchenOrders(tab, station, historyTab ? { from: historyPeriod.range.dateFrom ?? '2000-01-01', to: historyPeriod.range.dateTo ?? calendarDate(warehouseDay()) } : undefined);
+  const newOrdersQ = useKitchenOrders('new', station);
+  const inWorkOrdersQ = useKitchenOrders('in_work', station);
+  const historyOrdersQ = useKitchenOrders(historyTab ? tab : null, station, historyTab
+    ? { from: historyPeriod.range.dateFrom ?? '2000-01-01', to: historyPeriod.range.dateTo ?? calendarDate(warehouseDay()) }
+    : undefined);
+  const ordersQ = tab === 'new' ? newOrdersQ : tab === 'in_work' ? inWorkOrdersQ : historyOrdersQ;
   const accept = useAccept(station);
   const readyItems = useReadyItems(station);
   const rejectItems = useRejectItems(station);
@@ -109,7 +114,7 @@ export function KitchenApp({
   }, []);
 
   const orders = ordersQ.data ?? [];
-  const counts = orders.length;
+  const activeOrderCounts = { new: newOrdersQ.data?.length ?? 0, in_work: inWorkOrdersQ.data?.length ?? 0 };
 
   useEffect(() => {
     if (orders.length > 0) setNow(Date.now());
@@ -247,24 +252,30 @@ export function KitchenApp({
       {/* Вкладки + Стоп-лист */}
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-3 py-2.5 sm:flex-nowrap sm:px-5">
         <div className="no-scrollbar flex min-w-0 w-full gap-2 overflow-x-auto sm:w-auto sm:flex-1">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => {
-                setTab(t.key);
-                setShowStats(false);
-                setSettingsOpen(false);
-              }}
-              className={`shrink-0 rounded-lg px-4 py-2 text-[15px] font-medium transition-colors ${
-                !showSettings && !showStats && tab === t.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-              }`}
-            >
-              {t.label}
-              {!showSettings && !showStats && tab === t.key && counts > 0 && (
-                <span className="ml-2 rounded-full bg-paper/25 px-1.5 text-xs">{counts}</span>
-              )}
-            </button>
-          ))}
+          {TABS.map(({ key, label }) => {
+            const selected = !showSettings && !showStats && tab === key;
+            const count = key === 'new' || key === 'in_work' ? activeOrderCounts[key] : selected ? orders.length : 0;
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => {
+                  setTab(key);
+                  setShowStats(false);
+                  setSettingsOpen(false);
+                }}
+                className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-[15px] font-medium transition-colors ${
+                  selected ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
+                }`}
+              >
+                {label}
+                {count > 0 && <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-semibold tabular-nums ${selected ? 'bg-paper/25 text-white' : 'bg-primary/10 text-primary'}`}>
+                  {count}
+                </span>}
+              </button>
+            );
+          })}
         </div>
         <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
           {!showSettings && !showStats && historyTab && historyPeriod.filter}

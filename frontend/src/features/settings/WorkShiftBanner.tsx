@@ -108,7 +108,7 @@ export function WorkShiftGate({ children, adminWorkspace = false }: { children: 
 
   return <main className="flex h-full min-h-0 flex-col overflow-y-auto bg-white">
     <div className="flex shrink-0 justify-end gap-2 px-4 pt-3">
-      {adminWorkspace && !starting && <Link to="?section=profile" state={{ returnFromProfile: true }} className="btn-secondary btn-md">{t('Личный кабинет')}</Link>}
+      {adminWorkspace && !starting && <Link to="?section=profile" className="btn-secondary btn-md">{t('Личный кабинет')}</Link>}
       <button type="button" className="btn-secondary btn-md" onClick={() => { disconnectSocket(); logout(); }}>{t('Выйти')}</button>
     </div>
     <div className="min-h-[420px] flex-1">

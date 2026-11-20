@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import type { TouchEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/store/auth';
@@ -194,8 +194,6 @@ export function AdminApp() {
     return !!s.perm && canSection(s.perm);
   });
   const [route, setRoute] = useSearchParams();
-  const location = useLocation();
-  const navigate = useNavigate();
   const profileOpen = route.get('section') === 'profile';
   useWorkspaceScroll();
   const legacyStations = route.get('section') === 'menu' && route.get('view') === 'stations';
@@ -327,13 +325,8 @@ export function AdminApp() {
   }
 
   function openProfile() {
-    if (!profileOpen) setRoute({ section: 'profile' }, { state: { returnFromProfile: true } });
+    if (!profileOpen) setRoute({ section: 'profile' });
     setMobileNav(false);
-  }
-
-  function closeProfile() {
-    if (location.state?.returnFromProfile) navigate(-1);
-    else setRoute({}, { replace: true });
   }
 
   function go(s: Section) {
@@ -500,7 +493,7 @@ export function AdminApp() {
                   if (hasChildren) setSidebarFlyout(flyout?.pinned ? null : { section: s.key, anchor: event.currentTarget, pinned: true });
                   else go(s.key);
                 }}>
-                <Icon />
+                <span className="workspace-nav-label"><Icon /></span>
               </button>
               {flyout && <SidebarFlyout id={childrenId} label={t(s.label)} anchor={flyout.anchor}
                 focusOnOpen={flyout.pinned} onClose={() => setSidebarFlyout(null)}
@@ -509,9 +502,9 @@ export function AdminApp() {
                 {children.map((item) => {
                   const selected = active && currentView === item.key;
                   return <button key={item.key} type="button" aria-current={selected ? 'page' : undefined}
-                    className={`block w-full rounded-lg px-3 py-2.5 text-left text-sm leading-5 ${selected ? 'bg-primary/10 font-medium text-primary' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
+                    className={`workspace-nav-child block w-full rounded-lg px-3 py-2.5 text-left text-sm leading-5 ${selected ? 'bg-primary/10 font-medium text-primary' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
                     onClick={() => openView(item.key)}>
-                    {t(item.label)}
+                    <span className="workspace-nav-label">{t(item.label)}</span>
                   </button>;
                 })}
               </SidebarFlyout>}
@@ -534,10 +527,12 @@ export function AdminApp() {
                 aria-expanded={hasChildren ? expanded : undefined}
                 aria-controls={hasChildren ? childrenId : undefined}
                 aria-current={selectedSection ? 'page' : undefined}
-                className={`workspace-nav-section flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${selectedSection ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
+                className={`workspace-nav-section flex w-full items-center rounded-xl px-3 py-2.5 text-[15px] font-medium transition-colors ${selectedSection ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
               >
-                <Icon />
-                {t(s.label)}
+                <span className="workspace-nav-label items-center gap-3">
+                  <Icon />
+                  {t(s.label)}
+                </span>
               </button>
               {hasChildren && (
                 <div
@@ -559,7 +554,7 @@ export function AdminApp() {
                             onClick={() => openView(item.key)}
                             className={`workspace-nav-child block w-full rounded-lg py-2 pl-[34px] pr-2 text-left text-sm leading-[21px] transition-colors ${selected ? 'bg-primary font-medium text-white' : 'text-text-secondary hover:bg-background hover:text-text-primary'}`}
                           >
-                            {t(item.label)}
+                            <span className="workspace-nav-label">{t(item.label)}</span>
                           </button>
                         );
                       })}
@@ -650,7 +645,7 @@ export function AdminApp() {
         <main
           className={`workspace-main app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${posterWorkspace ? 'poster-workspace' : ''} ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
         >
-          {profileOpen ? <AdminProfilePage onBack={closeProfile} /> : !current ? (
+          {profileOpen ? <AdminProfilePage /> : !current ? (
             <NoAccessScreen />
           ) : (
             <>

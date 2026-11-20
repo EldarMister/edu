@@ -21,7 +21,7 @@ import {
   usePreparationStationUpdates,
   type PreparationStation,
 } from '@/features/kitchen/stations';
-import { IconTrash, IconPlus } from '../components/icons';
+import { IconEdit, IconTrash, IconPlus } from '../components/icons';
 import type { MenuView } from './warehouse/navigation';
 import { MenuStockCatalogue } from './warehouse/MenuStockCatalogue';
 import { DishComposition } from './warehouse/CatalogueDetails';
@@ -267,12 +267,14 @@ function MenuDishList({ view }: { view: MenuView }) {
                       )}
                       <button
                         type="button"
-                        className="text-xs text-primary hover:underline"
+                        className={editable ? 'group inline-flex items-center rounded-lg p-1.5 transition-colors hover:bg-background' : 'text-xs text-primary hover:underline'}
+                        title={editable ? t('Редактировать') : undefined}
+                        aria-label={editable ? `${t('Редактировать')}: ${dish.name}` : undefined}
                         onClick={() =>
                           openEditor({ type: dish.isSet ? 'set' : 'entry', id: dish.id })
                         }
                       >
-                        {editable ? 'Ред.' : 'Открыть'}
+                        {editable ? <IconEdit className="h-4 w-4 text-text-muted group-hover:text-primary" /> : 'Открыть'}
                       </button>
                       {editable && (
                         <MenuActions

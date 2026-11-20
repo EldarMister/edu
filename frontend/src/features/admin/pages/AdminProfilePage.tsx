@@ -10,19 +10,13 @@ const languages = [
   { value: 'ky', label: 'Кыргызча' },
 ] as const;
 
-export function AdminProfilePage({ onBack }: { onBack: () => void }) {
+export function AdminProfilePage() {
   const user = useAuth((state) => state.user);
   const { locale, setLocale } = useLocale();
   const t = useT();
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <button type="button" className="btn-secondary btn-md workspace-enter mb-4 gap-2" onClick={onBack}>
-        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <path d="m9.5 3-5 5 5 5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        {t('Назад')}
-      </button>
+    <div className="max-w-4xl">
       <div className="workspace-stagger grid items-start gap-4 md:grid-cols-2">
         {user && <section className="card flex items-center gap-3 p-5 md:col-span-2">
           <span aria-hidden="true" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary/10 font-semibold text-primary">

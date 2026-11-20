@@ -4,11 +4,12 @@ import type { Order, PrepStation } from '@/types';
 
 export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected' | 'cancelled';
 
-export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitchen', history?: { from?: string; to?: string }) {
+export function useKitchenOrders(tab: KitchenTab | null, station: PrepStation = 'kitchen', history?: { from?: string; to?: string }) {
   return useQuery({
     queryKey: ['kitchen', station, tab, history],
-    queryFn: async () =>
-      (await api.get<Order[]>('/kitchen/orders', { params: { tab, station, ...history } })).data,
+    queryFn: async ({ signal }) =>
+      (await api.get<Order[]>('/kitchen/orders', { params: { tab, station, ...history }, signal })).data,
+    enabled: tab !== null,
     refetchInterval: 15_000, // подстраховка, основное обновление — через сокет
   });
 }
