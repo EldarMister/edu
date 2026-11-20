@@ -579,7 +579,7 @@ export function useCategoryMutations() {
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number; taxId?: string | null }) =>
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number; position?: number; taxId?: string | null }) =>
       api.patch(`/admin/categories/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });

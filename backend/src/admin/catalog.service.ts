@@ -39,6 +39,8 @@ type NormalizedDishVariant = {
   unit?: string;
 };
 
+const categoryOrder: Prisma.CategoryOrderByWithRelationInput[] = [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }];
+
 /** Управление каталогом (залы, столы, категории, блюда) для админа/владельца. */
 @Injectable()
 export class CatalogService {
@@ -257,7 +259,7 @@ export class CatalogService {
 
   categoriesAll() {
     return this.prisma.category.findMany({
-      orderBy: { sortOrder: 'asc' },
+      orderBy: categoryOrder,
       select: { id: true, name: true, sortOrder: true, isActive: true, prepStation: true, taxId: true, _count: { select: { dishes: true } } },
     });
   }
@@ -286,11 +288,29 @@ export class CatalogService {
 
   async updateCategory(id: string, dto: UpdateCategoryDto, actor: AuditActor) {
     const before = await this.ensureCategory(id);
+    const { position, ...fields } = dto;
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
-      await assertAssignableStation(tx, dto.prepStation);
-      await assertMenuTax(tx, dto.taxId);
-      return tx.category.update({ where: { id }, data: { ...dto, prepStation: dto.prepStation ?? undefined } });
+      await assertAssignableStation(tx, fields.prepStation);
+      await assertMenuTax(tx, fields.taxId);
+      const data = { ...fields, prepStation: fields.prepStation ?? undefined };
+      if (position != null) {
+        const categories = await tx.category.findMany({ orderBy: categoryOrder, select: { id: true, sortOrder: true } });
+        const index = categories.findIndex((category) => category.id === id);
+        if (index < 0) throw new NotFoundException('Категория не найдена');
+        if (position < 1 || position > categories.length) {
+          throw new BadRequestException('Позиция категории вне диапазона. Обновите список категорий.');
+        }
+        const [category] = categories.splice(index, 1);
+        categories.splice(position - 1, 0, category);
+        for (const [sortOrder, entry] of categories.entries()) {
+          if (entry.id !== id && entry.sortOrder !== sortOrder) {
+            await tx.category.update({ where: { id: entry.id }, data: { sortOrder } });
+          }
+        }
+        data.sortOrder = position - 1;
+      }
+      return tx.category.update({ where: { id }, data });
     });
     await this.audit.log({
       actor,
@@ -298,8 +318,8 @@ export class CatalogService {
       entityType: AuditEntity.CATEGORY,
       entityId: id,
       description: `${actor.name ?? 'Сотрудник'} изменил категорию «${before.name}»`,
-      oldValue: { name: before.name, isActive: before.isActive, taxId: before.taxId },
-      newValue: { name: updated.name, isActive: updated.isActive, taxId: updated.taxId },
+      oldValue: { name: before.name, isActive: before.isActive, taxId: before.taxId, sortOrder: before.sortOrder },
+      newValue: { name: updated.name, isActive: updated.isActive, taxId: updated.taxId, sortOrder: updated.sortOrder },
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: id, action: 'update-category' });
     return updated;
@@ -347,13 +367,14 @@ export class CatalogService {
 
   /** Меняет порядок категорий по переданному списку id. */
   async reorderCategories(ids: string[], actor: AuditActor) {
-    const categories = await this.prisma.category.findMany({ where: { id: { in: ids } }, select: { id: true } });
-    if (categories.length !== ids.length) throw new BadRequestException('Категория не найдена');
-    await this.prisma.$transaction(
-      ids.map((catId, index) =>
-        this.prisma.category.update({ where: { id: catId }, data: { sortOrder: index } }),
-      ),
-    );
+    await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      const categories = await tx.category.findMany({ where: { id: { in: ids } }, select: { id: true } });
+      if (categories.length !== ids.length) throw new BadRequestException('Категория не найдена');
+      for (const [sortOrder, id] of ids.entries()) {
+        await tx.category.update({ where: { id }, data: { sortOrder } });
+      }
+    });
     await this.audit.log({
       actor,
       actionType: AuditAction.CATEGORY_UPDATED,

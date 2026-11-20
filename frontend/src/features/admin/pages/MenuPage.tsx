@@ -431,38 +431,10 @@ export function MenuCategoriesPage() {
       push({ message: apiError(failure), at: new Date().toISOString() });
     }
   }
-  if (editor?.type === 'category') {
-    if (categoriesQ.isPending)
-      return (
-        <EditorPage title="Категория" onClose={closeEditor}>
-          <Spinner />
-        </EditorPage>
-      );
-    if (categoriesQ.isError)
-      return (
-        <EditorPage title="Категория" onClose={closeEditor}>
-          <ListLoadError
-            error={categoriesQ.error}
-            onRetry={() => void categoriesQ.refetch()}
-            pending={categoriesQ.isFetching}
-          />
-        </EditorPage>
-      );
-    const category = sorted.find((item) => item.id === editor.id);
-    if (editor.id && !category)
-      return (
-        <EditorPage title="Категория не найдена" onClose={closeEditor}>
-          <p>Категория недоступна.</p>
-        </EditorPage>
-      );
-    return (
-      <MenuCategoryForm
-        key={editor.id ?? 'new'}
-        category={category}
-        stations={stations}
-        onClose={closeEditor}
-      />
-    );
+  const editingCategory = editor?.type === 'category' && !!editor.id;
+  const categoryIndex = editingCategory ? sorted.findIndex((category) => category.id === editor.id) : -1;
+  if (editor?.type === 'category' && !editor.id && categoriesQ.isSuccess) {
+    return <MenuCategoryForm stations={stations} onClose={closeEditor} />;
   }
   return (
     <div className="min-w-0">
@@ -518,12 +490,11 @@ export function MenuCategoriesPage() {
                   <td className="text-right tabular-nums">{category._count.dishes}</td>
                   <td className="w-px text-right">
                     <div className="poster-row-actions">
-                      <button
-                        className="text-xs text-primary hover:underline"
-                        onClick={() => openEditor({ type: 'category', id: category.id })}
-                      >
-                        {editable ? 'Ред.' : 'Открыть'}
-                      </button>
+                      {editable && <button type="button" title="Изменить" aria-label={`Изменить категорию ${category.name}`}
+                        className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-background hover:text-primary"
+                        onClick={() => openEditor({ type: 'category', id: category.id })}>
+                        <IconEdit className="h-4 w-4" />
+                      </button>}
                       {editable && (
                         <MenuActions
                           ariaLabel={`Действия категории ${category.name}`}
@@ -572,6 +543,16 @@ export function MenuCategoriesPage() {
           )}
         </div>
       )}
+      {editingCategory && (categoryIndex >= 0 ? (
+        <MenuCategoryForm key={editor.id} category={sorted[categoryIndex]} position={categoryIndex + 1}
+          categoryCount={sorted.length} stations={stations} onClose={closeEditor} />
+      ) : (
+        <Modal open title="Категория" onClose={closeEditor}>
+          {categoriesQ.isPending ? <Spinner /> : categoriesQ.isError ? (
+            <ListLoadError error={categoriesQ.error} onRetry={() => void categoriesQ.refetch()} pending={categoriesQ.isFetching} />
+          ) : <p className="text-sm text-text-secondary">Категория недоступна.</p>}
+        </Modal>
+      ))}
       {deleteTarget && (
         <DeleteCategorySheet
           category={deleteTarget}
@@ -584,13 +565,18 @@ export function MenuCategoriesPage() {
 }
 function MenuCategoryForm({
   category,
+  position = 1,
+  categoryCount = 1,
   stations,
   onClose,
 }: {
   category?: AdminCategory;
+  position?: number;
+  categoryCount?: number;
   stations: PreparationStation[];
   onClose: () => void;
 }) {
+  const formId = useId();
   const { create, update } = useCategoryMutations();
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
@@ -599,9 +585,13 @@ function MenuCategoryForm({
   const [prepStation, setPrepStation] = useState(
     category?.prepStation ?? stations.find((station) => station.isActive)?.id ?? 'none',
   );
+  const [initialPosition] = useState(position);
+  const [newPosition, setNewPosition] = useState(String(position));
   const [error, setError] = useState('');
   const push = useNotifications((state) => state.push);
   const pending = create.isPending || update.isPending;
+  const Field = category ? CategoryModalField : DocumentField;
+  const close = () => { if (!pending) onClose(); };
   async function save(event: React.FormEvent) {
     event.preventDefault();
     if (!editable || pending) return;
@@ -609,10 +599,17 @@ function MenuCategoryForm({
       setError('Укажите название категории.');
       return;
     }
+    const nextPosition = Number(newPosition);
+    if (category && (!Number.isInteger(nextPosition) || nextPosition < 1 || nextPosition > categoryCount)) {
+      setError(`Укажите позицию от 1 до ${categoryCount}.`);
+      return;
+    }
     setError('');
     try {
       const body = { name: name.trim(), prepStation, ...(tax !== (category?.taxId ?? '') ? { taxId: tax || null } : {}) };
-      if (category) await update.mutateAsync({ id: category.id, ...body });
+      if (category) await update.mutateAsync({
+        id: category.id, ...body, ...(nextPosition !== initialPosition ? { position: nextPosition } : {}),
+      });
       else await create.mutateAsync(body);
       push({ message: 'Категория сохранена', at: new Date().toISOString() });
       onClose();
@@ -620,65 +617,59 @@ function MenuCategoryForm({
       setError(apiError(failure));
     }
   }
-  return (
-    <EditorPage
-      title={category ? 'Редактирование категории' : 'Добавление категории'}
-      onClose={onClose}
-      footer={
-        editable ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="submit"
-              form="menu-category-form"
-              className="btn-primary btn-md"
-              disabled={pending}
-            >
-              {pending ? 'Сохранение…' : 'Сохранить'}
-            </button>
-            <button className="btn-ghost btn-md" onClick={onClose} disabled={pending}>
-              Отмена
-            </button>
-            {error && (
-              <p role="alert" className="text-sm text-danger">
-                {error}
-              </p>
-            )}
+  const fields = (
+    <form id={formId} onSubmit={save}>
+      <fieldset disabled={!editable || pending} className="min-w-0 space-y-4">
+        <Field label="Название">
+          <input aria-label="Название категории" className="input" value={name} maxLength={60}
+            onChange={(event) => setName(event.target.value)} required autoFocus={editable} />
+        </Field>
+        <Field label="Станция">
+          <Select ariaLabel="Станция категории" className="h-11 w-full" value={prepStation}
+            onChange={setPrepStation} options={routingOptions(stations, prepStation)} disabled={!editable || pending} />
+        </Field>
+        <Field label="Налог">
+          <MenuTaxSelect value={tax} onChange={setTax} disabled={!editable || pending} />
+        </Field>
+        {category && <Field label="Позиция в списке">
+          <div className="flex items-center gap-3">
+            <input aria-label="Позиция в списке" className="input max-w-24" type="number" inputMode="numeric"
+              min={1} max={categoryCount} step={1} required value={newPosition}
+              onChange={(event) => setNewPosition(event.target.value)} />
+            <span className="text-text-muted">из {categoryCount}</span>
           </div>
-        ) : undefined
-      }
-    >
-      <form id="menu-category-form" className="space-y-5" onSubmit={save}>
-        <fieldset disabled={!editable || pending} className="min-w-0 space-y-5">
-          <DocumentField label="Название">
-            <input
-              aria-label="Название категории"
-              className="input"
-              value={name}
-              maxLength={120}
-              onChange={(event) => setName(event.target.value)}
-              required
-              autoFocus
-            />
-          </DocumentField>
-          <DocumentField label="Станция">
-            <Select
-              ariaLabel="Станция категории"
-              className="h-11 w-full"
-              value={prepStation}
-              onChange={setPrepStation}
-              options={routingOptions(stations, prepStation)}
-            />
-          </DocumentField>
-          <DocumentField label="Налог">
-            <MenuTaxSelect value={tax} onChange={setTax} disabled={!editable || pending} />
-          </DocumentField>
-        </fieldset>
-      </form>
-    </EditorPage>
+        </Field>}
+      </fieldset>
+      {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+    </form>
   );
+  const footer = (
+    <div className={category ? 'flex justify-end gap-2' : 'flex gap-2'}>
+      <button type="button" className="btn-secondary btn-md" onClick={close} disabled={pending}>
+        {editable ? 'Отмена' : 'Закрыть'}
+      </button>
+      {editable && <button type="submit" form={formId} className="btn-primary btn-md" disabled={pending}>
+        {pending ? 'Сохранение…' : 'Сохранить'}
+      </button>}
+    </div>
+  );
+  if (category) {
+    return (
+      <Modal open title={editable ? 'Редактирование категории' : 'Категория'} onClose={close} footer={footer}>
+        {fields}
+      </Modal>
+    );
+  }
+  return <EditorPage title="Добавление категории" onClose={close} footer={footer}>{fields}</EditorPage>;
 }
 
-/** Подтверждение удаления категории: перенести блюда или удалить вместе с блюдами. */
+function CategoryModalField({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="grid gap-1.5 text-sm text-text-secondary">
+    <span>{label}</span>
+    {children}
+  </div>;
+}
+
 function DeleteCategorySheet({
   category,
   categories,
@@ -689,88 +680,68 @@ function DeleteCategorySheet({
   onDone: () => void;
 }) {
   const { remove } = useCategoryMutations();
-  const push = useNotifications((s) => s.push);
-  const others = categories.filter((c) => c.id !== category.id);
-  const [targetId, setTargetId] = useState(others[0]?.id ?? '');
+  const push = useNotifications((state) => state.push);
+  const others = categories.filter((item) => item.id !== category.id);
+  const strategyName = useId();
+  const [strategy, setStrategy] = useState<'move' | 'delete'>();
+  const [targetId, setTargetId] = useState('');
   const [confirmation, setConfirmation] = useState('');
-  const confirmed = confirmation.trim() === category.name.trim();
+  const [error, setError] = useState('');
   const hasDishes = category._count.dishes > 0;
+  const canDelete = confirmation.trim() === category.name.trim() &&
+    (!hasDishes || strategy === 'delete' || (strategy === 'move' && !!targetId));
 
-  async function run(strategy?: 'move' | 'delete', targetCategoryId?: string) {
-    if (!confirmed || remove.isPending) return;
+  async function run() {
+    if (!canDelete || remove.isPending) return;
     const playEffect = captureDeletionEffect(`menu-category-${category.id}`);
+    setError('');
     try {
-      await remove.mutateAsync({ id: category.id, strategy, targetCategoryId });
+      await remove.mutateAsync({ id: category.id, strategy, targetCategoryId: strategy === 'move' ? targetId : undefined });
       playEffect?.();
       push({ message: 'Категория удалена', at: new Date().toISOString() });
       onDone();
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+    } catch (failure) {
+      setError(apiError(failure));
     }
   }
 
   return (
-    <Modal open onClose={() => !remove.isPending && onDone()} title={`Удалить «${category.name}»`} footer={
-      <div className={hasDishes ? 'flex justify-end' : 'grid grid-cols-2 gap-2'}>
-        <button type="button" className="btn-secondary btn-lg" disabled={remove.isPending} onClick={onDone}>Отмена</button>
-        {!hasDishes && <button type="button" className="btn-danger btn-lg font-semibold"
-          disabled={remove.isPending || !confirmed} onClick={() => run()}>
-          {remove.isPending ? <Spinner /> : 'Удалить'}
-        </button>}
+    <Modal open title="Удалить категорию" onClose={() => !remove.isPending && onDone()} footer={
+      <div className="flex gap-2">
+        <button type="button" className="btn-secondary btn-lg flex-1" disabled={remove.isPending} onClick={onDone}>
+          Отмена
+        </button>
+        <button type="button" className="btn-danger btn-lg flex-1 font-semibold"
+          disabled={remove.isPending || !canDelete} onClick={() => void run()}>
+          {remove.isPending ? <Spinner /> : strategy === 'move' ? 'Перенести и удалить' : 'Удалить'}
+        </button>
       </div>
     }>
-      <div className="mb-3">
+      <p className="text-sm text-text-secondary">Удалить категорию «{category.name}»?</p>
+      {hasDishes && <>
+        <p className="mt-2 text-sm text-text-muted">
+          Позиций в категории: {category._count.dishes}. История заказов и чеки сохранятся.
+        </p>
+        <fieldset disabled={remove.isPending} className="mt-3 space-y-2.5 text-sm">
+          <legend className="mb-1 font-medium">Что сделать с позициями?</legend>
+          {others.length > 0 && <label className="flex items-center gap-2">
+            <input type="radio" name={strategyName} checked={strategy === 'move'} onChange={() => setStrategy('move')} />
+            Перенести в другую категорию
+          </label>}
+          {strategy === 'move' && <Select ariaLabel="Категория для переноса" className="h-10 w-full"
+            value={targetId} onChange={setTargetId} disabled={remove.isPending}
+            options={[{ value: '', label: 'Выберите категорию' }, ...others.map((item) => ({ value: item.id, label: item.name }))]} />}
+          <label className="flex items-center gap-2">
+            <input type="radio" name={strategyName} checked={strategy === 'delete'} onChange={() => setStrategy('delete')} />
+            Удалить все позиции вместе с категорией
+          </label>
+        </fieldset>
+      </>}
+      <div className="mt-3">
         <DeleteNameField label="Введите название категории для подтверждения"
           value={confirmation} disabled={remove.isPending} onChange={setConfirmation} />
       </div>
-      {!hasDishes ? (
-        <p className="text-sm text-text-secondary">В категории нет блюд.</p>
-      ) : (
-        <div className="space-y-4">
-          <p className="text-sm text-text-secondary">
-            В категории {category._count.dishes} блюд. Что сделать с ними?
-          </p>
-
-          <div className="space-y-2 rounded-xl border border-border p-3">
-            <p className="text-sm font-medium text-text-primary">
-              Перенести блюда в другую категорию
-            </p>
-            {others.length === 0 ? (
-              <p className="text-xs text-text-muted">Нет другой категории для переноса.</p>
-            ) : (
-              <div className="flex gap-2">
-                <Select
-                  className="h-10 min-w-0 flex-1"
-                  value={targetId}
-                  onChange={setTargetId}
-                  options={others.map((c) => ({ value: c.id, label: c.name }))}
-                />
-                <button
-                  className="btn-primary btn-md shrink-0"
-                  disabled={remove.isPending || !confirmed || !targetId}
-                  onClick={() => run('move', targetId)}
-                >
-                  {remove.isPending ? <Spinner /> : 'Перенести и удалить'}
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-2 rounded-xl border border-danger/30 bg-danger/5 p-3">
-            <p className="text-sm font-medium text-danger">Удалить категорию вместе с блюдами</p>
-            <p className="text-xs text-text-muted">
-              Блюда полностью удалятся из меню. История заказов и чеки сохранятся.
-            </p>
-            <button
-              className="btn-danger btn-md w-full font-semibold"
-              disabled={remove.isPending || !confirmed}
-              onClick={() => run('delete')}
-            >
-              {remove.isPending ? <Spinner /> : 'Удалить вместе с блюдами'}
-            </button>
-          </div>
-        </div>
-      )}
+      {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
     </Modal>
   );
 }

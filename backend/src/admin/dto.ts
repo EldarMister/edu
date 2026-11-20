@@ -92,6 +92,9 @@ export class CreateCategoryDto {
   prepStation?: string;
 }
 export class UpdateCategoryDto {
+  @IsOptional() @IsInt() @Min(1)
+  position?: number;
+
   @IsOptional() @IsUUID()
   taxId?: string | null;
 

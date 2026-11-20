@@ -12,7 +12,9 @@ const editorKeys = ['editor', 'id', 'action', 'itemId', 'editorWarehouse'];
 const scrollPositions = new Map<string, number>();
 function scrollKey(pathname: string, search: string) {
   const params = new URLSearchParams(search);
-  if (params.get('section') === 'staff' && ['employee', 'position'].includes(params.get('editor') ?? '')) {
+  const editor = params.get('editor');
+  if ((params.get('section') === 'staff' && ['employee', 'position'].includes(editor ?? ''))
+    || (params.get('section') === 'menu' && params.get('view') === 'categories' && editor === 'category' && params.has('id'))) {
     editorKeys.forEach((key) => params.delete(key));
   }
   // Disclosures change the URL for Back navigation without moving the current list.

@@ -320,9 +320,9 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
               placeholder={isGoods ? 'Например, лимонад 0,5 л' : 'Например, капучино'} required />
           </FormRow>
           <FormRow label="Категория">
-            <Select ariaLabel="Категория" className="h-11 w-full" value={form.categoryId} disabled={!canEdit || busy}
-              onChange={(value) => patch({ categoryId: value })}
-              options={[{ value: '', label: 'Выберите категорию' }, ...categories.map(({ id, name }) => ({ value: id, label: name }))]} />
+            <Select searchable ariaLabel="Категория" placeholder="Выберите категорию" className="h-11 w-full"
+              value={form.categoryId} disabled={!canEdit || busy} onChange={(value) => patch({ categoryId: value })}
+              options={categories.map(({ id, name }) => ({ value: id, label: name }))} />
           </FormRow>
           <FormRow label="Цех приготовления">
             <Select ariaLabel="Цех приготовления" className="h-11 w-full" value={form.prepStation} disabled={!canEdit || busy}
