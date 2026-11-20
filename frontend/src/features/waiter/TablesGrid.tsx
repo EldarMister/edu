@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { Hall, TableStatus } from '@/types';
 import { TABLE_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
+import { tableLabel } from '@/lib/format';
 import { FloorPlan, layoutFloorTables } from '@/components/FloorPlan';
 
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
@@ -89,13 +90,14 @@ export function TablesGrid({
                 key={table.id}
                 type="button"
                 onClick={() => onSelect(table.id)}
+                title={tableLabel(table, t('Стол'))}
                 className={`relative flex aspect-square w-full min-w-0 items-center justify-center rounded-[22px] border font-medium transition-colors ${
                   selected
                     ? 'border-primary/90 bg-primary/90 text-white shadow-soft'
                     : 'border-border bg-white text-text-primary hover:border-primary/40'
                 }`}
               >
-                <span>{table.number}</span>
+                {table.name ? <span className="line-clamp-2 break-words px-2 text-sm leading-tight sm:text-base">{table.name}</span> : <span>{table.number}</span>}
                 {!selected && (
                   <span className={`absolute rounded-full ${dotClass} ${meta.dot}`} />
                 )}
@@ -130,13 +132,13 @@ function WaiterFloorPlan({ hall, selectedTableId, onSelect }: {
     const table = tables.get(placement.tableId)!;
     const status = TABLE_STATUS[table.status];
     const selected = table.id === selectedTableId;
-    const name = placement.label || `${t('Стол')} ${table.number}`;
+    const name = placement.label?.trim() || tableLabel(table, t('Стол'));
     const description = [name, t(status.label), table.occupiedBy?.name].filter(Boolean).join(' · ');
     return <button key={table.id} type="button" style={style} className="floor-plan-table flex-col gap-0.5 overflow-hidden px-1"
       data-shape={placement.shape} data-selected={selected} aria-pressed={selected}
       aria-label={description} title={description} onClick={() => onSelect(table.id)}>
       {!selected && <span className={`absolute right-[15%] top-[15%] h-2 w-2 shrink-0 rounded-full ${status.dot}`} />}
-      <span className="floor-plan-table-number max-w-full truncate font-semibold">{placement.label || table.number}</span>
+      <span className="floor-plan-table-number max-w-full truncate font-semibold">{placement.label?.trim() || table.name || table.number}</span>
       {table.occupiedBy && placement.width >= 6 &&
         <span className="max-w-full truncate text-[10px] opacity-80">{table.occupiedBy.name}</span>}
     </button>;

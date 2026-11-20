@@ -36,6 +36,7 @@ export class IngredientMetadataDto {
   kind?: IngredientKind;
   @IsOptional() @IsString() @MaxLength(120)
   category?: string | null;
+  /** Ignored for cached warehouse forms sent by older clients. */
   @IsOptional() @IsString() @MaxLength(80)
   barcode?: string | null;
   @IsOptional() @IsString() @MaxLength(160)

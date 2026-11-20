@@ -15,7 +15,7 @@ export class HallsService {
         tables: {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
-          select: { id: true, number: true, seats: true, status: true, hallId: true },
+          select: { id: true, number: true, name: true, seats: true, status: true, hallId: true },
         },
       },
     });

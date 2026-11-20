@@ -4,7 +4,7 @@ import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
-import { displayOrderNumber, hallSuffix, money } from '@/lib/format';
+import { displayOrderNumber, money, orderPlaceLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { OrdersFilters, type OrderSort } from '../components/OrdersFilters';
 import { OrdersTable } from '../components/OrdersTable';
@@ -175,7 +175,7 @@ export function OrdersPage() {
         open={!!cancelTarget}
         orderLabel={
           cancelTarget
-            ? `${tr('Заказ')} ${displayOrderNumber(cancelTarget.orderNumber)} · ${tr('Стол')} ${cancelTarget.table.number}${hallSuffix(cancelTarget.table)} · ${money(cancelTarget.finalAmount)}`
+            ? `${tr('Заказ')} ${displayOrderNumber(cancelTarget.orderNumber)} · ${orderPlaceLabel(cancelTarget, tr)} · ${money(cancelTarget.finalAmount)}`
             : ''
         }
         submitting={cancelOrder.isPending}
@@ -232,7 +232,7 @@ function StatusEditorModal({
         <div className="border-b border-border px-4 py-3">
           <h3 className="font-semibold text-text-primary">{tr('Изменить статус заказа')}</h3>
           <p className="mt-0.5 text-sm text-text-muted">
-            {displayOrderNumber(order.orderNumber)} · {tr('Стол')} {order.table.number}{hallSuffix(order.table)}
+            {displayOrderNumber(order.orderNumber)} · {orderPlaceLabel(order, tr)}
           </p>
         </div>
         <div className="space-y-3 px-4 py-4">

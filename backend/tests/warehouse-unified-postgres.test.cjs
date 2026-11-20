@@ -39,14 +39,21 @@ test('PostgreSQL: unified catalog, precise receipts, transfers, returns and reve
         const submitted = await docs.submit(owner, created.id, created.revision);
         return docs.approve(owner, created.id, submitted.revision);
       };
-      const rice = await items.create({ name: 'Рис', unit: 'kg', kind: 'raw', category: 'Крупы', barcode: 'RICE', supplier: 'Мельница' });
+      const rice = await items.create({ name: 'Рис', unit: 'kg', kind: 'raw', category: 'Крупы', supplier: 'Мельница' });
+      await t.test('legacy barcodes stay stored without appearing in article searches or being updated', async () => {
+        await db.ingredient.update({ where: { id: rice.id }, data: { barcode: 'LEGACY-RICE' } });
+        assert.equal((await items.findAll({ search: 'Рис' }))[0].id, rice.id);
+        assert.deepEqual(await items.findAll({ search: 'LEGACY-RICE' }), []);
+        assert.equal('barcode' in (await items.findOne(rice.id)), false);
+        await items.update(rice.id, { barcode: 'STALE-CLIENT-CODE' });
+        assert.equal((await db.ingredient.findUnique({ where: { id: rice.id } })).barcode, 'LEGACY-RICE');
+      });
       let receipt;
       await t.test('10 kg at 80 plus 10 kg at 100 gives 20 kg at 90', async () => {
         await purchases.create({ supplier: 'Мельница', complete: true, items: [{ ingredientId: rice.id, quantity: 10, unit: 'kg', purchasePrice: 80 }] });
         receipt = await purchases.create({ supplier: 'Мельница', complete: true, items: [{ ingredientId: rice.id, quantity: 10, unit: 'kg', purchasePrice: 100 }] });
         assert.equal((await stock(rice.id)).stock, 20);
         assert.equal((await stock(rice.id)).avgCost, 90);
-        assert.equal((await items.findAll({ search: 'RICE' }))[0].id, rice.id);
         const card = await items.findOne(rice.id);
         assert.equal(card.lastPurchasePrice, 100);
         assert.equal(card.balances.length, 2);

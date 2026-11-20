@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent, OrderStatus } from '@/types';
 import type { KitchenTab } from './api';
 import { OrderBadge } from '@/components/StatusBadge';
-import { displayOrderNumber, hallSuffix, timeHM, dateDM, elapsed, orderItemDisplayName } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, timeHM, dateDM, elapsed, orderItemDisplayName, tableLabel } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 
 /** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
@@ -322,7 +322,7 @@ export function KitchenOrderCard({
               {order.externalOrderId ? `Внешний заказ ${order.externalOrderId}` : 'Онлайн-заказ'}
             </p>
           ) : (
-            <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}{hallSuffix(order.table)}</p>
+            <p className="mt-1 text-[13px] text-text-muted">{tableLabel(order.table)}{hallSuffix(order.table)}</p>
           )}
           {qrOrder && (
             <p className="mt-2 inline-flex rounded-lg bg-warning/10 px-2.5 py-1 text-[12px] font-medium text-warning">

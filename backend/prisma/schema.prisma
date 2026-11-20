@@ -389,6 +389,7 @@ model User {
   role         Role
   prepStation  String?  @map("prep_station")
   isActive     Boolean  @default(true) @map("is_active")
+  deletedAt    DateTime? @map("deleted_at")
   // Совместимость со старыми записями; права сотрудников задаются в StaffPosition.
   permissions  Json?    @map("permissions")
   positionId   String?  @map("position_id")
@@ -489,6 +490,7 @@ model Table {
   id        String      @id @default(uuid())
   hallId    String      @map("hall_id")
   number    Int
+  name      String?
   seats     Int         @default(2)
   status    TableStatus @default(free)
   isActive  Boolean     @default(true) @map("is_active")

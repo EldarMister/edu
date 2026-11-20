@@ -6,7 +6,6 @@ import { homeForUser } from '@/lib/workspaces';
 import { Spinner } from '@/components/Spinner';
 import { BrandLogo } from '@/components/BrandLogo';
 import { AppVersion } from '@/components/AppVersion';
-import { ACCOUNT_PHONE_ERROR, isAccountPhone, PhoneInput } from '@/components/PhoneInput';
 import type { LoginResponse } from '@/types';
 
 export function LoginPage() {
@@ -23,14 +22,15 @@ export function LoginPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (loading) return;
-    if (!isAccountPhone(phone)) {
-      setError(ACCOUNT_PHONE_ERROR);
+    const loginPhone = phone.trim();
+    if (!loginPhone) {
+      setError('Укажите номер телефона');
       return;
     }
     setError('');
     setLoading(true);
     try {
-      const { data } = await api.post<LoginResponse>('/auth/login', { phone, password });
+      const { data } = await api.post<LoginResponse>('/auth/login', { phone: loginPhone, password });
       setSession(data);
       navigate(homeForUser(data.user), { replace: true });
     } catch (err) {
@@ -62,7 +62,17 @@ export function LoginPage() {
             <label htmlFor={phoneId} className="mb-1.5 block text-sm font-medium text-text-secondary">
               Номер телефона
             </label>
-            <PhoneInput id={phoneId} value={phone} onChange={setPhone} autoComplete="username" disabled={loading} />
+            <input
+              id={phoneId}
+              name="phone"
+              className="input"
+              type="tel"
+              autoComplete="username"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              disabled={loading}
+              required
+            />
           </div>
 
           <div>

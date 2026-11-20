@@ -3,7 +3,6 @@ export interface InventoryScopeProduct {
   name: string;
   kind?: string;
   category?: string | null;
-  barcode?: string | null;
 }
 
 const INVENTORY_GROUPS = [
@@ -18,7 +17,7 @@ export function inventoryScopeGroups<T extends InventoryScopeProduct>(products: 
     const items = products.filter((item) => {
       const id = item.kind === 'goods' || item.kind === 'beverage' ? 'goods'
         : item.kind === 'preparation' || item.kind === 'prepared_dish' ? 'prepared' : 'ingredients';
-      return id === group.id && (!query || `${item.name} ${item.category ?? ''} ${item.barcode ?? ''}`.toLocaleLowerCase('ru').includes(query));
+      return id === group.id && (!query || `${item.name} ${item.category ?? ''}`.toLocaleLowerCase('ru').includes(query));
     }).sort((a, b) => a.name.localeCompare(b.name, 'ru'));
     const categories = [...new Set(items.map((item) => item.category?.trim() || 'Без категории'))].sort((a, b) => a.localeCompare(b, 'ru'));
     return { ...group, items, categories: categories.map((name) => ({ name, items: items.filter((item) => (item.category?.trim() || 'Без категории') === name) })) };

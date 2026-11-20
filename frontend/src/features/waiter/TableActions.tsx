@@ -4,6 +4,7 @@ import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { TABLE_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
+import { tableLabel } from '@/lib/format';
 import type { AvailableWaiter } from './api';
 import { TablesGrid } from './TablesGrid';
 
@@ -22,27 +23,29 @@ const TransferIcon = () => <I d="M16 3h5v5|M21 3l-7 7|M8 21H3v-5|M3 21l7-7" />;
 
 // ---------- Кнопка выбора стола рядом с поиском (экран меню) ----------
 export function TableSelectButton({
-  number,
+  table,
   hallName,
   onClick,
   disabled,
 }: {
-  number: number;
+  table: TableItem;
   hallName?: string;
   onClick: () => void;
   disabled?: boolean;
 }) {
   const t = useT();
+  const label = tableLabel(table, t('Стол'));
+  const description = hallName ? `${label} · ${hallName}` : label;
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      title={`${t('Стол')} ${number}${hallName ? ` · ${hallName}` : ''}`}
-      aria-label={`${t('Стол')} ${number}${hallName ? ` · ${hallName}` : ''}`}
+      title={description}
+      aria-label={description}
       className="inline-flex h-11 min-w-24 max-w-28 shrink-0 items-center justify-between gap-1 rounded-xl border border-border bg-white px-2 text-sm font-medium text-text-primary transition-colors hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
     >
-      <span className="truncate">{t('Стол')} {number}</span>
+      <span className="truncate">{label}</span>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-text-muted">
         <path d="m6 9 6 6 6-6" />
       </svg>
@@ -81,13 +84,14 @@ export function TableSelectModal({
                   <button
                     key={tbl.id}
                     onClick={() => onPick(tbl.id)}
+                    title={tableLabel(tbl, t('Стол'))}
                     className={`relative flex h-[60px] flex-col items-center justify-center rounded-xl border text-[15px] font-medium transition-colors ${
                       selected
                         ? 'border-primary bg-primary text-white'
                         : 'border-border bg-white text-text-primary hover:border-primary/40'
                     }`}
                   >
-                    {tbl.number}
+                    <span className="max-w-full truncate px-1">{tbl.name || tbl.number}</span>
                     {!selected && (
                       <span
                         className={`absolute right-2 top-2 h-2.5 w-2.5 rounded-full ${TABLE_STATUS[tbl.status].dot}`}
@@ -175,13 +179,13 @@ export function TableActionsMenu({
 
 // ---------- Модалка «Закрыть стол» ----------
 export function CloseTableModal({
-  tableNumber,
+  table,
   hasActiveOrder,
   pending,
   onConfirm,
   onClose,
 }: {
-  tableNumber: number;
+  table: TableItem;
   hasActiveOrder: boolean;
   pending: boolean;
   onConfirm: () => void;
@@ -223,7 +227,7 @@ export function CloseTableModal({
       }
     >
       <p className="text-sm text-text-secondary">
-        {t('Вы действительно хотите закрыть стол')} №{tableNumber}?
+        {t('Вы действительно хотите закрыть стол')} {table.name ? `«${table.name}»` : `№${table.number}`}?
       </p>
     </Modal>
   );
@@ -300,13 +304,14 @@ function TablePick({ table, selected, onClick }: { table: TableItem; selected: b
   return (
     <button
       onClick={onClick}
+      title={tableLabel(table)}
       className={`flex h-[60px] flex-col items-center justify-center rounded-xl border text-[15px] font-medium transition-colors ${
         selected
           ? 'border-primary/90 bg-primary/90 text-white'
           : 'border-border bg-white text-text-primary hover:border-primary/40'
       }`}
     >
-      {table.number}
+      <span className="max-w-full truncate px-1">{table.name || table.number}</span>
     </button>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState, type FormEvent } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { DeleteNameField } from '../components/DeleteNameField';
@@ -8,6 +8,7 @@ import { WorkspacePending } from '../components/WorkspacePending';
 import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
+import { tableLabel } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { IconEdit, IconTrash, IconPlus, IconQr } from '../components/icons';
 import { TableQrModal } from '../components/TableQrModal';
@@ -204,7 +205,7 @@ export function TablesPage() {
                               {t.number}
                             </span>
                             <div className="min-w-0">
-                              <p className="truncate text-[15px] font-medium text-text-primary">{tr('Стол')} {t.number}</p>
+                              <p className="truncate text-[15px] font-medium text-text-primary">{tableLabel(t, tr('Стол'))}</p>
                               <p className="text-xs text-text-muted">{t.seats} {tr('мест')}</p>
                             </div>
                           </div>
@@ -262,7 +263,8 @@ export function TablesPage() {
         }>
           <div className="space-y-2 text-sm">
             <p className="text-text-primary">
-              Удалить стол №{tableToDelete.number}{tableToDeleteHall ? ` из зала «${tableToDeleteHall.name}»` : ''}?
+              Удалить стол {tableToDelete.name ? `«${tableToDelete.name}»` : `№${tableToDelete.number}`}
+              {tableToDeleteHall ? ` из зала «${tableToDeleteHall.name}»` : ''}?
             </p>
             <p className="text-text-muted">Стол исчезнет с кассы. История заказов сохранится.</p>
             {removeTable.error && <p role="alert" className="text-danger">{apiError(removeTable.error)}</p>}
@@ -415,27 +417,27 @@ function TableModal({
   table: AdminTableItem | null;
   onClose: () => void;
 }) {
-  const isEdit = !!table;
+  const formId = useId();
   const { create, update } = useTableMutations();
   const push = useNotifications((s) => s.push);
   const [number, setNumber] = useState(table ? String(table.number) : '');
+  const [name, setName] = useState(table?.name ?? '');
   const [seats, setSeats] = useState(table ? String(table.seats) : '2');
   const [isActive, setIsActive] = useState(table?.isActive ?? true);
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
-  async function onSubmit() {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
     setError('');
-    if (!seats || (isEdit && !number)) {
-      setError(isEdit ? 'Укажите номер и количество мест' : 'Укажите количество мест');
-      return;
-    }
+    const values = { number: number === '' ? undefined : Number(number), name: name.trim() || null, seats: Number(seats) };
     try {
-      if (isEdit) {
-        await update.mutateAsync({ id: table!.id, number: Number(number), seats: Number(seats), isActive });
+      if (table) {
+        await update.mutateAsync({ id: table.id, ...values, isActive });
         push({ message: 'Стол обновлён', at: new Date().toISOString() });
       } else {
-        await create.mutateAsync({ hallId: hall.id, seats: Number(seats) });
+        await create.mutateAsync({ hallId: hall.id, ...values });
         push({ message: 'Стол добавлен', at: new Date().toISOString() });
       }
       onClose();
@@ -447,53 +449,56 @@ function TableModal({
   return (
     <Modal
       open
-      onClose={onClose}
-      title={isEdit ? `Стол №${table!.number}` : `Новый стол · ${hall.name}`}
+      onClose={() => !pending && onClose()}
+      title={table ? table.name || `Стол №${table.number}` : `Новый стол · ${hall.name}`}
       footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={pending} onClick={onSubmit}>
-          {pending ? <Spinner /> : isEdit ? 'Сохранить' : 'Добавить'}
+        <button type="submit" form={formId} className="btn-primary btn-lg w-full font-semibold" disabled={pending}>
+          {pending ? <Spinner /> : table ? 'Сохранить' : 'Добавить'}
         </button>
       }
     >
-      <div className="space-y-3">
-        <div className={isEdit ? "grid grid-cols-2 gap-3" : undefined}>
-          {isEdit && (
-            <Field label="Номер стола">
-              <input
-                className="input"
-                type="number"
-                inputMode="numeric"
-                value={number}
-                onChange={(e) => setNumber(e.target.value)}
-              />
-            </Field>
-          )}
-          <Field label="Мест">
+      <form id={formId} onSubmit={onSubmit} className="space-y-3">
+        <Field label="Название стола" htmlFor={`${formId}-name`}>
+          <input id={`${formId}-name`} className="input" value={name} maxLength={40}
+            placeholder="Например, Бар" onChange={(event) => setName(event.target.value)} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Номер стола" htmlFor={`${formId}-number`}>
+            <input id={`${formId}-number`} className="input" type="number" inputMode="numeric"
+              min={1} max={2147483647} step={1} required={!!table} placeholder="Автоматически"
+              value={number} onChange={(event) => setNumber(event.target.value)} />
+          </Field>
+          <Field label="Мест" htmlFor={`${formId}-seats`}>
             <input
+              id={`${formId}-seats`}
               className="input"
               type="number"
               inputMode="numeric"
+              min={1}
+              max={2147483647}
+              step={1}
+              required
               value={seats}
               onChange={(e) => setSeats(e.target.value)}
             />
           </Field>
         </div>
-        {isEdit && (
+        {table && (
           <label className="flex items-center gap-2.5 text-sm text-text-secondary">
             <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
             Стол активен
           </label>
         )}
-        {error && <p className="text-sm text-danger">{error}</p>}
-      </div>
+        {error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      </form>
     </Modal>
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, htmlFor, children }: { label: string; htmlFor?: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="mb-1.5 block text-sm font-medium text-text-secondary">{label}</label>
+      <label htmlFor={htmlFor} className="mb-1.5 block text-sm font-medium text-text-secondary">{label}</label>
       {children}
     </div>
   );

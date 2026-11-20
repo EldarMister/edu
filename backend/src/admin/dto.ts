@@ -10,6 +10,7 @@ import {
   IsString,
   IsUUID,
   Min,
+  Max,
   MaxLength,
   IsArray,
   IsIn,
@@ -47,20 +48,26 @@ export class CreateTableDto {
   @IsString() @IsNotEmpty()
   hallId: string;
 
-  @IsOptional() @IsInt() @Min(1)
+  @IsOptional() @IsInt() @Min(1) @Max(2147483647)
   number?: number;
 
-  @IsInt() @Min(1)
+  @IsOptional() @IsString() @MaxLength(40)
+  name?: string | null;
+
+  @IsInt() @Min(1) @Max(2147483647)
   seats: number;
 }
 export class UpdateTableDto {
   @IsOptional() @IsString()
   hallId?: string;
 
-  @IsOptional() @IsInt() @Min(1)
+  @IsOptional() @IsInt() @Min(1) @Max(2147483647)
   number?: number;
 
-  @IsOptional() @IsInt() @Min(1)
+  @IsOptional() @IsString() @MaxLength(40)
+  name?: string | null;
+
+  @IsOptional() @IsInt() @Min(1) @Max(2147483647)
   seats?: number;
 
   @IsOptional() @IsBoolean()

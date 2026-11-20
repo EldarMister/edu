@@ -11,7 +11,6 @@ const columns = {
   warehouse: { label: 'Склад', width: 25 },
   kind: { label: 'Тип', width: 18 },
   category: { label: 'Категория', width: 25 },
-  barcode: { label: 'Штрихкод', width: 22 },
   stock: { label: 'Остатки', width: 17 },
   unit: { label: 'Ед. измерения', width: 16 },
   cost: { label: 'Себестоимость', width: 19 },
@@ -56,7 +55,8 @@ function balanceKind(item: BalanceItem): keyof typeof kindLabels {
 
 export function balanceExportColumns(selection?: string): Column[] {
   if (selection === undefined) return defaultColumns;
-  const requested = selection.split(',');
+  const requested = selection.split(',').filter((key) => key !== 'barcode');
+  if (!requested.length) return defaultColumns;
   if (requested.some((key) => !Object.prototype.hasOwnProperty.call(columns, key))
     || new Set(requested).size !== requested.length) {
     throw new BadRequestException('Укажите допустимые столбцы остатков без повторов');
@@ -67,7 +67,7 @@ export function balanceExportColumns(selection?: string): Column[] {
 export function writeBalanceWorkbook(items: BalanceItem[], warehouse: string, query: BalanceExportQuery, selected: Column[]): Buffer {
   const search = query.search?.trim().toLocaleLowerCase();
   const rows = items.filter((item) =>
-    (!search || [item.name, item.barcode, item.category].some((value) => value?.toLocaleLowerCase().includes(search))) &&
+    (!search || [item.name, item.category].some((value) => value?.toLocaleLowerCase().includes(search))) &&
     (!query.kinds?.length || query.kinds.includes(balanceKind(item)) || query.kinds.includes(item.kind ?? '')) &&
     (!query.categories?.length || query.categories.includes(item.category ?? '')) &&
     (!query.unit || item.displayUnit === query.unit) &&
@@ -81,7 +81,7 @@ export function writeBalanceWorkbook(items: BalanceItem[], warehouse: string, qu
     const total = item.stock === 0 ? 0 : item.avgCostBase == null ? null
       : Math.round((item.stockBase * item.avgCostBase + Number.EPSILON) * 100) / 100;
     const values = {
-      name: item.name, warehouse, kind: kindLabels[balanceKind(item)], category: item.category, barcode: item.barcode,
+      name: item.name, warehouse, kind: kindLabels[balanceKind(item)], category: item.category,
       stock: virtual ? 'По рецепту' : item.stock, unit: item.unit,
       cost: virtual ? item.recipeUnitCost : item.avgCost, total: virtual ? null : total, limit: virtual ? null : item.lowStockThreshold,
     };

@@ -4,7 +4,7 @@ import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Spinner } from '@/components/Spinner';
 import { WorkspacePending } from './WorkspacePending';
 import { usePermissions } from '@/hooks/usePermissions';
-import { displayOrderNumber, hallSuffix, money, paymentCell, timeHM } from '@/lib/format';
+import { displayOrderNumber, money, orderPlaceLabel, paymentCell, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { IconEdit, IconX } from './icons';
 
@@ -77,7 +77,7 @@ export function OrdersTable({ items, isLoading, error, scrollRef, loadMoreRef, i
                   <Td className="whitespace-nowrap text-text-secondary">{new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)}</Td>
                   <Td className="text-text-secondary">
                     {order.source === 'delivery' ? <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{tr('Доставка')}</span>
-                      : <>{tr('Стол')} {order.table.number}{hallSuffix(order.table)}</>}
+                      : orderPlaceLabel(order, tr)}
                   </Td>
                   <Td className="text-text-secondary">
                     {order.waiter?.name ?? (order.source === 'delivery' ? tr('Онлайн-заказ') : 'QR menu')}

@@ -76,6 +76,11 @@ export class StaffController {
     return this.staff.positions(actor);
   }
 
+  @Get('report-employees')
+  reportEmployees(@CurrentUser() actor: AuthUser) {
+    return this.staff.reportEmployees(actor);
+  }
+
   @Get(':id')
   getOne(@Param('id') id: string, @CurrentUser() actor: AuthUser) {
     return this.staff.getOne(id, actor);

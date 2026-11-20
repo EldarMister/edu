@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Select } from '@/components/Select';
 import { money } from '@/lib/format';
 import { ItemCard } from './ItemCard';
@@ -14,6 +15,7 @@ import { ALL_UNITS, unitsForType, type UnitCode } from './units';
 export type RecipeDraftRow = RecipeRowInput & {
   ingredientId: string;
   name: string;
+  unit?: UnitCode;
   unitType: Ingredient['unitType'];
   pricePerUnit?: number | null;
 };
@@ -36,6 +38,40 @@ export function recipeDraftRows(items: RecipeItem[]): RecipeDraftRow[] {
 export function recipeDraftPayload(rows: RecipeDraftRow[]) {
   return rows.map(({ name: _name, unitType: _type, pricePerUnit: _price, ...row }) => row);
 }
+
+function unitFactor(unit: UnitCode) {
+  return ALL_UNITS.find((value) => value.code === unit)!.factor;
+}
+
+function ingredientPrice(item: Ingredient) {
+  return item.isPrepared && item.preparationMode === 'virtual' ? item.recipeUnitCost : item.avgCost;
+}
+
+function lineCost(row: RecipeDraftRow, ingredient?: Ingredient) {
+  if (!Number.isFinite(row.amount) || row.amount <= 0) return null;
+  let price = row.pricePerUnit;
+  // The saved recipe's rate belongs to the selected warehouse, including an unknown rate.
+  if (price === undefined && ingredient && !row.warehouseId && !row.fromCommonWarehouse) {
+    const displayPrice = ingredientPrice(ingredient);
+    if (displayPrice != null) {
+      price = displayPrice * unitFactor(row.unit ?? ingredient.displayUnit) / unitFactor(ingredient.displayUnit);
+    }
+  }
+  return price != null && Number.isFinite(price) && price >= 0 ? row.amount * price : null;
+}
+
+export function recipeDraftCost(rows: readonly RecipeDraftRow[], ingredients: readonly Ingredient[] = []) {
+  const ingredientsById = new Map(ingredients.map((item) => [item.id, item]));
+  let complete = rows.length > 0;
+  let total = 0;
+  for (const row of rows) {
+    const cost = lineCost(row, ingredientsById.get(row.ingredientId));
+    if (cost == null) complete = false;
+    else total += cost;
+  }
+  return { total, complete };
+}
+
 export function RecipeDraftFields({
   rows,
   onChange,
@@ -64,22 +100,18 @@ export function RecipeDraftFields({
         amount: 0,
         unit: item.displayUnit,
         netAmount: 0,
-        pricePerUnit:
-          item.isPrepared && item.preparationMode === 'virtual'
-            ? item.recipeUnitCost
-            : item.avgCost,
+        pricePerUnit: ingredientPrice(item) ?? null,
       },
     ]);
   }
   function patch(index: number, value: Partial<RecipeDraftRow>) {
     onChange(rows.map((row, i) => (i === index ? { ...row, ...value } : row)));
   }
-  const known = rows.length > 0 && rows.every((row) => row.pricePerUnit != null);
-  const total = rows.reduce((sum, row) => sum + row.amount * (row.pricePerUnit ?? 0), 0);
+  const { total, complete } = recipeDraftCost(rows);
   return (
     <section className="min-w-0 w-full space-y-4 border-t border-border pt-7">
       <h3 className="text-lg font-semibold">Состав техкарты</h3>
-      <div className="min-w-0 w-full overflow-x-auto">
+      {rows.length > 0 && <div className="min-w-0 w-full overflow-x-auto">
         <table className="w-full min-w-[700px] text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-text-muted">
@@ -199,9 +231,7 @@ export function RecipeDraftFields({
                     value={row.unit}
                     onChange={(event) => {
                       const unit = event.target.value as UnitCode;
-                      const factor =
-                        (ALL_UNITS.find((value) => value.code === row.unit)?.factor ?? 1) /
-                        (ALL_UNITS.find((value) => value.code === unit)?.factor ?? 1);
+                      const factor = (row.unit ? unitFactor(row.unit) : 1) / unitFactor(unit);
                       patch(index, {
                         unit,
                         amount: row.amount * factor,
@@ -242,15 +272,16 @@ export function RecipeDraftFields({
             ))}
           </tbody>
         </table>
+      </div>}
+      <div className={rows.length ? 'flex flex-wrap items-center gap-3' : 'flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-border bg-background p-4'}>
         {!rows.length && (
-          <p className="py-5 text-sm text-text-muted">
-            Добавьте ингредиенты, которые списываются при продаже одной порции.
+          <p className="w-full text-sm text-text-muted">
+            Добавьте ингредиенты, полуфабрикаты и расходники, которые списываются на одну порцию.
           </p>
         )}
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="min-w-56 flex-1 sm:max-w-sm">
+        <div className="w-full min-w-0 sm:max-w-sm">
           <Select
+            ariaLabel="Добавить компонент"
             className="h-11 w-full"
             value=""
             onChange={(id) => {
@@ -258,7 +289,7 @@ export function RecipeDraftFields({
               if (item) add(item);
             }}
             options={[
-              { value: '', label: 'Добавить ингредиент…' },
+              { value: '', label: 'Добавить компонент…' },
               ...available.map((item) => ({
                 value: item.id,
                 label: item.name,
@@ -277,11 +308,11 @@ export function RecipeDraftFields({
         )}
         {showCosts && (
           <span className="ml-auto text-sm">
-            Себестоимость: <strong>{known ? money(total) : 'не рассчитана'}</strong>
+            Себестоимость: <strong>{complete ? money(total) : 'не рассчитана'}</strong>
           </span>
         )}
       </div>
-      {createIngredient && (
+      {createIngredient && createPortal(
         <ItemCard
           compact
           defaultKind="raw"
@@ -290,7 +321,8 @@ export function RecipeDraftFields({
             add(item);
             setCreateIngredient(false);
           }}
-        />
+        />,
+        document.body,
       )}
     </section>
   );

@@ -7,6 +7,7 @@ import type { EmployeePermissions, FloorPlanTable, Order, OrderStatus, PaymentMe
 export interface AdminTableItem {
   id: string;
   number: number;
+  name?: string | null;
   seats: number;
   status: TableStatus;
   isActive: boolean;
@@ -69,7 +70,6 @@ export interface AdminGood extends AdminDish {
   goodsStation: PrepStation;
   goodsPrice: number;
   goodsUnits: string[];
-  barcodes: string[];
 }
 export interface AdminSetComponent {
   id: string;
@@ -504,12 +504,12 @@ export function useTableMutations() {
   const qc = useQueryClient();
   const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
   const create = useMutation({
-    mutationFn: (b: { hallId: string; number?: number; seats: number }) =>
+    mutationFn: (b: { hallId: string; number?: number; name?: string | null; seats: number }) =>
       api.post('/admin/tables', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; number?: number; seats?: number; isActive?: boolean }) =>
+    mutationFn: ({ id, ...b }: { id: string; number?: number; name?: string | null; seats?: number; isActive?: boolean }) =>
       api.patch(`/admin/tables/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
@@ -861,6 +861,13 @@ export function useStaff(role: string, search: string) {
     queryFn: () => get<StaffMember[]>(`/admin/staff?${q.toString()}`),
   });
 }
+export function useReportEmployees(enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'staff', 'report-employees'],
+    queryFn: () => get<Pick<StaffMember, 'id' | 'name' | 'role'>[]>('/admin/staff/report-employees'),
+    enabled,
+  });
+}
 export interface StaffInput {
   prepStation?: string | null;
   positionId?: string | null;
@@ -883,11 +890,9 @@ export function useStaffMutations() {
     onSuccess: invalidate,
   });
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete<{ ok?: boolean; isActive?: boolean }>(`/admin/staff/${id}`).then((r) => r.data),
-    onSuccess: (result, id) => {
-      qc.setQueriesData<StaffMember[]>({ queryKey: staffListKey }, (staff) => result?.isActive === false
-        ? staff?.map((member) => member.id === id ? { ...member, isActive: false } : member)
-        : staff?.filter((member) => member.id !== id));
+    mutationFn: (id: string) => api.delete(`/admin/staff/${id}`),
+    onSuccess: (_, id) => {
+      qc.setQueriesData<StaffMember[]>({ queryKey: staffListKey }, (staff) => staff?.filter((member) => member.id !== id));
       invalidate();
     },
   });

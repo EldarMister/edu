@@ -3,6 +3,7 @@ import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { FloorPlan, FLOOR_COLUMNS, FLOOR_MAX_ROWS, FLOOR_MIN_SIZE, layoutFloorTables } from '@/components/FloorPlan';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
+import { tableLabel } from '@/lib/format';
 import type { FloorPlanTable } from '@/types';
 import { useFloorPlanMutations, type AdminHall, type AdminTableItem } from '../api';
 
@@ -111,7 +112,8 @@ export function HallFloorPlanEditor({ halls, editable, onAdd, onEdit, onRemove }
     {editable && <p className="text-xs text-text-muted">Перетащите стол, чтобы переместить его. Потяните за угол, чтобы изменить размер. С клавиатуры используйте стрелки, а для изменения размера — Shift и стрелки.</p>}
     <div className="max-w-[560px]">
       <FloorPlan placements={placements} canvasRef={canvas} editing={editable} renderTable={(table, style) => {
-        const number = tablesById.get(table.tableId)?.number;
+        const item = tablesById.get(table.tableId)!;
+        const title = table.label?.trim() || tableLabel(item);
         const selected = table.tableId === selectedId;
         const pointer = {
           onPointerMove: move,
@@ -119,13 +121,13 @@ export function HallFloorPlanEditor({ halls, editable, onAdd, onEdit, onRemove }
         };
         return <div key={table.tableId} id={`hall-table-${table.tableId}`} className="floor-plan-table" data-shape={table.shape} data-selected={selected} style={style}>
           <button type="button" className="floor-plan-drag flex h-full w-full items-center justify-center rounded-[inherit] px-1 text-sm font-semibold"
-            aria-label={`Стол ${number}${table.label ? ` · ${table.label}` : ''}`} aria-pressed={selected}
+            aria-label={title} title={title} aria-pressed={selected}
             onClick={() => setSelectedId(table.tableId)} onFocus={() => setSelectedId(table.tableId)}
             onPointerDown={(event) => start(event, table, false)} onKeyDown={(event) => keyboard(event, table)}
             onDoubleClick={() => change(table, { shape: table.shape === 'round' ? 'rectangle' : 'round' })} {...pointer}>
-            <span className="truncate">{table.label?.trim() || number}</span>
+            <span className="truncate">{table.label?.trim() || item.name || item.number}</span>
           </button>
-          {canEdit && selected && <button type="button" aria-label={`Изменить размер стола ${number}`}
+          {canEdit && selected && <button type="button" aria-label={`Изменить размер · ${title}`}
             className="floor-plan-resize absolute bottom-0 right-0 grid h-7 w-7 place-items-center rounded-lg bg-primary text-white"
             onPointerDown={(event) => start(event, table, true)} onKeyDown={(event) => keyboard(event, table, true)} {...pointer}>
             <span aria-hidden="true">↘</span>
@@ -134,7 +136,7 @@ export function HallFloorPlanEditor({ halls, editable, onAdd, onEdit, onRemove }
       }} />
     </div>
     {selected && selectedTable && editable && <div className="flex max-w-4xl flex-wrap items-center gap-2 rounded-xl border border-border bg-white p-3">
-      <span className="text-sm font-medium">Стол {selectedTable.number}</span>
+      <span className="text-sm font-medium">{tableLabel(selectedTable)}</span>
       <Select ariaLabel="Форма стола" value={selected.shape} disabled={!canEdit}
         options={[{ value: 'rectangle', label: 'Прямоугольная' }, { value: 'round', label: 'Круглая' }]}
         onChange={(shape) => change(selected, { shape: shape as FloorPlanTable['shape'] })} />

@@ -80,6 +80,7 @@ export type TableStatus =
 export interface TableItem {
   id: string;
   number: number;
+  name?: string | null;
   seats: number;
   status: TableStatus;
   hallId: string;
@@ -272,7 +273,7 @@ export interface Order {
   comment: string | null;
   requiresWaiterDecision: boolean;
   createdAt: string;
-  table: { id: string; number: number; seats: number; hallId: string; status: TableStatus; hall?: { name: string } };
+  table: TableItem & { hall?: { name: string } };
   waiter: { id: string; name: string } | null;
   source?: 'pos' | 'qr' | 'delivery';
   externalOrderId?: string | null;

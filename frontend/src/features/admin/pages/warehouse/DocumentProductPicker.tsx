@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-type ProductChoice = { id: string; name: string; unit?: string; barcode?: string | null; group?: string; detail?: string };
+type ProductChoice = { id: string; name: string; unit?: string; group?: string; detail?: string };
 type PopupPosition = { left: number; width: number; maxHeight: number; top?: number; bottom?: number };
 
 /** Keep the selected ID until the user explicitly chooses another product. */
@@ -52,7 +52,7 @@ export function DocumentProductPicker({
   const [position, setPosition] = useState<PopupPosition>();
   const unavailable = loading || !!loadError;
   const matches = unavailable ? [] : options.filter((option) =>
-    `${option.name} ${option.barcode ?? ''} ${option.group ?? ''} ${option.detail ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+    `${option.name} ${option.group ?? ''} ${option.detail ?? ''}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
   );
   const activeIndex = Math.min(active, Math.max(0, matches.length - 1));
 
@@ -242,7 +242,7 @@ export function DocumentProductPicker({
                 >
                   <span className="min-w-0 break-words">{option.name}{option.detail && <span className="mt-0.5 block text-xs text-text-muted">{option.detail}</span>}</span>
                   <span className="shrink-0 text-xs text-text-muted">
-                    {[option.unit, option.barcode].filter(Boolean).join(' · ')}
+                    {option.unit}
                     {option.id === value ? ' ✓' : ''}
                   </span>
                 </button>

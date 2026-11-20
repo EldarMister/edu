@@ -101,7 +101,6 @@ function ItemForm({
   const kind: ItemKind = item?.kind ?? defaultKind ?? 'raw';
   const [unit, setUnit] = useState<UnitCode>(item?.displayUnit ?? (defaultKind === 'goods' ? 'pcs' : 'kg'));
   const [category, setCategory] = useState(item?.category ?? '');
-  const [barcode, setBarcode] = useState(item?.barcode ?? '');
   const [supplier, setSupplier] = useState(item?.supplier ?? '');
   const [threshold, setThreshold] = useState(String(item?.lowStockThreshold ?? 0));
   const suppliers = useSuppliers(editable);
@@ -127,7 +126,6 @@ function ItemForm({
         kind,
         unit,
         category: category.trim() || null,
-        barcode: barcode.trim() || null,
         supplier: supplier.trim() || null,
         supplierId:
           supplier.trim() === item?.supplier
@@ -186,14 +184,6 @@ function ItemForm({
         <details className="poster-advanced">
           <summary>Дополнительно</summary>
           <div className="space-y-4 pt-5">
-            <DocumentField label="Штрихкод">
-              <input
-                aria-label="Штрихкод"
-                className="input w-full"
-                value={barcode}
-                onChange={(e) => setBarcode(e.target.value)}
-              />
-            </DocumentField>
             {PROCESSING_METHODS.map((method) => (
               <DocumentField key={method.value} label={lossLabels[method.value]}>
                 <div className="poster-number-unit w-[136px]">

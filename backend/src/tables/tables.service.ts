@@ -15,7 +15,7 @@ export class TablesService {
     return this.prisma.table.findMany({
       where: { isActive: true },
       orderBy: [{ hallId: 'asc' }, { sortOrder: 'asc' }],
-      select: { id: true, number: true, seats: true, status: true, hallId: true },
+      select: { id: true, number: true, name: true, seats: true, status: true, hallId: true },
     });
   }
 

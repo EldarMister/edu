@@ -3,7 +3,7 @@ import { Modal } from '@/components/Modal';
 import { EditorPage } from '../pages/warehouse/EditorPage';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
-import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel,
+import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel, tableLabel,
   taxRateLabel } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
@@ -76,7 +76,7 @@ export function OrderDetailsModal({
     [
       {
         label: isDelivery ? (order.externalOrderId ? 'Внешний заказ' : 'Тип заказа') : 'Стол',
-        value: isDelivery ? order.externalOrderId ?? 'Доставка' : `Стол ${order.table.number}${hallSuffix(order.table)}`,
+        value: isDelivery ? order.externalOrderId ?? 'Доставка' : `${tableLabel(order.table)}${hallSuffix(order.table)}`,
       },
       { label: 'Оплата', value: order.paymentMethod ? paymentDisplayLabel(order) : '—' },
     ],

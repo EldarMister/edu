@@ -1,6 +1,6 @@
 import type { TableItem } from '@/types';
 import { useCart, cartTotals, type CartRounding } from './cart';
-import { displayOrderNumber, hallSuffix, money } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, money, tableLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { NumberTicker } from '@/components/NumberTicker';
@@ -55,7 +55,7 @@ export function CartPanel({
                 : t('Новый заказ')}
           </h2>
           <p className="mt-0.5 text-sm text-text-muted">
-            {delivery ? t('Доставка') : table && `${t('Стол')} ${table.number}${hallSuffix({ hall: hallName ? { name: hallName } : null })}`}
+            {delivery ? t('Доставка') : table && `${tableLabel(table, t('Стол'))}${hallSuffix({ hall: hallName ? { name: hallName } : null })}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-4">

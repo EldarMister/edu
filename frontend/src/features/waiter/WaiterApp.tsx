@@ -8,7 +8,7 @@ import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { isAxiosError } from 'axios';
 import { clientId } from '@/lib/id';
-import { displayOrderNumber, orderPlaceLabel } from '@/lib/format';
+import { displayOrderNumber, orderPlaceLabel, tableLabel } from '@/lib/format';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useT } from '@/lib/i18n';
 import { useWaiterPushNotifications } from '@/lib/push';
@@ -585,7 +585,7 @@ export function WaiterApp() {
       setViewingOrderId(updated.id);
       setTab('orders');
       push({
-        message: `${t('QR-заказ взят')} · ${t('Стол')} ${updated.table.number}`,
+        message: `${t('QR-заказ взят')} · ${tableLabel(updated.table, t('Стол'))}`,
         type: 'success',
         at: new Date().toISOString(),
       });
@@ -841,7 +841,7 @@ export function WaiterApp() {
       const updated = await moveTable.mutateAsync({ tableId: selectedTable.id, targetTableId });
       cart.selectTable(targetTableId);
       setViewingOrderId(null);
-      push({ message: `${t('Заказ перенесён на стол')} №${updated.table.number}`, type: 'success', at: new Date().toISOString() });
+      push({ message: `${t('Заказ перенесён на стол')} ${updated.table.name ? `«${updated.table.name}»` : `№${updated.table.number}`}`, type: 'success', at: new Date().toISOString() });
       setTableModal(null);
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
@@ -909,7 +909,7 @@ export function WaiterApp() {
         disabled={!canUseMenu}
         tableSlot={
           selectedTable ? (
-            <TableSelectButton number={selectedTable.number} hallName={selectedHallName} onClick={() => setTablePickerOpen(true)} />
+            <TableSelectButton table={selectedTable} hallName={selectedHallName} onClick={() => setTablePickerOpen(true)} />
           ) : deliveryChip
         }
       />
@@ -1252,7 +1252,7 @@ export function WaiterApp() {
       {/* Действия со столом */}
       {tableModal === 'close' && selectedTable && (
         <CloseTableModal
-          tableNumber={selectedTable.number}
+          table={selectedTable}
           hasActiveOrder={!!activeOrder}
           pending={closeTable.isPending}
           onConfirm={doCloseTable}

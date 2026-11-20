@@ -33,7 +33,6 @@ export interface Ingredient {
   processingLosses?: Partial<Record<ProcessingMethod, number>>;
   kind?: ItemKind;
   category?: string | null;
-  barcode?: string | null;
   supplier?: string | null;
   purchaseUnits?: { name: string; factor: number }[];
   supplierId?: string | null;
@@ -365,7 +364,6 @@ export interface IngredientInput {
   processingLosses?: Partial<Record<ProcessingMethod, number>>;
   kind?: ItemKind;
   category?: string | null;
-  barcode?: string | null;
   supplier?: string | null;
   purchaseUnits?: { name: string; factor: number }[];
   supplierId?: string | null;

@@ -26,7 +26,10 @@ function csvCell(value: string | number) {
   return `"${String(value).replace(/"/g, '""')}"`;
 }
 
-export function WaiterOrdersReport({ staff, staffLoading }: { staff: StaffMember[]; staffLoading: boolean }) {
+export function WaiterOrdersReport({ staff, staffLoading }: {
+  staff: Pick<StaffMember, 'id' | 'name' | 'role'>[];
+  staffLoading: boolean;
+}) {
   const [from, setFrom] = useState(todayYmd);
   const [to, setTo] = useState(todayYmd);
   const waiterOptions = useMemo(

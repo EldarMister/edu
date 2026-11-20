@@ -30,8 +30,8 @@ import { balanceMoney, balanceQuantity } from './warehouse/balance-format';
 import { normalizeUnitLabel } from './warehouse/units';
 import { EditorPage } from './warehouse/EditorPage';
 import { useEditorRoute, usePageFilter, usePageFilters } from './warehouse/workspace-route';
-import { warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
-import { filterMenuGoods, MenuGoodsFilters, MenuGoodsHeader, menuGoodsColumns, menuListFilters,
+import { WarehouseMultiFilter, warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
+import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColumns, menuListFilters,
   useMenuGoodsColumns, type MenuGoodsColumn } from './MenuGoodsControls';
 import { MenuEntryPage } from './MenuEntryPage';
 import { dishTaxInput, dishTaxValue, effectiveMenuTaxId, MenuTaxSelect } from '../../settings/MenuTaxSelect';
@@ -71,7 +71,7 @@ function MenuDishList({ view }: { view: MenuView }) {
   const taxNames = new Map(taxes.map((tax) => [tax.id, `${tax.name} · ${taxRateLabel(tax.rate)}`]));
   const taxFilters = [{ value: 'none', label: 'Без налога' }, ...[...taxNames].map(([value, label]) => ({ value, label }))];
   const taxCell = (item: AdminDish) => taxNames.get(effectiveMenuTaxId(item) ?? '') ?? '—';
-  const dishesQ = useAdminDishes(categoryId, search, !isGoods);
+  const dishesQ = useAdminDishes('', search, !isGoods);
   const goodsQ = useAdminGoods(isGoods);
   const listQ = isGoods ? goodsQ : dishesQ;
   const { columns, saveColumns } = useMenuGoodsColumns(isGoods);
@@ -86,23 +86,24 @@ function MenuDishList({ view }: { view: MenuView }) {
   }
   const categoryStations = new Map((categoriesQ.data ?? []).map((category) => [category.id, category.prepStation]));
   const dishStation = (dish: AdminDish) => dish.prepStation ?? categoryStations.get(dish.categoryId) ?? 'none';
+  const selectedCategories = warehouseMultiFilterValues(categoryId);
+  const selectedStations = warehouseMultiFilterValues(stationId);
   const rows = (isGoods ? filterMenuGoods(goodsQ.data ?? [], filters) : (dishesQ.data ?? []).filter(
     (dish) =>
       (dish.catalogKind ?? (dish.hasDirectStock ? 'goods' : 'recipe')) === 'recipe' &&
-      (!stationId || dishStation(dish) === stationId) &&
+      (!selectedCategories.length || selectedCategories.includes(dish.categoryId)) &&
+      (!selectedStations.length || selectedStations.includes(dishStation(dish))) &&
       (!filters.tax || (effectiveMenuTaxId(dish) ?? 'none') === filters.tax) &&
       (!availability || (availability === 'visible' ? dish.isAvailable && dish.isActive : !dish.isAvailable || !dish.isActive)),
   )).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (nameSort === 'desc' ? -1 : 1));
   const stationOptions = [...stations.map((station) => ({ value: station.id, label: station.name })), { value: 'none', label: 'Без цеха' }];
   const unitOptions = [...new Set(goodsQ.data?.flatMap((item) => item.goodsUnits))].sort((a, b) => a.localeCompare(b, 'ru'))
     .map((unit) => ({ value: unit, label: unit }));
-  const selectedCategories = warehouseMultiFilterValues(categoryId);
   const goodsCell = (dish: AdminGood, column: MenuGoodsColumn) => {
     switch (column) {
       case 'category': return dish.category.name;
       case 'price': return `${dish.variants.length ? 'от ' : ''}${balanceMoney(dish.goodsPrice)}`;
       case 'station': return stationOptions.find((option) => option.value === dish.goodsStation)?.label ?? dish.goodsStation;
-      case 'barcode': return dish.barcodes.join(', ') || '—';
       case 'unit': return dish.goodsUnits.join(', ');
       case 'weighted': return dish.isWeighted ? 'Да' : 'Нет';
       case 'availability': return dish.isAvailable && dish.isActive ? 'Доступен в меню' : 'Скрыт';
@@ -134,76 +135,44 @@ function MenuDishList({ view }: { view: MenuView }) {
     ) : (
       <SetModal set={null} stations={stations} onClose={closeEditor} />
     );
+  if (editor?.type === 'entry') {
+    return <MenuEntryPage
+      id={editor.id}
+      kind={isGoods ? 'goods' : 'recipe'}
+      categoryId={selectedCategories.length === 1 ? selectedCategories[0] : ''}
+      initialTab={editor.action === 'recipe' ? 'recipe' : 'main'}
+      onClose={closeEditor}
+    />;
+  }
   return (
     <div className="min-w-0">
       <WorkspaceHeaderCount count={listQ.isSuccess ? rows.length : undefined} />
-      {isGoods && !editor && <MenuGoodsHeader filters={filters} columns={columns} saveColumns={saveColumns}
-        ready={goodsQ.isSuccess} canExport={can('actions.exportReports')} />}
-      {editor?.type === 'entry' && (
-        <MenuEntryPage
-          id={editor.id}
-          kind={isGoods ? 'goods' : 'recipe'}
-          categoryId={isGoods ? (selectedCategories.length === 1 ? selectedCategories[0] : '') : categoryId}
-          initialTab={editor.action === 'recipe' ? 'recipe' : 'main'}
-          onClose={closeEditor}
-        />
-      )}
       <div className="poster-toolbar">
         <WorkspaceSearch
-          label={isGoods ? 'Поиск товаров' : t('Поиск блюда')}
+          label={isGoods ? 'Поиск товаров' : t('Поиск техкарт')}
           value={search}
           onChange={(search) => updateFilters({ search })}
         />
-        {isGoods ? <MenuGoodsFilters filters={filters} update={updateFilters} stations={stationOptions} units={unitOptions} taxes={taxFilters}
-          categories={(categoriesQ.data ?? []).map((category) => ({ value: category.id, label: category.name }))} />
-          : <>
-        <Select
-          ariaLabel="Категория"
-          className="poster-filter w-48"
-          value={categoryId}
-          onChange={(category) => updateFilters({ category })}
-          options={[
-            { value: '', label: 'Категория' },
-            ...(categoriesQ.data ?? []).map((category) => ({
-              value: category.id,
-              label: category.name,
-            })),
-          ]}
-        />
-        {stations.length > 0 && <Select
-          ariaLabel="Цех"
-          className="poster-filter w-40"
-          value={stationId}
-          onChange={(station) => updateFilters({ station })}
-          options={[
-            { value: '', label: 'Цех' },
-            ...stations.filter((station) => station.isActive || station.id === stationId)
-              .map((station) => ({ value: station.id, label: station.name })),
-            { value: 'none', label: 'Без цеха' },
-          ]}
-        />}
-        <details className="relative">
-          <summary className="cursor-pointer list-none text-sm text-primary">+ Фильтр{availability || filters.tax ? ' •' : ''}</summary>
-          <div className="absolute left-0 top-full z-30 mt-2 w-60 space-y-2 border border-border bg-white p-3 shadow-md">
-            <Select ariaLabel="Доступность в меню" className="w-full" value={availability} onChange={(availability) => updateFilters({ availability })}
-              options={[{ value: '', label: 'Все позиции' }, { value: 'visible', label: 'Доступные в меню' }, { value: 'hidden', label: 'Скрытые' }]} />
-            {displayTax && <Select ariaLabel="Фильтр по налогу" className="w-full" value={filters.tax}
-              onChange={(tax) => updateFilters({ tax })} options={[{ value: '', label: 'Все налоги' }, ...taxFilters]} />}
-          </div>
-        </details>
-        </>}
-        {editable && !editor && (
-          <div className="ml-auto flex items-center gap-2">
-            {!isGoods && (
+        <WarehouseMultiFilter label="Категория" value={categoryId} onChange={(category) => updateFilters({ category })}
+          options={(categoriesQ.data ?? []).map(({ id, name }) => ({ value: id, label: name }))} />
+        <WarehouseMultiFilter label="Цех" value={stationId} onChange={(station) => updateFilters({ station })}
+          options={stationOptions} />
+        <MenuAdditionalFilters filters={filters} update={updateFilters} goods={isGoods} units={unitOptions}
+          taxes={isGoods || displayTax ? taxFilters : []} />
+        {!editor && (isGoods || editable) && (
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {isGoods && <MenuGoodsActions filters={filters} columns={columns} saveColumns={saveColumns}
+              ready={goodsQ.isSuccess} canExport={can('actions.exportReports')} />}
+            {!isGoods && editable && (
               <MenuActions
                 ariaLabel="Другие действия"
                 onChange={() => openEditor({ type: 'set' })}
                 options={[{ value: 'set', label: 'Добавить сет' }]}
               />
             )}
-            <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'entry' })}>
-              {t(isGoods ? 'Добавить товар' : 'Добавить блюдо')}
-            </button>
+            {editable && <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'entry' })}>
+              {t(isGoods ? 'Добавить товар' : 'Добавить техкарту')}
+            </button>}
           </div>
         )}
       </div>
@@ -346,8 +315,8 @@ function MenuDishList({ view }: { view: MenuView }) {
                       ? 'Добавьте первый товар для продажи'
                       : 'Товаров пока нет'
                     : editable
-                      ? 'Добавьте первое блюдо'
-                      : 'Блюд пока нет'}
+                      ? 'Добавьте первую техкарту'
+                      : 'Техкарт пока нет'}
               </p>
               {filtered && (
                 <button

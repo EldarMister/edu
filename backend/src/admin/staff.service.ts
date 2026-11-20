@@ -122,10 +122,10 @@ export class StaffService {
   async overview(actor: AuditActor) {
     const visibleRoles = this.isOwner(actor) ? undefined : { not: Role.OWNER };
     const [total, admins, waiters, kitchen, activeShifts] = await Promise.all([
-      this.prisma.user.count({ where: visibleRoles ? { role: visibleRoles } : {} }),
-      this.prisma.user.count({ where: { role: Role.ADMIN } }),
-      this.prisma.user.count({ where: { role: Role.WAITER } }),
-      this.prisma.user.count({ where: { role: Role.KITCHEN } }),
+      this.prisma.user.count({ where: { deletedAt: null, role: visibleRoles } }),
+      this.prisma.user.count({ where: { deletedAt: null, role: Role.ADMIN } }),
+      this.prisma.user.count({ where: { deletedAt: null, role: Role.WAITER } }),
+      this.prisma.user.count({ where: { deletedAt: null, role: Role.KITCHEN } }),
       this.prisma.waiterShift.findMany({
         where: { status: WaiterShiftStatus.active },
         select: { waiterId: true },
@@ -145,6 +145,7 @@ export class StaffService {
       throw new ForbiddenException('Только владелец может просматривать владельцев');
     }
     const where: Prisma.UserWhereInput = {
+      deletedAt: null,
       ...(!this.isOwner(actor) ? { role: { not: Role.OWNER } } : {}),
       ...(params.role ? { role: params.role } : {}),
       ...(params.search
@@ -172,9 +173,19 @@ export class StaffService {
     return users.map((u) => ({ ...this.withPermissions(u, actor), onShift: onShift.has(u.id) }));
   }
 
+  async reportEmployees(actor: AuthUser) {
+    return this.prisma.user.findMany({
+      where: {
+        ...(this.isOwner(actor) ? {} : { role: { not: Role.OWNER } }),
+      },
+      select: { id: true, name: true, role: true },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+    });
+  }
+
   /** Один сотрудник с итоговыми правами доступа. */
   async getOne(id: string, actor: AuthUser) {
-    const user = await this.prisma.user.findUnique({ where: { id }, select: STAFF_SELECT });
+    const user = await this.prisma.user.findUnique({ where: { id, deletedAt: null }, select: STAFF_SELECT });
     if (!user) throw new NotFoundException('Сотрудник не найден');
     if (user.role === Role.OWNER && !this.isOwner(actor)) {
       throw new ForbiddenException('Только владелец может просматривать владельцев');
@@ -224,7 +235,7 @@ export class StaffService {
 
   async update(id: string, dto: UpdateStaffDto, actor: AuthUser) {
     const actorId = actor.id;
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findUnique({ where: { id, deletedAt: null } });
     if (!user) throw new NotFoundException('Сотрудник не найден');
     this.assertCanManageRole(actor, user.role);
     if (dto.role !== undefined) {
@@ -258,7 +269,7 @@ export class StaffService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
       if (actor.cafeId) await lockFinance(tx, actor.cafeId);
-      const current = await tx.user.findUnique({ where: { id }, select: STAFF_SELECT });
+      const current = await tx.user.findUnique({ where: { id, deletedAt: null }, select: STAFF_SELECT });
       if (!current) throw new NotFoundException('Сотрудник не найден');
       this.assertCanManageRole(actor, current.role);
       if (id !== actorId) this.assertCanManagePositionAccount(actor, current);
@@ -321,9 +332,10 @@ export class StaffService {
     if (id === actor.id) {
       throw new ForbiddenException('Нельзя удалить самого себя');
     }
-    const { user, result, softDeleted } = await this.prisma.$transaction(async (tx) => {
+    const { user, historyRetained } = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
       if (actor.cafeId) await lockFinance(tx, actor.cafeId);
-      const user = await tx.user.findUnique({ where: { id }, select: STAFF_SELECT });
+      const user = await tx.user.findUnique({ where: { id, deletedAt: null }, select: STAFF_SELECT });
       if (!user) throw new NotFoundException('Сотрудник не найден');
       this.assertCanManageRole(actor, user.role);
       this.assertCanManagePositionAccount(actor, user);
@@ -342,22 +354,34 @@ export class StaffService {
         tx.orderAction.findFirst({ where: { ...scope, userId: id }, select: { id: true } }),
       ]);
       if (history.some(Boolean)) {
-        const result = await tx.user.update({ where: { id }, data: { isActive: false }, select: STAFF_SELECT });
-        return { user, result, softDeleted: true };
+        await tx.user.update({
+          where: { id },
+          data: {
+            deletedAt: new Date(),
+            isActive: false,
+            phone: `deleted:${id}`,
+            login: null,
+            pinHash: null,
+            positionId: null,
+          },
+        });
+        await tx.pushSubscription.deleteMany({ where: { userId: id } });
+        await tx.userDevice.deleteMany({ where: { userId: id } });
+        return { user, historyRetained: true };
       }
       await tx.user.delete({ where: { id } });
-      return { user, result: { ok: true }, softDeleted: false };
+      return { user, historyRetained: false };
     });
     await this.audit.log({
       actor,
       actionType: AuditAction.STAFF_DELETED,
       entityType: AuditEntity.STAFF,
       entityId: id,
-      description: `${actor.name ?? 'Сотрудник'} ${softDeleted ? 'отключил' : 'удалил'} сотрудника ${user.name}${softDeleted ? ' (история работы и расчётов сохранена)' : ''}`,
+      description: `${actor.name ?? 'Сотрудник'} удалил сотрудника ${user.name}${historyRetained ? ' (история работы и расчётов сохранена)' : ''}`,
       oldValue: { name: user.name, role: user.role, phone: user.phone },
-      metadata: { softDeleted },
+      metadata: { historyRetained },
     });
-    return result;
+    return { ok: true };
   }
 
   async waiterReport(period: 'today' | 'week' | 'month', dateStr?: string) {
@@ -481,9 +505,11 @@ export class StaffService {
     const dateKey = this.dateOnly(dateStr);
 
     // В таблице — все сотрудники. Владельцев видит только владелец (как в списке персонала).
-    const where = actor && actor.role !== Role.OWNER ? { role: { not: Role.OWNER } } : {};
     const users = await this.prisma.user.findMany({
-      where,
+      where: {
+        deletedAt: null,
+        ...(actor && actor.role !== Role.OWNER ? { role: { not: Role.OWNER } } : {}),
+      },
       select: { id: true, name: true, role: true },
       orderBy: { name: 'asc' },
     });

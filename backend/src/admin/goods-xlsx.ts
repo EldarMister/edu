@@ -12,7 +12,6 @@ const columns = {
   category: 'Категория',
   price: 'Цена',
   station: 'Цех',
-  barcode: 'Штрихкод',
   unit: 'Ед. измерения',
   weighted: 'Весовой товар',
   availability: 'Доступность',
@@ -24,6 +23,7 @@ export class GoodsExportQuery {
   @IsOptional() @IsString() columns?: string;
   @IsOptional() @IsString() @MaxLength(160) search?: string;
   @IsOptional() @IsString() @MaxLength(160) name?: string;
+  /** Ignored for requests from older cached clients. */
   @IsOptional() @IsString() @MaxLength(160) barcode?: string;
   @IsOptional() @Transform(repeated) @IsArray() @IsString({ each: true }) units?: string[];
   @IsOptional() @IsIn(['yes', 'no']) weighted?: 'yes' | 'no';
@@ -35,7 +35,8 @@ export class GoodsExportQuery {
 }
 
 export function goodsExportColumns(selection = 'name,category,price'): Column[] {
-  const selected = selection.split(',');
+  const selected = selection.split(',').filter((key) => key !== 'barcode');
+  if (!selected.length) return ['name', 'category', 'price'];
   if (selected.some((key) => !Object.prototype.hasOwnProperty.call(columns, key)) || new Set(selected).size !== selected.length) {
     throw new BadRequestException('Укажите допустимые столбцы товаров без повторов');
   }
@@ -46,7 +47,6 @@ export function writeGoodsWorkbook(goods: GoodsRow[], query: GoodsExportQuery, s
   stations: Map<string, string>, taxNames: Map<string, string> = new Map()): Buffer {
   const search = query.search?.trim().toLocaleLowerCase();
   const name = query.name?.trim().toLocaleLowerCase();
-  const barcode = query.barcode?.trim().toLocaleLowerCase();
   const units = query.units ?? [];
   const taxId = (item: GoodsRow) => item.taxExempt ? null : item.taxId ?? item.category.taxId;
   const rows = goods.filter((item) => {
@@ -54,7 +54,6 @@ export function writeGoodsWorkbook(goods: GoodsRow[], query: GoodsExportQuery, s
     return (!search || itemName.includes(search)) && (!name || itemName.includes(name))
       && (!query.categories?.length || query.categories.includes(item.categoryId))
       && (!query.stations?.length || query.stations.includes(item.goodsStation))
-      && (!barcode || item.barcodes.some((code) => code.toLocaleLowerCase().includes(barcode)))
       && (!units.length || item.goodsUnits.some((unit) => units.includes(unit)))
       && (!query.tax || (taxId(item) ?? 'none') === query.tax)
       && (!query.weighted || item.isWeighted === (query.weighted === 'yes'))
@@ -66,7 +65,7 @@ export function writeGoodsWorkbook(goods: GoodsRow[], query: GoodsExportQuery, s
     const values = {
       name: item.name, category: item.category.name, price: item.goodsPrice,
       station: item.goodsStation === 'none' ? 'Без цеха' : stations.get(item.goodsStation) ?? item.goodsStation,
-      barcode: item.barcodes.join(', '), unit: item.goodsUnits.join(', '), weighted: item.isWeighted ? 'Да' : 'Нет',
+      unit: item.goodsUnits.join(', '), weighted: item.isWeighted ? 'Да' : 'Нет',
       availability: item.isAvailable && item.isActive ? 'Доступен в меню' : 'Скрыт',
       tax: taxNames.get(taxId(item) ?? '') ?? '',
     };

@@ -14,7 +14,7 @@ import { useListPeriod } from '../admin/pages/warehouse/ListPeriodFilter';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from '../admin/pages/warehouse/WarehouseColumnSettings';
 import { QueryState } from '../admin/pages/warehouse/WarehouseUi';
 import { usePageFilters } from '../admin/pages/warehouse/workspace-route';
-import { downloadTaxes, TAX_LIST_ENDPOINT, TAX_REPORT_ENDPOINT, TAX_REPORT_LABELS, TAX_TYPE_LABELS,
+import { downloadTaxes, TAX_REPORT_ENDPOINT, TAX_REPORT_LABELS, TAX_TYPE_LABELS,
   useTaxDirectory, useTaxMutations, useTaxReport } from './taxes-api';
 
 const labels = { name: 'Название', rate: 'Процент', type: 'Тип' } as const;
@@ -83,11 +83,11 @@ function TaxTableActions({ endpoint, params, table, canExport }: {
 }
 
 export function TaxesPage() {
-  const { canEditSection, canAction } = usePermissions();
+  const { canEditSection } = usePermissions();
   const editable = canEditSection('settings');
-  const [filters, setFilters] = usePageFilters({ search: '', type: '', rate: '', sort: 'asc', taxColumns: '' });
+  const [filters, setFilters] = usePageFilters({ search: '', type: '', sort: 'asc', taxColumns: '' });
   const queryParams = { search: filters.search.trim() || undefined, type: filters.type || undefined,
-    rate: parseRate(filters.rate), sort: filters.sort === 'desc' ? 'desc' : 'asc' };
+    sort: filters.sort === 'desc' ? 'desc' : 'asc' };
   const list = useTaxDirectory(queryParams);
   const taxes = list.data ?? [];
   const [savedColumns, saveColumns] = useColumnPreference('settings-taxes');
@@ -97,33 +97,17 @@ export function TaxesPage() {
   const [toDelete, setToDelete] = useState<MenuTax | null>(null);
   const { remove } = useTaxMutations();
   const text = (tax: MenuTax) => ({ name: tax.name, rate: taxRateLabel(tax.rate), type: TAX_TYPE_LABELS[tax.type] });
-  const table = { title: 'Налоги', headers: columns.map((key) => labels[key]), rows: taxes.map((tax) => {
-    const values = text(tax);
-    return columns.map((key) => values[key]);
-  }) };
   return <div className="space-y-3">
     <WorkspaceHeaderCount count={list.isSuccess ? taxes.length : undefined} />
-    <WorkspaceHeaderActions>
-      <TaxTableActions endpoint={TAX_LIST_ENDPOINT} params={{ ...queryParams, columns: columns.join(',') }}
-        table={table} canExport={canAction('exportReports')} />
-      {editable && <button type="button" className="btn-primary btn-md" onClick={() => setEditor('new')}>Добавить налог</button>}
-    </WorkspaceHeaderActions>
+    {editable && <WorkspaceHeaderActions>
+      <button type="button" className="btn-primary btn-md" onClick={() => setEditor('new')}>Добавить налог</button>
+    </WorkspaceHeaderActions>}
     <div className="poster-toolbar">
       <WorkspaceSearch label="Поиск налогов" value={filters.search} onChange={(search) => setFilters({ search: search.slice(0, 80) })} />
       <Select ariaLabel="Тип налога" className="poster-filter w-auto gap-2" value={filters.type}
         options={[{ value: '', label: 'Тип' }, ...taxTypes]} onChange={(type) => setFilters({ type })} />
-      <details className="relative">
-        <summary className="cursor-pointer list-none text-sm text-primary">+ Фильтр{filters.rate ? ' •' : ''}</summary>
-        <div className="absolute right-0 top-full z-30 mt-2 w-48 rounded-lg border border-border bg-card p-3 shadow-soft">
-          <label className="grid gap-1 text-sm">Процент
-            <input className="input" inputMode="decimal" value={filters.rate} maxLength={6}
-              onChange={(event) => setFilters({ rate: event.target.value })} placeholder="Любой" />
-          </label>
-          {filters.rate && queryParams.rate === undefined && <p role="status" className="mt-1 text-xs text-danger">Укажите процент от 0 до 100.</p>}
-        </div>
-      </details>
-      {(filters.search || filters.type || filters.rate) && <button type="button" className="text-sm text-primary"
-        onClick={() => setFilters({ search: '', type: '', rate: '' })}>Сбросить</button>}
+      {(filters.search || filters.type) && <button type="button" className="text-sm text-primary"
+        onClick={() => setFilters({ search: '', type: '' })}>Сбросить</button>}
       <button type="button" className="supply-header-action ml-auto shrink-0 print:hidden"
         onClick={() => setColumnsOpen(true)}>Столбцы</button>
     </div>
@@ -154,7 +138,7 @@ export function TaxesPage() {
           })}</tbody>
         </table>
         {!taxes.length && <p role="status" className="py-10 text-center text-sm text-text-muted">
-          {filters.search || filters.type || filters.rate ? 'Нет налогов по выбранным условиям' : 'Налоговых ставок пока нет'}
+          {filters.search || filters.type ? 'Нет налогов по выбранным условиям' : 'Налоговых ставок пока нет'}
         </p>}
       </div>
     </QueryState>

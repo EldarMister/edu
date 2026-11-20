@@ -21,7 +21,7 @@ test('partial inventory groups distinguish physical preparations from goods and 
   assert.deepEqual(groups.map((group) => group.items.map((item) => item.id)), [['rice'], ['dough'], ['water', 'bread']]);
   assert.equal(groups[2].categories.find((group) => group.name === 'Без категории').items[0].id, 'bread');
   assert.deepEqual(inventoryScopeGroups(products, 'напитки').flatMap((group) => group.items.map((item) => item.id)), ['water']);
-  assert.deepEqual(inventoryScopeGroups(products, '12345').flatMap((group) => group.items.map((item) => item.id)), ['water']);
+  assert.deepEqual(inventoryScopeGroups(products, '12345').flatMap((group) => group.items.map((item) => item.id)), []);
 });
 
 test('selecting or clearing a filtered category never clears hidden selections or adds duplicate ids', () => {

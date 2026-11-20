@@ -31,6 +31,7 @@ import {
   useShiftHistory,
   useShiftHistoryActions,
   useStaff,
+  useReportEmployees,
   useStaffMutations,
   type ShiftReportCategory,
   type ShiftReportRow,
@@ -132,6 +133,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
   const historyQ = useShiftHistory(historyFilters, tab === 'history');
   const shiftActions = useShiftHistoryActions();
   const staffQ = useStaff('', '');
+  const reportEmployees = useReportEmployees(tab !== 'current');
   const currentShiftLoading = reportQ.isFetching || staffQ.isFetching;
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
@@ -175,9 +177,9 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
   const staffOptions = useMemo(
     () => [
       { value: '', label: 'Все сотрудники' },
-      ...(staffQ.data ?? []).map((m) => ({ value: m.id, label: m.name })),
+      ...(reportEmployees.data ?? staffQ.data ?? []).map((m) => ({ value: m.id, label: m.name })),
     ],
-    [staffQ.data],
+    [reportEmployees.data, staffQ.data],
   );
   const roleOptions = [
     { value: '', label: 'Все роли' },
@@ -191,9 +193,9 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
     if (!pendingDelete || !deleteConfirmed || remove.isPending) return;
     const playEffect = captureDeletionEffect(`staff-member-${pendingDelete.id}`);
     try {
-      const result = await remove.mutateAsync(pendingDelete.id);
+      await remove.mutateAsync(pendingDelete.id);
       playEffect?.();
-      push({ message: result?.isActive === false ? 'Сотрудник отключён. История работы и расчётов сохранена.' : 'Сотрудник удалён', at: new Date().toISOString() });
+      push({ message: 'Сотрудник удалён', at: new Date().toISOString() });
       setPendingDelete(null);
     } catch (err) {
       push({ message: apiError(err), at: new Date().toISOString() });
@@ -352,7 +354,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
       </div>
 
       {tab === 'waiter-orders' ? (
-        <WaiterOrdersReport staff={staffQ.data ?? []} staffLoading={staffQ.isLoading} />
+        <WaiterOrdersReport staff={reportEmployees.data ?? staffQ.data ?? []} staffLoading={reportEmployees.isLoading && staffQ.isLoading} />
       ) : tab === 'current' ? (
         <div className="overflow-hidden rounded-xl border border-border bg-white">
         {staffQ.isError && <p role="alert" className="px-4 py-2.5 text-sm text-danger">Список сотрудников не обновился. {apiError(staffQ.error)}</p>}
@@ -515,7 +517,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
           <p className="text-sm text-text-secondary">
             Удалить сотрудника «{pendingDelete.name}»?
           </p>
-          <p className="mt-2 text-sm text-text-muted">Если у сотрудника есть история работы или расчётов, доступ будет отключён, а данные сохранятся. Открытые смены и заказы нужно предварительно закрыть.</p>
+          <p className="mt-2 text-sm text-text-muted">Сотрудник исчезнет из списка. История смен, заказов и расчётов сохранится. Открытые смены и заказы нужно предварительно закрыть.</p>
           <div className="mt-3">
             <DeleteNameField label="Введите имя сотрудника для подтверждения"
               value={pendingDelete.confirmation} disabled={remove.isPending}

@@ -1,14 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, apiError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
-import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/WarehouseColumnSettings';
-import { WarehouseMultiFilter, warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
+import { warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
 import type { AdminGood } from '../api';
 import { effectiveMenuTaxId } from '../../settings/MenuTaxSelect';
 
 export const menuGoodsColumns = {
-  name: 'Название', category: 'Категория', price: 'Цена', station: 'Цех', barcode: 'Штрихкод',
+  name: 'Название', category: 'Категория', price: 'Цена', station: 'Цех',
   unit: 'Ед. измерения', weighted: 'Весовой товар', availability: 'Доступность', tax: 'Налог',
 };
 export type MenuGoodsColumn = Exclude<keyof typeof menuGoodsColumns, 'name'>;
@@ -17,7 +16,7 @@ const columnOptions = Object.keys(menuGoodsColumns) as Column[];
 const defaults: Column[] = ['name', 'category', 'price'];
 
 export const menuListFilters = {
-  search: '', category: '', station: '', availability: '', goodsName: '', barcode: '', goodsUnit: '', goodsWeighted: '', tax: '', nameSort: 'asc',
+  search: '', category: '', station: '', availability: '', goodsName: '', goodsUnit: '', goodsWeighted: '', tax: '', nameSort: 'asc',
 };
 type Filters = typeof menuListFilters;
 type Option = { value: string; label: string };
@@ -28,13 +27,11 @@ export function filterMenuGoods(items: AdminGood[], filters: Filters) {
   const units = warehouseMultiFilterValues(filters.goodsUnit);
   const search = filters.search.trim().toLocaleLowerCase();
   const name = filters.goodsName.trim().toLocaleLowerCase();
-  const barcode = filters.barcode.trim().toLocaleLowerCase();
   return items.filter((item) => {
     const itemName = item.name.toLocaleLowerCase();
     return (!search || itemName.includes(search)) && (!name || itemName.includes(name))
       && (!categories.length || categories.includes(item.categoryId))
       && (!stations.length || stations.includes(item.goodsStation))
-      && (!barcode || item.barcodes.some((code) => code.toLocaleLowerCase().includes(barcode)))
       && (!units.length || item.goodsUnits.some((unit) => units.includes(unit)))
       && (!filters.tax || (effectiveMenuTaxId(item) ?? 'none') === filters.tax)
       && (!filters.goodsWeighted || !!item.isWeighted === (filters.goodsWeighted === 'yes'))
@@ -63,7 +60,7 @@ export function useMenuGoodsColumns(enabled: boolean) {
   };
 }
 
-export function MenuGoodsHeader({ filters, columns, saveColumns, ready, canExport }: {
+export function MenuGoodsActions({ filters, columns, saveColumns, ready, canExport }: {
   filters: Filters;
   columns: Column[];
   saveColumns: (columns: Column[]) => void;
@@ -79,7 +76,7 @@ export function MenuGoodsHeader({ filters, columns, saveColumns, ready, canExpor
     setError('');
     try {
       const params = new URLSearchParams({ columns: columns.join(','), sort: filters.nameSort === 'desc' ? 'desc' : 'asc' });
-      const values = { search: filters.search, name: filters.goodsName, barcode: filters.barcode,
+      const values = { search: filters.search, name: filters.goodsName,
         weighted: filters.goodsWeighted, availability: filters.availability, tax: filters.tax };
       Object.entries(values).forEach(([key, value]) => { if (value.trim()) params.set(key, value.trim()); });
       warehouseMultiFilterValues(filters.category).forEach((value) => params.append('categories', value));
@@ -96,38 +93,38 @@ export function MenuGoodsHeader({ filters, columns, saveColumns, ready, canExpor
     finally { setExporting(false); }
   }
   return <>
-    <WorkspaceHeaderActions>
+    <div className="flex flex-wrap items-center gap-1">
       <button type="button" className="supply-header-action" onClick={() => setColumnsOpen(true)}>Столбцы</button>
       {canExport && <button type="button" className="supply-header-action" disabled={!ready || exporting}
         onClick={() => void exportGoods()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
-    </WorkspaceHeaderActions>
+      {error && <p className="basis-full text-sm text-danger" role="alert">{error}</p>}
+    </div>
     {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaults}
       label={(key) => menuGoodsColumns[key]} onClose={() => setColumnsOpen(false)}
       onApply={(selected) => { saveColumns(selected); setColumnsOpen(false); }} />}
-    {error && <p className="py-2 text-sm text-danger" role="alert">{error}</p>}
   </>;
 }
 
 const extraFields = {
-  goodsName: 'Название', barcode: 'Штрихкод', goodsWeighted: 'Весовой товар', goodsUnit: 'Ед. измерения', availability: 'Доступность', tax: 'Налог',
+  goodsName: 'Название', goodsWeighted: 'Весовой товар', goodsUnit: 'Ед. измерения', availability: 'Доступность', tax: 'Налог',
 };
 type Field = keyof typeof extraFields;
-const fieldKeys = Object.keys(extraFields) as Field[];
+const goodsFields = Object.keys(extraFields) as Field[];
 const weightedOptions = [{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }];
 const availabilityOptions = [{ value: 'visible', label: 'Доступен в меню' }, { value: 'hidden', label: 'Скрыт' }];
 
-export function MenuGoodsFilters({ filters, update, categories, stations, units, taxes }: {
+export function MenuAdditionalFilters({ filters, update, units, taxes, goods }: {
   filters: Filters;
   update: (patch: Partial<Filters>) => void;
-  categories: Option[];
-  stations: Option[];
   units: Option[];
   taxes: Option[];
+  goods: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [field, setField] = useState<Field | ''>('');
   const root = useRef<HTMLDivElement>(null);
   const add = useRef<HTMLButtonElement>(null);
+  const fields: Field[] = goods ? goodsFields : (taxes.length ? ['availability', 'tax'] : ['availability']);
   const options: Partial<Record<Field, Option[]>> = { goodsWeighted: weightedOptions, availability: availabilityOptions, tax: taxes };
   const fieldOptions = field ? options[field] : undefined;
   function caption(key: Field) {
@@ -144,13 +141,11 @@ export function MenuGoodsFilters({ filters, update, categories, stations, units,
     return () => document.removeEventListener('pointerdown', close);
   }, [open]);
 
-  return <>
-    <WarehouseMultiFilter label="Категория" value={filters.category} onChange={(category) => update({ category })} options={categories} />
-    <WarehouseMultiFilter label="Цех" value={filters.station} onChange={(station) => update({ station })} options={stations} />
+  return (
     <div ref={root} className="relative flex flex-wrap items-center gap-2" onKeyDown={(event) => {
       if (event.key === 'Escape' && open) { setOpen(false); add.current?.focus(); }
     }}>
-      {fieldKeys.filter((key) => filters[key]).map((key) => <div key={key}
+      {fields.filter((key) => filters[key]).map((key) => <div key={key}
         className="flex min-h-8 items-center rounded-lg border border-primary/20 bg-primary/10 text-sm text-primary">
         <button type="button" className="max-w-48 truncate px-2 py-1" title={caption(key)}
           onClick={() => { setField(key); setOpen(true); }}>
@@ -166,7 +161,7 @@ export function MenuGoodsFilters({ filters, update, categories, stations, units,
         <select aria-label="Поле фильтра" className="input" value={field}
           onChange={(event) => setField(event.target.value as Field | '')}>
           <option value="">Выберите поле</option>
-          {fieldKeys.map((key) => <option key={key} value={key}>{extraFields[key]}</option>)}
+          {fields.map((key) => <option key={key} value={key}>{extraFields[key]}</option>)}
         </select>
         {field === 'goodsUnit' ? <MenuGoodsUnitOptions units={units} value={filters.goodsUnit}
           onChange={(goodsUnit) => update({ goodsUnit })} /> : field && (fieldOptions
@@ -179,7 +174,7 @@ export function MenuGoodsFilters({ filters, update, categories, stations, units,
               maxLength={160} value={filters[field]} onChange={(event) => update({ [field]: event.target.value })} />)}
       </div>}
     </div>
-  </>;
+  );
 }
 
 function MenuGoodsUnitOptions({ units, value, onChange }: { units: Option[]; value: string; onChange: (value: string) => void }) {

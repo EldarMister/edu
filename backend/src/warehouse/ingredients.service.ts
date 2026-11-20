@@ -60,7 +60,7 @@ export class IngredientsService {
     return {
       id: i.id,
       name: i.name,
-      kind: i.kind, category: i.category, barcode: i.barcode, supplier: i.supplierRecord?.name ?? i.supplier, supplierId: i.supplierId,
+      kind: i.kind, category: i.category, supplier: i.supplierRecord?.name ?? i.supplier, supplierId: i.supplierId,
       purchaseUnits: purchaseUnitsFor(i),
       purchaseUnit: i.purchaseUnit, purchaseFactor: i.purchaseFactor == null ? null : Number(i.purchaseFactor),
       preparationMode: i.preparationMode,
@@ -88,7 +88,7 @@ export class IngredientsService {
     return this.prisma.$transaction(async (db) => {
       const where: Prisma.IngredientWhereInput = {
         ...(params.includeInactive ? {} : { isActive: true }),
-        ...(params.search ? { OR: ['name', 'barcode', 'category'].map((field) => ({ [field]: { contains: params.search, mode: 'insensitive' as const } })) } : {}),
+        ...(params.search ? { OR: ['name', 'category'].map((field) => ({ [field]: { contains: params.search, mode: 'insensitive' as const } })) } : {}),
       };
       const warehouse = params.warehouseId === undefined ? null : await resolveWarehouse(db, params.warehouseId);
       const items = await db.ingredient.findMany({ where, include: { supplierRecord: { select: { name: true } } }, orderBy: { name: 'asc' } });
@@ -394,7 +394,6 @@ export class IngredientsService {
       kind, isPrepared: prepared, preparationMode: mode,
       processingLosses: dto.processingLosses,
       category: dto.category === undefined ? undefined : dto.category?.trim() || null,
-      barcode: dto.barcode === undefined ? undefined : dto.barcode?.trim() || null,
       supplier: dto.supplier === undefined ? undefined : dto.supplier?.trim() || null,
       purchaseUnits: units.map(({ name, factor }) => ({ name, factor })), purchaseUnit: units[0]?.name ?? null,
       purchaseFactor: units[0] ? new Prisma.Decimal(units[0].factor) : null,

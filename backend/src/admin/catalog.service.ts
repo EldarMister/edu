@@ -78,6 +78,7 @@ export class CatalogService {
           select: {
             id: true,
             number: true,
+            name: true,
             seats: true,
             status: true,
             isActive: true,
@@ -153,6 +154,7 @@ export class CatalogService {
 
   async createTable(dto: CreateTableDto) {
     const { hallId, seats, number } = dto;
+    const name = dto.name === undefined ? undefined : dto.name?.trim() || null;
     if (hallId.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
     const result = await this.prisma.$transaction(async (tx) => {
       const cafeId = getCafeId();
@@ -169,7 +171,7 @@ export class CatalogService {
         `;
         const next = last.number + 1;
         if (next > 2147483647) throw new BadRequestException('Достигнут максимальный номер стола');
-        const table = await tx.table.create({ data: { hallId, number: next, seats, sortOrder: next } });
+        const table = await tx.table.create({ data: { hallId, number: next, name, seats, sortOrder: next } });
         return { table, action: 'create-table' };
       }
 
@@ -184,12 +186,12 @@ export class CatalogService {
       if (exists) {
         const table = await tx.table.update({
           where: { id: exists.id },
-          data: { isActive: true, seats, sortOrder: number, status: TableStatus.free },
+          data: { isActive: true, name, seats, sortOrder: number, status: TableStatus.free },
         });
         return { table, action: 'restore-table' };
       }
 
-      const table = await tx.table.create({ data: { hallId, number, seats, sortOrder: number } });
+      const table = await tx.table.create({ data: { hallId, number, name, seats, sortOrder: number } });
       return { table, action: 'create-table' };
     });
     const { table, action } = result;
@@ -200,7 +202,8 @@ export class CatalogService {
   async updateTable(id: string, dto: UpdateTableDto) {
     const table = await this.prisma.table.findUnique({ where: { id } });
     if (!table) throw new NotFoundException('Стол не найден');
-    const updated = await this.prisma.table.update({ where: { id }, data: dto });
+    const name = dto.name === undefined ? undefined : dto.name?.trim() || null;
+    const updated = await this.prisma.table.update({ where: { id }, data: { ...dto, name } });
     if (dto.status && dto.status !== table.status) {
       this.events.emitBroadcast(SERVER_EVENTS.TABLE_STATUS_CHANGED, {
         id: updated.id,
@@ -406,12 +409,6 @@ export class CatalogService {
 
   async goodsAll() {
     const goods = await this.dishesAll({ goodsOnly: true });
-    const stockIds = [...new Set(goods.flatMap((dish) => [dish.stockIngredientId, ...dish.variants.map((variant) => variant.stockIngredientId)])
-      .filter((id): id is string => id != null))];
-    const stock = stockIds.length ? await this.prisma.ingredient.findMany({
-      where: { id: { in: stockIds } }, select: { id: true, barcode: true },
-    }) : [];
-    const barcodes = new Map(stock.map((item) => [item.id, item.barcode]));
     return goods.map((dish) => {
       const variants = dish.variants;
       const units = dish.isWeighted
@@ -424,12 +421,7 @@ export class CatalogService {
         if (dish.discountType === 'fixed') return Math.max(0, value - discount);
         return value;
       })) : Number(dish.price);
-      return { ...dish, goodsStation: dish.prepStation ?? dish.category.prepStation ?? 'none', goodsUnits: units,
-        goodsPrice: price, barcodes: [...new Set([dish.stockIngredientId, ...variants.map((variant) => variant.stockIngredientId)]
-          .flatMap((id) => {
-            const barcode = id && barcodes.get(id);
-            return barcode ? [barcode] : [];
-          }))] };
+      return { ...dish, goodsStation: dish.prepStation ?? dish.category.prepStation ?? 'none', goodsUnits: units, goodsPrice: price };
     });
   }
 

@@ -25,7 +25,6 @@ const key = ['admin', 'taxes'];
 export const taxReportKey = ['admin', 'stats', 'taxes'];
 const endpoint = '/admin/settings/taxes';
 export const TAX_REPORT_ENDPOINT = '/admin/statistics/taxes';
-export const TAX_LIST_ENDPOINT = endpoint;
 
 export function useTaxDirectory(params: QueryParams) {
   return useQuery({

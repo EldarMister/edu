@@ -15,7 +15,7 @@ export class PlatformService {
   async listCafes() {
     const [cafes, staffGroups, orderGroups] = await Promise.all([
       this.prisma.cafe.findMany({ orderBy: { createdAt: 'asc' } }),
-      this.prisma.user.groupBy({ by: ['cafeId'], _count: { _all: true } }),
+      this.prisma.user.groupBy({ by: ['cafeId'], where: { deletedAt: null }, _count: { _all: true } }),
       this.prisma.order.groupBy({ by: ['cafeId'], _count: { _all: true } }),
     ]);
     const staffByCafe = new Map(staffGroups.map((g) => [g.cafeId, g._count._all]));
@@ -178,7 +178,7 @@ export class PlatformService {
   async getCafeStaff(cafeId: string) {
     await this.requireCafe(cafeId);
     const staff = await this.prisma.user.findMany({
-      where: { cafeId },
+      where: { cafeId, deletedAt: null },
       select: { id: true, name: true, phone: true, role: true, isActive: true },
       orderBy: [{ role: 'asc' }, { name: 'asc' }],
     });
@@ -186,14 +186,14 @@ export class PlatformService {
   }
 
   private async requireCafeUser(cafeId: string, userId: string) {
-    const user = await this.prisma.user.findFirst({ where: { id: userId, cafeId } });
+    const user = await this.prisma.user.findFirst({ where: { id: userId, cafeId, deletedAt: null } });
     if (!user) throw new NotFoundException('Сотрудник не найден');
     return user;
   }
 
   async setStaffActive(cafeId: string, userId: string, isActive: boolean) {
     await this.requireCafeUser(cafeId, userId);
-    return this.prisma.user.update({ where: { id: userId }, data: { isActive } });
+    return this.prisma.user.update({ where: { id: userId, cafeId, deletedAt: null }, data: { isActive } });
   }
 
   /** Жёсткое удаление сотрудника. Владельца нельзя; при наличии истории — только деактивация. */
@@ -203,7 +203,7 @@ export class PlatformService {
       throw new BadRequestException('Владельца удалить нельзя. Удалите кафе целиком или смените владельца.');
     }
     try {
-      await this.prisma.user.delete({ where: { id: userId } });
+      await this.prisma.user.delete({ where: { id: userId, cafeId, deletedAt: null } });
       return { deleted: true };
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2003') {

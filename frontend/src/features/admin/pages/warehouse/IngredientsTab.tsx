@@ -21,7 +21,6 @@ const balanceColumns = {
   warehouse: { label: 'Склад', width: 155, optional: true },
   kind: { label: 'Тип', width: 130 },
   category: { label: 'Категория', width: 130 },
-  barcode: { label: 'Штрихкод', width: 140, optional: true },
   stock: { label: 'Остатки', width: 125, numeric: true },
   unit: { label: 'Ед. измерения', width: 130, optional: true },
   cost: { label: 'Себестоимость', width: 150, numeric: true, costs: true },
@@ -108,7 +107,7 @@ export function IngredientsTab({
   const rows = catalogueRows.filter(
     (item) =>
       (!searchText ||
-        [item.name, item.barcode, item.category].some((value) =>
+        [item.name, item.category].some((value) =>
           value?.toLocaleLowerCase().includes(searchText),
         )) &&
       (catalogue || !balanceKinds.length || balanceKinds.includes(balanceKind(item)) || balanceKinds.includes(item.kind ?? '')) &&
@@ -232,7 +231,6 @@ export function IngredientsTab({
       case 'warehouse': return warehouseName || 'Все склады';
       case 'kind': return kindLabel(item);
       case 'category': return item.category || '—';
-      case 'barcode': return item.barcode || '—';
       case 'stock': return virtual(item) ? 'По рецепту' : balanceQuantity(item.stock, item.unit, item.unitType, includeUnit);
       case 'unit': return item.unit;
       case 'cost': return unitCost(item) == null ? '—' : amount(unitCost(item)!);
