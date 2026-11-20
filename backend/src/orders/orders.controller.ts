@@ -131,6 +131,7 @@ export class OrdersController {
 
   @Post(':id/to-payment')
   @Roles(Role.WAITER)
+  @RequirePermission('actions.acceptOrderPayments')
   toPayment(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.orders.toPayment(id, user.id);
   }

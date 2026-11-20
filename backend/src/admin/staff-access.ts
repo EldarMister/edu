@@ -38,7 +38,7 @@ export function canManagePosition(actor: AuthUser, position: PositionAccess): bo
   // Terminal menu/orders are operational defaults, not grants to the administration panel.
   return (!production || !permissions.sections.warehouse || (actorPermissions.sections.warehouse
       && (!actorPermissions.readOnlySections?.includes('warehouse') || permissions.readOnlySections?.includes('warehouse') === true)))
-    && ACTION_KEYS.filter((key) => key === 'financeCashShifts' || key === 'createDeliveryOrders'
+    && ACTION_KEYS.filter((key) => key === 'financeCashShifts' || key === 'createDeliveryOrders' || key === 'printReceipts'
       || key === 'closeShift' || (production && key.startsWith('warehouse')))
       .every((key) => !permissions.actions[key] || actorPermissions.actions[key]);
 }

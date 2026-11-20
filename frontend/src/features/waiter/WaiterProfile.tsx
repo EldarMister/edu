@@ -56,7 +56,7 @@ export function WaiterProfile({
         </div>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[17px] font-semibold text-text-primary">{user?.name}</p>
-          <p className="truncate text-sm text-text-muted">{t('Официант')} · {user?.phone}</p>
+          <p className="truncate text-sm text-text-muted">{t(user?.positionName ?? (user?.role === 'OWNER' ? 'Владелец' : 'Официант'))} · {user?.phone}</p>
         </div>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-text-light" aria-hidden>
           <path d="m9 18 6-6-6-6" />

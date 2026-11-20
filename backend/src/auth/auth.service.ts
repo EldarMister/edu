@@ -50,6 +50,7 @@ export class AuthService {
         cafeId: user.cafeId,
         prepStation: user.prepStation,
         positionId: user.position?.role === user.role ? user.positionId : null,
+        positionName: user.position?.role === user.role ? user.position.name : null,
         permissions: resolveUserPermissions(user),
         access: workspaceAccess(user.role, resolveUserPermissions(user)),
       },
@@ -78,7 +79,7 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { id: true, name: true, phone: true, role: true, cafeId: true, prepStation: true, permissions: true,
-        positionId: true, position: { select: { role: true, permissions: true } } },
+        positionId: true, position: { select: { name: true, role: true, permissions: true } } },
     });
     if (!user) {
       throw new UnauthorizedException();
@@ -91,6 +92,7 @@ export class AuthService {
       cafeId: user.cafeId,
       prepStation: user.prepStation,
       positionId: user.position?.role === user.role ? user.positionId : null,
+      positionName: user.position?.role === user.role ? user.position.name : null,
       permissions: resolveUserPermissions(user),
       access: workspaceAccess(user.role, resolveUserPermissions(user)),
     };

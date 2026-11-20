@@ -22,6 +22,9 @@ export type ActionKey =
   | 'closeShift'
   | 'financeCashShifts'
   | 'createDeliveryOrders'
+  | 'acceptOrderPayments'
+  | 'printReceipts'
+  | 'requestReceiptPrints'
   | 'manageStaff'
   | 'editPermissions'
   | 'warehouseReceive'
@@ -48,6 +51,7 @@ export interface AuthUser {
   access?: { terminal: boolean; admin: boolean; production: 'kitchen' | 'bar' | null };
   prepStation?: string | null;
   positionId?: string | null;
+  positionName?: string | null;
   id: string;
   name: string;
   phone: string;

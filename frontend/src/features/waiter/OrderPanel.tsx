@@ -111,8 +111,8 @@ export function OrderPanel({
   onClaimQr?: () => void;
   onPickedUp: () => void;
   onServed: () => void;
-  onToPayment: () => void;
-  onPreliminaryReceipt: () => void;
+  onToPayment?: () => void;
+  onPreliminaryReceipt?: () => void;
   onContinueAfterRejection: () => void;
   onReplaceRejectedItem: (item: Order['items'][number]) => void;
   onRemoveRejectedItem: (item: Order['items'][number]) => void;
@@ -344,7 +344,7 @@ export function OrderPanel({
             </div>
           )}
           <div className="flex gap-2">
-          {[
+          {onPreliminaryReceipt && [
             'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
             'picked_up', 'partially_rejected', 'waiting_payment',
           ].includes(order.status) && !order.requiresWaiterDecision && !unclaimedQr && (
@@ -587,8 +587,8 @@ function ActionButton({
   onClaimQr?: () => void;
   onPickedUp: () => void;
   onServed: () => void;
-  onToPayment: () => void;
-  onPreliminaryReceipt: () => void;
+  onToPayment?: () => void;
+  onPreliminaryReceipt?: () => void;
   onContinueAfterRejection: () => void;
   onCancelOrder: () => void;
 }) {
@@ -684,28 +684,29 @@ function ActionButton({
     );
   }
   if (s === 'served') {
+    if (!onToPayment && !onPreliminaryReceipt) return null;
     return (
       <div className="space-y-2">
-        {!allActiveItemsServed && (
+        {onToPayment && !allActiveItemsServed && (
           <div className="rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">
             {t('Нельзя перейти к оплате: есть неподанные блюда.')}
           </div>
         )}
         <div className="flex gap-2">
-          <button
+          {onPreliminaryReceipt && <button
             className="btn btn-lg shrink-0 border border-primary bg-white px-4 font-medium text-primary hover:bg-primary/5"
             disabled={preliminaryPending}
             onClick={onPreliminaryReceipt}
           >
             {preliminaryPending ? <Spinner /> : t('Счёт')}
-          </button>
-          <button
+          </button>}
+          {onToPayment && <button
             className="btn-primary btn-lg flex-1 font-semibold"
             disabled={submitting || cooldownActive || !allActiveItemsServed}
             onClick={() => runProtectedAction(onToPayment)}
           >
             {cooldownActive ? actionCooldown : spin ?? t('Перейти к оплате')}
-          </button>
+          </button>}
         </div>
       </div>
     );

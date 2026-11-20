@@ -13,6 +13,7 @@ import { beep } from '@/lib/sound';
 import { usePay, fetchReceipt, useCreateReceiptPrintRequest } from './api';
 import { useReceiptPrint } from './receiptPrint';
 import { SplitBillSheet } from './SplitBillSheet';
+import { useOrderReceiptPrinter } from './useOrderReceiptPrinter';
 
 const ALL_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'qr', label: 'QR-код' },
@@ -45,11 +46,15 @@ export function PaymentModal({
   const push = useNotifications((s) => s.push);
   const settings = usePublicSettings();
   const { canAction } = usePermissions();
+  const canPrint = canAction('printReceipts');
+  const canRequestPrint = canAction('requestReceiptPrints');
+  const printOrderReceipt = useOrderReceiptPrinter();
   const mayOpenCashShift = canAction('financeCashShifts');
   const cashShift = useCashShiftState(open && Number(order.finalAmount) > 0 && mayOpenCashShift);
   const [method, setMethod] = useState<PaymentMethod | null>(null);
   const [error, setError] = useState('');
   const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [printing, setPrinting] = useState(false);
   // Промежуточное окно успешной оплаты: показывается ~1.3с, затем открывается чек.
   const [showSuccess, setShowSuccess] = useState(false);
   // Анимация успеха отыграла минимальную длительность (чек уже мог не догрузиться).
@@ -182,6 +187,26 @@ export function PaymentModal({
   // открываем нижний лист ожидания. Сам чек распечатается после подтверждения.
   async function requestPrint() {
     if (!receipt) return;
+    if (canPrint) {
+      const printWindow = window.open('', '_blank', 'width=380,height=640');
+      if (!printWindow) {
+        setError(t('Разрешите всплывающие окна и повторите печать.'));
+        return;
+      }
+      setPrinting(true);
+      setError('');
+      try {
+        await printOrderReceipt(order.id, printWindow);
+        close();
+      } catch (err) {
+        printWindow.close();
+        setError(apiError(err));
+      } finally {
+        setPrinting(false);
+      }
+      return;
+    }
+    if (!canRequestPrint) return;
     try {
       const request = await createPrintRequest.mutateAsync(order.id);
       beginPrint(request, receipt);
@@ -225,13 +250,13 @@ export function PaymentModal({
             <button className="btn-secondary btn-lg flex-1" onClick={close}>
               {t('Готово')}
             </button>
-            <button
+            {(canPrint || canRequestPrint) && <button
               className="btn-primary btn-lg flex-1 font-semibold"
-              disabled={createPrintRequest.isPending}
+              disabled={createPrintRequest.isPending || printing}
               onClick={requestPrint}
             >
-              {createPrintRequest.isPending ? <Spinner /> : t('Печать чека')}
-            </button>
+              {createPrintRequest.isPending || printing ? <Spinner /> : t('Печать чека')}
+            </button>}
           </div>
         }
       >

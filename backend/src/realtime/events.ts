@@ -8,6 +8,7 @@ export const ROOMS = {
   cafeWaiters: (cafeId: string | null | undefined) => `cafe:${cafeId ?? 'legacy'}:waiters`,
   cafeManagement: (cafeId: string | null | undefined) => `cafe:${cafeId ?? 'legacy'}:management`,
   cafeAdmins: (cafeId: string | null | undefined) => `cafe:${cafeId ?? 'legacy'}:admins`,
+  cafeReceiptPrinters: (cafeId: string | null | undefined) => `cafe:${cafeId ?? 'legacy'}:receipt-printers`,
   waiter: (waiterId: string) => `waiter:${waiterId}`,
   // Комната QR-меню конкретного стола: все гости стола получают обновления общего заказа.
   qrTable: (tableId: string) => `qr-table:${tableId}`,

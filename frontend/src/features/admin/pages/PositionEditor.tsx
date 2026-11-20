@@ -25,6 +25,9 @@ const payFields: { key: keyof PositionSalary; label: string; percent?: boolean }
   { key: 'personalPercent', label: 'Процент от личных продаж', percent: true },
   { key: 'shiftPercent', label: 'Процент от продаж за смену', percent: true },
 ];
+const terminalActions: ActionKey[] = [
+  'acceptOrderPayments', 'printReceipts', 'requestReceiptPrints', 'createDeliveryOrders', 'financeCashShifts',
+];
 
 function initialPermissions(position?: StaffPosition): EmployeePermissions {
   if (position) {
@@ -39,6 +42,8 @@ function initialPermissions(position?: StaffPosition): EmployeePermissions {
   permissions.adminAccess = false;
   for (const key of SECTION_KEYS) permissions.sections[key] = false;
   for (const key of ACTION_KEYS) permissions.actions[key] = false;
+  permissions.actions.acceptOrderPayments = true;
+  permissions.actions.requestReceiptPrints = true;
   return permissions;
 }
 
@@ -114,11 +119,10 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
         disabled={save.isPending} onChange={(event) => setName(event.target.value)} placeholder="Например, управляющий" /></DocumentField>
       <fieldset disabled={save.isPending}>
         <legend className="mb-2 text-lg font-semibold">Доступ к кассе</legend>
-        <Check label="Работа с кассой: заказы гостей и оплата" checked={!!permissions.terminalAccess}
+        <Check label="Открывать кассу и оформлять заказы гостей" checked={!!permissions.terminalAccess}
           onChange={(checked) => setPermissions((current) => ({ ...current, terminalAccess: checked }))} />
         {permissions.terminalAccess && <div className="ml-7">
-          {actionControl('financeCashShifts')}
-          {actionControl('createDeliveryOrders')}
+          {terminalActions.map(actionControl)}
         </div>}
       </fieldset>
       <fieldset disabled={save.isPending}>
@@ -143,7 +147,7 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
             })}</tbody>
           </table></div>
           <details className="mt-4 text-sm"><summary className="cursor-pointer py-2 text-primary">Отдельные действия и ограничения</summary>
-            <div className="grid gap-x-6 sm:grid-cols-2">{ACTION_KEYS.filter((key) => !['editPermissions', 'financeCashShifts', 'createDeliveryOrders'].includes(key)
+            <div className="grid gap-x-6 sm:grid-cols-2">{ACTION_KEYS.filter((key) => key !== 'editPermissions' && !terminalActions.includes(key)
               && !SECTION_KEYS.some((section) => (SECTION_ACTIONS[section] ?? []).includes(key) && (!permissions.sections[section]
                 || (permissions.readOnlySections?.includes(section) && (SECTION_WRITE_ACTIONS[section] ?? []).includes(key))))).map(actionControl)}</div>
             <p className="mt-2 text-xs text-text-muted">Управление должностями и передача прав доступны владельцу.</p>

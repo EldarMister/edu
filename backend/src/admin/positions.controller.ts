@@ -40,6 +40,7 @@ function positionPermissions(role: Role, input: unknown) {
     permissions.actions.refundChecks &&= permissions.sections.checks;
     permissions.actions.manageStaff &&= permissions.sections.staff;
     permissions.actions.createDeliveryOrders &&= permissions.terminalAccess === true;
+    permissions.actions.printReceipts &&= permissions.terminalAccess === true;
     for (const key of Object.keys(permissions.actions) as (keyof typeof permissions.actions)[]) {
       if (key.startsWith('warehouse')) permissions.actions[key] &&= permissions.sections.warehouse;
     }

@@ -19,6 +19,7 @@ export const ACTION_KEYS: ActionKey[] = [
   'exportReports',
   'closeShift',
   'financeCashShifts',
+  'acceptOrderPayments', 'printReceipts', 'requestReceiptPrints',
   'createDeliveryOrders',
   'manageStaff',
   'editPermissions',
@@ -54,6 +55,9 @@ export const ACTION_LABELS: Record<ActionKey, string> = {
   exportReports: 'Экспорт отчётов',
   closeShift: 'Закрывать рабочие смены сотрудников',
   financeCashShifts: 'Кассовые смены: открытие и закрытие',
+  acceptOrderPayments: 'Принимать оплату',
+  printReceipts: 'Печатать свои чеки и чеки по заявкам',
+  requestReceiptPrints: 'Отправлять заявки на печать',
   createDeliveryOrders: 'Оформлять доставку',
   manageStaff: 'Управление сотрудниками',
   editPermissions: 'Редактирование прав доступа',
@@ -73,6 +77,8 @@ const allSections = (v: boolean): Record<SectionKey, boolean> =>
   SECTION_KEYS.reduce((a, k) => ((a[k] = v), a), {} as Record<SectionKey, boolean>);
 const allActions = (v: boolean): Record<ActionKey, boolean> =>
   ACTION_KEYS.reduce((a, k) => ((a[k] = v), a), {} as Record<ActionKey, boolean>);
+
+const terminalDefaults = { acceptOrderPayments: true, printReceipts: false, requestReceiptPrints: true };
 
 /** Дефолты по роли (зеркало бэкенда) — на случай, если permissions ещё не пришли. */
 export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
@@ -100,6 +106,7 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
           exportReports: true,
           closeShift: true,
           financeCashShifts: false,
+          ...terminalDefaults,
           createDeliveryOrders: false,
           manageStaff: false,
           editPermissions: false,
@@ -109,10 +116,10 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
         },
       };
     case 'WAITER':
-      return { sections: { ...allSections(false), tables: true, menu: true, orders: true }, actions: allActions(false), terminalAccess: true, adminAccess: false };
+      return { sections: { ...allSections(false), tables: true, menu: true, orders: true }, actions: { ...allActions(false), ...terminalDefaults }, terminalAccess: true, adminAccess: false };
     case 'KITCHEN':
     case 'BAR':
-      return { sections: { ...allSections(false), orders: true }, actions: allActions(false), terminalAccess: false, adminAccess: false };
+      return { sections: { ...allSections(false), orders: true }, actions: { ...allActions(false), ...terminalDefaults }, terminalAccess: false, adminAccess: false };
     default:
       return { sections: allSections(false), actions: allActions(false) };
   }

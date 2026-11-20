@@ -19,7 +19,7 @@ test('QR orders, receipt speech and table changes reach only the appropriate caf
   const users = [
     ['a-waiter', 'WAITER', 'a'], ['a-kitchen', 'KITCHEN', 'a'],
     ['a-admin', 'ADMIN', 'a'], ['a-owner', 'OWNER', 'a'],
-    ['b-waiter', 'WAITER', 'b'], ['b-admin', 'ADMIN', 'b'],
+    ['a-cashier', 'WAITER', 'a'], ['b-cashier', 'WAITER', 'b'], ['b-admin', 'ADMIN', 'b'],
   ];
   const clients = [...users, ['guest']].map(([id, role]) => ({
     id, data: {}, handshake: { auth: role ? { token: id } : {} },
@@ -30,7 +30,8 @@ test('QR orders, receipt speech and table changes reach only the appropriate caf
   const gateway = new EventsGateway({ verifyAsync: async (sub) => ({ sub }) }, {
     user: { findUnique: async ({ where }) => {
       const [id, role, cafeId] = users.find(([id]) => id === where.id);
-      return { id, role, cafeId, isActive: true };
+      return { id, role, cafeId, isActive: true,
+        ...(id.endsWith('-cashier') ? { permissions: { actions: { printReceipts: true } } } : {}) };
     } },
     cafe: { findUnique: async () => ({ status: 'active' }) },
   });
@@ -41,7 +42,7 @@ test('QR orders, receipt speech and table changes reach only the appropriate caf
   await runWithTenant({ cafeId: 'a' }, () => {
     gateway.emitToWaiters('notification:new', { message: 'QR notification' });
     gateway.emitToAdmin('order:status_changed', { cafeId: 'a' });
-    gateway.emitToAdminOnly('receipt_print_request_created', { voice: { text: 'Receipt speech' } });
+    gateway.emitToReceiptPrinters('receipt_print_request_created', { voice: { text: 'Receipt speech' } });
     gateway.emitBroadcast('table:status_changed', { id: 'table-a' });
   });
   assert.deepEqual(clients.map(({ events }) => events), [
@@ -49,6 +50,7 @@ test('QR orders, receipt speech and table changes reach only the appropriate caf
     ['table:status_changed'],
     ['order:status_changed', 'receipt_print_request_created', 'table:status_changed'],
     ['order:status_changed', 'table:status_changed'],
+    ['notification:new', 'receipt_print_request_created', 'table:status_changed'],
     [], [], [],
   ]);
 });

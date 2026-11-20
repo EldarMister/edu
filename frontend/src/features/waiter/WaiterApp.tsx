@@ -17,6 +17,8 @@ import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { BrandLogo } from '@/components/BrandLogo';
 import { FullScreenLoader, Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
+import { ReceiptPrintsPage } from '@/features/admin/pages/ReceiptPrintsPage';
+import { useOrderReceiptPrinter } from './useOrderReceiptPrinter';
 import { NumberTicker } from '@/components/NumberTicker';
 import { useCart, cartLineKey, cartLineKeyFromParts, cartLineName, cartTotals } from './cart';
 import { useWaiterRealtime } from './useWaiterRealtime';
@@ -95,7 +97,11 @@ export function WaiterApp() {
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
   const t = useT();
-  const canCreateDelivery = usePermissions().canAction('createDeliveryOrders');
+  const { canAction } = usePermissions();
+  const canCreateDelivery = canAction('createDeliveryOrders');
+  const canTakePayment = canAction('acceptOrderPayments');
+  const canPrintReceipts = canAction('printReceipts');
+  const canRequestPrint = canAction('requestReceiptPrints');
   const pushNotifications = useWaiterPushNotifications(!!user);
 
   const hallsQ = useHalls();
@@ -126,6 +132,9 @@ export function WaiterApp() {
   const transferTable = useTransferTable();
   const createPrintRequest = useCreateReceiptPrintRequest();
   const beginPrint = useReceiptPrint((s) => s.begin);
+  const printOrderReceipt = useOrderReceiptPrinter();
+  const [printQueueOpen, setPrintQueueOpen] = useState(false);
+  const [printingPreliminary, setPrintingPreliminary] = useState(false);
 
   const [tab, setTab] = useState<Tab>('tables');
   const [viewingOrderId, setViewingOrderId] = useState<string | null>(null);
@@ -546,7 +555,7 @@ export function WaiterApp() {
     setViewingOrderId(order.id);
     selectOrderCart(order);
     setTab(order.requiresWaiterDecision ? 'orders' : 'cart');
-    if (order.status === 'waiting_payment') {
+    if (canTakePayment && order.status === 'waiting_payment') {
       setPaymentOrder(order);
     }
   }
@@ -630,6 +639,7 @@ export function WaiterApp() {
   }
 
   async function goToPayment(order: Order) {
+    if (!canTakePayment) return;
     try {
       const updated = await toPayment.mutateAsync(order.id);
       setPaymentOrder(updated);
@@ -641,6 +651,24 @@ export function WaiterApp() {
   // «Счёт»: создаём запрос на печать предварительного расчёта (тот же поток
   // подтверждения администратором, что и обычный чек) и открываем лист ожидания.
   async function requestPreliminaryReceipt(order: Order) {
+    if (canPrintReceipts) {
+      const printWindow = window.open('', '_blank', 'width=380,height=640');
+      if (!printWindow) {
+        push({ message: t('Разрешите всплывающие окна и повторите печать.'), type: 'error', at: new Date().toISOString() });
+        return;
+      }
+      setPrintingPreliminary(true);
+      try {
+        await printOrderReceipt(order.id, printWindow, { preliminary: true });
+      } catch (error) {
+        printWindow.close();
+        push({ message: apiError(error), type: 'error', at: new Date().toISOString() });
+      } finally {
+        setPrintingPreliminary(false);
+      }
+      return;
+    }
+    if (!canRequestPrint) return;
     try {
       const [request, receipt] = await Promise.all([
         createPrintRequest.mutateAsync({ orderId: order.id, type: 'preliminary' }),
@@ -883,13 +911,13 @@ export function WaiterApp() {
         <OrderPanel
           order={displayedOrder}
           submitting={actionPending}
-          preliminaryPending={createPrintRequest.isPending}
+          preliminaryPending={createPrintRequest.isPending || printingPreliminary}
           claimPending={claimQrOrder.isPending}
           onClaimQr={() => claimQr(displayedOrder)}
           onPickedUp={() => runAction(() => pickedUp.mutateAsync(displayedOrder.id))}
           onServed={() => runAction(() => served.mutateAsync(displayedOrder.id))}
-          onToPayment={() => goToPayment(displayedOrder)}
-          onPreliminaryReceipt={() => requestPreliminaryReceipt(displayedOrder)}
+          onToPayment={canTakePayment ? () => goToPayment(displayedOrder) : undefined}
+          onPreliminaryReceipt={canPrintReceipts || canRequestPrint ? () => requestPreliminaryReceipt(displayedOrder) : undefined}
           onContinueAfterRejection={() => continueAfterPartialRejection(displayedOrder)}
           onReplaceRejectedItem={(item) => replaceRejectedFromOrder(displayedOrder, item)}
           onRemoveRejectedItem={(item) => removeRejectedFromOrder(displayedOrder, item)}
@@ -966,6 +994,8 @@ export function WaiterApp() {
         </div>
         <DesktopNav current={desktopView} onChange={(next) => changeTab(next)} />
         <div className="flex items-center gap-3">
+          {canPrintReceipts && <button type="button" className="btn-secondary btn-md" disabled={!canWork}
+            onClick={() => setPrintQueueOpen(true)}>{t('Печать чека')}</button>}
           <ConnectionStatus />
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
         </div>
@@ -1124,7 +1154,13 @@ export function WaiterApp() {
 
       <BottomNav tab={activeNavTab} setTab={changeTab} ordersCount={ordersAttentionCount} />
 
-      {paymentOrder && (
+      {canPrintReceipts && canWork && printQueueOpen && (
+        <Modal open title={t('Печать чека')} onClose={() => setPrintQueueOpen(false)} panelClassName="max-w-5xl max-h-[90dvh]">
+          <ReceiptPrintsPage terminal />
+        </Modal>
+      )}
+
+      {canTakePayment && paymentOrder && (
         <PaymentModal
           order={paymentOrder}
           open={!!paymentOrder}

@@ -26,6 +26,7 @@ export function positionAccessSummary(role: Role, stored?: unknown) {
   const permissions = resolvePermissions(role, stored);
   if (role === 'OWNER') return 'Полный доступ';
   const parts = permissions.terminalAccess ? ['Касса'] : [];
+  if (permissions.terminalAccess && permissions.actions.printReceipts) parts.push('Печать чеков');
   if (permissions.terminalAccess && permissions.actions.createDeliveryOrders) parts.push('Оформление доставки');
   if (role === 'KITCHEN' || role === 'BAR') parts.push(role === 'KITCHEN' ? 'Экран кухни' : 'Экран бара');
   if (permissions.adminAccess) parts.push(...SECTION_KEYS.filter((key) => permissions.sections[key]).map((key) => SECTION_LABELS[key]

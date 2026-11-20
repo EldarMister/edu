@@ -150,11 +150,16 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         client.join(ROOMS.cafeKitchen(user.cafeId));
       } else if (user.role === 'WAITER') {
         client.join(ROOMS.cafeWaiters(user.cafeId));
+        if (user.permissions.actions.printReceipts) {
+          client.join(ROOMS.cafeReceiptPrinters(user.cafeId));
+        }
       } else if (user.role === 'ADMIN' || user.role === 'OWNER') {
-        client.join(ROOMS.cafeManagement(user.cafeId));
-        client.join(ROOMS.cafeKitchen(user.cafeId)); // админ видит и кухонную ленту
+        const { orders, staff, checks } = user.permissions.sections;
+        if (orders || staff || checks) client.join(ROOMS.cafeManagement(user.cafeId));
+        if (orders) client.join(ROOMS.cafeKitchen(user.cafeId));
         if (user.role === 'ADMIN') {
           client.join(ROOMS.cafeAdmins(user.cafeId));
+          if (checks) client.join(ROOMS.cafeReceiptPrinters(user.cafeId));
         }
       }
 
@@ -246,8 +251,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     this.server.to(ROOMS.cafeManagement(this.cafeFor(payload))).emit(event, payload);
   }
 
-  emitToAdminOnly(event: string, payload: unknown) {
-    this.server.to(ROOMS.cafeAdmins(this.cafeFor(payload))).emit(event, payload);
+  emitToReceiptPrinters(event: string, payload: unknown) {
+    this.server.to(ROOMS.cafeReceiptPrinters(this.cafeFor(payload))).emit(event, payload);
   }
 
   emitToCafeAdmins(cafeId: string | null | undefined, event: string, payload: unknown) {

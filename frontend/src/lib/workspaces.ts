@@ -42,6 +42,9 @@ export function workspacePermissions(user: AuthUser, workspace: Workspace) {
   if (workspace === 'terminal') {
     const permissions = getDefaultPermissionsByRole('WAITER');
     permissions.actions.financeCashShifts = base.actions.financeCashShifts;
+    permissions.actions.acceptOrderPayments = base.actions.acceptOrderPayments;
+    permissions.actions.printReceipts = base.actions.printReceipts;
+    permissions.actions.requestReceiptPrints = base.actions.requestReceiptPrints;
     permissions.actions.createDeliveryOrders = base.actions.createDeliveryOrders;
     permissions.actions.closeShift = base.actions.closeShift;
     return permissions;

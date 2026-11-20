@@ -24,6 +24,9 @@ export const ACTION_KEYS = [
   'exportReports',
   'closeShift',
   'financeCashShifts',
+  'acceptOrderPayments',
+  'printReceipts',
+  'requestReceiptPrints',
   'createDeliveryOrders',
   'manageStaff',
   'editPermissions',
@@ -61,6 +64,8 @@ const allSections = (value: boolean): Record<SectionKey, boolean> =>
 const allActions = (value: boolean): Record<ActionKey, boolean> =>
   ACTION_KEYS.reduce((acc, k) => ((acc[k] = value), acc), {} as Record<ActionKey, boolean>);
 
+const terminalDefaults = { acceptOrderPayments: true, printReceipts: false, requestReceiptPrints: true };
+
 /**
  * Дефолтные права по роли. Подобраны так, чтобы НЕ менять текущее поведение:
  * админ по умолчанию видит рабочие разделы, владелец — все разделы.
@@ -90,6 +95,7 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
           exportReports: true,
           closeShift: true,
           financeCashShifts: false,
+          ...terminalDefaults,
           createDeliveryOrders: false,
           manageStaff: false,
           editPermissions: false,
@@ -109,19 +115,19 @@ export function getDefaultPermissionsByRole(role: Role): EmployeePermissions {
       return {
         terminalAccess: true, adminAccess: false,
         sections: { ...allSections(false), tables: true, menu: true, orders: true },
-        actions: allActions(false),
+        actions: { ...allActions(false), ...terminalDefaults },
       };
     case Role.KITCHEN:
       return {
         terminalAccess: false, adminAccess: false,
         sections: { ...allSections(false), orders: true },
-        actions: allActions(false),
+        actions: { ...allActions(false), ...terminalDefaults },
       };
     case Role.BAR:
       return {
         terminalAccess: false, adminAccess: false,
         sections: { ...allSections(false), orders: true },
-        actions: allActions(false),
+        actions: { ...allActions(false), ...terminalDefaults },
       };
     default:
       return { sections: allSections(false), actions: allActions(false), terminalAccess: false, adminAccess: false };

@@ -338,9 +338,9 @@ export function useRetryFiscal() {
 export function useFiscalizeForPrint() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (orderId: string) =>
-      api.post<FiscalResult | null>(`/fiscal/orders/${orderId}/print`).then((r) => r.data),
-    onSuccess: (_data, orderId) => {
+    mutationFn: ({ orderId, requestId }: { orderId: string; requestId?: string }) =>
+      api.post<FiscalResult | null>(`/fiscal/orders/${orderId}/print`, undefined, { params: { requestId } }).then((r) => r.data),
+    onSuccess: (_data, { orderId }) => {
       qc.invalidateQueries({ queryKey: ['admin', 'orders', 'detail', orderId] });
     },
   });
