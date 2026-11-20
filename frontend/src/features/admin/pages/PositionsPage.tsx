@@ -8,7 +8,6 @@ import { apiError } from '@/lib/api';
 import { IconEdit, IconTrash } from '../components/icons';
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
-import { EditorPage } from './warehouse/EditorPage';
 import { QueryState } from './warehouse/WarehouseUi';
 import { useEditorRoute, usePageFilter } from './warehouse/workspace-route';
 import { useStaffPositionMutations, useStaffPositions, type StaffPosition } from './positions-api';
@@ -45,18 +44,8 @@ export function PositionsPage() {
   })
     .sort((a, b) => (sortDirection === 'desc' ? -1 : 1) * a.name.localeCompare(b.name, 'ru'));
   if (!isOwner) return <p role="alert">Должностями управляет владелец заведения.</p>;
-  if (editor?.type === 'position') {
-    if (editor.id) {
-      const entry = query.data?.find(({ id }) => id === editor.id);
-      if (!entry) return <EditorPage title="Должность" onClose={closeEditor}>
-        <QueryState pending={query.isPending} error={query.error}>
-          <p>Должность по этой ссылке не найдена.</p>
-        </QueryState>
-      </EditorPage>;
-      return <PositionEditor key={entry.id} position={entry} onClose={closeEditor} />;
-    }
-    return <PositionEditor key="new" onClose={closeEditor} />;
-  }
+  const positionEditor = editor?.type === 'position' ? editor : null;
+  const entry = positionEditor?.id ? query.data?.find(({ id }) => id === positionEditor.id) : undefined;
   return <div className="min-w-0 overflow-hidden rounded-t-2xl bg-card text-sm">
     <WorkspaceHeaderCount count={query.isSuccess ? rows.length : undefined} />
     <p className="px-4 pt-4 text-text-secondary">Создайте должность, настройте права и выберите её в карточке сотрудника.</p>
@@ -109,6 +98,13 @@ export function PositionsPage() {
       </div>
       {!rows.length && <p role="status" className="p-8 text-center text-text-muted">Должности не найдены</p>}
     </QueryState>
+    {positionEditor && (positionEditor.id && !entry
+      ? <Modal open title="Должность" onClose={closeEditor}>
+          <QueryState pending={query.isPending} error={query.error}>
+            <p>Должность по этой ссылке не найдена.</p>
+          </QueryState>
+        </Modal>
+      : <PositionEditor key={entry?.id ?? 'new'} position={entry} onClose={closeEditor} />)}
     {removePosition && <Modal open title="Удалить должность?" onClose={() => { if (!remove.isPending) setRemovePosition(null); }}
       footer={<button type="button" className="btn-danger btn-md" disabled={remove.isPending || (removePosition.employees > 0 && !replacementId)}
         onClick={() => remove.mutate({

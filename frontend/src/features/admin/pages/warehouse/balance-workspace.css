@@ -14,7 +14,7 @@
 .poster-balance-filter-options > p { padding: 8px 12px; color: rgb(var(--edu-text-muted)); }
 .poster-balance-filter button:focus-visible, .poster-balance-filter-panel button:focus-visible { outline: 2px solid light-dark(#005bff, rgb(var(--edu-link))); outline-offset: 2px; }
 .poster-workspace .poster-balance-reset { min-height: 32px; padding: 0 4px; color: rgb(var(--edu-text-muted)); font-size: 13px; }
-.poster-workspace .poster-balance-surface .poster-balance-table > tbody > tr:not(.poster-balance-detail-row) > td:last-child { color: light-dark(#8793a2, rgb(var(--edu-text-muted))); }
+.poster-workspace .poster-balance-surface .poster-balance-table > tbody > tr > td[data-column='limit'] { color: light-dark(#8793a2, rgb(var(--edu-text-muted))); }
 .poster-workspace .poster-balance-supplies th, .poster-workspace .poster-balance-supplies td { overflow-wrap: anywhere; }
 .poster-workspace .poster-balance-pagination { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 16px; padding-top: 12px; font-size: 13px; }
 .poster-workspace .poster-balance-pagination button { min-height: 32px; color: rgb(var(--edu-link)); }
@@ -24,7 +24,6 @@
 @media (max-width: 767px) {
   .poster-workspace .poster-balance-surface .poster-balance-toggle > span:last-child { white-space: normal; overflow-wrap: anywhere; }
   .poster-workspace .poster-balance-surface .poster-balance-toggle { font-size: 15px; line-height: 21px; }
-  .poster-workspace .poster-balance-mobile-meta { margin: 4px 0 10px 26px; color: rgb(var(--edu-text-muted)); font-size: 12px; }
   .poster-workspace .poster-balance-mobile-values { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin-left: 26px; }
   .poster-workspace .poster-balance-mobile-values > div { min-width: 0; }
   .poster-workspace .poster-balance-mobile-values dt { color: rgb(var(--edu-text-muted)); font-size: 11px; line-height: 16px; }

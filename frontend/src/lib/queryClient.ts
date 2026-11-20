@@ -10,8 +10,10 @@ export const queryClient = new QueryClient({
   },
 });
 
-// Keep visited admin sections available while navigating, with normal stale-data refreshes.
-const workspaceCache = { gcTime: 20 * 60_000 };
+// Keep loaded workspaces through the current app session. Auth clears the cache at session changes.
+const workspaceCache = { gcTime: Infinity };
 queryClient.setQueryDefaults(['admin'], workspaceCache);
 queryClient.setQueryDefaults(['audit'], workspaceCache);
 queryClient.setQueryDefaults(['settings', 'admin'], workspaceCache);
+queryClient.setQueryDefaults(['cash-shifts'], workspaceCache);
+queryClient.setQueryDefaults(['prep-stations'], workspaceCache);

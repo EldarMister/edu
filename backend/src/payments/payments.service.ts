@@ -7,6 +7,7 @@ import type { AuditActor } from '../audit/audit.service';
 import type { PaymentPartDto } from './dto/pay.dto';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { terminalReceiptOrderScope } from '../receipt-prints/receipt-print-access';
+import { receiptTaxes } from '../settings/order-taxes';
 
 @Injectable()
 export class PaymentsService {
@@ -64,6 +65,7 @@ export class PaymentsService {
         include: {
           table: { select: { number: true } },
           waiter: { select: { name: true } },
+          taxes: receiptTaxes,
           items: {
             where: { status: { notIn: ['rejected', 'cancelled'] } },
             select: {
@@ -92,6 +94,11 @@ export class PaymentsService {
     }
 
     return {
+      receiptLanguage: settings.receiptLanguage,
+      receiptPrintCafeName: settings.receiptPrintCafeName,
+      receiptPrintAddress: settings.receiptPrintAddress,
+      receiptPrintPhone: settings.receiptPrintPhone,
+      receiptLogoData: settings.receiptLogoData,
       cafeName: settings.cafeName,
       address: settings.address,
       phone: settings.phone,
@@ -104,9 +111,11 @@ export class PaymentsService {
       waiter: order.waiter?.name ?? (order.source === 'delivery' ? 'Онлайн-заказ' : 'QR-меню'),
       date: (order.closedAt ?? order.createdAt).toISOString(),
       items: order.items,
+      taxes: order.taxes,
       totalAmount: order.totalAmount,
       discountAmount: order.discountAmount,
       serviceChargeAmount: order.serviceChargeAmount,
+      roundingAmount: order.roundingAmount,
       finalAmount: order.finalAmount,
       paymentMethod: order.paymentMethod,
       // Разбивка по способам (для смешанной оплаты — наличные + QR).

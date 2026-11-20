@@ -257,6 +257,7 @@ export interface OrderItem {
 }
 
 export interface Order {
+  taxes?: ReceiptTax[];
   stationHistoryAt?: string;
   id: string;
   orderNumber: string;
@@ -264,6 +265,8 @@ export interface Order {
   totalAmount: string;
   discountAmount: string;
   serviceChargeAmount: string;
+  roundOrderTotal?: boolean;
+  roundingAmount?: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
   comment: string | null;
@@ -287,7 +290,32 @@ export interface Order {
   fiscalizedAt?: string | null;
 }
 
-export interface Receipt {
+export type MenuTaxType = 'vat' | 'turnover';
+
+export interface MenuTax {
+  id: string;
+  name: string;
+  rate: string | number;
+  type: MenuTaxType;
+}
+
+export interface ReceiptTax extends MenuTax {
+  salesAmount: string;
+  amount: string;
+}
+
+export type ReceiptLanguage = 'ru' | 'ky';
+
+export interface ReceiptPrintSettings {
+  receiptLanguage: ReceiptLanguage;
+  receiptPrintCafeName: boolean;
+  receiptPrintAddress: boolean;
+  receiptPrintPhone: boolean;
+}
+
+export interface Receipt extends Partial<ReceiptPrintSettings> {
+  taxes?: ReceiptTax[];
+  receiptLogoData?: string | null;
   cafeName: string;
   address?: string;
   phone?: string;
@@ -309,6 +337,7 @@ export interface Receipt {
   totalAmount: string;
   discountAmount: string;
   serviceChargeAmount: string;
+  roundingAmount?: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
   /** Разбивка по способам оплаты (для смешанной — наличные + QR). */

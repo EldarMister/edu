@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { CartLine, CartSetComponent, Dish, DishVariant } from '@/types';
-import { dishUnitPrice } from '@/lib/format';
+import { dishUnitPrice, roundOrderAmount } from '@/lib/format';
 
 interface CartDraft {
   lines: CartLine[];
@@ -221,16 +221,25 @@ export const useCart = create<CartState>((set, get) => ({
     }),
 }));
 
-export function cartTotals(lines: CartLine[]) {
+export interface CartRounding {
+  serviceCharge: number;
+}
+
+export function cartTotals(lines: CartLine[], rounding?: CartRounding) {
   let total = 0;
   let discount = 0;
+  let roundedLineSum = 0;
   let count = 0;
   for (const l of lines) {
     const unit = Number(cartLineBasePrice(l));
     const unitFinal = cartLineUnitPrice(l);
     total += unit * l.quantity;
     discount += (unit - unitFinal) * l.quantity;
+    roundedLineSum += Math.round(unitFinal * l.quantity * 100) / 100;
     count += l.quantity;
   }
-  return { total, discount, final: total - discount, count };
+  const serviceCharge = lines.length > 0 ? (rounding?.serviceCharge ?? 0) : 0;
+  const beforeRounding = rounding ? roundedLineSum + serviceCharge : total - discount;
+  const final = rounding ? roundOrderAmount(beforeRounding) : beforeRounding;
+  return { total, discount, final, count, serviceCharge, roundingAmount: Math.round((beforeRounding - final) * 100) / 100 };
 }

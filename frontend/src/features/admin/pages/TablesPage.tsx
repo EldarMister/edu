@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { DeleteNameField } from '../components/DeleteNameField';
+import { captureDeletionEffect } from '../components/deletion-effect';
 import { Spinner } from '@/components/Spinner';
 import { WorkspacePending } from '../components/WorkspacePending';
 import { usePermissions } from '@/hooks/usePermissions';
@@ -81,7 +82,13 @@ export function TablesPage() {
 
   function confirmTableDelete() {
     if (!editable || !tableToDelete || removeTable.isPending) return;
-    removeTable.mutate(tableToDelete.id, { onSuccess: () => setTableToDelete(null) });
+    const playEffect = captureDeletionEffect(`hall-table-${tableToDelete.id}`);
+    removeTable.mutate(tableToDelete.id, {
+      onSuccess: () => {
+        setTableToDelete(null);
+        playEffect?.();
+      },
+    });
   }
 
   function toggleHall(id: string) {
@@ -191,7 +198,7 @@ export function TablesPage() {
                   ) : (
                     <ul className="divide-y divide-border">
                       {hall.tables.map((t) => (
-                        <li key={t.id} className="flex items-center justify-between gap-3 px-6 py-3">
+                        <li key={t.id} id={`hall-table-${t.id}`} className="flex items-center justify-between gap-3 px-6 py-3">
                           <div className="flex min-w-0 items-center gap-3">
                             <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border text-[15px] font-medium text-text-primary">
                               {t.number}

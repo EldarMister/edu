@@ -9,7 +9,9 @@ import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { normalizeDishImage, withDishImageRef } from '../dishes/dish-image';
 import { normalizeUnit, unitLabel } from '../warehouse/units';
 import { projectDishStock } from '../warehouse/dish-stock-projection';
-import { assertAssignableStation, defaultCategoryStation, lockStationRouting } from '../kitchen/preparation-stations';
+import { assertAssignableStation, BUILTIN_STATIONS, defaultCategoryStation, lockStationRouting, stationCatalog } from '../kitchen/preparation-stations';
+import { goodsExportColumns, writeGoodsWorkbook, type GoodsExportQuery } from './goods-xlsx';
+import { assertMenuTax, dishTaxFields } from '../settings/order-taxes';
 import { type SaveFloorPlanDto, withinFloorPlan } from './floor-plan.dto';
 import {
   CreateCategoryDto,
@@ -253,7 +255,7 @@ export class CatalogService {
   categoriesAll() {
     return this.prisma.category.findMany({
       orderBy: { sortOrder: 'asc' },
-      select: { id: true, name: true, sortOrder: true, isActive: true, prepStation: true, _count: { select: { dishes: true } } },
+      select: { id: true, name: true, sortOrder: true, isActive: true, prepStation: true, taxId: true, _count: { select: { dishes: true } } },
     });
   }
 
@@ -262,8 +264,9 @@ export class CatalogService {
       await lockStationRouting(tx);
       const prepStation = dto.prepStation ?? await defaultCategoryStation(tx);
       await assertAssignableStation(tx, prepStation);
+      await assertMenuTax(tx, dto.taxId);
       return tx.category.create({
-        data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation },
+        data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation, taxId: dto.taxId },
       });
     });
     await this.audit.log({
@@ -272,7 +275,7 @@ export class CatalogService {
       entityType: AuditEntity.CATEGORY,
       entityId: category.id,
       description: `${actor.name ?? 'Сотрудник'} добавил категорию «${category.name}»`,
-      newValue: { name: category.name },
+      newValue: { name: category.name, taxId: category.taxId },
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: category.id, action: 'create-category' });
     return category;
@@ -283,6 +286,7 @@ export class CatalogService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
       await assertAssignableStation(tx, dto.prepStation);
+      await assertMenuTax(tx, dto.taxId);
       return tx.category.update({ where: { id }, data: { ...dto, prepStation: dto.prepStation ?? undefined } });
     });
     await this.audit.log({
@@ -291,8 +295,8 @@ export class CatalogService {
       entityType: AuditEntity.CATEGORY,
       entityId: id,
       description: `${actor.name ?? 'Сотрудник'} изменил категорию «${before.name}»`,
-      oldValue: { name: before.name, isActive: before.isActive },
-      newValue: { name: updated.name, isActive: updated.isActive },
+      oldValue: { name: before.name, isActive: before.isActive, taxId: before.taxId },
+      newValue: { name: updated.name, isActive: updated.isActive, taxId: updated.taxId },
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: id, action: 'update-category' });
     return updated;
@@ -381,8 +385,9 @@ export class CatalogService {
   }
 
   /** Все блюда (включая неактивные) с категорией — для управления меню. */
-  async dishesAll(params: { categoryId?: string; search?: string }) {
+  async dishesAll(params: { categoryId?: string; search?: string; goodsOnly?: boolean }) {
     const where: Prisma.DishWhereInput = {
+      ...(params.goodsOnly ? { catalogKind: 'goods' } : {}),
       ...(params.categoryId ? { categoryId: params.categoryId } : {}),
       ...(params.search ? { name: { contains: params.search, mode: 'insensitive' } } : {}),
     };
@@ -397,6 +402,48 @@ export class CatalogService {
       variants: dish.variants.map((variant) => ({ ...variant, stock: stock.get(dish.id)!.variantStocks.get(variant.id) ?? null })),
       hasRecipe: recipeDishIds.has(dish.id),
       hasDirectStock: !!dish.stockIngredientId || dish.variants.some((variant) => !!variant.stockIngredientId) }));
+  }
+
+  async goodsAll() {
+    const goods = await this.dishesAll({ goodsOnly: true });
+    const stockIds = [...new Set(goods.flatMap((dish) => [dish.stockIngredientId, ...dish.variants.map((variant) => variant.stockIngredientId)])
+      .filter((id): id is string => id != null))];
+    const stock = stockIds.length ? await this.prisma.ingredient.findMany({
+      where: { id: { in: stockIds } }, select: { id: true, barcode: true },
+    }) : [];
+    const barcodes = new Map(stock.map((item) => [item.id, item.barcode]));
+    return goods.map((dish) => {
+      const variants = dish.variants;
+      const units = dish.isWeighted
+        ? [`${dish.weightedPriceBase} ${dish.weightedMeasure === 'volume' ? 'мл' : 'г'}`]
+        : variants.length ? [...new Set(variants.map((variant) => variant.unit || dish.unit))] : [dish.unit];
+      const price = variants.length ? Math.min(...variants.map((variant) => {
+        const value = Number(variant.price);
+        const discount = Number(dish.discountValue);
+        if (dish.discountType === 'percent') return Math.max(0, value - value * discount / 100);
+        if (dish.discountType === 'fixed') return Math.max(0, value - discount);
+        return value;
+      })) : Number(dish.price);
+      return { ...dish, goodsStation: dish.prepStation ?? dish.category.prepStation ?? 'none', goodsUnits: units,
+        goodsPrice: price, barcodes: [...new Set([dish.stockIngredientId, ...variants.map((variant) => variant.stockIngredientId)]
+          .flatMap((id) => {
+            const barcode = id && barcodes.get(id);
+            return barcode ? [barcode] : [];
+          }))] };
+    });
+  }
+
+  async exportGoods(query: GoodsExportQuery) {
+    const columns = goodsExportColumns(query.columns);
+    const cafeId = getCafeId();
+    const [goods, stations, taxes] = await Promise.all([
+      this.goodsAll(),
+      cafeId ? this.prisma.preparationStation.findMany({ where: { cafeId }, select: { id: true, name: true, isActive: true } }) : [],
+      columns.includes('tax') ? this.prisma.menuTax.findMany({ where: { cafeId: cafeId ?? null }, select: { id: true, name: true, rate: true } }) : [],
+    ]);
+    const names = new Map((cafeId ? stationCatalog(stations, cafeId) : BUILTIN_STATIONS).map((station) => [station.id, station.name]));
+    return writeGoodsWorkbook(goods, query, columns, names,
+      new Map(taxes.map((tax) => [tax.id, `${tax.name} · ${tax.rate.toNumber().toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`])));
   }
 
   private normalizeVariants(variants?: DishVariantDto[]): NormalizedDishVariant[] {
@@ -444,7 +491,7 @@ export class CatalogService {
 
   private dishInclude() {
     return {
-      category: { select: { id: true, name: true, prepStation: true } },
+      category: { select: { id: true, name: true, prepStation: true, taxId: true } },
       variants: { orderBy: { sortOrder: 'asc' as const } },
       setComponents: {
         orderBy: { sortOrder: 'asc' as const },
@@ -489,6 +536,7 @@ export class CatalogService {
           trackInventory: false,
           unit: this.normalizeInventoryUnit(dto.unit),
           prepStation: dto.prepStation ?? null,
+          ...await dishTaxFields(tx, dto),
           voiceName: dto.voiceName?.trim() || null,
           variants: variants.length
             ? {
@@ -536,7 +584,8 @@ export class CatalogService {
       if ((variant.stock !== undefined && variant.stock !== (previous?.stock ?? 0))
         || (variant.initialStock !== undefined && variant.initialStock !== (previous?.initialStock ?? 0))) throw new BadRequestException(legacyError);
     }
-    const { variants: variantsDto, stock: _stock, initialStock: _initialStock, trackInventory: _trackInventory, ...dishDto } = dto;
+    const { variants: variantsDto, stock: _stock, initialStock: _initialStock, trackInventory: _trackInventory,
+      taxId: _taxId, taxExempt: _taxExempt, ...dishDto } = dto;
     const variants = variantsDto !== undefined ? this.normalizeVariants(variantsDto) : undefined;
     const data: Prisma.DishUpdateInput = { ...dishDto } as Prisma.DishUpdateInput;
     if (variants !== undefined || dto.price !== undefined) {
@@ -550,6 +599,7 @@ export class CatalogService {
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockStationRouting(tx);
       await assertAssignableStation(tx, dto.prepStation);
+      Object.assign(data, await dishTaxFields(tx, dto));
       if (variants !== undefined) {
         const incomingIds = variants.map((variant) => variant.id).filter((variantId): variantId is string => !!variantId);
         if (incomingIds.length > 0) {
@@ -683,6 +733,7 @@ export class CatalogService {
           price: new Prisma.Decimal(dto.price),
           isSet: true,
           prepStation: dto.prepStation,
+          ...await dishTaxFields(tx, dto),
           trackInventory: false,
           setComponents: { create: this.mapSetComponents(dto.components) },
         },
@@ -722,6 +773,7 @@ export class CatalogService {
           ...(dto.price !== undefined ? { price: new Prisma.Decimal(dto.price) } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
           prepStation: dto.prepStation,
+          ...await dishTaxFields(tx, dto),
         },
         include: this.dishInclude(),
       });

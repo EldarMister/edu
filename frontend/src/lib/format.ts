@@ -1,5 +1,13 @@
 import type { Order } from '@/types';
 
+export function roundOrderAmount(amount: number) {
+  return Math.floor(Math.round(amount * 100) / 100);
+}
+
+export function taxRateLabel(rate: string | number) {
+  return `${Number(rate).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`;
+}
+
 /** Человекочитаемое название способа оплаты. */
 export function paymentMethodLabel(method: string | null | undefined): string {
   switch (method) {

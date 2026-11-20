@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
+import { readAsDataUrl } from '@/lib/image';
 import { useNotifications } from '@/store/notifications';
 import { IconQr, IconTrash } from '../admin/components/icons';
 import { useUpdateSettings } from './api';
@@ -112,13 +113,4 @@ export function QrPaymentCard({ qrImageUrl }: { qrImageUrl: string | null }) {
       )}
     </div>
   );
-}
-
-function readAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
-    reader.readAsDataURL(file);
-  });
 }

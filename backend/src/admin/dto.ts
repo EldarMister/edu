@@ -72,6 +72,9 @@ export class UpdateTableDto {
 
 // ---------- Категории ----------
 export class CreateCategoryDto {
+  @IsOptional() @IsUUID()
+  taxId?: string | null;
+
   @IsString() @IsNotEmpty() @MaxLength(60)
   name: string;
 
@@ -82,6 +85,9 @@ export class CreateCategoryDto {
   prepStation?: string;
 }
 export class UpdateCategoryDto {
+  @IsOptional() @IsUUID()
+  taxId?: string | null;
+
   @IsOptional() @IsString() @MaxLength(60)
   name?: string;
 
@@ -141,7 +147,15 @@ export class DishVariantDto {
   unit?: string;
 }
 
-export class CreateDishDto {
+class MenuDishTaxDto {
+  @IsOptional() @IsUUID()
+  taxId?: string | null;
+
+  @IsOptional() @IsBoolean()
+  taxExempt?: boolean;
+}
+
+export class CreateDishDto extends MenuDishTaxDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
   name: string;
 
@@ -201,7 +215,7 @@ export class CreateDishDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
   variants?: DishVariantDto[];
 }
-export class UpdateDishDto {
+export class UpdateDishDto extends MenuDishTaxDto {
   @IsOptional() @IsString() @MaxLength(120)
   name?: string;
 
@@ -284,7 +298,7 @@ export class SetComponentDto {
   replaceable?: boolean;
 }
 
-export class CreateSetDto {
+export class CreateSetDto extends MenuDishTaxDto {
   @IsOptional() @IsString() @MaxLength(64)
   prepStation?: string | null;
 
@@ -299,7 +313,7 @@ export class CreateSetDto {
   components: SetComponentDto[];
 }
 
-export class UpdateSetDto {
+export class UpdateSetDto extends MenuDishTaxDto {
   @IsOptional() @IsString() @MaxLength(64)
   prepStation?: string | null;
 

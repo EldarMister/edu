@@ -7,7 +7,7 @@ import { WorkspaceHeaderActions, WorkspaceHeaderCount } from './WorkspaceHeader'
 import { WorkspaceSearch } from './WorkspaceSearch';
 import { STATISTICS_NAV, type StatisticsView } from './statisticsViews';
 
-type Report = Exclude<StatisticsView, 'overview'>;
+type Report = Exclude<StatisticsView, 'overview' | 'taxes'>;
 type Row = Record<string, string | number | null>;
 type Column = { key: string; label: string; format?: 'money' | 'date' | 'duration' | 'percent' };
 const cash = (key: string, label: string): Column => ({ key, label, format: 'money' });

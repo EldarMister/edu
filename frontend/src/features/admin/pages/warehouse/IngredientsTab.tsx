@@ -1,21 +1,43 @@
-import { Fragment, useId, type ReactNode } from 'react';
+import { Fragment, useId, useState, type ReactNode } from 'react';
 import { Select } from '@/components/Select';
 import { usePermissions } from '@/hooks/usePermissions';
+import { api, apiError } from '@/lib/api';
+import { useAuth } from '@/store/auth';
 import { PROCESSING_METHODS, useIngredients, type Ingredient } from './api';
 import { QueryState } from './WarehouseUi';
 import { usePageFilter, usePageFilters } from './workspace-route';
 import { useWarehousePolicy } from './settings-api';
 import { UNIT_OPTIONS, unitLabel } from './units';
-import { WorkspaceHeaderCount } from '../WorkspaceHeader';
+import { WorkspaceHeaderActions, WorkspaceHeaderCount } from '../WorkspaceHeader';
 import { WorkspaceSearch } from '../WorkspaceSearch';
 import { BalanceSupplies } from './BalanceSupplies';
 import { balanceMoney, balanceQuantity, balanceValue } from './balance-format';
 import { CatalogueUsage, PreparationComposition } from './CatalogueDetails';
 import { WarehouseMultiFilter, warehouseMultiFilterValues } from './WarehouseMultiFilter';
+import { visibleWarehouseColumns, WarehouseColumnSettings } from './WarehouseColumnSettings';
+
+const balanceColumns = {
+  name: { label: 'Название', width: 210 },
+  warehouse: { label: 'Склад', width: 155, optional: true },
+  kind: { label: 'Тип', width: 130 },
+  category: { label: 'Категория', width: 130 },
+  barcode: { label: 'Штрихкод', width: 140, optional: true },
+  stock: { label: 'Остатки', width: 125, numeric: true },
+  unit: { label: 'Ед. измерения', width: 130, optional: true },
+  cost: { label: 'Себестоимость', width: 150, numeric: true, costs: true },
+  total: { label: 'Сумма', width: 120, numeric: true, costs: true },
+  limit: { label: 'Лимит', width: 125, numeric: true },
+} satisfies Record<string, { label: string; width: number; numeric?: boolean; costs?: boolean; optional?: boolean }>;
+type BalanceColumn = keyof typeof balanceColumns;
+
+function columnSpec(key: BalanceColumn): { label: string; width: number; numeric?: boolean; costs?: boolean; optional?: boolean } {
+  return balanceColumns[key];
+}
 
 export type StockFilter = '' | 'low' | 'empty';
 export function IngredientsTab({
   warehouseId,
+  warehouseName,
   filter,
   onFilter,
   onOpen,
@@ -26,6 +48,7 @@ export function IngredientsTab({
   filters,
 }: {
   warehouseId?: string;
+  warehouseName?: string;
   filter: StockFilter;
   onFilter: (value: StockFilter) => void;
   onOpen: (item: Ingredient) => void;
@@ -35,8 +58,23 @@ export function IngredientsTab({
   catalogue?: false | 'ingredients' | 'preparations';
   filters?: ReactNode;
 }) {
-  const { can } = usePermissions();
+  const { can, effectiveRole } = usePermissions();
+  const userId = useAuth((state) => state.user?.id);
   const costs = can('actions.warehouseCosts');
+  const canExport = (effectiveRole === 'OWNER' || effectiveRole === 'ADMIN') && costs && can('actions.exportReports');
+  const columnStorageKey = `edu-pos-balance-columns:${userId ?? ''}`;
+  const [columnFilter, setColumnFilter] = useState(() => {
+    if (catalogue || !userId) return '';
+    try { return localStorage.getItem(columnStorageKey) ?? ''; }
+    catch { return ''; }
+  });
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
+  const columnOptions = (Object.keys(balanceColumns) as BalanceColumn[]).filter((key) => costs || !columnSpec(key).costs);
+  const defaultColumns = columnOptions.filter((key) => !columnSpec(key).optional);
+  const columns = columnFilter ? visibleWarehouseColumns(columnFilter, columnOptions) : defaultColumns;
+  const dataColumns = columns.slice(1);
   const suppliesVisible = can('actions.warehouseReports') && costs;
   const preparedCatalogue = catalogue === 'preparations';
   const [expanded, setExpanded] = usePageFilter('balanceExpanded');
@@ -93,8 +131,10 @@ export function IngredientsTab({
   const stock = (item: Ingredient) => (virtual(item) ? 'По рецепту' : quantity(item.stock, item));
   const kindLabel = (item: Ingredient) =>
     item.isPrepared ? 'Полуфабрикат' : ['goods', 'beverage'].includes(item.kind ?? '') ? 'Товар' : 'Ингредиент';
+  const includeUnit = !columns.includes('unit');
   const threshold = (item: Ingredient) => virtual(item) ? '—'
-    : `${item.lowStockThreshold.toLocaleString('ru-RU', { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${item.unit}`;
+    : item.lowStockThreshold.toLocaleString('ru-RU', { minimumFractionDigits: 3, maximumFractionDigits: 3 })
+      + (includeUnit ? ` ${item.unit}` : '');
   const output = (item: Ingredient) =>
     item.recipeOutputQuantity != null && item.recipeOutputUnit
       ? balanceQuantity(item.recipeOutputQuantity, unitLabel(item.recipeOutputUnit))
@@ -185,6 +225,49 @@ export function IngredientsTab({
     (!preparedCatalogue && filter)
   );
   const canCreate = preparedCatalogue ? can('actions.warehouseRecipes') : can('actions.warehouseReceive');
+  const showTotal = !preparedCatalogue && costs && rows.length > 0 && (catalogue || columns.includes('total'));
+  const totalLabel = unknown ? 'Известная стоимость' : catalogue ? 'Итого' : 'Всего';
+  function balanceCell(item: Ingredient, key: BalanceColumn) {
+    switch (key) {
+      case 'warehouse': return warehouseName || 'Все склады';
+      case 'kind': return kindLabel(item);
+      case 'category': return item.category || '—';
+      case 'barcode': return item.barcode || '—';
+      case 'stock': return virtual(item) ? 'По рецепту' : balanceQuantity(item.stock, item.unit, item.unitType, includeUnit);
+      case 'unit': return item.unit;
+      case 'cost': return unitCost(item) == null ? '—' : amount(unitCost(item)!);
+      case 'total': return virtual(item) || balanceValue(item) == null ? '—' : amount(balanceValue(item)!);
+      case 'limit': return threshold(item);
+      default: return item.name;
+    }
+  }
+
+  async function exportBalances() {
+    if (!canExport || exporting) return;
+    setExporting(true);
+    setExportError('');
+    try {
+      const params = new URLSearchParams({ columns: columns.join(','), sort: sort === 'desc' ? 'desc' : 'asc' });
+      if (warehouseId) params.set('warehouseId', warehouseId);
+      if (searchText) params.set('search', search.trim());
+      if (unit) params.set('unit', unit);
+      if (filter) params.set('stockFilter', filter);
+      balanceKinds.forEach((value) => params.append('kinds', value));
+      balanceCategories.forEach((value) => params.append('categories', value));
+      const response = await api.get<Blob>(`/admin/warehouse/ingredients/export.xlsx?${params}`, { responseType: 'blob' });
+      const downloadUrl = URL.createObjectURL(response.data);
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = 'Остатки.xlsx';
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+    } catch (error) {
+      setExportError(apiError(error));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const emptyState = (
     <div className="py-6 text-center">
       <p className="font-medium text-text-primary">
@@ -212,6 +295,26 @@ export function IngredientsTab({
   return (
     <div className={catalogue ? undefined : 'poster-balance-surface'}>
       {catalogue && <WorkspaceHeaderCount count={query.data ? catalogueRows.length : undefined} />}
+      {!catalogue && <>
+        <WorkspaceHeaderActions>
+          <button type="button" className="supply-header-action" onClick={() => setColumnsOpen(true)}>Столбцы</button>
+          {canExport && <button type="button" className="supply-header-action" disabled={exporting || !query.isSuccess}
+            onClick={() => void exportBalances()}>{exporting ? 'Выгрузка…' : 'Экспорт'}</button>}
+        </WorkspaceHeaderActions>
+        {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={columnOptions} resetColumns={defaultColumns}
+          label={(key) => columnSpec(key).label} onClose={() => setColumnsOpen(false)}
+          onApply={(selection) => {
+            const selected = selection.join(',');
+            const value = selected === defaultColumns.join(',') ? '' : selected;
+            setColumnFilter(value);
+            if (userId) {
+              try { localStorage.setItem(columnStorageKey, value); }
+              catch { /* The selection remains available in the open table. */ }
+            }
+            setColumnsOpen(false);
+          }} />}
+        {exportError && <p role="alert" className="py-2 text-sm text-danger">{exportError}</p>}
+      </>}
       <div className="poster-toolbar">
         <WorkspaceSearch label="Поиск позиции" placeholder={catalogue ? 'Быстрый поиск' : 'Поиск...'} value={search} onChange={setSearch} />
         {filters}
@@ -300,16 +403,11 @@ export function IngredientsTab({
       </div>
       <QueryState pending={query.isPending} error={query.error}>
         <div className="hidden overflow-x-auto md:block">
-          <table className={`poster-table w-full ${preparedCatalogue ? 'min-w-[680px]' : 'min-w-[1000px]'} ${catalogue ? 'poster-catalogue-table' : 'poster-balance-table table-fixed'}`}>
+          <table className={`poster-table w-full ${catalogue ? `poster-catalogue-table ${preparedCatalogue ? 'min-w-[680px]' : 'min-w-[1000px]'}` : 'poster-balance-table table-fixed'}`}
+            style={catalogue ? undefined : { minWidth: columns.reduce((width, key) => width + columnSpec(key).width, 0) }}>
             {!catalogue && (
               <colgroup>
-                <col style={{ width: costs ? '20%' : '28%' }} />
-                <col style={{ width: costs ? '13.333%' : '18%' }} />
-                <col style={{ width: costs ? '13.333%' : '18%' }} />
-                <col style={{ width: costs ? '13.333%' : '18%' }} />
-                {costs && <col style={{ width: '13.333%' }} />}
-                {costs && <col style={{ width: '13.333%' }} />}
-                <col style={{ width: costs ? '13.335%' : '18%' }} />
+                {columns.map((key) => <col key={key} style={{ width: columnSpec(key).width }} />)}
               </colgroup>
             )}
             <thead>
@@ -330,27 +428,29 @@ export function IngredientsTab({
                     </button>
                   )}
                 </th>
+                {catalogue ? <>
                 {!preparedCatalogue && (
                   <>
-                    {!catalogue && <th>Тип</th>}
                     <th>Категория</th>
-                    {catalogue && <th>Ед. измерения</th>}
+                    <th>Ед. измерения</th>
                     {catalogue === 'ingredients' && <th className="text-center">Потери</th>}
                   </>
                 )}
                 <th className="text-right">
-                  {preparedCatalogue ? 'Выход' : catalogue ? 'Остатки на складах' : 'Остатки'}
+                  {preparedCatalogue ? 'Выход' : 'Остатки на складах'}
                 </th>
                 {costs && (
                   <>
                     <th className="text-right">Себестоимость</th>
                     {!preparedCatalogue && (
-                      <th className="text-right">{catalogue ? 'Сумма остатков' : 'Сумма'}</th>
+                      <th className="text-right">Сумма остатков</th>
                     )}
                   </>
                 )}
-                {!catalogue && <th className="text-right">Лимит</th>}
-                {catalogue && <th><span className="sr-only">Действия</span></th>}
+                <th><span className="sr-only">Действия</span></th>
+                </> : dataColumns.map((key) => <th key={key} scope="col" className={columnSpec(key).numeric ? 'text-right' : undefined}>
+                  {columnSpec(key).label}
+                </th>)}
               </tr>
             </thead>
             <tbody>
@@ -368,11 +468,11 @@ export function IngredientsTab({
                       {item.name}
                     </button> : toggle(item, `${detailId}-desktop-${item.id}`)}
                   </td>
+                  {catalogue ? <>
                   {!preparedCatalogue && (
                     <>
-                      {!catalogue && <td className="truncate" title={kindLabel(item)}>{kindLabel(item)}</td>}
-                      <td className={catalogue ? undefined : 'truncate'} title={item.category || undefined}>{item.category || (catalogue ? 'Без категории' : '')}</td>
-                      {catalogue && <td>{item.unit}</td>}
+                      <td title={item.category || undefined}>{item.category || 'Без категории'}</td>
+                      <td>{item.unit}</td>
                       {catalogue === 'ingredients' && (
                         <td>
                           {item.unitType === 'mass' ||
@@ -412,8 +512,12 @@ export function IngredientsTab({
                       )}
                     </>
                   )}
-                  {!catalogue && <td className="text-right whitespace-nowrap">{threshold(item)}</td>}
-                  {catalogue && <td>{actions(item)}</td>}
+                  <td>{actions(item)}</td>
+                  </> : dataColumns.map((key) => {
+                    const value = balanceCell(item, key);
+                    return <td key={key} className={columnSpec(key).numeric ? 'text-right whitespace-nowrap' : 'truncate'}
+                      data-column={key} title={value}>{value}</td>;
+                  })}
                 </tr>
                 {catalogue && catalogueDetail?.id === item.id && (
                   <tr className="poster-catalogue-detail-row">
@@ -424,7 +528,7 @@ export function IngredientsTab({
                 )}
                 {!catalogue && expanded === item.id && (
                   <tr className="poster-balance-detail-row">
-                    <td colSpan={costs ? 7 : 5}>
+                    <td colSpan={columns.length}>
                       {details(item, `${detailId}-desktop-${item.id}`)}
                     </td>
                   </tr>
@@ -434,7 +538,7 @@ export function IngredientsTab({
               {!rows.length && (
                 <tr>
                   <td
-                    colSpan={preparedCatalogue ? (costs ? 4 : 3) : !catalogue ? (costs ? 7 : 5) : (costs ? 8 : 6)}
+                    colSpan={!catalogue ? columns.length : preparedCatalogue ? (costs ? 4 : 3) : (costs ? 8 : 6)}
                     className="py-12 text-center text-text-muted"
                   >
                     {emptyState}
@@ -442,15 +546,20 @@ export function IngredientsTab({
                 </tr>
               )}
             </tbody>
-            {!preparedCatalogue && costs && rows.length > 0 && (
+            {showTotal && (
               <tfoot>
-                <tr>
+                {catalogue ? <tr>
                   <td colSpan={catalogue === 'ingredients' ? 6 : 5}>
-                    {unknown ? 'Известная стоимость' : catalogue ? 'Итого' : 'Всего'}
+                    {totalLabel}
                   </td>
                   <td className="whitespace-nowrap text-right tabular-nums">{amount(total)}</td>
                   <td />
-                </tr>
+                </tr> : <tr>
+                  <td>{totalLabel}</td>
+                  {dataColumns.map((key) => <td key={key} className="whitespace-nowrap text-right tabular-nums">
+                    {key === 'total' ? amount(total) : null}
+                  </td>)}
+                </tr>}
               </tfoot>
             )}
           </table>
@@ -477,29 +586,23 @@ export function IngredientsTab({
               </div>
               </> : <>
                 {toggle(item, `${detailId}-mobile-${item.id}`)}
-                <p className="poster-balance-mobile-meta">{kindLabel(item)}{item.category ? ` · ${item.category}` : ''}</p>
-                <dl className="poster-balance-mobile-values">
-                  <div><dt>Остатки</dt><dd>{stock(item)}</dd></div>
-                  <div><dt>Лимит</dt><dd>{threshold(item)}</dd></div>
-                  {costs && <>
-                    <div><dt>Себестоимость</dt><dd>{unitCost(item) == null ? '—' : amount(unitCost(item)!)}</dd></div>
-                    <div><dt>Сумма</dt><dd>{!virtual(item) && balanceValue(item) != null ? amount(balanceValue(item)!) : '—'}</dd></div>
-                  </>}
-                </dl>
+                {dataColumns.length > 0 && <dl className="poster-balance-mobile-values mt-2">
+                  {dataColumns.map((key) => <div key={key}><dt>{columnSpec(key).label}</dt><dd>{balanceCell(item, key)}</dd></div>)}
+                </dl>}
               </>}
               {catalogue ? <div className="mt-2">{actions(item)}</div> : expanded === item.id && details(item, `${detailId}-mobile-${item.id}`)}
               {catalogue && catalogueDetail?.id === item.id && catalogueDetails(item)}
             </article>
           ))}
           {!rows.length && emptyState}
-          {!preparedCatalogue && costs && rows.length > 0 && (
+          {showTotal && (
             <p className="flex justify-between py-3 text-sm font-medium">
-              <span>{unknown ? 'Известная стоимость' : catalogue ? 'Итого' : 'Всего'}</span>
+              <span>{totalLabel}</span>
               <span>{amount(total)}</span>
             </p>
           )}
         </div>
-        {unknown && !preparedCatalogue && costs && (
+        {unknown && showTotal && (
           <p className="mt-2 text-xs text-text-muted">Стоимость части остатков неизвестна. Итог неполный.</p>
         )}
       </QueryState>

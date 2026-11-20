@@ -1,12 +1,13 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { DeleteNameField } from '../components/DeleteNameField';
+import { captureDeletionEffect } from '../components/deletion-effect';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { WorkspacePending } from '../components/WorkspacePending';
-import { minDishUnitPrice, variantNamesLine } from '@/lib/format';
+import { minDishUnitPrice, taxRateLabel, variantNamesLine } from '@/lib/format';
 import { resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
 import { WorkspaceHeaderCount } from './WorkspaceHeader';
@@ -28,16 +29,23 @@ import { DishComposition } from './warehouse/CatalogueDetails';
 import { balanceMoney, balanceQuantity } from './warehouse/balance-format';
 import { normalizeUnitLabel } from './warehouse/units';
 import { EditorPage } from './warehouse/EditorPage';
-import { useEditorRoute, usePageFilter } from './warehouse/workspace-route';
+import { useEditorRoute, usePageFilter, usePageFilters } from './warehouse/workspace-route';
+import { warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
+import { filterMenuGoods, MenuGoodsFilters, MenuGoodsHeader, menuGoodsColumns, menuListFilters,
+  useMenuGoodsColumns, type MenuGoodsColumn } from './MenuGoodsControls';
 import { MenuEntryPage } from './MenuEntryPage';
+import { dishTaxInput, dishTaxValue, effectiveMenuTaxId, MenuTaxSelect } from '../../settings/MenuTaxSelect';
+import { useMenuTaxOptions } from '../../settings/taxes-api';
 import {
   useAdminCategories,
   useAdminDishes,
+  useAdminGoods,
   useAdminSets,
   useCategoryMutations,
   useDishMutations,
   useSetMutations,
   type AdminDish,
+  type AdminGood,
   type AdminCategory,
 } from '../api';
 
@@ -48,51 +56,65 @@ export function MenuPage({ view }: { view: Exclude<MenuView, 'categories' | 'ing
 }
 function MenuDishList({ view }: { view: MenuView }) {
   const t = useT();
-  const [categoryId, setCategoryId] = usePageFilter('category');
-  const [search, setSearch] = usePageFilter('search');
-  const [availability, setAvailability] = usePageFilter('availability');
-  const [stationId, setStationId] = usePageFilter('station');
-  const [nameSort, setNameSort] = usePageFilter('nameSort', 'asc');
+  const isGoods = view === 'goods';
+  const [filters, updateFilters] = usePageFilters(menuListFilters);
+  const { category: categoryId, search, availability, station: stationId, nameSort } = filters;
   const [compositionId, setCompositionId] = useState<string | null>(null);
-  const [, setParams] = useSearchParams();
   const location = useLocation();
   const { editor, openEditor, closeEditor } = useEditorRoute();
   const compositionPanelId = useId();
   const stations = usePreparationStations().data ?? [];
   usePreparationStationUpdates();
   const categoriesQ = useAdminCategories();
-  const dishesQ = useAdminDishes(categoryId, search);
+  const taxes = useMenuTaxOptions().data ?? [];
+  const displayTax = !isGoods && (taxes.length > 0 || !!filters.tax);
+  const taxNames = new Map(taxes.map((tax) => [tax.id, `${tax.name} · ${taxRateLabel(tax.rate)}`]));
+  const taxFilters = [{ value: 'none', label: 'Без налога' }, ...[...taxNames].map(([value, label]) => ({ value, label }))];
+  const taxCell = (item: AdminDish) => taxNames.get(effectiveMenuTaxId(item) ?? '') ?? '—';
+  const dishesQ = useAdminDishes(categoryId, search, !isGoods);
+  const goodsQ = useAdminGoods(isGoods);
+  const listQ = isGoods ? goodsQ : dishesQ;
+  const { columns, saveColumns } = useMenuGoodsColumns(isGoods);
+  const dataColumns = columns.filter((column): column is MenuGoodsColumn => column !== 'name');
   const { remove } = useDishMutations();
   const push = useNotifications((state) => state.push);
-  const isGoods = view === 'goods';
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
+  const filtered = Object.entries(filters).some(([key, value]) => key !== 'nameSort' && value);
   function clearFilters() {
-    setParams(
-      (previous) => {
-        const next = new URLSearchParams(previous);
-        next.delete('search');
-        next.delete('category');
-        next.delete('availability');
-        next.delete('station');
-        return next;
-      },
-      { replace: true, state: location.state },
-    );
+    updateFilters({ ...menuListFilters, nameSort });
   }
   const categoryStations = new Map((categoriesQ.data ?? []).map((category) => [category.id, category.prepStation]));
   const dishStation = (dish: AdminDish) => dish.prepStation ?? categoryStations.get(dish.categoryId) ?? 'none';
-  const rows = (dishesQ.data ?? []).filter(
+  const rows = (isGoods ? filterMenuGoods(goodsQ.data ?? [], filters) : (dishesQ.data ?? []).filter(
     (dish) =>
-      (dish.catalogKind ?? (dish.hasDirectStock ? 'goods' : 'recipe')) ===
-      (isGoods ? 'goods' : 'recipe') &&
+      (dish.catalogKind ?? (dish.hasDirectStock ? 'goods' : 'recipe')) === 'recipe' &&
       (!stationId || dishStation(dish) === stationId) &&
+      (!filters.tax || (effectiveMenuTaxId(dish) ?? 'none') === filters.tax) &&
       (!availability || (availability === 'visible' ? dish.isAvailable && dish.isActive : !dish.isAvailable || !dish.isActive)),
-  ).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (nameSort === 'desc' ? -1 : 1));
+  )).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (nameSort === 'desc' ? -1 : 1));
+  const stationOptions = [...stations.map((station) => ({ value: station.id, label: station.name })), { value: 'none', label: 'Без цеха' }];
+  const unitOptions = [...new Set(goodsQ.data?.flatMap((item) => item.goodsUnits))].sort((a, b) => a.localeCompare(b, 'ru'))
+    .map((unit) => ({ value: unit, label: unit }));
+  const selectedCategories = warehouseMultiFilterValues(categoryId);
+  const goodsCell = (dish: AdminGood, column: MenuGoodsColumn) => {
+    switch (column) {
+      case 'category': return dish.category.name;
+      case 'price': return `${dish.variants.length ? 'от ' : ''}${balanceMoney(dish.goodsPrice)}`;
+      case 'station': return stationOptions.find((option) => option.value === dish.goodsStation)?.label ?? dish.goodsStation;
+      case 'barcode': return dish.barcodes.join(', ') || '—';
+      case 'unit': return dish.goodsUnits.join(', ');
+      case 'weighted': return dish.isWeighted ? 'Да' : 'Нет';
+      case 'availability': return dish.isAvailable && dish.isActive ? 'Доступен в меню' : 'Скрыт';
+      case 'tax': return taxCell(dish);
+    }
+  };
   async function onDelete(dish: AdminDish) {
-    if (!confirm(`Удалить «${dish.name}» из меню?`)) return;
+    if (remove.isPending || !confirm(`Удалить «${dish.name}» из меню?`)) return;
+    const playEffect = captureDeletionEffect(`menu-entry-${dish.id}`);
     try {
       await remove.mutateAsync(dish.id);
+      playEffect?.();
       push({ message: 'Позиция удалена', at: new Date().toISOString() });
     } catch (failure) {
       push({ message: apiError(failure), at: new Date().toISOString() });
@@ -114,12 +136,14 @@ function MenuDishList({ view }: { view: MenuView }) {
     );
   return (
     <div className="min-w-0">
-      <WorkspaceHeaderCount count={dishesQ.isSuccess ? rows.length : undefined} />
+      <WorkspaceHeaderCount count={listQ.isSuccess ? rows.length : undefined} />
+      {isGoods && !editor && <MenuGoodsHeader filters={filters} columns={columns} saveColumns={saveColumns}
+        ready={goodsQ.isSuccess} canExport={can('actions.exportReports')} />}
       {editor?.type === 'entry' && (
         <MenuEntryPage
           id={editor.id}
           kind={isGoods ? 'goods' : 'recipe'}
-          categoryId={categoryId}
+          categoryId={isGoods ? (selectedCategories.length === 1 ? selectedCategories[0] : '') : categoryId}
           initialTab={editor.action === 'recipe' ? 'recipe' : 'main'}
           onClose={closeEditor}
         />
@@ -128,13 +152,16 @@ function MenuDishList({ view }: { view: MenuView }) {
         <WorkspaceSearch
           label={isGoods ? 'Поиск товаров' : t('Поиск блюда')}
           value={search}
-          onChange={setSearch}
+          onChange={(search) => updateFilters({ search })}
         />
+        {isGoods ? <MenuGoodsFilters filters={filters} update={updateFilters} stations={stationOptions} units={unitOptions} taxes={taxFilters}
+          categories={(categoriesQ.data ?? []).map((category) => ({ value: category.id, label: category.name }))} />
+          : <>
         <Select
           ariaLabel="Категория"
           className="poster-filter w-48"
           value={categoryId}
-          onChange={setCategoryId}
+          onChange={(category) => updateFilters({ category })}
           options={[
             { value: '', label: 'Категория' },
             ...(categoriesQ.data ?? []).map((category) => ({
@@ -147,7 +174,7 @@ function MenuDishList({ view }: { view: MenuView }) {
           ariaLabel="Цех"
           className="poster-filter w-40"
           value={stationId}
-          onChange={setStationId}
+          onChange={(station) => updateFilters({ station })}
           options={[
             { value: '', label: 'Цех' },
             ...stations.filter((station) => station.isActive || station.id === stationId)
@@ -156,12 +183,15 @@ function MenuDishList({ view }: { view: MenuView }) {
           ]}
         />}
         <details className="relative">
-          <summary className="cursor-pointer list-none text-sm text-primary">+ Фильтр{availability ? ' •' : ''}</summary>
-          <div className="absolute left-0 top-full z-30 mt-2 w-60 border border-border bg-white p-3 shadow-md">
-            <Select ariaLabel="Доступность в меню" className="w-full" value={availability} onChange={setAvailability}
+          <summary className="cursor-pointer list-none text-sm text-primary">+ Фильтр{availability || filters.tax ? ' •' : ''}</summary>
+          <div className="absolute left-0 top-full z-30 mt-2 w-60 space-y-2 border border-border bg-white p-3 shadow-md">
+            <Select ariaLabel="Доступность в меню" className="w-full" value={availability} onChange={(availability) => updateFilters({ availability })}
               options={[{ value: '', label: 'Все позиции' }, { value: 'visible', label: 'Доступные в меню' }, { value: 'hidden', label: 'Скрытые' }]} />
+            {displayTax && <Select ariaLabel="Фильтр по налогу" className="w-full" value={filters.tax}
+              onChange={(tax) => updateFilters({ tax })} options={[{ value: '', label: 'Все налоги' }, ...taxFilters]} />}
           </div>
         </details>
+        </>}
         {editable && !editor && (
           <div className="ml-auto flex items-center gap-2">
             {!isGoods && (
@@ -184,27 +214,33 @@ function MenuDishList({ view }: { view: MenuView }) {
           pending={categoriesQ.isFetching}
         />
       )}
-      {dishesQ.isPending ? (
+      {listQ.isPending ? (
         <WorkspacePending />
-      ) : dishesQ.isError ? (
+      ) : listQ.isError ? (
         <ListLoadError
-          error={dishesQ.error}
-          onRetry={() => void dishesQ.refetch()}
-          pending={dishesQ.isFetching}
+          error={listQ.error}
+          onRetry={() => void listQ.refetch()}
+          pending={listQ.isFetching}
         />
       ) : (
         <div className="min-w-0 overflow-x-auto">
-          <table className="poster-table poster-menu-table poster-catalogue-table w-full min-w-[720px] text-sm">
+          <table className="poster-table poster-menu-table poster-catalogue-table w-full min-w-[720px] text-sm"
+            style={isGoods ? { minWidth: Math.max(560, 310 + dataColumns.length * 125) } : undefined}>
             <thead>
               <tr className="border-b border-border text-left text-xs text-text-muted">
                 <th className="py-3 pr-4 font-normal" aria-sort={nameSort === 'desc' ? 'descending' : 'ascending'}>
-                  <button type="button" className="flex items-center gap-2" onClick={() => setNameSort(nameSort === 'desc' ? 'asc' : 'desc')}>
+                  <button type="button" className="flex items-center gap-2" onClick={() => updateFilters({ nameSort: nameSort === 'desc' ? 'asc' : 'desc' })}>
                     Название <span aria-hidden>{nameSort === 'desc' ? '↓' : '↑'}</span>
                   </button>
                 </th>
-                <th className="px-4 py-3 font-normal">Категория</th>
-                {!isGoods && <th className="px-4 py-3 text-right font-normal">Выход</th>}
-                <th className="px-4 py-3 text-right font-normal">Цена</th>
+                {isGoods ? dataColumns.map((column) => <th key={column} scope="col"
+                  className={`px-4 py-3 font-normal ${column === 'price' ? 'text-right' : ''}`}>{menuGoodsColumns[column]}</th>)
+                  : <>
+                    <th className="px-4 py-3 font-normal">Категория</th>
+                    {displayTax && <th className="px-4 py-3 font-normal">Налог</th>}
+                    <th className="px-4 py-3 text-right font-normal">Выход</th>
+                    <th className="px-4 py-3 text-right font-normal">Цена</th>
+                  </>}
                 <th>
                   <span className="sr-only">Действия</span>
                 </th>
@@ -213,7 +249,7 @@ function MenuDishList({ view }: { view: MenuView }) {
             <tbody>
               {rows.map((dish) => (
                 <Fragment key={dish.id}>
-                <tr className="border-b border-border hover:bg-background/40" data-expanded={compositionId === dish.id ? 'true' : undefined}>
+                <tr id={`menu-entry-${dish.id}`} className="border-b border-border hover:bg-background/40" data-expanded={compositionId === dish.id ? 'true' : undefined}>
                   <td className="py-3 pr-4">
                     <button
                       type="button"
@@ -243,15 +279,17 @@ function MenuDishList({ view }: { view: MenuView }) {
                       </span>
                     </button>
                   </td>
-                  <td className="px-4 py-3 text-text-secondary">{dish.category.name}</td>
-                  {!isGoods && (
+                  {isGoods ? dataColumns.map((column) => <td key={column}
+                    className={`px-4 py-3 ${column === 'price' ? 'whitespace-nowrap text-right' : 'text-text-secondary'}`}>
+                    {goodsCell(dish as AdminGood, column)}
+                  </td>) : <>
+                    <td className="px-4 py-3 text-text-secondary">{dish.category.name}</td>
+                    {displayTax && <td className="px-4 py-3 text-text-secondary">{taxCell(dish)}</td>}
                     <td className="whitespace-nowrap px-4 py-3 text-right text-text-secondary">{dishOutput(dish)}</td>
-                  )}
-                  <td className="whitespace-nowrap px-4 py-3 text-right">
-                    {dish.variants.length
-                      ? `от ${balanceMoney(minDishUnitPrice(dish))}`
-                      : balanceMoney(Number(dish.price))}
-                  </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                      {dish.variants.length ? `от ${balanceMoney(minDishUnitPrice(dish))}` : balanceMoney(Number(dish.price))}
+                    </td>
+                  </>}
                   <td className="w-px px-3 py-3 text-right">
                     <div className="poster-row-actions">
                       {!isGoods && !dish.isSet && can('sections.warehouse') && (
@@ -290,7 +328,7 @@ function MenuDishList({ view }: { view: MenuView }) {
                   </td>
                 </tr>
                 {compositionId === dish.id && (
-                  <tr className="poster-catalogue-detail-row"><td colSpan={isGoods ? 4 : 5}>
+                  <tr className="poster-catalogue-detail-row"><td colSpan={displayTax ? 6 : 5}>
                     <div id={`${compositionPanelId}-${dish.id}`} className="poster-catalogue-detail" aria-label={`Состав: ${dish.name}`}><DishComposition dish={dish} /></div>
                   </td></tr>
                 )}
@@ -301,7 +339,7 @@ function MenuDishList({ view }: { view: MenuView }) {
           {!rows.length && (
             <div className="space-y-3 py-12 text-center text-sm text-text-muted" role="status">
               <p>
-                {search || categoryId || availability || stationId
+                {filtered
                   ? 'Нет позиций по выбранным условиям'
                   : isGoods
                     ? editable
@@ -311,7 +349,7 @@ function MenuDishList({ view }: { view: MenuView }) {
                       ? 'Добавьте первое блюдо'
                       : 'Блюд пока нет'}
               </p>
-              {(search || categoryId || availability || stationId) && (
+              {filtered && (
                 <button
                   type="button"
                   className="text-primary hover:underline"
@@ -495,7 +533,7 @@ export function MenuCategoriesPage() {
             </thead>
             <tbody>
               {rows.map((category) => (
-                <tr key={category.id}>
+                <tr key={category.id} id={`menu-category-${category.id}`}>
                   <td>
                     <button
                       type="button"
@@ -588,6 +626,7 @@ function MenuCategoryForm({
   const { can } = usePermissions();
   const editable = can('actions.editMenu');
   const [name, setName] = useState(category?.name ?? '');
+  const [tax, setTax] = useState(category?.taxId ?? '');
   const [prepStation, setPrepStation] = useState(
     category?.prepStation ?? stations.find((station) => station.isActive)?.id ?? 'none',
   );
@@ -603,8 +642,9 @@ function MenuCategoryForm({
     }
     setError('');
     try {
-      if (category) await update.mutateAsync({ id: category.id, name: name.trim(), prepStation });
-      else await create.mutateAsync({ name: name.trim(), prepStation });
+      const body = { name: name.trim(), prepStation, ...(tax !== (category?.taxId ?? '') ? { taxId: tax || null } : {}) };
+      if (category) await update.mutateAsync({ id: category.id, ...body });
+      else await create.mutateAsync(body);
       push({ message: 'Категория сохранена', at: new Date().toISOString() });
       onClose();
     } catch (failure) {
@@ -660,6 +700,9 @@ function MenuCategoryForm({
               options={routingOptions(stations, prepStation)}
             />
           </DocumentField>
+          <DocumentField label="Налог">
+            <MenuTaxSelect value={tax} onChange={setTax} disabled={!editable || pending} />
+          </DocumentField>
         </fieldset>
       </form>
     </EditorPage>
@@ -686,8 +729,10 @@ function DeleteCategorySheet({
 
   async function run(strategy?: 'move' | 'delete', targetCategoryId?: string) {
     if (!confirmed || remove.isPending) return;
+    const playEffect = captureDeletionEffect(`menu-category-${category.id}`);
     try {
       await remove.mutateAsync({ id: category.id, strategy, targetCategoryId });
+      playEffect?.();
       push({ message: 'Категория удалена', at: new Date().toISOString() });
       onDone();
     } catch (err) {
@@ -787,6 +832,7 @@ function SetModal({
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(set?.name ?? '');
   const [price, setPrice] = useState(set ? String(Number(set.price)) : '');
+  const [tax, setTax] = useState(() => dishTaxValue(set ?? undefined));
   const [prepStation, setPrepStation] = useState(set?.prepStation ?? '');
   const [components, setComponents] = useState<SetCompDraft[]>(() =>
     (set?.setComponents ?? []).map((c) => ({
@@ -850,6 +896,7 @@ function SetModal({
     const body = {
       name: name.trim(),
       price: priceNum,
+      ...(tax !== dishTaxValue(set ?? undefined) ? dishTaxInput(tax) : {}),
       prepStation: prepStation || null,
       components: components.map((c) => ({
         dishId: c.dishId,
@@ -922,6 +969,10 @@ function SetModal({
               ...routingOptions(stations, prepStation),
             ]}
           />
+        </Field>
+        <Field label="Налог">
+          <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!editable || pending}
+            categoryTaxId={set?.category.taxId} />
         </Field>
         <div>
           <p className="mb-1.5 text-sm font-medium text-text-secondary">Состав сета</p>

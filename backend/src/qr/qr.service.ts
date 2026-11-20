@@ -11,6 +11,7 @@ import { SettingsService } from '../settings/settings.service';
 import { DishesService } from '../dishes/dishes.service';
 import { CategoriesService } from '../categories/categories.service';
 import { OrdersService } from '../orders/orders.service';
+import { round2, unitPricing } from '../orders/order.helpers';
 import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { setCafeId } from '../tenant/tenant-context';
@@ -19,7 +20,10 @@ import type { AddItemDto, UpdateItemDto } from './dto';
 
 const sessionInclude = {
   guests: { orderBy: { createdAt: 'asc' as const } },
-  items: { orderBy: { createdAt: 'asc' as const } },
+  items: {
+    orderBy: { createdAt: 'asc' as const },
+    include: { dish: { select: { discountType: true, discountValue: true } } },
+  },
 } satisfies Prisma.QrTableSessionInclude;
 
 type SessionWithRelations = Prisma.QrTableSessionGetPayload<{ include: typeof sessionInclude }>;
@@ -102,7 +106,7 @@ export class QrService {
     // Нет активного draft, но последний визит закрыт официантом → показываем гостю
     // экран «Заказ завершён» вместо пустого меню (заказывать нельзя до нового визита).
     if (!session && (await this.isVisitClosed(table.id))) {
-      return { ...this.serializeSession(table, null), status: 'closed' as const };
+      return { ...(await this.serializeSession(table, null)), status: 'closed' as const };
     }
     return this.serializeSession(table, session);
   }
@@ -486,13 +490,13 @@ export class QrService {
       orderBy: { createdAt: 'desc' },
       include: sessionInclude,
     });
-    const payload = this.serializeSession(table, session);
+    const payload = await this.serializeSession(table, session);
     this.events.emitToQrTable(table.id, event, { tableId: table.id });
     this.events.emitToQrTable(table.id, SERVER_EVENTS.QR_CART_UPDATED, payload);
     return payload;
   }
 
-  private serializeSession(
+  private async serializeSession(
     table: { id: string; number: number; hall: { name: string } | null },
     session: SessionWithRelations | null,
   ) {
@@ -513,11 +517,20 @@ export class QrService {
     const activeGuestIds = new Set(session.guests.filter((g) => this.isActiveGuest(g)).map((g) => g.id));
     const visibleGuests = session.guests.filter((g) => activeGuestIds.has(g.id));
     const labelById = new Map(visibleGuests.map((g) => [g.id, g.guestLabel]));
+    const visibleItems = session.items.filter((item) => activeGuestIds.has(item.guestId));
+    const settings = visibleItems.length > 0 ? await this.prisma.settings.findFirst({
+      select: { roundOrderTotal: true, serviceChargeAmount: true },
+    }) : null;
+    const rounding = settings?.roundOrderTotal ?? false;
     let total = 0;
     let count = 0;
-    const items = session.items.filter((i) => activeGuestIds.has(i.guestId)).map((i) => {
-      const line = Number(i.snapshotPrice) * i.quantity;
-      total += line;
+    const items = visibleItems.map((i) => {
+      const price = rounding && i.dish
+        ? unitPricing(i.snapshotPrice, i.dish.discountType, i.dish.discountValue).unitFinal
+        : Number(i.snapshotPrice);
+      const line = price * i.quantity;
+      const lineTotal = round2(line);
+      total += rounding ? lineTotal : line;
       count += i.quantity;
       return {
         id: i.id,
@@ -528,11 +541,15 @@ export class QrService {
         name: i.snapshotName,
         variantName: i.variantName,
         quantity: i.quantity,
-        price: String(i.snapshotPrice),
-        lineTotal: String(round2(line)),
+        price: String(price),
+        lineTotal: String(lineTotal),
         comment: i.comment,
       };
     });
+
+    const serviceCharge = settings?.roundOrderTotal ? Number(settings.serviceChargeAmount) : 0;
+    const beforeRounding = round2(total + serviceCharge);
+    const payable = rounding ? Math.floor(beforeRounding) : beforeRounding;
 
     return {
       sessionId: session.id,
@@ -546,7 +563,10 @@ export class QrService {
       items,
       itemCount: count,
       activeGuestCount: visibleGuests.length,
-      totalAmount: String(round2(total)),
+      totalAmount: String(payable),
+      ...(rounding && {
+        rounding: { serviceCharge, amount: round2(beforeRounding - payable) },
+      }),
       submittedOrderId: session.submittedOrderId,
     };
   }
@@ -554,10 +574,6 @@ export class QrService {
   private isUniqueConstraintError(err: unknown) {
     return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002';
   }
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }
 
 /** Расстояние между двумя точками на земле в метрах (формула гаверсинуса). */

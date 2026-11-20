@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
-import { displayOrderNumber, isSplitPayment, money, orderItemDisplayName, orderPlaceLabel, paymentMethodLabel } from '@/lib/format';
+import { displayOrderNumber, isSplitPayment, money, orderItemDisplayName, orderPlaceLabel, paymentMethodLabel, taxRateLabel } from '@/lib/format';
+import { receiptHeader, receiptPrintSettings } from '@/lib/receipt';
 import { apiError } from '@/lib/api';
-import { useT } from '@/lib/i18n';
+import { translate, useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
 import { usePublicSettings, resolveQrSrc } from '@/features/settings/api';
 import { CashShiftForm, useCashShiftState } from '@/features/settings/CashShiftControls';
@@ -279,6 +280,9 @@ export function PaymentModal({
 
   // Шаг 2 — чек после успешной оплаты
   if (receipt) {
+    const { receiptLanguage } = receiptPrintSettings(receipt);
+    const receiptLabel = (label: string) => translate(receiptLanguage, label);
+    const header = receiptHeader(receipt);
     return (
       <Modal
         open={open}
@@ -299,10 +303,12 @@ export function PaymentModal({
           </div>
         }
       >
-        <div className="rounded-xl border border-border p-4 text-sm">
-          <p className="text-center text-base font-semibold">{receipt.cafeName}</p>
+        <div lang={receiptLanguage} className="rounded-xl border border-border p-4 text-sm">
+          {header.cafeName && <p className="text-center text-base font-semibold">{header.cafeName}</p>}
+          {header.address && <p className="text-center text-xs text-text-muted">{header.address}</p>}
+          {header.phones && <p className="text-center text-xs text-text-muted">{header.phones}</p>}
           <p className="mb-3 text-center text-xs text-text-muted">
-            {displayOrderNumber(receipt.orderNumber)} · {receipt.source === 'delivery' ? t('Доставка') : `${t('Стол')} ${receipt.tableNumber}`}
+            {displayOrderNumber(receipt.orderNumber)} · {receipt.source === 'delivery' ? receiptLabel('Доставка') : `${receiptLabel('Стол')} ${receipt.tableNumber}`}
           </p>
           <div className="space-y-1">
             {receipt.items.map((it, i) => (
@@ -316,24 +322,33 @@ export function PaymentModal({
           </div>
           {Number(receipt.serviceChargeAmount) > 0 && (
             <div className="mt-2 flex justify-between border-t border-border pt-2 text-sm text-text-secondary">
-              <span>{t('Обслуживание')}</span>
+              <span>{receiptLabel('Обслуживание')}</span>
               <span>{money(receipt.serviceChargeAmount)}</span>
             </div>
           )}
+          {Number(receipt.roundingAmount) > 0 && (
+            <div className="mt-2 flex justify-between text-sm text-text-secondary">
+              <span>{receiptLabel('Округление')}</span>
+              <span>−{money(receipt.roundingAmount ?? 0)}</span>
+            </div>
+          )}
           <div className="mt-3 flex justify-between border-t border-border pt-2 text-base font-semibold">
-            <span>{t('Итого')}</span>
+            <span>{receiptLabel('Итого')}</span>
             <span>{money(receipt.finalAmount)}</span>
           </div>
+          {receipt.taxes?.map((tax) => <div key={tax.id} className="mt-1.5 flex justify-between gap-2 text-xs text-text-muted">
+            <span>{receiptLabel('В т. ч.')} {tax.name} ({taxRateLabel(tax.rate)})</span><span>{money(tax.amount)}</span>
+          </div>)}
           {isSplitPayment(receipt) && receipt.payments?.length ? (
             <div className="mt-2 space-y-1 border-t border-border pt-2 text-sm">
               <div className="flex justify-between font-medium text-text-primary">
-                <span>{t('Раздельная оплата')}</span>
+                <span>{receiptLabel('Раздельная оплата')}</span>
                 <span>{money(receipt.finalAmount)}</span>
               </div>
               {receipt.payments.map((p, i) => (
                 <div key={i} className="flex justify-between text-text-secondary">
                   <span>
-                    {t('Платёж')} {i + 1} — {t(paymentMethodLabel(p.method))}
+                    {receiptLabel('Платёж')} {i + 1} — {receiptLabel(paymentMethodLabel(p.method))}
                   </span>
                   <span>{money(p.amount)}</span>
                 </div>
@@ -343,7 +358,7 @@ export function PaymentModal({
             <div className="mt-2 space-y-1 border-t border-border pt-2 text-sm">
               {receipt.payments.map((p, i) => (
                 <div key={i} className="flex justify-between text-text-secondary">
-                  <span>{t(METHOD_LABELS[p.method])}</span>
+                  <span>{receiptLabel(METHOD_LABELS[p.method])}</span>
                   <span>{money(p.amount)}</span>
                 </div>
               ))}

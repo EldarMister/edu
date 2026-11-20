@@ -76,6 +76,9 @@ export function OrdersPage() {
         });
   const ordersError = ordersQ.isError ? apiError(ordersQ.error) : null;
   const s = summaryQ.data;
+  const summaryPlaceholder = summaryQ.isPending
+    ? <span aria-hidden="true" className="workspace-skeleton inline-block h-3 w-8 align-middle" />
+    : '—';
 
   // Бесконечная подгрузка: тянем следующую страницу, когда «маяк» внизу появляется в зоне видимости.
   const { fetchNextPage, hasNextPage, isFetchingNextPage } = ordersQ;
@@ -130,16 +133,16 @@ export function OrdersPage() {
     <div className="orders-redesign">
       <WorkspaceHeaderActions>{period.filter}</WorkspaceHeaderActions>
       {/* Inline-сводка под заголовком */}
-      <div className="orders-summary workspace-enter">
-        <Sum label={tr('Всего заказов')} value={s ? s.total : '—'} />
+      <div className="orders-summary workspace-enter" aria-busy={summaryQ.isPending}>
+        <Sum label={tr('Всего заказов')} value={s?.total ?? summaryPlaceholder} />
         <Sep />
-        <Sum label={tr('Оплачено')} value={s ? s.paid : '—'} />
+        <Sum label={tr('Оплачено')} value={s?.paid ?? summaryPlaceholder} />
         <Sep />
-        <Sum label={tr('Не оплачено')} value={s ? s.unpaid : '—'} />
+        <Sum label={tr('Не оплачено')} value={s?.unpaid ?? summaryPlaceholder} />
         <Sep />
-        <Sum label={tr('Отменено')} value={s ? s.cancelled : '—'} />
+        <Sum label={tr('Отменено')} value={s?.cancelled ?? summaryPlaceholder} />
         <Sep />
-        <Sum label={tr('Выручка')} value={s ? money(s.revenue) : '—'} />
+        <Sum label={tr('Выручка')} value={s ? money(s.revenue) : summaryPlaceholder} />
       </div>
 
       <OrdersFilters

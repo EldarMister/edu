@@ -155,7 +155,6 @@ function PurchaseForm({
   const [discount, setDiscount] = useState(String(purchase?.discount ?? 0));
   const [discountVisible, setDiscountVisible] = useState(Number(purchase?.discount ?? 0) > 0);
   const [note, setNote] = useState(purchase?.note ?? '');
-  const [attachments, setAttachments] = useState((purchase?.attachments ?? []).join('\n'));
   const [error, setError] = useState('');
   const [validationAttempt, setValidationAttempt] = useState(0);
   const formRef = useRef<HTMLDivElement>(null);
@@ -171,7 +170,7 @@ function PurchaseForm({
   const effectiveAt = inventoryTimingValue(timing, purchase?.effectiveAt ?? (!purchase ? initialOperationAt : undefined));
   const timingReady = !timingEditable || (timingValid && effectiveAt !== undefined && !inventoryTimingError(timing, undefined, true));
   const push = useNotifications((state) => state.push);
-  const signature = JSON.stringify({ location, supplier, date, separateInvoiceDate, timing, rows, discount, note, attachments });
+  const signature = JSON.stringify({ location, supplier, date, separateInvoiceDate, timing, rows, discount, note });
   const initialSignature = useRef(signature);
   const { markSaved } = useEditorDirty(editable && (signature !== initialSignature.current || !dateValid || !timingReady));
   const lastPrices = useLastPurchasePrices(stockEditable ? rows.map((row) => row.ingredientId) : [], location, purchase?.id);
@@ -260,10 +259,6 @@ function PurchaseForm({
         ...(timingEditable ? { effectiveAt } : {}),
         note: note.trim(),
         discount: discountAmount,
-        attachments: attachments
-          .split('\n')
-          .map((a) => a.trim())
-          .filter(Boolean),
         items: enteredRows.map((row) => {
           const quantity = roundPurchaseQuantity(Number(row.quantity));
           const item = byId.get(row.ingredientId);
@@ -300,7 +295,7 @@ function PurchaseForm({
       };
       if (purchase) {
         await mutations.update.mutateAsync({ id: purchase.id,
-          ...(purchase.status === 'completed' && !stockEditable ? { date: body.date, supplier: body.supplier, supplierId: body.supplierId, note: body.note, attachments: body.attachments } : body),
+          ...(purchase.status === 'completed' && !stockEditable ? { date: body.date, supplier: body.supplier, supplierId: body.supplierId, note: body.note } : body),
           expectedUpdatedAt: purchase.updatedAt, complete: purchase.status === 'completed' ? false : complete });
       } else await mutations.create.mutateAsync({ ...body, complete, requestKey });
       markSaved();
@@ -689,7 +684,7 @@ function PurchaseForm({
           </div>
         )}
       </div>
-      {(editable || attachments.trim() || separateInvoiceDate) && (
+      {(editable || separateInvoiceDate) && (
         <details className="poster-advanced">
           <summary className="cursor-pointer text-sm font-medium">Накладная и дополнительные реквизиты</summary>
           <div className="mt-3 space-y-3">
@@ -704,18 +699,6 @@ function PurchaseForm({
               {editable ? <div className="w-[250px] max-w-full"><DateTimePicker aria-label="Дата накладной" className="input h-9" value={date} onChange={setDate} onValidityChange={setDateValid} required disabled={busy} /></div>
                 : <span className="poster-readonly">{inventoryTimeDisplay(purchase?.date ?? initialOperationAt)}</span>}
             </DocumentField>}
-            <DocumentField label="Ссылки на накладные, по одной на строку">
-              {editable ? (
-                <textarea
-                  className="input w-full"
-                  value={attachments}
-                  disabled={busy}
-                  onChange={(e) => setAttachments(e.target.value)}
-                />
-              ) : (
-                <span className="poster-readonly whitespace-pre-wrap">{attachments || '—'}</span>
-              )}
-            </DocumentField>
           </div>
         </details>
       )}

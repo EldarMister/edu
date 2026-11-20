@@ -142,6 +142,7 @@ export function WarehouseSection({
                     <IngredientsTab
                       filters={warehouseFilter}
                       warehouseId={scopedWarehouse}
+                      warehouseName={warehouseId ? warehouse.name : undefined}
                       filter={stockFilter as StockFilter}
                       onFilter={setStockFilter}
                       onOpen={(item) => setActive({ type: 'item', id: item.id })}

@@ -6,6 +6,7 @@ import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
 import { lockFinance } from '../finance/finance-ledger';
+import { ACCOUNT_PHONE_ERROR, accountPhoneAliases, normalizeAccountPhone } from '../common/account-phone';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { assertNoActiveWorkShifts, assertStaffWorkspaceChange, canManagePosition, disablesWorkTracking, losesOperationalAccess } from './staff-access';
 import { syncEmployeeSalary } from '../finance/employee-salary';
@@ -181,13 +182,10 @@ export class StaffService {
     return this.withPermissions(user, actor);
   }
 
-  private normalizePhone(phone: string) {
-    return phone.trim().replace(/[^\d+]/g, '');
-  }
-
   async create(dto: CreateStaffDto, actor: AuthUser) {
-    const phone = this.normalizePhone(dto.phone);
-    const exists = await this.prisma.user.findUnique({ where: { phone } });
+    const phone = normalizeAccountPhone(dto.phone);
+    if (!phone) throw new BadRequestException(ACCOUNT_PHONE_ERROR);
+    const exists = await this.prisma.user.findFirst({ where: { phone: { in: accountPhoneAliases(phone) } }, select: { id: true } });
     if (exists) {
       throw new BadRequestException('Сотрудник с таким телефоном уже есть');
     }
@@ -241,10 +239,14 @@ export class StaffService {
       }
       data.isActive = dto.isActive;
     }
-    if (dto.phone !== undefined) {
-      const phone = this.normalizePhone(dto.phone);
-      const other = await this.prisma.user.findUnique({ where: { phone } });
-      if (other && other.id !== id) {
+    if (dto.phone !== undefined && dto.phone !== user.phone) {
+      const phone = normalizeAccountPhone(dto.phone);
+      if (!phone) throw new BadRequestException(ACCOUNT_PHONE_ERROR);
+      const other = await this.prisma.user.findFirst({
+        where: { phone: { in: accountPhoneAliases(phone) }, id: { not: id } },
+        select: { id: true },
+      });
+      if (other) {
         throw new BadRequestException('Этот телефон занят другим сотрудником');
       }
       data.phone = phone;

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../../components/WorkspacePending';
 import { apiError } from '@/lib/api';
 import { useWarehousePolicy, useUpdateWarehousePolicy } from './settings-api';
 export function AccountingSettings() {
@@ -14,6 +14,7 @@ export function AccountingSettings() {
       setError(apiError(err));
     }
   }
+  if (query.isPending) return <WorkspacePending />;
   return (
     <div className="space-y-4">
       <section>
@@ -35,7 +36,6 @@ export function AccountingSettings() {
       </section>
       <section>
         <h4 className="mb-2 font-semibold">Отрицательные остатки</h4>
-        {query.isPending && <Spinner />}
         {query.data && (
           <>
             <label className="flex items-start gap-2 text-sm">

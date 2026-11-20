@@ -33,7 +33,7 @@ const TENANT_MODELS = new Set<string>([
   'User', 'StaffPosition', 'StaffPositionSalaryRate', 'EmployeeSalaryRate', 'Hall', 'Table', 'Category', 'Dish', 'SetComponent', 'DishVariant',
   'Order', 'OrderAction', 'WaiterShift', 'ShiftCashReport', 'CashShift', 'OrderItem',
   'OrderItemSetComponent', 'Payment', 'KitchenEvent', 'PenaltyReward', 'Incident',
-  'AuditLog', 'Settings', 'PushSubscription', 'ReceiptPrintRequest',
+  'AuditLog', 'Settings', 'MenuTax', 'OrderTax', 'PushSubscription', 'ReceiptPrintRequest',
   'QrTableSession', 'QrGuest', 'QrSessionItem', 'Ingredient', 'RecipeItem',
   'Purchase', 'PurchaseItem', 'StockMovement', 'PreparationStation',
   'FinanceAccount', 'FinanceCategory', 'FinanceEntry', 'SalaryAccrual',

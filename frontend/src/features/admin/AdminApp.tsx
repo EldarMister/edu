@@ -50,6 +50,11 @@ import { useWorkspaceScroll } from './pages/warehouse/workspace-route';
 import { StationsPage } from './pages/StationsPage';
 import { IngredientCategoriesPage } from './pages/IngredientCategoriesPage';
 import { WorkspaceHeaderProvider, WorkspaceTitleSlot, WorkspaceActionsSlot } from './pages/WorkspaceHeader';
+import { SettingsPage } from '../settings/SettingsPage';
+import { ReceiptSettingsPage } from '../settings/ReceiptSettingsPage';
+import { FiscalSettingsPage } from '../settings/FiscalSettingsPage';
+import { TaxesPage, TaxReportPage } from '../settings/TaxPages';
+import { taxReportKey } from '../settings/taxes-api';
 import './pages/warehouse/poster-workspace.css';
 import './components/sidebar.css';
 import './components/workspace-motion.css';
@@ -122,7 +127,12 @@ function receiptRequestVoice(request: ReceiptPrintRequest): string {
     `${delivery ? '' : 'Официант '}${request.waiterName} отправил заявку на печать ${documentName}. ${place}.`
   );
 }
-import { SettingsPage } from '../settings/SettingsPage';
+const SETTINGS_NAV = [
+  { key: 'general', label: 'Общие' },
+  { key: 'receipt', label: 'Чек' },
+  { key: 'fiscal', label: 'ККМ' },
+  { key: 'taxes', label: 'Налоги' },
+];
 
 type Section =
   | 'stats'
@@ -202,7 +212,7 @@ export function AdminApp() {
   const warehouseLocations = useWarehouseLocations(canSection('warehouse'));
   function setSection(next: Section) {
     const defaults: Partial<Record<Section, string>> = {
-      stats: 'overview', menu: 'goods', warehouse: 'balances', finance: financeNav[0]?.key, staff: 'employees',
+      stats: 'overview', menu: 'goods', warehouse: 'balances', finance: financeNav[0]?.key, staff: 'employees', settings: 'general',
     };
     const view = defaults[next];
     setRoute(view ? { section: next, view } : { section: next });
@@ -233,7 +243,9 @@ export function AdminApp() {
   const financeView = financeNav.find(({ key }) => key === route.get('view'))?.key ?? financeNav[0]?.key;
   const staffView = personnelNav.find(({ key }) => key === route.get('view'))?.key ?? 'employees';
   const staffTab = route.get('view') === 'waiter-report' ? 'waiter-orders' : 'current';
-  const posterWorkspace = ['menu', 'warehouse', 'finance', 'staff'].includes(section);
+  const settingsTab = SETTINGS_NAV.find(({ key }) => key === route.get('view')) ?? SETTINGS_NAV[0];
+  const settingsView = settingsTab.key;
+  const posterWorkspace = ['menu', 'warehouse', 'finance', 'staff'].includes(section) || (section === 'settings' && settingsView === 'taxes');
   function setStatsView(view: StatisticsView) { setRoute({ section: 'stats', view }); }
   function setWarehouseView(view: WarehouseView) { setRoute({ section: 'warehouse', view }); }
   function setMenuView(view: MenuView) { setRoute({ section: 'menu', view }); }
@@ -264,10 +276,14 @@ export function AdminApp() {
   useSocketEvent<Order>('order:status_changed', (order) => {
     void qc.invalidateQueries({ queryKey: financeKey });
     void qc.invalidateQueries({ queryKey: cashShiftKey });
+    void qc.invalidateQueries({ queryKey: taxReportKey });
     applyOrderStatusToCache(qc, order);
     qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
     qc.invalidateQueries({ queryKey: ['admin', 'tables'] });
     invalidateReceipts();
+  });
+  useSocketEvent('fiscal_receipt_updated', () => {
+    void qc.invalidateQueries({ queryKey: taxReportKey });
   });
   useSocketEvent('table:status_changed', () => {
     qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
@@ -400,7 +416,8 @@ export function AdminApp() {
       : section === 'menu' ? MENU_NAV.find((item) => item.key === menuView)?.label
         : section === 'finance' ? financeNav.find(({ key }) => key === financeView)?.label
           : section === 'staff' ? personnelNav.find(({ key }) => key === staffView)?.label
-            : section === 'tables' && route.get('view') === 'map' ? 'Карта зала' : undefined;
+            : section === 'tables' && route.get('view') === 'map' ? 'Карта зала'
+              : section === 'settings' ? settingsView === 'general' ? 'Общие настройки' : settingsTab.label : undefined;
   const pageTitle = profileOpen ? t('Личный кабинет') : current ? t(currentViewLabel ?? current.label) : '';
   useEffect(() => {
     const previous = document.title;
@@ -452,10 +469,10 @@ export function AdminApp() {
               : s.key === 'menu'
                 ? MENU_NAV.filter((item) => !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
                 : s.key === 'stats' ? STATISTICS_NAV
-                  : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav : [];
+                  : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav : s.key === 'settings' ? SETTINGS_NAV : [];
           const currentView = s.key === 'warehouse' ? warehouseView
             : s.key === 'menu' ? menuView : s.key === 'stats' ? statsView
-              : s.key === 'finance' ? financeView : staffView;
+              : s.key === 'finance' ? financeView : s.key === 'settings' ? settingsView : staffView;
           const hasChildren = children.length > 0;
           const expanded = hasChildren && active && collapsedSection !== s.key;
           const selectedSection = active && !hasChildren;
@@ -649,7 +666,7 @@ export function AdminApp() {
             <NoAccessScreen />
           ) : (
             <>
-              {section === 'stats' && canSection('statistics') && <StatisticsPage view={statsView} />}
+              {section === 'stats' && canSection('statistics') && (statsView === 'taxes' ? <TaxReportPage /> : <StatisticsPage view={statsView} />)}
               {section === 'orders' && canSection('orders') && <OrdersPage />}
               {section === 'receipts' && isAdmin && canSection('checks') && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
@@ -674,7 +691,12 @@ export function AdminApp() {
                 {staffView === 'employees' && <StaffPage key={staffTab} initialTab={staffTab} />}
               </>}
               {section === 'audit' && canSection('journal') && <AuditPage />}
-              {section === 'settings' && canSection('settings') && <SettingsPage />}
+              {section === 'settings' && canSection('settings') && <>
+                {settingsView === 'general' && <SettingsPage />}
+                {settingsView === 'receipt' && <ReceiptSettingsPage />}
+                {settingsView === 'fiscal' && <FiscalSettingsPage />}
+                {settingsView === 'taxes' && <TaxesPage />}
+              </>}
             </>
           )}
         </main>

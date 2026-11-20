@@ -22,7 +22,7 @@ export function useOrderReceiptPrinter() {
       try {
         const result = await fiscalize({ orderId, requestId });
         if (result?.success) {
-          fiscal = { receiptNumber: result.fiscalReceiptNumber, sign: result.fiscalSign, qrCode: result.qrCode };
+          fiscal = { receiptNumber: result.fiscalReceiptNumber, sign: result.fiscalSign, qrCode: result.qrCode, simulated: result.simulated };
         } else if (result?.error) {
           push({ message: `ККМ вернула ошибку: ${result.error}`, type: 'error', at: new Date().toISOString() });
         }

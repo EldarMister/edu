@@ -12,6 +12,7 @@ import { getCafeId } from '../tenant/tenant-context';
 
 /** Человекочитаемые названия полей настроек для описаний аудита. */
 const SETTINGS_FIELD_LABELS: Record<string, string> = {
+  taxesEnabled: 'учёт налогов',
   receiptPrintRequestsOnly: 'режим списка печати',
   waiterOrderPermissions: 'права официантов на изменение заказов',
   cafeName: 'название кафе',
@@ -21,6 +22,14 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   instagram: 'instagram',
   website: 'сайт',
   receiptText: 'текст чека',
+  receiptLanguage: 'язык чека',
+  receiptPrintCafeName: 'название заведения в чеке',
+  receiptPrintAddress: 'адрес в чеке',
+  receiptPrintPhone: 'телефон в чеке',
+  receiptLogoData: 'логотип чека',
+  roundOrderTotal: 'округление суммы заказа',
+  telegramStockAlertsEnabled: 'оповещения о складских остатках',
+  telegramStockChatId: 'чат оповещений об остатках',
   serviceChargeAmount: 'обслуживание',
   language: 'язык',
   payQr: 'оплата QR',
@@ -94,12 +103,14 @@ export class SettingsService {
     const {
       deliveryApiKeyHash: _secretHash,
       deliveryTableId: _internalDeliveryTableId,
+      telegramStockAlertState: _stockAlertState,
       ...safe
     } = s;
     return {
       ...safe,
       waiterOrderPermissions: normalizeWaiterOrderPermissions(s.waiterOrderPermissions),
       deliveryApiKeyConfigured: !!_secretHash,
+      telegramStockBotConfigured: !!process.env.TELEGRAM_STOCK_BOT_TOKEN?.trim(),
     };
   }
 
@@ -132,6 +143,7 @@ export class SettingsService {
       website: s.website,
       receiptText: s.receiptText,
       serviceChargeAmount: s.serviceChargeAmount,
+      roundOrderTotal: s.roundOrderTotal,
       language: s.language,
       paymentMethods: this.enabledMethodsOf(s),
       // Лёгкая версионированная ссылка вместо тяжёлого base64 — кэшируется браузером.
@@ -188,6 +200,26 @@ export class SettingsService {
     }
 
     const data: Prisma.SettingsUpdateInput = { ...dto };
+    if (dto.receiptLogoData !== undefined) {
+      if (dto.receiptLogoData && !QR_DATA_URL_RE.test(dto.receiptLogoData)) {
+        throw new BadRequestException('Логотип должен быть файлом PNG, JPG или WEBP');
+      }
+      data.receiptLogoData = dto.receiptLogoData || null;
+    }
+    if (dto.telegramStockChatId !== undefined) {
+      if (dto.telegramStockChatId && !Number.isSafeInteger(Number(dto.telegramStockChatId))) {
+        throw new BadRequestException('Укажите корректный ID чата Telegram');
+      }
+      data.telegramStockChatId = dto.telegramStockChatId || null;
+    }
+    if ((dto.telegramStockAlertsEnabled ?? current.telegramStockAlertsEnabled)
+      && !(dto.telegramStockChatId ?? current.telegramStockChatId)) {
+      throw new BadRequestException('Укажите ID чата Telegram для оповещений об остатках');
+    }
+    if ((dto.telegramStockChatId !== undefined && data.telegramStockChatId !== current.telegramStockChatId)
+      || (dto.telegramStockAlertsEnabled !== undefined && dto.telegramStockAlertsEnabled !== current.telegramStockAlertsEnabled)) {
+      data.telegramStockAlertState = Prisma.DbNull;
+    }
     if (dto.waiterOrderPermissions !== undefined) {
       data.waiterOrderPermissions = validateWaiterOrderPermissions(dto.waiterOrderPermissions);
     }
@@ -197,6 +229,9 @@ export class SettingsService {
 
     // ККМ: пустой провайдер = выключить (храним null, чтобы isEnabled() был false).
     if (dto.fiscalProvider !== undefined) {
+      if (['ekassa', 'yakassa'].includes(dto.fiscalProvider) && dto.fiscalProvider !== current.fiscalProvider) {
+        throw new BadRequestException('Для подключения ККМ нужен подтверждённый протокол поставщика');
+      }
       data.fiscalProvider = dto.fiscalProvider.trim() === '' ? null : dto.fiscalProvider;
     }
 
@@ -227,7 +262,7 @@ export class SettingsService {
       if (before === after) continue;
       changed.push(SETTINGS_FIELD_LABELS[key] ?? key);
       // QR-код — это огромный data URL, в журнал пишем только факт изменения.
-      if (key === 'qrImageUrl') {
+      if (key === 'qrImageUrl' || key === 'receiptLogoData') {
         oldValue[key] = before ? 'загружен' : 'нет';
         newValue[key] = after ? 'загружен' : 'удалён';
       } else if (key === 'fiscalEkassaApiKey' || key === 'fiscalYakassaApiKey') {

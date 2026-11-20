@@ -17,6 +17,7 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { AuditService, AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { MenuEntryDto } from './menu-entry.dto';
+import { dishTaxFields } from '../settings/order-taxes';
 import { createHash } from 'node:crypto';
 
 @Injectable()
@@ -168,6 +169,7 @@ export class MenuEntryService {
           price: new Prisma.Decimal(price),
           catalogKind: dto.catalogKind,
           description: dto.dish.description,
+          ...await dishTaxFields(tx, dto.dish),
           voiceName: dto.dish.voiceName,
           imageUrl,
           isAvailable: dto.dish.isAvailable,

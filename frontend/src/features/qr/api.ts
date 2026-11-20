@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { API_URL } from '@/lib/api';
+import { roundOrderAmount } from '@/lib/format';
 import { getGuestKey } from './guest';
 
 /** Публичный клиент QR-меню — без JWT и без auth-перехватчиков. */
@@ -108,6 +109,7 @@ export interface QrSession {
   itemCount: number;
   activeGuestCount: number;
   totalAmount: string;
+  rounding?: { serviceCharge: number; amount: number };
   submittedOrderId: string | null;
 }
 
@@ -226,16 +228,23 @@ export function useSubmitOrder(token: string) {
 }
 
 function recalcSessionTotals(session: QrSession): QrSession {
+  const rounding = session.rounding;
   let itemCount = 0;
   let totalAmount = 0;
   const items = session.items.map((item) => {
     const line = Number(item.price) * item.quantity;
+    const lineTotal = round2(line);
     itemCount += item.quantity;
-    totalAmount += line;
-    return { ...item, lineTotal: String(round2(line)) };
+    totalAmount += rounding ? lineTotal : line;
+    return { ...item, lineTotal: String(lineTotal) };
   });
   const activeGuestCount = Math.max(session.activeGuestCount, new Set(items.map((item) => item.guestId)).size);
-  return { ...session, items, itemCount, activeGuestCount, totalAmount: String(round2(totalAmount)) };
+  const beforeRounding = round2(totalAmount + (rounding?.serviceCharge ?? 0));
+  const payable = rounding ? roundOrderAmount(beforeRounding) : beforeRounding;
+  return {
+    ...session, items, itemCount, activeGuestCount, totalAmount: String(payable),
+    ...(rounding && { rounding: { ...rounding, amount: round2(beforeRounding - payable) } }),
+  };
 }
 
 function round2(value: number) {

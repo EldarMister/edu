@@ -5,6 +5,7 @@ import { usePageFilter, usePageFilters } from './workspace-route';
 import { useQuery } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../../components/WorkspacePending';
 import { api, apiError } from '@/lib/api';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useIngredients, type WarehouseLocation } from './api';
@@ -249,7 +250,7 @@ export function WarehouseMovementSummary({ warehouseId, range, onOpen, onHistory
           });
           setEditingColumns(false);
         }} />}
-      {query.isPending && <div className="flex justify-center p-8"><Spinner /></div>}
+      {query.isPending && <WorkspacePending />}
       {(query.isError || error) && (
         <div role="alert" className="space-y-2 p-4 text-danger">
           <p>{error || apiError(query.error)}</p>

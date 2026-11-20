@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { PaymentMethod, Settings } from '@prisma/client';
+import { OrderStatus, PaymentMethod, Settings } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -11,9 +11,9 @@ import type {
   FiscalSection,
   IFiscalProvider,
 } from './fiscal.interface';
-import { EkassaProvider } from './providers/ekassa.provider';
-import { YakassaProvider } from './providers/yakassa.provider';
 import { MockFiscalProvider } from './providers/mock.provider';
+
+const unsupportedProvider = 'Для этой ККМ нужен подтверждённый протокол поставщика. Отправка фискальных чеков недоступна.';
 
 /**
  * Выбирает провайдера ККМ по настройкам заведения и пробивает фискальный чек.
@@ -44,32 +44,17 @@ export class FiscalService {
 
   /** Провайдер по настройкам или null, если ККМ выключена. */
   private resolveProvider(s: Settings): IFiscalProvider | null {
-    switch (s.fiscalProvider) {
-      case 'mock':
-        // Эмуляция для проверки интеграции без реального ключа ККМ.
-        return new MockFiscalProvider();
-      case 'ekassa':
-        return new EkassaProvider({
-          apiKey: s.fiscalEkassaApiKey,
-          url: s.fiscalEkassaUrl,
-          inn: s.fiscalEkassaInn,
-        });
-      case 'yakassa':
-        return new YakassaProvider({
-          apiKey: s.fiscalYakassaApiKey,
-          url: s.fiscalYakassaUrl,
-        });
-      default:
-        return null;
-    }
+    // The two legacy HTTP adapters use unverified URLs and request formats.
+    return s.fiscalProvider === 'mock' ? new MockFiscalProvider() : null;
   }
 
   /** Провайдер или ошибка — для явных действий (проверка соединения, ручной повтор). */
   private async requireProvider(): Promise<IFiscalProvider> {
-    const provider = this.resolveProvider(await this.settings.get());
+    const settings = await this.settings.get();
+    const provider = this.resolveProvider(settings);
     if (!provider) {
       throw new BadRequestException(
-        'Провайдер ККМ не настроен. Выберите eKassa или YaKassa в настройках.',
+        settings.fiscalProvider ? unsupportedProvider : 'Провайдер ККМ не настроен',
       );
     }
     return provider;
@@ -86,21 +71,20 @@ export class FiscalService {
    * повторно не пробивает. Безопасно вызывать из flow печати: при выключенной ККМ
    * просто возвращает null и ничего не пишет.
    *
-   * @param force — повторить даже если уже была ошибка (используется кнопкой «Повторить»).
    */
-  async fiscalizeOrder(orderId: string, force = false): Promise<FiscalResult | null> {
+  async fiscalizeOrder(orderId: string): Promise<FiscalResult | null> {
     const settings = await this.settings.get();
-    const provider = this.resolveProvider(settings);
-    if (!provider) return null; // ККМ выключена — no-op
+    if (!settings.fiscalProvider) return null;
 
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
       include: { items: true, payments: true },
     });
     if (!order) throw new NotFoundException('Заказ не найден');
+    if (order.status !== OrderStatus.paid) throw new BadRequestException('Фискальный чек печатается по оплаченному заказу');
 
     // Уже успешно пробит — не дублируем.
-    if (order.fiscalReceiptNumber && !force) {
+    if (order.fiscalReceiptNumber && !order.fiscalReceiptNumber.startsWith('MOCK-')) {
       return {
         success: true,
         fiscalReceiptNumber: order.fiscalReceiptNumber,
@@ -108,16 +92,18 @@ export class FiscalService {
         qrCode: order.fiscalQrCode ?? undefined,
       };
     }
+    const provider = this.resolveProvider(settings);
+    if (!provider) return { success: false, error: unsupportedProvider };
 
     const paymentType = this.mapPaymentType(order.paymentMethod);
     const cashAmount = order.payments
-      .filter((p) => p.method === PaymentMethod.cash)
+      .filter((p) => p.status === 'paid' && p.method === PaymentMethod.cash)
       .reduce((sum, p) => sum + Number(p.amount), 0);
 
     const data: FiscalReceiptData = {
       orderId: order.id,
       orderNumber: order.orderNumber,
-      items: order.items.map((i) => ({
+      items: order.items.filter((item) => item.status !== 'cancelled' && item.status !== 'rejected').map((i) => ({
         // Снимки из заказа — не из текущего блюда.
         name: i.dishVariantNameSnapshot
           ? `${i.dishNameSnapshot} (${i.dishVariantNameSnapshot})`
@@ -142,23 +128,34 @@ export class FiscalService {
       result = { success: false, error: message };
     }
 
-    const updated = await this.prisma.order.update({
-      where: { id: order.id },
-      data: {
-        fiscalReceiptNumber: result.fiscalReceiptNumber ?? null,
-        fiscalSign: result.fiscalSign ?? null,
-        fiscalQrCode: result.qrCode ?? null,
-        fiscalError: result.success ? null : result.error ?? 'Ошибка ККМ',
-        fiscalizedAt: result.success ? new Date() : null,
-      },
-      select: {
-        id: true,
-        fiscalReceiptNumber: true,
-        fiscalSign: true,
-        fiscalQrCode: true,
-        fiscalError: true,
-        fiscalizedAt: true,
-      },
+    if (result.simulated) return result;
+    const fiscalizedAt = result.success ? new Date() : null;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.order.update({
+        where: { id: order.id },
+        data: {
+          fiscalReceiptNumber: result.fiscalReceiptNumber ?? null,
+          fiscalSign: result.fiscalSign ?? null,
+          fiscalQrCode: result.qrCode ?? null,
+          fiscalError: result.success ? null : result.error ?? 'Ошибка ККМ',
+          fiscalizedAt,
+        },
+        select: {
+          id: true,
+          fiscalReceiptNumber: true,
+          fiscalSign: true,
+          fiscalQrCode: true,
+          fiscalError: true,
+          fiscalizedAt: true,
+        },
+      });
+      if (fiscalizedAt && order.closedAt) {
+        await tx.orderTax.updateMany({
+          where: { orderId: order.id, soldAt: order.closedAt, fiscalizedAt: null },
+          data: { fiscalizedAt },
+        });
+      }
+      return saved;
     });
 
     this.events.emitToAdmin(SERVER_EVENTS.FISCAL_RECEIPT_UPDATED, { orderId: order.id, ...updated });

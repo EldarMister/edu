@@ -199,6 +199,12 @@ export function ReceiptPrintSheet() {
             <span>{money(receipt.serviceChargeAmount)}</span>
           </div>
         )}
+        {Number(receipt.roundingAmount) > 0 && (
+          <div className="mt-2 flex justify-between text-sm text-text-secondary">
+            <span>{t('Округление')}</span>
+            <span>−{money(receipt.roundingAmount ?? 0)}</span>
+          </div>
+        )}
         <div className="mt-2 flex justify-between border-t border-border pt-2 text-[15px] font-semibold text-text-primary">
           <span>{t('Итого')}</span>
           <span>{money(receipt.finalAmount)}</span>

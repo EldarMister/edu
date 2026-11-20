@@ -3,7 +3,8 @@ import { Modal } from '@/components/Modal';
 import { EditorPage } from '../pages/warehouse/EditorPage';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
-import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, money, orderItemDisplayName, paymentDisplayLabel, timeHM, isSplitPayment, paymentMethodLabel,
+  taxRateLabel } from '@/lib/format';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 import { useCancelOrderItem, useRetryFiscal } from '../api';
@@ -214,6 +215,9 @@ export function OrderDetailsModal({
           {Number(order.serviceChargeAmount) > 0 && (
             <Total label="Обслуживание" value={money(order.serviceChargeAmount)} />
           )}
+          {Number(order.roundingAmount) > 0 && <Total label="Округление" value={`−${money(order.roundingAmount ?? 0)}`} />}
+          {order.taxes?.map((tax) => <Total key={tax.id}
+            label={`В т. ч. ${tax.name} (${taxRateLabel(tax.rate)})`} value={money(tax.amount)} />)}
           <Total label="К оплате" value={money(order.finalAmount)} strong />
         </div>
 
@@ -243,6 +247,7 @@ function FiscalBlock({ order }: { order: Order }) {
   const push = useNotifications((s) => s.push);
 
   const hasReceipt = !!order.fiscalReceiptNumber;
+  const simulated = order.fiscalReceiptNumber?.startsWith('MOCK-');
   const hasError = !hasReceipt && !!order.fiscalError;
   if (!hasReceipt && !hasError) return null;
 
@@ -250,7 +255,7 @@ function FiscalBlock({ order }: { order: Order }) {
     try {
       const res = await retry.mutateAsync(order.id);
       if (res?.success) {
-        push({ message: 'Фискальный чек пробит', type: 'success', at: new Date().toISOString() });
+        push({ message: res.simulated ? 'Эмуляция завершена' : 'Фискальный чек получен', type: 'success', at: new Date().toISOString() });
       } else {
         push({
           message: res?.error ?? 'ККМ вернул ошибку',
@@ -264,17 +269,17 @@ function FiscalBlock({ order }: { order: Order }) {
   };
 
   if (hasReceipt) {
-    const qr = order.fiscalQrCode ?? '';
+    const qr = simulated ? '' : order.fiscalQrCode ?? '';
     const isImage = qr.startsWith('data:image');
     return (
       <div className="rounded-lg border border-success/30 bg-success/5 px-3 py-2.5">
         <div className="flex items-center gap-2">
           <span className="inline-block rounded-full bg-success/15 px-2.5 py-0.5 text-xs font-medium text-success">
-            Фискальный чек
+            {simulated ? 'Тестовый чек' : 'Фискальный чек'}
           </span>
           <span className="text-sm font-semibold text-text-primary">№ {order.fiscalReceiptNumber}</span>
         </div>
-        {order.fiscalSign && (
+        {!simulated && order.fiscalSign && (
           <p className="mt-1 text-xs text-text-muted">Фискальный признак: {order.fiscalSign}</p>
         )}
         {qr && (

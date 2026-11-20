@@ -1,5 +1,6 @@
 import { lockRecipeGraph } from '../warehouse/recipe-resolution';
 import { recordOrderReceipts, reverseOrderReceipts } from '../finance/order-receipts';
+import { receiptTaxes, recordOrderTaxes } from '../settings/order-taxes';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { hasPermission, resolveUserPermissions } from '../common/permissions';
 import {
@@ -188,7 +189,7 @@ export class OrdersService {
   }
 
   async findByIdForActor(id: string, actor: AuditActor) {
-    const order = await this.findById(id);
+    const order = await this.prisma.order.findUniqueOrThrow({ where: { id }, include: { ...orderInclude, taxes: receiptTaxes } });
     if (actor.role === Role.WAITER && !this.canWaiterViewOrder(order, actor.id)) {
       throw new ForbiddenException('Это не ваш заказ');
     }
@@ -341,8 +342,8 @@ export class OrdersService {
         const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
         await this.ensureOrderStations(tx, itemsData);
         const activeShift = await this.shifts.shiftForTerminalOrder(waiterId, tx);
-        const serviceChargeAmount = delivery ? 0 : await this.currentServiceChargeAmount(tx);
-        const totals = this.calcTotals(itemsData, serviceChargeAmount);
+        const pricing = await this.orderPricing(tx);
+        const totals = this.calcTotals(itemsData, delivery ? 0 : pricing.serviceChargeAmount, pricing.roundOrderTotal);
         const businessDate = this.businessDateOf();
         const orderNumber = await this.nextOrderNumber(tx, businessDate);
         if (!delivery) {
@@ -368,6 +369,8 @@ export class OrdersService {
             totalAmount: totals.total,
             discountAmount: totals.discount,
             serviceChargeAmount: totals.serviceCharge,
+            roundOrderTotal: pricing.roundOrderTotal,
+            roundingAmount: totals.roundingAmount,
             finalAmount: totals.final,
             items: { create: itemsData },
           },
@@ -452,8 +455,8 @@ export class OrdersService {
           const initialStatus = hasPrep ? OrderStatus.sent_to_kitchen : OrderStatus.ready;
           const initialTableStatus = hasPrep ? TableStatus.sent_to_kitchen : TableStatus.ready;
           await this.ensureOrderStations(tx, itemsData);
-          const serviceChargeAmount = await this.currentServiceChargeAmount(tx);
-          const totals = this.calcTotals(itemsData, serviceChargeAmount);
+          const pricing = await this.orderPricing(tx);
+          const totals = this.calcTotals(itemsData, pricing.serviceChargeAmount, pricing.roundOrderTotal);
           const businessDate = this.businessDateOf();
           const orderNumber = await this.nextOrderNumber(tx, businessDate);
           await tx.table.update({ where: { id: tableId }, data: { status: initialTableStatus } });
@@ -471,6 +474,8 @@ export class OrdersService {
               totalAmount: totals.total,
               discountAmount: totals.discount,
               serviceChargeAmount: totals.serviceCharge,
+              roundOrderTotal: pricing.roundOrderTotal,
+              roundingAmount: totals.roundingAmount,
               finalAmount: totals.final,
               items: { create: itemsData },
             },
@@ -581,7 +586,7 @@ export class OrdersService {
           await this.ensureOrderStations(tx, itemsData);
           // Доставка не получает ресторанный сервисный сбор: внешний клиент
           // ориентируется на цены меню, которые возвращает integration API.
-          const totals = this.calcTotals(itemsData, 0);
+          const totals = this.calcTotals(itemsData, 0, settings.roundOrderTotal);
           const businessDate = this.businessDateOf();
           const orderNumber = await this.nextOrderNumber(tx, businessDate);
           const createdOrder = await tx.order.create({
@@ -601,6 +606,8 @@ export class OrdersService {
               totalAmount: totals.total,
               discountAmount: totals.discount,
               serviceChargeAmount: totals.serviceCharge,
+              roundOrderTotal: settings.roundOrderTotal,
+              roundingAmount: totals.roundingAmount,
               finalAmount: totals.final,
               items: { create: itemsData },
             },
@@ -2320,6 +2327,9 @@ export class OrdersService {
       }
       const closedAt = new Date();
       if (latest.cafeId) await recordOrderReceipts(tx, latest.cafeId, orderId, cashierId, closedAt);
+      const taxFactor = latest.roundingAmount?.gt(0)
+        ? latest.finalAmount.div(latest.finalAmount.add(latest.roundingAmount)) : undefined;
+      await recordOrderTaxes(tx, orderId, latest.cafeId, latest.items, closedAt, taxFactor);
       // Стол освобождается.
       await tx.table.update({ where: { id: order.tableId }, data: { status: TableStatus.free } });
       return tx.order.update({
@@ -2449,6 +2459,9 @@ export class OrdersService {
       }
 
       if (targetStatus !== OrderStatus.paid) {
+        if (latest.paymentStatus === PaymentStatus.paid) {
+          await tx.orderTax.updateMany({ where: { orderId, reversedAt: null }, data: { reversedAt: new Date() } });
+        }
         if (latest.cafeId && latest.paymentStatus === PaymentStatus.paid) {
           await reverseOrderReceipts(tx, latest.cafeId, orderId, actor.id);
         }
@@ -2729,6 +2742,7 @@ export class OrdersService {
       finalPrice: string | number | Prisma.Decimal | Prisma.DecimalJsLike;
     }[],
     serviceChargeAmount = 0,
+    roundOrderTotal = false,
   ) {
     let total = 0;
     let discount = 0;
@@ -2740,48 +2754,44 @@ export class OrdersService {
       final += Number(i.finalPrice);
     }
     const serviceCharge = round2(Math.max(0, serviceChargeAmount));
+    const beforeRounding = round2(final + serviceCharge);
+    const payable = roundOrderTotal ? Math.floor(beforeRounding) : beforeRounding;
     return {
       total: new Prisma.Decimal(round2(total)),
       discount: new Prisma.Decimal(round2(discount)),
       serviceCharge: new Prisma.Decimal(serviceCharge),
-      final: new Prisma.Decimal(round2(final + serviceCharge)),
+      final: new Prisma.Decimal(payable),
+      roundingAmount: new Prisma.Decimal(round2(beforeRounding - payable)),
     };
   }
 
   /** Пересчитывает суммы заказа по его актуальным (не отказанным) позициям. */
   private async recalcOrder(tx: Prisma.TransactionClient, orderId: string) {
-    const { source, items } = await tx.order.findUniqueOrThrow({
+    const { source, roundOrderTotal, items } = await tx.order.findUniqueOrThrow({
       where: { id: orderId },
-      select: { source: true, items: { select: { status: true, priceSnapshot: true, quantity: true, discountAmount: true, finalPrice: true } } },
+      select: { source: true, roundOrderTotal: true, items: { select: { status: true, priceSnapshot: true, quantity: true, discountAmount: true, finalPrice: true } } },
     });
-    let total = 0;
-    let discount = 0;
-    let final = 0;
-    let activeItems = 0;
-    for (const i of items) {
-      if (i.status === OrderItemStatus.rejected || i.status === OrderItemStatus.cancelled) continue;
-      activeItems += 1;
-      total += Number(i.priceSnapshot) * i.quantity;
-      discount += Number(i.discountAmount);
-      final += Number(i.finalPrice);
-    }
-    const serviceCharge = activeItems > 0 && source !== 'delivery' ? await this.currentServiceChargeAmount(tx) : 0;
+    const active = items.filter((item) => item.status !== OrderItemStatus.rejected && item.status !== OrderItemStatus.cancelled);
+    const serviceCharge = active.length > 0 && source !== 'delivery' ? (await this.orderPricing(tx)).serviceChargeAmount : 0;
+    const totals = this.calcTotals(active, serviceCharge, roundOrderTotal);
     await tx.order.update({
       where: { id: orderId },
       data: {
-        totalAmount: new Prisma.Decimal(round2(total)),
-        discountAmount: new Prisma.Decimal(round2(discount)),
-        serviceChargeAmount: new Prisma.Decimal(serviceCharge),
-        finalAmount: new Prisma.Decimal(round2(final + serviceCharge)),
+        totalAmount: totals.total,
+        discountAmount: totals.discount,
+        serviceChargeAmount: totals.serviceCharge,
+        roundingAmount: totals.roundingAmount,
+        finalAmount: totals.final,
       },
     });
   }
 
-  private async currentServiceChargeAmount(tx?: Prisma.TransactionClient): Promise<number> {
-    const settings = tx
-      ? await tx.settings.findFirst({ select: { serviceChargeAmount: true } })
-      : await this.settings.ensure();
-    return Math.max(0, round2(Number(settings?.serviceChargeAmount ?? 0)));
+  private async orderPricing(tx: Prisma.TransactionClient) {
+    const settings = await tx.settings.findFirst({ select: { serviceChargeAmount: true, roundOrderTotal: true } });
+    return {
+      serviceChargeAmount: Math.max(0, round2(Number(settings?.serviceChargeAmount ?? 0))),
+      roundOrderTotal: settings?.roundOrderTotal ?? false,
+    };
   }
 
   private async lockKitchenSnapshot(tx: Prisma.TransactionClient, orderId: string, previous: { status: OrderStatus; updatedAt: Date; items: { id: string; status: OrderItemStatus; quantity: number }[] }) {

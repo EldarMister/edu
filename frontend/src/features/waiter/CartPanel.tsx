@@ -1,5 +1,5 @@
 import type { TableItem } from '@/types';
-import { useCart, cartTotals } from './cart';
+import { useCart, cartTotals, type CartRounding } from './cart';
 import { displayOrderNumber, hallSuffix, money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
@@ -9,6 +9,7 @@ import { CartLinesList, TakeawaySwitch } from './CartItems';
 export function CartPanel({
   table,
   delivery,
+  rounding,
   hallName,
   mode,
   orderNumber,
@@ -21,6 +22,7 @@ export function CartPanel({
 }: {
   table: TableItem | null;
   delivery?: boolean;
+  rounding?: CartRounding;
   hallName?: string;
   mode: 'create' | 'add' | 'edit';
   orderNumber?: string;
@@ -35,7 +37,7 @@ export function CartPanel({
   const t = useT();
   const { lines, comment, commentOpen, inc, dec, setComment, setCommentOpen, setLineTakeaway, setAllTakeaway, clear } =
     useCart();
-  const totals = cartTotals(lines);
+  const totals = cartTotals(lines, rounding);
   const hasLines = lines.length > 0;
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
   const canSend = hasLines && canSubmit && !submitting;
@@ -99,6 +101,8 @@ export function CartPanel({
           {totals.discount > 0 && (
             <Row label={t('Скидка')} value={`−${money(totals.discount)}`} valueClass="text-success" />
           )}
+          {totals.serviceCharge > 0 && <Row label={t('Обслуживание')} value={money(totals.serviceCharge)} />}
+          {totals.roundingAmount > 0 && <Row label={t('Округление')} value={`−${money(totals.roundingAmount)}`} />}
           <div className="flex items-center justify-between pt-1">
             <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
             <NumberTicker value={totals.final} className="text-xl font-semibold text-text-primary" />

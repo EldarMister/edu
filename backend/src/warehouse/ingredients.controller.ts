@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Role } from '@prisma/client';
 import { IngredientsService } from './ingredients.service';
@@ -8,6 +9,7 @@ import { CreateIngredientDto, UpdateIngredientDto } from './dto';
 import { assertWarehousePermission } from './warehouse-permissions';
 import { IsInt, IsNotEmpty, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { Type } from 'class-transformer';
+import { BalanceExportQuery } from './balance-xlsx';
 
 class RenameIngredientCategoryDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
@@ -56,6 +58,16 @@ export class IngredientsController {
       warehouseId,
       includeInactive: includeInactive === 'true' || includeInactive === '1',
     });
+  }
+
+  @Get('export.xlsx')
+  @Roles(Role.ADMIN, Role.OWNER)
+  @RequirePermission('actions.warehouseCosts', 'actions.exportReports')
+  async exportXlsx(@Query() query: BalanceExportQuery, @Res() response: Response) {
+    const workbook = await this.ingredients.exportXlsx(query);
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', 'attachment; filename="warehouse-balances.xlsx"');
+    response.send(workbook);
   }
 
   @Get(':id')

@@ -5,6 +5,7 @@ export const STATISTICS_NAV = [
   { key: 'staff', label: 'Сотрудники' },
   { key: 'categories', label: 'Категории' },
   { key: 'payments', label: 'Оплаты' },
+  { key: 'taxes', label: 'Налоги' },
 ] as const;
 
 export type StatisticsView = typeof STATISTICS_NAV[number]['key'];

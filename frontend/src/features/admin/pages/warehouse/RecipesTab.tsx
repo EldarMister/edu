@@ -1,7 +1,7 @@
 import { useEditorRoute, usePageFilter } from './workspace-route';
 import { usePermissions } from '@/hooks/usePermissions';
 import { Select } from '@/components/Select';
-import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../../components/WorkspacePending';
 import { apiError } from '@/lib/api';
 import { useIngredients, useWarehouseDishes, type Ingredient } from './api';
 import { StaffRecipePage } from './StaffRecipePage';
@@ -51,11 +51,7 @@ export function RecipesTab({
           />
         )}
       </div>
-      {(dishes.isPending || ingredients.isPending) && (
-        <div className="flex justify-center p-8">
-          <Spinner />
-        </div>
-      )}
+      {(dishes.isPending || ingredients.isPending) && <WorkspacePending />}
       {(dishes.isError || ingredients.isError) && (
         <p role="alert" className="p-4 text-danger">
           {apiError(dishes.error ?? ingredients.error)}

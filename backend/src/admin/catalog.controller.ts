@@ -1,4 +1,6 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { GoodsExportQuery } from './goods-xlsx';
 import { hasPermission, resolvePermissions } from '../common/permissions';
 import { MenuEntryService } from './menu-entry.service';
 import { MenuEntryDto } from './menu-entry.dto';
@@ -150,6 +152,19 @@ export class CatalogController {
   @RequirePermission('sections.menu')
   dishes(@Query('categoryId') categoryId?: string, @Query('search') search?: string) {
     return this.catalog.dishesAll({ categoryId, search });
+  }
+
+  @Get('menu/goods')
+  @RequirePermission('sections.menu')
+  goods() { return this.catalog.goodsAll(); }
+
+  @Get('menu/goods/export.xlsx')
+  @RequirePermission('sections.menu', 'actions.exportReports')
+  async exportGoods(@Query() query: GoodsExportQuery, @Res() response: Response) {
+    const workbook = await this.catalog.exportGoods(query);
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', 'attachment; filename="menu-goods.xlsx"');
+    response.send(workbook);
   }
 
   @Post('dishes')

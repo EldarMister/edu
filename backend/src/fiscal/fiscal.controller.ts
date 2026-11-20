@@ -32,7 +32,7 @@ export class FiscalController {
     } else {
       assertReceiptPrintOperator(user, true);
     }
-    return this.fiscal.fiscalizeOrder(orderId, false);
+    return this.fiscal.fiscalizeOrder(orderId);
   }
 
   /** Повторить фискализацию заказа — кнопка «Повторить» в карточке заказа. */
@@ -40,6 +40,6 @@ export class FiscalController {
   @RequirePermission('sections.checks')
   @Roles(Role.ADMIN, Role.OWNER)
   retry(@Param('orderId') orderId: string) {
-    return this.fiscal.fiscalizeOrder(orderId, true);
+    return this.fiscal.fiscalizeOrder(orderId);
   }
 }

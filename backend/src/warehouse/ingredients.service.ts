@@ -11,6 +11,7 @@ import { postStockMovement } from './stock-posting';
 import { lockIngredients, lockWarehouseCatalog } from './stock-lock';
 import { getWarehouseBalance, resolveWarehouse, setWarehouseBalance, warehouseBalances, warehouseDocumentFilter } from './warehouse-location';
 import { getCafeId } from '../tenant/tenant-context';
+import { balanceExportColumns, writeBalanceWorkbook, type BalanceExportQuery } from './balance-xlsx';
 import {
   assertUnitMatchesType,
   baseUnitForType,
@@ -129,6 +130,13 @@ export class IngredientsService {
           recipeOutputQuantity: recipe ? fromBase(Number(recipe.outputAmount), normalizeUnit(recipe.outputUnit)) : null, recipeOutputUnit: recipe?.outputUnit ?? null };
       });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+  }
+
+  async exportXlsx(query: BalanceExportQuery) {
+    const columns = balanceExportColumns(query.columns);
+    const items = await this.findAll({ warehouseId: query.warehouseId });
+    const warehouse = query.warehouseId ? await resolveWarehouse(this.prisma, query.warehouseId) : null;
+    return writeBalanceWorkbook(items, warehouse?.name ?? 'Все склады', query, columns);
   }
 
   async findOne(id: string) {

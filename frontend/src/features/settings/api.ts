@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, API_URL } from '@/lib/api';
 import type { WaiterOrderPermissions } from '@/lib/order-permissions';
-import type { PaymentMethod } from '@/types';
+import type { PaymentMethod, ReceiptPrintSettings } from '@/types';
 
 /** Преобразует значение QR из настроек в пригодный для <img src> адрес.
  *  Публичные настройки отдают лёгкую ссылку (/settings/qr?v=…), админские — data URL. */
@@ -11,7 +11,13 @@ export function resolveQrSrc(value: string | null | undefined): string | null {
   return `${API_URL}/api${value.startsWith('/') ? value : `/${value}`}`;
 }
 
-export interface Settings {
+export interface Settings extends Partial<ReceiptPrintSettings> {
+  taxesEnabled?: boolean;
+  roundOrderTotal?: boolean;
+  telegramStockAlertsEnabled?: boolean;
+  telegramStockChatId?: string | null;
+  telegramStockBotConfigured?: boolean;
+  receiptLogoData?: string | null;
   receiptPrintRequestsOnly: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   id: string;
@@ -44,7 +50,7 @@ export interface Settings {
   qrGeoLng: number | null;
   qrGeoRadius: number;
   // ККМ / фискализация
-  fiscalProvider: string | null; // 'ekassa' | 'yakassa' | null
+  fiscalProvider: string | null; // mock или сохранённый ранее провайдер.
   fiscalEkassaApiKey: string | null;
   fiscalEkassaUrl: string | null;
   fiscalEkassaInn: string | null;
@@ -54,6 +60,7 @@ export interface Settings {
 }
 
 export interface PublicSettings {
+  roundOrderTotal?: boolean;
   useFloorPlan?: boolean;
   receiptPrintRequestsOnly: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
@@ -91,7 +98,7 @@ export function useAdminSettings() {
   });
 }
 
-export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'queueDisplayCode' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount'>> & {
+export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'queueDisplayCode' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount' | 'telegramStockBotConfigured'>> & {
   serviceChargeAmount?: number;
 };
 

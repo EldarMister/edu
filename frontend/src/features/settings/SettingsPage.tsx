@@ -15,7 +15,6 @@ import {
   useAdminSettings,
   useGenerateDeliveryApiKey,
   useUpdateSettings,
-  useTestFiscalConnection,
   type SettingsInput,
 } from './api';
 import { OrderPermissionsSettings } from './OrderPermissionsSettings';
@@ -24,10 +23,11 @@ import { QrPaymentCard } from './QrPaymentCard';
 import { AccountingSettings } from '../admin/pages/warehouse/WarehouseSettingsPanels';
 import { usePermissions } from '@/hooks/usePermissions';
 
-type FiscalProvider = '' | 'ekassa' | 'yakassa' | 'mock';
-
 interface Form {
-  receiptPrintRequestsOnly: boolean;
+  taxesEnabled: boolean;
+  roundOrderTotal: boolean;
+  telegramStockAlertsEnabled: boolean;
+  telegramStockChatId: string;
   waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;
@@ -35,7 +35,6 @@ interface Form {
   phone2: string;
   instagram: string;
   website: string;
-  receiptText: string;
   serviceChargeAmount: string;
   payQr: boolean;
   payCash: boolean;
@@ -47,15 +46,7 @@ interface Form {
   qrGeoRadius: number;
   queueDisplayEnabled: boolean;
   queueDisplayMode: 'table' | 'number';
-  fiscalProvider: FiscalProvider;
-  fiscalEkassaApiKey: string;
-  fiscalEkassaUrl: string;
-  fiscalEkassaInn: string;
-  fiscalYakassaApiKey: string;
-  fiscalYakassaUrl: string;
 }
-
-const RECEIPT_LIMIT = 120;
 
 export function SettingsPage() {
   const { canSection, canEditSection } = usePermissions();
@@ -69,26 +60,26 @@ function CafeSettings() {
   const permissions = usePermissions();
   const { data, isLoading, isError, error } = useAdminSettings();
   const update = useUpdateSettings();
-  const testFiscal = useTestFiscalConnection();
   const generateDeliveryKey = useGenerateDeliveryApiKey();
   const push = useNotifications((s) => s.push);
   const isOwner = useAuth((s) => s.user?.role === 'OWNER');
   const t = useT();
-  const [fiscalCheck, setFiscalCheck] = useState<'ok' | 'fail' | null>(null);
   const [generatedDeliveryKey, setGeneratedDeliveryKey] = useState<string | null>(null);
 
   const [draft, setDraft] = useState<Form | null>(null);
   const dirty = draft !== null;
   const form: Form | null = draft ?? (data ? {
-    receiptPrintRequestsOnly: data.receiptPrintRequestsOnly ?? false,
     waiterOrderPermissions: data.waiterOrderPermissions ?? DEFAULT_WAITER_PERMISSIONS,
     cafeName: data.cafeName,
+    taxesEnabled: data.taxesEnabled ?? false,
+    roundOrderTotal: data.roundOrderTotal ?? false,
+    telegramStockAlertsEnabled: data.telegramStockAlertsEnabled ?? false,
+    telegramStockChatId: data.telegramStockChatId ?? '',
     address: data.address,
     phone: data.phone,
     phone2: data.phone2,
     instagram: data.instagram ?? '',
     website: data.website ?? '',
-    receiptText: data.receiptText,
     serviceChargeAmount: '0',
     payQr: data.payQr,
     payCash: data.payCash,
@@ -100,12 +91,6 @@ function CafeSettings() {
     qrGeoRadius: data.qrGeoRadius,
     queueDisplayEnabled: data.queueDisplayEnabled,
     queueDisplayMode: data.queueDisplayMode,
-    fiscalProvider: (data.fiscalProvider ?? '') as FiscalProvider,
-    fiscalEkassaApiKey: data.fiscalEkassaApiKey ?? '',
-    fiscalEkassaUrl: data.fiscalEkassaUrl ?? '',
-    fiscalEkassaInn: data.fiscalEkassaInn ?? '',
-    fiscalYakassaApiKey: data.fiscalYakassaApiKey ?? '',
-    fiscalYakassaUrl: data.fiscalYakassaUrl ?? '',
   } : null);
 
   if (isLoading) return <WorkspacePending />;
@@ -121,15 +106,17 @@ function CafeSettings() {
   }
 
   const toSettingsInput = (source: Form): SettingsInput => ({
-    ...(isOwner ? { receiptPrintRequestsOnly: source.receiptPrintRequestsOnly } : {}),
     waiterOrderPermissions: source.waiterOrderPermissions,
     cafeName: source.cafeName,
+    taxesEnabled: source.taxesEnabled,
+    roundOrderTotal: source.roundOrderTotal,
+    telegramStockAlertsEnabled: source.telegramStockAlertsEnabled,
+    telegramStockChatId: source.telegramStockChatId.trim(),
     address: source.address,
     phone: source.phone,
     phone2: source.phone2,
     instagram: source.instagram,
     website: source.website,
-    receiptText: source.receiptText,
     payQr: source.payQr,
     payCash: source.payCash,
     payCard: source.payCard,
@@ -140,12 +127,6 @@ function CafeSettings() {
     qrGeoRadius: source.qrGeoRadius,
     queueDisplayEnabled: source.queueDisplayEnabled,
     queueDisplayMode: source.queueDisplayMode,
-    fiscalProvider: source.fiscalProvider,
-    fiscalEkassaApiKey: source.fiscalEkassaApiKey,
-    fiscalEkassaUrl: source.fiscalEkassaUrl,
-    fiscalEkassaInn: source.fiscalEkassaInn,
-    fiscalYakassaApiKey: source.fiscalYakassaApiKey,
-    fiscalYakassaUrl: source.fiscalYakassaUrl,
   });
 
   const saveSettings = async ({ silent = false }: { silent?: boolean } = {}) => {
@@ -198,26 +179,6 @@ function CafeSettings() {
     );
   };
 
-  const runFiscalCheck = async () => {
-    setFiscalCheck(null);
-    try {
-      const saved = await saveSettings({ silent: true });
-      if (!saved) return;
-      const res = await testFiscal.mutateAsync();
-      setFiscalCheck(res.ok ? 'ok' : 'fail');
-      if (!res.ok) {
-        push({
-          message: t('ККМ не ответила. Проверьте провайдера, URL и ключ.'),
-          type: 'error',
-          at: new Date().toISOString(),
-        });
-      }
-    } catch (err) {
-      setFiscalCheck('fail');
-      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
-    }
-  };
-
   const createDeliveryKey = async () => {
     try {
       const result = await generateDeliveryKey.mutateAsync();
@@ -234,6 +195,41 @@ function CafeSettings() {
 
   return (
     <div className="workspace-stagger space-y-4">
+      <section className="card space-y-4 p-5">
+        <h2 className="font-semibold text-text-primary">{t('Настройки кассы')}</h2>
+        <label className="flex cursor-pointer items-start gap-3">
+          <input type="checkbox" className="mt-0.5 h-4 w-4 shrink-0 accent-primary" aria-label={t('Округлять сумму заказа')} checked={form.roundOrderTotal}
+            onChange={(event) => set('roundOrderTotal', event.target.checked)} />
+          <span className="text-sm">
+            {t('Округлять сумму заказа')}
+            <span className="mt-1 block text-text-muted">{t('Итог новых заказов округляется вниз до целого сома, например 10,60 → 10.')}</span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-center gap-3">
+          <input type="checkbox" className="h-4 w-4 accent-primary" checked={form.taxesEnabled}
+            disabled={update.isPending || !permissions.canEditSection('settings')}
+            onChange={(event) => set('taxesEnabled', event.target.checked)} />
+          <span className="font-semibold">Учитывать налоги</span>
+        </label>
+        <p className="mt-1 text-sm text-text-muted">Настройте ставки в разделе «Налоги» и назначьте их позициям или категориям меню.</p>
+      </section>
+      <section className="card space-y-3 p-5">
+        <h2 className="font-semibold text-text-primary">{t('Оповещения об остатках')}</h2>
+        <label className="flex cursor-pointer items-center gap-3 text-sm">
+          <input type="checkbox" className="h-4 w-4 accent-primary" checked={form.telegramStockAlertsEnabled}
+            onChange={(event) => set('telegramStockAlertsEnabled', event.target.checked)} />
+          {t('Отправлять в Telegram')}
+        </label>
+        <label className="grid max-w-xs gap-1.5 text-sm text-text-secondary">
+          {t('ID чата Telegram')}
+          <input className="input w-full" inputMode="text" maxLength={17}
+            value={form.telegramStockChatId} onChange={(event) => set('telegramStockChatId', event.target.value)} />
+        </label>
+        <p className="text-sm text-text-muted">{t('Бот сообщает, когда суммарный остаток позиции достигает установленного лимита.')}</p>
+        {form.telegramStockAlertsEnabled && !data.telegramStockBotConfigured && <p className="text-sm text-text-muted">
+          {t('Отправка начнётся после подключения бота на сервере.')}
+        </p>}
+      </section>
       {permissions.can('sections.warehouse') && permissions.can('actions.warehouseSettings') && (
         <details className="card p-5"><summary className="cursor-pointer font-semibold">Складской учёт</summary>
           <div className="mt-4"><AccountingSettings /></div>
@@ -294,31 +290,6 @@ function CafeSettings() {
                 placeholder="edu-cafe.kg"
               />
             </Field>
-            <Field label={t('Текст в чеке')} className="sm:col-span-2">
-              <textarea
-                className="input h-24 resize-none py-2.5"
-                maxLength={RECEIPT_LIMIT}
-                value={form.receiptText}
-                onChange={(e) => set('receiptText', e.target.value)}
-                placeholder="Спасибо за покупку!"
-              />
-              <p className="mt-1 text-right text-xs text-text-muted">
-                {form.receiptText.length}/{RECEIPT_LIMIT}
-              </p>
-            </Field>
-            <div className="sm:col-span-2 rounded-xl border border-border bg-background px-4 py-3 text-sm leading-6 text-text-secondary">
-              <p>EDU POS печатает предчек / внутренний товарный чек.</p>
-              <p>Фискальный чек формируется только через подключенную ККМ или онлайн-кассу.</p>
-            </div>
-            {isOwner && <section className="card space-y-2 p-5">
-              <h3 className="font-semibold">Список печати счетов и чеков</h3>
-              <select className="input w-full" aria-label="Список печати счетов и чеков"
-                value={form.receiptPrintRequestsOnly ? 'requests' : 'all'} disabled={update.isPending}
-                onChange={(event) => set('receiptPrintRequestsOnly', event.target.value === 'requests')}>
-                <option value="all">Все доступные счета и чеки</option>
-                <option value="requests">Только по заявкам официантов</option>
-              </select>
-            </section>}
             {isOwner && <CashShiftSettings />}
 
             {/* Гео-проверка QR-заказа — рядом со статусом принтера */}
@@ -577,119 +548,6 @@ function CafeSettings() {
               </div>
             )}
           </div>
-
-          {/* ККМ / Фискализация */}
-          <div className="card p-5">
-            <h3 className="mb-1 text-[15px] font-semibold text-text-primary">{t('ККМ / Фискализация')}</h3>
-            <p className="mb-3 text-xs text-text-muted">
-              {t('Без подключённой ККМ печатается товарный чек. С ККМ — фискальный чек с QR ГНС.')}
-            </p>
-
-            <p className="mb-1.5 text-sm font-medium text-text-secondary">{t('Провайдер')}</p>
-            <div className="space-y-1.5">
-              {(
-                [
-                  { value: '' as FiscalProvider, label: t('Выключено') },
-                  { value: 'ekassa' as FiscalProvider, label: 'eKassa (Telemedia Group)' },
-                  { value: 'yakassa' as FiscalProvider, label: 'YaKassa' },
-                  { value: 'mock' as FiscalProvider, label: t('Тест (эмуляция)') },
-                ]
-              ).map((p) => (
-                <label
-                  key={p.value || 'off'}
-                  className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-border px-3 py-2 text-sm"
-                >
-                  <input
-                    type="radio"
-                    name="fiscalProvider"
-                    checked={form.fiscalProvider === p.value}
-                    onChange={() => {
-                      setFiscalCheck(null);
-                      set('fiscalProvider', p.value, 'instant');
-                    }}
-                    className="accent-primary"
-                  />
-                  <span className="text-text-primary">{p.label}</span>
-                </label>
-              ))}
-            </div>
-
-            {form.fiscalProvider === 'ekassa' && (
-              <div className="mt-3 grid gap-3">
-                <Field label={t('URL API eKassa')}>
-                  <input
-                    className="input"
-                    value={form.fiscalEkassaUrl}
-                    onChange={(e) => set('fiscalEkassaUrl', e.target.value)}
-                    placeholder="https://api.ekassa.kg"
-                  />
-                </Field>
-                <Field label={t('API-ключ')}>
-                  <input
-                    className="input"
-                    value={form.fiscalEkassaApiKey}
-                    onChange={(e) => set('fiscalEkassaApiKey', e.target.value)}
-                    placeholder="••••••••"
-                  />
-                </Field>
-                <Field label={t('ИНН заведения')}>
-                  <input
-                    className="input"
-                    value={form.fiscalEkassaInn}
-                    onChange={(e) => set('fiscalEkassaInn', e.target.value)}
-                    placeholder="0000000000000"
-                  />
-                </Field>
-              </div>
-            )}
-
-            {form.fiscalProvider === 'yakassa' && (
-              <div className="mt-3 grid gap-3">
-                <Field label={t('URL API YaKassa')}>
-                  <input
-                    className="input"
-                    value={form.fiscalYakassaUrl}
-                    onChange={(e) => set('fiscalYakassaUrl', e.target.value)}
-                    placeholder="https://api.yakassa.kg"
-                  />
-                </Field>
-                <Field label={t('API-ключ')}>
-                  <input
-                    className="input"
-                    value={form.fiscalYakassaApiKey}
-                    onChange={(e) => set('fiscalYakassaApiKey', e.target.value)}
-                    placeholder="••••••••"
-                  />
-                </Field>
-              </div>
-            )}
-
-            {form.fiscalProvider === 'mock' && (
-              <p className="mt-3 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2 text-xs text-warning">
-                {t('Режим эмуляции: чек не уходит в ГНС, генерируется тестовый номер и QR. Для проверки сценария без реального ключа.')}
-              </p>
-            )}
-
-            {form.fiscalProvider && (
-              <div className="mt-4 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={runFiscalCheck}
-                  disabled={testFiscal.isPending}
-                  className="rounded-lg border border-primary/40 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/10 disabled:opacity-50"
-                >
-                  {testFiscal.isPending ? t('Проверка…') : t('Проверить соединение')}
-                </button>
-                {fiscalCheck === 'ok' && (
-                  <span className="text-sm font-medium text-success">{t('✅ Соединение установлено')}</span>
-                )}
-                {fiscalCheck === 'fail' && (
-                  <span className="text-sm font-medium text-danger">{t('❌ Нет соединения')}</span>
-                )}
-              </div>
-            )}
-          </div>
-
         </div>
       </div>
 

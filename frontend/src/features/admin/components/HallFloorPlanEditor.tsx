@@ -117,7 +117,7 @@ export function HallFloorPlanEditor({ halls, editable, onAdd, onEdit, onRemove }
           onPointerMove: move,
           onLostPointerCapture: () => { drag.current = null; },
         };
-        return <div key={table.tableId} className="floor-plan-table" data-shape={table.shape} data-selected={selected} style={style}>
+        return <div key={table.tableId} id={`hall-table-${table.tableId}`} className="floor-plan-table" data-shape={table.shape} data-selected={selected} style={style}>
           <button type="button" className="floor-plan-drag flex h-full w-full items-center justify-center rounded-[inherit] px-1 text-sm font-semibold"
             aria-label={`Стол ${number}${table.label ? ` · ${table.label}` : ''}`} aria-pressed={selected}
             onClick={() => setSelectedId(table.tableId)} onFocus={() => setSelectedId(table.tableId)}

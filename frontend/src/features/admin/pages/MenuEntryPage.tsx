@@ -10,6 +10,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { routingOptions, usePreparationStations } from '@/features/kitchen/stations';
 import { useAdminCategories, type AdminDish } from '../api';
+import { dishTaxInput, dishTaxValue, MenuTaxSelect } from '../../settings/MenuTaxSelect';
 import { type Recipe, type RecipeMetadata } from './warehouse/api';
 import {
   RecipeDraftFields,
@@ -106,6 +107,7 @@ function MenuEntryForm({
   const qc = useQueryClient();
   const push = useNotifications((state) => state.push);
   const requestKey = useRef(crypto.randomUUID());
+  const [tax, setTax] = useState(() => dishTaxValue(dish));
   const imageInput = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState({
     name: dish?.name ?? '',
@@ -200,6 +202,7 @@ function MenuEntryForm({
         expectedVersion: initial?.recipe.version,
         dish: {
           ...form,
+          ...(tax !== dishTaxValue(dish) ? dishTaxInput(tax) : {}),
           imageUrl: typedPhotoUrl || form.imageUrl,
           name: form.name.trim(),
           price: Number(form.price),
@@ -470,6 +473,10 @@ function MenuEntryForm({
                     />
                   </CompactField>
                 </div>
+                <CompactField label="Налог">
+                  <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!canEdit || pending}
+                    categoryTaxId={categories.find((category) => category.id === form.categoryId)?.taxId} />
+                </CompactField>
                 <CompactField label="Описание">
                   <div className="relative">
                     <textarea

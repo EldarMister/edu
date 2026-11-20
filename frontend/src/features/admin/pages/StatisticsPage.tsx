@@ -41,7 +41,7 @@ const PREPARED_LABEL: Record<StatsPeriod, string> = {
 const bishkekDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Bishkek', year: 'numeric', month: '2-digit', day: '2-digit' });
 const chartDay = new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: 'numeric', month: 'short' });
 
-export function StatisticsPage({ view }: { view: StatisticsView }) {
+export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'> }) {
   const t = useT();
   const today = useMemo(() => bishkekDay.format(new Date()), []);
   const weekAgo = useMemo(() => bishkekDay.format(new Date(Date.now() - 6 * 86_400_000)), []);
@@ -74,7 +74,7 @@ export function StatisticsPage({ view }: { view: StatisticsView }) {
         <p role="alert" className="text-danger">{apiError(activeQuery.error)}</p>
         <button type="button" className="btn-secondary btn-md" onClick={() => void activeQuery.refetch()}>{t('Повторить')}</button>
       </div> : activeQuery.isPending ? (
-        <WorkspacePending />
+        <WorkspacePending layout={view === 'overview' ? 'overview' : 'table'} />
       ) : view !== 'overview' ? reportsQ.data && <div key={view} className="workspace-stagger space-y-4">
         {view === 'sales' && reportsQ.data.sales.length > 0 && <section className="card p-4 sm:p-5">
           <h2 className="mb-4 font-semibold text-text-primary">{t('Выручка за период')}</h2>

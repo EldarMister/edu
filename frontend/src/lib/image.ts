@@ -1,5 +1,14 @@
 import { API_URL } from './api';
 
+export function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    reader.readAsDataURL(file);
+  });
+}
+
 /** Превращает относительную ссылку API (/dishes/:id/image) в абсолютный URL для <img>. */
 export function resolveApiImage(url: string | null | undefined): string | null {
   if (!url) return null;

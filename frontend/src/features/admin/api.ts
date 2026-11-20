@@ -24,6 +24,7 @@ export interface AdminHall {
   useFloorPlan?: boolean | null;
 }
 export interface AdminCategory {
+  taxId?: string | null;
   id: string;
   name: string;
   sortOrder: number;
@@ -32,6 +33,8 @@ export interface AdminCategory {
   _count: { dishes: number };
 }
 export interface AdminDish {
+  taxId?: string | null;
+  taxExempt?: boolean;
   catalogKind?: 'goods' | 'recipe';
   stockIngredientId?: string | null;
   hasDirectStock?: boolean;
@@ -41,7 +44,7 @@ export interface AdminDish {
   description: string | null;
   price: string;
   categoryId: string;
-  category: { id: string; name: string };
+  category: { id: string; name: string; taxId?: string | null };
   discountType: 'none' | 'percent' | 'fixed';
   discountValue: string;
   isAvailable: boolean;
@@ -61,6 +64,12 @@ export interface AdminDish {
   variants: AdminDishVariant[];
   // Лёгкая ссылка на фото блюда (/dishes/:id/image?v=…) или null.
   imageUrl?: string | null;
+}
+export interface AdminGood extends AdminDish {
+  goodsStation: PrepStation;
+  goodsPrice: number;
+  goodsUnits: string[];
+  barcodes: string[];
 }
 export interface AdminSetComponent {
   id: string;
@@ -315,6 +324,7 @@ export function useAdminOrderDetails(id: string | null) {
 /** Результат пробития фискального чека (ответ /fiscal/...). */
 export interface FiscalResult {
   success: boolean;
+  simulated?: boolean;
   fiscalReceiptNumber?: string;
   fiscalSign?: string;
   qrCode?: string;
@@ -537,36 +547,49 @@ export function useAdminCategories() {
     queryFn: () => get<AdminCategory[]>('/admin/categories'),
   });
 }
-export function useAdminDishes(categoryId: string, search: string) {
+export function useAdminDishes(categoryId: string, search: string, enabled = true) {
   const q = new URLSearchParams();
   if (categoryId) q.set('categoryId', categoryId);
   if (search) q.set('search', search);
   return useQuery({
     queryKey: ['admin', 'dishes', categoryId, search],
     queryFn: () => get<AdminDish[]>(`/admin/dishes?${q.toString()}`),
+    enabled,
+  });
+}
+
+export function useAdminGoods(enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'dishes', 'goods'],
+    queryFn: () => get<AdminGood[]>('/admin/menu/goods'),
+    enabled,
   });
 }
 
 export function useCategoryMutations() {
+  const qc = useQueryClient();
   const invalidate = useInvalidate([
     ['admin', 'categories'],
     ['admin', 'menu', 'overview'],
     ['admin', 'dishes'],
   ]);
   const create = useMutation({
-    mutationFn: (b: { name: string; prepStation?: PrepStation }) =>
+    mutationFn: (b: { name: string; prepStation?: PrepStation; taxId?: string | null }) =>
       api.post('/admin/categories', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number }) =>
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number; taxId?: string | null }) =>
       api.patch(`/admin/categories/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const remove = useMutation({
     mutationFn: ({ id, strategy, targetCategoryId }: { id: string; strategy?: 'move' | 'delete'; targetCategoryId?: string }) =>
       api.delete(`/admin/categories/${id}`, { data: { strategy, targetCategoryId } }).then((r) => r.data),
-    onSuccess: invalidate,
+    onSuccess: (_result, { id }) => {
+      qc.setQueryData<AdminCategory[]>(['admin', 'categories'], (categories) => categories?.filter((category) => category.id !== id));
+      invalidate();
+    },
   });
   const reorder = useMutation({
     mutationFn: (ids: string[]) => api.patch('/admin/categories/reorder', { ids }).then((r) => r.data),
@@ -603,6 +626,7 @@ export interface DishInput {
   imageUrl?: string;
 }
 export function useDishMutations() {
+  const qc = useQueryClient();
   const invalidate = useInvalidate([['admin', 'dishes'], ['admin', 'menu', 'overview'], ['admin', 'warehouse']]);
   const create = useMutation({
     mutationFn: (b: DishInput) => api.post('/admin/dishes', b).then((r) => r.data),
@@ -615,7 +639,10 @@ export function useDishMutations() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/admin/dishes/${id}`).then((r) => r.data),
-    onSuccess: invalidate,
+    onSuccess: (_result, id) => {
+      qc.setQueriesData<AdminDish[]>({ queryKey: ['admin', 'dishes'] }, (dishes) => dishes?.filter((dish) => dish.id !== id));
+      invalidate();
+    },
   });
   return { create, update, remove };
 }
@@ -629,6 +656,8 @@ export interface SetComponentInput {
   replaceable?: boolean;
 }
 export interface SetInput {
+  taxId?: string | null;
+  taxExempt?: boolean;
   name: string;
   price: number;
   prepStation?: PrepStation | null;
@@ -821,12 +850,14 @@ export function useSetCashHanded() {
   });
 }
 
+const staffListKey = ['admin', 'staff', 'list'];
+
 export function useStaff(role: string, search: string) {
   const q = new URLSearchParams();
   if (role) q.set('role', role);
   if (search) q.set('search', search);
   return useQuery({
-    queryKey: ['admin', 'staff', role, search],
+    queryKey: [...staffListKey, role, search],
     queryFn: () => get<StaffMember[]>(`/admin/staff?${q.toString()}`),
   });
 }
@@ -840,6 +871,7 @@ export interface StaffInput {
   isActive?: boolean;
 }
 export function useStaffMutations() {
+  const qc = useQueryClient();
   const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'positions'], ['admin', 'finance']]);
   const create = useMutation({
     mutationFn: (b: StaffInput) => api.post('/admin/staff', b).then((r) => r.data),
@@ -851,8 +883,13 @@ export function useStaffMutations() {
     onSuccess: invalidate,
   });
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete(`/admin/staff/${id}`).then((r) => r.data),
-    onSuccess: invalidate,
+    mutationFn: (id: string) => api.delete<{ ok?: boolean; isActive?: boolean }>(`/admin/staff/${id}`).then((r) => r.data),
+    onSuccess: (result, id) => {
+      qc.setQueriesData<StaffMember[]>({ queryKey: staffListKey }, (staff) => result?.isActive === false
+        ? staff?.map((member) => member.id === id ? { ...member, isActive: false } : member)
+        : staff?.filter((member) => member.id !== id));
+      invalidate();
+    },
   });
   return { create, update, remove };
 }

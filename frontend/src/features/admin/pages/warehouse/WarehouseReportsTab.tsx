@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Select } from '@/components/Select';
-import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../../components/WorkspacePending';
 import { api, apiError } from '@/lib/api';
 import { costLabel } from './cost-format';
 import { money } from '@/lib/format';
@@ -246,11 +246,7 @@ export function WarehouseReportsTab({
           </p>
         )}
       </div>
-      {query.isPending && (
-        <div className="flex justify-center p-8">
-          <Spinner />
-        </div>
-      )}
+      {query.isPending && <WorkspacePending />}
       {(query.isError || error) && (
         <p role="alert" className="p-4 text-danger">
           {error || apiError(query.error)}

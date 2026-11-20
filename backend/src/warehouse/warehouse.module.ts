@@ -21,6 +21,7 @@ import { WarehouseSuppliersModule } from './suppliers';
 import { WarehousePackagesModule } from './packages';
 import { ProcessingModule } from './processing';
 import { MenuModifiersController, MenuModifiersService } from './menu-modifiers';
+import { StockAlertsService } from './stock-alerts.service';
 
 /** Склад: сырьё, техкарты, закупки, движения. */
 @Module({
@@ -48,6 +49,7 @@ import { MenuModifiersController, MenuModifiersService } from './menu-modifiers'
     WarehouseReportsService,
     IngredientStockService,
     MenuModifiersService,
+    StockAlertsService,
   ],
   // IngredientStockService используется заказами для списания/возврата сырья.
   exports: [IngredientStockService, RecipesService, MenuModifiersService],

@@ -1,9 +1,10 @@
-import { useId, useState, type FormEvent } from 'react';
+import { useId, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
+import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
 import { ACTION_LABELS, ACTION_KEYS, getDefaultPermissionsByRole, READ_ONLY_SECTION_KEYS, resolvePermissions, SECTION_KEYS, SECTION_WRITE_ACTIONS } from '@/lib/permissions';
 import type { ActionKey, EmployeePermissions, SectionKey } from '@/types';
-import { EditorPage, useEditorDirty } from './warehouse/EditorPage';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { DocumentField } from './warehouse/WarehouseUi';
 import { parseMoney } from './finance/finance-format';
 import { SECTION_ACTIONS } from './position-permissions';
@@ -28,6 +29,47 @@ const payFields: { key: keyof PositionSalary; label: string; percent?: boolean }
 const terminalActions: ActionKey[] = [
   'acceptOrderPayments', 'printReceipts', 'requestReceiptPrints', 'createDeliveryOrders', 'financeCashShifts',
 ];
+const editorTabs = [
+  { key: 'general', label: 'Общие данные' },
+  { key: 'admin', label: 'Админ-панель' },
+  { key: 'terminal', label: 'Касса' },
+] as const;
+type EditorTab = (typeof editorTabs)[number]['key'];
+const sectionLevels = [
+  { value: 'none', label: 'Нет доступа' },
+  { value: 'view', label: 'Просмотр' },
+  { value: 'full', label: 'Полный доступ' },
+] as const;
+type SectionLevel = (typeof sectionLevels)[number]['value'];
+const actionLevels = [
+  { value: 'denied', label: 'Запрещено' },
+  { value: 'allowed', label: 'Разрешено' },
+] as const;
+
+function AccessRow<Value extends string>({ name, label, note, options, selected, onChange }: {
+  name: string;
+  label: string;
+  note?: string;
+  options: readonly { value: Value; label: string }[];
+  selected: Value | 'custom';
+  onChange: (value: Value) => void;
+}) {
+  return <div className="grid gap-2.5 border-b border-border/60 py-3 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_minmax(19rem,24rem)] sm:items-center sm:gap-5">
+    <div>
+      <span id={`${name}-label`} className="font-medium">{label}</span>
+      {note && <p className="mt-0.5 text-xs text-text-muted">{note}</p>}
+    </div>
+    <div role="radiogroup" aria-labelledby={`${name}-label`} className="grid grid-flow-col auto-cols-fr gap-1 rounded-xl border border-border/60 bg-background p-1">
+      {options.map((option) => <label key={option.value} className="min-w-0">
+        <input type="radio" name={name} className="peer sr-only" checked={selected === option.value}
+          onChange={() => onChange(option.value)} />
+        <span className="grid h-full min-h-9 cursor-pointer place-items-center rounded-lg px-1.5 py-1 text-center text-xs font-medium text-text-secondary transition-colors hover:bg-card hover:text-text-primary peer-checked:bg-primary/15 peer-checked:text-primary peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-primary peer-disabled:cursor-default peer-disabled:opacity-70 sm:text-sm">
+          {option.label}
+        </span>
+      </label>)}
+    </div>
+  </div>;
+}
 
 function initialPermissions(position?: StaffPosition): EmployeePermissions {
   if (position) {
@@ -56,6 +98,7 @@ function Check({ label, checked, onChange }: { label: string; checked: boolean; 
 
 export function PositionEditor({ position, onClose }: { position?: StaffPosition; onClose: () => void }) {
   const formId = useId();
+  const [tab, setTab] = useState<EditorTab>('general');
   const [name, setName] = useState(position?.name ?? '');
   const [role, setRole] = useState<PositionRole>(position?.role ?? 'ADMIN');
   const [permissions, setPermissions] = useState(() => initialPermissions(position));
@@ -74,8 +117,11 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
     || payFields.some(({ key }) => rates[key] !== (position?.salary?.[key] ? String(position.salary[key]) : ''));
   const { markSaved } = useEditorDirty(dirty);
   const valid = !!name.trim() && !!hasAccess && validSalary;
+  const tabs = editorTabs.filter(({ key }) => key === 'general'
+    || (key === 'admin' && !position?.fixedWorkspace)
+    || (key === 'terminal' && position?.fixedWorkspace !== 'production'));
 
-  function level(sections: SectionKey[]) {
+  function level(sections: SectionKey[]): SectionLevel | 'custom' {
     if (sections.every((key) => !permissions.sections[key])) return 'none';
     if (!sections.every((key) => permissions.sections[key])) return 'custom';
     const writes = sections.filter((key) => READ_ONLY_SECTION_KEYS.includes(key));
@@ -83,7 +129,7 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
     if (sections.some((key) => permissions.readOnlySections?.includes(key))) return 'custom';
     return sections.every((key) => (SECTION_ACTIONS[key] ?? []).every((action) => permissions.actions[action])) ? 'full' : 'custom';
   }
-  function setLevel(sections: SectionKey[], value: string) {
+  function setLevel(sections: SectionKey[], value: SectionLevel) {
     setPermissions((current) => {
       const next = { ...current, sections: { ...current.sections }, actions: { ...current.actions },
         readOnlySections: (current.readOnlySections ?? []).filter((key) => !sections.includes(key)) };
@@ -102,86 +148,118 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
     return <Check key={key} label={ACTION_LABELS[key]} checked={permissions.actions[key]}
       onChange={(checked) => setPermissions((current) => ({ ...current, actions: { ...current.actions, [key]: checked } }))} />;
   }
+  function switchTab(event: KeyboardEvent<HTMLDivElement>) {
+    const index = tabs.findIndex(({ key }) => key === tab);
+    let nextIndex: number;
+    switch (event.key) {
+      case 'ArrowLeft': nextIndex = (index + tabs.length - 1) % tabs.length; break;
+      case 'ArrowRight': nextIndex = (index + 1) % tabs.length; break;
+      case 'Home': nextIndex = 0; break;
+      case 'End': nextIndex = tabs.length - 1; break;
+      default: return;
+    }
+    event.preventDefault();
+    setTab(tabs[nextIndex].key);
+    event.currentTarget.querySelectorAll('button')[nextIndex]?.focus();
+  }
   function submit(event: FormEvent) {
     event.preventDefault();
     if (!valid || save.isPending) return;
     save.mutate({ id: position?.id, name: name.trim(), role, permissions, salary: Object.fromEntries(parsed) as PositionSalary },
       { onSuccess: () => { markSaved(); onClose(); } });
   }
-  return <EditorPage title={position ? 'Редактирование должности' : 'Добавление должности'} onClose={onClose} pinnedFooter
-    footer={<div className="flex flex-wrap items-center gap-3">
-      <button form={formId} type="submit" className="btn-primary btn-md" disabled={save.isPending || !valid}>Сохранить</button>
-      <button type="button" className="btn-secondary btn-md" disabled={save.isPending} onClick={onClose}>Отмена</button>
-      {position && <span className="pr-12 text-xs text-text-muted">Права и ставки изменятся у всех сотрудников этой должности: {position.employees}.</span>}
+  function tabPanel(key: EditorTab, children: ReactNode) {
+    return <section id={`${formId}-panel-${key}`} role={tabs.length > 1 ? 'tabpanel' : undefined}
+      aria-labelledby={tabs.length > 1 ? `${formId}-tab-${key}` : undefined} hidden={tab !== key}
+      className="py-4 sm:px-2">
+      {tab === key && children}
+    </section>;
+  }
+
+  function close() {
+    if (!save.isPending) onClose();
+  }
+
+  return <Modal open title={position ? 'Редактирование должности' : 'Добавление должности'} onClose={close}
+    panelClassName="max-w-[52rem]" footer={<div className="space-y-2">
+      {save.error && <p role="alert" className="text-sm text-danger">{apiError(save.error)}</p>}
+      {!validSalary && <p role="alert" className="text-sm text-danger">Укажите ставки от 0 и проценты от 0 до 100.</p>}
+      {!hasAccess && <p className="text-xs text-text-muted">Разрешите хотя бы кассу, один раздел админ-панели или экран приготовления.</p>}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {position && <p className="mr-auto text-xs text-text-muted">Сотрудников с этой должностью: {position.employees}</p>}
+        <button type="button" className="btn-secondary btn-md" disabled={save.isPending} onClick={close}>Отмена</button>
+        <button form={formId} type="submit" className="btn-primary btn-md" disabled={save.isPending || !valid}>Сохранить</button>
+      </div>
     </div>}>
-    <form id={formId} className="max-w-[820px] space-y-7" onSubmit={submit}>
-      <DocumentField label="Название должности"><input maxLength={80} required className="input w-full" value={name}
-        disabled={save.isPending} onChange={(event) => setName(event.target.value)} placeholder="Например, управляющий" /></DocumentField>
-      {position?.fixedWorkspace !== 'production' && <fieldset disabled={save.isPending}>
-        <legend className="mb-2 text-lg font-semibold">Доступ к кассе</legend>
-        <Check label="Открывать кассу и оформлять заказы гостей" checked={!!permissions.terminalAccess}
-          onChange={(checked) => setPermissions((current) => ({ ...current, terminalAccess: checked }))} />
-        {permissions.terminalAccess && <div className="ml-7">
-          {terminalActions.map(actionControl)}
-        </div>}
-      </fieldset>}
-      {!position?.fixedWorkspace && <fieldset disabled={save.isPending}>
-        <legend className="mb-2 text-lg font-semibold">Доступ к админ-панели</legend>
-        <Check label="Вход в админ-панель" checked={!!permissions.adminAccess}
-          onChange={(checked) => setPermissions((current) => ({ ...current, adminAccess: checked }))} />
+    <form id={formId} onSubmit={submit} className="text-sm">
+      {tabs.length > 1 && <div role="tablist" aria-label="Настройки должности" onKeyDown={switchTab}
+        className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b border-border bg-card sm:gap-4 sm:px-2">
+        {tabs.map(({ key, label }) => <button key={key} id={`${formId}-tab-${key}`} type="button" role="tab"
+          aria-selected={tab === key} aria-controls={`${formId}-panel-${key}`} tabIndex={tab === key ? 0 : -1}
+          onClick={() => setTab(key)} className={`min-h-11 shrink-0 border-b-2 px-2 text-sm font-medium transition-colors sm:px-3
+            ${tab === key ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
+          {label}
+        </button>)}
+      </div>}
+      {tabPanel('general', <fieldset disabled={save.isPending} className="min-w-0 space-y-6">
+        <DocumentField label="Название должности"><input maxLength={80} required className="input w-full" value={name}
+          onChange={(event) => setName(event.target.value)} placeholder="Например, управляющий" /></DocumentField>
+        <div>
+          <h4 className="mb-2 text-base font-semibold">Экран приготовления</h4>
+          <div className="max-w-lg space-y-2">
+            <Select ariaLabel="Экран приготовления" value={production ? role : 'ADMIN'} disabled={!!position || save.isPending}
+              options={[{ value: 'ADMIN', label: 'Не используется' }, { value: 'KITCHEN', label: 'Кухня' }, { value: 'BAR', label: 'Бар' }]}
+              onChange={(value) => setRole(value as PositionRole)} />
+            <p className="text-xs text-text-muted">Для повара или бармена. Конкретный цех выбирается в карточке сотрудника.</p>
+          </div>
+        </div>
+        <div>
+          <h4 className="text-base font-semibold">Рабочие смены</h4>
+          <Check label="Учитывать рабочие смены" checked={permissions.workShiftRequired !== false}
+            onChange={(checked) => setPermissions((current) => ({ ...current, workShiftRequired: checked }))} />
+          <p className="text-sm text-text-muted">Сотрудник начинает смену перед работой. Часы и смены попадают в табель и расчёт зарплаты.</p>
+        </div>
+        <div className="space-y-3">
+          <h4 className="text-base font-semibold">Расчёт зарплаты</h4>
+          <p className="text-sm text-text-muted">Выберите один или несколько способов. Расчёт и выплата — в «Финансы → Зарплата».</p>
+          <div className="grid gap-3 sm:grid-cols-3">{payFields.filter(({ percent }) => !percent).map(({ key, label }) => <label key={key} className="grid gap-1 text-sm">{label}
+            <input className="input min-w-0" inputMode="decimal" placeholder="0" value={rates[key]} onChange={(event) => setRates({ ...rates, [key]: event.target.value })} />
+          </label>)}</div>
+          <div className="grid gap-3 sm:grid-cols-2">{payFields.filter(({ percent }) => percent).map(({ key, label }) => <label key={key} className="grid gap-1 text-sm">{label}
+            <input className="input min-w-0" inputMode="decimal" placeholder="0%" value={rates[key]} onChange={(event) => setRates({ ...rates, [key]: event.target.value })} />
+          </label>)}</div>
+          <p className="text-xs text-text-muted">Ставки складываются. Изменения относятся ко всему текущему месяцу и будущим месяцам; прошлые месяцы сохраняются.</p>
+        </div>
+      </fieldset>)}
+      {!position?.fixedWorkspace && tabPanel('admin', <fieldset disabled={save.isPending} className="min-w-0">
+        <AccessRow name={`${formId}-admin`} label="Вход в админ-панель" options={actionLevels}
+          selected={permissions.adminAccess ? 'allowed' : 'denied'}
+          onChange={(value) => setPermissions((current) => ({ ...current, adminAccess: value === 'allowed' }))} />
         {permissions.adminAccess && <>
-          <div className="mt-3"><table className="w-full table-fixed text-xs sm:table-auto sm:text-sm">
-            <thead><tr><th className="w-[40%] sm:w-auto">Разделы</th><th className="text-center">Нет доступа</th><th className="text-center">Просмотр</th><th className="text-center">Полный доступ</th></tr></thead>
-            <tbody>{groups.map((group) => {
-              const currentLevel = level(group.sections);
-              const canEdit = group.sections.some((key) => READ_ONLY_SECTION_KEYS.includes(key));
-              return <tr key={group.key}>
-                <td>{group.label}{currentLevel === 'custom' && <span className="block text-xs text-text-muted">Индивидуальные ограничения</span>}</td>
-                {(['none', 'view', 'full'] as const).map((value) => <td key={value} className="text-center">
-                  {value === 'full' && !canEdit ? <span className="text-text-muted" aria-hidden="true">—</span> :
-                    <label className="flex min-h-8 cursor-pointer items-center justify-center"><input type="radio" name={`${formId}-${group.key}`} aria-label={`${group.label}: ${value === 'none' ? 'нет доступа' : value === 'view' ? 'просмотр' : 'полный доступ'}`}
-                      className="h-4 w-4 cursor-pointer accent-primary" checked={currentLevel === value} onChange={() => setLevel(group.sections, value)} />
-                    </label>}
-                </td>)}
-              </tr>;
-            })}</tbody>
-          </table></div>
-          <details className="mt-4 text-sm"><summary className="cursor-pointer py-2 text-primary">Отдельные действия и ограничения</summary>
+          {groups.map((group) => {
+            const currentLevel = level(group.sections);
+            const canEdit = group.sections.some((key) => READ_ONLY_SECTION_KEYS.includes(key));
+            return <AccessRow<SectionLevel> key={group.key} name={`${formId}-section-${group.key}`} label={group.label}
+              options={canEdit ? sectionLevels : sectionLevels.filter(({ value }) => value !== 'full')}
+              selected={currentLevel} note={currentLevel === 'custom' ? 'Индивидуальные ограничения' : undefined}
+              onChange={(value) => setLevel(group.sections, value)} />;
+          })}
+          <details className="mt-4 border-t border-border pt-2"><summary className="cursor-pointer py-2 font-medium text-primary">Отдельные действия и ограничения</summary>
             <div className="grid gap-x-6 sm:grid-cols-2">{ACTION_KEYS.filter((key) => key !== 'editPermissions' && !terminalActions.includes(key)
               && !SECTION_KEYS.some((section) => (SECTION_ACTIONS[section] ?? []).includes(key) && (!permissions.sections[section]
                 || (permissions.readOnlySections?.includes(section) && (SECTION_WRITE_ACTIONS[section] ?? []).includes(key))))).map(actionControl)}</div>
             <p className="mt-2 text-xs text-text-muted">Управление должностями и передача прав доступны владельцу.</p>
           </details>
         </>}
-      </fieldset>}
-      <details open={production} className="text-sm"><summary className="cursor-pointer py-2 text-primary">Экран приготовления</summary>
-        <div className="mt-3 max-w-lg space-y-2">
-          <Select ariaLabel="Экран приготовления" value={production ? role : 'ADMIN'} disabled={!!position || save.isPending}
-            options={[{ value: 'ADMIN', label: 'Не используется' }, { value: 'KITCHEN', label: 'Кухня' }, { value: 'BAR', label: 'Бар' }]}
-            onChange={(value) => setRole(value as PositionRole)} />
-          <p className="text-xs text-text-muted">Для повара или бармена. Конкретный цех выбирается в карточке сотрудника.</p>
-        </div>
-      </details>
-      <fieldset disabled={save.isPending}>
-        <legend className="mb-2 text-lg font-semibold">Рабочие смены</legend>
-        <Check label="Учитывать рабочие смены" checked={permissions.workShiftRequired !== false}
-          onChange={(checked) => setPermissions((current) => ({ ...current, workShiftRequired: checked }))} />
-        <p className="text-sm text-text-muted">Сотрудник начинает смену перед работой. Часы и смены попадают в табель и расчёт зарплаты.</p>
-      </fieldset>
-      <fieldset disabled={save.isPending} className="space-y-4">
-        <legend className="mb-2 text-lg font-semibold">Расчёт зарплаты</legend>
-        <p className="text-sm text-text-muted">Выберите один или несколько способов. Расчёт и выплата — в «Финансы → Зарплата».</p>
-        <div className="grid gap-3 sm:grid-cols-3">{payFields.filter(({ percent }) => !percent).map(({ key, label }) => <label key={key} className="grid gap-1 text-sm">{label}
-          <input className="input min-w-0" inputMode="decimal" placeholder="0" value={rates[key]} onChange={(event) => setRates({ ...rates, [key]: event.target.value })} />
-        </label>)}</div>
-        <div className="grid gap-3 sm:grid-cols-2">{payFields.filter(({ percent }) => percent).map(({ key, label }) => <label key={key} className="grid gap-1 text-sm">{label}
-          <input className="input min-w-0" inputMode="decimal" placeholder="0%" value={rates[key]} onChange={(event) => setRates({ ...rates, [key]: event.target.value })} />
-        </label>)}</div>
-        <p className="text-xs text-text-muted">Ставки складываются. Изменения относятся ко всему текущему месяцу и будущим месяцам; прошлые месяцы сохраняются.</p>
-        {!validSalary && <p role="alert" className="text-danger">Укажите ставки от 0 и проценты от 0 до 100.</p>}
-      </fieldset>
-      {!hasAccess && <p className="text-sm text-text-muted">Разрешите хотя бы кассу, один раздел админ-панели или экран приготовления.</p>}
-      {save.error && <p role="alert" className="text-danger">{apiError(save.error)}</p>}
+      </fieldset>)}
+      {position?.fixedWorkspace !== 'production' && tabPanel('terminal', <fieldset disabled={save.isPending} className="min-w-0">
+        <AccessRow name={`${formId}-terminal`} label="Открывать кассу и оформлять заказы гостей" options={actionLevels}
+          selected={permissions.terminalAccess ? 'allowed' : 'denied'}
+          onChange={(value) => setPermissions((current) => ({ ...current, terminalAccess: value === 'allowed' }))} />
+        {permissions.terminalAccess && terminalActions.map((key) => <AccessRow key={key} name={`${formId}-action-${key}`}
+          label={ACTION_LABELS[key]} options={actionLevels} selected={permissions.actions[key] ? 'allowed' : 'denied'}
+          onChange={(value) => setPermissions((current) => ({ ...current, actions: { ...current.actions, [key]: value === 'allowed' } }))} />)}
+      </fieldset>)}
     </form>
-  </EditorPage>;
+  </Modal>;
 }

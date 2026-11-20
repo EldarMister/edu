@@ -6,10 +6,12 @@ import { positionAccessSummary } from './position-permissions';
 import { parseMoney } from './finance/finance-format';
 import { Modal } from '@/components/Modal';
 import { DeleteNameField } from '../components/DeleteNameField';
+import { captureDeletionEffect } from '../components/deletion-effect';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
 import { WorkspacePending } from '../components/WorkspacePending';
+import { ACCOUNT_PHONE_ERROR, isAccountPhone, PhoneInput } from '@/components/PhoneInput';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -187,8 +189,10 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
 
   async function confirmDelete() {
     if (!pendingDelete || !deleteConfirmed || remove.isPending) return;
+    const playEffect = captureDeletionEffect(`staff-member-${pendingDelete.id}`);
     try {
       const result = await remove.mutateAsync(pendingDelete.id);
+      playEffect?.();
       push({ message: result?.isActive === false ? 'Сотрудник отключён. История работы и расчётов сохранена.' : 'Сотрудник удалён', at: new Date().toISOString() });
       setPendingDelete(null);
     } catch (err) {
@@ -392,6 +396,7 @@ export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' |
                   return (
                     <FragmentRow key={id}>
                       <tr
+                        id={`staff-member-${id}`}
                         className={`border-b border-border ${waiterReport ? 'cursor-pointer hover:bg-background/50' : ''}`}
                         onClick={waiterReport ? () => setExpanded(open ? null : id) : undefined}
                       >
@@ -1045,6 +1050,11 @@ function StaffEditor({
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving.current || !validAssignment) return;
+    const phoneChanged = phone !== member?.phone;
+    if (phoneChanged && !isAccountPhone(phone)) {
+      setError(ACCOUNT_PHONE_ERROR);
+      return;
+    }
     if (!isEdit && !password) {
       setError('Укажите пароль');
       return;
@@ -1057,7 +1067,7 @@ function StaffEditor({
         await update.mutateAsync({
           id: member!.id,
           name,
-          phone,
+          ...(phoneChanged ? { phone } : {}),
           ...(hasStation ? { prepStation: prepStation || null } : {}),
           isActive,
           ...assignmentPatch,
@@ -1099,7 +1109,7 @@ function StaffEditor({
             <input className="input h-9 w-full !rounded-md text-sm" value={name} autoFocus required onChange={(e) => setName(e.target.value)} />
           </DocumentField>
           <DocumentField label="Номер телефона">
-            <input className="input h-9 w-full !rounded-md text-sm" type="tel" value={phone} placeholder="+996" required onChange={(e) => setPhone(e.target.value)} />
+            <PhoneInput value={phone} onChange={setPhone} compact />
           </DocumentField>
           <DocumentField label="Должность">
             <Select
