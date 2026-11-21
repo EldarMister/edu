@@ -247,8 +247,14 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
     await t.test('owner can restrict the print queue to actual waiter requests', async () => {
       const owner = { token: sessions.owner, workspace: 'admin' };
       const admin = { token: sessions.admin, workspace: 'admin' };
-      const ticket = await request('/receipt-prints', { token: sessions.mixed, workspace: 'terminal', method: 'POST', status: 201,
-        body: { orderId: mixedOrder.id, type: 'receipt' } });
+      const printOptions = { token: sessions.mixed, workspace: 'terminal', method: 'POST', status: 201,
+        body: { orderId: mixedOrder.id, type: 'receipt' } };
+      const [ticket, retry] = await Promise.all([
+        request('/receipt-prints', printOptions), request('/receipt-prints', printOptions),
+      ]);
+      assert.equal(retry.id, ticket.id);
+      await request('/receipt-prints', { ...printOptions, status: 400,
+        body: { orderId: mixedOrder.id, type: 'preliminary' } });
       assert.ok((await request('/receipt-prints', admin)).some(({ source }) => source === 'order'));
       await request('/admin/settings', { ...admin, method: 'PATCH', status: 403, body: { receiptPrintRequestsOnly: true } });
       await request('/admin/settings', { ...owner, method: 'PATCH', body: { receiptPrintRequestsOnly: true } });
@@ -270,11 +276,20 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       await request(`/payments/${mixedOrder.id}/receipt?print=true&requestId=${ticket.id}`, { ...cashier, status: 403 });
       await request(`/receipt-prints/${ticket.id}/approve`, { ...cashier, ...post });
       await request(`/receipt-prints/${ticket.id}/approve`, { ...cashier, ...post, status: 400 });
+      const approvedRetry = await request('/receipt-prints', { token: sessions.mixed, workspace: 'terminal', ...post,
+        body: { orderId: mixedOrder.id, type: 'receipt' } });
+      assert.equal(approvedRetry.id, ticket.id);
       await request(`/payments/${mixedOrder.id}/receipt?print=true`, { ...cashier, status: 403 });
       await request(`/payments/${mixedOrder.id}/receipt?print=true&requestId=${ticket.id}`, cashier);
       await request(`/fiscal/orders/${mixedOrder.id}/print?requestId=${ticket.id}`, { ...cashier, ...post });
       assert.equal(fiscalized.at(-1), mixedOrder.id);
-      await request(`/receipt-prints/${ticket.id}/printed`, { ...cashier, ...post });
+      const fiscalCount = fiscalized.length;
+      const printed = await Promise.all([
+        request(`/receipt-prints/${ticket.id}/printed`, { ...cashier, ...post }),
+        request(`/receipt-prints/${ticket.id}/printed`, { ...cashier, ...post }),
+      ]);
+      assert.ok(printed.every(({ status }) => status === 'printed'));
+      assert.equal(fiscalized.length, fiscalCount + 1);
 
       await request('/waiter/shifts/start', { ...cashier, ...post });
       const table = await newTable();

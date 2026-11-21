@@ -40,7 +40,8 @@ test('PostgreSQL: waiter reports use Bishkek payment dates, exclude returns and 
       const createCheck = async (employee, seconds, { paid = paidAt, refunded = 0, finalAmount = 100, paymentStatus = 'paid' } = {}) => {
         const order = await db.order.create({ data: {
           tableId: table.id, waiterId: employee.id, orderNumber: randomUUID(), status: 'paid',
-          paymentStatus, closedAt: paid, finalAmount, createdAt: new Date(paid.getTime() - seconds * 1000),
+          paymentStatus, closedAt: paid, finalAmount, paymentMethod: 'cash', refundedAmount: finalAmount * refunded / 2,
+          createdAt: new Date(paid.getTime() - seconds * 1000),
         } });
         await db.orderItem.create({ data: {
           orderId: order.id, dishNameSnapshot: 'Чай', priceSnapshot: 50, quantity: 2, finalPrice: 100,
@@ -66,6 +67,10 @@ test('PostgreSQL: waiter reports use Bishkek payment dates, exclude returns and 
       assert.equal(single.summary.ordersCount, 1);
       assert.equal(single.summary.amount, 49.5);
       assert.equal(single.summary.averagePaymentSeconds, 120);
+      const shift = (await staff.shiftReport(date, { id: owner.id, role: 'OWNER' })).find(({ waiterId }) => waiterId === waiter.id);
+      assert.equal(shift.turnover, 49.5);
+      assert.equal(shift.cashDue, 49.5);
+      assert.equal(shift.categories[0].amount, 49.5);
 
       await db.user.update({ where: { id: waiter.id }, data: { role: 'KITCHEN' } });
       const afterReassignment = await staff.waiterOrdersReport({ waiterId: 'all', from: date, to: date });

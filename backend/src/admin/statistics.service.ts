@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
+import { allocateOrderItemCents, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { StatsQueryDto } from './dto';
 import { SettingsService } from '../settings/settings.service';
 import { warehouseDay } from '../warehouse/report-range';
@@ -81,16 +81,25 @@ export class StatisticsService {
       this.prisma.order.findMany({
         where: {
           ...paidWhere,
-          closedAt: range.from || range.to ? { gte: range.from, lt: range.to } : undefined,
+          closedAt: { gte: range.from, lt: range.to },
         },
         select: {
           finalAmount: true,
           refundedAmount: true,
+          serviceChargeAmount: true,
           paymentMethod: true,
           closedAt: true,
           waiterId: true,
           waiter: { select: { name: true } },
-          payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true, refundedAmount: true } },
+          payments: { select: { method: true, status: true, amount: true, refundedAmount: true } },
+          items: {
+            where: { status: { notIn: ['rejected', 'cancelled'] } },
+            orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+            select: {
+              dishNameSnapshot: true, dishVariantNameSnapshot: true, finalPrice: true, quantity: true, refundedQuantity: true,
+              dish: { select: { category: { select: { name: true } } } },
+            },
+          },
         },
       }),
       this.prisma.order.findMany({
@@ -119,13 +128,12 @@ export class StatisticsService {
     // Считаем по строкам оплат, чтобы смешанная оплата корректно разложилась на наличные/QR.
     const methodTotals: Record<PaymentMethod, number> = { qr: 0, cash: 0, card: 0, mixed: 0 };
     for (const o of currentOrders) {
-      const payments = o.payments.length ? o.payments : o.paymentMethod ? [{ method: o.paymentMethod, amount: o.finalAmount, refundedAmount: o.refundedAmount }] : [];
+      const payments = o.payments.length ? o.payments.filter(({ status }) => status === PaymentStatus.paid)
+        : o.paymentMethod ? [{ method: o.paymentMethod, amount: o.finalAmount, refundedAmount: o.refundedAmount }] : [];
       for (const p of payments) methodTotals[p.method] += Number(netPaymentAmount(p));
     }
-    const visibleMethods = enabledMethods.filter(
-      (method): method is Extract<PaymentMethod, 'qr' | 'cash' | 'card'> =>
-        method === PaymentMethod.qr || method === PaymentMethod.cash || method === PaymentMethod.card,
-    );
+    const visibleMethods = [PaymentMethod.qr, PaymentMethod.cash, PaymentMethod.card, PaymentMethod.mixed]
+      .filter((method) => methodTotals[method] > 0 || (method !== PaymentMethod.mixed && enabledMethods.includes(method)));
     const methodsSum = visibleMethods.reduce((sum, method) => sum + methodTotals[method], 0) || 1;
     const paymentMethods = visibleMethods.map((m) => ({
       method: m,
@@ -147,24 +155,6 @@ export class StatisticsService {
     }
     const topWaiters = [...waiterMap.values()].sort((a, b) => b.amount - a.amount).slice(0, 5);
 
-    const items = await this.prisma.orderItem.findMany({
-      where: {
-        order: {
-          ...paidWhere,
-          closedAt: range.from || range.to ? { gte: range.from, lt: range.to } : undefined,
-        },
-        status: { notIn: ['rejected', 'cancelled'] },
-      },
-      select: {
-        dishNameSnapshot: true,
-        dishVariantNameSnapshot: true,
-        finalPrice: true,
-        quantity: true,
-        refundedQuantity: true,
-        order: { select: { closedAt: true } },
-        dish: { select: { category: { select: { name: true } } } },
-      },
-    });
     const dishMap = new Map<string, { name: string; amount: number; count: number }>();
     // Приготовленные блюда: количество по дням — для «в среднем» и «максимум за день».
     const preparedPerDay = new Map<string, number>();
@@ -172,24 +162,26 @@ export class StatisticsService {
     let preparedTotal = 0;
     // Проданные напитки: позиции из категории «Напитки» (по названию категории блюда).
     const drinksMap = new Map<string, number>();
-    for (const it of items) {
-      const name = it.dishVariantNameSnapshot
-        ? `${it.dishNameSnapshot} · ${it.dishVariantNameSnapshot}`
-        : it.dishNameSnapshot;
-      const cur = dishMap.get(name) ?? { name, amount: 0, count: 0 };
-      cur.amount += Number(netItemAmount(it, it.finalPrice));
-      cur.count += netItemQuantity(it);
-      dishMap.set(name, cur);
+    for (const order of currentOrders) {
+      const productPayable = new Prisma.Decimal(order.finalAmount).sub(order.serviceChargeAmount ?? 0);
+      const itemPayables = allocateOrderItemCents(Prisma.Decimal.max(0, productPayable), order.items);
+      const day = order.closedAt ? warehouseDay(order.closedAt) : null;
+      for (const [index, item] of order.items.entries()) {
+        const name = item.dishVariantNameSnapshot
+          ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
+          : item.dishNameSnapshot;
+        const cur = dishMap.get(name) ?? { name, amount: 0, count: 0 };
+        cur.amount += Number(netItemAmount(item, itemPayables[index] / 100));
+        cur.count += netItemQuantity(item);
+        dishMap.set(name, cur);
 
-      preparedTotal += it.quantity;
-      preparedByDish.set(name, (preparedByDish.get(name) ?? 0) + it.quantity);
-      if (it.order?.closedAt) {
-        const day = warehouseDay(it.order.closedAt);
-        preparedPerDay.set(day, (preparedPerDay.get(day) ?? 0) + it.quantity);
-      }
+        preparedTotal += item.quantity;
+        preparedByDish.set(name, (preparedByDish.get(name) ?? 0) + item.quantity);
+        if (day) preparedPerDay.set(day, (preparedPerDay.get(day) ?? 0) + item.quantity);
 
-      if ((it.dish?.category?.name ?? '').toLowerCase().includes('напит')) {
-        drinksMap.set(name, (drinksMap.get(name) ?? 0) + netItemQuantity(it));
+        if ((item.dish?.category?.name ?? '').toLowerCase().includes('напит')) {
+          drinksMap.set(name, (drinksMap.get(name) ?? 0) + netItemQuantity(item));
+        }
       }
     }
     const topDishes = [...dishMap.values()].sort((a, b) => b.amount - a.amount).slice(0, 5);
@@ -228,7 +220,7 @@ export class StatisticsService {
         avgCheck: percentChange(avgCheck, previousAvg),
       },
       revenueSeries: this.revenueSeries(netOrders, range.from ?? startOfDay(), range.to, period),
-      peakHours: this.peakHours(currentOrders),
+      peakHours: this.peakHours(netOrders),
       paymentMethods,
       topDishes,
       topWaiters,

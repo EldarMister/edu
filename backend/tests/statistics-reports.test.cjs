@@ -42,7 +42,7 @@ test('daily sales, payment splits and report dimensions aggregate the same close
 test('costs follow split line origin and return; historical payment fallback retains disabled methods', () => {
   const remainder = { ...item, id: 'espresso-return-remnant', quantity: 1, finalPrice: 30, stockSourceLineId: item.id };
   const returned = { ...movement, type: 'return', orderItemId: 'cancelled', saleLineId: item.id, change: 10 };
-  const legacy = { ...order, items: [remainder], finalAmount: 30, payments: [], paymentMethod: 'qr' };
+  const legacy = { ...order, items: [remainder], finalAmount: 30, serviceChargeAmount: 0, payments: [], paymentMethod: 'qr' };
   const result = buildStatisticsReports([legacy], [movement, returned], true);
   assert.equal(result.products[0].cost, 4);
   assert.equal(result.payments[0].qr, 30);
@@ -53,7 +53,7 @@ test('profit subtracts recorded tax and restores the refunded part without taxin
   const exempt = { ...item, id: 'exempt', dishId: 'water', dishNameSnapshot: 'Вода',
     dishVariantNameSnapshot: null, quantity: 1, finalPrice: 20 };
   const taxable = { ...item, refundedQuantity: 1 };
-  const recorded = { ...order, finalAmount: 75, refundedAmount: 27.5, items: [taxable, exempt],
+  const recorded = { ...order, finalAmount: 75, serviceChargeAmount: 0, refundedAmount: 27.5, items: [taxable, exempt],
     taxes: [{ taxId: 'vat', amount: new Prisma.Decimal(6), salesAmount: new Prisma.Decimal(55), itemAmounts: { [item.id]: '55' } }],
     refunds: [{ taxReversals: [{ taxId: 'vat', amount: '3' }] }],
   };
@@ -70,6 +70,37 @@ test('profit subtracts recorded tax and restores the refunded part without taxin
   assert.ok(legacyReport.products.every(({ profit }) => profit === null));
   assert.equal(legacyReport.categories[0].tax, null);
   assert.equal(legacyReport.staff[0].profit, 38.5);
+});
+
+test('split check rounding and partial mixed refund reconcile across payment methods and item reports', async () => {
+  const check = { ...order, finalAmount: 98.99, refundedAmount: 33, serviceChargeAmount: 0,
+    payments: [
+      { method: 'cash', status: 'paid', amount: 60, refundedAmount: 20 },
+      { method: 'card', status: 'paid', amount: 38.99, refundedAmount: 13 },
+    ],
+    items: [
+      { ...item, priceSnapshot: 33.33, finalPrice: 66.66, refundedQuantity: 1, discountAmount: 0 },
+      { ...item, id: 'dessert', dishId: 'cake', dishNameSnapshot: 'Торт', dishVariantNameSnapshot: null,
+        priceSnapshot: 33.33, quantity: 1, finalPrice: 33.33, discountAmount: 0 },
+    ],
+  };
+  const result = buildStatisticsReports([check], [], false);
+  assert.deepEqual(result.products.map(({ name, revenue }) => [name, revenue]), [['Торт', 33], ['Эспрессо · Двойной', 32.99]]);
+  assert.equal(result.sales[0].revenue, 65.99);
+  assert.equal(result.categories[0].revenue, 65.99);
+  assert.equal(result.staff[0].revenue, 65.99);
+  assert.equal(result.payments[0].total, 65.99);
+
+  const statistics = new StatisticsService({
+    order: {
+      findMany: async ({ select }) => select.items ? [check] : [],
+      aggregate: async () => ({ _sum: {}, _count: 0 }),
+    },
+  }, { enabledMethods: async () => ['cash'] });
+  const overview = await statistics.dashboard({ period: 'custom', from: '2026-11-16', to: '2026-11-16' });
+  assert.deepEqual(overview.peakHours, [{ hour: '00:00', amount: 65.99, orders: 1 }]);
+  assert.deepEqual(overview.topDishes.map(({ name, amount }) => [name, amount]), [['Торт', 33], ['Эспрессо · Двойной', 32.99]]);
+  assert.deepEqual(overview.paymentMethods, [{ method: 'cash', amount: 40, percent: 61 }, { method: 'card', amount: 25.99, percent: 39 }]);
 });
 
 test('missing or restricted stock prices surface as null instead of claiming zero cost', () => {

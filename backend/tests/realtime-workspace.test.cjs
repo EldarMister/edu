@@ -60,7 +60,9 @@ test('live radio relays only valid frames from the current talker inside the sam
       id, connected: true,
       data: { user: { id, cafeId, role: 'WAITER' }, pttChannel: 'waiters' },
       emit() {},
-      to: (rooms) => ({ emit: (event, payload) => frames.push({ rooms, event, payload }) }),
+      to: (rooms) => ({
+        except: (excluded) => ({ emit: (event, payload) => frames.push({ rooms, excluded, event, payload }) }),
+      }),
     };
   }
   const first = socket('sender', 'a');
@@ -83,6 +85,7 @@ test('live radio relays only valid frames from the current talker inside the sam
     gateway.handleAudioFrame(first, frame);
     assert.equal(frames.length, 1);
     assert.equal(frames[0].rooms, 'restaurant_a_waiters');
+    assert.equal(frames[0].excluded, 'ptt:account:a:sender');
     assert.equal(frames[0].event, 'ptt_audio_frame');
     assert.equal(frames[0].payload.audio, frame.audio);
     assert.equal(frames[0].payload.senderId, first.id);
@@ -120,7 +123,9 @@ test('compact Opus packets retain their talk and room identity, including for a 
     id, connected: true, data: { user: { id, cafeId, role: 'WAITER' }, pttChannel: 'waiters' },
     join() {}, leave() {},
     emit(event, body) { received.push({ id, event, body }); },
-    to: (room) => ({ emit: (event, body) => relayed.push({ room, event, body }) }),
+    to: (room) => ({
+      except: (excluded) => ({ emit: (event, body) => relayed.push({ room, excluded, event, body }) }),
+    }),
   });
   const sender = socket('talker', 'a');
   try {
@@ -137,7 +142,9 @@ test('compact Opus packets retain their talk and room identity, including for a 
     gateway.handleAudioPacket(sender, packet.subarray(0, 135));
     assert.equal(relayed.length, 0);
     gateway.handleAudioPacket(sender, packet);
-    assert.deepEqual(relayed, [{ room: 'restaurant_a_waiters', event: 'ptt_audio_packet', body: packet }]);
+    assert.deepEqual(relayed, [{
+      room: 'restaurant_a_waiters', excluded: 'ptt:account:a:talker', event: 'ptt_audio_packet', body: packet,
+    }]);
     await gateway.handleStopTalk(sender, { channel: 'waiters', talkId });
     gateway.handleAudioPacket(sender, packet);
     assert.equal(relayed.length, 1);
@@ -153,18 +160,21 @@ test('higher-quality radio negotiates across all audible rooms and preserves leg
   let now = Date.now();
   t.mock.method(Date, 'now', () => now);
   const members = (rooms) => clients.filter((client) => [rooms].flat().some((room) => client.rooms.has(room)));
-  const broadcast = (rooms, excluded) => ({
+  const broadcast = (rooms, excluded, excludedRooms = []) => ({
+    except: (roomsToExclude) => broadcast(rooms, excluded, [...excludedRooms, ...[roomsToExclude].flat()]),
     emit(event, payload) {
-      for (const member of members(rooms)) if (member !== excluded) member.emit(event, payload);
+      for (const member of members(rooms)) {
+        if (member !== excluded && !excludedRooms.some((room) => member.rooms.has(room))) member.emit(event, payload);
+      }
     },
   });
   gateway.server = {
     to: broadcast,
     in: (rooms) => ({ fetchSockets: async () => members(rooms) }),
   };
-  async function connect(id, cafeId, channel, supportsHq) {
+  async function connect(id, cafeId, channel, supportsHq, userId = id) {
     const client = {
-      id, connected: true, data: { user: { id, cafeId, role: 'WAITER' } }, rooms: new Set(), events: [],
+      id, connected: true, data: { user: { id: userId, cafeId, role: 'WAITER' } }, rooms: new Set(), events: [],
       join(rooms) { [rooms].flat().forEach((room) => this.rooms.add(room)); },
       leave(room) { this.rooms.delete(room); },
       emit(event, payload) { this.events.push({ event, payload }); },
@@ -176,6 +186,7 @@ test('higher-quality radio negotiates across all audible rooms and preserves leg
   }
   const countPackets = (client) => client.events.filter(({ event }) => event === 'ptt_audio_packet').length;
   const sender = await connect('sender', 'a', 'general', true);
+  const senderSecondDevice = await connect('sender-other-device', 'a', 'general', true, 'sender');
   const listener = await connect('listener', 'a', 'kitchen', true);
   const outsider = await connect('outsider', 'b', 'kitchen', false);
   const talkId = 'a75369e4-383d-46f1-aa39-4186969096c8';
@@ -208,6 +219,7 @@ test('higher-quality radio negotiates across all audible rooms and preserves leg
     assert.equal(countPackets(lateHq), 680);
     assert.equal(countPackets(lateLegacy), 0);
     assert.equal(countPackets(sender), 0);
+    assert.equal(countPackets(senderSecondDevice), 0);
     assert.equal(countPackets(outsider), 0);
 
     await gateway.handleStopTalk(sender, request);

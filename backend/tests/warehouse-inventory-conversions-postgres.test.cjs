@@ -62,7 +62,7 @@ async function inventoryScenario(verify) {
 
       await verify({
         db, owner, main, bar, events, ingredient, line, receive, count, repost, balance, recipe, preparation,
-        produce, movements, documents, production, processing, reports,
+        produce, movements, documents, production, processing, purchases, reports,
       });
     });
   } finally {
@@ -173,6 +173,30 @@ verifyInventory('reprices a batch and two processing outputs through a warehouse
   const immutable = (groups) => groups.map((group) => group.map(({ id, ingredientId, warehouseId, change, createdAt }) =>
     [id, ingredientId, warehouseId, Number(change), createdAt]));
   assert.deepEqual(immutable(resultLegs), immutable(originalLegs), 'replay keeps conversion, transfer and sale legs and quantities');
+});
+
+verifyInventory('corrects a receipt in the open raw period even when the derived output has a later closed count', async ({
+  owner, main, ingredient, line, receive, count, balance, preparation, produce, documents, production, processing, purchases,
+}) => {
+  const raw = await ingredient('Raw flour with an open period');
+  const cooked = await preparation('Prepared flour', raw);
+  const output = await ingredient('Packaged flour with a closed period');
+  const rawReceipt = await receive(raw, 12, 10);
+  const rawCount = await count(raw, 12);
+  await receive(raw, 12, 30);
+  const batch = await produce(cooked);
+  const conversion = await processing.create(owner, { complete: true, inputs: [line(cooked, 2)], outputs: [line(output, 2)] });
+  const outputCount = await count(output, 1);
+  assert.deepEqual(await balance(output), [1, 40, true]);
+  await documents.reopen(owner, rawCount.id, rawCount.revision);
+  await purchases.update(rawReceipt.id, { complete: true, expectedUpdatedAt: rawReceipt.updatedAt.toISOString(),
+    warehouseId: main.id, items: [{ ingredientId: raw.id, quantity: 12, purchasePrice: 20, unit: 'pcs' }] }, owner);
+  assert.equal((await production.batch(batch.id)).totalCost, 100);
+  assert.equal((await processing.findOne(conversion.id)).totalCost, 100);
+  assert.deepEqual(await balance(output), [1, 50, true]);
+  const counted = await documents.get(outputCount.id);
+  assert.equal(counted.status, 'posted');
+  assert.deepEqual([counted.items[0].expected, counted.items[0].quantity, counted.items[0].unitCost], [2, 1, 50]);
 });
 
 verifyInventory('rejects a shortage at production time and keeps the opened revision and ledger intact', async ({

@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
-import { allocateCents, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
+import { allocateOrderItemCents, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
@@ -450,9 +450,11 @@ export class StaffService {
         waiterId: true,
         finalAmount: true,
         refundedAmount: true,
-        payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true, refundedAmount: true } },
+        paymentMethod: true,
+        payments: { select: { method: true, status: true, amount: true, refundedAmount: true } },
         items: {
           where: { status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           select: {
             dishNameSnapshot: true,
             dishVariantNameSnapshot: true,
@@ -575,13 +577,17 @@ export class StaffService {
       if (!o.waiterId) continue; // QR-заказ без официанта в отчёт сотрудника не идёт
       const a = ensure(o.waiterId);
       a.turnover += Number(netOrderAmount(o));
-      for (const p of o.payments) {
-        if (p.method === PaymentMethod.cash) a.cashDue += Number(netPaymentAmount(p));
+      if (!o.payments.length && o.paymentMethod === PaymentMethod.cash) {
+        a.cashDue += Number(netOrderAmount(o));
       }
-      for (const it of o.items) {
+      for (const p of o.payments) {
+        if (p.status === PaymentStatus.paid && p.method === PaymentMethod.cash) a.cashDue += Number(netPaymentAmount(p));
+      }
+      const itemPayables = allocateOrderItemCents(o.finalAmount, o.items);
+      for (const [index, it] of o.items.entries()) {
         const quantity = netItemQuantity(it);
         if (quantity <= 0) continue;
-        const amount = Number(netItemAmount(it, it.finalPrice));
+        const amount = Number(netItemAmount(it, itemPayables[index] / 100));
         const catId = it.dish?.categoryId ?? 'other';
         const catName = it.dish?.category?.name ?? 'Прочее';
         const sortOrder = it.dish?.category?.sortOrder ?? 9999;
@@ -876,9 +882,7 @@ export class StaffService {
       totalServingSeconds += Math.max(0, Math.round((servedAt.getTime() - order.createdAt.getTime()) / 1000));
       totalPaymentSeconds += Math.max(0, (paidAt.getTime() - order.createdAt.getTime()) / 1000);
 
-      const weights = order.items.map((item) => Math.max(0, item.finalPrice.mul(100).round().toNumber()));
-      const allocations = allocateCents(order.finalAmount.mul(100).round().toNumber(),
-        weights.some((amount) => amount > 0) ? weights : order.items.map((item) => item.quantity));
+      const allocations = allocateOrderItemCents(order.finalAmount, order.items);
       return order.items.flatMap((item, index) => {
         const quantity = netItemQuantity(item);
         if (quantity <= 0) return [];

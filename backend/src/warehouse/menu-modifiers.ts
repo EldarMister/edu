@@ -95,7 +95,8 @@ export class MenuModifiersService {
       const dish = await tx.dish.findUnique({ where: { id: dishId }, include: { recipeItems: true, variants: true, modifierGroups: { include: { options: true } } } });
       if (!dish) throw new NotFoundException('Блюдо не найдено');
       if (archive) await tx.recipeRevision.upsert({ where: { dishId_version: { dishId, version: dish.recipeVersion } }, update: {}, create: { dishId, version: dish.recipeVersion, snapshot: JSON.parse(JSON.stringify({ modifierGroups: dish.modifierGroups, allowIngredientExclusions: dish.allowIngredientExclusions, metadata: dish.recipeMetadata, stockIngredientId: dish.stockIngredientId, stockAmount: dish.stockAmount, items: dish.recipeItems, variants: dish.variants })) } });
-      const groupIds = new Set(dish.modifierGroups.map((group) => group.id)), optionIds = new Set(dish.modifierGroups.flatMap((group) => group.options.map((option) => option.id)));
+      const groupIds = new Set(dish.modifierGroups.map((group) => group.id));
+      const existingOptions = new Map(dish.modifierGroups.flatMap((group) => group.options.map((option) => [option.id, option] as const)));
       const keptGroups: string[] = [], seenOptions = new Set<string>();
       for (const [groupIndex, input] of dto.groups.entries()) {
         if (!input.name.trim() || (input.id && (!groupIds.has(input.id) || keptGroups.includes(input.id)))) throw new BadRequestException('Проверьте название и идентификатор группы');
@@ -105,11 +106,17 @@ export class MenuModifiersService {
         keptGroups.push(group.id);
         const keptOptions: string[] = [];
         for (const [optionIndex, option] of input.options.entries()) {
-          if (!option.name.trim() || (option.id && (!optionIds.has(option.id) || seenOptions.has(option.id)))) throw new BadRequestException('Проверьте название и идентификатор добавки');
+          const existing = option.id ? existingOptions.get(option.id) : undefined;
+          if (!option.name.trim() || (option.id && (!existing || seenOptions.has(option.id)))) throw new BadRequestException('Проверьте название и идентификатор добавки');
           if (option.id) seenOptions.add(option.id);
           let amount = new Prisma.Decimal(0), unit: UnitCode = 'pcs';
           if (option.ingredientId) {
-            const ingredient = await tx.ingredient.findFirst({ where: { id: option.ingredientId, isActive: true } });
+            const preservesLink = existing?.ingredientId === option.ingredientId;
+            const reactivatesOption = existing?.isActive === false && option.isActive !== false;
+            const ingredient = await tx.ingredient.findFirst({ where: {
+              id: option.ingredientId,
+              ...(!preservesLink || reactivatesOption ? { isActive: true } : {}),
+            } });
             if (!ingredient) throw new BadRequestException('Складская позиция добавки недоступна');
             unit = normalizeUnit(option.unit ?? ingredient.displayUnit); assertUnitMatchesType(unit, ingredient.unitType);
             amount = new Prisma.Decimal(option.amount ?? 0).mul(toBase(1, unit)).toDecimalPlaces(3);

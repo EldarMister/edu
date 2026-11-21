@@ -58,19 +58,15 @@ export async function purchaseCorrectionEligibility(
       correctionBlockedReason = 'После поставки по её продуктам проведена инвентаризация. Откройте ближайшую инвентаризацию на редактирование.';
     } else if (following || periods.length) {
       const anchor = posted.at(-1)!.createdAt;
-      const [priorCorrections, sameTime, dependentProduction] = await Promise.all([
+      const [priorCorrections, sameTime] = await Promise.all([
         tx.stockMovement.findMany({ where: { cafeId: purchase.cafeId, sourceType: 'purchase', sourceId: purchase.id, type: 'correction' } }),
         tx.stockMovement.findFirst({ where: { cafeId: purchase.cafeId, ingredientId: { in: [...new Set(ingredientIds)] },
           ...warehouseFilter, createdAt: anchor, NOT: { sourceType: 'purchase', sourceId: purchase.id } }, select: { id: true } }),
-        tx.stockMovement.findFirst({ where: { cafeId: purchase.cafeId, ingredientId: { in: [...new Set(ingredientIds)] },
-          ...warehouseFilter, createdAt: { gte: anchor }, sourceType: { in: ['processing', 'production'] } }, select: { id: true } }),
       ]);
       if (priorCorrections.some((row) => !historicalPurchaseCorrection(row) && (!row.change.isZero() || !row.valuationAdjustment.isZero()))) {
         correctionBlockedReason = 'Ранее по поставке проведено исправление текущей датой; его нельзя переносить в прошлый период автоматически.';
       } else if (sameTime) {
         correctionBlockedReason = 'У поставки и другой операции совпадает время до миллисекунды. Порядок пересчёта нельзя подтвердить.';
-      } else if (dependentProduction) {
-        correctionBlockedReason = 'После поставки было производство или переработка. Автоматическое исправление этого периода недоступно.';
       } else if (purchase.cafeId) historicalAt = anchor;
       else correctionBlockedReason = 'Для исторического исправления нужно назначенное заведение.';
     }

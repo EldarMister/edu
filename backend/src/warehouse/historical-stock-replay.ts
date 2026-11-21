@@ -144,10 +144,12 @@ async function chartLanes(tx: Prisma.TransactionClient, cafeId: string, scanAt: 
   const ingredients = new Set(seeds);
   const loaded = new Set<string>();
   const expanded = new Set<string>();
-  const follow = (row: Movement) => {
+  const expandedPeriods = new Set<string>();
+  const periodStarts = new Map(starts);
+  const follow = (row: Movement, dates = starts) => {
     const key = scopeKey(row), time = row.createdAt.getTime();
-    if ((starts.get(key) ?? Infinity) <= time) return;
-    starts.set(key, time);
+    if ((dates.get(key) ?? Infinity) <= time) return;
+    dates.set(key, time);
     ingredients.add(row.ingredientId);
   };
 
@@ -165,9 +167,14 @@ async function chartLanes(tx: Prisma.TransactionClient, cafeId: string, scanAt: 
       if (suffix.length > movementLimit) throw cannotReplay('слишком много движений; выберите более позднюю дату');
       nextIngredients.forEach((id) => loaded.add(id));
     }
-    const sources = suffix.filter((row) => !expanded.has(row.id) && row.createdAt.getTime() >= (starts.get(scopeKey(row)) ?? Infinity)
-      && (isConversionInput(row) || (row.sourceType === 'transfer' && row.type === 'transfer' && row.change.lt(0))));
-    if (!sources.length) return { suffix, ingredientIds: [...ingredients] };
+    const sources = suffix.filter((row) => {
+      const transfer = row.sourceType === 'transfer' && row.type === 'transfer' && row.change.lt(0);
+      if (!transfer && !isConversionInput(row)) return false;
+      const key = scopeKey(row), time = row.createdAt.getTime();
+      return (!expanded.has(row.id) && time >= (starts.get(key) ?? Infinity))
+        || (transfer && !expandedPeriods.has(row.id) && time >= (periodStarts.get(key) ?? Infinity));
+    });
+    if (!sources.length) return { suffix, ingredientIds: [...ingredients], periodStarts };
     const transferIds = sources.flatMap((row) => row.sourceType === 'transfer' && row.sourceId ? [row.sourceId] : []);
     const conversionIds = sources.flatMap((row) => isConversionInput(row) && row.sourceId ? [row.sourceId] : []);
     const [transferLegs, conversionOutputs] = await Promise.all([
@@ -186,7 +193,12 @@ async function chartLanes(tx: Prisma.TransactionClient, cafeId: string, scanAt: 
     }
     for (const row of sources) {
       if (row.sourceType === 'transfer') {
-        follow(transferPair(pairs, row).credit);
+        const { credit } = transferPair(pairs, row);
+        follow(credit);
+        if (row.createdAt.getTime() >= (periodStarts.get(scopeKey(row)) ?? Infinity)) {
+          follow(credit, periodStarts);
+          expandedPeriods.add(row.id);
+        }
       } else {
         const results = outputs.get(conversionKey(row));
         if (!results?.length) throw cannotReplay('в журнале нет выпуска по производству или переработке');
@@ -361,7 +373,7 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
         Math.min(effectiveAt.getTime(), opening.getTime()));
     }
   }
-  const { suffix, ingredientIds } = await chartLanes(tx, cafeId, scanAt, starts, seedIngredients);
+  const { suffix, ingredientIds, periodStarts } = await chartLanes(tx, cafeId, scanAt, starts, seedIngredients);
   const startFor = (row: Movement) => starts.get(scopeKey(row)) ?? Infinity;
   const replayRows = suffix.filter((row) => row.createdAt.getTime() >= startFor(row));
 
@@ -415,7 +427,9 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     if (anchorsBeforeLane.has(anchorKey)) continue;
     if (document.status === 'reversed') throw cannotReplay('в периоде есть сторно инвентаризации');
     if (!item.expected) throw cannotReplay('журнал не подтверждает остатки на момент инвентаризации');
-    if (cutoff >= start) {
+    // Recording a correction in the source period can revalue already
+    // counted manufactured outputs. Their posted physical quantities stay fixed.
+    if (cutoff >= (periodStarts.get(lane) ?? Infinity)) {
       const earliest = earliestCounts.get(lane)?.document;
       if (!earliest || cutoff < (earliest.countedAt ?? earliest.postedAt!).getTime()) earliestCounts.set(lane, item);
     }

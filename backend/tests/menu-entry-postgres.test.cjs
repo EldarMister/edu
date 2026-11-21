@@ -8,6 +8,7 @@ const { MenuEntryService } = require('../src/admin/menu-entry.service.ts');
 const { CatalogController } = require('../src/admin/catalog.controller.ts');
 const { RecipesService } = require('../src/warehouse/recipes.service.ts');
 const { MenuModifiersService } = require('../src/warehouse/menu-modifiers.ts');
+const { IngredientsService } = require('../src/warehouse/ingredients.service.ts');
 const { redactWarehouseCosts } = require('../src/warehouse/warehouse-cost.interceptor.ts');
 const { PermissionsGuard } = require('../src/common/guards/permissions.guard.ts');
 const { Reflector } = require('@nestjs/core');
@@ -526,7 +527,7 @@ test(
           },
         );
         await t.test(
-          'existing modifiers round-trip through validation and unchanged archived modifiers do not block menu edits',
+          'existing modifiers round-trip and archived ingredients do not block group edits or deactivation',
           async () => {
             const baseline = await service.get(recipe.dish.id);
             const pipe = new ValidationPipe({
@@ -551,7 +552,8 @@ test(
               updated.modifiers.groups[0].options[0].id,
               baseline.modifiers.groups[0].options[0].id,
             );
-            await db.ingredient.update({ where: { id: milk.id }, data: { isActive: false } });
+            const archived = await new IngredientsService(db).remove(milk.id);
+            assert.equal(archived.deactivated, true);
             const { modifiers: _unchanged, ...withoutModifiers } = request;
             const result = await service.save(
               recipe.dish.id,
@@ -567,6 +569,45 @@ test(
               result.modifiers.groups[0].options[0].id,
               baseline.modifiers.groups[0].options[0].id,
             );
+            const archivedGroup = result.modifiers.groups[0];
+            const edited = await service.save(
+              recipe.dish.id,
+              {
+                ...withoutModifiers,
+                expectedVersion: result.recipe.version,
+                modifiers: {
+                  allowIngredientExclusions: result.modifiers.allowIngredientExclusions,
+                  groups: [{
+                    ...archivedGroup,
+                    name: 'Молоко и сливки',
+                    options: [
+                      { ...archivedGroup.options[0], isActive: false },
+                      { name: 'Сливки', price: 15 },
+                    ],
+                  }],
+                },
+              },
+              actor,
+            );
+            assert.equal(edited.modifiers.groups[0].name, 'Молоко и сливки');
+            assert.equal(edited.modifiers.groups[0].options[0].id, archivedGroup.options[0].id);
+            assert.equal(edited.modifiers.groups[0].options[0].isActive, false);
+            assert.equal(edited.modifiers.groups[0].options[0].ingredientId, milk.id);
+            assert.equal(edited.modifiers.groups[0].options[1].name, 'Сливки');
+            const currentGroup = edited.modifiers.groups[0];
+            for (const selections of [
+              [{ ...currentGroup.options[0], isActive: true }, currentGroup.options[1]],
+              [...currentGroup.options, { name: 'Новая добавка', price: 10, ingredientId: milk.id, amount: 0.05, unit: 'l' }],
+            ]) {
+              await assert.rejects(service.save(recipe.dish.id, {
+                ...withoutModifiers,
+                expectedVersion: edited.recipe.version,
+                modifiers: {
+                  allowIngredientExclusions: true,
+                  groups: [{ ...currentGroup, options: selections }],
+                },
+              }, actor), /Складская позиция добавки недоступна/);
+            }
           },
         );
       });

@@ -1,19 +1,19 @@
 import { Prisma } from '@prisma/client';
-import { netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
+import { allocateOrderItemCents, netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import type { RefundTaxReversal } from '../orders/order-refund-plan';
 import { preparedLossQuantity } from '../warehouse/movement-cost';
 import { warehouseDay } from '../warehouse/report-range';
 
 export const statisticsOrderSelect = {
   id: true, createdAt: true, closedAt: true, waiterId: true, finalAmount: true,
-  paymentMethod: true, discountAmount: true, refundedAmount: true,
+  paymentMethod: true, discountAmount: true, refundedAmount: true, serviceChargeAmount: true,
   waiter: { select: { name: true } },
   payments: { select: { method: true, amount: true, status: true, refundedAmount: true } },
   taxes: { where: { reversedAt: null }, select: { taxId: true, salesAmount: true, amount: true, itemAmounts: true } },
   refunds: { where: { status: 'approved' }, select: { taxReversals: true } },
   items: {
     where: { status: { notIn: ['cancelled', 'rejected'] } },
-    orderBy: { id: 'asc' },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: {
       id: true, dishId: true, dishVariantId: true, dishNameSnapshot: true, dishVariantNameSnapshot: true,
       quantity: true, refundedQuantity: true, priceSnapshot: true, discountAmount: true, finalPrice: true,
@@ -191,14 +191,17 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
     staff.set(waiterId, employee);
 
     const itemCosts = costsForOrder(order.items, costs, showCosts);
-    for (const item of order.items) {
+    // Product sales exclude the service charge retained on legacy receipts.
+    const productPayable = new Prisma.Decimal(order.finalAmount).sub(order.serviceChargeAmount ?? 0);
+    const itemPayables = allocateOrderItemCents(Prisma.Decimal.max(0, productPayable), order.items);
+    for (const [index, item] of order.items.entries()) {
       const categoryId = item.dish?.category.id ?? 'uncategorized';
       const category = item.dish?.category.name ?? 'Без категории';
       const categoryRow = categories.get(categoryId) ?? { id: categoryId, name: category, quantity: 0, revenue: 0, cost: 0, tax: 0 };
       const name = item.dishVariantNameSnapshot ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}` : item.dishNameSnapshot;
       const id = JSON.stringify([item.dishId, item.dishVariantId, name, categoryId, waiterId]);
       const product = products.get(id) ?? { id, name, categoryId, category, waiterId, waiter, quantity: 0, gross: 0, discount: 0, revenue: 0, cost: 0, tax: 0 };
-      const revenue = Number(netItemAmount(item, item.finalPrice));
+      const revenue = Number(netItemAmount(item, itemPayables[index] / 100));
       const quantity = netItemQuantity(item);
       const cost = itemCosts.get(item.id) ?? null;
       const tax = taxes.allAttributed ? taxes.byItem.get(item.id) ?? 0 : null;

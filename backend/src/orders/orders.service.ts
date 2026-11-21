@@ -2357,7 +2357,7 @@ export class OrdersService {
       this.ensureNoPendingWaiterDecision(latest);
       this.ensureAllActiveItemsServed(latest);
       await tx.table.update({
-        where: { id: order.tableId },
+        where: { id: latest.tableId },
         data: { status: TableStatus.waiting_payment },
       });
       return tx.order.update({
@@ -2369,6 +2369,26 @@ export class OrdersService {
     this.emitStatusChanged(updated);
     this.emitTableStatus(updated.table.id, updated.table.number, TableStatus.waiting_payment, updated.table.hallId);
     return updated;
+  }
+
+  private assertMatchingPayment(
+    order: Prisma.OrderGetPayload<{ include: typeof orderInclude }>,
+    method: PaymentMethod,
+    source: PaymentSource,
+    parts: { method: PaymentMethod; amount: number }[],
+  ) {
+    if (order.paymentStatus === PaymentStatus.refunded || order.refundedAmount.gt(0)) {
+      throw new ConflictException('По этому чеку уже оформлен возврат');
+    }
+    // У старых чеков способ оплаты может храниться только в заказе.
+    const expected = parts.map((part) => `${source}:${part.method}:${part.amount.toFixed(2)}`).sort();
+    const recorded = order.payments.map((part) => `${part.source}:${part.method}:${part.amount.toFixed(2)}`).sort();
+    const matches = recorded.length
+      ? expected.length === recorded.length && expected.every((part, index) => part === recorded[index])
+      : source === PaymentSource.normal && method !== PaymentMethod.mixed;
+    if (order.paymentMethod !== method || !matches) {
+      throw new ConflictException('Чек уже оплачен. Обновите его, чтобы увидеть фактическую оплату');
+    }
   }
 
   /** Приём оплаты: закрывает заказ, освобождает стол. Вызывается из PaymentsService. */
@@ -2389,11 +2409,6 @@ export class OrdersService {
     if (expectedAmount !== undefined && !order.finalAmount.eq(expectedAmount)) {
       throw new ConflictException('Сумма заказа изменилась. Обновите заказ перед оплатой');
     }
-    if (order.status === OrderStatus.paid) {
-      return order;
-    }
-    this.ensureAllActiveItemsServed(order);
-
     // Смешанная/раздельная оплата: суммы частей должны точно совпадать с итогом заказа.
     const final = Number(order.finalAmount);
     let paymentParts: { method: PaymentMethod; amount: number }[];
@@ -2416,11 +2431,23 @@ export class OrdersService {
       paymentParts = [{ method, amount: final }];
     }
 
-    const updated = await this.prisma.$transaction(async (tx) => {
+    if (order.status === OrderStatus.paid) {
+      this.assertMatchingPayment(order, method, source, paymentParts);
+      return order;
+    }
+    this.ensureAllActiveItemsServed(order);
+
+    const { updated, applied } = await this.prisma.$transaction(async (tx) => {
       await lockOrder(tx, orderId);
       const latest = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
       if (Number(latest.finalAmount) !== final) throw new ConflictException('Сумма заказа изменилась. Обновите заказ перед оплатой');
-      if (latest.status === OrderStatus.paid) return latest;
+      if (latest.status === OrderStatus.paid) {
+        if (actor.role === Role.WAITER && !this.canWaiterAccessOrder(latest, actor.id)) {
+          throw new ForbiddenException('Это не ваш заказ');
+        }
+        this.assertMatchingPayment(latest, method, source, paymentParts);
+        return { updated: latest, applied: false };
+      }
       this.assertOrderEditable(latest, actor);
       this.ensureAllActiveItemsServed(latest);
       const existingPayment = await tx.payment.findFirst({ where: { orderId, status: PaymentStatus.paid } });
@@ -2446,7 +2473,7 @@ export class OrdersService {
       });
       await recordOrderTaxes(tx, orderId, latest.cafeId, taxItems, closedAt, roundedPayable);
       await this.updateTableAfterClosingCheck(tx, latest);
-      return tx.order.update({
+      const updated = await tx.order.update({
         where: { id: orderId },
         data: {
           status: OrderStatus.paid,
@@ -2456,8 +2483,10 @@ export class OrdersService {
         },
         include: orderInclude,
       });
+      return { updated, applied: true };
     });
 
+    if (!applied) return updated;
     this.emitStatusChanged(updated);
     this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
 

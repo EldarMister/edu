@@ -30,7 +30,8 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
   const cafe = await db.cafe.create({ data: { name: `Order integration ${randomUUID()}` } });
   const eventLog = [];
   const events = new Proxy({}, { get: (_, event) => (...args) => eventLog.push({ event, args }) });
-  const audit = { log: async () => {} };
+  const auditLog = [];
+  const audit = { log: async (entry) => { auditLog.push(entry); } };
   const pushCalls = [];
   const push = { notifyRole: async (...args) => pushCalls.push(args), notifyUser: async () => {}, notifyWaiter: async () => {} };
   try {
@@ -409,6 +410,64 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
           assert.ok(['cooking', 'cancelled'].includes(final.status));
           assert.equal(final.items[0].status, final.status);
         }
+      });
+
+      await t.test('moving a served order while sending it to payment updates its current table', async (subtest) => {
+        const order = await newOrder();
+        const target = await db.table.create({ data: { hallId: hall.id, number: tableNumber++ } });
+        await db.orderItem.updateMany({ where: { orderId: order.id }, data: { status: 'served' } });
+        await db.order.update({ where: { id: order.id }, data: { status: 'served' } });
+        const findById = orders.findById.bind(orders);
+        subtest.mock.method(orders, 'findById', async (id) => {
+          const beforeMove = await findById(id);
+          await orders.moveTable(order.tableId, target.id, waiter);
+          return beforeMove;
+        }, { times: 1 });
+
+        const pending = await orders.toPayment(order.id, waiter.id);
+        assert.equal(pending.tableId, target.id);
+        assert.equal(pending.table.status, 'waiting_payment');
+        assert.equal((await db.table.findUniqueOrThrow({ where: { id: order.tableId } })).status, 'free');
+      });
+
+      await t.test('concurrent tenders and split payment retries create one recorded checkout', async () => {
+        const order = await newOrder();
+        await db.orderItem.updateMany({ where: { orderId: order.id }, data: { status: 'served' } });
+        await db.order.update({ where: { id: order.id }, data: { status: 'served' } });
+        const methods = ['cash', 'card'];
+        const attempts = await Promise.allSettled(methods.map((method) => orders.markPaid(order.id, waiter, method)));
+        const accepted = attempts.findIndex((attempt) => attempt.status === 'fulfilled');
+        assert.notEqual(accepted, -1);
+        assert.equal(attempts[1 - accepted].reason?.status, 409);
+        const method = methods[accepted];
+        assert.equal((await orders.markPaid(order.id, waiter, method)).paymentMethod, method);
+        const payments = await db.payment.findMany({ where: { orderId: order.id } });
+        assert.equal(payments.length, 1);
+        assert.equal(payments[0].method, method);
+        const receipt = await db.financeEntry.findFirstOrThrow({
+          where: { sourceKey: 'sale:' + payments[0].id }, include: { account: true },
+        });
+        assert.equal(receipt.account.type, method === 'cash' ? 'cash' : 'noncash');
+        assert.ok(receipt.amount.eq(payments[0].amount));
+        assert.deepEqual(
+          auditLog.filter(({ actionType, orderId }) => actionType === 'ORDER_PAID' && orderId === order.id)
+            .map(({ metadata }) => metadata.method),
+          [method],
+        );
+
+        const split = await newOrder();
+        await db.orderItem.updateMany({ where: { orderId: split.id }, data: { status: 'served' } });
+        await db.order.update({ where: { id: split.id }, data: { status: 'served' } });
+        const parts = [{ method: 'cash', amount: 50 }, { method: 'card', amount: +split.finalAmount - 50 }];
+        await Promise.all([
+          orders.markPaid(split.id, waiter, 'mixed', parts, 'split'),
+          orders.markPaid(split.id, waiter, 'mixed', [...parts].reverse(), 'split'),
+        ]);
+        await assert.rejects(orders.markPaid(split.id, waiter, 'mixed', [
+          { method: 'cash', amount: 60 }, { method: 'card', amount: +split.finalAmount - 60 },
+        ], 'split'), { status: 409 });
+        assert.equal(await db.payment.count({ where: { orderId: split.id } }), 2);
+        assert.equal(auditLog.filter(({ actionType, orderId }) => actionType === 'ORDER_PAID' && orderId === split.id).length, 1);
       });
 
       await t.test('payment and tenant barriers still apply even when all waiter stages are enabled', async () => {

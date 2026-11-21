@@ -280,6 +280,12 @@ export function AdminApp() {
     void qc.invalidateQueries({ queryKey: financeKey });
     void qc.invalidateQueries({ queryKey: cashShiftKey });
     void qc.invalidateQueries({ queryKey: taxReportKey });
+    if (order.status === 'paid' || order.status === 'cancelled') {
+      void qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-report'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'staff', 'waiter-report'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'staff', 'waiter-orders-report'] });
+    }
     applyOrderStatusToCache(qc, order);
     qc.invalidateQueries({ queryKey: ['admin', 'orders'] });
     qc.invalidateQueries({ queryKey: ['admin', 'tables'] });

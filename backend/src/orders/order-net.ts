@@ -16,6 +16,12 @@ export function allocateCents(amount: number, weights: number[]) {
   return rows.map((row) => row.amount);
 }
 
+export function allocateOrderItemCents(payable: Money, items: readonly { finalPrice: Money; quantity: number }[]) {
+  const weights = items.map((item) => Math.max(0, new Prisma.Decimal(item.finalPrice).mul(100).round().toNumber()));
+  return allocateCents(new Prisma.Decimal(payable).mul(100).round().toNumber(),
+    weights.some((weight) => weight > 0) ? weights : items.map((item) => item.quantity));
+}
+
 export function netOrderAmount(order: { finalAmount: Money; refundedAmount?: Money | null }) {
   return new Prisma.Decimal(order.finalAmount).sub(order.refundedAmount ?? 0);
 }
