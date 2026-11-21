@@ -1,20 +1,21 @@
 /* global AudioWorkletProcessor, registerProcessor, sampleRate */
-const SPEECH_RATE = 16000;
-const FRAME_SAMPLES = 640;
-
 class PttCaptureProcessor extends AudioWorkletProcessor {
-  ratio = sampleRate / SPEECH_RATE;
-  remaining = this.ratio;
   sum = 0;
-  frame = new DataView(new ArrayBuffer(FRAME_SAMPLES * 2));
   index = 0;
   finished = false;
 
-  constructor() {
+  constructor(options) {
     super();
+    const highQuality = options?.processorOptions?.sampleRate === 24000;
+    this.frameSamples = highQuality ? 480 : 640;
+    this.ratio = sampleRate / (highQuality ? 24000 : 16000);
+    this.remaining = this.ratio;
+    this.frame = new DataView(new ArrayBuffer(this.frameSamples * 2));
     this.port.onmessage = ({ data }) => {
       if (data !== 'flush' || this.finished) return;
       this.finished = true;
+      const partial = this.ratio - this.remaining;
+      if (partial > 1e-6) this.writeSample(this.sum / partial);
       // The unused portion of the last PCM frame is already padded with silence.
       if (this.index > 0) this.sendFrame();
       this.port.postMessage('drained');
@@ -43,13 +44,13 @@ class PttCaptureProcessor extends AudioWorkletProcessor {
   writeSample(value) {
     this.frame.setInt16(this.index * 2, Math.round(Math.max(-1, Math.min(1, value)) * 32767), true);
     this.index++;
-    if (this.index === FRAME_SAMPLES) this.sendFrame();
+    if (this.index === this.frameSamples) this.sendFrame();
   }
 
   sendFrame() {
     const bytes = this.frame.buffer;
     this.port.postMessage(bytes, [bytes]);
-    this.frame = new DataView(new ArrayBuffer(FRAME_SAMPLES * 2));
+    this.frame = new DataView(new ArrayBuffer(this.frameSamples * 2));
     this.index = 0;
   }
 }

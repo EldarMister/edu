@@ -1,8 +1,9 @@
 import { getAudioContext, resumeAudioContext } from '@/lib/audio';
+import { PTT_CAPTURE_RATE, PTT_OPUS_PROFILES } from './opusAudio';
 
-const SPEECH_RATE = 16000;
-const FRAME_SAMPLES = 640;
-const START_BUFFER_SECONDS = 0.14;
+const START_BUFFER_SECONDS = 0.12;
+const MAX_BUFFER_SECONDS = 0.3;
+const SCHEDULING_MARGIN_SECONDS = 0.008;
 const CUE_SECONDS = 0.05;
 const FLUSH_TIMEOUT_MS = 250;
 
@@ -12,7 +13,7 @@ function prepareWorklet(ctx: AudioContext) {
   if (!ctx.audioWorklet) return Promise.reject(new Error('AudioWorklet unavailable'));
   let module = modules.get(ctx);
   if (!module) {
-    module = ctx.audioWorklet.addModule('/ptt-capture.worklet.js').catch((error: unknown) => {
+    module = ctx.audioWorklet.addModule('/ptt-capture.worklet.js?v=2').catch((error: unknown) => {
       modules.delete(ctx);
       throw error;
     });
@@ -30,7 +31,9 @@ export async function createPttCapture(stream: MediaStream, onFrame: (audio: Arr
   await prepareWorklet(ctx);
 
   const source = ctx.createMediaStreamSource(stream);
-  const capture = new AudioWorkletNode(ctx, 'edu-ptt-capture', { channelCount: 1, channelCountMode: 'explicit' });
+  const capture = new AudioWorkletNode(ctx, 'edu-ptt-capture', {
+    channelCount: 1, channelCountMode: 'explicit', processorOptions: { sampleRate: PTT_CAPTURE_RATE },
+  });
   let timer: number | undefined;
   let drained: ((complete: boolean) => void) | undefined;
   function finishFlush(complete: boolean) {
@@ -90,17 +93,22 @@ export function playPttReadyCue() {
 export class PttPlayback {
   private context?: AudioContext;
   private endAt = 0;
+  private lastArrival?: number;
+  private jitter = 0;
   private readonly sources = new Set<AudioScheduledSourceNode>();
 
-  push(audio: unknown, startsTalk = false) {
-    if (!(audio instanceof ArrayBuffer && audio.byteLength === FRAME_SAMPLES * 2)
-      && !(audio instanceof Float32Array && audio.length === FRAME_SAMPLES)) return false;
+  push(audio: unknown, startsTalk = false, sampleRate: number = PTT_OPUS_PROFILES.opus.sampleRate, framesInPacket = 1) {
+    const frameSamples = sampleRate === PTT_CAPTURE_RATE
+      ? PTT_OPUS_PROFILES['opus-hq'].frameSamples
+      : PTT_OPUS_PROFILES.opus.frameSamples;
+    if (!(audio instanceof ArrayBuffer && audio.byteLength === frameSamples * 2)
+      && !(audio instanceof Float32Array && audio.length === frameSamples)) return false;
     const ctx = getAudioContext();
     if (ctx.state !== 'running') return false;
     if (this.context !== ctx) this.stop();
     this.context = ctx;
 
-    const buffer = ctx.createBuffer(1, FRAME_SAMPLES, SPEECH_RATE);
+    const buffer = ctx.createBuffer(1, frameSamples, sampleRate);
     const samples = buffer.getChannelData(0);
     if (audio instanceof Float32Array) samples.set(audio);
     else {
@@ -116,16 +124,27 @@ export class PttPlayback {
       source.disconnect();
     };
 
-    const ahead = this.endAt - ctx.currentTime;
-    // Catch up after bursts by slightly speeding up queued speech, without discarding whole frames.
-    const rate = ahead > 0.75 ? 1.2 : ahead > 0.36 ? 1.08 : 1;
-    const startAt = ahead > 0
-      ? this.endAt + (startsTalk ? CUE_SECONDS : 0)
-      : ctx.currentTime + START_BUFFER_SECONDS;
+    const now = ctx.currentTime;
+    if (framesInPacket > 0) {
+      if (this.lastArrival !== undefined) {
+        const elapsed = now - this.lastArrival;
+        if (!startsTalk) {
+          // Rebuffer after a stall based on recent jitter, then gradually return to the shorter delay.
+          const expected = framesInPacket * buffer.duration;
+          this.jitter = Math.min(MAX_BUFFER_SECONDS - START_BUFFER_SECONDS, Math.max(this.jitter * 0.96, elapsed - expected));
+        } else if (elapsed > 1) {
+          this.jitter *= Math.pow(0.5, elapsed);
+        }
+      }
+      this.lastArrival = now;
+    }
+    const canContinue = this.endAt > 0 && this.endAt >= now - buffer.duration;
+    const startAt = canContinue
+      ? Math.max(this.endAt, now + SCHEDULING_MARGIN_SECONDS) + (startsTalk ? CUE_SECONDS : 0)
+      : now + START_BUFFER_SECONDS + this.jitter;
     if (startsTalk) this.playCue(ctx, startAt - CUE_SECONDS, 760);
-    source.playbackRate.value = rate;
     source.start(startAt);
-    this.endAt = startAt + buffer.duration / rate;
+    this.endAt = startAt + buffer.duration;
     return true;
   }
 
@@ -158,6 +177,8 @@ export class PttPlayback {
     }
     this.sources.clear();
     this.endAt = 0;
+    this.lastArrival = undefined;
+    this.jitter = 0;
     this.context = undefined;
   }
 }

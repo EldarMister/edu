@@ -468,7 +468,7 @@ export function PttOverlay({
     const seq = ++joinSeqRef.current;
     const attempt = (retriesLeft: number) => {
       if (joinSeqRef.current !== seq) return;
-      sock.emit(PTT_EVENTS.JOIN, { channel }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
+      sock.emit(PTT_EVENTS.JOIN, { channel, codecs: ['opus-hq'] }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
         if (joinSeqRef.current !== seq) return;
         if (ack?.ok) {
           if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);

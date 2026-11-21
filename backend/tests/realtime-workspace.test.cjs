@@ -145,3 +145,82 @@ test('compact Opus packets retain their talk and room identity, including for a 
     await gateway.handleStopTalk(sender, { channel: 'waiters', talkId });
   }
 });
+
+test('higher-quality radio negotiates across all audible rooms and preserves legacy listeners', async (t) => {
+  const { PttGateway } = require('../src/realtime/ptt.gateway.ts');
+  const gateway = new PttGateway({}, {});
+  const clients = [];
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const members = (rooms) => clients.filter((client) => [rooms].flat().some((room) => client.rooms.has(room)));
+  const broadcast = (rooms, excluded) => ({
+    emit(event, payload) {
+      for (const member of members(rooms)) if (member !== excluded) member.emit(event, payload);
+    },
+  });
+  gateway.server = {
+    to: broadcast,
+    in: (rooms) => ({ fetchSockets: async () => members(rooms) }),
+  };
+  async function connect(id, cafeId, channel, supportsHq) {
+    const client = {
+      id, connected: true, data: { user: { id, cafeId, role: 'WAITER' } }, rooms: new Set(), events: [],
+      join(rooms) { [rooms].flat().forEach((room) => this.rooms.add(room)); },
+      leave(room) { this.rooms.delete(room); },
+      emit(event, payload) { this.events.push({ event, payload }); },
+      to(rooms) { return broadcast(rooms, this); },
+    };
+    clients.push(client);
+    await gateway.handleJoin(client, supportsHq ? { channel, codecs: ['opus-hq'] } : { channel });
+    return client;
+  }
+  const countPackets = (client) => client.events.filter(({ event }) => event === 'ptt_audio_packet').length;
+  const sender = await connect('sender', 'a', 'general', true);
+  const listener = await connect('listener', 'a', 'kitchen', true);
+  const outsider = await connect('outsider', 'b', 'kitchen', false);
+  const talkId = 'a75369e4-383d-46f1-aa39-4186969096c8';
+  const request = { channel: 'general', talkId, codec: 'opus', preferHq: true };
+  const packet = (size) => {
+    const bytes = Buffer.alloc(size);
+    Buffer.from(talkId.replaceAll('-', ''), 'hex').copy(bytes);
+    return bytes;
+  };
+  try {
+    assert.equal((await gateway.handleStartTalk(sender, request)).codec, 'opus-hq');
+    assert.equal(listener.events.find(({ event }) => event === 'ptt_channel_busy').payload.codec, 'opus-hq');
+    const lateLegacy = await connect('older-device', 'a', 'admin', false);
+    const lateHq = await connect('new-device', 'a', 'waiters', true);
+    assert.equal(lateHq.events.find(({ event }) => event === 'ptt_channel_busy').payload.codec, 'opus-hq');
+    assert.equal((await gateway.handleStartTalk(sender, request)).codec, 'opus-hq', 'a retry keeps its granted codec');
+
+    const hqFrame = packet(96);
+    gateway.handleAudioPacket(sender, packet(136));
+    gateway.handleAudioPacket(sender, packet(176));
+    gateway.handleAudioPacket(sender, Buffer.alloc(96));
+    gateway.handleAudioPacket(listener, hqFrame);
+    assert.equal(countPackets(listener), 0);
+    for (let i = 0; i < 180; i++) gateway.handleAudioPacket(sender, hqFrame);
+    for (let i = 0; i < 500; i++) {
+      now += 20;
+      gateway.handleAudioPacket(sender, hqFrame);
+    }
+    assert.equal(countPackets(listener), 680, 'supports a delayed burst followed by 50 frames per second');
+    assert.equal(countPackets(lateHq), 680);
+    assert.equal(countPackets(lateLegacy), 0);
+    assert.equal(countPackets(sender), 0);
+    assert.equal(countPackets(outsider), 0);
+
+    await gateway.handleStopTalk(sender, request);
+    assert.equal((await gateway.handleStartTalk(sender, request)).codec, 'opus');
+    gateway.handleAudioPacket(sender, hqFrame);
+    gateway.handleAudioPacket(sender, packet(76));
+    assert.equal(countPackets(listener), 681);
+    assert.equal(countPackets(lateLegacy), 1, 'the next talk uses a codec the late listener can hear');
+
+    await gateway.handleStopTalk(sender, request);
+    await gateway.handleJoin(lateLegacy, { channel: null });
+    assert.equal((await gateway.handleStartTalk(sender, { ...request, preferHq: false })).codec, 'opus');
+  } finally {
+    await gateway.handleStopTalk(sender, request);
+  }
+});

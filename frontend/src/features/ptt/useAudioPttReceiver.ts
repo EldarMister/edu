@@ -3,9 +3,9 @@ import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { playRadioAudio } from '@/lib/audio';
 import { PttPlayback } from './liveAudio';
-import { createPttOpusDecoder, preparePttOpus, pttOpusFrames, pttOpusHeader } from './opusAudio';
+import { createPttOpusDecoder, isPttOpusCodec, preparePttOpus, pttOpusFrames, pttOpusHeader, PTT_OPUS_PROFILES } from './opusAudio';
 import { playPttCue, playPttMessage } from './sounds';
-import { PTT_EVENTS, type PttAudioPayload, type PttBusyPayload, type PttChannel, type PttFramePayload, type PttFreePayload } from './types';
+import { PTT_EVENTS, type PttAudioPayload, type PttBusyPayload, type PttChannel, type PttFramePayload, type PttFreePayload, type PttOpusCodec } from './types';
 
 function base64ToBytes(value: string): Uint8Array {
   const binary = window.atob(value);
@@ -79,7 +79,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     if (!enabled) return;
     const socket = getSocket();
     const playback = new PttPlayback();
-    type OpusTalk = { id: string; header: Uint8Array; speaker: PttPlayingSpeaker };
+    type OpusTalk = { id: string; codec: PttOpusCodec; header: Uint8Array; speaker: PttPlayingSpeaker };
     let active = true;
     let talkId: string | undefined;
     let opusTalk: OpusTalk | undefined;
@@ -103,14 +103,14 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       decoderTalkId = undefined;
     }
 
-    function playFrame(id: string, who: PttPlayingSpeaker, audio: ArrayBuffer | Float32Array) {
+    function playFrame(id: string, who: PttPlayingSpeaker, audio: ArrayBuffer | Float32Array, sampleRate?: number, framesInPacket?: number) {
       const startsTalk = id !== talkId;
       if (startsTalk) {
         window.clearTimeout(endTimer);
         talkId = id;
         setLiveSpeaker(who);
       }
-      if (!playback.push(audio, startsTalk) && startsTalk) {
+      if (!playback.push(audio, startsTalk, sampleRate, framesInPacket) && startsTalk) {
         // Preserve the existing tap-to-unlock flow on browsers that suspend audio.
         void playPttCue('start', 'receiver');
       }
@@ -121,26 +121,29 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     }
 
     function onBusy(payload: PttBusyPayload) {
-      if (payload.codec !== 'opus' || !payload.talkId || !payload.speaker || !hears(payload.channel, payload.speaker.id)) return;
-      opusTalk = { id: payload.talkId, header: pttOpusHeader(payload.talkId), speaker: payload.speaker };
+      if (!isPttOpusCodec(payload.codec) || !payload.talkId || !payload.speaker || !hears(payload.channel, payload.speaker.id)) return;
+      opusTalk = { id: payload.talkId, codec: payload.codec, header: pttOpusHeader(payload.talkId), speaker: payload.speaker };
     }
 
     function onPacket(packet: unknown) {
       const stream = opusTalk;
       if (!stream) return;
-      const frames = pttOpusFrames(packet, stream.header);
+      const frames = pttOpusFrames(packet, stream.header, stream.codec);
       if (!frames.length) return;
 
       queue(async () => {
         if (decoderTalkId !== stream.id) {
-          const next = await createPttOpusDecoder();
+          const next = await createPttOpusDecoder(stream.codec);
           if (!active) { next.free(); return; }
           closeDecoder();
           decoder = next;
           decoderTalkId = stream.id;
         }
         if (!decoder) return;
-        for (const frame of frames) playFrame(stream.id, stream.speaker, decoder.decodeFloat(frame));
+        const sampleRate = PTT_OPUS_PROFILES[stream.codec].sampleRate;
+        for (const [index, frame] of frames.entries()) {
+          playFrame(stream.id, stream.speaker, decoder.decodeFloat(frame), sampleRate, index === 0 ? frames.length : 0);
+        }
       });
     }
 

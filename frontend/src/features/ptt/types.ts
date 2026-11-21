@@ -6,6 +6,7 @@ export const PTT_CHANNELS = [
 ] as const;
 
 export type PttChannel = (typeof PTT_CHANNELS)[number]['key'];
+export type PttOpusCodec = 'opus' | 'opus-hq';
 
 export type PttAudioPayload = {
   channel: PttChannel;
@@ -40,7 +41,7 @@ export type PttPresencePayload = {
 
 export type PttBusyPayload = {
   talkId?: string;
-  codec?: 'opus';
+  codec?: PttOpusCodec;
   channel: PttChannel;
   speaker?: { id: string; role: string; name?: string };
   startedAt?: string;

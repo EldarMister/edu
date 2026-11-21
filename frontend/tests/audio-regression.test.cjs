@@ -190,7 +190,7 @@ test('normalized radio WAV preserves sample rate, stereo order, and amplitude he
   for (let i = 44; i < 52; i += 2) assert.ok(Math.abs(bytes.getInt16(i, true)) < 32767);
 });
 
-function senderHarness({ captureFails = false, pendingPermission = false, pendingAck = false } = {}) {
+function senderHarness({ captureFails = false, pendingPermission = false, pendingAck = false, codec = 'opus' } = {}) {
   const events = [];
   const modes = [];
   const cues = [];
@@ -208,7 +208,7 @@ function senderHarness({ captureFails = false, pendingPermission = false, pendin
     emit(event, payload) { events.push({ event, payload }); },
     timeout() { return { emit(event, payload, callback) {
       events.push({ event, payload });
-      ack = (error) => callback(error, { ok: true, talkId: payload.talkId, codec: 'opus' });
+      ack = (error) => callback(error, { ok: true, talkId: payload.talkId, codec });
       if (!pendingAck) ack(null);
     } }; },
   };
@@ -238,9 +238,12 @@ function senderHarness({ captureFails = false, pendingPermission = false, pendin
         };
       },
     };
-    if (id === './opusAudio') return { async createPttOpusEncoder(_id, transmit) {
-      return { push: (audio) => transmit({ audio, talkId: '75d0a019-a195-450b-89e4-766c7de92ea5' }), flush() {}, close() {} };
-    } };
+    if (id === './opusAudio') return {
+      isPttOpusCodec: (value) => value === 'opus' || value === 'opus-hq',
+      async createPttOpusEncoder(talkId, transmit, codec) {
+        return { push: (audio) => transmit({ audio, talkId, codec }), flush() {}, close() {} };
+      },
+    };
     if (id === './types') return { PTT_EVENTS: eventsApi };
     throw new Error(id);
   });
@@ -286,15 +289,19 @@ test('server timeout releases the microphone and stops the requested transmissio
 });
 
 test('radio sends binary frames during the press and releases the microphone on stop', async () => {
-  const h = senderHarness();
+  const h = senderHarness({ codec: 'opus-hq' });
   assert.equal(await h.sender.start(), true);
   assert.equal(h.constraints.audio.autoGainControl, true);
+  assert.equal(h.constraints.audio.noiseSuppression, true);
   assert.equal(h.connectedCapture, 1);
-  const audio = new ArrayBuffer(1280);
+  const audio = new ArrayBuffer(960);
   h.frame(audio);
   assert.deepEqual(h.events.map(({ event }) => event), ['start', 'frame']);
+  assert.equal(h.events[0].payload.codec, 'opus');
+  assert.equal(h.events[0].payload.preferHq, true);
+  assert.equal(h.events[1].payload.codec, 'opus-hq');
   assert.equal(h.events[1].payload.audio, audio);
-  const tail = new ArrayBuffer(1280);
+  const tail = new ArrayBuffer(960);
   h.tail(tail);
   h.sender.stop();
   assert.equal(h.stopped, 1);
@@ -313,8 +320,8 @@ test('capture keeps the first words during the grant and completes short presses
   const starting = h.sender.start();
   await flush();
   assert.equal(h.connectedCapture, 1);
-  const opening = new ArrayBuffer(1280);
-  const tail = new ArrayBuffer(1280);
+  const opening = new ArrayBuffer(960);
+  const tail = new ArrayBuffer(960);
   h.frame(opening);
   h.tail(tail);
   h.sender.stop();
@@ -325,12 +332,13 @@ test('capture keeps the first words during the grant and completes short presses
   assert.equal(await starting, false);
   assert.deepEqual(h.events.map(({ event }) => event), ['start', 'frame', 'frame', 'stop']);
   assert.equal(h.events[1].payload.audio, opening);
+  assert.equal(h.events[1].payload.codec, 'opus');
   assert.equal(h.events[2].payload.audio, tail);
   assert.equal(h.disconnected, 1);
   assert.ok(h.events.every(({ payload }) => payload.talkId === h.events[0].payload.talkId));
 });
 
-test('capture worklet resamples 48 kHz and emits 40 ms PCM frames before the stream ends', () => {
+test('capture worklet resamples 48 kHz and emits 20 ms PCM frames before the stream ends', () => {
   const source = fs.readFileSync(path.join(__dirname, '../public/ptt-capture.worklet.js'), 'utf8');
   const frames = [];
   let Worklet;
@@ -338,25 +346,25 @@ test('capture worklet resamples 48 kHz and emits 40 ms PCM frames before the str
     sampleRate: 48000, AudioWorkletProcessor: class { port = { postMessage: (bytes) => frames.push(bytes) }; },
     registerProcessor: (_, processor) => { Worklet = processor; },
   });
-  const capture = new Worklet();
-  for (let index = 0; index < 15; index++) capture.process([[new Float32Array(128).fill(0.25)]]);
+  const capture = new Worklet({ processorOptions: { sampleRate: 24000 } });
+  capture.process([[new Float32Array(960).fill(0.25)]]);
   assert.equal(frames.length, 1);
-  assert.equal(frames[0].byteLength, 1280);
+  assert.equal(frames[0].byteLength, 960);
   const frame = new DataView(frames[0]);
   assert.equal(frame.getInt16(0, true), 8192);
-  assert.equal(frame.getInt16(1278, true), 8192);
+  assert.equal(frame.getInt16(958, true), 8192);
   capture.process([[new Float32Array(128).fill(-0.25)]]);
   capture.port.onmessage({ data: 'flush' });
   assert.equal(frames.length, 3);
   assert.equal(frames[2], 'drained');
   const tail = new DataView(frames[1]);
   assert.equal(tail.getInt16(0, true), -8192);
-  assert.equal(tail.getInt16(1278, true), 0);
+  assert.equal(tail.getInt16(958, true), 0);
   capture.process([[new Float32Array(1920)]]);
   assert.equal(frames.length, 3);
 });
 
-test('playback keeps all queued frames after a burst and when the next speaker starts', () => {
+test('playback keeps all queued frames at normal speed after a burst and through a brief stall', () => {
   const played = [];
   const stopped = [];
   const ctx = {
@@ -376,53 +384,73 @@ test('playback keeps all queued frames after a burst and when the next speaker s
     createOscillator() { return { frequency: {}, connect(node) { return node; }, disconnect() {}, start() {}, stop() {} }; },
     createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {} }, connect() {}, disconnect() {} }; },
   };
-  const { PttPlayback } = load('src/features/ptt/liveAudio.ts', { ArrayBuffer }, (id) => {
+  const { PttPlayback } = load('src/features/ptt/liveAudio.ts', { ArrayBuffer, Float32Array }, (id) => {
     if (id === '@/lib/audio') return { getAudioContext: () => ctx };
+    if (id === './opusAudio') return load('src/features/ptt/opusAudio.ts');
     throw new Error(id);
   });
   const playback = new PttPlayback();
-  for (let index = 0; index < 24; index++) playback.push(new ArrayBuffer(1280), index === 0);
+  for (let index = 0; index < 24; index++) playback.push(new Float32Array(480), index === 0, 24000);
+  ctx.currentTime = 10.605;
+  playback.push(new Float32Array(480), false, 24000);
+  assert.ok(played.at(-1)[0] - ctx.currentTime < 0.02);
+  ctx.currentTime = 10.7;
+  playback.push(new Float32Array(480), false, 24000);
+  const resumedAt = played.at(-1)[0];
+  assert.ok(resumedAt > ctx.currentTime + 0.12 && resumedAt <= ctx.currentTime + 0.3);
+  ctx.currentTime += 0.02;
+  playback.push(new Float32Array(480), false, 24000);
+  assert.ok(Math.abs(played.at(-1)[0] - (resumedAt + 0.02)) < 1e-6);
   playback.endCue();
   playback.push(new ArrayBuffer(1280), true);
-  assert.equal(played.length, 25);
+  assert.equal(played.length, 28);
   assert.deepEqual(stopped, []);
-  assert.ok(played[0][0] - ctx.currentTime < 0.2);
+  assert.ok(played[0][0] - 10 < 0.2);
+  assert.ok(played.slice(0, 27).every(([, duration]) => duration === 0.02));
   for (let index = 1; index < played.length; index++) {
     assert.ok(played[index][0] >= played[index - 1][0] + played[index - 1][1] - 1e-6);
   }
 });
 
-test('Opus sends 40 ms of speech in 60 bytes and drains the last samples', async () => {
+test('Opus sends both negotiated formats and drains the last samples', async () => {
   const libopus = await import('libopus-wasm');
   const radio = load('src/features/ptt/opusAudio.ts', { ArrayBuffer, Uint8Array }, (id) => {
     if (id === 'libopus-wasm') return libopus;
     throw new Error(id);
   });
   const talkId = '75d0a019-a195-450b-89e4-766c7de92ea5';
-  const packets = [];
-  const encoder = await radio.createPttOpusEncoder(talkId, (packet) => packets.push(packet));
-  const decoder = await radio.createPttOpusDecoder();
-  try {
-    const tone = new Int16Array(640).map((_, index) => Math.round(Math.sin(index * Math.PI * 880 / 16000) * 12000));
-    encoder.push(tone.buffer);
-    assert.deepEqual(packets.map((packet) => packet.byteLength), [76]);
-    encoder.push(tone.buffer);
-    encoder.push(tone.buffer);
-    assert.deepEqual(packets.map((packet) => packet.byteLength), [76, 136]);
-    encoder.flush();
-    assert.deepEqual(packets.map((packet) => packet.byteLength), [76, 136, 76]);
-
-    const id = radio.pttOpusHeader(talkId);
-    const frames = packets.flatMap((packet) => radio.pttOpusFrames(packet, id));
-    assert.equal(frames.length, 4);
-    assert.ok(frames.every((frame) => frame.byteLength === 60));
-    const decoded = frames.map((frame) => decoder.decodeFloat(frame));
-    assert.ok(decoded[2].some((sample) => Math.abs(sample) > 0.05));
-    assert.ok(decoded[3].subarray(0, 104).some((sample) => Math.abs(sample) > 0.02));
-    assert.equal(radio.pttOpusFrames(packets[0], new Uint8Array(16)).length, 0);
-  } finally {
-    encoder.close();
-    decoder.free();
+  for (const codec of ['opus', 'opus-hq']) {
+    const packets = [];
+    const highQuality = codec === 'opus-hq';
+    const encoder = await radio.createPttOpusEncoder(talkId, (packet) => packets.push(packet), codec);
+    const decoder = await radio.createPttOpusDecoder(codec);
+    try {
+      const tone = new Int16Array(480).map((_, index) => Math.round(Math.sin(index * Math.PI * 880 / 24000) * 12000));
+      encoder.push(tone.buffer);
+      assert.deepEqual(packets.map((packet) => packet.byteLength), highQuality ? [96] : []);
+      encoder.push(tone.buffer);
+      assert.deepEqual(packets.map((packet) => packet.byteLength), highQuality ? [96, 96] : [76]);
+      const id = radio.pttOpusHeader(talkId);
+      if (!highQuality) {
+        const batch = new Uint8Array(136);
+        batch.set(id);
+        batch.set(new Uint8Array(packets[0]).subarray(16), 16);
+        batch.set(new Uint8Array(packets[0]).subarray(16), 76);
+        assert.equal(radio.pttOpusFrames(batch.buffer, id, codec).length, 2);
+      }
+      encoder.flush();
+      assert.deepEqual(packets.map((packet) => packet.byteLength), highQuality ? [96, 96, 96] : [76, 76]);
+      const frames = packets.flatMap((packet) => radio.pttOpusFrames(packet, id, codec));
+      const decoded = frames.map((frame) => decoder.decodeFloat(frame));
+      assert.equal(decoded[0].length, highQuality ? 480 : 640);
+      assert.ok(decoded[0].some((sample) => Math.abs(sample) > 0.05));
+      assert.ok(decoded.at(-1).subarray(0, 104).some((sample) => Math.abs(sample) > 0.02));
+      assert.equal(radio.pttOpusFrames(packets[0], new Uint8Array(16), codec).length, 0);
+      assert.equal(radio.pttOpusFrames(packets[0], id, highQuality ? 'opus' : 'opus-hq').length, 0);
+    } finally {
+      encoder.close();
+      decoder.free();
+    }
   }
 });
 
