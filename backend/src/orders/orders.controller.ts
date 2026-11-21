@@ -1,16 +1,19 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto } from './dto/create-order.dto';
+import { CreateOrderDto, CreateTerminalDeliveryDto } from './dto/create-order.dto';
 import { AddItemsDto } from './dto/add-items.dto';
 import { EditOrderDto } from './dto/edit-order.dto';
 import { CancelOrderDto } from './dto/cancel-order.dto';
 import { CancelOrderItemDto } from './dto/cancel-order-item.dto';
 import { ReplaceRejectedItemDto } from './dto/resolve-rejected-item.dto';
+import { SplitOrderDto } from './dto/split-order.dto';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
 
 @Controller('orders')
+@RequirePermission('sections.orders')
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
@@ -18,6 +21,13 @@ export class OrdersController {
   @Roles(Role.WAITER)
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateOrderDto) {
     return this.orders.create(user, dto);
+  }
+
+  @Post('delivery')
+  @Roles(Role.WAITER)
+  @RequirePermission('actions.createDeliveryOrders')
+  createDelivery(@CurrentUser() user: AuthUser, @Body() dto: CreateTerminalDeliveryDto) {
+    return this.orders.createTerminalDelivery(user, dto);
   }
 
   @Get('active')
@@ -30,6 +40,24 @@ export class OrdersController {
   @Roles(Role.WAITER)
   cabinet(@CurrentUser() user: AuthUser, @Query('period') period?: 'day' | 'week' | 'month') {
     return this.orders.waiterCabinet(user.id, period);
+  }
+
+  @Get('history')
+  @Roles(Role.WAITER)
+  history(@CurrentUser() user: AuthUser, @Query('cursor') cursor?: string) {
+    return this.orders.waiterOrderHistory(user.id, cursor);
+  }
+
+  @Get('item-cancellation-requests')
+  @Roles(Role.ADMIN, Role.OWNER)
+  pendingItemCancellations(@CurrentUser() user: AuthUser) {
+    return this.orders.pendingItemCancellations(user);
+  }
+
+  @Get(':id/item-cancellation-requests')
+  @Roles(Role.WAITER)
+  waiterItemCancellations(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.orders.waiterItemCancellations(id, user);
   }
 
   @Get(':id')
@@ -108,6 +136,27 @@ export class OrdersController {
     return this.orders.cancelReadyItem(id, itemId, user, dto.reason);
   }
 
+  @Post(':id/items/:itemId/cancellation-request')
+  @Roles(Role.WAITER)
+  requestItemCancellation(
+    @Param('id') id: string, @Param('itemId') itemId: string,
+    @CurrentUser() user: AuthUser, @Body() dto: CancelOrderItemDto,
+  ) {
+    return this.orders.requestItemCancellation(id, itemId, user, dto.reason);
+  }
+
+  @Post(':id/item-cancellation-requests/:requestId/approve')
+  @Roles(Role.ADMIN, Role.OWNER)
+  approveItemCancellation(@Param('id') id: string, @Param('requestId') requestId: string, @CurrentUser() user: AuthUser) {
+    return this.orders.decideItemCancellation(id, requestId, user, 'approved');
+  }
+
+  @Post(':id/item-cancellation-requests/:requestId/reject')
+  @Roles(Role.ADMIN, Role.OWNER)
+  rejectItemCancellation(@Param('id') id: string, @Param('requestId') requestId: string, @CurrentUser() user: AuthUser) {
+    return this.orders.decideItemCancellation(id, requestId, user, 'rejected');
+  }
+
   @Post(':id/served')
   @Roles(Role.WAITER)
   served(@Param('id') id: string, @CurrentUser() user: AuthUser) {
@@ -116,7 +165,15 @@ export class OrdersController {
 
   @Post(':id/to-payment')
   @Roles(Role.WAITER)
+  @RequirePermission('actions.acceptOrderPayments')
   toPayment(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.orders.toPayment(id, user.id);
+  }
+
+  @Post(':id/split')
+  @Roles(Role.WAITER)
+  @RequirePermission('actions.acceptOrderPayments')
+  split(@Param('id') id: string, @CurrentUser() user: AuthUser, @Body() dto: SplitOrderDto) {
+    return this.orders.splitCheck(id, user, dto);
   }
 }

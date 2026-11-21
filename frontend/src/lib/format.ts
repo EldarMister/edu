@@ -1,3 +1,13 @@
+import type { Order } from '@/types';
+
+export function roundOrderAmount(amount: number) {
+  return Math.floor(Math.round(amount * 100) / 100);
+}
+
+export function taxRateLabel(rate: string | number) {
+  return `${Number(rate).toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`;
+}
+
 /** Человекочитаемое название способа оплаты. */
 export function paymentMethodLabel(method: string | null | undefined): string {
   switch (method) {
@@ -94,6 +104,14 @@ export function displayOrderNumber(value: string): string {
 export function hallSuffix(table: { hall?: { name?: string } | null } | null | undefined): string {
   const name = table?.hall?.name;
   return name ? ` · ${name}` : '';
+}
+
+export function orderPlaceLabel(order: Pick<Order, 'source' | 'table'>, t: (text: string) => string) {
+  return order.source === 'delivery' ? t('Доставка') : `${tableLabel(order.table, t('Стол'))}${hallSuffix(order.table)}`;
+}
+
+export function tableLabel(table: { name?: string | null; number: number }, prefix = 'Стол') {
+  return table.name || `${prefix} ${table.number}`;
 }
 
 /** Время HH:MM из ISO. */

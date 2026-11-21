@@ -11,6 +11,7 @@ export interface AuditActor {
   id: string;
   name?: string | null;
   role?: string | null;
+  identityRole?: string | null;
 }
 
 export interface AuditLogInput {
@@ -67,7 +68,7 @@ export class AuditService {
   async log(input: AuditLogInput): Promise<void> {
     try {
       let userName = input.actor?.name ?? null;
-      let userRole = input.actor?.role ?? null;
+      let userRole = input.actor?.identityRole ?? input.actor?.role ?? null;
 
       // Если имя/роль не переданы — подтянем актуальные (это и есть «на момент действия»).
       if (input.actor?.id && (!userName || !userRole)) {

@@ -1,6 +1,7 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
+  ArrayMaxSize,
   IsArray,
   IsBoolean,
   IsEnum,
@@ -9,6 +10,7 @@ import {
   IsOptional,
   IsString,
   Min,
+  Matches,
   MaxLength,
   ValidateNested,
 } from 'class-validator';
@@ -36,7 +38,17 @@ export class SetComponentInputDto {
   action: SetComponentAction;
 }
 
+class OrderModifierSelectionDto {
+  @IsString() @IsNotEmpty() optionId: string;
+  @IsInt() @Min(1) quantity: number;
+}
+
 export class CreateOrderItemDto {
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @ValidateNested({ each: true }) @Type(() => OrderModifierSelectionDto)
+  modifierSelections?: OrderModifierSelectionDto[];
+
+  @IsOptional() @IsArray() @ArrayMaxSize(100) @IsString({ each: true })
+  excludedIngredientIds?: string[];
   /** Stable existing line identifier when editing; ignored for creation. */
   @IsOptional()
   @IsString()
@@ -77,11 +89,7 @@ export class CreateOrderItemDto {
   setComponents?: SetComponentInputDto[];
 }
 
-export class CreateOrderDto {
-  @IsString()
-  @IsNotEmpty()
-  tableId: string;
-
+export class OrderCompositionDto {
   @IsOptional()
   @IsString()
   @MaxLength(500)
@@ -98,4 +106,30 @@ export class CreateOrderDto {
   @ValidateNested({ each: true })
   @Type(() => CreateOrderItemDto)
   items: CreateOrderItemDto[];
+}
+
+export class CreateOrderDto extends OrderCompositionDto {
+  @IsString()
+  @IsNotEmpty()
+  tableId: string;
+}
+
+export class CreateTerminalDeliveryDto extends OrderCompositionDto {
+  @IsOptional()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(120)
+  customerName?: string;
+
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(40)
+  @Matches(/^\+?(?:[ ()-]*\d){6,15}[ ()-]*$/, { message: 'Укажите корректный телефон клиента' })
+  customerPhone: string;
+
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @IsNotEmpty({ message: 'Укажите адрес доставки' })
+  @MaxLength(300)
+  deliveryAddress: string;
 }

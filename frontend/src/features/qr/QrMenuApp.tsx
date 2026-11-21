@@ -103,7 +103,7 @@ export function QrMenuApp() {
   }, [menuQ.data, tableToken]);
 
   // Realtime: обновления общего заказа и статуса для всех гостей стола.
-  useQrRealtime(menuQ.data?.table.id, {
+  useQrRealtime(menuQ.data?.table.id, tableToken, {
     onCartUpdated: (payload) => qc.setQueryData(qrSessionKey(tableToken), payload as QrSession),
     onGuestChanged: () => qc.invalidateQueries({ queryKey: qrSessionKey(tableToken) }),
     onOrderSubmitted: (p) => {

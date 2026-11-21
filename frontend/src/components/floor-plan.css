@@ -1,0 +1,59 @@
+.floor-plan-scroll {
+  overflow: auto;
+  border: 1px solid rgb(var(--edu-border));
+  border-radius: 14px;
+  background: rgb(var(--edu-background));
+}
+
+.floor-plan-canvas {
+  position: relative;
+  min-width: 264px;
+  background-image:
+    linear-gradient(to right, rgb(var(--edu-border) / .42) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(var(--edu-border) / .42) 1px, transparent 1px);
+}
+
+.floor-plan-scroll[data-fit] {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+}
+
+.floor-plan-scroll[data-fit] .floor-plan-canvas {
+  flex: 1 0 auto;
+  min-width: 0;
+  background-image: none;
+  container-type: inline-size;
+}
+
+.floor-plan-table-number { font-size: clamp(15px, 5cqw, 30px); }
+
+.floor-plan-table {
+  position: absolute;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(var(--edu-border));
+  border-radius: 10px;
+  background: rgb(var(--edu-card));
+  color: rgb(var(--edu-text));
+}
+
+.floor-plan-table[data-shape='round'] { border-radius: 999px; }
+
+@media (min-width: 768px) and (min-height: 480px) {
+  .floor-plan-scroll[data-fit] .floor-plan-table { scale: var(--floor-plan-table-scale, 1); }
+}
+
+.floor-plan-table:hover, .floor-plan-table:focus-within { border-color: rgb(var(--edu-focus)); }
+.floor-plan-table[data-selected='true'] {
+  z-index: 1;
+  border-color: rgb(var(--edu-focus));
+  background: rgb(var(--edu-primary));
+  color: white;
+}
+.floor-plan-table:focus-visible { outline: 2px solid rgb(var(--edu-focus)); outline-offset: 2px; }
+.floor-plan-canvas[data-editing] .floor-plan-drag { touch-action: none; cursor: grab; }
+.floor-plan-canvas[data-editing] .floor-plan-drag:active { cursor: grabbing; }
+.floor-plan-resize { cursor: nwse-resize; touch-action: none; }

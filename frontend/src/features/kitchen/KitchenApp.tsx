@@ -1,9 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAuth } from '@/store/auth';
 import { apiError } from '@/lib/api';
 import { useNotifications } from '@/store/notifications';
 import { ConnectionStatus, OfflineBanner } from '@/components/ConnectionStatus';
 import { Spinner } from '@/components/Spinner';
+import { Select } from '@/components/Select';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
+import { WorkShiftSettingsCard } from '@/features/settings/WorkShiftBanner';
+import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { disconnectSocket } from '@/lib/socket';
 import { usePushNotifications } from '@/lib/push';
 import { useKitchenRealtime } from './useKitchenRealtime';
@@ -13,6 +19,10 @@ import { KitchenOrderCard } from './KitchenOrderCard';
 import { StopListDrawer } from './StopListDrawer';
 import { KitchenHandControl } from './hand-control/KitchenHandControl';
 import { KitchenStats } from './KitchenStats';
+import { KitchenTapFeedback, KitchenTapFeedbackSetting } from './KitchenTapFeedback';
+import { useListPeriod } from '@/features/admin/pages/warehouse/ListPeriodFilter';
+import { calendarDate, warehouseDay } from '@/features/admin/pages/warehouse/warehouse-period';
+import { usePreparationStations, usePreparationStationUpdates } from './stations';
 
 const TABS: { key: KitchenTab; label: string }[] = [
   { key: 'new', label: 'Новые' },
@@ -45,23 +55,54 @@ function pluralPositions(n: number): string {
 }
 
 export function KitchenApp({
-  station = 'kitchen',
+  station: defaultStation = 'kitchen',
 }: {
   station?: PrepStation;
 } = {}) {
-  useKitchenRealtime(station);
   const { user, logout } = useAuth();
+  const { canSection, canEditSection, canAction, effectiveRole } = usePermissions();
+  const canChangeOrders = canEditSection('orders');
+  const canChangeStopList = !!user && (effectiveRole !== 'ADMIN' || (canEditSection('menu') && canAction('editMenu')));
+  const [searchParams, setSearchParams] = useSearchParams();
+  const stationKey = `edu-pos-prep-station:${user?.id ?? ''}:${defaultStation}`;
+  const [selectedStation, setSelectedStation] = useState(() => {
+    try { return localStorage.getItem(stationKey) ?? defaultStation; }
+    catch { return defaultStation; }
+  });
+  const stations = usePreparationStations();
+  usePreparationStationUpdates();
+  const canAccessBoth = effectiveRole === 'OWNER' || effectiveRole === 'ADMIN';
+  const assignedStation = user?.prepStation ?? defaultStation;
+  const availableStations = (stations.data ?? []).filter((item) => canAccessBoth || item.id === assignedStation);
+  const requestedStation = searchParams.get('station') ?? selectedStation;
+  const fallbackStation = canAccessBoth && !availableStations.some((item) => item.id === assignedStation && item.isActive)
+    ? availableStations.find((item) => item.isActive)?.id ?? assignedStation
+    : assignedStation;
+  const station = availableStations.some((item) => item.id === requestedStation) ? requestedStation : fallbackStation;
+  useKitchenRealtime(station);
   const push = useNotifications((s) => s.push);
   const pushNotifications = usePushNotifications(user?.role === 'KITCHEN' || user?.role === 'BAR');
 
   const [tab, setTab] = useState<KitchenTab>('new');
   const [showStats, setShowStats] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsButton = useRef<HTMLButtonElement>(null);
+  const tracksShift = !!user && user.role !== 'OWNER' && user.permissions?.workShiftRequired !== false;
+  const canOpenSettings = canChangeOrders || user?.role === 'BAR' || tracksShift;
+  const showSettings = settingsOpen && canOpenSettings;
   const [now, setNow] = useState(() => Date.now());
   const [actingId, setActingId] = useState<string | null>(null);
   const [stopListOpen, setStopListOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
+  const historyPeriod = useListPeriod('kitchenHistory', 'today');
+  const historyTab = tab === 'ready' || tab === 'rejected';
 
-  const ordersQ = useKitchenOrders(tab, station);
+  const newOrdersQ = useKitchenOrders('new', station);
+  const inWorkOrdersQ = useKitchenOrders('in_work', station);
+  const historyOrdersQ = useKitchenOrders(historyTab ? tab : null, station, historyTab
+    ? { from: historyPeriod.range.dateFrom ?? '2000-01-01', to: historyPeriod.range.dateTo ?? calendarDate(warehouseDay()) }
+    : undefined);
+  const ordersQ = tab === 'new' ? newOrdersQ : tab === 'in_work' ? inWorkOrdersQ : historyOrdersQ;
   const accept = useAccept(station);
   const readyItems = useReadyItems(station);
   const rejectItems = useRejectItems(station);
@@ -73,7 +114,7 @@ export function KitchenApp({
   }, []);
 
   const orders = ordersQ.data ?? [];
-  const counts = orders.length;
+  const activeOrderCounts = { new: newOrdersQ.data?.length ?? 0, in_work: inWorkOrdersQ.data?.length ?? 0 };
 
   useEffect(() => {
     if (orders.length > 0) setNow(Date.now());
@@ -81,6 +122,7 @@ export function KitchenApp({
 
   // Отправляет отложенное действие на сервер (= «уходит официанту»).
   function commit(p: PendingAction) {
+    if (!canChangeOrders) return;
     const run =
       p.type === 'reject'
         ? rejectItems.mutateAsync({
@@ -101,19 +143,21 @@ export function KitchenApp({
   // По истечении таймера действие фиксируется и уходит на сервер.
   useEffect(() => {
     if (!pending) return;
+    if (!canChangeOrders) { setPending(null); return; }
     const t = setTimeout(() => {
       commit(pending);
       setPending(null);
     }, Math.max(0, pending.deadline - Date.now()));
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending]);
+  }, [pending, canChangeOrders]);
 
   function onBatch(
     orderId: string,
     type: 'reject' | 'ready',
     ids: { itemIds: string[]; setComponentIds: string[]; partial?: { itemId: string; quantity: number }[] },
   ) {
+    if (!canChangeOrders) return;
     // Новое действие, пока предыдущее не подтверждено — фиксируем предыдущее сразу.
     if (pending) commit(pending);
     setPending({ orderId, type, ...ids, deadline: Date.now() + UNDO_SECONDS * 1000 });
@@ -135,6 +179,7 @@ export function KitchenApp({
   }
 
   function acceptOrder(id: string) {
+    if (!canChangeOrders) return;
     const isOnlyNewOrder = tab === 'new' && orders.length === 1;
     return act(id, async () => {
       await accept.mutateAsync(id);
@@ -149,18 +194,46 @@ export function KitchenApp({
 
   const undoSecondsLeft = pending ? Math.max(0, Math.ceil((pending.deadline - now) / 1000)) : 0;
 
+  function closeSettings() {
+    setSettingsOpen(false);
+    requestAnimationFrame(() => settingsButton.current?.focus());
+  }
+
   return (
-    <div data-hand-scope className="flex h-full flex-col bg-background">
+    <div data-hand-scope className="flex h-full flex-col bg-background" onKeyDown={(event) => {
+      if (showSettings && event.key === 'Escape') closeSettings();
+    }}>
       <OfflineBanner />
+      <KitchenTapFeedback />
 
       {/* Шапка */}
       <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-5 py-3.5">
-        <div className="flex items-baseline gap-3">
-          <span className="text-[26px] font-medium tracking-tight text-text-primary">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="shrink-0 text-[26px] font-medium tracking-tight text-text-primary">
             {new Date(now).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
           </span>
+          <span aria-hidden="true" className="shrink-0 text-text-muted">|</span>
+          {canAccessBoth ? <Select
+            ariaLabel="Станция приготовления"
+            className="h-10 max-w-[45vw]"
+            value={station}
+            options={availableStations.map((item) => ({ value: item.id, label: item.isActive ? item.name : `${item.name} (архив)` }))}
+            onChange={(value) => {
+              setSelectedStation(value);
+              if (searchParams.has('station')) {
+                const next = new URLSearchParams(searchParams);
+                next.delete('station');
+                setSearchParams(next, { replace: true });
+              }
+              try { localStorage.setItem(stationKey, value); } catch { /* Storage can be disabled. */ }
+            }}
+            disabled={!!pending || actingId !== null || stopListOpen}
+          /> : <span className="text-sm font-medium text-text-primary">
+            {availableStations[0]?.name ?? (assignedStation === 'bar' ? 'Бар' : assignedStation === 'kitchen' ? 'Кухня' : 'Станция приготовления')}
+          </span>}
         </div>
         <div className="flex items-center gap-4 text-sm">
+          {canSection('warehouse')&&<Link to="/warehouse" className="text-primary">Склад и техкарты</Link>}
           <ConnectionStatus />
           {pushNotifications.status !== 'subscribed' &&
             pushNotifications.status !== 'unsupported' &&
@@ -174,31 +247,40 @@ export function KitchenApp({
           </button>
         </div>
       </header>
+      <WorkspaceLinks current="production" />
 
       {/* Вкладки + Стоп-лист */}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-border bg-white px-5 py-2.5">
-        <div className="no-scrollbar flex gap-2 overflow-x-auto">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => {
-                setTab(t.key);
-                setShowStats(false);
-              }}
-              className={`shrink-0 rounded-lg px-4 py-2 text-[15px] font-medium transition-colors ${
-                !showStats && tab === t.key ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-              }`}
-            >
-              {t.label}
-              {!showStats && tab === t.key && counts > 0 && (
-                <span className="ml-2 rounded-full bg-white/25 px-1.5 text-xs">{counts}</span>
-              )}
-            </button>
-          ))}
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border bg-white px-3 py-2.5 sm:flex-nowrap sm:px-5">
+        <div className="no-scrollbar flex min-w-0 w-full gap-2 overflow-x-auto sm:w-auto sm:flex-1">
+          {TABS.map(({ key, label }) => {
+            const selected = !showSettings && !showStats && tab === key;
+            const count = key === 'new' || key === 'in_work' ? activeOrderCounts[key] : selected ? orders.length : 0;
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={selected}
+                onClick={() => {
+                  setTab(key);
+                  setShowStats(false);
+                  setSettingsOpen(false);
+                }}
+                className={`inline-flex shrink-0 items-center gap-2 rounded-lg px-4 py-2 text-[15px] font-medium transition-colors ${
+                  selected ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
+                }`}
+              >
+                {label}
+                {count > 0 && <span className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-xs font-semibold tabular-nums ${selected ? 'bg-paper/25 text-white' : 'bg-primary/10 text-primary'}`}>
+                  {count}
+                </span>}
+              </button>
+            );
+          })}
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex max-w-full shrink-0 flex-wrap items-center gap-2">
+          {!showSettings && !showStats && historyTab && historyPeriod.filter}
           <button
-            onClick={() => setShowStats((v) => !v)}
+            onClick={() => { setSettingsOpen(false); setShowStats((v) => !v); }}
             className={`shrink-0 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors ${
               showStats
                 ? 'border-primary bg-primary text-white'
@@ -207,18 +289,34 @@ export function KitchenApp({
           >
             Статистика
           </button>
-          <KitchenHandControl />
-          <button
+          {canOpenSettings && <button type="button" ref={settingsButton} aria-pressed={showSettings}
+            onClick={() => { setShowStats(false); setSettingsOpen(!showSettings); }}
+            className={`shrink-0 rounded-lg border border-primary px-3.5 py-2 text-sm font-medium transition-colors ${
+              showSettings ? 'bg-primary text-white' : 'bg-white text-primary hover:bg-primary/5'
+            }`}>
+            Настройки
+          </button>}
+          {canChangeStopList && <button
             onClick={() => setStopListOpen(true)}
             className="shrink-0 rounded-lg border border-primary bg-white px-3.5 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/5"
           >
             Стоп-лист
-          </button>
+          </button>}
         </div>
       </div>
 
-      {/* Статистика кухни */}
-      {showStats ? (
+      {!canChangeOrders && <p className="border-b border-border bg-card px-5 py-2 text-sm text-text-muted">Заказы доступны только для просмотра.</p>}
+
+      {canChangeOrders && <KitchenHandControl showSettings={showSettings} />}
+      {showSettings && !canChangeOrders && <main className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="mx-auto w-full max-w-2xl space-y-4">
+          <WorkShiftSettingsCard />
+          <section aria-label="Внешний вид" className="card p-4"><ThemeSwitch /></section>
+          <KitchenTapFeedbackSetting />
+        </div>
+      </main>}
+
+      {!showSettings && (showStats ? (
         <main className="flex-1 overflow-y-auto">
           <KitchenStats station={station} />
         </main>
@@ -228,6 +326,11 @@ export function KitchenApp({
         {ordersQ.isLoading ? (
           <div className="flex justify-center py-16 text-primary">
             <Spinner className="h-7 w-7" />
+          </div>
+        ) : ordersQ.isError ? (
+          <div role="alert" className="py-12 text-center text-danger">
+            <p>{apiError(ordersQ.error)}</p>
+            <button className="btn-secondary btn-md mt-3" onClick={() => void ordersQ.refetch()}>Повторить</button>
           </div>
         ) : orders.length === 0 ? (
           <p className="py-16 text-center text-text-muted">
@@ -251,6 +354,7 @@ export function KitchenApp({
                   tab={tab}
                   now={now}
                   submitting={actingId === o.id}
+                  readOnly={!canChangeOrders}
                   pendingItemIds={
                     pending?.orderId === o.id ? [...pending.itemIds, ...pending.setComponentIds] : []
                   }
@@ -264,7 +368,7 @@ export function KitchenApp({
           </div>
         )}
       </main>
-      )}
+      ))}
 
       {/* Нижний блок отмены действия с таймером */}
       {pending && (
@@ -294,7 +398,7 @@ export function KitchenApp({
         </div>
       )}
 
-      <StopListDrawer open={stopListOpen} station={station} onClose={() => setStopListOpen(false)} />
+      {canChangeStopList && <StopListDrawer open={stopListOpen} station={station} onClose={() => setStopListOpen(false)} />}
     </div>
   );
 }

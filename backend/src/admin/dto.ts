@@ -6,16 +6,17 @@ import {
   IsInt,
   IsNotEmpty,
   IsNumber,
-  IsObject,
   IsOptional,
   IsString,
+  IsUUID,
   Min,
+  Max,
   MaxLength,
   IsArray,
   IsIn,
   ValidateNested,
 } from 'class-validator';
-import { Role, DiscountType, TableStatus, PrepStation, OrderStatus } from '@prisma/client';
+import { Role, DiscountType, TableStatus, OrderStatus } from '@prisma/client';
 
 // ---------- Залы ----------
 export class CreateHallDto {
@@ -24,6 +25,9 @@ export class CreateHallDto {
 
   @IsOptional() @IsInt()
   sortOrder?: number;
+
+  @IsOptional() @IsBoolean()
+  useFloorPlan?: boolean | null;
 }
 export class UpdateHallDto {
   @IsOptional() @IsString() @MaxLength(60)
@@ -34,6 +38,9 @@ export class UpdateHallDto {
 
   @IsOptional() @IsInt()
   sortOrder?: number;
+
+  @IsOptional() @IsBoolean()
+  useFloorPlan?: boolean | null;
 }
 
 // ---------- Столы ----------
@@ -41,20 +48,26 @@ export class CreateTableDto {
   @IsString() @IsNotEmpty()
   hallId: string;
 
-  @IsInt() @Min(1)
-  number: number;
+  @IsOptional() @IsInt() @Min(1) @Max(2147483647)
+  number?: number;
 
-  @IsInt() @Min(1)
+  @IsOptional() @IsString() @MaxLength(40)
+  name?: string | null;
+
+  @IsInt() @Min(1) @Max(2147483647)
   seats: number;
 }
 export class UpdateTableDto {
   @IsOptional() @IsString()
   hallId?: string;
 
-  @IsOptional() @IsInt() @Min(1)
+  @IsOptional() @IsInt() @Min(1) @Max(2147483647)
   number?: number;
 
-  @IsOptional() @IsInt() @Min(1)
+  @IsOptional() @IsString() @MaxLength(40)
+  name?: string | null;
+
+  @IsOptional() @IsInt() @Min(1) @Max(2147483647)
   seats?: number;
 
   @IsOptional() @IsBoolean()
@@ -66,16 +79,25 @@ export class UpdateTableDto {
 
 // ---------- Категории ----------
 export class CreateCategoryDto {
+  @IsOptional() @IsUUID()
+  taxId?: string | null;
+
   @IsString() @IsNotEmpty() @MaxLength(60)
   name: string;
 
   @IsOptional() @IsInt()
   sortOrder?: number;
 
-  @IsOptional() @IsEnum(PrepStation)
-  prepStation?: PrepStation;
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string;
 }
 export class UpdateCategoryDto {
+  @IsOptional() @IsInt() @Min(1)
+  position?: number;
+
+  @IsOptional() @IsUUID()
+  taxId?: string | null;
+
   @IsOptional() @IsString() @MaxLength(60)
   name?: string;
 
@@ -85,8 +107,8 @@ export class UpdateCategoryDto {
   @IsOptional() @IsInt()
   sortOrder?: number;
 
-  @IsOptional() @IsEnum(PrepStation)
-  prepStation?: PrepStation;
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string;
 }
 
 /** Удаление категории: что сделать с блюдами внутри. */
@@ -135,7 +157,15 @@ export class DishVariantDto {
   unit?: string;
 }
 
-export class CreateDishDto {
+class MenuDishTaxDto {
+  @IsOptional() @IsUUID()
+  taxId?: string | null;
+
+  @IsOptional() @IsBoolean()
+  taxExempt?: boolean;
+}
+
+export class CreateDishDto extends MenuDishTaxDto {
   @IsString() @IsNotEmpty() @MaxLength(120)
   name: string;
 
@@ -185,8 +215,8 @@ export class CreateDishDto {
   unit?: string;
 
   // null = брать направление из категории; задано — приоритет блюда.
-  @IsOptional() @IsEnum(PrepStation)
-  prepStation?: PrepStation | null;
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string | null;
 
   // Отдельное название для озвучки кухни (если задано — используется вместо name).
   @IsOptional() @IsString() @MaxLength(120)
@@ -195,7 +225,7 @@ export class CreateDishDto {
   @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => DishVariantDto)
   variants?: DishVariantDto[];
 }
-export class UpdateDishDto {
+export class UpdateDishDto extends MenuDishTaxDto {
   @IsOptional() @IsString() @MaxLength(120)
   name?: string;
 
@@ -248,8 +278,8 @@ export class UpdateDishDto {
   unit?: string;
 
   // null = брать направление из категории; задано — приоритет блюда.
-  @IsOptional() @IsEnum(PrepStation)
-  prepStation?: PrepStation | null;
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string | null;
 
   // Отдельное название для озвучки кухни.
   @IsOptional() @IsString() @MaxLength(120)
@@ -278,7 +308,10 @@ export class SetComponentDto {
   replaceable?: boolean;
 }
 
-export class CreateSetDto {
+export class CreateSetDto extends MenuDishTaxDto {
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string | null;
+
   @IsString() @IsNotEmpty() @MaxLength(120)
   name: string;
 
@@ -290,7 +323,10 @@ export class CreateSetDto {
   components: SetComponentDto[];
 }
 
-export class UpdateSetDto {
+export class UpdateSetDto extends MenuDishTaxDto {
+  @IsOptional() @IsString() @MaxLength(64)
+  prepStation?: string | null;
+
   @IsOptional() @IsString() @MaxLength(120)
   name?: string;
 
@@ -306,19 +342,31 @@ export class UpdateSetDto {
 
 // ---------- Персонал ----------
 export class CreateStaffDto {
+  @IsOptional() @IsUUID()
+  positionId?: string | null;
+
+  @IsOptional() @IsString() @MaxLength(80)
+  prepStation?: string | null;
+
   @IsString() @IsNotEmpty() @MaxLength(80)
   name: string;
 
   @IsString() @IsNotEmpty()
   phone: string;
 
-  @IsEnum(Role)
-  role: Role;
+  @IsOptional() @IsEnum(Role)
+  role?: Role;
 
   @IsString() @IsNotEmpty()
   password: string;
 }
 export class UpdateStaffDto {
+  @IsOptional() @IsUUID()
+  positionId?: string | null;
+
+  @IsOptional() @IsString() @MaxLength(80)
+  prepStation?: string | null;
+
   @IsOptional() @IsString() @MaxLength(80)
   name?: string;
 
@@ -335,17 +383,6 @@ export class UpdateStaffDto {
   password?: string;
 }
 
-// ---------- Права доступа сотрудника ----------
-export class UpdatePermissionsDto {
-  // Доступ к разделам: { warehouse: true, ... }. Неизвестные ключи отбрасываются на сервере.
-  @IsOptional() @IsObject()
-  sections?: Record<string, boolean>;
-
-  // Дополнительные права (действия): { editMenu: true, ... }.
-  @IsOptional() @IsObject()
-  actions?: Record<string, boolean>;
-}
-
 // ---------- Отчёт по сменам: фиксация сдачи наличных ----------
 export class SetCashHandedDto {
   @IsString() @IsNotEmpty()
@@ -360,7 +397,7 @@ export class SetCashHandedDto {
 }
 
 export class ShiftHistoryQueryDto {
-  @IsOptional() @IsString()
+  @IsOptional() @IsIn(['today', 'week', 'month', 'custom'])
   period?: 'today' | 'week' | 'month' | 'custom';
 
   @IsOptional() @IsString()

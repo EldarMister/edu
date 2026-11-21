@@ -1,10 +1,13 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PaymentMethod, PaymentSource, Role } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OrdersService } from '../orders/orders.service';
 import { SettingsService } from '../settings/settings.service';
 import type { AuditActor } from '../audit/audit.service';
 import type { PaymentPartDto } from './dto/pay.dto';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
+import { terminalReceiptOrderScope } from '../receipt-prints/receipt-print-access';
+import { receiptTaxes } from '../settings/order-taxes';
 
 @Injectable()
 export class PaymentsService {
@@ -22,6 +25,8 @@ export class PaymentsService {
     cashAmount?: number,
     qrAmount?: number,
     splitPayments?: PaymentPartDto[],
+    cardAmount?: number,
+    expectedAmount?: number,
   ) {
     if (splitPayments?.length) {
       const parts = splitPayments.filter((p) => p.amount > 0);
@@ -36,31 +41,32 @@ export class PaymentsService {
       }
       const unique = [...new Set(parts.map((p) => p.method))];
       const orderMethod = unique.length === 1 ? unique[0] : PaymentMethod.mixed;
-      return this.orders.markPaid(orderId, actor, orderMethod, parts, PaymentSource.split);
+      return this.orders.markPaid(orderId, actor, orderMethod, parts, PaymentSource.split, expectedAmount);
     }
 
     if (method === PaymentMethod.mixed) {
-      // Смешанная складывается из наличных и QR — оба способа должны быть включены.
-      await this.settings.assertMethodEnabled(PaymentMethod.cash);
-      await this.settings.assertMethodEnabled(PaymentMethod.qr);
       const parts = [
         { method: PaymentMethod.cash, amount: cashAmount ?? 0 },
         { method: PaymentMethod.qr, amount: qrAmount ?? 0 },
-      ];
-      return this.orders.markPaid(orderId, actor, method, parts);
+        { method: PaymentMethod.card, amount: cardAmount ?? 0 },
+      ].filter((part) => part.amount > 0);
+      for (const part of parts) await this.settings.assertMethodEnabled(part.method);
+      return this.orders.markPaid(orderId, actor, method, parts, PaymentSource.normal, expectedAmount);
     }
     await this.settings.assertMethodEnabled(method);
-    return this.orders.markPaid(orderId, actor, method);
+    return this.orders.markPaid(orderId, actor, method, undefined, PaymentSource.normal, expectedAmount);
   }
 
   /** Данные для печати чека (ТЗ §4.8) — реквизиты берём из настроек заведения. */
-  async receipt(actor: AuditActor, orderId: string) {
+  async receipt(actor: AuthUser, orderId: string, print?: { requestId?: string }) {
+    const scope = print && actor.role === Role.WAITER ? terminalReceiptOrderScope(actor, print.requestId) : undefined;
     const [order, settings] = await Promise.all([
-      this.prisma.order.findUniqueOrThrow({
-        where: { id: orderId },
+      this.prisma.order.findUnique({
+        where: { id: orderId, AND: scope },
         include: {
           table: { select: { number: true } },
           waiter: { select: { name: true } },
+          taxes: receiptTaxes,
           items: {
             where: { status: { notIn: ['rejected', 'cancelled'] } },
             select: {
@@ -80,11 +86,20 @@ export class PaymentsService {
       }),
       this.settings.ensure(),
     ]);
-    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+    if (!order) {
+      if (scope) throw new ForbiddenException('Нет доступа к печати этого чека');
+      throw new NotFoundException('Заказ не найден');
+    }
+    if (!scope && actor.role === Role.WAITER && order.waiterId !== actor.id) {
       throw new ForbiddenException('Это не ваш заказ');
     }
 
     return {
+      receiptLanguage: settings.receiptLanguage,
+      receiptPrintCafeName: settings.receiptPrintCafeName,
+      receiptPrintAddress: settings.receiptPrintAddress,
+      receiptPrintPhone: settings.receiptPrintPhone,
+      receiptLogoData: settings.receiptLogoData,
       cafeName: settings.cafeName,
       address: settings.address,
       phone: settings.phone,
@@ -93,15 +108,18 @@ export class PaymentsService {
       website: settings.website,
       orderNumber: order.orderNumber,
       tableNumber: order.table.number,
-      waiter: order.waiter?.name ?? 'QR-меню',
+      source: order.source,
+      waiter: order.waiter?.name ?? (order.source === 'delivery' ? 'Онлайн-заказ' : 'QR-меню'),
       date: (order.closedAt ?? order.createdAt).toISOString(),
       items: order.items,
+      taxes: order.taxes,
       totalAmount: order.totalAmount,
       discountAmount: order.discountAmount,
       serviceChargeAmount: order.serviceChargeAmount,
+      roundingAmount: order.roundingAmount,
       finalAmount: order.finalAmount,
       paymentMethod: order.paymentMethod,
-      // Разбивка по способам (для смешанной оплаты — наличные + QR).
+      // Разбивка платежа по способам оплаты.
       payments: order.payments.map((p) => ({ method: p.method, amount: String(p.amount), source: p.source })),
       thanks: settings.receiptText,
     };

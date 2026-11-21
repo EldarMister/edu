@@ -1,12 +1,18 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, TableStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
+import { getCafeId } from '../tenant/tenant-context';
 import { SERVER_EVENTS } from '../realtime/events';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { normalizeDishImage, withDishImageRef } from '../dishes/dish-image';
 import { normalizeUnit, unitLabel } from '../warehouse/units';
+import { projectDishStock } from '../warehouse/dish-stock-projection';
+import { assertAssignableStation, BUILTIN_STATIONS, defaultCategoryStation, lockStationRouting, stationCatalog } from '../kitchen/preparation-stations';
+import { goodsExportColumns, writeGoodsWorkbook, type GoodsExportQuery } from './goods-xlsx';
+import { assertMenuTax, dishTaxFields } from '../settings/order-taxes';
+import { type SaveFloorPlanDto, withinFloorPlan } from './floor-plan.dto';
 import {
   CreateCategoryDto,
   CreateDishDto,
@@ -33,6 +39,8 @@ type NormalizedDishVariant = {
   unit?: string;
 };
 
+const categoryOrder: Prisma.CategoryOrderByWithRelationInput[] = [{ sortOrder: 'asc' }, { name: 'asc' }, { id: 'asc' }];
+
 /** Управление каталогом (залы, столы, категории, блюда) для админа/владельца. */
 @Injectable()
 export class CatalogService {
@@ -45,11 +53,12 @@ export class CatalogService {
   // ===================== ЗАЛЫ И СТОЛЫ =====================
 
   async tablesOverview() {
+    const physicalTables = { NOT: { hallId: { startsWith: 'delivery-hall:' } } };
     const [hallsCount, tablesCount, activeTables, occupied] = await Promise.all([
       this.prisma.hall.count({ where: { isActive: true } }),
-      this.prisma.table.count(),
-      this.prisma.table.count({ where: { isActive: true } }),
-      this.prisma.table.count({ where: { status: { not: TableStatus.free } } }),
+      this.prisma.table.count({ where: physicalTables }),
+      this.prisma.table.count({ where: { ...physicalTables, isActive: true } }),
+      this.prisma.table.count({ where: { ...physicalTables, status: { not: TableStatus.free } } }),
     ]);
     return {
       hallsCount,
@@ -59,16 +68,19 @@ export class CatalogService {
     };
   }
 
-  /** Все залы со столами (включая неактивные) — для управления. */
+  /** Залы с действующими столами для управления. Архивные столы в интерфейс не попадают. */
   hallsWithTables() {
     return this.prisma.hall.findMany({
+      where: { NOT: { id: { startsWith: 'delivery-hall:' } } },
       orderBy: { sortOrder: 'asc' },
       include: {
         tables: {
+          where: { isActive: true },
           orderBy: [{ sortOrder: 'asc' }, { number: 'asc' }],
           select: {
             id: true,
             number: true,
+            name: true,
             seats: true,
             status: true,
             isActive: true,
@@ -80,8 +92,46 @@ export class CatalogService {
     });
   }
 
+  async saveFloorPlan(hallId: string, dto: SaveFloorPlanDto) {
+    if (hallId.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
+    const cafeId = getCafeId();
+    if (!cafeId) throw new BadRequestException('Не выбрано заведение');
+    if (dto.tables.some((table) => !withinFloorPlan(table))) {
+      throw new BadRequestException('Столы должны находиться в границах карты');
+    }
+    const tables = dto.tables.map(({ tableId, x, y, width, height, shape, label }) => ({
+      tableId, x, y, width, height, shape, ...(label?.trim() ? { label: label.trim() } : {}),
+    }));
+    const result = await this.prisma.$transaction(async (tx) => {
+      const hall = await tx.hall.findFirst({ where: { id: hallId, cafeId }, select: { id: true } });
+      if (!hall) throw new NotFoundException('Зал не найден');
+      const count = await tx.table.count({
+        where: { cafeId, hallId, isActive: true, id: { in: tables.map(({ tableId }) => tableId) } },
+      });
+      if (count !== tables.length) throw new ConflictException('Список столов изменился. Обновите карту зала');
+      const saved = await tx.hall.updateMany({
+        where: { id: hallId, cafeId, floorPlanVersion: dto.version },
+        data: { floorPlan: tables, floorPlanVersion: { increment: 1 } },
+      });
+      if (!saved.count) throw new ConflictException('Карта зала изменилась. Отмените правки и откройте актуальную версию');
+      return { floorPlan: tables, floorPlanVersion: dto.version + 1 };
+    });
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { hallId, action: 'floor-plan' });
+    return result;
+  }
+
+  async setFloorPlanMode(useFloorPlan: boolean) {
+    const cafeId = getCafeId();
+    if (!cafeId) throw new BadRequestException('Не выбрано заведение');
+    await this.prisma.settings.upsert({ where: { cafeId }, update: { useFloorPlan }, create: { cafeId, useFloorPlan } });
+    this.events.emitBroadcast(SERVER_EVENTS.SETTINGS_UPDATED, { fields: ['useFloorPlan'] });
+    return { useFloorPlan };
+  }
+
   async createHall(dto: CreateHallDto) {
-    const hall = await this.prisma.hall.create({ data: { name: dto.name, sortOrder: dto.sortOrder ?? 0 } });
+    const hall = await this.prisma.hall.create({
+      data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, useFloorPlan: dto.useFloorPlan },
+    });
     this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { hallId: hall.id, action: 'create-hall' });
     return hall;
   }
@@ -105,15 +155,41 @@ export class CatalogService {
   }
 
   async createTable(dto: CreateTableDto) {
-    await this.ensureHall(dto.hallId);
-    const exists = await this.prisma.table.findUnique({
-      where: { hallId_number: { hallId: dto.hallId, number: dto.number } },
-    });
-    if (exists) {
-      throw new BadRequestException(`Стол №${dto.number} уже есть в этом зале`);
-    }
-    const table = await this.prisma.table.create({
-      data: { hallId: dto.hallId, number: dto.number, seats: dto.seats, sortOrder: dto.number },
+    const { hallId, seats, number: requestedNumber } = dto;
+    const name = dto.name === undefined ? undefined : dto.name?.trim() || null;
+    if (hallId.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
+    const table = await this.prisma.$transaction(async (tx) => {
+      const cafeId = getCafeId();
+      // Serialize table creation per hall and verify access before reading its numbers.
+      const halls = cafeId
+        ? await tx.$queryRaw<{ id: string }[]>`SELECT id FROM halls WHERE id = ${hallId} AND cafe_id = ${cafeId} FOR UPDATE`
+        : await tx.$queryRaw<{ id: string }[]>`SELECT id FROM halls WHERE id = ${hallId} FOR UPDATE`;
+      if (!halls.length) throw new NotFoundException('Зал не найден');
+
+      let number = requestedNumber;
+      if (number == null) {
+        const activeTables = await tx.table.findMany({
+          where: { hallId, isActive: true, number: { gte: 1 } },
+          select: { number: true },
+          orderBy: { number: 'asc' },
+        });
+        number = 1;
+        for (const activeTable of activeTables) {
+          if (activeTable.number !== number) break;
+          number++;
+        }
+        if (number > 2147483647) throw new BadRequestException('Достигнут максимальный номер стола');
+      } else {
+        const existing = await tx.table.findFirst({
+          where: { hallId, number, isActive: true },
+          select: { id: true },
+        });
+        if (existing) {
+          throw new BadRequestException(`Стол №${number} уже есть в этом зале`);
+        }
+      }
+
+      return tx.table.create({ data: { hallId, number, name, seats, sortOrder: number } });
     });
     this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: table.id, hallId: table.hallId, action: 'create-table' });
     return table;
@@ -122,7 +198,8 @@ export class CatalogService {
   async updateTable(id: string, dto: UpdateTableDto) {
     const table = await this.prisma.table.findUnique({ where: { id } });
     if (!table) throw new NotFoundException('Стол не найден');
-    const updated = await this.prisma.table.update({ where: { id }, data: dto });
+    const name = dto.name === undefined ? undefined : dto.name?.trim() || null;
+    const updated = await this.prisma.table.update({ where: { id }, data: { ...dto, name } });
     if (dto.status && dto.status !== table.status) {
       this.events.emitBroadcast(SERVER_EVENTS.TABLE_STATUS_CHANGED, {
         id: updated.id,
@@ -151,6 +228,7 @@ export class CatalogService {
   }
 
   private async ensureHall(id: string) {
+    if (id.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
     const hall = await this.prisma.hall.findUnique({ where: { id } });
     if (!hall) throw new NotFoundException('Зал не найден');
     return hall;
@@ -175,14 +253,20 @@ export class CatalogService {
 
   categoriesAll() {
     return this.prisma.category.findMany({
-      orderBy: { sortOrder: 'asc' },
-      select: { id: true, name: true, sortOrder: true, isActive: true, prepStation: true, _count: { select: { dishes: true } } },
+      orderBy: categoryOrder,
+      select: { id: true, name: true, sortOrder: true, isActive: true, prepStation: true, taxId: true, _count: { select: { dishes: true } } },
     });
   }
 
   async createCategory(dto: CreateCategoryDto, actor: AuditActor) {
-    const category = await this.prisma.category.create({
-      data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation: dto.prepStation },
+    const category = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      const prepStation = dto.prepStation ?? await defaultCategoryStation(tx);
+      await assertAssignableStation(tx, prepStation);
+      await assertMenuTax(tx, dto.taxId);
+      return tx.category.create({
+        data: { name: dto.name, sortOrder: dto.sortOrder ?? 0, prepStation, taxId: dto.taxId },
+      });
     });
     await this.audit.log({
       actor,
@@ -190,7 +274,7 @@ export class CatalogService {
       entityType: AuditEntity.CATEGORY,
       entityId: category.id,
       description: `${actor.name ?? 'Сотрудник'} добавил категорию «${category.name}»`,
-      newValue: { name: category.name },
+      newValue: { name: category.name, taxId: category.taxId },
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: category.id, action: 'create-category' });
     return category;
@@ -198,15 +282,38 @@ export class CatalogService {
 
   async updateCategory(id: string, dto: UpdateCategoryDto, actor: AuditActor) {
     const before = await this.ensureCategory(id);
-    const updated = await this.prisma.category.update({ where: { id }, data: dto });
+    const { position, ...fields } = dto;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, fields.prepStation);
+      await assertMenuTax(tx, fields.taxId);
+      const data = { ...fields, prepStation: fields.prepStation ?? undefined };
+      if (position != null) {
+        const categories = await tx.category.findMany({ orderBy: categoryOrder, select: { id: true, sortOrder: true } });
+        const index = categories.findIndex((category) => category.id === id);
+        if (index < 0) throw new NotFoundException('Категория не найдена');
+        if (position < 1 || position > categories.length) {
+          throw new BadRequestException('Позиция категории вне диапазона. Обновите список категорий.');
+        }
+        const [category] = categories.splice(index, 1);
+        categories.splice(position - 1, 0, category);
+        for (const [sortOrder, entry] of categories.entries()) {
+          if (entry.id !== id && entry.sortOrder !== sortOrder) {
+            await tx.category.update({ where: { id: entry.id }, data: { sortOrder } });
+          }
+        }
+        data.sortOrder = position - 1;
+      }
+      return tx.category.update({ where: { id }, data });
+    });
     await this.audit.log({
       actor,
       actionType: AuditAction.CATEGORY_UPDATED,
       entityType: AuditEntity.CATEGORY,
       entityId: id,
       description: `${actor.name ?? 'Сотрудник'} изменил категорию «${before.name}»`,
-      oldValue: { name: before.name, isActive: before.isActive },
-      newValue: { name: updated.name, isActive: updated.isActive },
+      oldValue: { name: before.name, isActive: before.isActive, taxId: before.taxId, sortOrder: before.sortOrder },
+      newValue: { name: updated.name, isActive: updated.isActive, taxId: updated.taxId, sortOrder: updated.sortOrder },
     });
     this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { categoryId: id, action: 'update-category' });
     return updated;
@@ -254,13 +361,14 @@ export class CatalogService {
 
   /** Меняет порядок категорий по переданному списку id. */
   async reorderCategories(ids: string[], actor: AuditActor) {
-    const categories = await this.prisma.category.findMany({ where: { id: { in: ids } }, select: { id: true } });
-    if (categories.length !== ids.length) throw new BadRequestException('Категория не найдена');
-    await this.prisma.$transaction(
-      ids.map((catId, index) =>
-        this.prisma.category.update({ where: { id: catId }, data: { sortOrder: index } }),
-      ),
-    );
+    await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      const categories = await tx.category.findMany({ where: { id: { in: ids } }, select: { id: true } });
+      if (categories.length !== ids.length) throw new BadRequestException('Категория не найдена');
+      for (const [sortOrder, id] of ids.entries()) {
+        await tx.category.update({ where: { id }, data: { sortOrder } });
+      }
+    });
     await this.audit.log({
       actor,
       actionType: AuditAction.CATEGORY_UPDATED,
@@ -295,8 +403,9 @@ export class CatalogService {
   }
 
   /** Все блюда (включая неактивные) с категорией — для управления меню. */
-  async dishesAll(params: { categoryId?: string; search?: string }) {
+  async dishesAll(params: { categoryId?: string; search?: string; goodsOnly?: boolean }) {
     const where: Prisma.DishWhereInput = {
+      ...(params.goodsOnly ? { catalogKind: 'goods' } : {}),
       ...(params.categoryId ? { categoryId: params.categoryId } : {}),
       ...(params.search ? { name: { contains: params.search, mode: 'insensitive' } } : {}),
     };
@@ -305,7 +414,43 @@ export class CatalogService {
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       include: this.dishInclude(),
     });
-    return dishes.map(withDishImageRef);
+    const recipeDishIds = new Set((await this.prisma.recipeItem.findMany({ where: { dishId: { in: dishes.map((dish) => dish.id) } }, select: { dishId: true }, distinct: ['dishId'] })).map((row) => row.dishId));
+    const stock = await projectDishStock(this.prisma, dishes);
+    return dishes.map((dish) => withDishImageRef({ ...dish, trackInventory: stock.get(dish.id)!.trackInventory, stock: stock.get(dish.id)!.stock,
+      variants: dish.variants.map((variant) => ({ ...variant, stock: stock.get(dish.id)!.variantStocks.get(variant.id) ?? null })),
+      hasRecipe: recipeDishIds.has(dish.id),
+      hasDirectStock: !!dish.stockIngredientId || dish.variants.some((variant) => !!variant.stockIngredientId) }));
+  }
+
+  async goodsAll() {
+    const goods = await this.dishesAll({ goodsOnly: true });
+    return goods.map((dish) => {
+      const variants = dish.variants;
+      const units = dish.isWeighted
+        ? [`${dish.weightedPriceBase} ${dish.weightedMeasure === 'volume' ? 'мл' : 'г'}`]
+        : variants.length ? [...new Set(variants.map((variant) => variant.unit || dish.unit))] : [dish.unit];
+      const price = variants.length ? Math.min(...variants.map((variant) => {
+        const value = Number(variant.price);
+        const discount = Number(dish.discountValue);
+        if (dish.discountType === 'percent') return Math.max(0, value - value * discount / 100);
+        if (dish.discountType === 'fixed') return Math.max(0, value - discount);
+        return value;
+      })) : Number(dish.price);
+      return { ...dish, goodsStation: dish.prepStation ?? dish.category.prepStation ?? 'none', goodsUnits: units, goodsPrice: price };
+    });
+  }
+
+  async exportGoods(query: GoodsExportQuery) {
+    const columns = goodsExportColumns(query.columns);
+    const cafeId = getCafeId();
+    const [goods, stations, taxes] = await Promise.all([
+      this.goodsAll(),
+      cafeId ? this.prisma.preparationStation.findMany({ where: { cafeId }, select: { id: true, name: true, isActive: true } }) : [],
+      columns.includes('tax') ? this.prisma.menuTax.findMany({ where: { cafeId: cafeId ?? null }, select: { id: true, name: true, rate: true } }) : [],
+    ]);
+    const names = new Map((cafeId ? stationCatalog(stations, cafeId) : BUILTIN_STATIONS).map((station) => [station.id, station.name]));
+    return writeGoodsWorkbook(goods, query, columns, names,
+      new Map(taxes.map((tax) => [tax.id, `${tax.name} · ${tax.rate.toNumber().toLocaleString('ru-RU', { maximumFractionDigits: 2 })}%`])));
   }
 
   private normalizeVariants(variants?: DishVariantDto[]): NormalizedDishVariant[] {
@@ -353,7 +498,7 @@ export class CatalogService {
 
   private dishInclude() {
     return {
-      category: { select: { id: true, name: true } },
+      category: { select: { id: true, name: true, prepStation: true, taxId: true } },
       variants: { orderBy: { sortOrder: 'asc' as const } },
       setComponents: {
         orderBy: { sortOrder: 'asc' as const },
@@ -371,43 +516,48 @@ export class CatalogService {
   }
 
   async createDish(dto: CreateDishDto, actor: AuditActor) {
+    if (dto.trackInventory || Number(dto.stock ?? 0) !== 0 || dto.variants?.some((variant) => Number(variant.stock ?? 0) !== 0)) {
+      throw new BadRequestException('Складской учёт настраивается в «Состав и себестоимость». Остатки вносятся приходом или инвентаризацией');
+    }
     await this.ensureCategory(dto.categoryId);
     const variants = this.normalizeVariants(dto.variants);
     const price = this.resolveDishPrice(dto.price, variants);
-    const dish = await this.prisma.dish.create({
-      data: {
-        name: dto.name,
-        categoryId: dto.categoryId,
-        price: new Prisma.Decimal(price),
-        description: dto.description,
-        imageUrl: await normalizeDishImage(dto.imageUrl),
-        discountType: dto.discountType ?? 'none',
-        discountValue: new Prisma.Decimal(dto.discountValue ?? 0),
-        cookingTime: dto.cookingTime,
-        isAvailable: dto.isAvailable ?? true,
-        isWeighted: dto.isWeighted ?? false,
-        weightedMeasure: dto.weightedMeasure ?? 'weight',
-        weightedPriceBase: dto.weightedPriceBase ?? 100,
-        trackInventory: dto.trackInventory ?? false,
-        stock: dto.stock,
-        initialStock: dto.initialStock,
-        unit: this.normalizeInventoryUnit(dto.unit),
-        prepStation: dto.prepStation ?? null,
-        voiceName: dto.voiceName?.trim() || null,
-        variants: variants.length
-          ? {
-              create: variants.map((variant) => ({
-                name: variant.name,
-                price: new Prisma.Decimal(variant.price),
-                sortOrder: variant.sortOrder,
-                stock: variant.stock,
-                initialStock: variant.initialStock,
-                unit: variant.unit,
-              })),
-            }
-          : undefined,
-      },
-      include: this.dishInclude(),
+    const imageUrl = await normalizeDishImage(dto.imageUrl);
+    const dish = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
+      return tx.dish.create({
+        data: {
+          name: dto.name,
+          categoryId: dto.categoryId,
+          price: new Prisma.Decimal(price),
+          description: dto.description,
+          imageUrl,
+          discountType: dto.discountType ?? 'none',
+          discountValue: new Prisma.Decimal(dto.discountValue ?? 0),
+          cookingTime: dto.cookingTime,
+          isAvailable: dto.isAvailable ?? true,
+          isWeighted: dto.isWeighted ?? false,
+          weightedMeasure: dto.weightedMeasure ?? 'weight',
+          weightedPriceBase: dto.weightedPriceBase ?? 100,
+          trackInventory: false,
+          unit: this.normalizeInventoryUnit(dto.unit),
+          prepStation: dto.prepStation ?? null,
+          ...await dishTaxFields(tx, dto),
+          voiceName: dto.voiceName?.trim() || null,
+          variants: variants.length
+            ? {
+                create: variants.map((variant) => ({
+                  name: variant.name,
+                  price: new Prisma.Decimal(variant.price),
+                  sortOrder: variant.sortOrder,
+                  unit: variant.unit,
+                })),
+              }
+            : undefined,
+        },
+        include: this.dishInclude(),
+      });
     });
     await this.audit.log({
       actor,
@@ -429,15 +579,22 @@ export class CatalogService {
   async updateDish(id: string, dto: UpdateDishDto, actor: AuditActor) {
     const dish = await this.prisma.dish.findUnique({
       where: { id },
-      include: { _count: { select: { variants: true } } },
+      include: { _count: { select: { variants: true } }, variants: true },
     });
     if (!dish) throw new NotFoundException('Блюдо не найдено');
-    const { variants: variantsDto, ...dishDto } = dto;
+    const legacyError = 'Остатки изменяются в складе документом прихода или инвентаризации. Способ учёта — в «Состав и себестоимость»';
+    if ((dto.trackInventory !== undefined && dto.trackInventory !== dish.trackInventory)
+      || (dto.stock !== undefined && dto.stock !== dish.stock)
+      || (dto.initialStock !== undefined && dto.initialStock !== dish.initialStock)) throw new BadRequestException(legacyError);
+    for (const variant of dto.variants ?? []) {
+      const previous = dish.variants.find((entry) => entry.id === variant.id);
+      if ((variant.stock !== undefined && variant.stock !== (previous?.stock ?? 0))
+        || (variant.initialStock !== undefined && variant.initialStock !== (previous?.initialStock ?? 0))) throw new BadRequestException(legacyError);
+    }
+    const { variants: variantsDto, stock: _stock, initialStock: _initialStock, trackInventory: _trackInventory,
+      taxId: _taxId, taxExempt: _taxExempt, ...dishDto } = dto;
     const variants = variantsDto !== undefined ? this.normalizeVariants(variantsDto) : undefined;
     const data: Prisma.DishUpdateInput = { ...dishDto } as Prisma.DishUpdateInput;
-    if (dto.trackInventory !== undefined) {
-      data.trackInventory = dto.trackInventory;
-    }
     if (variants !== undefined || dto.price !== undefined) {
       data.price = new Prisma.Decimal(this.resolveDishPrice(dto.price, variants ?? [], dish.price));
     }
@@ -447,6 +604,9 @@ export class CatalogService {
     if (dto.unit !== undefined) data.unit = this.normalizeInventoryUnit(dto.unit);
     if (dto.categoryId) await this.ensureCategory(dto.categoryId);
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
+      Object.assign(data, await dishTaxFields(tx, dto));
       if (variants !== undefined) {
         const incomingIds = variants.map((variant) => variant.id).filter((variantId): variantId is string => !!variantId);
         if (incomingIds.length > 0) {
@@ -469,8 +629,6 @@ export class CatalogService {
                 name: variant.name,
                 price: new Prisma.Decimal(variant.price),
                 sortOrder: variant.sortOrder,
-                stock: variant.stock,
-                initialStock: variant.initialStock,
                 unit: variant.unit,
               },
             });
@@ -481,8 +639,6 @@ export class CatalogService {
                 name: variant.name,
                 price: new Prisma.Decimal(variant.price),
                 sortOrder: variant.sortOrder,
-                stock: variant.stock,
-                initialStock: variant.initialStock,
                 unit: variant.unit,
               },
             });
@@ -573,17 +729,23 @@ export class CatalogService {
 
   async createSet(dto: CreateSetDto, actor: AuditActor) {
     await this.validateSetComponents(dto.components);
-    const categoryId = await this.ensureSetsCategory();
-    const set = await this.prisma.dish.create({
-      data: {
-        name: dto.name,
-        categoryId,
-        price: new Prisma.Decimal(dto.price),
-        isSet: true,
-        trackInventory: false,
-        setComponents: { create: this.mapSetComponents(dto.components) },
-      },
-      include: this.dishInclude(),
+    const set = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
+      const categoryId = await this.ensureSetsCategory(tx);
+      return tx.dish.create({
+        data: {
+          name: dto.name,
+          categoryId,
+          price: new Prisma.Decimal(dto.price),
+          isSet: true,
+          prepStation: dto.prepStation,
+          ...await dishTaxFields(tx, dto),
+          trackInventory: false,
+          setComponents: { create: this.mapSetComponents(dto.components) },
+        },
+        include: this.dishInclude(),
+      });
     });
     await this.audit.log({
       actor,
@@ -603,6 +765,8 @@ export class CatalogService {
     if (dto.components) await this.validateSetComponents(dto.components);
 
     const updated = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      await assertAssignableStation(tx, dto.prepStation);
       if (dto.components) {
         await tx.setComponent.deleteMany({ where: { setId: id } });
         await tx.setComponent.createMany({
@@ -615,6 +779,8 @@ export class CatalogService {
           ...(dto.name !== undefined ? { name: dto.name } : {}),
           ...(dto.price !== undefined ? { price: new Prisma.Decimal(dto.price) } : {}),
           ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+          prepStation: dto.prepStation,
+          ...await dishTaxFields(tx, dto),
         },
         include: this.dishInclude(),
       });
@@ -672,12 +838,12 @@ export class CatalogService {
   }
 
   /** Категория «Сеты» (создаётся при необходимости). */
-  private async ensureSetsCategory(): Promise<string> {
-    const existing = await this.prisma.category.findFirst({ where: { name: 'Сеты' } });
+  private async ensureSetsCategory(tx: Prisma.TransactionClient): Promise<string> {
+    const existing = await tx.category.findFirst({ where: { name: 'Сеты' } });
     if (existing) return existing.id;
-    const agg = await this.prisma.category.aggregate({ _max: { sortOrder: true } });
-    const cat = await this.prisma.category.create({
-      data: { name: 'Сеты', sortOrder: (agg._max.sortOrder ?? 0) + 1 },
+    const agg = await tx.category.aggregate({ _max: { sortOrder: true } });
+    const cat = await tx.category.create({
+      data: { name: 'Сеты', sortOrder: (agg._max.sortOrder ?? 0) + 1, prepStation: await defaultCategoryStation(tx) },
     });
     return cat.id;
   }

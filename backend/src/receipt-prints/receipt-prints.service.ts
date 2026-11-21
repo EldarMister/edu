@@ -11,9 +11,12 @@ import { SERVER_EVENTS } from '../realtime/events';
 import { FiscalService } from '../fiscal/fiscal.service';
 import type { AuditActor } from '../audit/audit.service';
 import { PushService } from '../push/push.service';
+import { lockOrder } from '../orders/order-lock';
+import { RECEIPT_REQUEST_TTL_MS } from './receipt-print-access';
 
 const withWaiter = {
   waiter: { select: { id: true, name: true } },
+  order: { select: { source: true } },
 } satisfies Prisma.ReceiptPrintRequestInclude;
 
 type RequestWithWaiter = Prisma.ReceiptPrintRequestGetPayload<{ include: typeof withWaiter }>;
@@ -23,7 +26,6 @@ type PrintableOrder = Prisma.OrderGetPayload<{
     waiter: { select: { id: true; name: true } };
   };
 }>;
-const REQUEST_TTL_MS = 2 * 60 * 60 * 1000;
 const PRINTABLE_ORDER_TTL_MS = 24 * 60 * 60 * 1000;
 const PRELIMINARY_ORDER_STATUSES: OrderStatus[] = [
   OrderStatus.sent_to_kitchen,
@@ -90,6 +92,7 @@ export class ReceiptPrintsService {
       priority: true,
       orderId: r.orderId,
       orderNumber: r.orderNumber,
+      orderSource: r.order.source,
       tableNumber: r.tableNumber,
       type: r.type,
       waiterId: r.waiterId,
@@ -103,10 +106,12 @@ export class ReceiptPrintsService {
 
   private withRequestVoice(dto: ReturnType<ReceiptPrintsService['serialize']>) {
     const documentName = dto.type === ReceiptPrintType.preliminary ? 'счёта' : 'чека';
+    const delivery = dto.orderSource === 'delivery';
+    const place = delivery ? 'Доставка' : `Стол номер ${tableNumberVoice(dto.tableNumber)}`;
     return {
       ...dto,
       voice: {
-        text: `Официант ${dto.waiterName} отправил заявку на печать ${documentName}. Стол номер ${tableNumberVoice(dto.tableNumber)}.`,
+        text: `${delivery ? '' : 'Официант '}${dto.waiterName} отправил заявку на печать ${documentName}. ${place}.`,
       },
     };
   }
@@ -120,6 +125,7 @@ export class ReceiptPrintsService {
       priority: false,
       orderId: order.id,
       orderNumber: order.orderNumber,
+      orderSource: order.source,
       tableNumber: order.table.number,
       type,
       waiterId: order.waiterId,
@@ -132,7 +138,7 @@ export class ReceiptPrintsService {
   }
 
   private async purgeExpired() {
-    const cutoff = new Date(Date.now() - REQUEST_TTL_MS);
+    const cutoff = new Date(Date.now() - RECEIPT_REQUEST_TTL_MS);
     await this.prisma.receiptPrintRequest.deleteMany({
       where: {
         createdAt: { lt: cutoff },
@@ -148,79 +154,93 @@ export class ReceiptPrintsService {
   ) {
     await this.purgeExpired();
 
-    const order = await this.prisma.order.findUnique({
-      where: { id: orderId },
-      include: { table: { select: { number: true } } },
-    });
-    if (!order) throw new NotFoundException('Заказ не найден');
-    if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
-      throw new ForbiddenException('Это не ваш заказ');
-    }
-    // Заявку официанта на печать создаёт сам официант — у заказа есть официант.
-    // QR-заказ (без официанта) печатается администратором напрямую, без заявки.
-    if (!order.waiterId) {
-      throw new BadRequestException('У заказа нет официанта — печать через раздел администратора');
-    }
+    const { request, created, cafeId } = await this.prisma.$transaction(async (tx) => {
+      await lockOrder(tx, orderId);
+      const order = await tx.order.findUniqueOrThrow({
+        where: { id: orderId },
+        include: { table: { select: { number: true } } },
+      });
+      if (actor.role === Role.WAITER && order.waiterId !== actor.id) {
+        throw new ForbiddenException('Это не ваш заказ');
+      }
+      if (!order.waiterId) {
+        throw new BadRequestException('У заказа нет официанта — печать через раздел администратора');
+      }
+      if (type === ReceiptPrintType.receipt && order.status !== OrderStatus.paid) {
+        throw new BadRequestException('Чек можно запросить после оплаты');
+      }
+      if (type === ReceiptPrintType.preliminary && !PRELIMINARY_ORDER_STATUSES.includes(order.status) && order.status !== OrderStatus.draft) {
+        throw new BadRequestException('Счёт доступен для открытого заказа');
+      }
+      const existing = await tx.receiptPrintRequest.findFirst({
+        where: { orderId, type, status: { in: [ReceiptPrintStatus.pending, ReceiptPrintStatus.approved] } },
+        orderBy: { createdAt: 'asc' },
+        include: withWaiter,
+      });
+      if (existing) return { request: existing, created: false, cafeId: order.cafeId };
 
-    // Уже есть активный (ожидающий) запрос того же типа по заказу — вернём его, не дублируем.
-    const existing = await this.prisma.receiptPrintRequest.findFirst({
-      where: { orderId, type, status: ReceiptPrintStatus.pending },
-      include: withWaiter,
+      const request = await tx.receiptPrintRequest.create({
+        data: {
+          orderId,
+          waiterId: order.waiterId,
+          tableNumber: order.table.number,
+          orderNumber: order.orderNumber,
+          amount: order.finalAmount,
+          type,
+          status: ReceiptPrintStatus.pending,
+        },
+        include: withWaiter,
+      });
+      return { request, created: true, cafeId: order.cafeId };
     });
-    if (existing) return this.serialize(existing);
-
-    const request = await this.prisma.receiptPrintRequest.create({
-      data: {
-        orderId,
-        waiterId: order.waiterId,
-        tableNumber: order.table.number,
-        orderNumber: order.orderNumber,
-        amount: order.finalAmount,
-        type,
-        status: ReceiptPrintStatus.pending,
-      },
-      include: withWaiter,
-    });
-
+    if (!created) return this.serialize(request);
     const dto = this.withRequestVoice(this.serialize(request));
     // Заявка сразу появляется только у администраторов.
-    this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, dto);
+    this.events.emitToReceiptPrinters(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_CREATED, dto);
+    const place = dto.orderSource === 'delivery' ? 'Доставка' : `Стол ${dto.tableNumber}`;
     void this.push.notifyRole(Role.ADMIN, {
-      title: 'Печать чека', body: `Заявка от ${dto.waiterName} · Стол ${dto.tableNumber}`,
+      title: 'Печать чека', body: `Заявка от ${dto.waiterName} · ${place}`,
       orderId: dto.orderId, orderNumber: dto.orderNumber, channel: 'payments',
       notificationId: `receipt:${dto.id}:created`, url: '/admin/receipts',
-    }, order.cafeId);
+    }, cafeId);
     return dto;
   }
 
-  /** Список для администратора: приоритетные заявки официантов + заказы, доступные к печати 24 часа. */
-  async listPending() {
+  /** Заявки всегда в приоритете. Остальные документы зависят от режима заведения. */
+  async listPending(terminalId?: string) {
     await this.purgeExpired();
 
     const printableCutoff = new Date(Date.now() - PRINTABLE_ORDER_TTL_MS);
 
-    const [requests, orders] = await Promise.all([
+    const [requests, settings] = await Promise.all([
       this.prisma.receiptPrintRequest.findMany({
-        where: { status: { in: [ReceiptPrintStatus.pending, ReceiptPrintStatus.approved] } },
+        where: { OR: [
+          { status: ReceiptPrintStatus.pending },
+          { status: ReceiptPrintStatus.approved, decidedById: terminalId },
+        ] },
         orderBy: { createdAt: 'asc' },
         include: withWaiter,
       }),
-      this.prisma.order.findMany({
-        where: {
-          OR: [
-            { status: { in: PRELIMINARY_ORDER_STATUSES }, updatedAt: { gte: printableCutoff } },
-            { status: OrderStatus.paid, closedAt: { gte: printableCutoff } },
-            { status: OrderStatus.paid, closedAt: null, updatedAt: { gte: printableCutoff } },
-          ],
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-        include: {
-          table: { select: { number: true } },
-          waiter: { select: { id: true, name: true } },
-        },
-      }),
+      this.prisma.settings.findFirst({ select: { receiptPrintRequestsOnly: true } }),
     ]);
+    if (settings?.receiptPrintRequestsOnly) return requests.map((request) => this.serialize(request));
+
+    const orders = await this.prisma.order.findMany({
+      where: {
+        waiterId: terminalId,
+        OR: [
+          { status: { in: PRELIMINARY_ORDER_STATUSES }, updatedAt: { gte: printableCutoff } },
+          { status: OrderStatus.paid, closedAt: { gte: printableCutoff } },
+          { status: OrderStatus.paid, closedAt: null, updatedAt: { gte: printableCutoff } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
+      include: {
+        table: { select: { number: true } },
+        waiter: { select: { id: true, name: true } },
+      },
+    });
 
     const activeRequestKeys = new Set(requests.map((r) => `${r.orderId}:${r.type}`));
     const printableOrders = orders.filter((order) => {
@@ -238,21 +258,11 @@ export class ReceiptPrintsService {
   /** Администратор принимает заявку: дальше админское устройство печатает документ. */
   async approve(actor: AuditActor, id: string) {
     await this.purgeExpired();
-    const request = await this.getPending(id);
-
-    const updated = await this.prisma.receiptPrintRequest.update({
-      where: { id },
-      data: {
-        status: ReceiptPrintStatus.approved,
-        decidedById: actor.id,
-        decidedAt: new Date(),
-      },
-      include: withWaiter,
-    });
+    const updated = await this.decidePending(actor.id, id, ReceiptPrintStatus.approved);
     const dto = this.serialize(updated);
 
-    this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, dto);
-    this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, dto);
+    this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, dto);
+    this.events.emitToReceiptPrinters(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_APPROVED, dto);
     return dto;
   }
 
@@ -261,6 +271,9 @@ export class ReceiptPrintsService {
     await this.purgeExpired();
     const request = await this.prisma.receiptPrintRequest.findUnique({ where: { id } });
     if (!request) throw new NotFoundException('Заявка не найдена');
+    if (actor.role === Role.WAITER && request.decidedById !== actor.id) {
+      throw new ForbiddenException('Заявку обрабатывает другой сотрудник');
+    }
     if (request.status === ReceiptPrintStatus.printed) {
       const printed = await this.prisma.receiptPrintRequest.findUniqueOrThrow({ where: { id }, include: withWaiter });
       return this.serialize(printed);
@@ -269,16 +282,17 @@ export class ReceiptPrintsService {
       throw new BadRequestException('Заявка ещё не подтверждена');
     }
 
-    const updated = await this.prisma.receiptPrintRequest.update({
-      where: { id },
+    const result = await this.prisma.receiptPrintRequest.updateMany({
+      where: { id, status: ReceiptPrintStatus.approved },
       data: {
         status: ReceiptPrintStatus.printed,
         decidedById: request.decidedById ?? actor.id,
         decidedAt: request.decidedAt ?? new Date(),
       },
-      include: withWaiter,
     });
+    const updated = await this.prisma.receiptPrintRequest.findUniqueOrThrow({ where: { id }, include: withWaiter });
     const dto = this.serialize(updated);
+    if (!result.count) return dto;
 
     // ККМ: финальный (товарный) чек пробивается фискально, если подключён провайдер.
     // Предчек (preliminary) не фискализируется. Ошибка ККМ не блокирует flow печати —
@@ -288,7 +302,7 @@ export class ReceiptPrintsService {
     }
 
     this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
-    this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
+    this.events.emitToReceiptPrinters(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_PRINTED, dto);
     const label = dto.type === ReceiptPrintType.preliminary ? 'Счёт' : 'Чек';
     void this.push.notifyWaiter(request.waiterId, {
       title: 'Печать завершена', body: `${label} ${dto.orderNumber} распечатан. Заберите ${label.toLowerCase()}.`,
@@ -301,22 +315,12 @@ export class ReceiptPrintsService {
   /** Администратор отклоняет заявку: чек не печатается → статус rejected. */
   async reject(actor: AuditActor, id: string) {
     await this.purgeExpired();
-    const request = await this.getPending(id);
-
-    const updated = await this.prisma.receiptPrintRequest.update({
-      where: { id },
-      data: {
-        status: ReceiptPrintStatus.rejected,
-        decidedById: actor.id,
-        decidedAt: new Date(),
-      },
-      include: withWaiter,
-    });
+    const updated = await this.decidePending(actor.id, id, ReceiptPrintStatus.rejected);
     const dto = this.serialize(updated);
 
-    this.events.emitToWaiter(request.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_REJECTED, dto);
-    this.events.emitToAdminOnly(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_REJECTED, dto);
-    void this.push.notifyWaiter(request.waiterId, {
+    this.events.emitToWaiter(updated.waiterId, SERVER_EVENTS.RECEIPT_PRINT_REQUEST_REJECTED, dto);
+    this.events.emitToReceiptPrinters(SERVER_EVENTS.RECEIPT_PRINT_REQUEST_REJECTED, dto);
+    void this.push.notifyWaiter(updated.waiterId, {
       title: 'Печать отклонена', body: 'Печать чека отклонена администратором',
       orderId: dto.orderId, orderNumber: dto.orderNumber, type: 'error', channel: 'payments',
       notificationId: `receipt:${dto.id}:rejected`, url: '/waiter',
@@ -324,12 +328,18 @@ export class ReceiptPrintsService {
     return dto;
   }
 
-  private async getPending(id: string) {
-    const request = await this.prisma.receiptPrintRequest.findUnique({ where: { id } });
-    if (!request) throw new NotFoundException('Заявка не найдена');
-    if (request.status !== ReceiptPrintStatus.pending) {
-      throw new BadRequestException('Заявка уже обработана');
+  private async decidePending(actorId: string, id: string, status: ReceiptPrintStatus) {
+    try {
+      return await this.prisma.receiptPrintRequest.update({
+        where: { id, status: ReceiptPrintStatus.pending },
+        data: { status, decidedById: actorId, decidedAt: new Date() },
+        include: withWaiter,
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new BadRequestException('Заявка уже обработана или недоступна');
+      }
+      throw error;
     }
-    return request;
   }
 }

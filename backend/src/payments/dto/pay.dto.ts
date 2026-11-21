@@ -19,7 +19,12 @@ export class PayDto {
   @IsEnum(PaymentMethod)
   method: PaymentMethod;
 
-  // Для смешанной оплаты (method = mixed): сумма наличными и сумма по QR.
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  expectedAmount?: number;
+
+  // Суммы по способам смешанной оплаты (method = mixed).
   @IsOptional()
   @IsNumber()
   @Min(0)
@@ -29,6 +34,11 @@ export class PayDto {
   @IsNumber()
   @Min(0)
   qrAmount?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  cardAmount?: number;
 
   // Для раздельной оплаты: отдельные платежи гостей, сохраняются как split.
   @IsOptional()

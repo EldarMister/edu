@@ -1,3 +1,6 @@
+import { SheetHandle } from '@/components/SheetHandle';
+import { useDialogEscape } from '@/components/useDialogEscape';
+import { IconX } from '@/features/admin/components/icons';
 import { useEffect, useRef, useState } from 'react';
 import type { Dish, DishVariant } from '@/types';
 import { dishUnitPrice, money } from '@/lib/format';
@@ -23,17 +26,13 @@ export function VariantPickerSheet({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [renderDish, setRenderDish] = useState<Dish | null>(dish);
   const [visible, setVisible] = useState(false);
-  const [drag, setDrag] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const startY = useRef<number | null>(null);
-  const dragRef = useRef(0);
+  const panel = useRef<HTMLDivElement>(null);
+  useDialogEscape(panel, !!dish, onClose);
 
   useEffect(() => {
     if (dish) {
       setRenderDish(dish);
       setSelectedId(null);
-      setDrag(0);
-      dragRef.current = 0;
       let raf2 = 0;
       const raf1 = requestAnimationFrame(() => {
         raf2 = requestAnimationFrame(() => setVisible(true));
@@ -47,8 +46,6 @@ export function VariantPickerSheet({
     setVisible(false);
     const id = setTimeout(() => {
       setRenderDish(null);
-      setDrag(0);
-      dragRef.current = 0;
     }, VARIANT_SHEET_MS);
     return () => clearTimeout(id);
   }, [dish]);
@@ -56,34 +53,6 @@ export function VariantPickerSheet({
   if (!renderDish) return null;
 
   const selectedVariant = renderDish.variants.find((variant) => variant.id === selectedId) ?? null;
-  const sheetTransform = visible ? `translateY(${drag}px)` : 'translateY(100%)';
-
-  function onPointerDown(e: React.PointerEvent) {
-    startY.current = e.clientY;
-    setDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-
-  function onPointerMove(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    const dy = e.clientY - startY.current;
-    const nextDrag = dy > 0 ? dy : 0;
-    dragRef.current = nextDrag;
-    setDrag(nextDrag);
-  }
-
-  function onPointerUp(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    startY.current = null;
-    e.currentTarget.releasePointerCapture?.(e.pointerId);
-    setDragging(false);
-    if (dragRef.current > 110) onClose();
-    else requestAnimationFrame(() => {
-      dragRef.current = 0;
-      setDrag(0);
-    });
-  }
-
   return (
     <div className={`fixed inset-0 ${zIndexClass}`}>
       <div
@@ -93,23 +62,24 @@ export function VariantPickerSheet({
         aria-hidden
       />
       <div
-        className="absolute inset-x-0 bottom-0 mx-auto flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft"
+        ref={panel}
+        className="terminal-dialog absolute inset-x-0 bottom-0 mx-auto flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft"
+        data-visible={visible}
+        data-modal-panel={dish ? true : undefined}
         style={{
-          transform: sheetTransform,
-          transition: dragging ? 'none' : `transform ${VARIANT_SHEET_MS}ms ${VARIANT_SHEET_EASE}`,
+          transition: `transform ${VARIANT_SHEET_MS}ms ${VARIANT_SHEET_EASE}`,
         }}
         role="dialog"
+        aria-modal={!!dish}
         aria-label={t('Выбор варианта')}
       >
-        <div
-          className="shrink-0 cursor-grab touch-none px-4 pb-2 pt-2.5"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
-          <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-slate-300" />
-          <h2 className="text-xl font-semibold text-text-primary">{renderDish.name}</h2>
+        <SheetHandle panel={panel} onClose={onClose} enabled={!!dish && visible} className="md:hidden" />
+        <div className="shrink-0 px-4 pb-2 md:pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-xl font-semibold text-text-primary">{renderDish.name}</h2>
+            <button type="button" onClick={onClose} aria-label={t('Закрыть')}
+              className="hidden shrink-0 rounded-lg p-1 text-text-muted hover:bg-background md:block"><IconX /></button>
+          </div>
           <p className="mt-3 text-[15px] font-medium text-text-secondary">{t('Выберите размер')}</p>
         </div>
 

@@ -10,14 +10,34 @@ import {
 import { Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Server, Socket } from 'socket.io';
+import { Prisma } from '@prisma/client';
 import { ROOMS, SERVER_EVENTS, QR_CLIENT_EVENTS } from './events';
 import { getJwtAccessSecret } from '../auth/jwt.config';
 import { PrismaService } from '../prisma/prisma.service';
-import { getCafeId } from '../tenant/tenant-context';
+import { getCafeId, runWithTenant } from '../tenant/tenant-context';
 import { assertCafeActive } from '../platform/cafe-status';
+import { resolveUserPermissions } from '../common/permissions';
+import { projectWorkspaceUser } from '../common/workspace-access';
+import type { AuthUser } from '../common/decorators/current-user.decorator';
 
 const QR_OFFLINE_CART_TTL_MS = 60 * 60 * 1000;
 const QR_OFFLINE_CART_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
+const STAFF_ACCESS_CHECK_INTERVAL_MS = 30_000;
+const socketUserSelect = { id: true, role: true, name: true, phone: true, cafeId: true, isActive: true,
+  prepStation: true, positionId: true, permissions: true, position: { select: { role: true, permissions: true, isStarter: true } } } satisfies Prisma.UserSelect;
+type SocketEmployee = Prisma.UserGetPayload<{ select: typeof socketUserSelect }>;
+
+function socketActor(user: SocketEmployee, workspace?: unknown) {
+  return projectWorkspaceUser({ id: user.id, role: user.role, name: user.name, phone: user.phone,
+    cafeId: user.cafeId, prepStation: user.prepStation, positionId: user.positionId,
+    permissions: resolveUserPermissions(user) }, workspace);
+}
+
+function socketAccessFingerprint(user: AuthUser) {
+  return JSON.stringify({ cafeId: user.cafeId, identityRole: user.identityRole, role: user.role,
+    workspace: user.workspace, prepStation: user.prepStation, positionId: user.positionId,
+    access: user.access, permissions: user.permissions });
+}
 
 interface SocketUser {
   id: string;
@@ -28,11 +48,7 @@ interface SocketUser {
 
 /**
  * Единый шлюз реального времени.
- * Клиент подключается с JWT в auth.token; по роли его добавляют в нужные комнаты:
- *  - кухня → ROOMS.KITCHEN
- *  - официант → персональная комната waiter:<id>
- *  - админ/владелец → ROOMS.ADMIN
- *  - только админ → ROOMS.ADMIN_ONLY
+ * Клиент с JWT получает события в комнатах своего кафе и своей роли.
  */
 @WebSocketGateway({
   cors: {
@@ -47,6 +63,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   private readonly logger = new Logger('EventsGateway');
   private readonly qrPresence = new Map<string, number>();
   private cleanupTimer?: NodeJS.Timeout;
+  private accessTimer?: NodeJS.Timeout;
+  private checkingAccess = false;
 
   constructor(
     private readonly jwt: JwtService,
@@ -60,10 +78,37 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       });
     }, QR_OFFLINE_CART_CLEANUP_INTERVAL_MS);
     this.cleanupTimer.unref?.();
+    this.accessTimer = setInterval(() => {
+      void this.revalidateStaffConnections().catch((error: unknown) => this.logger.error('Failed to revalidate staff socket access', error));
+    }, STAFF_ACCESS_CHECK_INTERVAL_MS);
+    this.accessTimer.unref?.();
   }
 
   onModuleDestroy() {
     if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    if (this.accessTimer) clearInterval(this.accessTimer);
+  }
+
+  /** One batched lookup per interval, regardless of the number of devices per employee. */
+  async revalidateStaffConnections() {
+    if (this.checkingAccess || !this.server?.sockets?.sockets) return;
+    const clients = [...this.server.sockets.sockets.values()].filter((client) => client.data.user);
+    if (!clients.length) return;
+    this.checkingAccess = true;
+    try {
+      const ids = [...new Set(clients.map((client) => (client.data.user as SocketUser).id))];
+      const users = await runWithTenant({}, async () => await this.prisma.user.findMany({ where: { id: { in: ids } }, select: socketUserSelect }));
+      const byId = new Map(users.map((user) => [user.id, user]));
+      for (const client of clients) {
+        const before = client.data.user as AuthUser;
+        const employee = byId.get(before.id);
+        try {
+          if (!employee?.isActive || socketAccessFingerprint(socketActor(employee, before.workspace)) !== client.data.accessFingerprint) {
+            client.disconnect(true);
+          }
+        } catch { client.disconnect(true); }
+      }
+    } finally { this.checkingAccess = false; }
   }
 
   async handleConnection(client: Socket) {
@@ -85,7 +130,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       });
       const dbUser = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-        select: { id: true, role: true, name: true, cafeId: true, isActive: true },
+        select: socketUserSelect,
       });
       if (!dbUser || !dbUser.isActive) {
         client.disconnect(true);
@@ -93,22 +138,29 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       }
       await assertCafeActive(this.prisma, dbUser.cafeId);
 
-      const user: SocketUser = { id: dbUser.id, role: dbUser.role, name: dbUser.name, cafeId: dbUser.cafeId };
+      const user = socketActor(dbUser, client.handshake.auth?.workspace);
       client.data.user = user;
+      client.data.accessFingerprint = socketAccessFingerprint(user);
+      client.join(ROOMS.cafeStaff(user.cafeId));
+      // The legacy personal room also carries work-time updates for kitchen, bar and management.
+      client.join(ROOMS.waiter(user.id));
 
       if (user.role === 'KITCHEN' || user.role === 'BAR') {
         // Бар получает ту же ленту, что и кухня; экран фильтрует позиции по станции.
         client.join(ROOMS.cafeKitchen(user.cafeId));
       } else if (user.role === 'WAITER') {
-        client.join(ROOMS.WAITERS);
-        client.join(ROOMS.waiter(user.id));
-      } else if (user.role === 'ADMIN' || user.role === 'OWNER') {
-        client.join(ROOMS.ADMIN);
-        client.join(ROOMS.cafeKitchen(user.cafeId)); // админ видит и кухонную ленту
-        if (user.role === 'ADMIN') {
-          client.join(ROOMS.ADMIN_ONLY);
-          if (user.cafeId) client.join(ROOMS.cafeAdmins(user.cafeId));
+        client.join(ROOMS.cafeWaiters(user.cafeId));
+        if (user.permissions.actions.printReceipts && user.permissions.ownerOperations?.printRequests !== false) {
+          client.join(ROOMS.cafeReceiptPrinters(user.cafeId));
         }
+      } else if (user.role === 'ADMIN' || user.role === 'OWNER') {
+        const { orders, staff, checks } = user.permissions.sections;
+        if (orders || staff || checks) client.join(ROOMS.cafeManagement(user.cafeId));
+        if (orders) client.join(ROOMS.cafeKitchen(user.cafeId));
+        if (user.role === 'ADMIN') {
+          client.join(ROOMS.cafeAdmins(user.cafeId));
+        }
+        if (checks && user.permissions.ownerOperations?.printRequests !== false) client.join(ROOMS.cafeReceiptPrinters(user.cafeId));
       }
 
       this.logger.log(`Connected: ${user.role} ${user.id} (${client.id})`);
@@ -133,18 +185,34 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   @SubscribeMessage(QR_CLIENT_EVENTS.JOIN)
   async handleQrJoin(
     @ConnectedSocket() client: Socket,
-    @MessageBody() body: { tableId?: string; guestKey?: string },
+    @MessageBody() body: { tableId?: string; guestKey?: string; tableToken?: string },
   ) {
     const tableId = body?.tableId;
-    if (!tableId) return { ok: false };
+    const guestKey = body?.guestKey;
+    if (typeof tableId !== 'string' || typeof guestKey !== 'string' || !tableId || !guestKey) return { ok: false };
+    const table = await this.prisma.table.findFirst({
+      where: { id: tableId, isActive: true },
+      select: { cafeId: true, qrToken: true },
+    });
+    if (!table) return { ok: false };
+    if (body.tableToken !== table.qrToken) {
+      const lastVisit = await this.prisma.qrTableSession.findFirst({
+        where: { tableId },
+        orderBy: { createdAt: 'desc' },
+        select: { guests: { where: { guestKey }, select: { id: true }, take: 1 } },
+      });
+      if (!lastVisit?.guests.length) return { ok: false };
+    }
+    try {
+      await assertCafeActive(this.prisma, table.cafeId);
+    } catch {
+      return { ok: false };
+    }
     if (client.data.qr) await this.releaseQrGuest(client, false);
     client.join(ROOMS.qrTable(tableId));
-    client.data.qr = { tableId, guestKey: body.guestKey };
-    await this.retainQrGuest(tableId, body.guestKey);
-    this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_GUEST_JOINED, {
-      tableId,
-      guestKey: body.guestKey,
-    });
+    client.data.qr = { tableId, guestKey };
+    await this.retainQrGuest(tableId, guestKey);
+    this.server.to(ROOMS.qrTable(tableId)).emit(SERVER_EVENTS.QR_GUEST_JOINED, { tableId });
     await this.emitQrSessionSnapshot(tableId);
     return { ok: true };
   }
@@ -160,10 +228,13 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
   // ---- API для сервисов ----
 
-  emitToKitchen(event: string, payload: unknown) {
+  private cafeFor(payload: unknown) {
     const explicitCafe = payload && typeof payload === 'object' && 'cafeId' in payload ? payload.cafeId : undefined;
-    const cafeId = typeof explicitCafe === 'string' || explicitCafe === null ? explicitCafe : getCafeId();
-    this.server.to(ROOMS.cafeKitchen(cafeId)).emit(event, payload);
+    return typeof explicitCafe === 'string' || explicitCafe === null ? explicitCafe : getCafeId();
+  }
+
+  emitToKitchen(event: string, payload: unknown) {
+    this.server.to(ROOMS.cafeKitchen(this.cafeFor(payload))).emit(event, payload);
   }
 
   emitToWaiter(waiterId: string | null | undefined, event: string, payload: unknown) {
@@ -173,15 +244,15 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   }
 
   emitToWaiters(event: string, payload: unknown) {
-    this.server.to(ROOMS.WAITERS).emit(event, payload);
+    this.server.to(ROOMS.cafeWaiters(this.cafeFor(payload))).emit(event, payload);
   }
 
   emitToAdmin(event: string, payload: unknown) {
-    this.server.to(ROOMS.ADMIN).emit(event, payload);
+    this.server.to(ROOMS.cafeManagement(this.cafeFor(payload))).emit(event, payload);
   }
 
-  emitToAdminOnly(event: string, payload: unknown) {
-    this.server.to(ROOMS.ADMIN_ONLY).emit(event, payload);
+  emitToReceiptPrinters(event: string, payload: unknown) {
+    this.server.to(ROOMS.cafeReceiptPrinters(this.cafeFor(payload))).emit(event, payload);
   }
 
   emitToCafeAdmins(cafeId: string | null | undefined, event: string, payload: unknown) {
@@ -189,9 +260,14 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     this.server.to(ROOMS.cafeAdmins(cafeId)).emit(event, payload);
   }
 
-  /** Широковещательно (например, изменение статуса стола видят все). */
+  /** События стола, меню и настроек получают только сотрудники кафе. */
   emitBroadcast(event: string, payload: unknown) {
-    this.server.emit(event, payload);
+    this.server.to(ROOMS.cafeStaff(this.cafeFor(payload))).emit(event, payload);
+  }
+
+  /** Плановое обновление рейтинга затрагивает меню всех заведений. */
+  emitPopularityRefresh() {
+    this.server.emit(SERVER_EVENTS.MENU_UPDATED, { source: 'dish-popularity-cron' });
   }
 
   /** Всем гостям QR-меню конкретного стола. */
@@ -247,10 +323,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     }
 
     if (emit) {
-      this.server.to(ROOMS.qrTable(qr.tableId)).emit(SERVER_EVENTS.QR_GUEST_LEFT, {
-        tableId: qr.tableId,
-        guestKey: qr.guestKey,
-      });
+      this.server.to(ROOMS.qrTable(qr.tableId)).emit(SERVER_EVENTS.QR_GUEST_LEFT, { tableId: qr.tableId });
       await this.emitQrSessionSnapshot(qr.tableId);
     }
   }

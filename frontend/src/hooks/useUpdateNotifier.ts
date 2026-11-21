@@ -26,9 +26,7 @@ export function useUpdateNotifier() {
         const res = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
-        if (data.commit && data.commit !== APP_COMMIT) {
-          setUpdateAvailable(true);
-        }
+        setUpdateAvailable(typeof data.commit === 'string' && !!data.commit && data.commit !== APP_COMMIT);
       } catch {
         // нет сети — молча игнорируем
       }
@@ -42,8 +40,6 @@ export function useUpdateNotifier() {
   function snooze() {
     localStorage.setItem(STORAGE_KEY, String(Date.now() + SNOOZE_MS));
     setUpdateAvailable(false);
-    // Через час перепроверим — snooze уже истечёт
-    setTimeout(() => setUpdateAvailable(true), SNOOZE_MS);
   }
 
   return { updateAvailable, snooze };

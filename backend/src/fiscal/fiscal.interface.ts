@@ -31,6 +31,7 @@ export interface FiscalReceiptData {
 
 export interface FiscalResult {
   success: boolean;
+  simulated?: boolean;
   /** Номер фискального чека. */
   fiscalReceiptNumber?: string;
   /** Фискальный признак. */

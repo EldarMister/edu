@@ -1,6 +1,12 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Put, Query, Res } from '@nestjs/common';
+import type { Response } from 'express';
+import { GoodsExportQuery } from './goods-xlsx';
+import { hasPermission, resolvePermissions } from '../common/permissions';
+import { MenuEntryService } from './menu-entry.service';
+import { MenuEntryDto } from './menu-entry.dto';
 import { Role } from '@prisma/client';
 import { CatalogService } from './catalog.service';
+import { SaveFloorPlanDto, SetFloorPlanModeDto } from './floor-plan.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
@@ -23,7 +29,20 @@ import {
 @Controller('admin')
 @Roles(Role.ADMIN, Role.OWNER)
 export class CatalogController {
-  constructor(private readonly catalog: CatalogService) {}
+  constructor(private readonly catalog: CatalogService, private readonly entries: MenuEntryService) {}
+
+  @Get('menu/entries/:id') @RequirePermission('sections.menu')
+  menuEntry(@Param('id') id: string) { return this.entries.get(id); }
+
+  @Post('menu/entries') @RequirePermission('sections.menu', 'actions.editMenu')
+  createMenuEntry(@Body() dto: MenuEntryDto, @CurrentUser() user: AuthUser) { this.assertRecipePermission(dto, user); return this.entries.save(null, dto, user); }
+
+  @Put('menu/entries/:id') @RequirePermission('sections.menu', 'actions.editMenu')
+  updateMenuEntry(@Param('id') id: string, @Body() dto: MenuEntryDto, @CurrentUser() user: AuthUser) { this.assertRecipePermission(dto, user); return this.entries.save(id, dto, user); }
+
+  private assertRecipePermission(dto: MenuEntryDto, user: AuthUser) {
+    if ((dto.recipe || dto.modifiers) && user.role !== Role.OWNER && !hasPermission(user.permissions ?? resolvePermissions(user.role as Role, null), 'actions.warehouseRecipes')) throw new ForbiddenException('Нет права изменять состав техкарты');
+  }
 
   // ---- Залы и столы (раздел «Столы») ----
   @Get('tables/overview')
@@ -36,6 +55,18 @@ export class CatalogController {
   @RequirePermission('sections.tables')
   halls() {
     return this.catalog.hallsWithTables();
+  }
+
+  @Put('halls/:id/floor-plan')
+  @RequirePermission('sections.tables')
+  saveFloorPlan(@Param('id') id: string, @Body() dto: SaveFloorPlanDto) {
+    return this.catalog.saveFloorPlan(id, dto);
+  }
+
+  @Put('tables/floor-plan-mode')
+  @RequirePermission('sections.tables')
+  setFloorPlanMode(@Body() dto: SetFloorPlanModeDto) {
+    return this.catalog.setFloorPlanMode(dto.useFloorPlan);
   }
 
   @Post('halls')
@@ -88,31 +119,31 @@ export class CatalogController {
   }
 
   @Post('categories')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   createCategory(@Body() dto: CreateCategoryDto, @CurrentUser() user: AuthUser) {
     return this.catalog.createCategory(dto, user);
   }
 
   @Patch('categories/reorder')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   reorderCategories(@Body() dto: ReorderCategoriesDto, @CurrentUser() user: AuthUser) {
     return this.catalog.reorderCategories(dto.ids, user);
   }
 
   @Post('categories/move-dishes')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   moveCategoryDishes(@Body() dto: MoveCategoryDishesDto, @CurrentUser() user: AuthUser) {
     return this.catalog.moveCategoryDishes(dto.fromCategoryId, dto.toCategoryId, user);
   }
 
   @Patch('categories/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   updateCategory(@Param('id') id: string, @Body() dto: UpdateCategoryDto, @CurrentUser() user: AuthUser) {
     return this.catalog.updateCategory(id, dto, user);
   }
 
   @Delete('categories/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   deleteCategory(@Param('id') id: string, @Body() dto: DeleteCategoryDto, @CurrentUser() user: AuthUser) {
     return this.catalog.deleteCategory(id, dto ?? {}, user);
   }
@@ -123,20 +154,33 @@ export class CatalogController {
     return this.catalog.dishesAll({ categoryId, search });
   }
 
-  @Post('dishes')
+  @Get('menu/goods')
   @RequirePermission('sections.menu')
+  goods() { return this.catalog.goodsAll(); }
+
+  @Get('menu/goods/export.xlsx')
+  @RequirePermission('sections.menu', 'actions.exportReports')
+  async exportGoods(@Query() query: GoodsExportQuery, @Res() response: Response) {
+    const workbook = await this.catalog.exportGoods(query);
+    response.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    response.setHeader('Content-Disposition', 'attachment; filename="menu-goods.xlsx"');
+    response.send(workbook);
+  }
+
+  @Post('dishes')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   createDish(@Body() dto: CreateDishDto, @CurrentUser() user: AuthUser) {
     return this.catalog.createDish(dto, user);
   }
 
   @Patch('dishes/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   updateDish(@Param('id') id: string, @Body() dto: UpdateDishDto, @CurrentUser() user: AuthUser) {
     return this.catalog.updateDish(id, dto, user);
   }
 
   @Delete('dishes/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   deleteDish(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.catalog.deleteDish(id, user);
   }
@@ -149,19 +193,19 @@ export class CatalogController {
   }
 
   @Post('sets')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   createSet(@Body() dto: CreateSetDto, @CurrentUser() user: AuthUser) {
     return this.catalog.createSet(dto, user);
   }
 
   @Patch('sets/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   updateSet(@Param('id') id: string, @Body() dto: UpdateSetDto, @CurrentUser() user: AuthUser) {
     return this.catalog.updateSet(id, dto, user);
   }
 
   @Delete('sets/:id')
-  @RequirePermission('sections.menu')
+  @RequirePermission('sections.menu', 'actions.editMenu')
   deleteSet(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.catalog.deleteDish(id, user);
   }

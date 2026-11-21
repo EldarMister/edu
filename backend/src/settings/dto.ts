@@ -1,7 +1,13 @@
-import { IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { Equals, IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, Matches, Max, MaxLength, Min, ValidateIf } from 'class-validator';
 import { WaiterOrderPermissions } from '../orders/order-policy';
 
 export class UpdateSettingsDto {
+  @ValidateIf((_object, value) => value !== undefined) @IsBoolean()
+  taxesEnabled?: boolean;
+
+  @ValidateIf((_object, value) => value !== undefined) @IsBoolean()
+  receiptPrintRequestsOnly?: boolean;
+
   @IsOptional() @IsObject()
   waiterOrderPermissions?: WaiterOrderPermissions;
   // ---- Интеграция доставки ----
@@ -29,7 +35,32 @@ export class UpdateSettingsDto {
   @IsOptional() @IsString() @MaxLength(120)
   receiptText?: string;
 
-  @IsOptional() @IsNumber() @Min(0) @Max(100000)
+  @ValidateIf((_object, value) => value !== undefined) @IsIn(['ru', 'ky'])
+  receiptLanguage?: 'ru' | 'ky';
+
+  @ValidateIf((_object, value) => value !== undefined) @IsBoolean()
+  receiptPrintCafeName?: boolean;
+
+  @ValidateIf((_object, value) => value !== undefined) @IsBoolean()
+  receiptPrintAddress?: boolean;
+
+  @ValidateIf((_object, value) => value !== undefined) @IsBoolean()
+  receiptPrintPhone?: boolean;
+
+  @ValidateIf((_object, value) => value !== undefined) @IsString() @MaxLength(700_000)
+  receiptLogoData?: string;
+
+  @ValidateIf((_object, value) => value !== undefined) @IsBoolean()
+  roundOrderTotal?: boolean;
+
+  @ValidateIf((_object, value) => value !== undefined) @IsBoolean()
+  telegramStockAlertsEnabled?: boolean;
+
+  @ValidateIf((_object, value) => value !== undefined) @Matches(/^(?:-?[1-9]\d{0,15})?$/)
+  telegramStockChatId?: string;
+
+  @ValidateIf((_object, value) => value !== undefined)
+  @Equals(0, { message: 'Отдельная плата за обслуживание отключена' })
   serviceChargeAmount?: number;
 
   @IsOptional() @IsIn(['ru', 'ky'])
@@ -46,6 +77,12 @@ export class UpdateSettingsDto {
 
   @IsOptional() @IsBoolean()
   allowNegativeIngredientStock?: boolean;
+
+  @IsOptional() @IsBoolean()
+  warehouseProductionEnabled?: boolean;
+
+  @IsOptional() @IsBoolean()
+  warehouseProcessingEnabled?: boolean;
 
   // ---- Экран очереди заказов (табло в зале) ----
   @IsOptional() @IsBoolean()

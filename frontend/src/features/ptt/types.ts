@@ -6,6 +6,7 @@ export const PTT_CHANNELS = [
 ] as const;
 
 export type PttChannel = (typeof PTT_CHANNELS)[number]['key'];
+export type PttOpusCodec = 'opus' | 'opus-hq';
 
 export type PttAudioPayload = {
   channel: PttChannel;
@@ -17,7 +18,17 @@ export type PttAudioPayload = {
   sentAt?: string;
 };
 
+export type PttFramePayload = {
+  channel: PttChannel;
+  talkId: string;
+  senderId: string;
+  senderName?: string;
+  senderRole?: string;
+  audio: ArrayBuffer;
+};
+
 export type PttDeniedPayload = {
+  talkId?: string;
   channel?: PttChannel;
   reason: string;
   speakerId?: string;
@@ -29,14 +40,30 @@ export type PttPresencePayload = {
 };
 
 export type PttBusyPayload = {
+  sequenced?: boolean;
+  talkId?: string;
+  codec?: PttOpusCodec;
   channel: PttChannel;
   speaker?: { id: string; role: string; name?: string };
   startedAt?: string;
 };
 
+export type PttBatchPayload = {
+  channel: PttChannel;
+  talkId: string;
+  codec: PttOpusCodec;
+  senderId: string;
+  senderName?: string;
+  senderRole?: string;
+  firstFrame: number;
+  audio: unknown;
+};
+
 export type RadioState = 'ready' | 'speakingSelf' | 'speakingOther' | 'error';
 
 export type PttFreePayload = {
+  frames?: number;
+  talkId?: string;
   channel: PttChannel;
   speakerId?: string;
   freedAt?: string;
@@ -49,6 +76,10 @@ export const PTT_EVENTS = {
   CHANNEL_BUSY: 'ptt_channel_busy',
   CHANNEL_FREE: 'ptt_channel_free',
   AUDIO_MESSAGE: 'ptt_audio_message',
+  AUDIO_FRAME: 'ptt_audio_frame',
+  AUDIO_PACKET: 'ptt_audio_packet',
+  AUDIO_BATCH: 'ptt_audio_batch',
+  AUDIO_SYNC: 'ptt_audio_sync',
   TALK_DENIED: 'ptt_talk_denied',
   PRESENCE: 'ptt_presence',
 } as const;

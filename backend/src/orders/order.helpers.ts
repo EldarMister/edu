@@ -2,7 +2,7 @@ import { Prisma, DiscountType, PaymentStatus } from '@prisma/client';
 
 /** Полный набор связей заказа для ответа API и real-time payload. */
 export const orderInclude = {
-  table: { select: { id: true, number: true, seats: true, hallId: true, status: true, hall: { select: { name: true } } } },
+  table: { select: { id: true, number: true, name: true, seats: true, hallId: true, status: true, hall: { select: { name: true } } } },
   waiter: { select: { id: true, name: true } },
   payments: {
     where: { status: PaymentStatus.paid },
@@ -15,12 +15,18 @@ export const orderInclude = {
       id: true,
       dishId: true,
       dishVariantId: true,
+      stockSourceLineId: true,
+    stockAccountingSnapshot: true,
+      modifierSelections: true,
+      excludedIngredientIds: true,
+      excludedIngredientNames: true,
       dishNameSnapshot: true,
       dishVariantNameSnapshot: true,
       weightGrams: true,
       dishVoiceSnapshot: true,
       priceSnapshot: true,
       quantity: true,
+      refundedQuantity: true,
       discountAmount: true,
       finalPrice: true,
       status: true,

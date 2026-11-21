@@ -1,17 +1,17 @@
 export type Role = 'WAITER' | 'KITCHEN' | 'BAR' | 'ADMIN' | 'OWNER';
 
 /** Направление приготовления/выдачи позиции. `none` — без отправки (официант забирает сам). */
-export type PrepStation = 'kitchen' | 'bar' | 'none';
+export type PrepStation = string;
 
 export type SectionKey =
   | 'statistics'
+  | 'finance'
   | 'orders'
   | 'tables'
   | 'menu'
   | 'warehouse'
   | 'staff'
   | 'journal'
-  | 'paymentReconciliation'
   | 'checks'
   | 'settings';
 
@@ -20,15 +20,41 @@ export type ActionKey =
   | 'refundChecks'
   | 'exportReports'
   | 'closeShift'
+  | 'financeCashShifts'
+  | 'createDeliveryOrders'
+  | 'acceptOrderPayments'
+  | 'printReceipts'
+  | 'requestReceiptPrints'
   | 'manageStaff'
-  | 'editPermissions';
+  | 'editPermissions'
+  | 'warehouseReceive'
+  | 'warehouseTransfer'
+  | 'warehouseWriteoff'
+  | 'warehouseCount'
+  | 'warehouseApprove'
+  | 'warehouseRecipes'
+  | 'warehouseProduce'
+  | 'warehouseCosts'
+  | 'warehouseReports'
+  | 'warehouseSettings';
+
+export type OwnerOperations = Record<'refunds' | 'cancelOrders' | 'cancelItems' | 'printRequests', boolean>;
 
 export interface EmployeePermissions {
+  terminalAccess?: boolean;
+  adminAccess?: boolean;
+  workShiftRequired?: boolean;
   sections: Record<SectionKey, boolean>;
   actions: Record<ActionKey, boolean>;
+  readOnlySections?: SectionKey[];
+  ownerOperations?: OwnerOperations;
 }
 
 export interface AuthUser {
+  access?: { terminal: boolean; admin: boolean; production: 'kitchen' | 'bar' | null };
+  prepStation?: string | null;
+  positionId?: string | null;
+  positionName?: string | null;
   id: string;
   name: string;
   phone: string;
@@ -57,6 +83,7 @@ export type TableStatus =
 export interface TableItem {
   id: string;
   number: number;
+  name?: string | null;
   seats: number;
   status: TableStatus;
   hallId: string;
@@ -64,10 +91,22 @@ export interface TableItem {
   occupiedBy?: { id: string; name: string } | null;
 }
 
+export interface FloorPlanTable {
+  tableId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  shape: 'rectangle' | 'round';
+  label?: string;
+}
+
 export interface Hall {
   id: string;
   name: string;
   tables: TableItem[];
+  floorPlan?: FloorPlanTable[] | null;
+  useFloorPlan?: boolean | null;
 }
 
 export interface Category {
@@ -90,6 +129,8 @@ export interface DishVariant {
 }
 
 export interface Dish {
+  hasModifiers?: boolean;
+  allowIngredientExclusions?: boolean;
   id: string;
   categoryId: string;
   name: string;
@@ -173,6 +214,7 @@ export type OrderItemStatus =
   | 'cancelled';
 
 export type PaymentMethod = 'qr' | 'cash' | 'card' | 'mixed';
+export type PaymentStatus = 'pending' | 'paid' | 'refunded' | 'cancelled';
 export type PaymentSource = 'normal' | 'split';
 export type RejectionDecision = 'pending' | 'removed' | 'replaced';
 
@@ -194,6 +236,9 @@ export interface WaiterShift {
 }
 
 export interface OrderItem {
+  modifierSelections?: MenuModifierSelection[];
+  excludedIngredientIds?: string[];
+  excludedIngredientNames?: string[];
   id: string;
   /** null — блюдо удалено из меню; позиция остаётся в истории по снимкам. */
   dishId: string | null;
@@ -203,6 +248,7 @@ export interface OrderItem {
   weightGrams?: number | null;
   priceSnapshot: string;
   quantity: number;
+  refundedQuantity?: number;
   discountAmount: string;
   finalPrice: string;
   status: OrderItemStatus;
@@ -217,18 +263,26 @@ export interface OrderItem {
 }
 
 export interface Order {
+  taxes?: ReceiptTax[];
+  stationHistoryAt?: string;
   id: string;
+  splitFromOrderId?: string | null;
   orderNumber: string;
   status: OrderStatus;
   totalAmount: string;
   discountAmount: string;
   serviceChargeAmount: string;
+  roundOrderTotal?: boolean;
+  roundingAmount?: string;
   finalAmount: string;
+  refundedAmount?: string;
+  paymentStatus?: PaymentStatus;
   paymentMethod: PaymentMethod | null;
   comment: string | null;
   requiresWaiterDecision: boolean;
   createdAt: string;
-  table: { id: string; number: number; seats: number; hallId: string; status: TableStatus; hall?: { name: string } };
+  updatedAt?: string;
+  table: TableItem & { hall?: { name: string } };
   waiter: { id: string; name: string } | null;
   source?: 'pos' | 'qr' | 'delivery';
   externalOrderId?: string | null;
@@ -236,7 +290,7 @@ export interface Order {
   deliveryCustomerPhone?: string | null;
   deliveryAddress?: string | null;
   items: OrderItem[];
-  /** Разбивка оплат (для смешанной — наличные + QR). Приходит в списке заказов админки. */
+  /** Разбивка по способам оплаты. Приходит в списке заказов админки. */
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
   // ККМ / фискализация (null = ККМ выключена или чек ещё не пробит).
   fiscalReceiptNumber?: string | null;
@@ -246,7 +300,32 @@ export interface Order {
   fiscalizedAt?: string | null;
 }
 
-export interface Receipt {
+export type MenuTaxType = 'vat' | 'turnover';
+
+export interface MenuTax {
+  id: string;
+  name: string;
+  rate: string | number;
+  type: MenuTaxType;
+}
+
+export interface ReceiptTax extends MenuTax {
+  salesAmount: string;
+  amount: string;
+}
+
+export type ReceiptLanguage = 'ru' | 'ky';
+
+export interface ReceiptPrintSettings {
+  receiptLanguage: ReceiptLanguage;
+  receiptPrintCafeName: boolean;
+  receiptPrintAddress: boolean;
+  receiptPrintPhone: boolean;
+}
+
+export interface Receipt extends Partial<ReceiptPrintSettings> {
+  taxes?: ReceiptTax[];
+  receiptLogoData?: string | null;
   cafeName: string;
   address?: string;
   phone?: string;
@@ -255,6 +334,7 @@ export interface Receipt {
   website?: string | null;
   orderNumber: string;
   tableNumber: number;
+  source?: Order['source'];
   waiter: string;
   date: string;
   items: {
@@ -267,9 +347,10 @@ export interface Receipt {
   totalAmount: string;
   discountAmount: string;
   serviceChargeAmount: string;
+  roundingAmount?: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
-  /** Разбивка по способам оплаты (для смешанной — наличные + QR). */
+  /** Разбивка по способам оплаты. */
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
   thanks: string;
 }
@@ -287,6 +368,7 @@ export interface ReceiptPrintRequest {
   orderId: string;
   orderNumber: string;
   tableNumber: number;
+  orderSource?: Order['source'];
   type: ReceiptPrintType;
   waiterId: string;
   waiterName: string;
@@ -329,6 +411,9 @@ export interface CartSetComponent {
 }
 
 export interface CartLine {
+  modifierSelections?: MenuModifierSelection[];
+  excludedIngredientIds?: string[];
+  excludedIngredientNames?: string[];
   orderItemId?: string;
   editAllowed?: boolean;
   cancelAllowed?: boolean;
@@ -358,3 +443,5 @@ export interface AppNotification {
   /** Сколько мс держать тост на экране (по умолчанию — по типу). */
   durationMs?: number;
 }
+
+export interface MenuModifierSelection { optionId: string; quantity: number; name: string; price: string | number; }

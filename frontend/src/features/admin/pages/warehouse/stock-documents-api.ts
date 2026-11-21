@@ -1,0 +1,156 @@
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import type { WriteoffSourceInput, WriteoffSourceLine } from './writeoff-api';
+
+export type StockDocumentKind = 'inventory' | 'writeoff' | 'transfer' | 'supplier_return';
+export type InventoryMode = 'full' | 'partial';
+export type WriteoffReason =
+  'spoilage' | 'expired' | 'damage' | 'staff_meal' | 'tasting' | 'household' | 'other';
+export type StockDocumentStatus = 'draft' | 'submitted' | 'posted' | 'reversed';
+
+export interface StockDocumentItem {
+  costKnown?:boolean;
+  ingredientId: string;
+  name: string;
+  unit: string;
+  expected: number | null;
+  quantity: number | null;
+  difference: number | null;
+  value: number | null;
+  unitCost: number | null;
+}
+
+export interface StockDocument {
+  id: string;
+  warehouseId: string;
+  destinationWarehouseId?: string | null;
+  sourcePurchaseId?: string | null;
+  kind: StockDocumentKind;
+  mode: InventoryMode | null;
+  reason: WriteoffReason | null;
+  note: string | null;
+  status: StockDocumentStatus;
+  revision: number;
+  createdAt: string;
+  submittedAt: string | null;
+  postedAt: string | null;
+  reopenedAt?: string | null;
+  countedAt?: string | null;
+  effectiveAt?: string | null;
+  createdByName: string | null;
+  postedByName: string | null;
+  itemsCount: number;
+  productNames?: string[];
+  categories?: string[];
+  varianceValue: number | null;
+}
+
+export interface StockDocumentDetails extends StockDocument {
+  reversalBlockedReason?: string | null;
+  items: StockDocumentItem[];
+  sourceLines?: WriteoffSourceLine[];
+  sourceTotal?: number | null;
+  inventoryContext?: {
+    cutoffAt: string;
+    rows: Array<{
+      ingredientId: string;
+      lastCountAt: string | null;
+      openingQuantity: number;
+      incomingQuantity: number;
+      consumptionQuantity: number;
+      writeoffQuantity: number;
+      otherQuantity: number;
+    }>;
+  };
+}
+
+export interface DocumentInput {
+  finalize?: 'submit' | 'post';
+  requestKey?: string;
+  destinationWarehouseId?: string;
+  sourcePurchaseId?: string;
+  revision?: number;
+  recount?: boolean;
+  countedAt?: string | null;
+  effectiveAt?: string | null;
+  reason?: WriteoffReason | null;
+  note?: string;
+  items?: { ingredientId: string; quantity: number | null }[];
+  sourceLines?: WriteoffSourceInput[];
+}
+
+const BASE_URL = '/admin/warehouse/documents';
+const WAREHOUSE_KEY = ['admin', 'warehouse'] as const;
+const DOCUMENTS_KEY = [...WAREHOUSE_KEY, 'documents'] as const;
+
+export function useStockDocuments(warehouseId?: string, kind?: StockDocumentKind, search?: string) {
+  return useQuery({
+    queryKey: [...DOCUMENTS_KEY, 'list', warehouseId, kind, search],
+    queryFn: async () => (await api.get<StockDocument[]>(BASE_URL, { params: { warehouseId, kind, search } })).data,
+  });
+}
+
+export function useStockDocument(id: string) {
+  return useQuery({
+    queryKey: [...DOCUMENTS_KEY, 'detail', id],
+    queryFn: async () => (await api.get<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}`)).data,
+  });
+}
+
+export function useInventoryContext(id: string) {
+  return useQuery({
+    queryKey: [...DOCUMENTS_KEY, 'detail', id, 'inventory-context'],
+    queryFn: async () => (await api.get<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}`, {
+      params: { includeInventoryContext: true },
+    })).data,
+    staleTime: 0,
+  });
+}
+
+export function useStockDocumentMutations() {
+  const qc = useQueryClient();
+  const saved = (document: StockDocumentDetails) => {
+    qc.setQueryData([...DOCUMENTS_KEY, 'detail', document.id], document);
+    void qc.invalidateQueries({ queryKey: [...DOCUMENTS_KEY, 'list'] });
+    if (document.kind === 'inventory')
+      void qc.invalidateQueries({ queryKey: [...DOCUMENTS_KEY, 'detail', document.id, 'inventory-context'] });
+    if (document.status === 'posted' || document.status === 'reversed')
+      void qc.invalidateQueries({ queryKey: WAREHOUSE_KEY });
+  };
+  const create = useMutation({
+    mutationFn: async (
+      body: DocumentInput & { warehouseId: string; kind: StockDocumentKind; mode?: InventoryMode },
+    ) => (await api.post<StockDocumentDetails>(BASE_URL, body)).data,
+    onSuccess: saved,
+  });
+  const update = useMutation({
+    mutationFn: async ({ id, ...body }: DocumentInput & { id: string }) =>
+      (await api.patch<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}`, body)).data,
+    onSuccess: saved,
+  });
+  const transition = useMutation({
+    mutationFn: async ({
+      id,
+      action,
+      revision,
+      note,
+    }: {
+      id: string;
+      action: 'submit' | 'approve' | 'reopen' | 'reverse';
+      revision: number;
+      note?: string;
+    }) =>
+      (
+        await api.post<StockDocumentDetails>(`${BASE_URL}/${encodeURIComponent(id)}/${action}`, {
+          revision,
+          note,
+        })
+      ).data,
+    onSuccess: (document) => {
+      saved(document);
+      if (document.status === 'posted' || document.status === 'reversed')
+        void qc.invalidateQueries({ queryKey: WAREHOUSE_KEY });
+    },
+  });
+  return { create, update, transition };
+}

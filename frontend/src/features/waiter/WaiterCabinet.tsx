@@ -5,20 +5,24 @@ import { disconnectSocket } from '@/lib/socket';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { ORDER_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Spinner } from '@/components/Spinner';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { OrderDetailsModal } from '@/features/admin/components/OrderDetailsModal';
+import { WaiterVoiceSettings } from '@/features/kitchen/KitchenVoiceSettings';
 import { Select } from '@/components/Select';
+import { Modal } from '@/components/Modal';
 import { useState } from 'react';
-import { useWaiterCabinet, useOrderDetails, type CabinetRecentOrder } from './api';
+import { useWaiterCabinet, useWaiterOrderHistory, useOrderDetails, type CabinetRecentOrder } from './api';
 
-export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onViewAll: () => void }) {
+export function WaiterCabinet({ onBack, onOpenHistory }: { onBack: () => void; onOpenHistory: () => void }) {
   const logout = useAuth((s) => s.logout);
+  const userId = useAuth((s) => s.user?.id);
   const { locale, setLocale } = useLocale();
   const t = useT();
   const [period, setPeriod] = useState<'day' | 'week' | 'month'>('week');
   const cabinetQ = useWaiterCabinet(period);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const detailQ = useOrderDetails(detailId);
 
   function onLogout() {
     disconnectSocket();
@@ -56,6 +60,12 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
         </div>
       </div>
 
+      <div className="card p-4">
+        <ThemeSwitch />
+      </div>
+
+      {userId && <div className="flex justify-end"><WaiterVoiceSettings userId={userId} /></div>}
+
       {/* Статистика */}
       <div className="card p-5">
         <div className="mb-3 flex items-center justify-between gap-3">
@@ -90,7 +100,7 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
       <div className="card p-5">
         <div className="mb-2 flex items-center justify-between gap-3">
           <h3 className="text-[15px] font-semibold text-text-primary">{t('Последние заказы')}</h3>
-          <button onClick={onViewAll} className="text-sm font-medium text-primary hover:underline">
+          <button onClick={onOpenHistory} className="text-sm font-medium text-primary hover:underline">
             {t('Смотреть все')}
           </button>
         </div>
@@ -126,9 +136,49 @@ export function WaiterCabinet({ onBack, onViewAll }: { onBack: () => void; onVie
         {t('Выйти')}
       </button>
 
-      <OrderDetailsModal order={detailQ.data ?? null} onClose={() => setDetailId(null)} />
+      {detailId && <WaiterOrderDetails id={detailId} onClose={() => setDetailId(null)} />}
     </div>
   );
+}
+
+export function WaiterOrderArchive({ onClose }: { onClose: () => void }) {
+  const t = useT();
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const history = useWaiterOrderHistory(true);
+  const orders = history.data?.pages.flatMap((page) => page.items) ?? [];
+  return <>
+      <Modal open suspended={!!detailId} onClose={onClose} title={t('История заказов')}>
+        {history.isLoading && <Spinner className="mx-auto h-5 w-5" />}
+        {history.isError && <p className="py-2 text-sm text-danger">{t('Не удалось загрузить заказы')}</p>}
+        {!history.isLoading && !history.isError && !orders.length && <p>{t('Заказов пока нет')}</p>}
+        {orders.map((order, index) => {
+          const date = new Date(order.createdAt).toDateString();
+          return <div key={order.id} className="border-b border-border">
+            {(index === 0 || new Date(orders[index - 1].createdAt).toDateString() !== date) &&
+              <p className="pt-3 text-xs text-text-muted">{new Date(order.createdAt).toLocaleDateString('ru-RU')}</p>}
+            <OrderRow order={order} tableLabel={t('Стол')} onOpen={() => setDetailId(order.id)} />
+          </div>;
+        })}
+        {(history.hasNextPage || (history.isError && !orders.length)) && <button
+          type="button"
+          className="btn-secondary btn-md mt-3 w-full"
+          disabled={history.isFetching}
+          onClick={() => void (orders.length ? history.fetchNextPage({ cancelRefetch: false }) : history.refetch())}
+        >{t(history.isError ? 'Повторить' : 'Показать ещё')}</button>}
+      </Modal>
+      {detailId && <WaiterOrderDetails id={detailId} onClose={() => setDetailId(null)} />}
+  </>;
+}
+
+function WaiterOrderDetails({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT();
+  const { canOwnerOperation } = usePermissions();
+  const detail = useOrderDetails(id);
+  if (detail.data) return <OrderDetailsModal order={detail.data} onClose={onClose} waiterLayout
+    refundMode={canOwnerOperation('refunds') ? 'request' : undefined} />;
+  return <Modal open onClose={onClose} title={t('Заказ')}>
+    {detail.isError ? <p>{t('Не удалось загрузить заказ')}</p> : <Spinner className="mx-auto h-5 w-5" />}
+  </Modal>;
 }
 
 function LangButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -178,14 +228,16 @@ function OrderRow({
   onOpen: () => void;
 }) {
   const t = useT();
-  const s = statusMeta(order.status);
+  const s = order.paymentStatus === 'refunded' || Number(order.refundedAmount ?? 0) > 0
+    ? { label: order.paymentStatus === 'refunded' ? 'Возвращён' : 'Частичный возврат', cls: 'bg-warning/10 text-warning' }
+    : statusMeta(order.status);
   return (
     <button
       onClick={onOpen}
-      className="-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-2 rounded-lg px-1 py-2.5 text-left text-sm transition-colors hover:bg-background"
+      className="-mx-1 flex w-[calc(100%+0.5rem)] flex-wrap items-center gap-2 rounded-lg px-1 py-2.5 text-left text-sm transition-colors hover:bg-background"
     >
-      <span className="w-14 shrink-0 font-medium text-text-primary">{displayOrderNumber(order.orderNumber)}</span>
-      <span className="shrink-0 text-text-muted">{tableLabel} {order.tableNumber}</span>
+      <span className="w-11 shrink-0 font-medium text-text-primary sm:w-14">{displayOrderNumber(order.orderNumber)}</span>
+      <span className="shrink-0 text-text-muted">{order.source === 'delivery' ? t('Доставка') : `${tableLabel} ${order.tableNumber}`}</span>
       <span className="shrink-0 text-text-light">{timeHM(order.createdAt)}</span>
       <span className="ml-auto shrink-0 font-medium text-text-primary">{money(order.finalAmount)}</span>
       <span className={`shrink-0 whitespace-nowrap rounded-md px-2 py-0.5 text-[11px] font-medium ${s.cls}`}>{t(s.label)}</span>

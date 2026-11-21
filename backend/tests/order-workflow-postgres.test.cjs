@@ -1,14 +1,25 @@
 require('ts-node/register/transpile-only');
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { randomUUID } = require('node:crypto');
+const { randomInt, randomUUID } = require('node:crypto');
+const { JwtService } = require('@nestjs/jwt');
+const { AuthService } = require('../src/auth/auth.service.ts');
 const { PrismaClient } = require('@prisma/client');
 const { OrdersService } = require('../src/orders/orders.service.ts');
+const { OrderRefundsService } = require('../src/orders/order-refunds.service.ts');
 const { SettingsService } = require('../src/settings/settings.service.ts');
 const { IngredientStockService } = require('../src/warehouse/ingredient-stock.service.ts');
 const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
 const { normalizeWaiterOrderPermissions } = require('../src/orders/order-policy.ts');
 const { lockOrder } = require('../src/orders/order-lock.ts');
+const { KitchenService } = require('../src/kitchen/kitchen.service.ts');
+const { PreparationStationsController } = require('../src/kitchen/preparation-stations.controller.ts');
+const { CatalogService } = require('../src/admin/catalog.service.ts');
+const { WarehouseLocationsService } = require('../src/warehouse/locations.service.ts');
+const { PreparationProductionService } = require('../src/warehouse/preparation-production.ts');
+const { RecipesService } = require('../src/warehouse/recipes.service.ts');
+const { StaffService } = require('../src/admin/staff.service.ts');
+const { resolveStation } = require('../src/kitchen/preparation-stations.ts');
 
 const url = process.env.ORDER_FEATURE_TEST_DATABASE_URL;
 if (url && (!['localhost', '127.0.0.1'].includes(new URL(url).hostname) || !new URL(url).pathname.includes('test'))) throw new Error('Only a dedicated local test database is allowed');
@@ -19,8 +30,10 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
   const cafe = await db.cafe.create({ data: { name: `Order integration ${randomUUID()}` } });
   const eventLog = [];
   const events = new Proxy({}, { get: (_, event) => (...args) => eventLog.push({ event, args }) });
-  const audit = { log: async () => {} };
-  const push = { notifyRole: async () => {}, notifyUser: async () => {}, notifyWaiter: async () => {} };
+  const auditLog = [];
+  const audit = { log: async (entry) => { auditLog.push(entry); } };
+  const pushCalls = [];
+  const push = { notifyRole: async (...args) => pushCalls.push(args), notifyUser: async () => {}, notifyWaiter: async () => {} };
   try {
     await runWithTenant({ cafeId: cafe.id }, async () => {
       const makeUser = (name, role) => db.user.create({ data: { name, role, phone: randomUUID(), passwordHash: 'unused-test-hash' } });
@@ -31,10 +44,10 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
       const hall = await db.hall.create({ data: { name: 'Test hall' } });
       const category = await db.category.create({ data: { name: 'Test menu' } });
       const dishes = await Promise.all(['Роллы', 'Пицца', 'Шашлык', 'Салат'].map((name, i) => db.dish.create({ data: { name, categoryId: category.id, price: 100, trackInventory: true, stock: 1000 } })));
-      const ingredient = await db.ingredient.create({ data: { name: 'Test rice', unitType: 'mass', displayUnit: 'g', stock: 100000, avgCost: 1 } });
+      const ingredient = await db.ingredient.create({ data: { name: 'Test rice', unitType: 'mass', displayUnit: 'g', stock: 100000, avgCost: 1, valuationKnown: true } });
       await db.recipeItem.create({ data: { dishId: dishes[0].id, ingredientId: ingredient.id, amount: 10 } });
       const settings = new SettingsService(db, audit, events);
-      const orders = new OrdersService(db, events, { getRequiredActiveShift: async () => shift }, push, settings, { recalculateDishes: async () => {} }, audit, new IngredientStockService());
+      const orders = new OrdersService(db, events, { shiftForTerminalOrder: async () => shift }, push, settings, { recalculateDishes: async () => {} }, audit, new IngredientStockService());
       const initialSettings = await settings.ensure();
       let tableNumber = 100;
       const newOrder = async (items = [{ dishId: dishes[0].id, quantity: 2 }]) => {
@@ -43,6 +56,32 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         order.items.sort((a, b) => items.findIndex(i => i.dishId === a.dishId) - items.findIndex(i => i.dishId === b.dishId));
         return order;
       };
+
+      await t.test('single-record order and table access is constrained by cafe', async () => {
+        const foreign = await db.cafe.create({ data: { name: 'Foreign order access cafe' } });
+        const foreignRecords = await runWithTenant({ cafeId: foreign.id }, async () => {
+          const foreignHall = await db.hall.create({ data: { name: 'Foreign hall' } });
+          const foreignTable = await db.table.create({ data: { hallId: foreignHall.id, number: 1 } });
+          const foreignOrder = await db.order.create({
+            data: { tableId: foreignTable.id, source: 'qr', orderNumber: '№1', status: 'ready' },
+          });
+          return { table: foreignTable, order: foreignOrder };
+        });
+        await assert.rejects(orders.findByIdForActor(foreignRecords.order.id, owner));
+        await assert.rejects(orders.findByIdForActor(foreignRecords.order.id, waiter));
+        await assert.rejects(orders.findByIdForActor(foreignRecords.order.id, cooks[0]));
+        await assert.rejects(orders.create(waiter, {
+          tableId: foreignRecords.table.id,
+          items: [{ dishId: dishes[0].id, quantity: 1 }],
+        }), /Стол не найден/);
+        await assert.rejects(orders.closeTable(foreignRecords.table.id, waiter), /Стол не найден/);
+        assert.equal(await db.order.findUnique({ where: { id: foreignRecords.order.id } }), null);
+        await assert.rejects(db.table.update({ where: { id: foreignRecords.table.id }, data: { seats: 11 } }), { code: 'P2025' });
+        await assert.rejects(db.table.delete({ where: { id: foreignRecords.table.id } }), { code: 'P2025' });
+        await runWithTenant({ cafeId: foreign.id }, async () => {
+          assert.equal((await db.table.findUnique({ where: { id: foreignRecords.table.id } })).seats, foreignRecords.table.seats);
+        });
+      });
       const editLine = i => ({ id: i.id, dishId: i.dishId, quantity: i.quantity, comment: i.comment ?? undefined, takeaway: i.takeaway });
       const setPolicy = async overrides => {
         const policy = normalizeWaiterOrderPermissions(null);
@@ -50,6 +89,242 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         await settings.update({ waiterOrderPermissions: policy }, owner);
         return policy;
       };
+
+      await t.test('automatic table numbers fill gaps in the chosen hall without reviving archived tables', async () => {
+        const catalog = new CatalogService(db, events, audit);
+        const terrace = await db.hall.create({ data: { name: 'Терраса' } });
+        await db.table.createMany({
+          data: [1, 2, 3, 4, 5, 6, 7, 10].map((number) => ({ hallId: terrace.id, number })),
+        });
+        await db.table.create({ data: { hallId: hall.id, number: 8 } });
+        const archived = await db.table.create({ data: { hallId: terrace.id, number: 8 } });
+        const historicalOrder = await db.order.create({
+          data: { tableId: archived.id, orderNumber: 'Past terrace order', status: 'paid' },
+        });
+        const unused = await db.table.create({ data: { hallId: terrace.id, number: 9 } });
+        await catalog.deleteTable(archived.id);
+        await catalog.deleteTable(unused.id);
+        assert.equal(await db.table.findUnique({ where: { id: unused.id } }), null);
+
+        const added = await Promise.all([
+          catalog.createTable({ hallId: terrace.id, seats: 2 }),
+          catalog.createTable({ hallId: terrace.id, seats: 4 }),
+        ]);
+        assert.deepEqual(added.map(({ number }) => number).sort(), [8, 9]);
+        const newEight = added.find(({ number }) => number === 8);
+        assert.notEqual(newEight.id, archived.id);
+        assert.notEqual(newEight.qrToken, archived.qrToken);
+        assert.equal((await db.table.findUniqueOrThrow({ where: { id: archived.id } })).isActive, false);
+        assert.equal((await db.order.findUniqueOrThrow({ where: { id: historicalOrder.id } })).tableId, archived.id);
+        await assert.rejects(catalog.createTable({ hallId: terrace.id, seats: 2, number: 8 }), /уже есть/);
+        const formerTwelve = await db.table.create({ data: { hallId: terrace.id, number: 12, isActive: false } });
+        const manual = await catalog.createTable({ hallId: terrace.id, seats: 2, number: 12, name: 'У окна' });
+        assert.equal(manual.number, 12);
+        assert.equal(manual.name, 'У окна');
+        assert.notEqual(manual.id, formerTwelve.id);
+        assert.notEqual(manual.qrToken, formerTwelve.qrToken);
+
+        await catalog.updateTable(newEight.id, { isActive: false });
+        const ten = await db.table.findFirstOrThrow({ where: { hallId: terrace.id, number: 10 } });
+        const corrected = await catalog.updateTable(ten.id, { number: 8 });
+        assert.equal(corrected.number, 8);
+        assert.equal(corrected.qrToken, ten.qrToken);
+      });
+
+      await t.test('custom station routes a mixed ticket and keeps its own completion and cancellation history', async () => {
+        const stationApi = new PreparationStationsController(db, events, audit);
+        const catalog = new CatalogService(db, events, audit);
+        const board = new KitchenService(db, events, audit);
+        const station = await stationApi.create(owner, { name: '  Холодный цех  ' });
+        assert.equal(station.name, 'Холодный цех');
+        assert.equal(station.isBuiltIn, false);
+        assert.ok((await stationApi.list(waiter)).some(({ id }) => id === station.id));
+        await assert.rejects(stationApi.create(owner, { name: 'Кухня' }), /уже существует/);
+        const staff = new StaffService(db, audit);
+        const phone = `+996700${String(randomInt(1_000_000)).padStart(6, '0')}`;
+        const password = 'test-password';
+        const cook = await staff.create({ name: 'Station cook', phone, role: 'KITCHEN', password, prepStation: station.id }, owner);
+        const auth = new AuthService(db, new JwtService());
+        const { user: assignedCook } = await auth.login({ phone, password });
+        assert.equal(assignedCook.id, cook.id);
+        assert.equal((await auth.me(cook.id)).prepStation, station.id);
+        assert.equal((await resolveStation(db, assignedCook)).id, station.id);
+        await assert.rejects(resolveStation(db, assignedCook, 'kitchen'), /Нет доступа/);
+        await assert.rejects(resolveStation(db, cooks[0], station.id), /Нет доступа/);
+        await assert.rejects(resolveStation(db, cooks[0], 'bar'), /Нет доступа/);
+        const otherCafe = await db.cafe.create({ data: { name: 'Foreign preparation stations' } });
+        await runWithTenant({ cafeId: otherCafe.id }, async () => {
+          const foreign = await makeUser('Foreign owner', 'OWNER');
+          assert.deepEqual((await stationApi.list(foreign)).map(({ id }) => id), ['kitchen', 'bar']);
+          await assert.rejects(stationApi.remove(foreign, station.id, { confirmation: station.name }), /не найдена/);
+          await assert.rejects(resolveStation(db, foreign, station.id), /не найдена/);
+          await assert.rejects(catalog.createCategory({ name: 'Invalid route', prepStation: station.id }, foreign), /действующую станцию/);
+          await assert.rejects(staff.create({ name: 'Foreign cook', phone: '+996700000000', role: 'KITCHEN', password, prepStation: station.id }, foreign), /действующую станцию/);
+        });
+        const customCategory = await catalog.createCategory({ name: 'Закуски', prepStation: station.id }, owner);
+        const customDish = await catalog.createDish({ name: 'Салат', categoryId: customCategory.id, price: 90 }, owner);
+        const barDish = await catalog.createDish({ name: 'Чай', categoryId: customCategory.id, price: 50, prepStation: 'bar' }, owner);
+        await assert.rejects(stationApi.update(owner, station.id, { isActive: false }), /переназначьте/);
+        await assert.rejects(stationApi.remove(owner, station.id, { confirmation: station.name }), /блюда и категории/);
+        const order = await newOrder([{ dishId: dishes[0].id, quantity: 1 }, { dishId: customDish.id, quantity: 1 }, { dishId: barDish.id, quantity: 1 }]);
+        const [kitchenLine, customLine, barLine] = order.items;
+        assert.deepEqual(order.items.map(({ prepStation }) => prepStation), ['kitchen', station.id, 'bar']);
+        const stationPushes = pushCalls
+          .filter(([, payload]) => payload.orderId === order.id)
+          .map(([role, , targetCafe, prepStation]) => [role, targetCafe, prepStation]);
+        assert.deepEqual(stationPushes, [
+          ['KITCHEN', cafe.id, null],
+          ['KITCHEN', cafe.id, station.id],
+          ['BAR', cafe.id, station.id],
+          ['BAR', cafe.id, null],
+        ]);
+        assert.deepEqual((await board.findByTab('new', station.id)).find(({ id }) => id === order.id).items.map(({ id }) => id), [customLine.id]);
+        assert.ok(eventLog.some(({ event, args }) => event === 'emitToKitchen' && args[0] === 'kitchen:new_order' && args[1].voice.byStation[station.id]));
+        await assert.rejects(orders.kitchenReadyItems(order.id, [kitchenLine.id], assignedCook.id, station.id), /Нет блюд/);
+        await orders.stationAccept(order.id, assignedCook.id, station.id, station.name);
+        await orders.kitchenReadyItems(order.id, [customLine.id], assignedCook.id, station.id);
+        const finished = (await board.findByTab('ready', station.id)).find(({ id }) => id === order.id);
+        assert.deepEqual(finished.items.map(({ id }) => id), [customLine.id]);
+        assert.ok(finished.stationHistoryAt instanceof Date);
+        assert.ok((await board.findByTab('new', 'kitchen')).some(({ id }) => id === order.id));
+        await orders.cancelReadyItem(order.id, barLine.id, owner, 'Гость отменил чай');
+        const cancelled = (await board.findByTab('cancelled', 'bar')).find(({ id }) => id === order.id);
+        assert.deepEqual(cancelled.items.map(({ id }) => id), [barLine.id]);
+        assert.equal(cancelled.items[0].rejectReason, 'Гость отменил чай');
+        assert.equal((await board.findByTab('ready', station.id)).find(({ id }) => id === order.id).stationHistoryAt.getTime(), finished.stationHistoryAt.getTime());
+        await assert.rejects(board.findByTab('ready', station.id, '2026-02-31'), /действительную дату/);
+        await catalog.updateCategory(customCategory.id, { prepStation: 'kitchen' }, owner);
+        await assert.rejects(stationApi.update(owner, station.id, { isActive: false }), /переназначьте сотрудников/);
+        assert.equal((await staff.update(cook.id, { prepStation: null }, owner)).prepStation, null);
+        assert.equal((await resolveStation(db, (await auth.login({ phone, password })).user)).id, 'kitchen');
+        const archived = await stationApi.update(owner, station.id, { isActive: false });
+        assert.equal(archived.isActive, false);
+        assert.equal((await resolveStation(db, owner, station.id)).isActive, false);
+        assert.ok((await board.findByTab('ready', station.id)).some(({ id }) => id === order.id));
+        await assert.rejects(stationApi.remove(owner, station.id, { confirmation: station.name }), /история заказов/);
+        await assert.rejects(catalog.updateCategory(customCategory.id, { prepStation: station.id }, owner), /действующую станцию/);
+      });
+
+      await t.test('an unused custom station requires the current name and removes its warehouse route', async () => {
+        const stationApi = new PreparationStationsController(db, events, audit);
+        const station = await stationApi.create(owner, { name: 'Станция для удаления' });
+        const warehouse = await db.warehouse.create({ data: { cafeId: cafe.id, name: 'Склад станции на удаление' } });
+        await db.stationWarehouse.create({ data: { cafeId: cafe.id, stationId: station.id, warehouseId: warehouse.id } });
+        await assert.rejects(stationApi.remove(owner, station.id, { confirmation: 'Неверное название' }), /точное название/);
+        await assert.rejects(stationApi.remove(owner, 'kitchen', { confirmation: 'Кухня' }), /в архив/);
+        const renamed = await stationApi.update(owner, station.id, { name: 'Новое название станции' });
+        await assert.rejects(stationApi.remove(owner, station.id, { confirmation: station.name }), /точное название/);
+        assert.deepEqual(await stationApi.remove(owner, station.id, { confirmation: renamed.name }), { ok: true });
+        assert.equal((await stationApi.list(owner)).some(({ id }) => id === station.id), false);
+        assert.equal(await db.stationWarehouse.count({ where: { stationId: station.id } }), 0);
+      });
+
+      await t.test('built-in station settings are per cafe and archive preserves order history', async () => {
+        const separate = await db.cafe.create({ data: { name: 'Built-in station lifecycle' } });
+        const stationApi = new PreparationStationsController(db, events, audit);
+        await runWithTenant({ cafeId: separate.id }, async () => {
+          const stationOwner = await makeUser('Station owner', 'OWNER');
+          const legacyCook = await makeUser('Legacy cook', 'KITCHEN');
+          const staff = new StaffService(db, audit);
+          const catalog = new CatalogService(db, events, audit);
+          const localHall = await db.hall.create({ data: { name: 'Station hall' } });
+          const table = await db.table.create({ data: { hallId: localHall.id, number: 1 } });
+          const category = await catalog.createCategory({ name: 'Main' }, stationOwner);
+          assert.equal(category.prepStation, 'kitchen');
+          const renamed = await stationApi.update(stationOwner, 'kitchen', { name: 'Горячий цех' });
+          assert.deepEqual(renamed, { id: 'kitchen', name: 'Горячий цех', isActive: true, isBuiltIn: true });
+          assert.equal((await resolveStation(db, legacyCook)).name, 'Горячий цех');
+          await assert.rejects(stationApi.update(stationOwner, 'bar', { name: 'горячий цех' }), /уже существует/);
+          await assert.rejects(stationApi.update(stationOwner, 'kitchen', { isActive: false }), /блюда и категории/);
+          const dish = await catalog.createDish({ name: 'Рис', categoryId: category.id, price: 50 }, stationOwner);
+          const order = await orders.createFromQr({ tableId: table.id, items: [{ dishId: dish.id, quantity: 1 }] });
+          await catalog.updateCategory(category.id, { prepStation: 'bar' }, stationOwner);
+          await assert.rejects(stationApi.update(stationOwner, 'kitchen', { isActive: false }), /переназначьте сотрудников/);
+          await staff.update(legacyCook.id, { role: 'BAR' }, stationOwner);
+          await assert.rejects(stationApi.update(stationOwner, 'kitchen', { isActive: false }), /текущие заказы/);
+          await orders.kitchenReadyItems(order.id, order.items.map(({ id }) => id), legacyCook.id, 'kitchen');
+          const archived = await stationApi.update(stationOwner, 'kitchen', { isActive: false });
+          assert.equal(archived.isActive, false);
+          assert.equal((await catalog.createCategory({ name: 'New' }, stationOwner)).prepStation, 'bar');
+          await assert.rejects(catalog.updateCategory(category.id, { prepStation: 'kitchen' }, stationOwner), /действующую станцию/);
+          await assert.rejects(staff.update(legacyCook.id, { role: 'KITCHEN' }, stationOwner), /действующую станцию/);
+          const board = new KitchenService(db, events, audit);
+          assert.ok((await board.findByTab('ready', 'kitchen')).some(({ id }) => id === order.id));
+          assert.equal((await stationApi.update(stationOwner, 'kitchen', { isActive: true })).name, 'Горячий цех');
+          assert.equal((await stationApi.update(stationOwner, 'bar', { name: 'Напитки' })).name, 'Напитки');
+        });
+        assert.equal((await resolveStation(db, owner, 'kitchen')).name, 'Кухня');
+        assert.equal((await resolveStation(db, owner, 'bar')).name, 'Бар');
+        const empty = await db.cafe.create({ data: { name: 'Cafe without stations' } });
+        await runWithTenant({ cafeId: empty.id }, async () => {
+          const stationOwner = await makeUser('Owner without stations', 'OWNER');
+          const catalog = new CatalogService(db, events, audit);
+          await stationApi.update(stationOwner, 'kitchen', { isActive: false });
+          await stationApi.update(stationOwner, 'bar', { isActive: false });
+          assert.equal((await catalog.createCategory({ name: 'No preparation' }, stationOwner)).prepStation, 'none');
+        });
+      });
+
+      await t.test('station sale, shared ingredients, historical returns and preparation batches', async () => {
+        const warehouseApi = new WarehouseLocationsService(db, events);
+        const recipes = new RecipesService(db);
+        const preparation = new PreparationProductionService(db);
+        const barWarehouse = await warehouseApi.save(cafe.id, 'Склад бара');
+        const { locations } = await warehouseApi.list(cafe.id);
+        const common = locations.find(({ isDefault }) => isDefault);
+        const createIngredient = (name, stock, avgCost) => db.ingredient.create({ data: {
+          name, unitType: 'count', displayUnit: 'pcs', stock, avgCost, valuationKnown: true,
+        } });
+        const soda = await createIngredient('Кола', 20, 5);
+        const commonCup = await createIngredient('Стакан', 20, 2);
+        const routeCategory = await db.category.create({ data: { name: 'Drinks', prepStation: 'bar' } });
+        const drink = await db.dish.create({ data: { name: 'Напиток', categoryId: routeCategory.id, price: 50 } });
+        await warehouseApi.transfer({ ingredientId: soda.id, fromWarehouseId: common.id, toWarehouseId: barWarehouse.id, quantity: 10, unit: 'pcs' });
+        await warehouseApi.route(owner, 'bar', barWarehouse.id);
+        await recipes.addItem(drink.id, { ingredientId: soda.id, amount: 1 });
+        await recipes.addItem(drink.id, { ingredientId: commonCup.id, amount: 1, fromCommonWarehouse: true });
+        assert.equal((await recipes.getByDish(drink.id)).foodCost, 7);
+        await settings.update({ allowNegativeIngredientStock: false }, owner);
+        await assert.rejects(newOrder([{ dishId: drink.id, quantity: 11 }]), /Недостаточно сырья/);
+        await settings.update({ allowNegativeIngredientStock: true }, owner);
+        const commonStock = async (id) => Number((await db.ingredient.findUniqueOrThrow({ where: { id } })).stock);
+        const routedStock = async (id) => Number((await db.warehouseStock.findUniqueOrThrow({
+          where: { warehouseId_ingredientId: { warehouseId: barWarehouse.id, ingredientId: id } },
+        })).stock);
+        const order = await newOrder([{ dishId: drink.id, quantity: 3 }]);
+        assert.deepEqual([await routedStock(soda.id), await commonStock(soda.id), await commonStock(commonCup.id)], [7, 10, 17]);
+        await warehouseApi.route(owner, 'bar', null);
+        const sodaRow = (await recipes.getByDish(drink.id)).items.find(({ ingredientId }) => ingredientId === soda.id);
+        await recipes.updateItem(sodaRow.id, { amount: 2, unit: 'pcs' });
+        const reduced = await orders.editOrder(order.id, owner, [{ id: order.items[0].id, dishId: drink.id, quantity: 2 }], undefined, 'Одна порция отменена');
+        assert.deepEqual([await routedStock(soda.id), await commonStock(commonCup.id)], [8, 18]);
+        const remaining = reduced.items.find(({ status }) => status !== 'cancelled');
+        await orders.cancelReadyItem(order.id, remaining.id, owner, 'Заказ отменён');
+        assert.deepEqual([await routedStock(soda.id), await commonStock(soda.id), await commonStock(commonCup.id)], [10, 10, 20]);
+        await recipes.removeItem(sodaRow.id);
+        await orders.adminUpdateStatus(order.id, owner, 'sent_to_kitchen');
+        assert.equal(await commonStock(commonCup.id), 17);
+        await orders.adminUpdateStatus(order.id, owner, 'cancelled', 'Повторная отмена');
+        assert.equal(await commonStock(commonCup.id), 20);
+        const prepared = await preparation.create({ name: 'Сироп', unit: 'l' });
+        await preparation.saveRecipe(prepared.id, {
+          outputQuantity: 1, outputUnit: 'l', items: [{ ingredientId: soda.id, quantity: 2, unit: 'pcs' }],
+        });
+        const batch = await preparation.produce(prepared.id, { quantity: 0.5, unit: 'l', warehouseId: barWarehouse.id });
+        assert.equal(batch.totalCost, 5);
+        assert.equal(await routedStock(soda.id), 9);
+        assert.equal(await routedStock(prepared.id), 500);
+        assert.equal(await commonStock(prepared.id), 0);
+        assert.equal((await preparation.list(barWarehouse.id)).find(({ id }) => id === prepared.id).avgCost, 10);
+        await assert.rejects(preparation.produce(prepared.id, { quantity: 100, unit: 'l', warehouseId: barWarehouse.id }), /Недостаточно сырья/);
+        assert.equal(await routedStock(soda.id), 9);
+        assert.equal(await routedStock(prepared.id), 500);
+        const outside = await db.cafe.create({ data: { name: 'Outside preparation' } });
+        await runWithTenant({ cafeId: outside.id }, async () => {
+          assert.deepEqual(await preparation.list(), []);
+          await assert.rejects(preparation.getRecipe(prepared.id), /не найден/);
+        });
+      });
 
       await t.test('live policy update is scoped to cafe and emits settings sync', async () => {
         await setPolicy({ cooking: { cancel: false, edit: true } });
@@ -154,21 +429,178 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         }
       });
 
+      await t.test('moving a served order while sending it to payment updates its current table', async (subtest) => {
+        const order = await newOrder();
+        const target = await db.table.create({ data: { hallId: hall.id, number: tableNumber++ } });
+        await db.orderItem.updateMany({ where: { orderId: order.id }, data: { status: 'served' } });
+        await db.order.update({ where: { id: order.id }, data: { status: 'served' } });
+        const findById = orders.findById.bind(orders);
+        subtest.mock.method(orders, 'findById', async (id) => {
+          const beforeMove = await findById(id);
+          await orders.moveTable(order.tableId, target.id, waiter);
+          return beforeMove;
+        }, { times: 1 });
+
+        const pending = await orders.toPayment(order.id, waiter.id);
+        assert.equal(pending.tableId, target.id);
+        assert.equal(pending.table.status, 'waiting_payment');
+        assert.equal((await db.table.findUniqueOrThrow({ where: { id: order.tableId } })).status, 'free');
+      });
+
+      await t.test('concurrent tenders and split payment retries create one recorded checkout', async () => {
+        const order = await newOrder();
+        await db.orderItem.updateMany({ where: { orderId: order.id }, data: { status: 'served' } });
+        await db.order.update({ where: { id: order.id }, data: { status: 'served' } });
+        const methods = ['cash', 'card'];
+        const attempts = await Promise.allSettled(methods.map((method) => orders.markPaid(order.id, waiter, method)));
+        const accepted = attempts.findIndex((attempt) => attempt.status === 'fulfilled');
+        assert.notEqual(accepted, -1);
+        assert.equal(attempts[1 - accepted].reason?.status, 409);
+        const method = methods[accepted];
+        assert.equal((await orders.markPaid(order.id, waiter, method)).paymentMethod, method);
+        const payments = await db.payment.findMany({ where: { orderId: order.id } });
+        assert.equal(payments.length, 1);
+        assert.equal(payments[0].method, method);
+        const receipt = await db.financeEntry.findFirstOrThrow({
+          where: { sourceKey: 'sale:' + payments[0].id }, include: { account: true },
+        });
+        assert.equal(receipt.account.type, method === 'cash' ? 'cash' : 'noncash');
+        assert.ok(receipt.amount.eq(payments[0].amount));
+        assert.deepEqual(
+          auditLog.filter(({ actionType, orderId }) => actionType === 'ORDER_PAID' && orderId === order.id)
+            .map(({ metadata }) => metadata.method),
+          [method],
+        );
+
+        const split = await newOrder();
+        await db.orderItem.updateMany({ where: { orderId: split.id }, data: { status: 'served' } });
+        await db.order.update({ where: { id: split.id }, data: { status: 'served' } });
+        const parts = [{ method: 'cash', amount: 50 }, { method: 'card', amount: +split.finalAmount - 50 }];
+        await Promise.all([
+          orders.markPaid(split.id, waiter, 'mixed', parts, 'split'),
+          orders.markPaid(split.id, waiter, 'mixed', [...parts].reverse(), 'split'),
+        ]);
+        await assert.rejects(orders.markPaid(split.id, waiter, 'mixed', [
+          { method: 'cash', amount: 60 }, { method: 'card', amount: +split.finalAmount - 60 },
+        ], 'split'), { status: 409 });
+        assert.equal(await db.payment.count({ where: { orderId: split.id } }), 2);
+        assert.equal(auditLog.filter(({ actionType, orderId }) => actionType === 'ORDER_PAID' && orderId === split.id).length, 1);
+      });
+
       await t.test('payment and tenant barriers still apply even when all waiter stages are enabled', async () => {
         const order = await newOrder();
         await db.orderItem.updateMany({ where: { orderId: order.id }, data: { status: 'served' } });
         await db.order.update({ where: { id: order.id }, data: { status: 'served' } });
         await orders.markPaid(order.id, waiter, 'cash');
+        const payment = await db.payment.findFirstOrThrow({ where: { orderId: order.id, status: 'paid' } });
+        await orders.markPaid(order.id, waiter, 'cash');
+        const sourceKey = 'sale:' + payment.id;
+        const sale = await db.financeEntry.findFirstOrThrow({ where: { sourceKey }, include: { account: true } });
+        assert.equal(sale.account.type, 'cash');
+        assert.equal(sale.account.cafeId, cafe.id);
+        assert.ok(sale.amount.eq(payment.amount));
         await assert.rejects(orders.cancelOrder(order.id, owner, 'Нельзя без возврата'), /оплачен/);
         await assert.rejects(orders.editOrder(order.id, waiter, [editLine(order.items[0])]), /оплачен/);
         await runWithTenant({ cafeId: 'another-cafe' }, async () => {
           await assert.rejects(orders.cancelReadyItem(order.id, order.items[0].id, owner, 'Cross tenant'), /не найден/);
         });
         assert.equal((await orders.findById(order.id)).status, 'paid');
-        await orders.adminUpdateStatus(order.id, owner, 'served', 'Отмена оплаты по существующему механизму');
-        assert.equal((await orders.findById(order.id)).payments.length, 0);
-        await orders.cancelOrder(order.id, owner, 'Отмена после возврата');
-        assert.equal((await orders.findById(order.id)).status, 'cancelled');
+        await assert.rejects(orders.adminUpdateStatus(order.id, owner, 'served'), /оформите возврат в карточке заказа/);
+        const refunds = new OrderRefundsService(db, audit, events, new IngredientStockService());
+        const quote = await refunds.quote(owner, order.id, {});
+        const requestId = randomUUID();
+        const refund = {
+          requestId, quoteVersion: quote.version, reason: 'Возврат оплаченного заказа', approval: { fundsReturned: true },
+        };
+        await refunds.create(owner, order.id, refund, true);
+        await refunds.create(owner, order.id, refund, true);
+        const entries = await db.financeEntry.findMany({ where: { sourceKey: { in: [sourceKey, 'refund:' + requestId + ':0'] } } });
+        assert.equal(entries.length, 2);
+        assert.ok(entries.every(({ accountId }) => accountId === sale.accountId));
+        assert.ok(entries.reduce((total, { amount }) => total.add(amount), sale.amount.mul(0)).isZero());
+        const returned = await orders.findById(order.id);
+        assert.equal(returned.payments.length, 1);
+        const retainedPayment = await db.payment.findUniqueOrThrow({ where: { id: payment.id } });
+        assert.equal(retainedPayment.status, 'paid');
+        assert.ok(retainedPayment.refundedAmount.eq(payment.amount));
+        assert.equal(returned.status, 'paid');
+        assert.equal(returned.paymentStatus, 'refunded');
+        await assert.rejects(orders.cancelOrder(order.id, owner, 'Отмена после возврата'), /оплачен/);
+      });
+
+      await t.test('rounded checkout records the same line amounts for payment, tax and refunds', async () => {
+        await settings.update({ taxesEnabled: true, roundOrderTotal: true }, owner);
+        const lines = [];
+        for (const idx of [1, 2, 3]) {
+          const tax = await db.menuTax.create({ data: { name: 'Tax ' + idx, type: 'turnover', rate: 10 } });
+          const dish = await db.dish.create({ data: { name: 'Taxable ' + idx, categoryId: category.id, price: '0.67', taxId: tax.id } });
+          lines.push({ dishId: dish.id, quantity: 1 });
+        }
+        const order = await newOrder(lines);
+        await db.orderItem.updateMany({ where: { orderId: order.id }, data: { status: 'served' } });
+        await db.order.update({ where: { id: order.id }, data: { status: 'served' } });
+        const paid = await orders.markPaid(order.id, waiter, 'cash');
+        const taxes = await db.orderTax.findMany({ where: { orderId: order.id } });
+        assert.equal(taxes.length, 3);
+        assert.ok(taxes.reduce((sum, row) => sum.add(row.salesAmount), paid.finalAmount.mul(0)).eq(paid.finalAmount));
+        assert.equal(paid.finalAmount.toString(), '2');
+
+        const refunds = new OrderRefundsService(db, audit, events, new IngredientStockService());
+        for (const row of taxes) {
+          const [itemId] = Object.keys(row.itemAmounts);
+          const quote = await refunds.quote(owner, order.id, { itemId });
+          assert.equal(quote.amount, row.salesAmount.toFixed(2));
+        }
+        await settings.update({ taxesEnabled: false, roundOrderTotal: false }, owner);
+      });
+
+      await t.test('waiter history pages through tied timestamps and stays scoped to the waiter and cafe', async () => {
+        const historyWaiter = await makeUser('History waiter', 'WAITER');
+        const table = await db.table.create({ data: { hallId: hall.id, number: tableNumber++ } });
+        const createdAt = new Date('2025-01-02T10:00:00.000Z');
+        const orderData = {
+          tableId: table.id,
+          waiterId: historyWaiter.id,
+          businessDate: createdAt,
+          createdAt,
+          finalAmount: '50.25',
+        };
+        const ownOrders = Array.from({ length: 32 }, (_, index) => ({
+          ...orderData,
+          id: randomUUID(),
+          orderNumber: String(index + 1),
+          status: ['paid', 'cancelled'][index % 2],
+          createdAt: index === 31 ? new Date('2025-01-01T10:00:00.000Z') : createdAt,
+        }));
+        await db.order.createMany({ data: [
+          ...ownOrders,
+          { ...orderData, waiterId: waiter.id, orderNumber: '33' },
+        ] });
+        const foreignCafe = await db.cafe.create({ data: { name: 'Foreign history cafe' } });
+        await runWithTenant({ cafeId: foreignCafe.id }, async () => {
+          const foreignHall = await db.hall.create({ data: { name: 'Foreign hall' } });
+          const foreignTable = await db.table.create({ data: { hallId: foreignHall.id, number: 1 } });
+          await db.order.create({ data: { ...orderData, tableId: foreignTable.id, orderNumber: '1' } });
+        });
+
+        const expected = ownOrders
+          .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+          .map((order) => order.id);
+        const first = await orders.waiterOrderHistory(historyWaiter.id);
+        assert.deepEqual(first.items.map((order) => order.id), expected.slice(0, 30));
+        assert.ok(first.nextCursor);
+        assert.equal(first.items[0].tableNumber, table.number);
+        assert.equal(first.items[0].finalAmount, '50.25');
+        assert.ok(first.items.some((order) => order.status === 'paid'));
+        assert.ok(first.items.some((order) => order.status === 'cancelled'));
+
+        // A transfer between pages should not invalidate the previously issued cursor.
+        await db.order.update({ where: { id: expected[29] }, data: { waiterId: waiter.id } });
+        const second = await orders.waiterOrderHistory(historyWaiter.id, first.nextCursor);
+        assert.deepEqual(second.items.map((order) => order.id), expected.slice(30));
+        assert.equal(second.nextCursor, null);
+        assert.deepEqual(await orders.waiterOrderHistory(owner.id), { items: [], nextCursor: null });
+        await assert.rejects(orders.waiterOrderHistory(historyWaiter.id, 'invalid'), { status: 400 });
       });
       assert.ok(initialSettings.cafeId === cafe.id);
     });

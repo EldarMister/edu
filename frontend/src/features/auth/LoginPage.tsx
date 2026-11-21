@@ -1,8 +1,8 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useId, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, apiError } from '@/lib/api';
 import { useAuth } from '@/store/auth';
-import { homeForRole } from '@/routes/ProtectedRoute';
+import { homeForUser } from '@/lib/workspaces';
 import { Spinner } from '@/components/Spinner';
 import { BrandLogo } from '@/components/BrandLogo';
 import { AppVersion } from '@/components/AppVersion';
@@ -11,6 +11,7 @@ import type { LoginResponse } from '@/types';
 export function LoginPage() {
   const navigate = useNavigate();
   const setSession = useAuth((s) => s.setSession);
+  const phoneId = useId();
 
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -21,12 +22,17 @@ export function LoginPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (loading) return;
+    const loginPhone = phone.trim();
+    if (!loginPhone) {
+      setError('Укажите номер телефона');
+      return;
+    }
     setError('');
     setLoading(true);
     try {
-      const { data } = await api.post<LoginResponse>('/auth/login', { phone, password });
+      const { data } = await api.post<LoginResponse>('/auth/login', { phone: loginPhone, password });
       setSession(data);
-      navigate(homeForRole(data.user.role), { replace: true });
+      navigate(homeForUser(data.user), { replace: true });
     } catch (err) {
       setError(apiError(err));
     } finally {
@@ -53,17 +59,18 @@ export function LoginPage() {
 
         <form onSubmit={onSubmit} className="space-y-4">
           <div>
-            <label className="mb-1.5 block text-sm font-medium text-text-secondary">
+            <label htmlFor={phoneId} className="mb-1.5 block text-sm font-medium text-text-secondary">
               Номер телефона
             </label>
             <input
+              id={phoneId}
+              name="phone"
               className="input"
               type="tel"
-              inputMode="tel"
               autoComplete="username"
-              placeholder="Введите номер телефона"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
+              disabled={loading}
               required
             />
           </div>
@@ -92,7 +99,7 @@ export function LoginPage() {
             </div>
           </div>
 
-          {error && <p className="text-sm text-danger">{error}</p>}
+          {error && <p role="alert" className="text-sm text-danger">{error}</p>}
 
           <button type="submit" className="btn-primary btn-lg w-full font-semibold" disabled={loading}>
             {loading ? <Spinner /> : 'Войти'}

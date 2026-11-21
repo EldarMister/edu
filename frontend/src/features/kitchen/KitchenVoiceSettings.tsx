@@ -1,55 +1,62 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Toggle } from '@/components/Toggle';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
+import { Modal } from '@/components/Modal';
+import { useT } from '@/lib/i18n';
 import { kitchenVoice } from '@/services/kitchenVoice';
+import { waiterVoice } from '@/services/waiterVoice';
 import {
   KITCHEN_SPEAKERS,
   KITCHEN_SPEECH_RATES,
   getKitchenVoiceSettings,
+  getWaiterVoiceSettings,
   saveKitchenVoiceSettings,
+  saveWaiterVoiceSettings,
   subscribeKitchenVoiceSettings,
   type KitchenSpeechRate,
   type KitchenVoiceSettings as KitchenVoiceSettingsType,
 } from '@/services/kitchenVoiceSettings';
-import { KITCHEN_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
+import { KITCHEN_VOICE_TEST_SCENARIOS, WAITER_VOICE_TEST_SCENARIOS } from '@/services/kitchenVoiceScenarios';
+import { WorkShiftSettingsCard } from '@/features/settings/WorkShiftBanner';
+import { KitchenTapFeedbackSetting } from './KitchenTapFeedback';
 
 export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode }) {
+  return <VoiceSettings handControl={handControl} />;
+}
+
+export function WaiterVoiceSettings({ userId }: { userId: string }) {
+  return <VoiceSettings key={userId} waiterId={userId} />;
+}
+
+function VoiceSettings({ handControl, waiterId }: { handControl?: ReactNode; waiterId?: string }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
-  const [settings, setSettings] = useState<KitchenVoiceSettingsType>(() => getKitchenVoiceSettings());
+  const [settings, setSettings] = useState<KitchenVoiceSettingsType>(() =>
+    waiterId ? getWaiterVoiceSettings(waiterId) : getKitchenVoiceSettings(),
+  );
   const [testing, setTesting] = useState(false);
+  const [waiterScenarioIndex, setWaiterScenarioIndex] = useState(0);
   const [testMessage, setTestMessage] = useState('');
-  const rootRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => subscribeKitchenVoiceSettings(setSettings), []);
-
+  const title = t('Настройки озвучки');
   useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', onPointerDown);
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [open]);
+    if (!waiterId) return subscribeKitchenVoiceSettings(setSettings);
+  }, [waiterId]);
 
   function patch(next: Partial<KitchenVoiceSettingsType>) {
-    setSettings(saveKitchenVoiceSettings(next));
+    setSettings(waiterId ? saveWaiterVoiceSettings(waiterId, next) : saveKitchenVoiceSettings(next));
+    if (waiterId && next.voiceEnabled === false) waiterVoice.stop();
     setTestMessage('');
   }
 
   async function testVoice() {
     setTesting(true);
     setTestMessage('');
-    const scenario = KITCHEN_VOICE_TEST_SCENARIOS[
+    const scenario = waiterId ? WAITER_VOICE_TEST_SCENARIOS[waiterScenarioIndex] : KITCHEN_VOICE_TEST_SCENARIOS[
       Math.floor(Math.random() * KITCHEN_VOICE_TEST_SCENARIOS.length)
     ];
     try {
       await kitchenVoice.testScenario(scenario, settings);
+      if (waiterId) setWaiterScenarioIndex((index) => (index + 1) % WAITER_VOICE_TEST_SCENARIOS.length);
       setTestMessage('Тест озвучки завершён');
     } catch (err) {
       console.error('[kitchen-tts] тест озвучки не удался:', err);
@@ -59,8 +66,92 @@ export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode 
     }
   }
 
+  const controls = (
+    <>
+      <Section>
+        <p className="mb-3 font-semibold text-text-primary">{t('Голос')}</p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {KITCHEN_SPEAKERS.map((speaker) => (
+            <button
+              key={speaker.value}
+              type="button"
+              aria-pressed={settings.speaker === speaker.value}
+              onClick={() => patch({ speaker: speaker.value })}
+              className={`flex w-full items-center gap-1.5 rounded-lg px-1 py-2 text-left transition-colors ${
+                settings.speaker === speaker.value
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-text-secondary hover:bg-background'
+              }`}
+            >
+              <Radio checked={settings.speaker === speaker.value} />
+              <span className="font-medium">{speaker.label}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+
+      <Section>
+        <div className={waiterId ? undefined : 'grid gap-x-8 sm:grid-cols-2'}>
+          <SettingRow
+            label={t(waiterId ? 'Звук уведомлений' : 'Уведомления')}
+            checked={settings.notificationsEnabled}
+            onChange={(value) => patch({ notificationsEnabled: value })}
+          />
+          <SettingRow
+            label={t('Голосовая озвучка')}
+            checked={settings.voiceEnabled}
+            onChange={(value) => patch({ voiceEnabled: value })}
+          />
+        </div>
+      </Section>
+
+      <Section>
+        <p className="mb-3 font-semibold text-text-primary">{t('Скорость озвучки')}</p>
+        <SpeedSlider
+          rates={KITCHEN_SPEECH_RATES}
+          value={settings.speechRate}
+          onChange={(rate) => patch({ speechRate: rate })}
+        />
+      </Section>
+    </>
+  );
+
+  const preview = (
+    <>
+        <button
+          type="button"
+          onClick={testVoice}
+          disabled={testing}
+          className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {t(testing ? 'Тестируем...' : 'Тестировать')}
+        </button>
+        {testMessage && (
+          <p role="status" className={`mt-2 text-center text-xs ${testMessage.includes('Не удалось') ? 'text-danger' : 'text-success'}`}>
+            {t(testMessage)}
+          </p>
+        )}
+    </>
+  );
+
+  if (!waiterId) {
+    return <div className="mx-auto grid w-full max-w-6xl items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] lg:gap-6">
+      <div className="min-w-0 space-y-4">
+        <WorkShiftSettingsCard />
+        {handControl && <section aria-label="Управление рукой" className="card px-4 py-3 sm:px-6">{handControl}</section>}
+        <section aria-label="Внешний вид" className="card px-4 py-3 sm:px-6"><ThemeSwitch /></section>
+        <KitchenTapFeedbackSetting />
+      </div>
+      <section aria-label="Озвучка" className="card min-w-0 px-4 py-4 sm:px-6">
+        <h2 className="text-base font-semibold">Озвучка</h2>
+        {controls}
+        <Section>{preview}</Section>
+      </section>
+    </div>;
+  }
+
   return (
-    <div ref={rootRef} className="relative">
+    <div className="relative">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
@@ -73,80 +164,12 @@ export function KitchenVoiceSettings({ handControl }: { handControl?: ReactNode 
         aria-haspopup="dialog"
       >
         <SpeakerIcon />
-        Озвучка
-        <ChevronIcon open={open} />
+        {title}
       </button>
 
-      {open && (
-        <div
-          role="dialog"
-          aria-label="Настройки озвучки кухни"
-          className="absolute right-0 top-[calc(100%+10px)] z-50 w-[calc(100vw-2rem)] max-w-[320px] rounded-xl border border-border bg-white p-4 text-sm shadow-soft"
-        >
-          <h3 className="text-[15px] font-semibold text-text-secondary">Настройки озвучки кухни</h3>
-
-          <Section>
-            <p className="mb-3 font-semibold text-text-primary">Голос</p>
-            <div className="grid grid-cols-3 gap-1.5">
-              {KITCHEN_SPEAKERS.map((speaker) => (
-                <button
-                  key={speaker.value}
-                  type="button"
-                  onClick={() => patch({ speaker: speaker.value })}
-                  className={`flex w-full items-center gap-1.5 rounded-lg px-1 py-2 text-left transition-colors ${
-                    settings.speaker === speaker.value
-                      ? 'bg-primary/10 text-primary'
-                      : 'text-text-secondary hover:bg-background'
-                  }`}
-                >
-                  <Radio checked={settings.speaker === speaker.value} />
-                  <span className="font-medium">{speaker.label}</span>
-                </button>
-              ))}
-            </div>
-          </Section>
-
-          <Section>
-            <SettingRow
-              label="Уведомления"
-              checked={settings.notificationsEnabled}
-              onChange={(value) => patch({ notificationsEnabled: value })}
-            />
-            <SettingRow
-              label="Голосовая озвучка"
-              checked={settings.voiceEnabled}
-              onChange={(value) => patch({ voiceEnabled: value })}
-            />
-          </Section>
-
-          {handControl}
-
-          <Section>
-            <p className="mb-3 font-semibold text-text-primary">Скорость озвучки</p>
-            <SpeedSlider
-              rates={KITCHEN_SPEECH_RATES}
-              value={settings.speechRate}
-              onChange={(rate) => patch({ speechRate: rate })}
-            />
-          </Section>
-
-          <Section>
-            <button
-              type="button"
-              onClick={testVoice}
-              disabled={testing}
-              className="inline-flex w-full items-center justify-center rounded-lg bg-primary px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {testing ? 'Тестируем...' : 'Тестировать'}
-            </button>
-            {testMessage && (
-              <p className={`mt-2 text-xs ${testMessage.includes('Не удалось') ? 'text-danger' : 'text-success'}`}>
-                {testMessage}
-              </p>
-            )}
-          </Section>
-        </div>
-      )}
+      <Modal open={open} onClose={() => setOpen(false)} title={title} bottomSheet panelClassName="max-w-xl" footer={preview}>
+        {controls}
+      </Modal>
     </div>
   );
 }
@@ -249,7 +272,7 @@ function SettingRow({
   return (
     <div className="flex items-center justify-between gap-4 py-2">
       <span className="font-medium text-text-primary">{label}</span>
-      <Toggle checked={checked} onChange={onChange} />
+      <Toggle checked={checked} onChange={onChange} ariaLabel={label} />
     </div>
   );
 }
@@ -272,25 +295,6 @@ function SpeakerIcon() {
       <path d="M11 5 6 9H3v6h3l5 4V5Z" />
       <path d="M15.5 8.5a5 5 0 0 1 0 7" />
       <path d="M18.5 5.5a9 9 0 0 1 0 13" />
-    </svg>
-  );
-}
-
-function ChevronIcon({ open }: { open: boolean }) {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={`transition-transform ${open ? 'rotate-180' : ''}`}
-      aria-hidden
-    >
-      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }

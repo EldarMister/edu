@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useUpdateNotifier } from '@/hooks/useUpdateNotifier';
 import { refreshAppToLatestVersion } from '@/lib/app-update';
 
@@ -8,11 +9,26 @@ import { refreshAppToLatestVersion } from '@/lib/app-update';
  */
 export function UpdateModal() {
   const { updateAvailable, snooze } = useUpdateNotifier();
+  const [updating, setUpdating] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function update() {
+    if (updating) return;
+    setUpdating(true);
+    setFailed(false);
+    try {
+      await refreshAppToLatestVersion();
+    } catch {
+      setFailed(true);
+    } finally {
+      setUpdating(false);
+    }
+  }
 
   if (!updateAvailable) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-end justify-center p-4 sm:items-center">
+    <div data-radio-blocking className="fixed inset-0 z-[9999] flex items-end justify-center p-4 sm:items-center">
       {/* Полупрозрачный оверлей */}
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
 
@@ -49,16 +65,21 @@ export function UpdateModal() {
             Вышла новая версия приложения. Обновите, чтобы получить исправления и улучшения.
           </p>
 
+          {failed && <p role="alert" className="mb-3 text-center text-sm text-danger">
+            Не удалось загрузить обновление. Проверьте подключение и попробуйте снова.
+          </p>}
           <div className="flex flex-col gap-2.5">
             <button
               className="btn-primary btn-lg w-full font-semibold"
-              onClick={() => void refreshAppToLatestVersion()}
+              disabled={updating}
+              onClick={update}
             >
-              Обновить сейчас
+              {updating ? 'Обновление…' : 'Обновить сейчас'}
             </button>
             <button
               className="btn-secondary btn-lg w-full"
-              onClick={snooze}
+              disabled={updating}
+              onClick={() => { setFailed(false); snooze(); }}
             >
               Позже (напомнить через 1 час)
             </button>

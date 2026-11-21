@@ -30,14 +30,6 @@ enum PushProvider {
   FCM
 }
 
-// Направление приготовления/выдачи позиции: кухня или бар.
-enum PrepStation {
-  kitchen
-  bar
-  // «Без отправки» — официант забирает сам: позиция не уходит на кухню/бар.
-  none
-}
-
 enum TableStatus {
   free // свободен
   occupied // занят
@@ -95,6 +87,12 @@ enum PaymentStatus {
   cancelled
 }
 
+enum OrderRefundStatus {
+  pending
+  approved
+  rejected
+}
+
 enum PaymentSource {
   normal
   split
@@ -146,12 +144,53 @@ enum StockMovementType {
   return // возврат при отмене/отказе
   correction // ручная корректировка
   cancel // отмена операции
+  inventory
+  writeoff
+  transfer
+  supplier_return
+  production
+  processing
 }
 
 enum StockMovementSource {
   purchase // источник — закупка
   order // источник — заказ
   manual // ручная операция
+  inventory
+  writeoff
+  transfer
+  supplier_return
+  production
+  processing
+}
+
+enum WarehouseDocumentKind {
+  inventory
+  writeoff
+  transfer
+  supplier_return
+}
+
+enum WarehouseInventoryMode {
+  full
+  partial
+}
+
+enum WarehouseDocumentStatus {
+  draft
+  submitted
+  posted
+  reversed
+}
+
+enum WarehouseWriteoffReason {
+  spoilage
+  expired
+  damage
+  staff_meal
+  tasting
+  household
+  other
 }
 
 enum PurchaseStatus {
@@ -161,6 +200,15 @@ enum PurchaseStatus {
 }
 
 // Тип единицы измерения сырья. База: mass→г, volume→мл, count→шт.
+enum IngredientKind {
+  raw
+  beverage
+  goods
+  preparation
+  prepared_dish
+  consumable
+}
+
 enum IngredientUnitType {
   mass // масса (г, кг)
   volume // объём (мл, л)
@@ -179,6 +227,15 @@ enum CafeStatus {
 // Заведение (арендатор). Все бизнес-данные привязаны к кафе через cafe_id.
 // Мультитенантность, фаза 1: cafe_id добавлен nullable во все таблицы и бэкфиллен «Кафе #1».
 model Cafe {
+  staffPositions StaffPosition[]
+  financeAccounts FinanceAccount[]
+  financeCategories FinanceCategory[]
+  financeEntries FinanceEntry[]
+  salaryAccruals SalaryAccrual[]
+  employeeSalaryRates EmployeeSalaryRate[]
+  warehouseSuppliers WarehouseSupplier[]
+  warehousePackages WarehousePackage[]
+  processingDocuments ProcessingDocument[]
   id              String     @id @default(uuid())
   name            String
   isActive        Boolean    @default(true) @map("is_active")
@@ -189,6 +246,9 @@ model Cafe {
   suspendedReason String?    @map("suspended_reason") // напр. «не оплачено» или текст супер-админа
   createdAt       DateTime   @default(now()) @map("created_at")
   updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  preparationStations PreparationStation[]
+  warehouses Warehouse[]
 
   @@map("cafes")
 }
@@ -206,6 +266,127 @@ model PlatformAdmin {
   @@map("platform_admins")
 }
 
+enum FinanceAccountType {
+  cash
+  noncash
+}
+
+enum FinanceCategoryKind {
+  income
+  expense
+  both
+}
+
+enum FinanceEntryKind {
+  income
+  expense
+  transfer
+  sale
+  refund
+  salary
+  adjustment
+}
+
+model FinanceAccount {
+  id             String             @id @default(uuid())
+  cafeId         String             @map("cafe_id")
+  name           String
+  type           FinanceAccountType
+  isDefault      Boolean            @default(false) @map("is_default")
+  isCollection   Boolean            @default(false) @map("is_collection")
+  openingBalance Decimal            @default(0) @map("opening_balance") @db.Decimal(18, 2)
+  createdAt      DateTime           @default(now()) @map("created_at")
+  archivedAt     DateTime?          @map("archived_at")
+  cafe           Cafe               @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  entries        FinanceEntry[]     @relation("FinanceAccountEntries")
+  counterEntries FinanceEntry[]    @relation("FinanceCounterAccount")
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, name])
+  @@index([cafeId, archivedAt])
+  @@map("finance_accounts")
+}
+
+model FinanceCategory {
+  id          String              @id @default(uuid())
+  cafeId      String              @map("cafe_id")
+  name        String
+  kind        FinanceCategoryKind
+  parentId    String?             @map("parent_id")
+  showOnPos   Boolean             @default(false) @map("show_on_pos")
+  userIds     String[]            @default([]) @map("user_ids")
+  positionIds String[]            @default([]) @map("position_ids")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  cafe        Cafe                @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  parent      FinanceCategory?    @relation("FinanceCategoryParent", fields: [cafeId, parentId], references: [cafeId, id], onDelete: NoAction)
+  children    FinanceCategory[]   @relation("FinanceCategoryParent")
+  entries     FinanceEntry[]
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, kind, name])
+  @@index([cafeId, parentId])
+  @@map("finance_categories")
+}
+
+model SalaryAccrual {
+  id           String         @id @default(uuid())
+  cafeId       String         @map("cafe_id")
+  userId       String         @map("user_id")
+  employeeName String         @map("employee_name")
+  month        String
+  amount       Decimal        @db.Decimal(18, 2)
+  note         String?
+  calculation  Json?
+  supplemental Boolean        @default(false)
+  revision     Int            @default(0)
+  history      Json           @default("[]")
+  voidedAt     DateTime?      @map("voided_at")
+  voidReason   String?        @map("void_reason")
+  actorId      String         @map("actor_id")
+  requestKey   String         @map("request_key")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  cafe         Cafe           @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  payments     FinanceEntry[]
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, requestKey])
+  @@index([cafeId, month])
+  @@map("salary_accruals")
+}
+
+model FinanceEntry {
+  id                    String           @id @default(uuid())
+  cafeId                String           @map("cafe_id")
+  accountId             String           @map("account_id")
+  kind                  FinanceEntryKind
+  amount                Decimal          @db.Decimal(18, 2)
+  categoryId            String?          @map("category_id")
+  counterpartyAccountId String?          @map("counterparty_account_id")
+  salaryAccrualId       String?          @map("salary_accrual_id")
+  cashShiftId           String?          @map("cash_shift_id")
+  cashCustodianId       String?          @map("cash_custodian_id")
+  cashCustodyDay        DateTime?        @map("cash_custody_day") @db.Date
+  pendingCashShift      Boolean          @default(false) @map("pending_cash_shift")
+  actorId               String?          @map("actor_id")
+  sourceKey             String?          @map("source_key")
+  note                  String?
+  occurredAt            DateTime         @default(now()) @map("occurred_at")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  cafe                  Cafe             @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  account               FinanceAccount   @relation("FinanceAccountEntries", fields: [cafeId, accountId], references: [cafeId, id], onDelete: NoAction)
+  counterparty          FinanceAccount?  @relation("FinanceCounterAccount", fields: [cafeId, counterpartyAccountId], references: [cafeId, id], onDelete: NoAction)
+  category              FinanceCategory? @relation(fields: [cafeId, categoryId], references: [cafeId, id], onDelete: NoAction)
+  salaryAccrual         SalaryAccrual?   @relation(fields: [cafeId, salaryAccrualId], references: [cafeId, id], onDelete: NoAction)
+
+  @@unique([cafeId, sourceKey])
+  @@index([cafeId, occurredAt])
+  @@index([cafeId, accountId, occurredAt])
+  @@index([cafeId, salaryAccrualId])
+  @@index([cafeId, cashShiftId])
+  @@index([cafeId, cashCustodyDay, cashCustodianId], map: "finance_entries_cash_custody_idx")
+  @@map("finance_entries")
+}
+
 model User {
   cafeId       String?  @map("cafe_id")
   id           String   @id @default(uuid())
@@ -215,9 +396,13 @@ model User {
   passwordHash String   @map("password_hash")
   pinHash      String?  @map("pin_hash")
   role         Role
+  prepStation  String?  @map("prep_station")
   isActive     Boolean  @default(true) @map("is_active")
-  // Права доступа сотрудника (разделы/действия). null = дефолты по роли.
+  deletedAt    DateTime? @map("deleted_at")
+  // Совместимость со старыми записями; права сотрудников задаются в StaffPosition.
   permissions  Json?    @map("permissions")
+  positionId   String?  @map("position_id")
+  position     StaffPosition? @relation(fields: [cafeId, positionId], references: [cafeId, id], onDelete: Restrict)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -235,7 +420,61 @@ model User {
   receiptPrintRequests ReceiptPrintRequest[] @relation("WaiterReceiptPrints")
   cashReports          ShiftCashReport[]     @relation("WaiterCashReports")
 
+  @@index([cafeId, prepStation])
+  @@index([cafeId, positionId])
   @@map("users")
+}
+
+model StaffPosition {
+  id          String   @id @default(uuid())
+  cafeId      String   @map("cafe_id")
+  name        String
+  role        Role
+  isStarter   Boolean  @default(false) @map("is_starter")
+  permissions Json
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  cafe  Cafe   @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  users User[]
+  salaryRates StaffPositionSalaryRate[]
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, name])
+  @@map("staff_positions")
+}
+
+model StaffPositionSalaryRate {
+  cafeId          String   @map("cafe_id")
+  positionId      String   @map("position_id")
+  effectiveMonth  String   @map("effective_month")
+  hourly          Decimal  @default(0) @db.Decimal(14, 2)
+  perShift        Decimal  @default(0) @map("per_shift") @db.Decimal(14, 2)
+  monthly         Decimal  @default(0) @db.Decimal(14, 2)
+  personalPercent Decimal  @default(0) @map("personal_percent") @db.Decimal(5, 2)
+  shiftPercent    Decimal  @default(0) @map("shift_percent") @db.Decimal(5, 2)
+  position StaffPosition @relation(fields: [cafeId, positionId], references: [cafeId, id], onDelete: Cascade, map: "staff_position_salary_rates_position_fkey")
+
+  @@id([cafeId, positionId, effectiveMonth])
+  @@map("staff_position_salary_rates")
+}
+
+// Independent snapshots keep past payroll intact after a position is changed or removed.
+model EmployeeSalaryRate {
+  cafeId          String   @map("cafe_id")
+  userId          String   @map("user_id")
+  effectiveMonth  String   @map("effective_month")
+  positionId      String?  @map("position_id")
+  positionName    String   @map("position_name")
+  hourly          Decimal  @default(0) @db.Decimal(14, 2)
+  perShift        Decimal  @default(0) @map("per_shift") @db.Decimal(14, 2)
+  monthly         Decimal  @default(0) @db.Decimal(14, 2)
+  personalPercent Decimal  @default(0) @map("personal_percent") @db.Decimal(5, 2)
+  shiftPercent    Decimal  @default(0) @map("shift_percent") @db.Decimal(5, 2)
+  cafe            Cafe     @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@id([cafeId, userId, effectiveMonth])
+  @@map("employee_salary_rates")
 }
 
 model Hall {
@@ -244,6 +483,9 @@ model Hall {
   name      String
   isActive  Boolean  @default(true) @map("is_active")
   sortOrder Int      @default(0) @map("sort_order")
+  floorPlan Json?    @map("floor_plan")
+  floorPlanVersion Int @default(0) @map("floor_plan_version")
+  useFloorPlan Boolean? @map("use_floor_plan")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -257,6 +499,7 @@ model Table {
   id        String      @id @default(uuid())
   hallId    String      @map("hall_id")
   number    Int
+  name      String?
   seats     Int         @default(2)
   status    TableStatus @default(free)
   isActive  Boolean     @default(true) @map("is_active")
@@ -272,8 +515,20 @@ model Table {
   incidents  Incident[]
   qrSessions QrTableSession[]
 
-  @@unique([hallId, number])
+  // Table numbers are unique among active tables in the same hall (partial database index).
+  @@index([hallId, number])
   @@map("tables")
+}
+
+model PreparationStation {
+  id       String  @id @default(uuid())
+  cafeId   String  @map("cafe_id")
+  name     String
+  isActive Boolean @default(true) @map("is_active")
+  cafe     Cafe    @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, name])
+  @@map("preparation_stations")
 }
 
 model Category {
@@ -282,13 +537,34 @@ model Category {
   name        String
   sortOrder   Int         @default(0) @map("sort_order")
   isActive    Boolean     @default(true) @map("is_active")
-  prepStation PrepStation @default(kitchen) @map("prep_station")
+  prepStation String @default("kitchen") @map("prep_station")
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @updatedAt @map("updated_at")
 
   dishes Dish[]
+  taxId  String? @map("tax_id")
+  tax    MenuTax? @relation(fields: [taxId], references: [id], onDelete: NoAction)
 
+  @@index([taxId])
   @@map("categories")
+}
+
+enum MenuTaxType {
+  vat
+  turnover
+}
+
+model MenuTax {
+  id         String      @id @default(uuid())
+  cafeId     String?     @map("cafe_id")
+  name       String
+  rate       Decimal     @db.Decimal(5, 2)
+  type       MenuTaxType
+  categories Category[]
+  dishes     Dish[]
+
+  @@index([cafeId, name])
+  @@map("menu_taxes")
 }
 
 model Dish {
@@ -310,7 +586,7 @@ model Dish {
   initialStock      Int?         @map("initial_stock")
   unit              String       @default("шт")
   // null = наследовать направление от категории; задано — приоритет над категорией.
-  prepStation       PrepStation? @map("prep_station")
+  prepStation       String? @map("prep_station")
   // true — это «шапка» сета (состав в SetComponent), а не обычное блюдо.
   isSet             Boolean      @default(false) @map("is_set")
   // Весовое блюдо открывает у официанта отдельный выбор граммов вместо обычных вариантов.
@@ -337,8 +613,22 @@ model Dish {
   finalOrderSetItems OrderItemSetComponent[] @relation("FinalDish")
   qrSessionItems     QrSessionItem[]
   // Техкарта блюда: какие ингредиенты и сколько уходит на 1 порцию.
+  stockIngredientId String? @map("stock_ingredient_id")
+  stockAmount Decimal @default(1) @db.Decimal(14, 3) @map("stock_amount")
+  recipeVersion Int @default(1) @map("recipe_version")
+  catalogKind String @default("recipe") @map("catalog_kind")
+  menuCreateKey String? @unique @map("menu_create_key")
+  recipeMetadata Json? @map("recipe_metadata")
+  stockIngredient Ingredient? @relation("DirectStockIngredient", fields: [stockIngredientId], references: [id], onDelete: Restrict)
+  allowIngredientExclusions Boolean @default(false) @map("allow_ingredient_exclusions")
+  modifierGroups MenuModifierGroup[]
+  recipeRevisions RecipeRevision[]
   recipeItems        RecipeItem[]
+  taxId              String? @map("tax_id")
+  taxExempt          Boolean @default(false) @map("tax_exempt")
+  tax                MenuTax? @relation(fields: [taxId], references: [id], onDelete: NoAction)
 
+  @@index([taxId])
   @@map("dishes")
 }
 
@@ -372,6 +662,9 @@ model DishVariant {
   name         String
   price        Decimal  @db.Decimal(10, 2)
   sortOrder    Int      @default(0) @map("sort_order")
+  stockIngredientId String? @map("stock_ingredient_id")
+  stockAmount Decimal @default(1) @db.Decimal(14,3) @map("stock_amount")
+  stockIngredient Ingredient? @relation("DirectVariantIngredient", fields: [stockIngredientId], references: [id], onDelete: Restrict)
   stock        Int?
   initialStock Int?     @map("initial_stock")
   unit         String   @default("шт")
@@ -395,11 +688,12 @@ model Order {
   // Бизнес-день заказа (локальная полночь) — для дневной нумерации и уникальности номера в дне.
   businessDate           DateTime       @default(now()) @map("business_date")
   tableId                String         @map("table_id")
+  splitFromOrderId       String?        @map("split_from_order_id")
   // nullable: заказ из QR-меню создаётся без официанта (source=qr).
   waiterId               String?        @map("waiter_id")
-  // Источник заказа: pos — сотрудник, qr — QR-меню, delivery — внешнее приложение.
+  // Источник заказа: pos — в зале, qr — QR-меню, delivery — доставка с кассы или из интеграции.
   source                 String         @default("pos")
-  // Идентификатор и данные внешнего заказа доставки. Для pos/qr остаются null.
+  // Внешний идентификатор есть только у заказов из интеграции.
   externalOrderId        String?        @map("external_order_id")
   deliveryCustomerName   String?        @map("delivery_customer_name")
   deliveryCustomerPhone  String?        @map("delivery_customer_phone")
@@ -409,7 +703,10 @@ model Order {
   totalAmount            Decimal        @default(0) @map("total_amount") @db.Decimal(10, 2)
   discountAmount         Decimal        @default(0) @map("discount_amount") @db.Decimal(10, 2)
   serviceChargeAmount    Decimal        @default(0) @map("service_charge_amount") @db.Decimal(10, 2)
+  roundOrderTotal        Boolean        @default(false) @map("round_order_total")
+  roundingAmount         Decimal        @default(0) @map("rounding_amount") @db.Decimal(10, 2)
   finalAmount            Decimal        @default(0) @map("final_amount") @db.Decimal(10, 2)
+  refundedAmount         Decimal        @default(0) @map("refunded_amount") @db.Decimal(10, 2)
   paymentStatus          PaymentStatus  @default(pending) @map("payment_status")
   paymentMethod          PaymentMethod? @map("payment_method")
   comment                String?
@@ -429,14 +726,19 @@ model Order {
   fiscalizedAt        DateTime? @map("fiscalized_at") // момент успешного пробития
 
   table                Table                 @relation(fields: [tableId], references: [id])
+  splitFromOrder       Order?                @relation("SplitOrderFamily", fields: [splitFromOrderId], references: [id], onDelete: NoAction)
+  splitOrders          Order[]               @relation("SplitOrderFamily")
   waiter               User?                 @relation("WaiterOrders", fields: [waiterId], references: [id])
   waiterShift          WaiterShift?          @relation(fields: [waiterShiftId], references: [id])
   items                OrderItem[]
   payments             Payment[]
+  taxes                OrderTax[]
   kitchenEvents        KitchenEvent[]
   incidents            Incident[]
   actions              OrderAction[]
   receiptPrintRequests ReceiptPrintRequest[]
+  refunds              OrderRefund[]
+  cancellationRequests OrderItemCancellationRequest[]
   // Заполняется, если заказ создан из QR-сессии стола.
   qrSession            QrTableSession?
 
@@ -445,6 +747,7 @@ model Order {
   @@index([status])
   @@index([source, status])
   @@index([tableId])
+  @@index([splitFromOrderId])
   @@index([waiterId])
   @@index([waiterShiftId])
   @@map("orders")
@@ -457,6 +760,7 @@ model OrderAction {
   type           String
   idempotencyKey String   @map("idempotency_key")
   userId         String?  @map("user_id")
+  details        Json?
   createdAt      DateTime @default(now()) @map("created_at")
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -464,6 +768,70 @@ model OrderAction {
   @@unique([type, idempotencyKey])
   @@index([orderId, type])
   @@map("order_actions")
+}
+
+model OrderTax {
+  id           String      @id @default(uuid())
+  cafeId       String?     @map("cafe_id")
+  orderId      String      @map("order_id")
+  taxId        String      @map("tax_id")
+  name         String
+  rate         Decimal     @db.Decimal(5, 2)
+  type         MenuTaxType
+  salesAmount  Decimal     @map("sales_amount") @db.Decimal(12, 2)
+  amount       Decimal     @db.Decimal(12, 2)
+  soldAt       DateTime    @map("sold_at")
+  reversedAt   DateTime?   @map("reversed_at")
+  fiscalizedAt DateTime?   @map("fiscalized_at")
+  itemAmounts  Json?       @map("item_amounts")
+  order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, soldAt, taxId])
+  @@index([cafeId, soldAt])
+  @@index([cafeId, reversedAt])
+  @@map("order_taxes")
+}
+
+model CashShift {
+  id             String    @id @default(uuid())
+  cafeId         String    @map("cafe_id")
+  accountId      String    @map("account_id")
+  openedById     String    @map("opened_by_id")
+  closedById     String?   @map("closed_by_id")
+  openedAt       DateTime  @default(now()) @map("opened_at")
+  closedAt       DateTime? @map("closed_at")
+  openingAmount  Decimal   @map("opening_amount") @db.Decimal(14, 2)
+  expectedAmount Decimal?  @map("expected_amount") @db.Decimal(14, 2)
+  actualAmount   Decimal?  @map("actual_amount") @db.Decimal(14, 2)
+  difference     Decimal?  @db.Decimal(14, 2)
+  closingComment String?   @map("closing_comment") @db.VarChar(500)
+  closeEmployeeShifts Boolean @default(false) @map("close_employee_shifts")
+
+  deletedOperations CashShiftDeletedOperation[]
+
+  @@index([cafeId, openedAt])
+  @@map("cash_shifts")
+}
+
+model CashShiftDeletedOperation {
+  id            String           @id
+  cafeId        String           @map("cafe_id")
+  cashShiftId   String           @map("cash_shift_id")
+  sourceKey     String           @map("source_key")
+  kind          FinanceEntryKind
+  amount        Decimal          @db.Decimal(18, 2)
+  category      String?
+  note          String?
+  actorName     String?          @map("actor_name")
+  occurredAt    DateTime         @map("occurred_at")
+  deletedById   String           @map("deleted_by_id")
+  deletedByName String?          @map("deleted_by_name")
+  deletedAt     DateTime         @default(now()) @map("deleted_at")
+  shift         CashShift        @relation(fields: [cashShiftId], references: [id], onDelete: Cascade)
+
+  @@unique([cafeId, sourceKey])
+  @@index([cafeId, cashShiftId, occurredAt], map: "cash_shift_deleted_operations_shift_history_idx")
+  @@map("cash_shift_deleted_operations")
 }
 
 model WaiterShift {
@@ -491,6 +859,7 @@ model ShiftCashReport {
   waiterId    String   @map("waiter_id")
   date        DateTime @db.Date
   cashHanded  Decimal  @default(0) @map("cash_handed") @db.Decimal(10, 2)
+  cashReceivedAt DateTime? @map("cash_received_at")
   updatedById String?  @map("updated_by_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -503,6 +872,11 @@ model ShiftCashReport {
 
 model OrderItem {
   cafeId                  String?            @map("cafe_id")
+  stockSourceLineId String? @map("stock_source_line_id")
+  stockAccountingSnapshot Json? @map("stock_accounting_snapshot")
+  modifierSelections Json? @map("modifier_selections")
+  excludedIngredientIds Json? @map("excluded_ingredient_ids")
+  excludedIngredientNames Json? @map("excluded_ingredient_names")
   id                      String             @id @default(uuid())
   orderId                 String             @map("order_id")
   // nullable: блюдо может быть полностью удалено из меню — позиция остаётся в истории по снимкам.
@@ -516,10 +890,11 @@ model OrderItem {
   dishVoiceSnapshot       String?            @map("dish_voice_snapshot")
   priceSnapshot           Decimal            @map("price_snapshot") @db.Decimal(10, 2)
   quantity                Int                @default(1)
+  refundedQuantity        Int                @default(0) @map("refunded_quantity")
   discountAmount          Decimal            @default(0) @map("discount_amount") @db.Decimal(10, 2)
   finalPrice              Decimal            @map("final_price") @db.Decimal(10, 2)
   status                  OrderItemStatus    @default(new)
-  prepStation             PrepStation        @default(kitchen) @map("prep_station")
+  prepStation             String             @default("kitchen") @map("prep_station")
   comment                 String?
   // «С собой» (навынос) — кухня видит, что позицию нужно упаковать.
   takeaway                Boolean            @default(false)
@@ -536,6 +911,7 @@ model OrderItem {
   setComponents OrderItemSetComponent[]
 
   @@index([orderId])
+  @@index([cafeId, prepStation, status, updatedAt])
   @@index([dishVariantId])
   @@map("order_items")
 }
@@ -590,6 +966,7 @@ model Payment {
   id        String        @id @default(uuid())
   orderId   String        @map("order_id")
   amount    Decimal       @db.Decimal(10, 2)
+  refundedAmount Decimal  @default(0) @map("refunded_amount") @db.Decimal(10, 2)
   method    PaymentMethod
   source    PaymentSource @default(normal)
   status    PaymentStatus @default(paid)
@@ -602,12 +979,70 @@ model Payment {
   @@map("payments")
 }
 
+model OrderRefund {
+  id                    String            @id @default(uuid())
+  cafeId                String?           @map("cafe_id")
+  orderId               String            @map("order_id")
+  itemId                String?           @map("item_id")
+  quantity              Int?
+  reason                String
+  status                OrderRefundStatus @default(pending)
+  amount                Decimal           @db.Decimal(10, 2)
+  items                 Json
+  paymentParts          Json              @map("payment_parts")
+  taxReversals          Json              @map("tax_reversals")
+  quoteVersion          String            @map("quote_version")
+  requestedById         String            @map("requested_by_id")
+  requestedByName       String            @map("requested_by_name")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  decidedById           String?           @map("decided_by_id")
+  decidedByName         String?           @map("decided_by_name")
+  decidedAt             DateTime?         @map("decided_at")
+  fiscalRefundReference String?           @map("fiscal_refund_reference")
+  restockedGoods        Boolean           @default(false) @map("restocked_goods")
+  order                 Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, fiscalRefundReference], map: "order_refunds_fiscal_reference_key")
+  @@index([orderId, createdAt])
+  @@index([cafeId, status, createdAt])
+  @@index([cafeId, status, decidedAt])
+  @@map("order_refunds")
+}
+
+enum OrderItemCancellationStatus {
+  pending
+  approved
+  rejected
+}
+
+model OrderItemCancellationRequest {
+  id              String                      @id @default(uuid())
+  cafeId          String?                     @map("cafe_id")
+  orderId         String                      @map("order_id")
+  itemId          String                      @map("item_id")
+  itemName        String                      @map("item_name")
+  quantity        Int
+  reason          String
+  status          OrderItemCancellationStatus @default(pending)
+  requestedById   String                      @map("requested_by_id")
+  requestedByName String                      @map("requested_by_name")
+  createdAt       DateTime                    @default(now()) @map("created_at")
+  decidedById     String?                     @map("decided_by_id")
+  decidedAt       DateTime?                   @map("decided_at")
+  order           Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, status, createdAt])
+  @@index([orderId])
+  @@map("order_item_cancellation_requests")
+}
+
 model KitchenEvent {
   cafeId      String?          @map("cafe_id")
   id          String           @id @default(uuid())
   orderId     String           @map("order_id")
   orderItemId String?          @map("order_item_id")
   type        KitchenEventType
+  prepStation String?          @map("prep_station")
   reason      String?
   comment     String?
   createdById String           @map("created_by")
@@ -689,6 +1124,10 @@ model AuditLog {
 
 // Настройки заведения (singleton, id = "default"). Этап 8.
 model Settings {
+  taxesEnabled Boolean @default(false) @map("taxes_enabled")
+  useFloorPlan Boolean @default(false) @map("use_floor_plan")
+  cashShiftsEnabled            Boolean @default(false) @map("cash_shifts_enabled")
+  cashHandoverEnabled          Boolean @default(false) @map("cash_handover_enabled")
   waiterOrderPermissions Json? @map("waiter_order_permissions")
   cafeId                       String? @unique @map("cafe_id")
   id                           String  @id @default(uuid())
@@ -699,6 +1138,15 @@ model Settings {
   instagram                    String?
   website                      String?
   receiptText                  String  @default("Спасибо за покупку!") @map("receipt_text")
+  receiptLanguage              String  @default("ru") @map("receipt_language")
+  receiptPrintCafeName         Boolean @default(true) @map("receipt_print_cafe_name")
+  receiptPrintAddress          Boolean @default(true) @map("receipt_print_address")
+  receiptPrintPhone            Boolean @default(true) @map("receipt_print_phone")
+  receiptLogoData              String? @map("receipt_logo_data")
+  roundOrderTotal              Boolean @default(false) @map("round_order_total")
+  telegramStockAlertsEnabled   Boolean @default(false) @map("telegram_stock_alerts_enabled")
+  telegramStockChatId          String? @map("telegram_stock_chat_id")
+  telegramStockAlertState      Json?   @map("telegram_stock_alert_state")
   serviceChargeAmount          Decimal @default(0) @map("service_charge_amount") @db.Decimal(10, 2)
   language                     String  @default("ru") // ru | ky
   payQr                        Boolean @default(true) @map("pay_qr")
@@ -706,7 +1154,10 @@ model Settings {
   payCard                      Boolean @default(true) @map("pay_card")
   qrImageUrl                   String? @map("qr_image_url") // data URL загруженного QR-кода (один на заведение)
   printerConnected             Boolean @default(false) @map("printer_connected")
-  allowNegativeIngredientStock Boolean @default(true) @map("allow_negative_ingredient_stock")
+  receiptPrintRequestsOnly     Boolean @default(false) @map("receipt_print_requests_only")
+  allowNegativeIngredientStock Boolean @default(false) @map("allow_negative_ingredient_stock")
+  warehouseProductionEnabled Boolean @default(false) @map("warehouse_production_enabled")
+  warehouseProcessingEnabled Boolean @default(false) @map("warehouse_processing_enabled")
 
   // Интеграция внешнего сайта/приложения доставки. Полный API-ключ не хранится:
   // только SHA-256 и безопасный префикс для отображения владельцу.
@@ -888,6 +1339,7 @@ model Ingredient {
   unitType          IngredientUnitType @default(count) @map("unit_type")
   displayUnit       String             @default("pcs") @map("display_unit")
   // ВНИМАНИЕ: stock/avgCost/lowStockThreshold хранятся в БАЗОВЫХ единицах (g|ml|pcs).
+  valuationKnown Boolean @default(false) @map("valuation_known")
   stock             Decimal            @default(0) @db.Decimal(14, 3) // в базовых единицах
   avgCost           Decimal            @default(0) @map("avg_cost") @db.Decimal(20, 8) // себестоимость за базовую единицу
   lowStockThreshold Decimal            @default(0) @map("low_stock_threshold") @db.Decimal(14, 3) // база
@@ -895,10 +1347,32 @@ model Ingredient {
   createdAt         DateTime           @default(now()) @map("created_at")
   updatedAt         DateTime           @updatedAt @map("updated_at")
 
+  kind IngredientKind @default(raw)
+  category String?
+  barcode String?
+  supplier String?
+  supplierId String? @map("supplier_id")
+  supplierRecord WarehouseSupplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  processingLosses Json? @map("processing_losses")
+  modifierOptions MenuModifierOption[]
+  processingLines ProcessingLine[]
+  purchaseUnits Json @default("[]") @map("purchase_units")
+  purchaseUnit String? @map("purchase_unit")
+  purchaseFactor Decimal? @map("purchase_factor") @db.Decimal(14, 6)
+  preparationMode String @default("stocked") @map("preparation_mode")
+  directDishes Dish[] @relation("DirectStockIngredient")
+  directVariants DishVariant[] @relation("DirectVariantIngredient")
+  isPrepared    Boolean @default(false) @map("is_prepared")
   recipeItems   RecipeItem[]
   purchaseItems PurchaseItem[]
   movements     StockMovement[]
+  warehouseStock WarehouseStock[]
+  preparationRecipe PreparationRecipe? @relation("PreparedIngredient")
+  preparationInputs PreparationRecipeItem[]
+  warehouseDocumentItems WarehouseDocumentItem[]
 
+  @@index([cafeId, kind])
+  @@index([cafeId, barcode])
   @@map("ingredients")
 }
 
@@ -910,6 +1384,13 @@ model RecipeItem {
   ingredientId String   @map("ingredient_id")
   amount       Decimal  @db.Decimal(14, 3) // количество на 1 порцию в БАЗОВЫХ единицах
   amountUnit   String   @default("pcs") @map("amount_unit") // display-единица, выбранная при вводе
+  fromCommonWarehouse Boolean @default(false) @map("from_common_warehouse")
+  warehouseId String? @map("warehouse_id")
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  processingMethod String? @map("processing_method")
+  variantAmounts Json? @map("variant_amounts")
+  netAmount Decimal? @map("net_amount") @db.Decimal(14, 3)
+  lossPercent Decimal @default(0) @map("loss_percent") @db.Decimal(5, 2)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -922,20 +1403,168 @@ model RecipeItem {
   @@map("recipe_items")
 }
 
+model Warehouse {
+  id String @id @default(uuid())
+  cafeId String @map("cafe_id")
+  name String
+  address String?
+  modifierOptions MenuModifierOption[]
+  processingLines ProcessingLine[]
+  isDefault Boolean @default(false) @map("is_default")
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  stock WarehouseStock[]
+  stationRoutes StationWarehouse[]
+  purchases Purchase[]
+  movements StockMovement[]
+  documents WarehouseDocument[]
+  recipeItems RecipeItem[]
+
+  @@unique([cafeId, name])
+  @@unique([cafeId, id])
+  @@map("warehouses")
+}
+
+model WarehouseStock {
+  cafeId String @map("cafe_id")
+  warehouseId String @map("warehouse_id")
+  ingredientId String @map("ingredient_id")
+  stock Decimal @default(0) @db.Decimal(14, 3)
+  avgCost Decimal @default(0) @map("avg_cost") @db.Decimal(20, 8)
+  valuationKnown Boolean @default(false) @map("valuation_known")
+  warehouse Warehouse @relation(fields: [cafeId, warehouseId], references: [cafeId, id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@id([warehouseId, ingredientId])
+  @@index([cafeId, ingredientId])
+  @@map("warehouse_stock")
+}
+
+model WarehouseDocument {
+  id              String                  @id @default(uuid())
+  cafeId          String                  @map("cafe_id")
+  warehouseId     String                  @map("warehouse_id")
+  kind            WarehouseDocumentKind
+  mode            WarehouseInventoryMode?
+  reason          WarehouseWriteoffReason?
+  note            String?
+  sourceLines     Json?                   @map("source_lines")
+  destinationWarehouseId String? @map("destination_warehouse_id")
+  sourcePurchaseId String? @map("source_purchase_id")
+  requestKey String? @map("request_key")
+  reversedAt DateTime? @map("reversed_at")
+  reversedById String? @map("reversed_by_id")
+  reversedByName String? @map("reversed_by_name")
+  reversalReason String? @map("reversal_reason")
+  status          WarehouseDocumentStatus @default(draft)
+  revision        Int                     @default(0)
+  createdAt       DateTime                @default(now()) @map("created_at")
+  submittedAt     DateTime?               @map("submitted_at")
+  postedAt        DateTime?               @map("posted_at")
+  reopenedAt      DateTime?               @map("reopened_at")
+  countedAt       DateTime?               @map("counted_at")
+  effectiveAt     DateTime?               @map("effective_at")
+  createdById     String                  @map("created_by_id")
+  createdByName   String                  @map("created_by_name")
+  submittedById   String?                 @map("submitted_by_id")
+  submittedByName String?                 @map("submitted_by_name")
+  postedById      String?                 @map("posted_by_id")
+  postedByName    String?                 @map("posted_by_name")
+  warehouse       Warehouse               @relation(fields: [cafeId, warehouseId], references: [cafeId, id], onDelete: Cascade, map: "warehouse_documents_warehouse_fk")
+  items           WarehouseDocumentItem[]
+
+  @@unique([cafeId, id])
+  @@unique([cafeId, requestKey])
+  @@index([cafeId, warehouseId, kind, createdAt], map: "warehouse_documents_cafe_id_warehouse_id_kind_created_at_idx")
+  @@map("warehouse_documents")
+}
+
+model WarehouseDocumentItem {
+  cafeId              String            @map("cafe_id")
+  documentId          String            @map("document_id")
+  ingredientId        String            @map("ingredient_id")
+  name                String
+  unit                String
+  expected            Decimal?          @db.Decimal(14, 3)
+  quantity            Decimal?          @db.Decimal(14, 3)
+  reopenedQuantity    Decimal?          @map("reopened_quantity") @db.Decimal(14, 3)
+  difference          Decimal?          @db.Decimal(14, 3)
+  unitCost            Decimal?          @map("unit_cost") @db.Decimal(20, 8)
+  inventoryGeneration Int?              @map("inventory_generation")
+  document            WarehouseDocument @relation(fields: [cafeId, documentId], references: [cafeId, id], onDelete: Cascade, map: "warehouse_document_items_document_fk")
+  ingredient          Ingredient        @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([documentId, ingredientId])
+  @@index([cafeId, ingredientId])
+  @@map("warehouse_document_items")
+  costKnown Boolean @default(false) @map("cost_known")
+}
+
+model StationWarehouse {
+  cafeId String @map("cafe_id")
+  stationId String @map("station_id")
+  warehouseId String @map("warehouse_id")
+  warehouse Warehouse @relation(fields: [cafeId, warehouseId], references: [cafeId, id], onDelete: Cascade)
+
+  @@id([cafeId, stationId])
+  @@map("station_warehouses")
+}
+
+model PreparationRecipe {
+  cafeId String @map("cafe_id")
+  ingredientId String @id @map("ingredient_id")
+  outputAmount Decimal @map("output_amount") @db.Decimal(14, 3)
+  outputUnit String @map("output_unit")
+  instructions String?
+  ingredient Ingredient @relation("PreparedIngredient", fields: [ingredientId], references: [id], onDelete: Cascade)
+  items PreparationRecipeItem[]
+
+  @@index([cafeId])
+  @@map("preparation_recipes")
+}
+
+model PreparationRecipeItem {
+  cafeId String @map("cafe_id")
+  recipeId String @map("recipe_id")
+  ingredientId String @map("ingredient_id")
+  amount Decimal @db.Decimal(14, 3)
+  unit String
+  netAmount Decimal? @map("net_amount") @db.Decimal(14, 3)
+  lossPercent Decimal @default(0) @map("loss_percent") @db.Decimal(5, 2)
+  processingMethod String? @map("processing_method")
+  recipe PreparationRecipe @relation(fields: [recipeId], references: [ingredientId], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Restrict)
+
+  @@id([recipeId, ingredientId])
+  @@index([cafeId, ingredientId])
+  @@map("preparation_recipe_items")
+}
+
 // Закупка. number — автоинкремент, на фронте показываем как «ЗКП-000142».
 model Purchase {
   cafeId      String?        @map("cafe_id")
   id          String         @id @default(uuid())
   number      Int            @default(autoincrement())
   date        DateTime       @default(now())
+  effectiveAt DateTime?      @map("effective_at")
+  stockPostedAt DateTime?    @map("stock_posted_at")
   supplier    String
+  supplierId String? @map("supplier_id")
+  supplierRecord WarehouseSupplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  requestKey String? @map("request_key")
+  note String?
+  attachments Json?
+  discount Decimal @default(0) @db.Decimal(12, 2)
   totalAmount Decimal        @default(0) @map("total_amount") @db.Decimal(12, 2)
   status      PurchaseStatus @default(draft)
   createdAt   DateTime       @default(now()) @map("created_at")
   updatedAt   DateTime       @updatedAt @map("updated_at")
 
   items PurchaseItem[]
+  warehouseId String? @map("warehouse_id")
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
 
+  @@unique([cafeId, requestKey])
+  @@index([cafeId, warehouseId])
   @@index([status])
   @@index([createdAt])
   @@map("purchases")
@@ -946,11 +1575,18 @@ model PurchaseItem {
   id            String   @id @default(uuid())
   purchaseId    String   @map("purchase_id")
   ingredientId  String   @map("ingredient_id")
+  packageId String? @map("package_id")
+  package WarehousePackage? @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  packageName String? @map("package_name")
+  packageUnit String? @map("package_unit")
+  packageQuantity Decimal? @map("package_quantity") @db.Decimal(14, 6)
+  packageFactor Decimal? @map("package_factor") @db.Decimal(14, 6)
   // Введённые значения (в display-единице) — для отображения документа.
   unit          String   @default("pcs") // display-единица, выбранная при закупке
   quantity      Decimal  @db.Decimal(14, 3) // в display-единице
   purchasePrice Decimal  @map("purchase_price") @db.Decimal(20, 8) // цена за display-единицу
   total         Decimal  @db.Decimal(12, 2)
+  grossTotal Decimal @default(0) @map("gross_total") @db.Decimal(12, 2)
   // Конвертированные значения — основа остатков и себестоимости.
   quantityBase  Decimal  @default(0) @map("quantity_base") @db.Decimal(14, 3) // в базовых единицах
   unitPriceBase Decimal  @default(0) @map("unit_price_base") @db.Decimal(20, 8) // цена за базовую единицу
@@ -965,7 +1601,7 @@ model PurchaseItem {
   @@map("purchase_items")
 }
 
-// Движение склада — неизменяемая запись в журнале остатков.
+// Исходная операция в журнале; расчётные остатки и стоимость обновляются при пересчёте периода.
 model StockMovement {
   cafeId       String?             @map("cafe_id")
   id           String              @id @default(uuid())
@@ -981,14 +1617,193 @@ model StockMovement {
   costAtMoment Decimal             @map("cost_at_moment") @db.Decimal(20, 8) // себестоимость за базовую единицу
   comment      String?
   createdAt    DateTime            @default(now()) @map("created_at")
+  recordedAt   DateTime?           @map("recorded_at")
+  receiptValue Decimal?            @map("receipt_value") @db.Decimal(12, 2)
 
   ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
 
-  @@unique([type, sourceType, sourceId, orderItemId, ingredientId], map: "stock_movements_order_item_once_key")
+  warehouseId String? @map("warehouse_id")
+  warehouse Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  valuationAdjustment Decimal @default(0) @map("valuation_adjustment") @db.Decimal(20, 8)
+  actorId String? @map("actor_id")
+  actorName String? @map("actor_name")
+  reason String?
+  recipeSnapshot Json? @map("recipe_snapshot")
+  saleQuantity Int? @map("sale_quantity")
+  warehouseKey String @default("default") @map("warehouse_key")
+  saleCycle Int @default(0) @map("sale_cycle")
+  saleLineId String? @map("sale_line_id")
+
+  @@unique([type, sourceType, sourceId, orderItemId, ingredientId, saleCycle, warehouseKey], map: "stock_movements_order_item_cycle_key")
+  @@index([cafeId, warehouseId, createdAt])
   @@index([ingredientId])
   @@index([orderItemId])
+  @@index([sourceId, saleLineId])
   @@index([createdAt])
   @@index([type])
   @@index([sourceType])
   @@map("stock_movements")
+  costKnown Boolean @default(false) @map("cost_known")
+  beforeValuationKnown Boolean @default(false) @map("before_valuation_known")
+  valuationKnown Boolean @default(false) @map("valuation_known")
+}
+
+model PreparationBatch {
+  id String @id @default(uuid())
+  cafeId String @map("cafe_id")
+  warehouseId String @map("warehouse_id")
+  ingredientId String @map("ingredient_id")
+  plannedQuantity Decimal @map("planned_quantity") @db.Decimal(14, 3)
+  actualQuantity Decimal @map("actual_quantity") @db.Decimal(14, 3)
+  totalCost Decimal @map("total_cost") @db.Decimal(12, 2)
+  items Json
+  reversedAt DateTime? @map("reversed_at")
+  reverseReason String? @map("reverse_reason")
+  reversedById String? @map("reversed_by_id")
+  producedAt DateTime @default(now()) @map("produced_at")
+  expiresAt DateTime? @map("expires_at")
+  batchNumber String? @map("batch_number")
+  requestKey String @default(uuid()) @map("request_key")
+  @@unique([cafeId, requestKey])
+  @@index([cafeId, ingredientId, producedAt])
+  @@map("preparation_batches")
+  costKnown Boolean @default(false) @map("cost_known")
+}
+
+model RecipeRevision {
+  id String @id @default(uuid())
+  cafeId String? @map("cafe_id")
+  dishId String @map("dish_id")
+  version Int
+  snapshot Json
+  createdAt DateTime @default(now()) @map("created_at")
+  dish Dish @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  @@unique([dishId, version])
+  @@index([cafeId, dishId])
+  @@map("recipe_revisions")
+}
+
+model WarehouseSupplier {
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  id String @id @default(uuid())
+  cafeId String @map("cafe_id")
+  name String
+  address String?
+  taxId String? @map("tax_id")
+  phone String?
+  email String?
+  note String?
+  isActive Boolean @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  ingredients Ingredient[]
+  purchases Purchase[]
+  @@unique([cafeId, name])
+  @@index([cafeId, isActive])
+  @@map("warehouse_suppliers")
+}
+
+model WarehousePackage {
+  id String @id @default(uuid())
+  cafeId String @map("cafe_id")
+  name String
+  unit String
+  unitType IngredientUnitType @map("unit_type")
+  quantity Decimal @db.Decimal(14,6)
+  quantityBase Decimal @map("quantity_base") @db.Decimal(14,3)
+  isActive Boolean @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  purchases PurchaseItem[]
+  @@unique([cafeId,name,unitType,quantityBase])
+  @@index([cafeId,unitType,isActive])
+  @@map("warehouse_packages")
+}
+
+model ProcessingDocument {
+  id String @id @default(uuid())
+  cafeId String @map("cafe_id")
+  date DateTime @default(now())
+  note String?
+  requestKey String? @map("request_key")
+  status String @default("draft")
+  revision Int @default(0)
+  totalCost Decimal @default(0) @map("total_cost") @db.Decimal(20,8)
+  hasUnknownCost Boolean @default(false) @map("has_unknown_cost")
+  createdAt DateTime @default(now()) @map("created_at")
+  createdById String @map("created_by_id")
+  createdByName String @map("created_by_name")
+  postedAt DateTime? @map("posted_at")
+  postedById String? @map("posted_by_id")
+  postedByName String? @map("posted_by_name")
+  reversedAt DateTime? @map("reversed_at")
+  reversedById String? @map("reversed_by_id")
+  reversedByName String? @map("reversed_by_name")
+  reverseReason String? @map("reverse_reason")
+  cafe Cafe @relation(fields: [cafeId], references: [id], onDelete: Cascade)
+  lines ProcessingLine[]
+  @@unique([cafeId,id])
+  @@unique([cafeId,requestKey])
+  @@index([cafeId,date])
+  @@map("processing_documents")
+}
+
+model ProcessingLine {
+  id String @id @default(uuid())
+  cafeId String @map("cafe_id")
+  documentId String @map("document_id")
+  direction String
+  ingredientId String @map("ingredient_id")
+  warehouseId String @map("warehouse_id")
+  name String
+  warehouseName String @map("warehouse_name")
+  quantity Decimal @db.Decimal(14,3)
+  unit String
+  unitCost Decimal @default(0) @map("unit_cost") @db.Decimal(20,8)
+  lineCost Decimal @default(0) @map("line_cost") @db.Decimal(20,8)
+  costSharePercent Decimal @default(0) @map("cost_share_percent") @db.Decimal(7,4)
+  sortOrder Int @default(0) @map("sort_order")
+  document ProcessingDocument @relation(fields:[cafeId,documentId],references:[cafeId,id],onDelete:Cascade)
+  ingredient Ingredient @relation(fields:[ingredientId],references:[id],onDelete:Restrict)
+  warehouse Warehouse @relation(fields:[cafeId,warehouseId],references:[cafeId,id],onDelete:Restrict)
+  @@unique([documentId,direction,ingredientId,warehouseId])
+  @@index([cafeId,ingredientId])
+  @@map("processing_lines")
+  costKnown Boolean @default(false) @map("cost_known")
+}
+
+model MenuModifierGroup {
+  id String @id @default(uuid())
+  cafeId String? @map("cafe_id")
+  dishId String @map("dish_id")
+  name String
+  minSelections Int @default(0) @map("min_selections")
+  maxSelections Int? @map("max_selections")
+  sortOrder Int @default(0) @map("sort_order")
+  dish Dish @relation(fields:[dishId],references:[id],onDelete:Cascade)
+  options MenuModifierOption[]
+  @@index([cafeId,dishId])
+  @@map("menu_modifier_groups")
+}
+
+model MenuModifierOption {
+  id String @id @default(uuid())
+  cafeId String? @map("cafe_id")
+  groupId String @map("group_id")
+  name String
+  price Decimal @default(0) @db.Decimal(10,2)
+  ingredientId String? @map("ingredient_id")
+  amount Decimal @default(0) @db.Decimal(14,3)
+  amountUnit String @default("pcs") @map("amount_unit")
+  fromCommonWarehouse Boolean @default(false) @map("from_common_warehouse")
+  warehouseId String? @map("warehouse_id")
+  maxQuantity Int @default(1) @map("max_quantity")
+  isActive Boolean @default(true) @map("is_active")
+  sortOrder Int @default(0) @map("sort_order")
+  group MenuModifierGroup @relation(fields:[groupId],references:[id],onDelete:Cascade)
+  ingredient Ingredient? @relation(fields:[ingredientId],references:[id],onDelete:Restrict)
+  warehouse Warehouse? @relation(fields:[warehouseId],references:[id],onDelete:Restrict)
+  @@index([cafeId,groupId])
+  @@map("menu_modifier_options")
 }

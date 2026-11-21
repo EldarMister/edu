@@ -1,12 +1,18 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 import type { EmployeePermissions } from '../permissions';
+import type { Workspace, WorkspaceAccess } from '../workspace-access';
 
 export interface AuthUser {
   id: string;
   role: string;
+  identityRole?: string;
+  workspace?: Workspace;
+  access?: WorkspaceAccess;
   name: string;
   phone: string;
   cafeId: string | null;
+  prepStation?: string | null;
+  positionId?: string | null;
   /** Итоговые права доступа (дефолты по роли + сохранённые). */
   permissions: EmployeePermissions;
 }

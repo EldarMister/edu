@@ -1,230 +1,239 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { setAudioRecording, unlockAudio } from '@/lib/audio';
+import { createPttCapture } from './liveAudio';
+import { createPttOpusEncoder, isPttOpusCodec, PTT_OPUS_PROFILES } from './opusAudio';
 import { playPttCue } from './sounds';
-import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
+import { createPttBatcher } from './sequencedAudio';
+import { startRadioInput } from './radioAudioGate';
+import { PTT_EVENTS, type PttChannel, type PttDeniedPayload, type PttOpusCodec } from './types';
 
-type Ack = { ok: boolean; reason?: string };
+type Socket = ReturnType<typeof getSocket>;
+type Ack = { ok: boolean; reason?: string; talkId?: string; sequenced?: boolean; codec?: PttOpusCodec };
+type Transmission = {
+  talkId: string;
+  batcher?: ReturnType<typeof createPttBatcher>;
+  releaseInput: () => void;
+  cue: AbortController;
+  channel: PttChannel;
+  socket: Socket;
+  stream?: MediaStream;
+  capture?: Awaited<ReturnType<typeof createPttCapture>>;
+  encoder?: Awaited<ReturnType<typeof createPttOpusEncoder>>;
+  requested: boolean;
+  granted: boolean;
+  released: boolean;
+  pendingFrames: ArrayBuffer[];
+};
 
-function pickMimeType() {
-  if (MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4';
-  if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
-  if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
-  return '';
+// Keep up to 4 s of 20 ms capture frames while the channel grant is pending.
+const MAX_PENDING_FRAMES = 200;
+
+function stopTracks(stream?: MediaStream) {
+  stream?.getTracks().forEach((track) => track.stop());
 }
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const value = typeof reader.result === 'string' ? reader.result : '';
-      const comma = value.indexOf(',');
-      resolve(comma >= 0 ? value.slice(comma + 1) : value);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('Не удалось прочитать аудио'));
-    reader.readAsDataURL(blob);
-  });
+function releaseChannel({ socket, channel, talkId }: Transmission) {
+  if (socket.connected) socket.emit(PTT_EVENTS.STOP_TALK, { channel, talkId });
 }
 
-function socketAck(event: string, payload: unknown): Promise<Ack> {
+function requestChannel({ socket, channel, talkId }: Transmission): Promise<Ack> {
   return new Promise((resolve) => {
-    getSocket().timeout(5000).emit(event, payload, (error: Error | null, ack: Ack | undefined) =>
+    socket.timeout(3500).emit(PTT_EVENTS.START_TALK, { channel, talkId, codec: 'opus', preferHq: true, sequenced: true }, (error: Error | null, ack?: Ack) =>
       resolve(error ? { ok: false, reason: 'timeout' } : ack ?? { ok: false }));
   });
 }
 
 export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
   const [talking, setTalking] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [deniedReason, setDeniedReason] = useState<string | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const activeRef = useRef(false);
-  const holdRef = useRef(false);
-  const startingRef = useRef(false);
-  const finishingRef = useRef(false);
-  const channelHeldRef = useRef(false);
+  const attemptRef = useRef<Transmission | null>(null);
 
-  const cleanupStream = useCallback(() => {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
+  const finish = useCallback(() => {
+    const attempt = attemptRef.current;
+    if (!attempt) return;
+    attemptRef.current = null;
+    attempt.cue.abort();
+    attempt.releaseInput();
+    stopTracks(attempt.stream);
+    attempt.capture?.close();
+    attempt.encoder?.close();
     setAudioRecording(false);
+    setStarting(false);
+    setTalking(false);
+    if (attempt.requested) releaseChannel(attempt);
   }, []);
 
-  const releaseChannel = useCallback(() => {
-    getSocket().emit(PTT_EVENTS.STOP_TALK, { channel });
-    if (channelHeldRef.current) {
-      channelHeldRef.current = false;
-      void playPttCue('end');
+  const complete = useCallback(async (attempt: Transmission) => {
+    try {
+      attempt.encoder?.flush();
+      if (attempt.batcher) {
+        const frames = attempt.batcher.flush();
+        const response = await attempt.socket.timeout(4500).emitWithAck(PTT_EVENTS.STOP_TALK, {
+          channel: attempt.channel, talkId: attempt.talkId, frames,
+        });
+        if (!response?.ok) throw new Error('Incomplete radio transmission');
+        attempt.requested = false;
+      }
+    } catch {
+      if (attemptRef.current === attempt) setDeniedReason('Не удалось передать конец фразы. Повторите последние слова');
     }
-  }, [channel]);
+    if (attemptRef.current === attempt) finish();
+  }, [finish]);
 
-  // Telegram-модель: запись идёт единым куском, пока держат кнопку. На отпускании
-  // останавливаем рекордер — его onstop собирает цельный файл, отправляет его
-  // одним эвентом ptt_audio_message и только затем освобождает канал.
   const stop = useCallback(() => {
-    holdRef.current = false;
-    if (!activeRef.current) {
-      if (streamRef.current) cleanupStream();
+    const attempt = attemptRef.current;
+    if (!attempt || attempt.released) return;
+    if (!attempt.capture) {
+      finish();
       return;
     }
-    activeRef.current = false;
+
+    attempt.released = true;
+    stopTracks(attempt.stream);
+    attempt.stream = undefined;
+    setStarting(false);
     setTalking(false);
-    const recorder = recorderRef.current;
-    recorderRef.current = null;
-    if (recorder && recorder.state !== 'inactive') {
-      finishingRef.current = true;
-      try {
-        recorder.stop();
-        // Release the microphone before iOS can suspend the page/onstop callback.
-        cleanupStream();
-      } catch {
-        finishingRef.current = false;
-        cleanupStream();
-        releaseChannel();
-      }
-    } else {
-      cleanupStream();
-      releaseChannel();
-    }
-  }, [releaseChannel, cleanupStream]);
+    const capture = attempt.capture;
+    void capture.flush().then((flushed) => {
+      if (attemptRef.current !== attempt) return;
+      if (!flushed) setDeniedReason('Не удалось передать конец фразы. Повторите последние слова');
+      capture.close();
+      attempt.capture = undefined;
+      attempt.releaseInput();
+      if (attempt.granted) void complete(attempt);
+      else setAudioRecording(false);
+    });
+  }, [complete, finish]);
 
   const start = useCallback(async () => {
-    if (!enabled || activeRef.current || startingRef.current || finishingRef.current) return false;
-    unlockAudio();
-    holdRef.current = true;
+    if (!enabled || attemptRef.current) return false;
     setDeniedReason(null);
+    unlockAudio();
 
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setDeniedReason('Микрофон недоступен');
-      holdRef.current = false;
+    const socket = getSocket();
+    if (!socket.connected) {
+      setDeniedReason('Рация подключается. Попробуйте ещё раз');
+      return false;
+    }
+    if (!navigator.mediaDevices?.getUserMedia || typeof AudioWorkletNode === 'undefined') {
+      setDeniedReason('Микрофон рации недоступен в этом браузере');
       return false;
     }
 
-    startingRef.current = true;
-    const startCue = playPttCue('start');
+    const talkId = crypto.randomUUID();
+    const attempt: Transmission = {
+      talkId, channel, socket, requested: false, granted: false, released: false, pendingFrames: [],
+      cue: new AbortController(), releaseInput: startRadioInput(),
+    };
+    attemptRef.current = attempt;
+    setAudioRecording(true);
+    setStarting(true);
+    const fail = (message: string) => {
+      if (attemptRef.current !== attempt) return;
+      setDeniedReason(message);
+      finish();
+    };
+
     try {
-      setAudioRecording(true);
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true },
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
-      // Keep the stream reachable even if the server or MediaRecorder fails.
-      streamRef.current = stream;
-      if (!holdRef.current) {
-        cleanupStream();
+      if (attemptRef.current !== attempt) {
+        stopTracks(stream);
         return false;
       }
-      const ack = await socketAck(PTT_EVENTS.START_TALK, { channel });
-      if (!ack.ok) {
-        cleanupStream();
-        releaseChannel();
-        setDeniedReason(ack.reason === 'busy' ? 'Канал занят' : 'Не удалось начать разговор');
+      attempt.stream = stream;
+      stream.getAudioTracks()[0]?.addEventListener('ended', () => fail('Микрофон отключился'));
+      const capture = await createPttCapture(stream, (audio) => {
+        if (attemptRef.current !== attempt) return;
+        if (attempt.encoder) {
+          try { attempt.encoder.push(audio); } catch { fail('Не удалось передать звук. Повторите фразу'); }
+        } else if (attempt.pendingFrames.length < MAX_PENDING_FRAMES) attempt.pendingFrames.push(audio);
+        else fail('Канал отвечает слишком долго. Повторите фразу');
+      }, () => fail('Передача прервалась. Попробуйте ещё раз'));
+      if (attemptRef.current !== attempt) {
+        capture.close();
         return false;
       }
-      channelHeldRef.current = true;
-      await startCue;
-      if (!holdRef.current) {
-        cleanupStream();
-        releaseChannel();
+      await playPttCue('start', 'sender', { signal: attempt.cue.signal, timeoutMs: 400 });
+      if (attemptRef.current !== attempt) {
+        capture.close();
+        return false;
+      }
+      attempt.capture = capture;
+      capture.connect();
+      attempt.requested = true;
+      const ack = await requestChannel(attempt);
+      if (attemptRef.current !== attempt) {
+        // The grant may arrive after this attempt was cancelled.
+        if (ack.ok) releaseChannel(attempt);
+        return false;
+      }
+      if (!ack.ok || ack.talkId !== talkId || !isPttOpusCodec(ack.codec)) {
+        fail(ack.reason === 'busy' ? 'Канал занят' : ack.ok ? 'Обновите EDU POS, чтобы включить рацию' : 'Не удалось начать разговор');
         return false;
       }
 
-      const mimeType = pickMimeType();
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      const chunks: BlobPart[] = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data);
-      };
-      recorder.onstop = () => {
-        activeRef.current = false;
-        recorderRef.current = null;
-        setTalking(false);
-        finishingRef.current = true;
-        const blob = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' });
-        cleanupStream();
-        const finishMessage = () => {
-          finishingRef.current = false;
-          releaseChannel();
-        };
-        if (blob.size === 0) {
-          finishMessage();
-          return;
-        }
-        void blobToBase64(blob)
-          .then((chunk) => {
-            if (chunk) {
-              getSocket().emit(PTT_EVENTS.AUDIO_MESSAGE, {
-                channel,
-                mimeType: blob.type || 'audio/webm',
-                chunk,
-              });
-            }
-          })
-          .catch(() => setDeniedReason('Не удалось отправить сообщение'))
-          .finally(finishMessage);
-      };
-      recorder.onerror = () => {
-        setDeniedReason('Запись прервана. Попробуйте ещё раз');
-        // An errored recorder can dispatch onstop later. Do not let that callback
-        // clean up a newer recording or send an incomplete file.
-        recorder.onstop = null;
-        recorder.ondataavailable = null;
-        if (recorder.state !== 'inactive') {
-          try { recorder.stop(); } catch { /* already stopped */ }
-        }
-        holdRef.current = false;
-        activeRef.current = false;
-        finishingRef.current = false;
-        recorderRef.current = null;
-        setTalking(false);
-        cleanupStream();
-        releaseChannel();
-      };
-
-      recorderRef.current = recorder;
-      activeRef.current = true;
+      if (ack.sequenced) {
+        attempt.batcher = createPttBatcher(PTT_OPUS_PROFILES[ack.codec].frameBytes, (firstFrame, audio) => {
+          socket.emit(PTT_EVENTS.AUDIO_BATCH, { channel, talkId, firstFrame, audio });
+        });
+      }
+      const encoder = await createPttOpusEncoder(talkId, (packet) => {
+        if (!socket.connected || attemptRef.current !== attempt) return;
+        if (attempt.batcher) attempt.batcher.push(packet);
+        else socket.emit(PTT_EVENTS.AUDIO_PACKET, packet);
+      }, ack.codec);
+      if (attemptRef.current !== attempt) {
+        encoder.close();
+        return false;
+      }
+      attempt.encoder = encoder;
+      attempt.granted = true;
+      for (const audio of attempt.pendingFrames) encoder.push(audio);
+      attempt.pendingFrames.length = 0;
+      if (attempt.released) {
+        if (!attempt.capture) void complete(attempt);
+        return false;
+      }
+      setStarting(false);
       setTalking(true);
-      recorder.start(); // без timeSlice — единая непрерывная запись
       return true;
     } catch (error) {
-      setDeniedReason(error instanceof DOMException && error.name === 'NotAllowedError'
-        ? 'Разрешите доступ к микрофону' : 'Не удалось начать запись');
-      stop();
-      cleanupStream();
-      releaseChannel();
+      fail(error instanceof DOMException && error.name === 'NotAllowedError'
+        ? 'Разрешите доступ к микрофону' : 'Не удалось запустить микрофон рации');
       return false;
-    } finally {
-      startingRef.current = false;
-      if (!activeRef.current) holdRef.current = false;
     }
-  }, [channel, enabled, cleanupStream, stop, releaseChannel]);
+  }, [channel, enabled, complete, finish]);
 
   useEffect(() => {
-    const sock = getSocket();
+    const socket = getSocket();
     const onDenied = (payload: PttDeniedPayload) => {
-      if (payload.channel && payload.channel !== channel) return;
-      // Сервер шлёт talk_denied и на неудачный ptt_join (например, гонка с
-      // аутентификацией сокета) — это не про текущую попытку говорить.
-      if (!holdRef.current && !activeRef.current) return;
-      setDeniedReason(payload.reason === 'busy' ? 'Канал занят' : 'Разговор недоступен');
-      stop();
+      if (!payload.talkId || payload.talkId !== attemptRef.current?.talkId) return;
+      setDeniedReason('Передача прервалась. Повторите фразу');
+      finish();
     };
-    sock.on(PTT_EVENTS.TALK_DENIED, onDenied);
-    return () => {
-      sock.off(PTT_EVENTS.TALK_DENIED, onDenied);
+    const onDisconnect = () => {
+      if (!attemptRef.current) return;
+      setDeniedReason('Связь прервалась. Повторите фразу после подключения');
+      finish();
     };
-  }, [channel, stop]);
+    const onVisibility = () => { if (document.hidden) finish(); };
 
-  useEffect(() => () => stop(), [stop]);
-
-  useEffect(() => {
-    const onVisibility = () => { if (document.hidden) stop(); };
+    socket.on(PTT_EVENTS.TALK_DENIED, onDenied);
+    socket.on('disconnect', onDisconnect);
     document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('pagehide', stop);
+    window.addEventListener('pagehide', finish);
     return () => {
+      socket.off(PTT_EVENTS.TALK_DENIED, onDenied);
+      socket.off('disconnect', onDisconnect);
       document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('pagehide', stop);
+      window.removeEventListener('pagehide', finish);
+      finish();
     };
-  }, [stop]);
+  }, [channel, enabled, finish]);
 
-  return { talking, deniedReason, start, stop };
+  return { talking, starting, deniedReason, start, stop };
 }

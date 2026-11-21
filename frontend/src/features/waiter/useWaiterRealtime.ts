@@ -7,6 +7,7 @@ import { beep } from '@/lib/sound';
 import { displayOrderNumber } from '@/lib/format';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
 import { waiterVoice } from '@/services/waiterVoice';
+import { waiterNotificationSoundEnabled } from '@/services/kitchenVoiceSettings';
 import type { AppNotification, Order, ReceiptPrintRequest } from '@/types';
 import { useReceiptPrint } from './receiptPrint';
 
@@ -55,6 +56,7 @@ function tableNumberVoice(value: unknown): string {
 }
 
 function waiterLocationText(order: Order): string {
+  if (order.source === 'delivery') return 'Доставка.';
   const hall = order.table?.hall?.name?.trim();
   const tableNumber = order.table?.number;
   const tableNumberText =
@@ -183,7 +185,7 @@ export function useWaiterRealtime() {
     const orderNumber = n.orderNumber ? displayOrderNumber(n.orderNumber) : undefined;
     const message = n.orderNumber && orderNumber ? n.message.replace(n.orderNumber, orderNumber) : n.message;
     push({ message, type: n.type ?? 'info', orderId: n.orderId, orderNumber, at: n.at });
-    beep('notify');
+    if (waiterNotificationSoundEnabled(userId)) beep('notify');
   });
 
   useSocketEvent<VoicedOrder>('order:status_changed', (order) => {
@@ -220,11 +222,13 @@ export function useWaiterRealtime() {
   useSocketEvent('tables:updated', invalidateTables);
   // Админ изменил меню/категории/сеты — обновляем меню официанта без перезагрузки.
   useSocketEvent('menu:updated', () => {
+    qc.invalidateQueries({ queryKey: ['dish-modifiers'] });
     qc.invalidateQueries({ queryKey: ['categories'] });
     qc.invalidateQueries({ queryKey: ['dishes'] });
   });
   // Владелец изменил QR, способы оплаты или другие публичные настройки.
   useSocketEvent('settings:updated', () => {
+    void qc.invalidateQueries({ queryKey: ['prep-stations'] });
     qc.invalidateQueries({ queryKey: ['settings'] });
   });
 
@@ -275,7 +279,7 @@ export function useWaiterRealtime() {
         at: new Date().toISOString(),
       });
       st.dismiss();
-      beep('notify');
+      if (waiterNotificationSoundEnabled(userId)) beep('notify');
     }
   });
 
@@ -292,6 +296,6 @@ export function useWaiterRealtime() {
       });
       st.dismiss();
     }
-    beep('notify');
+    if (waiterNotificationSoundEnabled(userId)) beep('notify');
   });
 }

@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent, OrderStatus } from '@/types';
 import type { KitchenTab } from './api';
 import { OrderBadge } from '@/components/StatusBadge';
-import { displayOrderNumber, hallSuffix, timeHM, dateDM, elapsed, orderItemDisplayName } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, timeHM, dateDM, elapsed, orderItemDisplayName, tableLabel } from '@/lib/format';
 import { Spinner } from '@/components/Spinner';
 
 /** Порог «долгого» ожидания, после которого таймер краснеет (сек). */
@@ -12,6 +12,7 @@ const FINAL_ITEM_STATUSES: OrderItemStatus[] = ['rejected', 'cancelled', 'ready'
 const QR_ORDER_COMMENT = 'Заказ из QR-меню';
 
 function kitchenCardBadgeStatus(order: Order, tab: KitchenTab): OrderStatus {
+  if (tab === 'cancelled' || tab === 'rejected') return tab;
   if (tab !== 'ready' || order.status === 'paid') return order.status;
 
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
@@ -46,6 +47,7 @@ export function KitchenOrderCard({
   tab,
   now,
   submitting,
+  readOnly = false,
   pendingItemIds,
   pendingType,
   pendingPartial,
@@ -56,6 +58,7 @@ export function KitchenOrderCard({
   tab: KitchenTab;
   now: number;
   submitting: boolean;
+  readOnly?: boolean;
   /** Блюда заказа с отложенным (ещё не подтверждённым) действием. */
   pendingItemIds: string[];
   pendingType: 'reject' | 'ready' | null;
@@ -70,6 +73,7 @@ export function KitchenOrderCard({
   const waitSec = Math.floor((now - new Date(order.createdAt).getTime()) / 1000);
   const slow = waitSec > SLOW_AFTER && (tab === 'new' || tab === 'in_work');
   const badgeStatus = kitchenCardBadgeStatus(order, tab);
+  const historyAt = order.stationHistoryAt ?? order.createdAt;
   const qrOrder = isQrOrder(order);
   const deliveryOrder = order.source === 'delivery';
   const visibleOrderComment = kitchenOrderComment(order.comment, qrOrder);
@@ -77,7 +81,7 @@ export function KitchenOrderCard({
   // Станции независимы: отказ на баре не блокирует кухню и наоборот.
   const stationRejected = order.items.some((it) => it.status === 'rejected');
   const waitingDecision = order.requiresWaiterDecision && stationRejected;
-  const canSelect = (tab === 'new' || tab === 'in_work') && !waitingDecision;
+  const canSelect = !readOnly && (tab === 'new' || tab === 'in_work') && !waitingDecision;
 
   // «С собой»: если все живые позиции навынос — бейдж на весь заказ, иначе помечаем точечно.
   const liveItems = order.items.filter((it) => it.status !== 'rejected' && it.status !== 'cancelled');
@@ -128,7 +132,7 @@ export function KitchenOrderCard({
       return next.size === prev.size ? prev : next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusById, pendingItemIds]);
+  }, [statusById, pendingItemIds, canSelect]);
 
   function toggle(id: string) {
     setSelected((prev) => {
@@ -318,7 +322,7 @@ export function KitchenOrderCard({
               {order.externalOrderId ? `Внешний заказ ${order.externalOrderId}` : 'Онлайн-заказ'}
             </p>
           ) : (
-            <p className="mt-1 text-[13px] text-text-muted">Стол {order.table.number}{hallSuffix(order.table)}</p>
+            <p className="mt-1 text-[13px] text-text-muted">{tableLabel(order.table)}{hallSuffix(order.table)}</p>
           )}
           {qrOrder && (
             <p className="mt-2 inline-flex rounded-lg bg-warning/10 px-2.5 py-1 text-[12px] font-medium text-warning">
@@ -331,7 +335,7 @@ export function KitchenOrderCard({
             {/* Завершённые/отказанные показываем с датой — их смотрят позже. */}
             {tab === 'new' || tab === 'in_work'
               ? timeHM(order.createdAt)
-              : `${dateDM(order.createdAt)} ${timeHM(order.createdAt)}`}
+              : `${dateDM(historyAt)} ${timeHM(historyAt)}`}
           </p>
           {tab === 'new' || tab === 'in_work' ? (
             <p className={`text-[15px] font-semibold ${slow ? 'text-danger' : 'text-text-secondary'}`}>
@@ -362,7 +366,7 @@ export function KitchenOrderCard({
         </div>
       )}
 
-      {stationRejected && (
+      {stationRejected && (tab === 'new' || tab === 'in_work') && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           <span className="rounded-full bg-danger/10 px-2 py-0.5 text-[11px] font-medium text-danger">
             Частичный отказ
@@ -380,11 +384,14 @@ export function KitchenOrderCard({
         {order.items.map((it) => {
           const itemName = orderItemDisplayName(it);
           const itemComment = kitchenItemComment(it.comment, qrOrder);
+          const historyReason = (tab === 'cancelled' || tab === 'rejected') && it.rejectReason;
           const setParts = it.setComponents ?? [];
           const isSet = setParts.length > 0;
           const header = (
             <>
               <span className="font-semibold">{it.quantity}×</span> {itemName}
+              {it.modifierSelections?.map((option) => <span key={option.optionId} className="block text-sm text-primary">+ {option.name} ×{option.quantity}</span>)}
+              {it.excludedIngredientNames?.map((name) => <span key={name} className="block text-sm text-warning">Без {name}</span>)}
               {itemComment && <span className="text-warning font-medium"> · {itemComment}</span>}
               {/* Точечная метка «с собой» — только если весь заказ не навынос. */}
               {it.takeaway && !allTakeaway && (
@@ -402,6 +409,7 @@ export function KitchenOrderCard({
             return (
               <li key={it.id} className="text-[15px]">
                 {renderLine(it.id, it.status, header)}
+                {historyReason && <p className="mt-1 text-sm text-text-muted">Причина: {historyReason}</p>}
                 {showStepper && (
                   <div className="mt-1.5 flex items-center gap-2 pl-9 text-[13px] text-text-secondary">
                     <span>Количество:</span>
@@ -494,11 +502,16 @@ export function KitchenOrderCard({
                       </li>
                     ) : (
                       // Каждое блюдо внутри сета — отдельная выбираемая позиция.
-                      <li key={sc.id}>{renderLine(sc.id, sc.status, componentLabel(sc))}</li>
+                      <li key={sc.id}>
+                        {renderLine(sc.id, sc.status, componentLabel(sc))}
+                        {(tab === 'rejected' || tab === 'cancelled') && sc.rejectReason &&
+                          <p className="mt-1 text-sm text-text-muted">Причина: {sc.rejectReason}</p>}
+                      </li>
                     ),
                   )}
                 </ul>
               )}
+              {historyReason && <p className="mt-1 text-sm text-text-muted">Причина: {historyReason}</p>}
             </li>
           );
         })}

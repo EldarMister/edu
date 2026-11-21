@@ -1,0 +1,63 @@
+.warehouse-journal-print {
+  display: none;
+}
+
+@media print {
+  @page warehouse-journal {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  body:has(> .warehouse-journal-print) > :not(.warehouse-journal-print) {
+    display: none !important;
+  }
+
+  .warehouse-journal-print,
+  .warehouse-journal-print * {
+    visibility: visible !important;
+    color: inherit !important;
+  }
+
+  .warehouse-journal-print {
+    display: block;
+    page: warehouse-journal;
+    color: black !important;
+    background: white;
+    color-scheme: light;
+    font: 11px Arial, sans-serif;
+  }
+
+  .warehouse-journal-print h1 {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .warehouse-journal-print .warehouse-report-table {
+    overflow: visible;
+  }
+
+  .warehouse-journal-print table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+    border-collapse: collapse;
+    font-size: 10px;
+  }
+
+  .warehouse-journal-print thead {
+    display: table-header-group;
+  }
+
+  .warehouse-journal-print tr {
+    break-inside: avoid;
+  }
+
+  .warehouse-journal-print th,
+  .warehouse-journal-print td {
+    padding: 5px 6px;
+    border: 1px solid #bbb;
+    overflow-wrap: anywhere;
+    vertical-align: top;
+  }
+}

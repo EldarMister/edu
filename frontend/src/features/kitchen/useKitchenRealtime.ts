@@ -20,7 +20,8 @@ type VoicedOrder = Order & {
 function stationVoice(order: VoicedOrder, station: PrepStation): string | null {
   if (station === 'none') return null;
   if (order.voice?.suppressStations?.[station]) return null;
-  return order.voice?.byStation?.[station] ?? order.voice?.text ?? null;
+  if (order.voice?.byStation) return order.voice.byStation[station] ?? null;
+  return order.items.some((item) => item.prepStation === station) ? order.voice?.text ?? null : null;
 }
 
 /** Подписки кухни: новый заказ — звук + тост + озвучка, любые изменения — обновление списков. */
@@ -54,7 +55,7 @@ export function useKitchenRealtime(station: PrepStation = 'kitchen') {
 
     // 2. Озвучка — текст уже сформирован backend для конкретной станции.
     kitchenVoice.enqueue(text);
-  });
+  }, [station, qc, push]);
 
   useSocketEvent<VoicedOrder>('order:status_changed', (order) => {
     applyOrderStatusToCache(qc, order);
@@ -66,7 +67,7 @@ export function useKitchenRealtime(station: PrepStation = 'kitchen') {
       if (getKitchenVoiceSettings().notificationsEnabled) beep('notify');
       kitchenVoice.enqueue(text);
     }
-  });
+  }, [station, qc]);
 
   // Админ изменил меню/категории/сеты или стоп-лист — кухня и бар обновляют экраны без перезахода.
   useSocketEvent('menu:updated', () => {

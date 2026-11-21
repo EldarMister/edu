@@ -1,33 +1,42 @@
 import { useState } from 'react';
-import { Spinner } from '@/components/Spinner';
-import { api, apiError } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { WorkspacePending } from '../components/WorkspacePending';
+import { usePermissions } from '@/hooks/usePermissions';
+import { apiError } from '@/lib/api';
+import { useSocketEvent } from '@/lib/socket';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useNotifications } from '@/store/notifications';
-import type { Receipt, ReceiptPrintRequest } from '@/types';
-import { printReceipt, type FiscalPrintData } from '@/features/waiter/printReceipt';
+import type { ReceiptPrintRequest } from '@/types';
+import { useOrderReceiptPrinter } from '@/features/waiter/useOrderReceiptPrinter';
 import { usePublicSettings } from '@/features/settings/api';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
-import { useAdminOrderDetails, useReceiptPrintRequests, useReceiptPrintActions, useFiscalizeForPrint } from '../api';
+import { useAdminOrderDetails, useReceiptPrintRequests, useReceiptPrintActions } from '../api';
 
 /** Раздел администратора «Печать чека»: заявки официантов на печать. */
-export function ReceiptPrintsPage() {
+export function ReceiptPrintsPage({ terminal = false }: { terminal?: boolean }) {
+  const { canAction, canEditSection } = usePermissions();
+  const editable = terminal ? canAction('printReceipts') : canEditSection('checks');
   const t = useT();
   const q = useReceiptPrintRequests();
   const { approve, printed, reject } = useReceiptPrintActions();
-  const fiscalizeForPrint = useFiscalizeForPrint();
-  const fiscalEnabled = usePublicSettings().data?.fiscalEnabled ?? false;
+  const print = useOrderReceiptPrinter();
+  const settings = usePublicSettings();
+  const queryClient = useQueryClient();
+  const refresh = () => { if (terminal) void queryClient.invalidateQueries({ queryKey: ['admin', 'receipt-prints'] }); };
+  useSocketEvent('receipt_print_request_created', refresh, [terminal, queryClient]);
+  useSocketEvent('receipt_print_request_approved', refresh, [terminal, queryClient]);
+  useSocketEvent('receipt_print_request_printed', refresh, [terminal, queryClient]);
+  useSocketEvent('receipt_print_request_rejected', refresh, [terminal, queryClient]);
   const push = useNotifications((s) => s.push);
-  const [directPendingId, setDirectPendingId] = useState<string | null>(null);
+  const [printing, setPrinting] = useState(false);
   const [detailsOrderId, setDetailsOrderId] = useState<string | null>(null);
   const detailsQ = useAdminOrderDetails(detailsOrderId);
 
   const items = q.data ?? [];
   const requestedItems = items.filter((item) => (item.source ?? 'request') === 'request');
   const availableItems = items.filter((item) => item.source === 'order');
-  const pendingId =
-    directPendingId ??
-    (approve.isPending ? (approve.variables as string) : printed.isPending ? (printed.variables as string) : reject.isPending ? (reject.variables as string) : null);
+  const busy = !editable || printing || approve.isPending || printed.isPending || reject.isPending;
 
   async function run(
     action: typeof approve | typeof reject,
@@ -43,34 +52,20 @@ export function ReceiptPrintsPage() {
   }
 
   async function approveAndPrint(row: ReceiptPrintRequest, okMessage: string) {
+    if (busy) return;
     const printWindow = window.open('', '_blank', 'width=380,height=640');
+    if (!printWindow) {
+      push({ message: t('Разрешите всплывающие окна и повторите печать.'), type: 'error', at: new Date().toISOString() });
+      return;
+    }
     const isRequest = (row.source ?? 'request') === 'request';
     const alreadyApproved = row.status === 'approved';
     try {
-      setDirectPendingId(isRequest ? null : row.id);
+      setPrinting(true);
       const request = isRequest && !alreadyApproved ? await approve.mutateAsync(row.id) : row;
-      const receipt = (await api.get<Receipt>(`/payments/${request.orderId}/receipt`)).data;
-      const prelim = request.type === 'preliminary';
-
-      // ККМ: фискализируем ДО печати, чтобы напечатать фискальный чек (номер + QR ГНС).
-      // Предчек не фискализируется. Ошибка ККМ не блокирует — печатаем обычный товарный чек.
-      let fiscal: FiscalPrintData | undefined;
-      if (!prelim && fiscalEnabled) {
-        try {
-          const res = await fiscalizeForPrint.mutateAsync(request.orderId);
-          if (res?.success) {
-            fiscal = { receiptNumber: res.fiscalReceiptNumber, sign: res.fiscalSign, qrCode: res.qrCode };
-          } else if (res?.error) {
-            push({ message: `Чек печатается, но ККМ вернул ошибку: ${res.error}`, type: 'error', at: new Date().toISOString() });
-          }
-        } catch (err) {
-          push({ message: `ККМ недоступна: ${apiError(err)}`, type: 'error', at: new Date().toISOString() });
-        }
-      }
-
-      await printReceipt(receipt, printWindow, {
-        preliminary: prelim,
-        fiscal,
+      await print(request.orderId, printWindow, {
+        preliminary: request.type === 'preliminary',
+        requestId: isRequest ? request.id : undefined,
         onAfterPrint: async () => {
           try {
             // Запрос официанта: подтверждаем печать (backend пометит printed; фискализация идемпотентна).
@@ -78,21 +73,19 @@ export function ReceiptPrintsPage() {
             push({ message: okMessage, type: 'success', at: new Date().toISOString() });
           } catch (err) {
             push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
-          } finally {
-            setDirectPendingId(null);
           }
         },
       });
     } catch (err) {
-      printWindow?.close();
-      setDirectPendingId(null);
+      printWindow.close();
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    } finally {
+      setPrinting(false);
     }
   }
 
   const renderRows = (rows: ReceiptPrintRequest[]) =>
     rows.map((r) => {
-      const busy = pendingId === r.id;
       const prelim = r.type === 'preliminary';
       const isRequest = (r.source ?? 'request') === 'request';
       const approved = r.status === 'approved';
@@ -100,11 +93,11 @@ export function ReceiptPrintsPage() {
       return (
         <tr
           key={r.id}
-          className="cursor-pointer border-b border-border last:border-0 hover:bg-background/60"
-          tabIndex={0}
-          role="button"
-          onClick={() => setDetailsOrderId(r.orderId)}
-          onKeyDown={(e) => {
+          className={`border-b border-border last:border-0 ${terminal ? '' : 'cursor-pointer hover:bg-background/60'}`}
+          tabIndex={terminal ? undefined : 0}
+          role={terminal ? undefined : 'button'}
+          onClick={terminal ? undefined : () => setDetailsOrderId(r.orderId)}
+          onKeyDown={terminal ? undefined : (e) => {
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault();
               setDetailsOrderId(r.orderId);
@@ -127,7 +120,7 @@ export function ReceiptPrintsPage() {
               )}
             </div>
           </td>
-          <td className="px-4 py-3 text-text-secondary">{r.tableNumber}</td>
+          <td className="px-4 py-3 text-text-secondary">{r.orderSource === 'delivery' ? t('Доставка') : r.tableNumber}</td>
           <td className="px-4 py-3 text-text-secondary">{r.waiterName}</td>
           <td className="px-4 py-3 font-medium text-text-primary">{money(r.amount)}</td>
           <td className="px-4 py-3 text-text-muted">{timeHM(r.createdAt)}</td>
@@ -147,7 +140,7 @@ export function ReceiptPrintsPage() {
                   <path d="M20 6 9 17l-5-5" />
                 </svg>
               </button>
-              {isRequest && (
+              {isRequest && !approved && (
                 <button
                   aria-label={t('Отклонить')}
                   title={t('Отклонить')}
@@ -207,15 +200,17 @@ export function ReceiptPrintsPage() {
   );
 
   return (
-    <div className="space-y-4">
+    <div className="workspace-stagger space-y-4">
       {q.isLoading ? (
-        <div className="flex justify-center rounded-xl border border-border bg-white py-16 text-primary">
-          <Spinner className="h-7 w-7" />
-        </div>
+        <WorkspacePending />
+      ) : q.isError ? (
+        <p role="alert" className="p-4 text-danger">{apiError(q.error)}</p>
       ) : (
         <>
           {renderSection(t('Запрошенные на печать'), requestedItems, t('Запросов на печать нет'))}
-          {renderSection(t('Доступные к печати'), availableItems, t('Доступных заказов к печати нет'))}
+          {settings.isSuccess && !settings.data.receiptPrintRequestsOnly && renderSection(
+            t('Доступные к печати'), availableItems, t('Доступных заказов к печати нет'),
+          )}
         </>
       )}
       <OrderDetailsModal

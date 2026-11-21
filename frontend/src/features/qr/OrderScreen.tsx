@@ -133,6 +133,9 @@ export function OrderScreen({
           </div>
           <span className="pb-1 text-[13px] text-text-muted">{pluralItems(session.itemCount)}</span>
         </div>
+        {session.rounding && session.rounding.amount > 0 && (
+          <div className="mb-2 text-sm text-text-muted">Округление −{money(session.rounding.amount)}</div>
+        )}
         <button
           type="button"
           onClick={() => setConfirm(true)}

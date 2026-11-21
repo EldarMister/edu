@@ -28,12 +28,12 @@ export interface QrRealtimeHandlers {
 }
 
 /** Подключает гостя к комнате стола и подписывает на realtime-события QR-меню. */
-export function useQrRealtime(tableId: string | undefined, handlers: QrRealtimeHandlers) {
+export function useQrRealtime(tableId: string | undefined, tableToken: string, handlers: QrRealtimeHandlers) {
   useEffect(() => {
     if (!tableId) return;
     const sock = getGuestSocket();
 
-    const join = () => sock.emit('qr:join', { tableId, guestKey: getGuestKey() });
+    const join = () => sock.emit('qr:join', { tableId, tableToken, guestKey: getGuestKey() });
     if (sock.connected) join();
     sock.on('connect', join);
     const heartbeat = window.setInterval(join, 30_000);
@@ -65,5 +65,5 @@ export function useQrRealtime(tableId: string | undefined, handlers: QrRealtimeH
       sock.off('qr:session_closed', onClosed);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tableId]);
+  }, [tableId, tableToken]);
 }

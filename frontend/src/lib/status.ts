@@ -37,15 +37,9 @@ export const ORDER_STATUS: Record<OrderStatus, StatusMeta> = {
   cancelled: { label: 'Отменён', badge: 'bg-slate-100 text-text-muted', dot: 'bg-text-light' },
 };
 
-// ---- Статусы по станциям (кухня / бар) -------------------------------------
-// Глобальный статус заказа один на всех, поэтому он не может одновременно
-// показать «кухня готовит» и «бар только отправлен». Когда позиции заказа живут
-// сразу на двух станциях в разных состояниях, считаем агрегатный статус по
-// каждой станции отдельно и показываем парой бейджей.
+// Статусы станций показывают, какая часть заказа ещё готовится.
 
-type Station = 'kitchen' | 'bar';
-
-const STATION_LABEL: Record<Station, string> = { kitchen: 'Кухня', bar: 'Бар' };
+const STATION_LABEL: Record<string, string> = { kitchen: 'Кухня', bar: 'Бар' };
 
 // Подпись/цвет агрегатного статуса станции. «new» для станции — это «отправлен»
 // (официант отправил, станция ещё не приняла).
@@ -71,32 +65,34 @@ function aggregateStationStatus(items: OrderItem[]): OrderItemStatus | null {
 }
 
 export interface StationStatusChip {
-  station: Station;
+  station: string;
   stationLabel: string;
   label: string;
   badge: string;
 }
 
 /**
- * Чипы статусов по станциям. Возвращаем пару бейджей только когда обе станции
- * (кухня и бар) активны И находятся в РАЗНЫХ статусах — только тогда один
- * глобальный статус вводит в заблуждение (напр. кухня готовит, а бар лишь
- * отправлен). Если станции в одном статусе (оба готовы, оба отправлены,
- * ожидание оплаты и т.п.) — дублировать незачем, отдаём пустой массив, и
- * вызывающий показывает единый глобальный бейдж.
+ * Показываем отдельные бейджи, когда у станций разные статусы.
  */
 export function orderStationStatuses(order: Pick<Order, 'items'>): StationStatusChip[] {
-  const kitchen = aggregateStationStatus(order.items.filter((i) => i.prepStation === 'kitchen'));
-  const bar = aggregateStationStatus(order.items.filter((i) => i.prepStation === 'bar'));
-  // Нужны обе станции, и их статусы должны различаться.
-  if (!kitchen || !bar || kitchen === bar) return [];
-  const chips: StationStatusChip[] = [];
-  for (const [station, agg] of [['kitchen', kitchen], ['bar', bar]] as [Station, OrderItemStatus][]) {
-    const meta = STATION_ITEM_STATUS[agg];
-    if (!meta) return [];
-    chips.push({ station, stationLabel: STATION_LABEL[station], label: meta.label, badge: meta.badge });
+  const grouped = new Map<string, OrderItem[]>();
+  for (const item of order.items) {
+    if (!item.prepStation || item.prepStation === 'none') continue;
+    const items = grouped.get(item.prepStation);
+    if (items) items.push(item);
+    else grouped.set(item.prepStation, [item]);
   }
-  return chips;
+  const statuses = new Set<OrderItemStatus>();
+  const chips: StationStatusChip[] = [];
+  for (const [station, items] of grouped) {
+    const agg = aggregateStationStatus(items);
+    if (!agg) continue;
+    const meta = STATION_ITEM_STATUS[agg];
+    if (!meta) continue;
+    statuses.add(agg);
+    chips.push({ station, stationLabel: STATION_LABEL[station] ?? 'Станция', label: meta.label, badge: meta.badge });
+  }
+  return statuses.size > 1 ? chips : [];
 }
 
 export const REJECT_REASONS = [

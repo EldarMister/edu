@@ -1,13 +1,22 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { queryClient } from '@/lib/queryClient';
 import { App } from './App';
+import { EditorNavigationGuard } from '@/components/EditorNavigationGuard';
 import { installAudioUnlock } from '@/lib/audio';
+import { APP_RELOAD_PARAM } from '@/lib/app-update';
 import './index.css';
+import './theme.css';
 
 installAudioUnlock();
+
+const loadedUrl = new URL(window.location.href);
+if (loadedUrl.searchParams.has(APP_RELOAD_PARAM)) {
+  loadedUrl.searchParams.delete(APP_RELOAD_PARAM);
+  window.history.replaceState(window.history.state, '', loadedUrl);
+}
 
 // Точная высота вьюпорта на мобильных. Обновляется при ресайзе и
 // показе клавиатуры, чтобы нижняя навигация не «уезжала» вниз.
@@ -19,12 +28,12 @@ setAppHeight();
 window.addEventListener('resize', setAppHeight);
 window.visualViewport?.addEventListener('resize', setAppHeight);
 
+const router = createBrowserRouter([{ path: '*', element: <><App /><EditorNavigationGuard /></> }]);
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>
   </React.StrictMode>,
 );

@@ -1,5 +1,5 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
-import { PaymentMethod, Prisma, Settings } from '@prisma/client';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { PaymentMethod, Prisma, Role, Settings } from '@prisma/client';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService, type AuditActor } from '../audit/audit.service';
@@ -8,9 +8,12 @@ import { EventsGateway } from '../realtime/events.gateway';
 import { SERVER_EVENTS } from '../realtime/events';
 import { UpdateSettingsDto } from './dto';
 import { normalizeWaiterOrderPermissions, validateWaiterOrderPermissions } from '../orders/order-policy';
+import { getCafeId } from '../tenant/tenant-context';
 
 /** Человекочитаемые названия полей настроек для описаний аудита. */
 const SETTINGS_FIELD_LABELS: Record<string, string> = {
+  taxesEnabled: 'учёт налогов',
+  receiptPrintRequestsOnly: 'режим списка печати',
   waiterOrderPermissions: 'права официантов на изменение заказов',
   cafeName: 'название кафе',
   address: 'адрес',
@@ -19,12 +22,22 @@ const SETTINGS_FIELD_LABELS: Record<string, string> = {
   instagram: 'instagram',
   website: 'сайт',
   receiptText: 'текст чека',
+  receiptLanguage: 'язык чека',
+  receiptPrintCafeName: 'название заведения в чеке',
+  receiptPrintAddress: 'адрес в чеке',
+  receiptPrintPhone: 'телефон в чеке',
+  receiptLogoData: 'логотип чека',
+  roundOrderTotal: 'округление суммы заказа',
+  telegramStockAlertsEnabled: 'оповещения о складских остатках',
+  telegramStockChatId: 'чат оповещений об остатках',
   serviceChargeAmount: 'обслуживание',
   language: 'язык',
   payQr: 'оплата QR',
   payCash: 'оплата наличными',
   payCard: 'оплата картой',
   allowNegativeIngredientStock: 'минусовой остаток сырья',
+  warehouseProductionEnabled: 'производство полуфабрикатов',
+  warehouseProcessingEnabled: 'переработки',
   deliveryEnabled: 'интеграция доставки',
   queueDisplayEnabled: 'экран очереди заказов',
   queueDisplayMode: 'режим экрана очереди',
@@ -68,6 +81,8 @@ export class SettingsService {
    *  findFirst/create скоупятся по cafeId middleware'ом (контекст тенанта).
    *  Без контекста (фоновые/публичные) — вернётся единственная строка. */
   async ensure(): Promise<Settings> {
+    const cafeId = getCafeId();
+    if (cafeId) return this.prisma.settings.upsert({ where: { cafeId }, create: { cafeId }, update: {} });
     const existing = await this.prisma.settings.findFirst();
     if (existing) return existing;
     return this.prisma.settings.create({ data: {} });
@@ -88,12 +103,15 @@ export class SettingsService {
     const {
       deliveryApiKeyHash: _secretHash,
       deliveryTableId: _internalDeliveryTableId,
+      telegramStockAlertState: _stockAlertState,
       ...safe
     } = s;
     return {
       ...safe,
+      serviceChargeAmount: '0',
       waiterOrderPermissions: normalizeWaiterOrderPermissions(s.waiterOrderPermissions),
       deliveryApiKeyConfigured: !!_secretHash,
+      telegramStockBotConfigured: !!process.env.TELEGRAM_STOCK_BOT_TOKEN?.trim(),
     };
   }
 
@@ -125,12 +143,15 @@ export class SettingsService {
       instagram: s.instagram,
       website: s.website,
       receiptText: s.receiptText,
-      serviceChargeAmount: s.serviceChargeAmount,
+      serviceChargeAmount: '0',
+      roundOrderTotal: s.roundOrderTotal,
       language: s.language,
       paymentMethods: this.enabledMethodsOf(s),
       // Лёгкая версионированная ссылка вместо тяжёлого base64 — кэшируется браузером.
       qrImageUrl: s.qrImageUrl ? `/settings/qr?ref=${encodeURIComponent(s.id)}&v=${s.updatedAt.getTime()}` : null,
       printerConnected: s.printerConnected,
+      receiptPrintRequestsOnly: s.receiptPrintRequestsOnly,
+      useFloorPlan: s.useFloorPlan,
       // Включена ли ККМ — без раскрытия ключей (нужно фронтенду для подсказок/гейтинга).
       fiscalEnabled: !!s.fiscalProvider,
       deliveryEnabled: s.deliveryEnabled,
@@ -166,6 +187,9 @@ export class SettingsService {
   }
 
   async update(dto: UpdateSettingsDto, actor: AuditActor) {
+    if (dto.receiptPrintRequestsOnly !== undefined && actor.role !== Role.OWNER) {
+      throw new ForbiddenException('Режим печати меняет только владелец');
+    }
     const current = await this.ensure();
 
     // Проверка: хотя бы один способ оплаты должен остаться включённым.
@@ -177,15 +201,38 @@ export class SettingsService {
     }
 
     const data: Prisma.SettingsUpdateInput = { ...dto };
+    if (dto.receiptLogoData !== undefined) {
+      if (dto.receiptLogoData && !QR_DATA_URL_RE.test(dto.receiptLogoData)) {
+        throw new BadRequestException('Логотип должен быть файлом PNG, JPG или WEBP');
+      }
+      data.receiptLogoData = dto.receiptLogoData || null;
+    }
+    if (dto.telegramStockChatId !== undefined) {
+      if (dto.telegramStockChatId && !Number.isSafeInteger(Number(dto.telegramStockChatId))) {
+        throw new BadRequestException('Укажите корректный ID чата Telegram');
+      }
+      data.telegramStockChatId = dto.telegramStockChatId || null;
+    }
+    if ((dto.telegramStockAlertsEnabled ?? current.telegramStockAlertsEnabled)
+      && !(dto.telegramStockChatId ?? current.telegramStockChatId)) {
+      throw new BadRequestException('Укажите ID чата Telegram для оповещений об остатках');
+    }
+    if ((dto.telegramStockChatId !== undefined && data.telegramStockChatId !== current.telegramStockChatId)
+      || (dto.telegramStockAlertsEnabled !== undefined && dto.telegramStockAlertsEnabled !== current.telegramStockAlertsEnabled)) {
+      data.telegramStockAlertState = Prisma.DbNull;
+    }
     if (dto.waiterOrderPermissions !== undefined) {
       data.waiterOrderPermissions = validateWaiterOrderPermissions(dto.waiterOrderPermissions);
     }
     if (dto.serviceChargeAmount !== undefined) {
-      data.serviceChargeAmount = new Prisma.Decimal(round2(dto.serviceChargeAmount));
+      data.serviceChargeAmount = new Prisma.Decimal(0);
     }
 
     // ККМ: пустой провайдер = выключить (храним null, чтобы isEnabled() был false).
     if (dto.fiscalProvider !== undefined) {
+      if (['ekassa', 'yakassa'].includes(dto.fiscalProvider) && dto.fiscalProvider !== current.fiscalProvider) {
+        throw new BadRequestException('Для подключения ККМ нужен подтверждённый протокол поставщика');
+      }
       data.fiscalProvider = dto.fiscalProvider.trim() === '' ? null : dto.fiscalProvider;
     }
 
@@ -216,7 +263,7 @@ export class SettingsService {
       if (before === after) continue;
       changed.push(SETTINGS_FIELD_LABELS[key] ?? key);
       // QR-код — это огромный data URL, в журнал пишем только факт изменения.
-      if (key === 'qrImageUrl') {
+      if (key === 'qrImageUrl' || key === 'receiptLogoData') {
         oldValue[key] = before ? 'загружен' : 'нет';
         newValue[key] = after ? 'загружен' : 'удалён';
       } else if (key === 'fiscalEkassaApiKey' || key === 'fiscalYakassaApiKey') {
@@ -303,8 +350,4 @@ export class SettingsService {
     if (s.payCard) list.push(PaymentMethod.card);
     return list;
   }
-}
-
-function round2(n: number): number {
-  return Math.round(n * 100) / 100;
 }

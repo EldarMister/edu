@@ -7,17 +7,52 @@ import {
   IsIn,
   IsNotEmpty,
   IsNumber,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
-import { PurchaseStatus } from '@prisma/client';
+import { IngredientKind, PurchaseStatus } from '@prisma/client';
 
 // ---------- Сырьё (ингредиенты) ----------
 
-export class CreateIngredientDto {
+export class PurchaseUnitDto {
+  @IsString() @IsNotEmpty() @MaxLength(40)
+  name: string;
+  @IsNumber() @Min(0.000001)
+  factor: number;
+}
+
+export class IngredientMetadataDto {
+  @IsOptional() @IsObject()
+  processingLosses?: Record<string, number>;
+  @IsOptional() @IsString() @MaxLength(160)
+  supplierId?: string | null;
+  @IsOptional() @IsArray() @ValidateNested({ each: true }) @Type(() => PurchaseUnitDto)
+  purchaseUnits?: PurchaseUnitDto[];
+  @IsOptional() @IsEnum(IngredientKind)
+  kind?: IngredientKind;
+  @IsOptional() @IsString() @MaxLength(120)
+  category?: string | null;
+  /** Ignored for cached warehouse forms sent by older clients. */
+  @IsOptional() @IsString() @MaxLength(80)
+  barcode?: string | null;
+  @IsOptional() @IsString() @MaxLength(160)
+  supplier?: string | null;
+  @IsOptional() @IsString() @MaxLength(40)
+  purchaseUnit?: string | null;
+  @IsOptional() @IsNumber() @Min(0.000001)
+  purchaseFactor?: number | null;
+  @IsOptional() @IsIn(['stocked', 'virtual'])
+  preparationMode?: 'stocked' | 'virtual';
+}
+
+export class CreateIngredientDto extends IngredientMetadataDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsString() @IsNotEmpty() @MaxLength(120)
   name: string;
 
@@ -36,7 +71,10 @@ export class CreateIngredientDto {
   lowStockThreshold?: number;
 }
 
-export class UpdateIngredientDto {
+export class UpdateIngredientDto extends IngredientMetadataDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsOptional() @IsString() @MaxLength(120)
   name?: string;
 
@@ -56,22 +94,12 @@ export class UpdateIngredientDto {
   isActive?: boolean;
 }
 
-// Ручная корректировка остатка (ТЗ §8): добавить / списать / установить.
-export class AdjustIngredientDto {
-  @IsIn(['add', 'writeoff', 'set'])
-  mode: 'add' | 'writeoff' | 'set';
-
-  @IsNumber() @Min(0)
-  quantity: number;
-
-  // Единица количества (должна быть совместима с типом ингредиента).
-  @IsString() @IsNotEmpty() @MaxLength(16)
-  unit: string;
-}
-
 // ---------- Техкарта ----------
 
 export class CreateRecipeItemDto {
+  @IsOptional() @IsBoolean()
+  fromCommonWarehouse?: boolean;
+
   @IsString() @IsNotEmpty()
   ingredientId: string;
 
@@ -85,6 +113,9 @@ export class CreateRecipeItemDto {
 }
 
 export class UpdateRecipeItemDto {
+  @IsOptional() @IsBoolean()
+  fromCommonWarehouse?: boolean;
+
   @IsNumber() @Min(0)
   amount: number;
 
@@ -95,6 +126,12 @@ export class UpdateRecipeItemDto {
 // ---------- Закупки ----------
 
 export class PurchaseItemInputDto {
+  // Only PATCH may reuse the package snapshot of this exact saved purchase line.
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  purchaseItemId?: string;
+
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  packageId?: string;
   @IsString() @IsNotEmpty()
   ingredientId: string;
 
@@ -102,7 +139,7 @@ export class PurchaseItemInputDto {
   quantity: number;
 
   // Единица закупки (g/kg/ml/l/pcs). Если не задана — display-единица ингредиента.
-  @IsOptional() @IsString() @MaxLength(16)
+  @IsOptional() @IsString() @MaxLength(40)
   unit?: string;
 
   @IsOptional() @IsNumber() @Min(0)
@@ -114,12 +151,31 @@ export class PurchaseItemInputDto {
   total?: number;
 }
 
-export class CreatePurchaseDto {
+export class PurchaseMetadataDto {
+  @IsOptional() @IsString() @MaxLength(35)
+  effectiveAt?: string | null;
+
+  @IsOptional() @IsString() @MaxLength(160)
+  supplierId?: string | null;
+  @IsOptional() @IsString() @MaxLength(2000)
+  note?: string | null;
+  @IsOptional() @IsArray() @IsString({ each: true }) @MaxLength(2000, { each: true })
+  attachments?: string[];
+  @IsOptional() @IsNumber() @Min(0)
+  discount?: number;
+}
+
+export class CreatePurchaseDto extends PurchaseMetadataDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  requestKey?: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsOptional() @IsString()
   date?: string;
 
-  @IsString() @IsNotEmpty() @MaxLength(160)
-  supplier: string;
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  supplier?: string;
 
   @IsArray() @ArrayMinSize(1) @ValidateNested({ each: true })
   @Type(() => PurchaseItemInputDto)
@@ -130,7 +186,19 @@ export class CreatePurchaseDto {
   complete?: boolean;
 }
 
-export class UpdatePurchaseDto {
+export class UpdatePurchaseDto extends PurchaseMetadataDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(40)
+  expectedUpdatedAt?: string;
+
+  @IsOptional() @IsString() @MaxLength(500)
+  correctionReason?: string;
+
+  @IsOptional() @IsBoolean()
+  complete?: boolean;
+
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsOptional() @IsString()
   date?: string;
 
@@ -145,6 +213,9 @@ export class UpdatePurchaseDto {
 // ---------- Фильтры движений ----------
 
 export class MovementsQueryDto {
+  @IsOptional() @IsString() @IsNotEmpty() @MaxLength(160)
+  warehouseId?: string;
+
   @IsOptional() @IsString()
   from?: string;
 

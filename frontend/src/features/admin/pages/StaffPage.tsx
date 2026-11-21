@@ -1,24 +1,38 @@
 import { DatePicker, DateTimePicker } from '@/components/DatePicker';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { Role } from '@/types';
+import { useAssignableStaffPositions } from './positions-api';
+import { positionAccessSummary } from './position-permissions';
+import { parseMoney } from './finance/finance-format';
+import { Link } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
+import { DeleteNameField } from '../components/DeleteNameField';
+import { captureDeletionEffect } from '../components/deletion-effect';
+import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../components/WorkspacePending';
+import { ACCOUNT_PHONE_ERROR, isAccountPhone, PhoneInput } from '@/components/PhoneInput';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { useAuth } from '@/store/auth';
+import { usePreparationStations, usePreparationStationUpdates } from '@/features/kitchen/stations';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
-import { IconPlus, IconEdit, IconTrash } from '../components/icons';
-import { EmployeePermissionsModal } from '../components/EmployeePermissionsModal';
+import { IconPlus, IconEdit, IconTrash, IconEye, IconEyeOff } from '../components/icons';
 import { WaiterOrdersReport } from './WaiterOrdersReport';
+import { WorkspaceHeaderCount } from './WorkspaceHeader';
+import { WorkspaceSearch } from './WorkspaceSearch';
+import { DocumentField } from './warehouse/WarehouseUi';
+import { useEditorRoute } from './warehouse/workspace-route';
 import {
   useShiftReport,
   useSetCashHanded,
   useShiftHistory,
   useShiftHistoryActions,
   useStaff,
+  useReportEmployees,
   useStaffMutations,
   type ShiftReportCategory,
   type ShiftReportRow,
@@ -41,14 +55,6 @@ function IconRefresh(p: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
       <path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-    </svg>
-  );
-}
-function IconKey(p: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={p.className}>
-      <circle cx="7.5" cy="15.5" r="3.5" />
-      <path d="M10 13l8-8m-2 0h3v3" />
     </svg>
   );
 }
@@ -102,8 +108,14 @@ function fromDateTimeLocal(value: string) {
   return value ? new Date(value).toISOString() : null;
 }
 
-export function StaffPage() {
-  const [tab, setTab] = useState<'current' | 'history' | 'waiter-orders'>('current');
+export function StaffPage({ initialTab = 'current' }: { initialTab?: 'current' | 'history' | 'waiter-orders' }) {
+  const stations = usePreparationStations().data ?? [];
+  usePreparationStationUpdates();
+  const stationNames = new Map(stations.map(({ id, name }) => [id, name]));
+  const [tab, setTab] = useState<'current' | 'history' | 'waiter-orders'>(initialTab);
+  const [employeeSearch, setEmployeeSearch] = useState('');
+  const [employeePosition, setEmployeePosition] = useState('');
+  const [employeeStatus, setEmployeeStatus] = useState('');
   const [showWaiterReportBadge, setShowWaiterReportBadge] = useState(
     () => Date.now() < WAITER_REPORT_BADGE_EXPIRES_AT,
   );
@@ -113,21 +125,44 @@ export function StaffPage() {
   const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
   const [editingShift, setEditingShift] = useState<ShiftHistoryRow | null>(null);
   const [closingShift, setClosingShift] = useState<ShiftHistoryRow | null>(null);
-  const [editing, setEditing] = useState<StaffMember | null | 'new'>(null);
-  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
-  const [permissionsFor, setPermissionsFor] = useState<StaffMember | null>(null);
+  const { editor, openEditor, closeEditor } = useEditorRoute();
+  const staffEditor = editor?.type === 'employee' ? editor : null;
+  const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string; confirmation: string } | null>(null);
+  const deleteConfirmed = !!pendingDelete && pendingDelete.confirmation.trim() === pendingDelete.name.trim();
 
-  const reportQ = useShiftReport(date);
-  const historyQ = useShiftHistory(historyFilters);
+  const reportQ = useShiftReport(date, tab === 'current');
+  const historyQ = useShiftHistory(historyFilters, tab === 'history');
   const shiftActions = useShiftHistoryActions();
   const staffQ = useStaff('', '');
+  const reportEmployees = useReportEmployees(tab !== 'current');
+  const currentShiftLoading = reportQ.isFetching || staffQ.isFetching;
   const { remove } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const tr = useT();
   const currentUser = useAuth((s) => s.user);
-  const { isOwner, canAction } = usePermissions();
-  // Кнопку «Права доступа» видит владелец, либо админ с правом editPermissions/manageStaff.
-  const canManagePermissions = isOwner || canAction('editPermissions') || canAction('manageStaff');
+  const { isOwner, canAction, canEditSection } = usePermissions();
+  const canManageStaff = isOwner || canAction('manageStaff');
+  const canEditMember = (member: StaffMember) => canManageStaff && (member.canManage ?? isOwner);
+  const positionKey = (member: StaffMember) => member.positionId ?? member.role;
+  const positionLabel = (member: StaffMember) => member.positionName ?? tr(ROLE_LABEL[member.role]);
+  const positionChoices = new Map((staffQ.data ?? []).map((member) => [positionKey(member), positionLabel(member)]));
+  const employeeTerm = employeeSearch.trim().toLocaleLowerCase('ru');
+  const employeePhone = employeeTerm.replace(/[^\d]/g, '');
+  const looksLikePhone = !!employeePhone && /^[+\d ()-]+$/.test(employeeTerm);
+  const reportRows = reportQ.data ?? [];
+  const memberById = new Map((staffQ.data ?? []).map((member) => [member.id, member]));
+  const reportById = new Map(reportRows.map((row) => [row.waiterId, row]));
+  const rows = (staffQ.data?.map(({ id, name, role }) => ({ id, name, role }))
+    ?? reportRows.map(({ waiterId, name, role }) => ({ id: waiterId, name, role })))
+    .filter(({ id, name }) => {
+      const member = memberById.get(id);
+      return (!employeePosition || (member && positionKey(member) === employeePosition))
+        && (!employeeStatus || member?.isActive === (employeeStatus === 'active'))
+        && (!employeeTerm || name.toLocaleLowerCase('ru').includes(employeeTerm)
+          || (looksLikePhone && (member?.phone ?? '').replace(/[^\d]/g, '').includes(employeePhone)));
+    })
+    .sort((a, b) => Number(b.role === 'WAITER') - Number(a.role === 'WAITER') || a.name.localeCompare(b.name, 'ru'));
+  const editorMember = staffEditor?.id ? memberById.get(staffEditor.id) : undefined;
 
   useEffect(() => {
     if (!showWaiterReportBadge) return;
@@ -140,14 +175,12 @@ export function StaffPage() {
     return () => window.clearTimeout(timer);
   }, [showWaiterReportBadge]);
 
-  const rows = reportQ.data ?? [];
-  const memberById = new Map((staffQ.data ?? []).map((m) => [m.id, m]));
   const staffOptions = useMemo(
     () => [
       { value: '', label: 'Все сотрудники' },
-      ...(staffQ.data ?? []).map((m) => ({ value: m.id, label: m.name })),
+      ...(reportEmployees.data ?? staffQ.data ?? []).map((m) => ({ value: m.id, label: m.name })),
     ],
-    [staffQ.data],
+    [reportEmployees.data, staffQ.data],
   );
   const roleOptions = [
     { value: '', label: 'Все роли' },
@@ -158,9 +191,11 @@ export function StaffPage() {
   ];
 
   async function confirmDelete() {
-    if (!pendingDelete) return;
+    if (!pendingDelete || !deleteConfirmed || remove.isPending) return;
+    const playEffect = captureDeletionEffect(`staff-member-${pendingDelete.id}`);
     try {
       await remove.mutateAsync(pendingDelete.id);
+      playEffect?.();
       push({ message: 'Сотрудник удалён', at: new Date().toISOString() });
       setPendingDelete(null);
     } catch (err) {
@@ -169,12 +204,13 @@ export function StaffPage() {
   }
 
   function exportCsv() {
-    const head = ['Сотрудник', 'Роль', 'Смена', 'Оборот', 'Касса (должен)', 'Касса (сдал)', 'Разница'];
-    const lines = rows.map((r) => {
-      const fin = r.isWaiter
-        ? [shiftLabel(r), r.turnover, r.cashDue, r.cashHanded, r.difference]
+    const head = ['Сотрудник', 'Должность', 'Смена', 'Оборот', 'Касса (должен)', 'Касса (сдал)', 'Разница'];
+    const lines = rows.map(({ id, name, role }) => {
+      const row = reportById.get(id);
+      const fin = row?.isWaiter
+        ? [shiftLabel(row), row.turnover, row.cashDue, row.cashHanded, row.difference]
         : ['—', '—', '—', '—', '—'];
-      return [r.name, tr(ROLE_LABEL[r.role]), ...fin]
+      return [name, memberById.get(id) ? positionLabel(memberById.get(id)!) : tr(ROLE_LABEL[role]), ...fin]
         .map((c) => `"${String(c).replace(/"/g, '""')}"`)
         .join(';');
     });
@@ -221,41 +257,81 @@ export function StaffPage() {
     }
   }
 
+  function renderStaffEditor() {
+    if (!staffEditor) return null;
+    if (!canManageStaff || (editorMember && !canEditMember(editorMember))) {
+      return <Modal open title="Карточка сотрудника" onClose={closeEditor}><p role="alert">Недостаточно прав для редактирования.</p></Modal>;
+    }
+    if (staffEditor.id && !editorMember) {
+      return <Modal open title="Карточка сотрудника" onClose={closeEditor}>
+        {staffQ.isPending ? <Spinner /> : <p role="alert">{staffQ.isError ? apiError(staffQ.error) : 'Сотрудник не найден.'}</p>}
+      </Modal>;
+    }
+    return <StaffEditor key={staffEditor.id ?? 'new'} member={editorMember ?? null} onClose={closeEditor} />;
+  }
+
   return (
     <div className="space-y-3">
-      {tab !== 'waiter-orders' && <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-text-primary">{tr('Персонал и отчет по сменам')}</h2>
-        <div className="flex flex-wrap items-center justify-end gap-2">
+      {tab !== 'waiter-orders' && <div className="flex flex-wrap items-start justify-between gap-3">
+        {tab === 'current' && <>
+          <WorkspaceHeaderCount count={staffQ.data || reportQ.data ? rows.length : undefined} />
+          <div className="flex flex-wrap items-center gap-2">
+            <WorkspaceSearch label="Поиск сотрудников" placeholder="Поиск сотрудников" value={employeeSearch}
+              onChange={setEmployeeSearch} />
+            <Select ariaLabel="Должность" placeholder="Должность" className="h-9" value={employeePosition}
+              onChange={setEmployeePosition} options={[
+                { value: '', label: 'Все должности' }, ...Array.from(positionChoices, ([value, label]) => ({ value, label })),
+              ]} />
+            <Select ariaLabel="Статус сотрудника" placeholder="Статус" className="h-9" value={employeeStatus}
+              onChange={setEmployeeStatus} options={[
+                { value: '', label: 'Все сотрудники' }, { value: 'active', label: 'Активные' }, { value: 'inactive', label: 'Неактивные' },
+              ]} />
+          </div>
+        </>}
+        {tab === 'history' && (
+          <HistoryFilters
+            filters={historyFilters}
+            setFilters={setHistoryFilters}
+            staffOptions={staffOptions}
+            roleOptions={roleOptions}
+            loading={historyQ.isFetching}
+            onRefresh={() => historyQ.refetch()}
+            onExport={exportHistoryCsv}
+          />
+        )}
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {tab === 'current' && (
             <>
               <span className="text-sm text-text-secondary">{tr('Дата смены:')}</span>
               <DatePicker
-                className="h-9 rounded-lg border border-border bg-white px-2.5 text-sm text-text-primary outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+                aria-label={tr('Дата смены')}
+                className="h-9 rounded-lg border border-border bg-white px-2.5 text-sm text-text-primary"
                 value={date}
                 onChange={(value) => setDate(value)}
               />
               <button
-                onClick={() => reportQ.refetch()}
-                disabled={reportQ.isFetching}
+                onClick={() => Promise.all([reportQ.refetch(), staffQ.refetch()])}
+                disabled={currentShiftLoading}
                 className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background"
               >
-                <IconRefresh className={`h-4 w-4 ${reportQ.isFetching ? 'animate-spin' : ''}`} />
+                <IconRefresh className={`h-4 w-4 ${currentShiftLoading ? 'animate-spin' : ''}`} />
                 {tr('Обновить')}
               </button>
               <button
                 onClick={exportCsv}
-                className="h-9 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background"
+                disabled={!reportQ.data || !rows.length}
+                className="h-9 rounded-lg border border-border bg-white px-3 text-sm text-text-secondary transition-colors hover:bg-background disabled:opacity-50"
               >
                 {tr('Экспорт')}
               </button>
             </>
           )}
-          <button
+          {canManageStaff && <button
             className="flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-sm font-medium text-white transition-colors hover:bg-primary-hover"
-            onClick={() => setEditing('new')}
+            onClick={() => openEditor({ type: 'employee' })}
           >
             <IconPlus className="h-4 w-4" /> {tr('Добавить сотрудника')}
-          </button>
+          </button>}
         </div>
       </div>}
 
@@ -278,35 +354,23 @@ export function StaffPage() {
         </TabButton>
       </div>
 
-      {tab === 'history' && (
-        <HistoryFilters
-          filters={historyFilters}
-          setFilters={setHistoryFilters}
-          staffOptions={staffOptions}
-          roleOptions={roleOptions}
-          loading={historyQ.isFetching}
-          onRefresh={() => historyQ.refetch()}
-          onExport={exportHistoryCsv}
-        />
-      )}
-
       {tab === 'waiter-orders' ? (
-        <WaiterOrdersReport staff={staffQ.data ?? []} staffLoading={staffQ.isLoading} />
+        <WaiterOrdersReport staff={reportEmployees.data ?? staffQ.data ?? []} staffLoading={reportEmployees.isLoading && staffQ.isLoading} />
       ) : tab === 'current' ? (
         <div className="overflow-hidden rounded-xl border border-border bg-white">
-        {reportQ.isLoading ? (
-          <div className="flex justify-center py-12 text-primary">
-            <Spinner className="h-6 w-6" />
-          </div>
+        {staffQ.isError && <p role="alert" className="px-4 py-2.5 text-sm text-danger">Список сотрудников не обновился. {apiError(staffQ.error)}</p>}
+        {reportQ.isError && <p role="alert" className="px-4 py-2.5 text-sm text-danger">Отчёт по смене не загрузился. {apiError(reportQ.error)}</p>}
+        {!staffQ.data && !reportQ.data && (staffQ.isLoading || reportQ.isLoading) ? (
+          <WorkspacePending />
         ) : rows.length === 0 ? (
-          <p className="py-12 text-center text-text-muted">{tr('Нет данных за выбранную дату')}</p>
+          <p className="py-12 text-center text-text-muted">Сотрудники не найдены</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] text-sm">
               <thead>
                 <tr className="border-b border-border bg-background/40 text-left text-xs text-text-muted">
                   <th className="w-9 px-2 py-2.5" />
-                  <th className="px-3 py-2.5 font-medium">{tr('Сотрудник / Роль')}</th>
+                  <th className="px-3 py-2.5 font-medium">Сотрудник / Должность</th>
                   <th className="px-3 py-2.5 font-medium">{tr('Смена')}</th>
                   <th className="px-3 py-2.5 text-right font-medium">{tr('Оборот')}</th>
                   <th className="px-3 py-2.5 text-right font-medium">{tr('Касса (должен)')}</th>
@@ -316,63 +380,70 @@ export function StaffPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => {
-                  const isWaiter = row.isWaiter;
-                  const open = isWaiter && expanded === row.waiterId;
+                {rows.map(({ id, name, role }) => {
+                  const row = reportById.get(id);
+                  const waiterReport = row?.isWaiter ? row : undefined;
+                  const open = expanded === id;
+                  const difference = row?.difference ?? 0;
                   const diffCls =
-                    Math.round(row.difference) === 0
+                    Math.round(difference) === 0
                       ? 'text-text-secondary'
-                      : row.difference > 0
+                      : difference > 0
                         ? 'text-success'
                         : 'text-danger';
-                  const member = memberById.get(row.waiterId);
+                  const member = memberById.get(id);
+                  const canEdit = !!member && canEditMember(member);
                   const openEdit = () => {
-                    if (member) setEditing(member);
+                    if (member) openEditor({ type: 'employee', id: member.id });
                   };
                   return (
-                    <FragmentRow key={row.waiterId}>
+                    <FragmentRow key={id}>
                       <tr
-                        className={`border-b border-border ${isWaiter ? 'cursor-pointer hover:bg-background/50' : ''}`}
-                        onClick={isWaiter ? () => setExpanded(open ? null : row.waiterId) : undefined}
+                        id={`staff-member-${id}`}
+                        className={`border-b border-border ${waiterReport ? 'cursor-pointer hover:bg-background/50' : ''}`}
+                        onClick={waiterReport ? () => setExpanded(open ? null : id) : undefined}
                       >
                         <td className="px-2 py-2.5 align-middle">
-                          {isWaiter && <Chevron open={open} />}
+                          {waiterReport && <Chevron open={open} />}
                         </td>
                         <td className="px-3 py-2.5">
-                          <div className="font-medium text-text-primary">{row.name}</div>
-                          <div className="text-xs text-text-muted">{tr(ROLE_LABEL[row.role])}</div>
+                          <div className="font-medium text-text-primary">{name}</div>
+                          <div className="text-xs text-text-muted">
+                            {member?.positionName ?? stationNames.get(member?.prepStation ?? (role === 'KITCHEN' ? 'kitchen' : role === 'BAR' ? 'bar' : '')) ?? tr(ROLE_LABEL[role])}
+                            {member?.isActive === false && ' · Неактивен'}
+                          </div>
                         </td>
-                        {isWaiter ? (
+                        {waiterReport ? (
                           <>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{shiftLabel(row)}</td>
-                            <td className="px-3 py-2.5 text-right font-medium text-text-primary">{money(row.turnover)}</td>
-                            <td className="px-3 py-2.5 text-right text-text-secondary">{money(row.cashDue)}</td>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{shiftLabel(waiterReport)}</td>
+                            <td className="px-3 py-2.5 text-right font-medium text-text-primary">{money(waiterReport.turnover)}</td>
+                            <td className="px-3 py-2.5 text-right text-text-secondary">{money(waiterReport.cashDue)}</td>
                             <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                              <CashHandedCell row={row} date={date} />
+                              <CashHandedCell row={waiterReport} date={date} />
                             </td>
-                            <td className={`px-3 py-2.5 text-right font-medium ${diffCls}`}>{signedMoney(row.difference)}</td>
+                            <td className={`px-3 py-2.5 text-right font-medium ${diffCls}`}>{signedMoney(difference)}</td>
                           </>
                         ) : (
-                          // Кухня / бар / админ / владелец — без официантских финансовых колонок.
-                          <td className="px-3 py-2.5 text-center text-text-light" colSpan={5}>
-                            —
-                          </td>
+                          <>
+                            <td className="whitespace-nowrap px-3 py-2.5 text-text-secondary">{row ? shiftLabel(row) : '—'}</td>
+                            <td className="px-3 py-2.5 text-center text-text-light" colSpan={4}>—</td>
+                          </>
                         )}
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
-                          <div className="flex items-center justify-end gap-1">
+                          {canEdit && <div className="flex items-center justify-end gap-1">
                             <IconBtn title={tr('Изменить')} onClick={openEdit}>
                               <IconEdit className="h-4 w-4" />
                             </IconBtn>
-                            <IconBtn title={tr('Удалить')} danger onClick={() => setPendingDelete({ id: row.waiterId, name: row.name })}>
+                            {id !== currentUser?.id && <IconBtn title={tr('Удалить')} danger onClick={() => setPendingDelete({ id, name, confirmation: '' })}>
                               <IconTrash className="h-4 w-4" />
-                            </IconBtn>
-                          </div>
+                            </IconBtn>}
+                          </div>}
                         </td>
                       </tr>
-                      {open && (
+                      {open && waiterReport && (
                         <tr className="border-b border-border bg-background/30">
                           <td colSpan={8} className="px-3 py-3">
-                            <ShiftDetails row={row} onEdit={openEdit} />
+                            <ShiftDetails row={waiterReport} onEdit={canEdit ? openEdit : undefined} />
                           </td>
                         </tr>
                       )}
@@ -384,34 +455,18 @@ export function StaffPage() {
           </div>
         )}
         </div>
-      ) : (
+      ) : tab === 'history' ? (
         <ShiftHistoryTable
           data={historyQ.data}
           isLoading={historyQ.isLoading}
           expanded={historyExpanded}
           setExpanded={setHistoryExpanded}
-          onEdit={setEditingShift}
-          onClose={setClosingShift}
+          onEdit={canManageStaff ? setEditingShift : undefined}
+          onClose={canEditSection('staff') && canAction('closeShift') ? setClosingShift : undefined}
         />
-      )}
+      ) : null}
 
-      {editing !== null && (
-        <StaffModal
-          member={editing === 'new' ? null : editing}
-          onClose={() => setEditing(null)}
-          onManagePermissions={
-            editing !== 'new' && editing && canManagePermissions && editing.role === 'ADMIN' && editing.id !== currentUser?.id
-              ? () => {
-                  setPermissionsFor(editing);
-                  setEditing(null);
-                }
-              : undefined
-          }
-        />
-      )}
-      {permissionsFor && (
-        <EmployeePermissionsModal member={permissionsFor} onClose={() => setPermissionsFor(null)} />
-      )}
+      {renderStaffEditor()}
       {editingShift && (
         <ShiftEditModal row={editingShift} onClose={() => setEditingShift(null)} />
       )}
@@ -452,7 +507,7 @@ export function StaffPage() {
               </button>
               <button
                 className="btn-danger btn-lg flex-1 font-semibold"
-                disabled={remove.isPending}
+                disabled={remove.isPending || !deleteConfirmed}
                 onClick={confirmDelete}
               >
                 {remove.isPending ? <Spinner /> : 'Удалить'}
@@ -463,6 +518,12 @@ export function StaffPage() {
           <p className="text-sm text-text-secondary">
             Удалить сотрудника «{pendingDelete.name}»?
           </p>
+          <p className="mt-2 text-sm text-text-muted">Сотрудник исчезнет из списка. История смен, заказов и расчётов сохранится. Открытые смены и заказы нужно предварительно закрыть.</p>
+          <div className="mt-3">
+            <DeleteNameField label="Введите имя сотрудника для подтверждения"
+              value={pendingDelete.confirmation} disabled={remove.isPending}
+              onChange={(confirmation) => setPendingDelete({ ...pendingDelete, confirmation })} />
+          </div>
         </Modal>
       )}
     </div>
@@ -512,9 +573,10 @@ function HistoryFilters({
     { value: 'custom', label: 'Произвольный период' },
   ];
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex min-w-0 flex-wrap items-center gap-2" role="group" aria-label="Фильтры истории смен">
       <div className="w-full sm:w-44">
         <Select
+          ariaLabel="Период истории смен"
           className="h-10 w-full"
           value={filters.period}
           onChange={(v) => setFilters((f) => ({ ...f, period: v as ShiftHistoryPeriod }))}
@@ -526,7 +588,8 @@ function HistoryFilters({
           <div className="flex items-center gap-2">
             <span className="text-sm text-text-muted">с</span>
             <DatePicker
-              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+              aria-label="Начало периода"
+              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm"
               value={filters.from ?? ''}
               onChange={(value) => setFilters((f) => ({ ...f, from: value }))}
             />
@@ -534,7 +597,8 @@ function HistoryFilters({
           <div className="flex items-center gap-2">
             <span className="text-sm text-text-muted">по</span>
             <DatePicker
-              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
+              aria-label="Конец периода"
+              className="h-10 rounded-lg border border-border bg-white px-2.5 text-sm"
               value={filters.to ?? ''}
               onChange={(value) => setFilters((f) => ({ ...f, to: value }))}
             />
@@ -607,16 +671,14 @@ function ShiftHistoryTable({
   isLoading: boolean;
   expanded: string | null;
   setExpanded: (id: string | null) => void;
-  onEdit: (row: ShiftHistoryRow) => void;
-  onClose: (row: ShiftHistoryRow) => void;
+  onEdit?: (row: ShiftHistoryRow) => void;
+  onClose?: (row: ShiftHistoryRow) => void;
 }) {
   const rows = data?.items ?? [];
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-white">
       {isLoading ? (
-        <div className="flex justify-center py-12 text-primary">
-          <Spinner className="h-6 w-6" />
-        </div>
+        <WorkspacePending />
       ) : rows.length === 0 ? (
         <p className="py-12 text-center text-text-muted">Нет смен за выбранный период</p>
       ) : (
@@ -656,10 +718,10 @@ function ShiftHistoryTable({
                         <td className="whitespace-nowrap px-3 py-2.5"><ShiftStatusBadge status={row.status} /></td>
                         <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
                           <div className="flex justify-end gap-1">
-                            <IconBtn title="Редактировать время смены" onClick={() => onEdit(row)}>
+                            {onEdit && <IconBtn title="Редактировать время смены" onClick={() => onEdit(row)}>
                               <IconEdit className="h-4 w-4" />
-                            </IconBtn>
-                            {row.status !== 'closed' && (
+                            </IconBtn>}
+                            {row.status !== 'closed' && onClose && (
                               <button
                                 onClick={() => onClose(row)}
                                 className="h-8 rounded-lg border border-warning/30 px-2.5 text-xs font-medium text-warning transition-colors hover:bg-warning/10"
@@ -744,10 +806,14 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
   const push = useNotifications((s) => s.push);
   const [startedAt, setStartedAt] = useState(toDateTimeLocal(row.startedAt));
   const [endedAt, setEndedAt] = useState(toDateTimeLocal(row.endedAt));
+  const [startedAtValid, setStartedAtValid] = useState(true);
+  const [endedAtValid, setEndedAtValid] = useState(true);
   const [openShift, setOpenShift] = useState(!row.endedAt);
   const [error, setError] = useState('');
+  const datesValid = startedAtValid && !!startedAt && (openShift || (endedAtValid && !!endedAt));
 
   async function submit() {
+    if (!datesValid || actions.update.isPending) return;
     setError('');
     try {
       await actions.update.mutateAsync({
@@ -768,7 +834,7 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
       onClose={onClose}
       title="Редактировать время смены"
       footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={actions.update.isPending} onClick={submit}>
+        <button className="btn-primary btn-lg w-full font-semibold" disabled={actions.update.isPending || !datesValid} onClick={submit}>
           {actions.update.isPending ? <Spinner /> : 'Сохранить'}
         </button>
       }
@@ -780,6 +846,8 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
             className="input"
             value={startedAt}
             onChange={(value) => setStartedAt(value)}
+            onValidityChange={setStartedAtValid}
+            required
           />
         </Field>
         <label className="flex items-center gap-2.5 text-sm text-text-secondary">
@@ -792,6 +860,8 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
               className="input"
               value={endedAt}
               onChange={(value) => setEndedAt(value)}
+              onValidityChange={setEndedAtValid}
+              required
             />
           </Field>
         )}
@@ -802,37 +872,53 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
 }
 
 function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
+  const { canAction, canEditSection, canSection } = usePermissions();
   const setCash = useSetCashHanded();
   const [val, setVal] = useState(row.cashHanded ? String(row.cashHanded) : '');
+  const [validationError, setValidationError] = useState('');
   useEffect(() => {
     setVal(row.cashHanded ? String(row.cashHanded) : '');
   }, [row.cashHanded]);
 
   function commit() {
-    const num = Number(val.replace(/\s/g, '').replace(',', '.')) || 0;
+    const num = val.trim() ? parseMoney(val) : 0;
+    if (num === null || num < 0) { setValidationError('Введите сумму от 0'); return; }
+    setValidationError('');
     if (num === row.cashHanded) return;
     setCash.mutate({ waiterId: row.waiterId, date, cashHanded: num });
   }
 
+  if (row.cashHandover) {
+    const label = row.cashReceivedAt || row.cashHanded ? money(row.cashHanded) : '—';
+    return canSection('finance') ? <Link className="text-primary hover:underline" aria-label="Открыть сдачу наличных"
+      to={{ search: new URLSearchParams({
+        section: 'finance', view: 'cashHandover', handoverFrom: date, handoverTo: date, handoverEmployee: row.waiterId,
+      }).toString() }}>{label === '—' ? 'Сдача наличных' : label}</Link> : <span>{label}</span>;
+  }
+  if (!canEditSection('staff') || !canAction('closeShift')) return <span>{money(row.cashHanded)}</span>;
   return (
-    <span className="inline-flex items-center gap-1">
+    <span className="inline-flex flex-wrap items-center justify-end gap-1">
       <input
         inputMode="decimal"
+        aria-label={`Сдано наличных · ${row.name}`}
+        aria-invalid={!!validationError || setCash.isError}
+        disabled={setCash.isPending}
         className="w-20 rounded-lg border border-border bg-white px-2 py-1 text-right text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"
         value={val}
         placeholder="0"
-        onChange={(e) => setVal(e.target.value)}
+        onChange={(e) => { setVal(e.target.value); setValidationError(''); setCash.reset(); }}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur();
         }}
       />
       <span className="text-xs text-text-muted">с</span>
+      {(validationError || setCash.isError) && <span role="alert" className="w-full max-w-40 text-xs text-danger">{validationError || apiError(setCash.error)}</span>}
     </span>
   );
 }
 
-function ShiftDetails({ row, onEdit }: { row: ShiftReportRow; onEdit: () => void }) {
+function ShiftDetails({ row, onEdit }: { row: ShiftReportRow; onEdit?: () => void }) {
   const tr = useT();
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -848,12 +934,12 @@ function ShiftDetails({ row, onEdit }: { row: ShiftReportRow; onEdit: () => void
             ))}
           </div>
         )}
-        <button
+        {onEdit && <button
           onClick={onEdit}
           className="mt-3 text-sm font-medium text-primary hover:underline"
         >
           {tr('Редактировать профиль')}
-        </button>
+        </button>}
       </div>
 
       {/* Правая колонка: отменённые чеки */}
@@ -922,118 +1008,180 @@ function CategoryRow({ cat }: { cat: ShiftReportCategory }) {
   );
 }
 
-function StaffModal({
+function StaffEditor({
   member,
   onClose,
-  onManagePermissions,
 }: {
   member: StaffMember | null;
   onClose: () => void;
-  onManagePermissions?: () => void;
 }) {
   const isEdit = !!member;
   const { create, update } = useStaffMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(member?.name ?? '');
   const [phone, setPhone] = useState(member?.phone ?? '');
-  const [role, setRole] = useState<Role>(member?.role ?? 'WAITER');
+  const [prepStation, setPrepStation] = useState(member?.prepStation ?? '');
+  const [positionId, setPositionId] = useState(member?.positionId ?? '');
+  const currentUser = useAuth((state) => state.user);
+  const { isOwner } = usePermissions();
+  const canAssignPosition = member?.role !== 'OWNER' && (!member || member.id !== currentUser?.id);
+  const positions = useAssignableStaffPositions(canAssignPosition);
+  const stations = usePreparationStations().data ?? [];
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isActive, setIsActive] = useState(member?.isActive ?? true);
   const [error, setError] = useState('');
+  const formId = useId();
+  const saving = useRef(false);
+  const dirty = name !== (member?.name ?? '') || phone !== (member?.phone ?? '') || prepStation !== (member?.prepStation ?? '') ||
+    positionId !== (member?.positionId ?? '') || !!password || isActive !== (member?.isActive ?? true);
+  const { markSaved } = useEditorDirty(dirty);
 
   const pending = create.isPending || update.isPending;
+  const close = () => { if (!saving.current) onClose(); };
+  const assignedPosition = positions.data?.find((position) => position.id === positionId);
+  const role = assignedPosition?.role ?? member?.role;
+  const hasStation = role === 'KITCHEN' || role === 'BAR';
+  const positionOptions = (positions.data ?? []).map(({ id, name }) => ({ value: id, label: name }));
+  if (member?.positionId && !positionOptions.some(({ value }) => value === member.positionId)) {
+    positionOptions.push({ value: member.positionId, label: member.positionName ?? ROLE_LABEL[member.role] });
+  }
+  const validAssignment = !canAssignPosition || (!!assignedPosition && positions.isSuccess);
+  const stationOptions = [
+    { value: '', label: role === 'BAR' ? 'Бар (по умолчанию)' : 'Кухня (по умолчанию)' },
+    ...stations.filter((station) => (station.isActive || station.id === prepStation)
+      && station.id !== (role === 'BAR' ? 'kitchen' : 'bar'))
+      .map(({ id, name, isActive }) => ({ value: id, label: name + (isActive ? '' : ' · неактивна') })),
+  ];
+  if (prepStation && !stationOptions.some(({ value }) => value === prepStation)) {
+    stationOptions.push({ value: prepStation, label: 'Текущая станция · недоступна' });
+  }
 
-  async function onSubmit() {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (saving.current || !validAssignment) return;
+    const phoneChanged = phone !== member?.phone;
+    if (phoneChanged && !isAccountPhone(phone)) {
+      setError(ACCOUNT_PHONE_ERROR);
+      return;
+    }
+    if (!isEdit && !password) {
+      setError('Укажите пароль');
+      return;
+    }
+    saving.current = true;
     setError('');
+    const assignmentPatch = canAssignPosition ? { positionId } : {};
     try {
       if (isEdit) {
         await update.mutateAsync({
           id: member!.id,
           name,
-          phone,
-          role,
+          ...(phoneChanged ? { phone } : {}),
+          ...(hasStation ? { prepStation: prepStation || null } : {}),
           isActive,
+          ...assignmentPatch,
           ...(password ? { password } : {}),
         });
         push({ message: 'Сотрудник обновлён', at: new Date().toISOString() });
       } else {
-        if (!password) {
-          setError('Укажите пароль');
-          return;
-        }
-        await create.mutateAsync({ name, phone, role, password });
+        await create.mutateAsync({ name, phone, password, positionId, ...(hasStation ? { prepStation: prepStation || null } : {}) });
         push({ message: 'Сотрудник добавлен', at: new Date().toISOString() });
       }
+      markSaved();
       onClose();
     } catch (err) {
       setError(apiError(err));
+    } finally {
+      saving.current = false;
     }
   }
 
   return (
     <Modal
       open
-      onClose={onClose}
-      title={isEdit ? 'Изменить сотрудника' : 'Новый сотрудник'}
+      onClose={close}
+      title={isEdit ? 'Карточка сотрудника' : 'Добавление сотрудника'}
+      panelClassName="max-w-3xl"
       footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={pending} onClick={onSubmit}>
-          {pending ? <Spinner /> : isEdit ? 'Сохранить' : 'Добавить'}
-        </button>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="btn-secondary btn-md" disabled={pending} onClick={close}>Отмена</button>
+          <button type="submit" form={formId} className="btn-primary btn-md" disabled={pending || !validAssignment}>
+            {pending ? <Spinner /> : 'Сохранить'}
+          </button>
+        </div>
       }
     >
-      <div className="space-y-3">
-        <Field label="Имя">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label="Телефон">
-          <input className="input" value={phone} onChange={(e) => setPhone(e.target.value)} />
-        </Field>
-        <Field label="Роль">
-          <Select
-            className="h-11 w-full"
-            value={role}
-            onChange={(v) => setRole(v as Role)}
-            options={[
-              { value: 'WAITER', label: 'Официант' },
-              { value: 'KITCHEN', label: 'Кухня' },
-              { value: 'BAR', label: 'Бар' },
-              { value: 'ADMIN', label: 'Администратор' },
-              { value: 'OWNER', label: 'Владелец' },
-            ]}
-          />
-        </Field>
-        <Field label={isEdit ? 'Новый пароль (если менять)' : 'Пароль'}>
-          <input
-            className="input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={isEdit ? 'Оставьте пустым' : 'Пароль для входа'}
-          />
-        </Field>
-        {isEdit && (
-          <label className="flex items-center gap-2.5 pt-1 text-sm text-text-secondary">
-            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
-            Активен (может входить в систему)
-          </label>
-        )}
-        {onManagePermissions && (
-          <button
-            type="button"
-            onClick={onManagePermissions}
-            className="mt-1 flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-white px-3 py-2.5 text-left text-sm font-medium text-text-primary transition-colors hover:border-primary/40 hover:bg-background"
-          >
-            <span className="flex items-center gap-2.5">
-              <IconKey className="h-[18px] w-[18px] text-text-muted" />
-              Права доступа
-            </span>
-            <svg className="h-4 w-4 text-text-light" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m9 6 6 6-6 6" />
-            </svg>
-          </button>
-        )}
-        {error && <p className="text-sm text-danger">{error}</p>}
-      </div>
+      <form id={formId} onSubmit={onSubmit}
+        className="py-2 sm:px-2 sm:[&_.document-field]:grid-cols-[minmax(0,210px)_minmax(0,1fr)]">
+        <fieldset disabled={pending} className="space-y-3">
+          <DocumentField label="Имя и фамилия сотрудника">
+            <input className="input h-9 w-full !rounded-md text-sm" value={name} autoFocus required onChange={(e) => setName(e.target.value)} />
+          </DocumentField>
+          <DocumentField label="Номер телефона">
+            <PhoneInput value={phone} onChange={setPhone} compact />
+          </DocumentField>
+          <DocumentField label="Должность">
+            <Select
+              ariaLabel="Должность"
+              className="h-9 w-full !rounded-md !text-sm"
+              value={member?.role === 'OWNER' ? 'owner' : positionId}
+              placeholder={positions.isPending && canAssignPosition ? 'Загрузка должностей…' : 'Выберите должность'}
+              disabled={!canAssignPosition || positions.isPending || positions.isError}
+              onChange={(value) => {
+                const nextPosition = positions.data?.find(({ id }) => id === value);
+                if (!nextPosition) return;
+                setPositionId(value);
+                if (nextPosition.role !== role) setPrepStation('');
+              }}
+              options={member?.role === 'OWNER' ? [{ value: 'owner', label: 'Владелец' }] : positionOptions}
+            />
+            <p className="mt-2 text-xs text-text-muted">Права доступа и ставки зарплаты задаются в должности и применяются ко всем её сотрудникам.</p>
+            {assignedPosition && <div className="mt-2 rounded-lg bg-background p-3 text-xs">
+              <p className="font-medium">Доступ по должности</p>
+              <p className="mt-1 text-text-secondary">{positionAccessSummary(assignedPosition.role, assignedPosition.permissions)}</p>
+            </div>}
+            {canAssignPosition && positions.isError && <p role="alert" className="mt-2 text-xs text-danger">
+              Не удалось загрузить должности. <button type="button" className="underline" onClick={() => positions.refetch()}>Повторить</button>
+            </p>}
+            {canAssignPosition && positions.isSuccess && !positions.data.length && <p role="status" className="mt-2 text-xs text-text-muted">
+              {isOwner ? 'Сначала создайте должность в разделе «Персонал → Должности».' : 'Нет доступных должностей. Владелец должен настроить права и должности.'}
+            </p>}
+          </DocumentField>
+          {hasStation && <DocumentField label="Станция приготовления">
+            <Select ariaLabel="Станция приготовления" className="h-9 w-full !rounded-md !text-sm" value={prepStation} onChange={setPrepStation}
+              disabled={!canAssignPosition} options={stationOptions} />
+            <p className="mt-2 text-xs text-text-muted">Определяет, заказы какого цеха видит сотрудник.</p>
+          </DocumentField>}
+          <DocumentField label={isEdit ? 'Новый пароль' : 'Пароль для входа'}>
+            <div className="relative">
+              <input
+                className="input h-9 w-full !rounded-md !pr-11 text-sm"
+                aria-label={isEdit ? 'Новый пароль' : 'Пароль для входа'}
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                required={!isEdit}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={isEdit ? 'Оставьте пустым' : 'Пароль для входа'}
+              />
+              <button type="button" className="absolute inset-y-0 right-0 flex w-11 items-center justify-center text-text-muted hover:text-text-primary"
+                aria-label={showPassword ? 'Скрыть пароль' : 'Показать пароль'} onClick={() => setShowPassword((visible) => !visible)}>
+                {showPassword ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
+              </button>
+            </div>
+          </DocumentField>
+          {isEdit && (
+            <DocumentField label="Статус">
+              <label className="flex items-center gap-2.5 pt-2.5 text-sm text-text-secondary">
+                <input type="checkbox" checked={isActive} disabled={member?.id === currentUser?.id} onChange={(e) => setIsActive(e.target.checked)} />
+                Может входить в систему
+              </label>
+            </DocumentField>
+          )}
+        </fieldset>
+        {error && <p role="alert" className="mt-4 text-sm text-danger">{error}</p>}
+      </form>
     </Modal>
   );
 }

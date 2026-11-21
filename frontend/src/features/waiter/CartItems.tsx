@@ -1,3 +1,5 @@
+import { ModifierPicker } from './ModifierPicker';
+import { useCart } from './cart';
 import { useState } from 'react';
 import type { CartLine } from '@/types';
 import { useT } from '@/lib/i18n';
@@ -25,9 +27,12 @@ export function CartLinesList({
   priceWidth?: string;
 }) {
   const t = useT();
+  const [modifierLine, setModifierLine] = useState<CartLine | null>(null);
+  const setLineModifiers = useCart((state) => state.setLineModifiers);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   return (
     <div className="divide-y divide-border">
+      {modifierLine && <ModifierPicker editing line={modifierLine} onClose={() => setModifierLine(null)} onConfirm={(modifiers) => { setLineModifiers(cartLineKey(modifierLine), modifiers); setModifierLine(null); }} />}
       {lines.map((l) => {
         const key = cartLineKey(l);
         const unit = cartLineUnitPrice(l);
@@ -52,11 +57,14 @@ export function CartLinesList({
                     </span>
                   )}
                 </button>
+                {(l.dish.hasModifiers || l.dish.allowIngredientExclusions || !!l.modifierSelections?.length || !!l.excludedIngredientIds?.length) && <button type="button" className="mt-1 text-xs text-primary" disabled={l.editAllowed === false || l.cancelAllowed === false} onClick={() => setModifierLine(l)}>Добавки и состав</button>}
+                {l.modifierSelections?.map((option) => <p key={option.optionId} className="text-sm text-text-secondary">+ {option.name} ×{option.quantity}</p>)}
+                {l.excludedIngredientNames?.map((name) => <p key={name} className="text-sm text-warning">Без {name}</p>)}
                 {/* Компактная метка «С собой» — только если позиция навынос. Тап снимает отметку. */}
-                {l.takeaway && (
+                {l.takeaway && onToggleTakeaway && (
                   <button
                     type="button"
-                    onClick={() => onToggleTakeaway?.(key, false)}
+                    onClick={() => onToggleTakeaway(key, false)}
                     aria-label={t('Снять «с собой»')}
                     className="mt-1 inline-flex items-center gap-1 rounded-md border border-border bg-white px-1.5 py-0.5 text-[11px] leading-none text-text-secondary"
                   >
@@ -118,7 +126,7 @@ export function TakeawaySwitch({ on, onChange }: { on: boolean; onChange: (v: bo
         }`}
       >
         <span
-          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+          className={`inline-block h-4 w-4 transform rounded-full bg-paper shadow transition-transform ${
             on ? 'translate-x-[18px]' : 'translate-x-0.5'
           }`}
         />

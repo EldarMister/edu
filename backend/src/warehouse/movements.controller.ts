@@ -2,10 +2,12 @@ import { Controller, Get, Query } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import { MovementsService } from './movements.service';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 import { MovementsQueryDto } from './dto';
 
 @Controller('admin/warehouse/movements')
 @Roles(Role.ADMIN, Role.OWNER)
+@RequirePermission('sections.warehouse')
 export class MovementsController {
   constructor(private readonly movements: MovementsService) {}
 

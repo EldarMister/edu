@@ -2,36 +2,26 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { InputHTMLAttributes } from 'react';
 import { createPortal } from 'react-dom';
 import { useT } from '@/lib/i18n';
+import {
+  dateToIso as toIso,
+  dateToDisplay as toDisplay,
+  parseDateDisplay as parseDisplay,
+  validateDateInput,
+  isCompleteTime,
+  nextDateTimeForTime,
+} from './date-picker-values';
 import './date-picker.css';
 
 type Props = Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'value' | 'defaultValue' | 'onChange'> & {
   value: string;
   onChange: (value: string) => void;
   openOnMount?: boolean;
+  onValidityChange?: (valid: boolean) => void;
+  containerClassName?: string;
 };
 
 const weekdays = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 const months = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'];
-
-function toIso(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-}
-
-function toDisplay(value: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return '';
-  const [year, month, day] = value.split('-');
-  return `${day}.${month}.${year}`;
-}
-
-function parseDisplay(value: string): Date | null {
-  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value);
-  if (!match) return null;
-  const [, day, month, year] = match.map(Number);
-  const date = new Date(0);
-  date.setFullYear(year, month - 1, day);
-  date.setHours(12, 0, 0, 0);
-  return year > 0 && date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day ? date : null;
-}
 
 function monthFor(value: string): Date {
   const date = parseDisplay(toDisplay(value)) ?? new Date();
@@ -42,11 +32,13 @@ export function CalendarIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M7 3v4M17 3v4M3 10h18" /></svg>;
 }
 
-export function DatePicker({ value, onChange, className = '', min, max, disabled, readOnly, openOnMount = false, onFocus, onBlur, onKeyDown, ...inputProps }: Props) {
+export function DatePicker({ value, onChange, onValidityChange, className = '', containerClassName = '', min, max, disabled, readOnly, openOnMount = false, onFocus, onBlur, onKeyDown, ...inputProps }: Props) {
   const tr = useT();
   const calendarId = useId();
+  const errorId = useId();
   const [open, setOpen] = useState(openOnMount);
   const [typedDate, setTypedDate] = useState(() => toDisplay(value));
+  const [touched, setTouched] = useState(false);
   const [visibleMonth, setVisibleMonth] = useState(() => monthFor(value));
   const [position, setPosition] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -58,8 +50,19 @@ export function DatePicker({ value, onChange, className = '', min, max, disabled
   const minimum = typeof min === 'string' ? min : '';
   const maximum = typeof max === 'string' ? max : '';
   const allowed = (iso: string) => (!minimum || iso >= minimum) && (!maximum || iso <= maximum);
+  const validation = validateDateInput(typedDate, { min: minimum, max: maximum, required: inputProps.required });
+  const error = validation.error === 'required' ? tr('Укажите дату')
+    : validation.error === 'format' ? tr('Введите дату в формате ДД.ММ.ГГГГ')
+    : validation.error === 'min' ? `${tr('Дата не раньше')} ${toDisplay(minimum)}`
+    : validation.error === 'max' ? `${tr('Дата не позже')} ${toDisplay(maximum)}`
+    : '';
+  const visibleError = canEdit && (touched || typedDate.length >= 10) ? error : '';
 
-  useEffect(() => setTypedDate(toDisplay(value)), [value]);
+  useEffect(() => { setTypedDate(toDisplay(value)); setTouched(false); }, [value]);
+  useEffect(() => {
+    inputRef.current?.setCustomValidity(error);
+    onValidityChange?.(!validation.error);
+  }, [error, validation.error, onValidityChange]);
 
   useLayoutEffect(() => {
     if (!open || !canEdit) return;
@@ -146,12 +149,14 @@ export function DatePicker({ value, onChange, className = '', min, max, disabled
     if (next && !allowed(next)) return;
     onChange(next);
     setTypedDate(toDisplay(next));
+    setTouched(false);
     setOpen(false);
     iconRef.current?.focus({ preventScroll: true });
   }
 
   return (
-    <div ref={rootRef} className={`date-picker ${open && canEdit ? 'is-open' : ''} ${className}`}>
+    <div className={`date-picker-field ${containerClassName}`}>
+    <div ref={rootRef} className={`date-picker ${open && canEdit ? 'is-open' : ''} ${visibleError ? 'is-invalid' : ''} ${className}`}>
       <input
         {...inputProps}
         ref={inputRef}
@@ -164,12 +169,14 @@ export function DatePicker({ value, onChange, className = '', min, max, disabled
         aria-haspopup="dialog"
         aria-expanded={open && canEdit}
         aria-controls={open && canEdit ? calendarId : undefined}
+        aria-invalid={validation.error ? true : inputProps['aria-invalid']}
+        aria-describedby={[inputProps['aria-describedby'], visibleError ? errorId : ''].filter(Boolean).join(' ') || undefined}
         disabled={disabled}
         readOnly={readOnly}
         value={typedDate}
         onFocus={(event) => { onFocus?.(event); }}
         onClick={() => showCalendar()}
-        onBlur={(event) => { setTypedDate(toDisplay(value)); onBlur?.(event); }}
+        onBlur={(event) => { setTouched(true); onBlur?.(event); }}
         onKeyDown={(event) => {
           onKeyDown?.(event);
           if (!event.defaultPrevented && event.key === 'ArrowDown') { event.preventDefault(); showCalendar(true); }
@@ -178,10 +185,10 @@ export function DatePicker({ value, onChange, className = '', min, max, disabled
           const next = event.target.value;
           setTypedDate(next);
           if (!next) onChange('');
-          const parsed = parseDisplay(next);
-          if (parsed && allowed(toIso(parsed))) {
-            onChange(toIso(parsed));
-            setVisibleMonth(monthFor(toIso(parsed)));
+          const result = validateDateInput(next, { min: minimum, max: maximum, required: inputProps.required });
+          if (result.value) {
+            onChange(result.value);
+            setVisibleMonth(monthFor(result.value));
           }
         }}
       />
@@ -219,17 +226,85 @@ export function DatePicker({ value, onChange, className = '', min, max, disabled
         </div>, document.body,
       )}
     </div>
+    {visibleError && <span id={errorId} className="date-picker-error" role="alert">{visibleError}</span>}
+    </div>
   );
 }
 
 /** Сохраняет локальное время смены при выборе другой даты. */
-export function DateTimePicker({ value, onChange, className = '', ...props }: Props) {
+export function DateTimePicker({ value, onChange, onValidityChange, className = '', containerClassName = '', ...props }: Props) {
   const tr = useT();
   const [date = '', time = ''] = value.split('T');
+  const [typedTime, setTypedTime] = useState(() => time.slice(0, 5));
+  const [timeTouched, setTimeTouched] = useState(false);
+  const [dateValid, setDateValid] = useState(() => !validateDateInput(toDisplay(date), {
+    required: props.required,
+    min: typeof props.min === 'string' ? props.min.slice(0, 10) : '',
+    max: typeof props.max === 'string' ? props.max.slice(0, 10) : '',
+  }).error);
+  const timeRef = useRef<HTMLInputElement>(null);
+  const timeEdited = useRef(false);
+  const emittedValue = useRef<string | null>(null);
+  const timeErrorId = useId();
+  const timeInvalid = !!(date || props.required || typedTime) && !isCompleteTime(typedTime);
+  const timeError = timeInvalid ? (typedTime ? tr('Введите время в формате ЧЧ:ММ') : tr('Укажите время')) : '';
+
+  useEffect(() => {
+    if (emittedValue.current === value) {
+      emittedValue.current = null;
+      return;
+    }
+    setTypedTime(time.slice(0, 5));
+    setTimeTouched(false);
+    timeEdited.current = false;
+  }, [value, time]);
+  useEffect(() => {
+    timeRef.current?.setCustomValidity(timeError);
+    onValidityChange?.(dateValid && !timeInvalid);
+  }, [dateValid, timeInvalid, timeError, onValidityChange]);
+
+  function emit(next: string) {
+    emittedValue.current = next;
+    onChange(next);
+  }
+
+  function changeDate(next: string) {
+    if (!next) {
+      setTypedTime('');
+      setTimeTouched(false);
+      timeEdited.current = false;
+      emit('');
+      return;
+    }
+    const nextTime = isCompleteTime(typedTime) ? typedTime : isCompleteTime(time.slice(0, 5)) ? time.slice(0, 5) : '00:00';
+    if (!timeEdited.current) setTypedTime(nextTime);
+    emit(`${next}T${nextTime}`);
+  }
+
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <DatePicker {...props} className={`flex-1 ${className}`} value={date} min={typeof props.min === 'string' ? props.min.slice(0, 10) : props.min} max={typeof props.max === 'string' ? props.max.slice(0, 10) : props.max} onChange={(next) => onChange(next ? `${next}T${time || '00:00'}` : '')} />
-      <input type="time" className="input w-[110px]" aria-label={tr('Время')} disabled={props.disabled} readOnly={props.readOnly} value={time.slice(0, 5)} onChange={(event) => { const next = event.target.value; onChange(next ? `${date || toIso(new Date())}T${next}` : ''); }} />
+    <div className="flex min-w-0 flex-wrap items-start gap-2">
+      <DatePicker {...props} containerClassName={`flex-1 ${containerClassName}`} className={`w-full ${className}`} value={date} min={typeof props.min === 'string' ? props.min.slice(0, 10) : props.min} max={typeof props.max === 'string' ? props.max.slice(0, 10) : props.max} onChange={changeDate} onValidityChange={setDateValid} />
+      <input
+        ref={timeRef}
+        type="time"
+        className="input w-[110px]"
+        aria-label={tr('Время')}
+        aria-invalid={timeInvalid || undefined}
+        aria-describedby={timeTouched && timeError ? timeErrorId : undefined}
+        disabled={props.disabled}
+        readOnly={props.readOnly}
+        required={props.required || !!date}
+        value={typedTime}
+        onBlur={() => setTimeTouched(true)}
+        onChange={(event) => {
+          const next = event.target.value;
+          timeEdited.current = true;
+          setTypedTime(next);
+          const committed = nextDateTimeForTime(value, next, toIso(new Date()));
+          if (committed !== undefined && dateValid) emit(committed);
+        }}
+      />
+      {timeTouched && timeError && <p id={timeErrorId} className="date-time-error w-full text-xs text-danger" role="alert">{timeError}</p>}
     </div>
   );
 }

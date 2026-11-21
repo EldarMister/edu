@@ -16,6 +16,24 @@ function load(relativePath, globals = {}, requireMock = require) {
 }
 const flush = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 
+test('waiter signal and speech preferences are independent and saved per account', () => {
+  const storage = new Map();
+  const window = { localStorage: {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  } };
+  const loadSettings = () => load('src/services/kitchenVoiceSettings.ts', { window });
+  const settings = loadSettings();
+  settings.saveWaiterVoiceSettings('first', { notificationsEnabled: false });
+  settings.saveWaiterVoiceSettings('second', { voiceEnabled: false });
+  const restored = loadSettings();
+  assert.equal(restored.waiterNotificationSoundEnabled('first'), false);
+  assert.equal(restored.getWaiterVoiceSettings('first').voiceEnabled, true);
+  assert.equal(restored.waiterNotificationSoundEnabled('second'), true);
+  assert.equal(restored.getWaiterVoiceSettings('second').voiceEnabled, false);
+  assert.equal(restored.getKitchenVoiceSettings().notificationsEnabled, true);
+});
+
 function audioHarness() {
   const elements = [];
   const timers = new Map();
@@ -172,73 +190,83 @@ test('normalized radio WAV preserves sample rate, stereo order, and amplitude he
   for (let i = 44; i < 52; i += 2) assert.ok(Math.abs(bytes.getInt16(i, true)) < 32767);
 });
 
-function senderHarness({ recorderFails = false, pendingPermission = false, pendingAck = false, pendingCue = false } = {}) {
+function senderHarness({ captureFails = false, pendingPermission = false, pendingAck = false, codec = 'opus' } = {}) {
   const events = [];
   const modes = [];
   const cues = [];
-  const effects = [];
   let stopped = 0;
+  let disconnected = 0;
+  let connectedCapture = 0;
   let permissionResolve;
   let ack;
-  let recorder;
+  let onFrame;
+  let tail;
   let constraints;
-  let cueResolve;
-  const stream = { getTracks: () => [{ stop: () => stopped++ }] };
+  const stream = { getTracks: () => [{ stop: () => stopped++ }], getAudioTracks: () => [] };
   const socket = {
+    connected: true,
     emit(event, payload) { events.push({ event, payload }); },
     timeout() { return { emit(event, payload, callback) {
       events.push({ event, payload });
-      ack = callback;
-      if (!pendingAck) callback(null, { ok: true });
+      ack = (error) => callback(error, { ok: true, talkId: payload.talkId, codec });
+      if (!pendingAck) ack(null);
     } }; },
-    on() {}, off() {},
   };
-  class MediaRecorder {
-    static isTypeSupported(type) { return type === 'audio/mp4'; }
-    state = 'inactive';
-    mimeType = 'audio/mp4';
-    constructor() { if (recorderFails) throw new Error('recorder failed'); recorder = this; }
-    start() { this.state = 'recording'; }
-    stop() { this.state = 'inactive'; queueMicrotask(() => this.onstop()); }
-  }
-  const eventsApi = { START_TALK: 'start', STOP_TALK: 'stop', AUDIO_MESSAGE: 'audio', TALK_DENIED: 'denied' };
+  const eventsApi = { START_TALK: 'start', STOP_TALK: 'stop', AUDIO_PACKET: 'frame' };
   const api = load('src/features/ptt/useAudioPttSender.ts', {
-    MediaRecorder, Blob, DOMException, queueMicrotask,
+    DOMException, AbortController, AudioWorkletNode: class {},
+    crypto: { randomUUID: () => '75d0a019-a195-450b-89e4-766c7de92ea5' },
     navigator: { mediaDevices: { getUserMedia(value) {
       constraints = value;
       return pendingPermission ? new Promise((resolve) => { permissionResolve = resolve; }) : Promise.resolve(stream);
     } } },
-    document: { hidden: false, addEventListener() {}, removeEventListener() {} },
-    window: { addEventListener() {}, removeEventListener() {} },
   }, (id) => {
     if (id === 'react') return {
-      useCallback: (fn) => fn, useRef: (current) => ({ current }), useState: (value) => [value, () => {}],
-      useEffect: (effect) => effects.push(effect),
+      useCallback: (fn) => fn, useRef: (current) => ({ current }), useState: (value) => [value, () => {}], useEffect() {},
     };
     if (id === '@/lib/socket') return { getSocket: () => socket };
     if (id === '@/lib/audio') return { unlockAudio() {}, setAudioRecording: (value) => modes.push(value) };
-    if (id === './sounds') return { playPttCue: async (kind) => { cues.push(kind); if (pendingCue && kind === 'start') await new Promise(resolve => { cueResolve = resolve; }); } };
+    if (id === './sounds') return { playPttCue: (kind) => cues.push(kind) };
+    if (id === './sequencedAudio') return {};
+    if (id === './radioAudioGate') return { startRadioInput: () => () => {} };
+    if (id === './liveAudio') return {
+      async createPttCapture(_stream, sendFrame) {
+        if (captureFails) throw new Error('capture failed');
+        onFrame = sendFrame;
+        return {
+          connect() { connectedCapture++; },
+          close() { disconnected++; },
+          async flush() { if (tail) sendFrame(tail); return true; },
+        };
+      },
+    };
+    if (id === './opusAudio') return {
+      isPttOpusCodec: (value) => value === 'opus' || value === 'opus-hq',
+      async createPttOpusEncoder(talkId, transmit, codec) {
+        return { push: (audio) => transmit({ audio, talkId, codec }), flush() {}, close() {} };
+      },
+    };
     if (id === './types') return { PTT_EVENTS: eventsApi };
     throw new Error(id);
   });
   return {
     sender: api.useAudioPttSender('general', true), events, modes, cues,
     get stopped() { return stopped; }, get constraints() { return constraints; },
-    grant: () => permissionResolve(stream), acknowledge: (...args) => ack(...args),
-    get recorder() { return recorder; },
-    finishCue: () => cueResolve(),
+    get disconnected() { return disconnected; }, get connectedCapture() { return connectedCapture; },
+    grant: () => permissionResolve(stream), acknowledge: (error) => ack(error),
+    frame: (audio) => onFrame(audio), tail: (audio) => { tail = audio; },
   };
 }
 
-test('recorder construction failure releases microphone and restores playback mode', async () => {
-  const h = senderHarness({ recorderFails: true });
+test('capture setup failure releases the microphone without taking the channel', async () => {
+  const h = senderHarness({ captureFails: true });
   assert.equal(await h.sender.start(), false);
-  assert.ok(h.stopped > 0);
+  assert.equal(h.stopped, 1);
   assert.equal(h.modes.at(-1), false);
-  assert.ok(h.events.some((event) => event.event === 'stop'));
+  assert.deepEqual(h.events, []);
 });
 
-test('releasing while microphone permission is pending does not start a recording', async () => {
+test('releasing while microphone permission is pending does not start live audio', async () => {
   const h = senderHarness({ pendingPermission: true });
   const starting = h.sender.start();
   h.sender.stop();
@@ -246,10 +274,10 @@ test('releasing while microphone permission is pending does not start a recordin
   assert.equal(await starting, false);
   assert.equal(h.stopped, 1);
   assert.equal(h.modes.at(-1), false);
-  assert.equal(h.events.length, 0);
+  assert.deepEqual(h.events, []);
 });
 
-test('server timeout releases microphone and permits another attempt', async () => {
+test('server timeout releases the microphone and stops the requested transmission', async () => {
   const h = senderHarness({ pendingAck: true });
   const starting = h.sender.start();
   await flush();
@@ -257,34 +285,192 @@ test('server timeout releases microphone and permits another attempt', async () 
   h.acknowledge(new Error('timeout'));
   assert.equal(await starting, false);
   assert.equal(h.stopped, 1);
+  assert.equal(h.disconnected, 1);
   assert.equal(h.modes.at(-1), false);
+  assert.deepEqual(h.events.map(({ event }) => event), ['start', 'stop']);
 });
 
-test('normal radio recording enables mic gain and restores output after stop', async () => {
-  const h = senderHarness();
+test('radio sends binary frames during the press and releases the microphone on stop', async () => {
+  const h = senderHarness({ codec: 'opus-hq' });
   assert.equal(await h.sender.start(), true);
   assert.equal(h.constraints.audio.autoGainControl, true);
-  assert.equal(h.constraints.audio.channelCount, 1);
+  assert.equal(h.constraints.audio.noiseSuppression, true);
+  assert.equal(h.connectedCapture, 1);
+  const audio = new ArrayBuffer(960);
+  h.frame(audio);
+  assert.deepEqual(h.events.map(({ event }) => event), ['start', 'frame']);
+  assert.equal(h.events[0].payload.codec, 'opus');
+  assert.equal(h.events[0].payload.preferHq, true);
+  assert.equal(h.events[1].payload.codec, 'opus-hq');
+  assert.equal(h.events[1].payload.audio, audio);
+  const tail = new ArrayBuffer(960);
+  h.tail(tail);
   h.sender.stop();
-  await flush();
   assert.equal(h.stopped, 1);
+  await flush();
+  h.frame(audio);
+  assert.equal(h.disconnected, 1);
   assert.equal(h.modes.at(-1), false);
-  assert.equal(h.events.at(-1).event, 'stop');
-  assert.deepEqual(h.cues, ['start', 'end']);
+  assert.deepEqual(h.events.map(({ event }) => event), ['start', 'frame', 'frame', 'stop']);
+  assert.equal(h.events[2].payload.audio, tail);
+  assert.equal(h.events[0].payload.talkId, h.events[3].payload.talkId);
+  assert.deepEqual(h.cues, ['start']);
 });
 
-
-test('release during the start cue never opens the recorder and releases the channel once', async () => {
-  const h = senderHarness({ pendingCue: true });
+test('capture keeps the first words during the grant and completes short presses in order', async () => {
+  const h = senderHarness({ pendingAck: true });
   const starting = h.sender.start();
   await flush();
-  assert.equal(h.recorder, undefined);
+  assert.equal(h.connectedCapture, 1);
+  const opening = new ArrayBuffer(960);
+  const tail = new ArrayBuffer(960);
+  h.frame(opening);
+  h.tail(tail);
   h.sender.stop();
-  h.finishCue();
+  assert.equal(h.stopped, 1);
+  await flush();
+  assert.deepEqual(h.events.map(({ event }) => event), ['start']);
+  h.acknowledge(null);
   assert.equal(await starting, false);
-  assert.equal(h.recorder, undefined);
-  assert.deepEqual(h.cues, ['start', 'end']);
-  assert.equal(h.events.filter(e => e.event === 'stop').length, 1);
+  assert.deepEqual(h.events.map(({ event }) => event), ['start', 'frame', 'frame', 'stop']);
+  assert.equal(h.events[1].payload.audio, opening);
+  assert.equal(h.events[1].payload.codec, 'opus');
+  assert.equal(h.events[2].payload.audio, tail);
+  assert.equal(h.disconnected, 1);
+  assert.ok(h.events.every(({ payload }) => payload.talkId === h.events[0].payload.talkId));
+});
+
+test('capture worklet resamples 48 kHz and emits 20 ms PCM frames before the stream ends', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../public/ptt-capture.worklet.js'), 'utf8');
+  const frames = [];
+  let Worklet;
+  vm.runInNewContext(source, {
+    sampleRate: 48000, AudioWorkletProcessor: class { port = { postMessage: (bytes) => frames.push(bytes) }; },
+    registerProcessor: (_, processor) => { Worklet = processor; },
+  });
+  const capture = new Worklet({ processorOptions: { sampleRate: 24000 } });
+  capture.process([[new Float32Array(960).fill(0.25)]]);
+  assert.equal(frames.length, 1);
+  assert.equal(frames[0].byteLength, 960);
+  const frame = new DataView(frames[0]);
+  assert.equal(frame.getInt16(0, true), 8192);
+  assert.equal(frame.getInt16(958, true), 8192);
+  capture.process([[new Float32Array(128).fill(-0.25)]]);
+  capture.port.onmessage({ data: 'flush' });
+  assert.equal(frames.length, 3);
+  assert.equal(frames[2], 'drained');
+  const tail = new DataView(frames[1]);
+  assert.equal(tail.getInt16(0, true), -8192);
+  assert.equal(tail.getInt16(958, true), 0);
+  capture.process([[new Float32Array(1920)]]);
+  assert.equal(frames.length, 3);
+});
+
+test('playback plays the MP3 before each talk and keeps speech continuous through packet bursts', async () => {
+  const played = [];
+  const cues = [];
+  const stopped = [];
+  const startCue = { duration: 0.235 };
+  const ctx = {
+    currentTime: 10, state: 'running', destination: {},
+    async decodeAudioData() { return startCue; },
+    createBuffer(_channels, length, sampleRate) {
+      const samples = new Float32Array(length);
+      return { duration: length / sampleRate, getChannelData: () => samples };
+    },
+    createBufferSource() {
+      return {
+        playbackRate: { value: 1 },
+        connect() {}, disconnect() {},
+        start(at) {
+          const timeline = this.buffer === startCue ? cues : played;
+          timeline.push([at, this.buffer.duration / this.playbackRate.value]);
+        },
+        stop() { stopped.push(this); },
+      };
+    },
+    createOscillator() { return { frequency: {}, connect(node) { return node; }, disconnect() {}, start() {}, stop() {} }; },
+    createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {} }, connect() {}, disconnect() {} }; },
+  };
+  const { PttPlayback } = load('src/features/ptt/liveAudio.ts', {
+    ArrayBuffer, Float32Array,
+    fetch: async (url) => {
+      assert.equal(url, '/sounds/ptt1.mp3');
+      return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    },
+  }, (id) => {
+    if (id === '@/lib/audio') return { getAudioContext: () => ctx };
+    if (id === './sounds') return { PTT_START_SOUND: '/sounds/ptt1.mp3' };
+    if (id === './opusAudio') return load('src/features/ptt/opusAudio.ts');
+    throw new Error(id);
+  });
+  const playback = new PttPlayback();
+  await playback.prepareStartCue();
+  for (let index = 0; index < 24; index++) playback.push(new Float32Array(480), index === 0, 24000);
+  ctx.currentTime = played.at(-1)[0] + 0.025;
+  playback.push(new Float32Array(480), false, 24000);
+  assert.ok(played.at(-1)[0] - ctx.currentTime < 0.02);
+  ctx.currentTime = played.at(-1)[0] + 0.1;
+  playback.push(new Float32Array(480), false, 24000);
+  const resumedAt = played.at(-1)[0];
+  assert.ok(resumedAt > ctx.currentTime + 0.12 && resumedAt <= ctx.currentTime + 0.3);
+  ctx.currentTime += 0.02;
+  playback.push(new Float32Array(480), false, 24000);
+  assert.ok(Math.abs(played.at(-1)[0] - (resumedAt + 0.02)) < 1e-6);
+  playback.endCue();
+  playback.push(new ArrayBuffer(1280), true);
+  assert.equal(played.length, 28);
+  assert.deepEqual(stopped, []);
+  assert.equal(cues.length, 2);
+  assert.ok(cues[0][0] < 10.02);
+  assert.equal(played[0][0], cues[0][0] + startCue.duration);
+  assert.equal(played.at(-1)[0], cues[1][0] + startCue.duration);
+  assert.ok(played.slice(0, 27).every(([, duration]) => duration === 0.02));
+  for (let index = 1; index < played.length; index++) {
+    assert.ok(played[index][0] >= played[index - 1][0] + played[index - 1][1] - 1e-6);
+  }
+});
+
+test('Opus sends both negotiated formats and drains the last samples', async () => {
+  const libopus = await import('libopus-wasm');
+  const radio = load('src/features/ptt/opusAudio.ts', { ArrayBuffer, Uint8Array }, (id) => {
+    if (id === 'libopus-wasm') return libopus;
+    throw new Error(id);
+  });
+  const talkId = '75d0a019-a195-450b-89e4-766c7de92ea5';
+  for (const codec of ['opus', 'opus-hq']) {
+    const packets = [];
+    const highQuality = codec === 'opus-hq';
+    const encoder = await radio.createPttOpusEncoder(talkId, (packet) => packets.push(packet), codec);
+    const decoder = await radio.createPttOpusDecoder(codec);
+    try {
+      const tone = new Int16Array(480).map((_, index) => Math.round(Math.sin(index * Math.PI * 880 / 24000) * 12000));
+      encoder.push(tone.buffer);
+      assert.deepEqual(packets.map((packet) => packet.byteLength), highQuality ? [96] : []);
+      encoder.push(tone.buffer);
+      assert.deepEqual(packets.map((packet) => packet.byteLength), highQuality ? [96, 96] : [76]);
+      const id = radio.pttOpusHeader(talkId);
+      if (!highQuality) {
+        const batch = new Uint8Array(136);
+        batch.set(id);
+        batch.set(new Uint8Array(packets[0]).subarray(16), 16);
+        batch.set(new Uint8Array(packets[0]).subarray(16), 76);
+        assert.equal(radio.pttOpusFrames(batch.buffer, id, codec).length, 2);
+      }
+      encoder.flush();
+      assert.deepEqual(packets.map((packet) => packet.byteLength), highQuality ? [96, 96, 96] : [76, 76]);
+      const frames = packets.flatMap((packet) => radio.pttOpusFrames(packet, id, codec));
+      const decoded = frames.map((frame) => decoder.decodeFloat(frame));
+      assert.equal(decoded[0].length, highQuality ? 480 : 640);
+      assert.ok(decoded[0].some((sample) => Math.abs(sample) > 0.05));
+      assert.ok(decoded.at(-1).subarray(0, 104).some((sample) => Math.abs(sample) > 0.02));
+      assert.equal(radio.pttOpusFrames(packets[0], new Uint8Array(16), codec).length, 0);
+      assert.equal(radio.pttOpusFrames(packets[0], id, highQuality ? 'opus' : 'opus-hq').length, 0);
+    } finally {
+      encoder.close();
+      decoder.free();
+    }
+  }
 });
 
 function cueHarness(mode) {
@@ -330,4 +516,59 @@ test('a stalled cue is stopped within its bound and its timer is cleared', async
   await pending;
   assert.deepEqual(h.calls, ['/sounds/ptt1.mp3', 'stop']);
   assert.equal(h.timers.size, 0);
+});
+
+const sequencedModule = load('src/features/ptt/sequencedAudio.ts', { Uint8Array, Float32Array, ArrayBuffer }, id => {
+  assert.equal(id, './types');
+  return { PTT_EVENTS: {} };
+});
+const settleSequenced = () => new Promise(resolve => setImmediate(resolve));
+
+test('a radio gap is repaired in order and overlapping live frames play only once', async () => {
+  const decodedFrames = [];
+  const played = [];
+  const ended = [];
+  const payload = (firstFrame, samples, senderId = 'other') => ({
+    channel: 'waiters', talkId: 'radio-talk', codec: 'opus-hq', firstFrame, senderId,
+    audio: new Uint8Array(samples).buffer,
+  });
+  const receiver = sequencedModule.createPttStreamReceiver({
+    hears: batch => batch.senderId !== 'me' && batch.channel === 'waiters',
+    openDecoder: () => ({ frameBytes: 1, frameSamples: 1, sampleRate: 24000,
+      decode(frame) { decodedFrames.push(frame[0]); return Float32Array.of(frame[0] / 255); },
+      close() {},
+    }),
+    async sync(id, frame) {
+      assert.equal(id, 'radio-talk');
+      if (frame === 2) return { ok: true, batch: payload(2, [20, 21, 30, 31]) };
+      assert.equal(frame, 6);
+      return { ok: true, finished: true, nextFrame: 8, batch: payload(6, [40, 41]) };
+    },
+    play(batch, samples) { played.push([batch.firstFrame, samples.length]); },
+    end(id) { ended.push(id); },
+  });
+  receiver.batch(payload(0, [200, 201], 'me'));
+  receiver.batch(payload(0, [10, 11]));
+  receiver.batch(payload(4, [30, 31]));
+  await settleSequenced();
+  receiver.disconnected();
+  receiver.joined();
+  await settleSequenced();
+  receiver.batch(payload(6, [40, 41]));
+  await settleSequenced();
+  assert.deepEqual(decodedFrames, [10, 11, 20, 21, 30, 31, 40, 41]);
+  assert.deepEqual(played, [[0, 2], [2, 4], [6, 2]]);
+  assert.deepEqual(ended, ['radio-talk']);
+  receiver.dispose();
+});
+
+test('radio packs Opus frames and flushes the last partial batch before the channel is released', () => {
+  const sent = [];
+  const batcher = sequencedModule.createPttBatcher(2, (first, audio) => sent.push([first, Array.from(new Uint8Array(audio))]));
+  for (let frame = 1; frame <= 6; frame++) batcher.push(new Uint8Array(18).fill(frame).buffer);
+  assert.deepEqual(sent, [[0, [1, 1, 2, 2, 3, 3, 4, 4]]]);
+  assert.equal(batcher.flush(), 6);
+  assert.deepEqual(sent[1], [4, [5, 5, 6, 6]]);
+  assert.equal(batcher.flush(), 6);
+  assert.equal(sent.length, 2);
 });

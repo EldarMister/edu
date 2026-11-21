@@ -3,11 +3,15 @@ import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permiss
 import { useEffect, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
 import { OrderStatusBadges } from '@/components/StatusBadge';
-import { ORDER_STATUS } from '@/lib/status';
-import { displayOrderNumber, hallSuffix, money, orderItemDisplayName } from '@/lib/format';
+import { ORDER_STATUS, orderStationStatuses } from '@/lib/status';
+import { usePendingItemCancellations } from '@/features/requests/item-cancellations';
+import { displayOrderNumber, money, orderItemDisplayName, orderPlaceLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
+import { Select } from '@/components/Select';
+import { useAuth } from '@/store/auth';
+import { usePermissions } from '@/hooks/usePermissions';
 
 const ITEM_CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
 
@@ -99,8 +103,13 @@ export function OrderPanel({
   onReplaceRejectedItem,
   onRemoveRejectedItem,
   onCancelReadyItem,
+  cancellationDeniedOpen,
+  onInsufficientPermissions,
   onCancelOrder,
   onEdit,
+  onSplitOrder,
+  relatedChecks,
+  onSelectCheck,
 }: {
   order: Order;
   submitting: boolean;
@@ -109,19 +118,23 @@ export function OrderPanel({
   onClaimQr?: () => void;
   onPickedUp: () => void;
   onServed: () => void;
-  onToPayment: () => void;
-  onPreliminaryReceipt: () => void;
+  onToPayment?: () => void;
+  onPreliminaryReceipt?: () => void;
   onContinueAfterRejection: () => void;
   onReplaceRejectedItem: (item: Order['items'][number]) => void;
   onRemoveRejectedItem: (item: Order['items'][number]) => void;
   onCancelReadyItem: (item: Order['items'][number], reason: string) => void;
-  onInsufficientPermissions: () => void;
+  cancellationDeniedOpen: boolean;
+  onInsufficientPermissions: (item: Order['items'][number]) => void;
   onCancelOrder: () => void;
   /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
   onEdit?: () => void;
+  onSplitOrder?: () => void;
+  relatedChecks: Pick<Order, 'id' | 'orderNumber'>[];
+  onSelectCheck: (id: string) => void;
 }) {
   const t = useT();
-  const [billItem, setBillItem] = useState<Order['items'][number] | null>(null);
+  const [billItemId, setBillItemId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState<string>(ITEM_CANCEL_REASONS[0]);
   const [cancelOther, setCancelOther] = useState('');
   const waitingDecision = order.status === 'partially_rejected' && order.requiresWaiterDecision;
@@ -130,8 +143,18 @@ export function OrderPanel({
   const settings = usePublicSettings();
   const policies = settings.data?.waiterOrderPermissions;
   const editable = waiterOrderPermission(order, 'edit', policies).allowed;
+  const billItem = order.items.find((item) => item.id === billItemId);
+  const owner = useAuth((state) => state.user?.role === 'OWNER');
+  const { canOwnerOperation } = usePermissions();
+  const canCancelItem = (item: Order['items'][number]) => canOwnerOperation('cancelItems')
+    && (owner || waiterItemPermission(order, item, 'cancel', policies).allowed);
   const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
+  const pendingCancellations = usePendingItemCancellations(billCorrection && !unclaimedQr ? order.id : undefined);
   const finalCancelReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
+
+  useEffect(() => {
+    if (cancellationDeniedOpen) setBillItemId(null);
+  }, [cancellationDeniedOpen]);
 
   if (waitingDecision) {
     return (
@@ -146,17 +169,19 @@ export function OrderPanel({
     );
   }
 
+  const showReadyInHeader = order.status === 'ready' && orderStationStatuses(order).length === 0;
+  const statusBadges = <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />;
+
   return (
     <div className="flex h-full flex-col">
-      {/* Компактная шапка: номер + стол и «Изменить» в первой строке, статусы —
-          второй строкой, чтобы широкие станционные чипы не съедали номер заказа. */}
       <div className="border-b border-border pb-1.5">
         <div className="flex items-center justify-between gap-2">
           <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight text-text-primary">
             {t('Заказ')} {displayOrderNumber(order.orderNumber)}
-            <span className="ml-2 text-[13px] font-normal text-text-muted">{t('Стол')} {order.table.number}{hallSuffix(order.table)}</span>
+            <span className="ml-2 text-[13px] font-normal text-text-muted">{orderPlaceLabel(order, t)}</span>
           </h2>
           <div className="flex shrink-0 items-center gap-2">
+            {showReadyInHeader && statusBadges}
             {unclaimedQr && (
               <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
                 QR
@@ -177,25 +202,32 @@ export function OrderPanel({
             )}
           </div>
         </div>
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          {waitingDecision && (
-            <span className="rounded-md bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
-              {t('Нужен ответ')}
-            </span>
-          )}
-          <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />
-        </div>
+        {relatedChecks.length > 1 && <Select value={order.id} ariaLabel={t('Чеки стола')}
+          className="mt-2 h-9 w-full max-w-52" disabled={submitting}
+          options={relatedChecks.map((check) => ({ value: check.id, label: `${t('Чек')} ${displayOrderNumber(check.orderNumber)}` }))}
+          onChange={onSelectCheck} />}
+        {!showReadyInHeader && <div className="mt-1.5">{statusBadges}</div>}
       </div>
 
       {/* Позиции — компактный список */}
       <div className="no-scrollbar flex-1 space-y-1.5 overflow-y-auto py-2">
+        {order.source === 'delivery' && order.deliveryAddress && (
+          <div className="mb-2 space-y-1 rounded-lg border border-border px-3 py-2 text-sm">
+            <p className="break-words font-medium text-text-primary">{order.deliveryAddress}</p>
+            <p className="flex flex-wrap gap-x-3 text-text-secondary">
+              {order.deliveryCustomerName && <span>{order.deliveryCustomerName}</span>}
+              {order.deliveryCustomerPhone && <a className="text-primary" href={`tel:${order.deliveryCustomerPhone}`}>{order.deliveryCustomerPhone}</a>}
+            </p>
+          </div>
+        )}
         {order.items.map((it) => {
           const rejected = it.status === 'rejected';
           const cancelled = it.status === 'cancelled';
           const waitingItem = waitingDecision && !rejected;
           const comment = safeComment(it.comment);
           const setParts = it.setComponents ?? [];
-          const clickable = billCorrection && !rejected && !cancelled;
+          const cancellationRequested = pendingCancellations.data?.some(({ itemId }) => itemId === it.id);
+          const clickable = billCorrection && !rejected && !cancelled && !cancellationRequested;
           const hasExtra = setParts.length > 0 || comment || ((rejected || cancelled) && it.rejectReason) || waitingItem;
           return (
             <button
@@ -203,7 +235,11 @@ export function OrderPanel({
               type="button"
               disabled={!clickable || submitting}
               onClick={() => {
-                setBillItem(it);
+                if (!canCancelItem(it)) {
+                  onInsufficientPermissions(it);
+                  return;
+                }
+                setBillItemId(it.id);
                 setCancelReason(ITEM_CANCEL_REASONS[0]);
                 setCancelOther('');
               }}
@@ -252,6 +288,11 @@ export function OrderPanel({
                   )}
                 </div>
               </div>
+              {cancellationRequested && !rejected && !cancelled && (
+                <p className="mt-1 text-xs font-medium text-warning">{t('Отмена запрошена')}</p>
+              )}
+              {it.modifierSelections?.map((option) => <p key={option.optionId} className="mt-1 text-sm text-text-secondary">+ {option.name} ×{option.quantity}</p>)}
+              {it.excludedIngredientNames?.map((name) => <p key={name} className="mt-1 text-sm text-warning">Без {name}</p>)}
               {hasExtra && (
                 <div className="mt-1.5 text-xs">
                   {setParts.length > 0 && (
@@ -319,8 +360,10 @@ export function OrderPanel({
               {t('Этот QR-заказ видят все официанты. Нажмите «Взять заказ», чтобы закрепить его за собой.')}
             </div>
           )}
+          {onSplitOrder && <button type="button" className="mb-2 block py-1 text-sm font-medium text-primary hover:underline"
+            disabled={submitting || preliminaryPending} onClick={onSplitOrder}>{t('Разделить по позициям')}</button>}
           <div className="flex gap-2">
-          {[
+          {onPreliminaryReceipt && [
             'sent_to_kitchen', 'accepted_by_kitchen', 'cooking', 'ready',
             'picked_up', 'partially_rejected', 'waiting_payment',
           ].includes(order.status) && !order.requiresWaiterDecision && !unclaimedQr && (
@@ -351,19 +394,20 @@ export function OrderPanel({
         </div>
       </div>
       <Modal
-        open={!!billItem}
-        onClose={() => setBillItem(null)}
+        open={!!billItem && !cancellationDeniedOpen}
+        onClose={() => setBillItemId(null)}
         title={t('Действие с блюдом')}
         panelClassName="max-w-md"
         footer={
           <div className="space-y-2">
             <button
               className="btn-danger btn-lg w-full font-semibold"
-              disabled={submitting || !billItem || !waiterItemPermission(order, billItem, 'cancel', policies).allowed}
+              disabled={submitting || !billItem}
               onClick={() => {
                 if (!billItem) return;
-                onCancelReadyItem(billItem, finalCancelReason);
-                setBillItem(null);
+                if (canCancelItem(billItem)) onCancelReadyItem(billItem, finalCancelReason);
+                else onInsufficientPermissions(billItem);
+                setBillItemId(null);
               }}
             >
               {submitting ? <Spinner /> : t('Отменить блюдо')}
@@ -373,14 +417,13 @@ export function OrderPanel({
       >
         {billItem && (
           <div className="space-y-3">
-            {!waiterItemPermission(order, billItem, 'cancel', policies).allowed && <p role="status" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{waiterItemPermission(order, billItem, 'cancel', policies).reason}</p>}
             <div className="rounded-xl border border-border bg-background px-3 py-2">
               <p className="font-medium text-text-primary">{orderItemDisplayName(billItem)}</p>
               <p className="mt-1 text-sm text-text-muted">
                 ×{billItem.quantity} · {money(billItem.finalPrice)}
               </p>
             </div>
-            <div>
+            {canCancelItem(billItem) && <div>
               <p className="mb-2 text-sm font-medium text-text-secondary">{t('Причина отмены')}</p>
               <div className="space-y-2">
                 {ITEM_CANCEL_REASONS.map((reason) => (
@@ -410,7 +453,7 @@ export function OrderPanel({
                   onChange={(e) => setCancelOther(e.target.value)}
                 />
               )}
-            </div>
+            </div>}
           </div>
         )}
       </Modal>
@@ -448,7 +491,7 @@ function PartialRejectionPanel({
         <div className="min-w-0">
           <h2 className="truncate text-[18px] font-semibold leading-tight text-text-primary sm:text-[20px]">
             {t('Заказ')} {displayOrderNumber(order.orderNumber)}
-            <span className="ml-2 text-[14px] font-normal text-text-muted">{t('Стол')} {order.table.number}{hallSuffix(order.table)}</span>
+            <span className="ml-2 text-[14px] font-normal text-text-muted">{orderPlaceLabel(order, t)}</span>
           </h2>
         </div>
         <span className="shrink-0 rounded-lg border border-danger/25 bg-danger/5 px-2.5 py-1 text-[12px] font-medium text-danger">
@@ -563,14 +606,15 @@ function ActionButton({
   onClaimQr?: () => void;
   onPickedUp: () => void;
   onServed: () => void;
-  onToPayment: () => void;
-  onPreliminaryReceipt: () => void;
+  onToPayment?: () => void;
+  onPreliminaryReceipt?: () => void;
   onContinueAfterRejection: () => void;
   onCancelOrder: () => void;
 }) {
   const t = useT();
   const [actionCooldown, setActionCooldown] = useState(0);
   const s = order.status;
+  const delivery = order.source === 'delivery';
   const spin = submitting ? <Spinner /> : null;
   const unclaimedQr = order.source === 'qr' && !order.waiter;
   const waitingDecision = s === 'partially_rejected' && order.requiresWaiterDecision;
@@ -623,7 +667,7 @@ function ActionButton({
 
   // «Забрал с кухни» — только если есть готовая позиция, реально отправленная на станцию.
   if (
-    hasReadyStationItem &&
+    !delivery && hasReadyStationItem &&
     !['paid', 'cancelled', 'rejected', 'waiting_payment', 'picked_up', 'served', 'ready'].includes(s)
   ) {
     return (
@@ -636,8 +680,9 @@ function ActionButton({
   // Заказ готов (ready) — независимо от того, есть ли кухонные позиции, показываем «Вынес гостям».
   if (s === 'ready') {
     return (
-      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onServed)}>
-        {cooldownActive ? actionCooldown : spin ?? t('Вынес гостям')}
+      <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive}
+        onClick={() => runProtectedAction(delivery ? onPickedUp : onServed)}>
+        {cooldownActive ? actionCooldown : spin ?? t(delivery ? 'Передать курьеру' : 'Вынес гостям')}
       </button>
     );
   }
@@ -653,38 +698,46 @@ function ActionButton({
   if (s === 'picked_up') {
     return (
       <button className="btn-primary btn-lg w-full font-semibold" disabled={submitting || cooldownActive} onClick={() => runProtectedAction(onServed)}>
-        {cooldownActive ? actionCooldown : spin ?? t('Вынес гостям')}
+        {cooldownActive ? actionCooldown : spin ?? t(delivery ? 'Отметить доставленным' : 'Вынес гостям')}
       </button>
     );
   }
   if (s === 'served') {
+    if (!onToPayment && !onPreliminaryReceipt) return null;
     return (
       <div className="space-y-2">
-        {!allActiveItemsServed && (
+        {onToPayment && !allActiveItemsServed && (
           <div className="rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning">
             {t('Нельзя перейти к оплате: есть неподанные блюда.')}
           </div>
         )}
         <div className="flex gap-2">
-          <button
+          {onPreliminaryReceipt && <button
             className="btn btn-lg shrink-0 border border-primary bg-white px-4 font-medium text-primary hover:bg-primary/5"
             disabled={preliminaryPending}
             onClick={onPreliminaryReceipt}
           >
             {preliminaryPending ? <Spinner /> : t('Счёт')}
-          </button>
-          <button
+          </button>}
+          {onToPayment && <button
             className="btn-primary btn-lg flex-1 font-semibold"
             disabled={submitting || cooldownActive || !allActiveItemsServed}
             onClick={() => runProtectedAction(onToPayment)}
           >
             {cooldownActive ? actionCooldown : spin ?? t('Перейти к оплате')}
-          </button>
+          </button>}
         </div>
       </div>
     );
   }
   if (s === 'waiting_payment') {
+    if (onToPayment) {
+      return (
+        <button type="button" className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onToPayment}>
+          {spin ?? t('Перейти к оплате')}
+        </button>
+      );
+    }
     return (
       <div className="rounded-xl bg-purple-50 py-3 text-center text-sm text-purple-600">
         {t('Ожидает оплаты')}

@@ -96,6 +96,11 @@ export const IconEye = (p: P) => (
     <circle cx="12" cy="12" r="3" />
   </S>
 );
+export const IconEyeOff = (p: P) => (
+  <S {...p}>
+    <path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c6.5 0 10 7 10 7a13.2 13.2 0 0 1-1.67 2.4M6.6 6.6A13.3 13.3 0 0 0 2 11s3.5 7 10 7a9 9 0 0 0 4.2-1M1 1l22 22" />
+  </S>
+);
 export const IconTrash = (p: P) => (
   <S {...p}>
     <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
@@ -113,12 +118,6 @@ export const IconLogout = (p: P) => (
   </S>
 );
 export const IconUsers = (p: P) => IconStaff(p);
-export const IconReconcile = (p: P) => (
-  <S {...p}>
-    <path d="M9 11l3 3L22 4" />
-    <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
-  </S>
-);
 export const IconJournal = (p: P) => (
   <S {...p}>
     <path d="M4 5a2 2 0 0 1 2-2h11a1 1 0 0 1 1 1v15a1 1 0 0 1-1 1H6a2 2 0 0 1-2-2Z" />

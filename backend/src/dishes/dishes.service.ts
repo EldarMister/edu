@@ -2,10 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { decodeDishImage, dishImageRef } from './dish-image';
+import { MenuModifiersService } from '../warehouse/menu-modifiers';
+import { projectDishStock } from '../warehouse/dish-stock-projection';
 
 @Injectable()
 export class DishesService {
   constructor(private prisma: PrismaService) {}
+
+  modifiers(id: string) { return new MenuModifiersService(this.prisma).get(id, true); }
 
   /** Активные блюда для меню официанта. Можно фильтровать по категории и поиску. */
   async findAll(params: { categoryId?: string; search?: string }) {
@@ -36,8 +40,14 @@ export class DishesService {
         isAvailable: true,
         isSet: true,
         isWeighted: true,
+        allowIngredientExclusions: true,
+        _count: { select: { modifierGroups: true } },
         weightedMeasure: true,
         weightedPriceBase: true,
+        prepStation: true,
+        category: { select: { prepStation: true } },
+        stockIngredientId: true,
+        stockAmount: true,
         variants: {
           orderBy: { sortOrder: 'asc' },
           select: {
@@ -45,6 +55,8 @@ export class DishesService {
             name: true,
             price: true,
             sortOrder: true,
+            stockIngredientId: true,
+            stockAmount: true,
           },
         },
         setComponents: {
@@ -63,8 +75,13 @@ export class DishesService {
     });
 
     // Вместо тяжёлого base64 отдаём лёгкую ссылку на картинку блюда.
-    return dishes.map(({ updatedAt, ...d }) => ({
+    const stock = await projectDishStock(this.prisma, dishes);
+    return dishes.map(({ updatedAt, stockIngredientId, stockAmount, category, _count, variants, ...d }) => ({
       ...d,
+      trackInventory: stock.get(d.id)!.trackInventory,
+      stock: stock.get(d.id)!.stock,
+      variants: variants.map(({ stockIngredientId, stockAmount, ...variant }) => ({ ...variant, stock: stock.get(d.id)!.variantStocks.get(variant.id) ?? null })),
+      hasModifiers: _count.modifierGroups > 0 || d.allowIngredientExclusions,
       imageUrl: dishImageRef(d.id, updatedAt, d.imageUrl),
     }));
   }

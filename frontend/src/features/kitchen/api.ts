@@ -2,13 +2,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, networkRetry } from '@/lib/api';
 import type { Order, PrepStation } from '@/types';
 
-export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected';
+export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected' | 'cancelled';
 
-export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitchen') {
+export function useKitchenOrders(tab: KitchenTab | null, station: PrepStation = 'kitchen', history?: { from?: string; to?: string }) {
   return useQuery({
-    queryKey: ['kitchen', station, tab],
-    queryFn: async () =>
-      (await api.get<Order[]>(`/kitchen/orders?tab=${tab}&station=${station}`)).data,
+    queryKey: ['kitchen', station, tab, history],
+    queryFn: async ({ signal }) =>
+      (await api.get<Order[]>('/kitchen/orders', { params: { tab, station, ...history }, signal })).data,
+    enabled: tab !== null,
     refetchInterval: 15_000, // подстраховка, основное обновление — через сокет
   });
 }
@@ -82,11 +83,11 @@ export function useStopList(enabled: boolean, station: PrepStation = 'kitchen') 
   });
 }
 
-export function useSaveStopList() {
+export function useSaveStopList(station: PrepStation = 'kitchen') {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (items: { dishId: string; isAvailable: boolean }[]) =>
-      (await api.patch<StopListCategory[]>('/kitchen/stop-list', { items })).data,
+      (await api.patch<StopListCategory[]>('/kitchen/stop-list', { items }, { params: { station } })).data,
     retry: networkRetry,
     onSuccess: () => {
       // Стоп-лист общий по составу, но фильтруется по станции — обновляем оба экрана.

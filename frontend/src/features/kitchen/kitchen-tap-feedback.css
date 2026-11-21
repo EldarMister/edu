@@ -1,0 +1,22 @@
+.kitchen-tap-feedback {
+  position: fixed;
+  z-index: 10001;
+  width: 38px;
+  height: 38px;
+  margin: -19px 0 0 -19px;
+  border: 2px solid rgb(var(--edu-primary));
+  border-radius: 50%;
+  background: rgb(var(--edu-primary) / .2);
+  box-shadow: 0 0 0 2px rgb(var(--edu-card) / .8);
+  pointer-events: none;
+  animation: kitchen-tap 480ms ease-out forwards;
+}
+
+@keyframes kitchen-tap {
+  from { transform: scale(.55); opacity: 1; }
+  to { transform: scale(1.4); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kitchen-tap-feedback { animation: none; }
+}

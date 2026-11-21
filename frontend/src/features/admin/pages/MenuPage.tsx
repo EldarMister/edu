@@ -1,866 +1,558 @@
-import { useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
+import { DeleteNameField } from '../components/DeleteNameField';
+import { captureDeletionEffect } from '../components/deletion-effect';
 import { Select } from '@/components/Select';
 import { Spinner } from '@/components/Spinner';
-import { minDishUnitPrice, money, variantNamesLine } from '@/lib/format';
-import { apiError } from '@/lib/api';
-import { downscaleToDataUrl, resolveApiImage } from '@/lib/image';
+import { WorkspacePending } from '../components/WorkspacePending';
+import { minDishUnitPrice, taxRateLabel, variantNamesLine } from '@/lib/format';
+import { resolveApiImage } from '@/lib/image';
 import { useT } from '@/lib/i18n';
+import { WorkspaceHeaderCount } from './WorkspaceHeader';
+import { WorkspaceSearch } from './WorkspaceSearch';
+import { DocumentField } from './warehouse/WarehouseUi';
+import { apiError } from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
-import { IconEdit, IconTrash, IconPlus } from '../components/icons';
-import { RecipeEditor } from './warehouse/RecipeEditor';
-import { useRecipe } from './warehouse/api';
-import { normalizeUnitLabel, unitLabelOptions } from './warehouse/units';
 import {
-  useMenuOverview,
+  routingOptions,
+  usePreparationStations,
+  usePreparationStationUpdates,
+  type PreparationStation,
+} from '@/features/kitchen/stations';
+import { IconEdit, IconTrash, IconPlus } from '../components/icons';
+import type { MenuView } from './warehouse/navigation';
+import { MenuStockCatalogue } from './warehouse/MenuStockCatalogue';
+import { DishComposition } from './warehouse/CatalogueDetails';
+import { balanceMoney, balanceQuantity } from './warehouse/balance-format';
+import { normalizeUnitLabel } from './warehouse/units';
+import { EditorPage } from './warehouse/EditorPage';
+import { useEditorRoute, usePageFilter, usePageFilters } from './warehouse/workspace-route';
+import { WarehouseMultiFilter, warehouseMultiFilterValues } from './warehouse/WarehouseMultiFilter';
+import { filterMenuGoods, MenuAdditionalFilters, MenuGoodsActions, menuGoodsColumns, menuListFilters,
+  useMenuGoodsColumns, type MenuGoodsColumn } from './MenuGoodsControls';
+import { MenuEntryPage } from './MenuEntryPage';
+import { dishTaxInput, dishTaxValue, effectiveMenuTaxId, MenuTaxSelect } from '../../settings/MenuTaxSelect';
+import { useMenuTaxOptions } from '../../settings/taxes-api';
+import {
   useAdminCategories,
   useAdminDishes,
+  useAdminGoods,
+  useAdminSets,
   useCategoryMutations,
   useDishMutations,
   useSetMutations,
   type AdminDish,
+  type AdminGood,
   type AdminCategory,
-  type AdminDishVariant,
 } from '../api';
 
-export function MenuPage() {
-  const [categoryId, setCategoryId] = useState('');
-  const [search, setSearch] = useState('');
-  const [dishModal, setDishModal] = useState<AdminDish | null | 'new'>(null);
-  const [setModal, setSetModal] = useState<AdminDish | null | 'new'>(null);
-  const [catModal, setCatModal] = useState(false);
-
-  const overview = useMenuOverview();
+export function MenuPage({ view }: { view: Exclude<MenuView, 'categories' | 'ingredientCategories'> }) {
+  if (view === 'ingredients' || view === 'preparations')
+    return <MenuStockCatalogue key={view} view={view} />;
+  return <MenuDishList key={view} view={view} />;
+}
+function MenuDishList({ view }: { view: MenuView }) {
+  const t = useT();
+  const isGoods = view === 'goods';
+  const [filters, updateFilters] = usePageFilters(menuListFilters);
+  const { category: categoryId, search, availability, station: stationId, nameSort } = filters;
+  const [compositionId, setCompositionId] = useState<string | null>(null);
+  const location = useLocation();
+  const { editor, openEditor, closeEditor } = useEditorRoute();
+  const compositionPanelId = useId();
+  const stations = usePreparationStations().data ?? [];
+  usePreparationStationUpdates();
   const categoriesQ = useAdminCategories();
-  const dishesQ = useAdminDishes(categoryId, search);
+  const taxes = useMenuTaxOptions().data ?? [];
+  const displayTax = !isGoods && (taxes.length > 0 || !!filters.tax);
+  const taxNames = new Map(taxes.map((tax) => [tax.id, `${tax.name} · ${taxRateLabel(tax.rate)}`]));
+  const taxFilters = [{ value: 'none', label: 'Без налога' }, ...[...taxNames].map(([value, label]) => ({ value, label }))];
+  const taxCell = (item: AdminDish) => taxNames.get(effectiveMenuTaxId(item) ?? '') ?? '—';
+  const dishesQ = useAdminDishes('', search, !isGoods);
+  const goodsQ = useAdminGoods(isGoods);
+  const listQ = isGoods ? goodsQ : dishesQ;
+  const { columns, saveColumns } = useMenuGoodsColumns(isGoods);
+  const dataColumns = columns.filter((column): column is MenuGoodsColumn => column !== 'name');
   const { remove } = useDishMutations();
-  const push = useNotifications((s) => s.push);
-  const tr = useT();
-  const o = overview.data;
-
-  // Эффективное направление блюда: своё, иначе — направление категории.
-  const stationByCat = new Map((categoriesQ.data ?? []).map((c) => [c.id, c.prepStation ?? 'kitchen']));
-  const dishStation = (d: AdminDish) => d.prepStation ?? stationByCat.get(d.categoryId) ?? 'kitchen';
-
-  async function onDelete(d: AdminDish) {
-    if (!confirm(`Удалить блюдо «${d.name}»?`)) return;
+  const push = useNotifications((state) => state.push);
+  const { can } = usePermissions();
+  const editable = can('actions.editMenu');
+  const filtered = Object.entries(filters).some(([key, value]) => key !== 'nameSort' && value);
+  function clearFilters() {
+    updateFilters({ ...menuListFilters, nameSort });
+  }
+  const categoryStations = new Map((categoriesQ.data ?? []).map((category) => [category.id, category.prepStation]));
+  const dishStation = (dish: AdminDish) => dish.prepStation ?? categoryStations.get(dish.categoryId) ?? 'none';
+  const selectedCategories = warehouseMultiFilterValues(categoryId);
+  const selectedStations = warehouseMultiFilterValues(stationId);
+  const rows = (isGoods ? filterMenuGoods(goodsQ.data ?? [], filters) : (dishesQ.data ?? []).filter(
+    (dish) =>
+      (dish.catalogKind ?? (dish.hasDirectStock ? 'goods' : 'recipe')) === 'recipe' &&
+      (!selectedCategories.length || selectedCategories.includes(dish.categoryId)) &&
+      (!selectedStations.length || selectedStations.includes(dishStation(dish))) &&
+      (!filters.tax || (effectiveMenuTaxId(dish) ?? 'none') === filters.tax) &&
+      (!availability || (availability === 'visible' ? dish.isAvailable && dish.isActive : !dish.isAvailable || !dish.isActive)),
+  )).sort((a, b) => a.name.localeCompare(b.name, 'ru') * (nameSort === 'desc' ? -1 : 1));
+  const stationOptions = [...stations.map((station) => ({ value: station.id, label: station.name })), { value: 'none', label: 'Без цеха' }];
+  const unitOptions = [...new Set(goodsQ.data?.flatMap((item) => item.goodsUnits))].sort((a, b) => a.localeCompare(b, 'ru'))
+    .map((unit) => ({ value: unit, label: unit }));
+  const goodsCell = (dish: AdminGood, column: MenuGoodsColumn) => {
+    switch (column) {
+      case 'category': return dish.category.name;
+      case 'price': return `${dish.variants.length ? 'от ' : ''}${balanceMoney(dish.goodsPrice)}`;
+      case 'station': return stationOptions.find((option) => option.value === dish.goodsStation)?.label ?? dish.goodsStation;
+      case 'unit': return dish.goodsUnits.join(', ');
+      case 'weighted': return dish.isWeighted ? 'Да' : 'Нет';
+      case 'availability': return dish.isAvailable && dish.isActive ? 'Доступен в меню' : 'Скрыт';
+      case 'tax': return taxCell(dish);
+    }
+  };
+  async function onDelete(dish: AdminDish) {
+    if (remove.isPending || !confirm(`Удалить «${dish.name}» из меню?`)) return;
+    const playEffect = captureDeletionEffect(`menu-entry-${dish.id}`);
     try {
-      await remove.mutateAsync(d.id);
-      push({ message: 'Блюдо удалено', at: new Date().toISOString() });
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+      await remove.mutateAsync(dish.id);
+      playEffect?.();
+      push({ message: 'Позиция удалена', at: new Date().toISOString() });
+    } catch (failure) {
+      push({ message: apiError(failure), at: new Date().toISOString() });
     }
   }
-
+  if (editor?.type === 'categories' || editor?.type === 'category') {
+    const categoryRoute = new URLSearchParams({ section: 'menu', view: 'categories' });
+    if (editor.type === 'category') {
+      categoryRoute.set('editor', 'category');
+      if (editor.id) categoryRoute.set('id', editor.id);
+    }
+    return <Navigate replace to={{ pathname: location.pathname, search: categoryRoute.toString() }} />;
+  }
+  if (editor?.type === 'set')
+    return editor.id ? (
+      <ExistingSetPage key={editor.id} id={editor.id} stations={stations} onClose={closeEditor} />
+    ) : (
+      <SetModal set={null} stations={stations} onClose={closeEditor} />
+    );
+  if (editor?.type === 'entry') {
+    return <MenuEntryPage
+      id={editor.id}
+      kind={isGoods ? 'goods' : 'recipe'}
+      categoryId={selectedCategories.length === 1 ? selectedCategories[0] : ''}
+      initialTab={editor.action === 'recipe' ? 'recipe' : 'main'}
+      onClose={closeEditor}
+    />;
+  }
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-text-secondary">
-        <Sum label={tr('Блюд')} value={o?.dishesCount ?? '—'} />
-        <Sep />
-        <Sum label={tr('Категорий')} value={o?.categoriesCount ?? '—'} />
-        <Sep />
-        <Sum label={tr('Активных')} value={o?.activeDishesCount ?? '—'} />
-      </div>
-
-      <div className="card overflow-hidden">
-        {/* Категории + действия */}
-        <div className="flex flex-col gap-3 border-b border-border p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <input
-              className="input h-10 sm:max-w-xs"
-              placeholder={tr('Поиск блюда')}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-            <div className="flex gap-2">
-              <button className="btn-secondary btn-md" onClick={() => setCatModal(true)}>
-                <IconPlus className="h-4 w-4" /> {tr('Категория')}
-              </button>
-              <button className="btn-secondary btn-md" onClick={() => setSetModal('new')}>
-                <IconPlus className="h-4 w-4" /> {tr('Сет')}
-              </button>
-              <button className="btn-primary btn-md font-medium" onClick={() => setDishModal('new')}>
-                <IconPlus className="h-4 w-4" /> {tr('Добавить блюдо')}
-              </button>
-            </div>
-          </div>
-          <div className="no-scrollbar flex gap-1.5 overflow-x-auto">
-            <CatTab active={categoryId === ''} onClick={() => setCategoryId('')}>
-              {tr('Все блюда')}
-            </CatTab>
-            {categoriesQ.data?.map((c) => (
-              <CatTab key={c.id} active={categoryId === c.id} onClick={() => setCategoryId(c.id)}>
-                {c.name}
-              </CatTab>
-            ))}
-          </div>
-        </div>
-
-        {/* Таблица блюд */}
-        {dishesQ.isLoading ? (
-          <div className="flex justify-center py-12 text-primary">
-            <Spinner className="h-6 w-6" />
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs text-text-muted">
-                  <th className="px-4 py-3 font-medium">{tr('Название')}</th>
-                  <th className="px-4 py-3 font-medium">{tr('Категория')}</th>
-                  <th className="px-4 py-3 text-right font-medium">{tr('Цена')}</th>
-                  <th className="px-4 py-3 text-right font-medium">{tr('Остаток')}</th>
-                  <th className="px-4 py-3 font-medium">{tr('Статус')}</th>
-                  <th className="px-4 py-3 text-right font-medium">{tr('Действия')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dishesQ.data?.map((d) => (
-                  <tr key={d.id} className="border-b border-border last:border-0 hover:bg-background/60">
-                    <td className="px-4 py-3">
-                      <p className="flex items-center gap-2 font-medium text-text-primary">
-                        {d.name}
-                        {d.isSet && (
-                          <span className="inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700">
-                            Сет
-                          </span>
-                        )}
-                        {d.isWeighted && (
-                          <span className="inline-flex items-center rounded-md bg-blue-100 px-1.5 py-0.5 text-[11px] font-medium text-blue-700">
-                            Весовое
-                          </span>
-                        )}
-                        {dishStation(d) === 'bar' && (
-                          <span className="inline-flex items-center rounded-md bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">
-                            Бар
-                          </span>
-                        )}
-                        {dishStation(d) === 'none' && (
-                          <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
-                            Без отправки
-                          </span>
-                        )}
-                      </p>
-                      {d.variants.length > 0 && (
-                        <p className="text-xs font-medium text-primary">{variantNamesLine(d.variants)}</p>
-                      )}
-                      {d.description && <p className="text-xs text-text-muted">{d.description}</p>}
-                    </td>
-                    <td className="px-4 py-3 text-text-secondary">{d.category.name}</td>
-                    <td className="px-4 py-3 text-right font-medium text-text-primary">
-                      {d.variants.length > 0 ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}
-                    </td>
-                    <td className="px-4 py-3 text-right text-text-secondary">
-                      {(() => {
-                        if (!d.trackInventory) return '—';
-                        const hasVar = d.variants.length > 0;
-                        const stock = hasVar ? d.variants.reduce((a, v) => a + (v.stock ?? 0), 0) : (d.stock ?? 0);
-                        const units = hasVar
-                          ? new Set(d.variants.map((variant) => normalizeUnitLabel(variant.unit)))
-                          : new Set([normalizeUnitLabel(d.unit)]);
-                        return `${stock} ${units.size === 1 ? [...units][0] : 'по вариантам'}`;
-                      })()}
-                    </td>
-                    <td className="px-4 py-3">
-                      {(() => {
-                        const hasVar = d.variants.length > 0;
-                        const stock = hasVar ? d.variants.reduce((a, v) => a + (v.stock ?? 0), 0) : (d.stock ?? 0);
-                        if (d.trackInventory && stock === 0) {
-                          return <Badge tone="danger">{tr('Нет в наличии')}</Badge>;
-                        }
-                        if (d.isActive && d.isAvailable) {
-                          return <Badge tone="success">{tr('Активно')}</Badge>;
-                        }
-                        return <Badge tone="muted">{tr('Скрыто')}</Badge>;
-                      })()}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-1">
-                        <IconBtn onClick={() => (d.isSet ? setSetModal(d) : setDishModal(d))} title="Изменить">
-                          <IconEdit className="h-4 w-4" />
-                        </IconBtn>
-                        <IconBtn onClick={() => onDelete(d)} title="Удалить" danger>
-                          <IconTrash className="h-4 w-4" />
-                        </IconBtn>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {dishesQ.data?.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-10 text-center text-text-muted">
-                      Блюда не найдены
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+    <div className="min-w-0">
+      <WorkspaceHeaderCount count={listQ.isSuccess ? rows.length : undefined} />
+      <div className="poster-toolbar">
+        <WorkspaceSearch
+          label={isGoods ? 'Поиск товаров' : t('Поиск техкарт')}
+          value={search}
+          onChange={(search) => updateFilters({ search })}
+        />
+        <WarehouseMultiFilter label="Категория" value={categoryId} onChange={(category) => updateFilters({ category })}
+          options={(categoriesQ.data ?? []).map(({ id, name }) => ({ value: id, label: name }))} />
+        <WarehouseMultiFilter label="Цех" value={stationId} onChange={(station) => updateFilters({ station })}
+          options={stationOptions} />
+        <MenuAdditionalFilters filters={filters} update={updateFilters} goods={isGoods} units={unitOptions}
+          taxes={isGoods || displayTax ? taxFilters : []} />
+        {!editor && (isGoods || editable) && (
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+            {isGoods && <MenuGoodsActions filters={filters} columns={columns} saveColumns={saveColumns}
+              ready={goodsQ.isSuccess} canExport={can('actions.exportReports')} />}
+            {!isGoods && editable && (
+              <MenuActions
+                ariaLabel="Другие действия"
+                onChange={() => openEditor({ type: 'set' })}
+                options={[{ value: 'set', label: 'Добавить сет' }]}
+              />
+            )}
+            {editable && <button type="button" className="btn-primary btn-md" onClick={() => openEditor({ type: 'entry' })}>
+              {t(isGoods ? 'Добавить товар' : 'Добавить блюдо')}
+            </button>}
           </div>
         )}
       </div>
-
-      {dishModal !== null && (
-        <DishModal
-          dish={dishModal === 'new' ? null : dishModal}
-          categories={categoriesQ.data ?? []}
-          defaultCategoryId={categoryId}
-          onClose={() => setDishModal(null)}
+      {categoriesQ.isError && (
+        <ListLoadError
+          error={categoriesQ.error}
+          onRetry={() => void categoriesQ.refetch()}
+          pending={categoriesQ.isFetching}
         />
       )}
-      {setModal !== null && (
-        <SetModal set={setModal === 'new' ? null : setModal} onClose={() => setSetModal(null)} />
-      )}
-      {catModal && (
-        <CategoryModal categories={categoriesQ.data ?? []} onClose={() => setCatModal(false)} />
+      {listQ.isPending ? (
+        <WorkspacePending />
+      ) : listQ.isError ? (
+        <ListLoadError
+          error={listQ.error}
+          onRetry={() => void listQ.refetch()}
+          pending={listQ.isFetching}
+        />
+      ) : (
+        <div className="min-w-0 overflow-x-auto">
+          <table className="poster-table poster-menu-table poster-catalogue-table w-full min-w-[720px] text-sm"
+            style={isGoods ? { minWidth: Math.max(560, 310 + dataColumns.length * 125) } : undefined}>
+            <thead>
+              <tr className="border-b border-border text-left text-xs text-text-muted">
+                <th className="py-3 pr-4 font-normal" aria-sort={nameSort === 'desc' ? 'descending' : 'ascending'}>
+                  <button type="button" className="flex items-center gap-2" onClick={() => updateFilters({ nameSort: nameSort === 'desc' ? 'asc' : 'desc' })}>
+                    Название <span aria-hidden>{nameSort === 'desc' ? '↓' : '↑'}</span>
+                  </button>
+                </th>
+                {isGoods ? dataColumns.map((column) => <th key={column} scope="col"
+                  className={`px-4 py-3 font-normal ${column === 'price' ? 'text-right' : ''}`}>{menuGoodsColumns[column]}</th>)
+                  : <>
+                    <th className="px-4 py-3 font-normal">Категория</th>
+                    {displayTax && <th className="px-4 py-3 font-normal">Налог</th>}
+                    <th className="px-4 py-3 text-right font-normal">Выход</th>
+                    <th className="px-4 py-3 text-right font-normal">Цена</th>
+                  </>}
+                <th>
+                  <span className="sr-only">Действия</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((dish) => (
+                <Fragment key={dish.id}>
+                <tr id={`menu-entry-${dish.id}`} className="border-b border-border hover:bg-background/40" data-expanded={compositionId === dish.id ? 'true' : undefined}>
+                  <td className="py-3 pr-4">
+                    <button
+                      type="button"
+                      className="flex items-center gap-3 text-left"
+                      onClick={() =>
+                        openEditor({ type: dish.isSet ? 'set' : 'entry', id: dish.id })
+                      }
+                    >
+                      <span className="h-9 w-12 shrink-0">
+                        {dish.imageUrl && (
+                          <img
+                            src={resolveApiImage(dish.imageUrl) ?? undefined}
+                            alt=""
+                            className="h-9 w-12 rounded-sm object-cover"
+                          />
+                        )}
+                      </span>
+                      <span>
+                        <span className="font-medium text-text-primary">{dish.name}</span>
+                        {dish.isSet && <span className="ml-2 text-xs text-text-muted">Сет</span>}
+                        {(!dish.isAvailable || !dish.isActive) && <span className="ml-2 text-xs text-text-muted">Скрыт</span>}
+                        {dish.variants.length > 0 && (
+                          <span className="mt-0.5 block text-xs text-text-muted">
+                            {variantNamesLine(dish.variants)}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  </td>
+                  {isGoods ? dataColumns.map((column) => <td key={column}
+                    className={`px-4 py-3 ${column === 'price' ? 'whitespace-nowrap text-right' : 'text-text-secondary'}`}>
+                    {goodsCell(dish as AdminGood, column)}
+                  </td>) : <>
+                    <td className="px-4 py-3 text-text-secondary">{dish.category.name}</td>
+                    {displayTax && <td className="px-4 py-3 text-text-secondary">{taxCell(dish)}</td>}
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-text-secondary">{dishOutput(dish)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                      {dish.variants.length ? `от ${balanceMoney(minDishUnitPrice(dish))}` : balanceMoney(Number(dish.price))}
+                    </td>
+                  </>}
+                  <td className="w-px px-3 py-3 text-right">
+                    <div className="poster-row-actions">
+                      {!isGoods && !dish.isSet && can('sections.warehouse') && (
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline"
+                          aria-expanded={compositionId === dish.id}
+                          aria-controls={compositionId === dish.id ? `${compositionPanelId}-${dish.id}` : undefined}
+                          onClick={() => setCompositionId(compositionId === dish.id ? null : dish.id)}
+                        >
+                          Состав
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className={editable ? 'group inline-flex items-center rounded-lg p-1.5 transition-colors hover:bg-background' : 'text-xs text-primary hover:underline'}
+                        title={editable ? t('Редактировать') : undefined}
+                        aria-label={editable ? `${t('Редактировать')}: ${dish.name}` : undefined}
+                        onClick={() =>
+                          openEditor({ type: dish.isSet ? 'set' : 'entry', id: dish.id })
+                        }
+                      >
+                        {editable ? <IconEdit className="h-4 w-4 text-text-muted group-hover:text-primary" /> : 'Открыть'}
+                      </button>
+                      {editable && (
+                        <MenuActions
+                          ariaLabel={`Действия: ${dish.name}`}
+                          disabled={remove.isPending}
+                          onChange={(action) => {
+                            if (action === 'delete') void onDelete(dish);
+                          }}
+                          options={[{ value: 'delete', label: 'Удалить' }]}
+                        />
+                      )}
+                    </div>
+                  </td>
+                </tr>
+                {compositionId === dish.id && (
+                  <tr className="poster-catalogue-detail-row"><td colSpan={displayTax ? 6 : 5}>
+                    <div id={`${compositionPanelId}-${dish.id}`} className="poster-catalogue-detail" aria-label={`Состав: ${dish.name}`}><DishComposition dish={dish} /></div>
+                  </td></tr>
+                )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+          {!rows.length && (
+            <div className="space-y-3 py-12 text-center text-sm text-text-muted" role="status">
+              <p>
+                {filtered
+                  ? 'Нет позиций по выбранным условиям'
+                  : isGoods
+                    ? editable
+                      ? 'Добавьте первый товар для продажи'
+                      : 'Товаров пока нет'
+                    : editable
+                      ? 'Добавьте первое блюдо'
+                      : 'Блюд пока нет'}
+              </p>
+              {filtered && (
+                <button
+                  type="button"
+                  className="text-primary hover:underline"
+                  onClick={clearFilters}
+                >
+                  Сбросить фильтры
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
 }
-
-function Sum({ label, value }: { label: string; value: React.ReactNode }) {
+function dishOutput(dish: AdminDish) {
+  const metadata = (
+    dish as AdminDish & { recipeMetadata?: { outputQuantity?: number; outputUnit?: string } | null }
+  ).recipeMetadata;
+  return metadata?.outputQuantity != null
+    ? balanceQuantity(metadata.outputQuantity, metadata.outputUnit ? normalizeUnitLabel(metadata.outputUnit) : '')
+    : '—';
+}
+function ListLoadError({
+  error,
+  onRetry,
+  pending,
+}: {
+  error: unknown;
+  onRetry: () => void;
+  pending: boolean;
+}) {
   return (
-    <span>
-      {label}: <span className="font-medium text-text-primary">{value}</span>
-    </span>
+    <div role="alert" className="flex flex-wrap items-center gap-3 py-4 text-sm">
+      <p className="text-danger">{apiError(error)}</p>
+      <button
+        type="button"
+        className="text-primary hover:underline disabled:opacity-50"
+        onClick={onRetry}
+        disabled={pending}
+      >
+        {pending ? 'Загрузка…' : 'Повторить загрузку'}
+      </button>
+    </div>
   );
 }
-
-function Sep() {
-  return <span className="text-text-light">|</span>;
-}
-
-interface DishVariantDraft {
-  uid: string;
-  id?: string;
-  name: string;
-  price: string;
-  stock: string;
-  unit: string;
-}
-
-function variantDraft(variant?: AdminDishVariant): DishVariantDraft {
-  return {
-    uid: variant?.id ?? `tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    id: variant?.id,
-    name: variant?.name ?? '',
-    price: variant ? String(Number(variant.price)) : '',
-    stock: variant?.stock != null ? String(variant.stock) : '',
-    unit: normalizeUnitLabel(variant?.unit),
-  };
-}
-
-function DishModal({
-  dish,
-  categories,
-  defaultCategoryId,
+function ExistingSetPage({
+  id,
+  stations,
   onClose,
 }: {
-  dish: AdminDish | null;
-  categories: AdminCategory[];
-  defaultCategoryId: string;
+  id: string;
+  stations: PreparationStation[];
   onClose: () => void;
 }) {
-  const isEdit = !!dish;
-  const { create, update, remove } = useDishMutations();
-  const push = useNotifications((s) => s.push);
-  const [name, setName] = useState(dish?.name ?? '');
-  const [categoryId, setCategoryId] = useState(
-    dish?.categoryId ?? (defaultCategoryId || categories[0]?.id || ''),
-  );
-  const [price, setPrice] = useState(
-    dish ? (dish.variants.length > 0 && !dish.isWeighted ? '' : String(Number(dish.price))) : '',
-  );
-  const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : '');
-  const [unit, setUnit] = useState(normalizeUnitLabel(dish?.unit));
-  const [description, setDescription] = useState(dish?.description ?? '');
-  const [voiceName, setVoiceName] = useState(dish?.voiceName ?? '');
-  const [isAvailable, setIsAvailable] = useState(dish?.isAvailable ?? true);
-  const [isWeighted, setIsWeighted] = useState(dish?.isWeighted ?? false);
-  const [weightedMeasure, setWeightedMeasure] = useState<'weight' | 'volume'>(dish?.weightedMeasure ?? 'weight');
-  const [weightedPriceBase, setWeightedPriceBase] = useState(dish?.weightedPriceBase ?? 100);
-  // '' = брать направление из категории; иначе приоритет блюда.
-  const [prepStation, setPrepStation] = useState<'' | 'kitchen' | 'bar' | 'none'>(dish?.prepStation ?? '');
-  const [variants, setVariants] = useState<DishVariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [error, setError] = useState('');
-  const [tab, setTab] = useState<'main' | 'recipe'>('main');
-  const pending = create.isPending || update.isPending || remove.isPending;
-  const recipeQ = useRecipe(isEdit ? dish.id : null);
-  const hasRecipe = (recipeQ.data?.items.length ?? 0) > 0;
-  const hasDishStock = variants.length > 0
-    ? variants.some((variant) => variant.stock.trim() !== '')
-    : stock.trim() !== '';
-
-  // Фото блюда: preview — что показываем; payload — что отправляем (data URL | ссылка для загрузки | '' удалить | undefined без изменений).
-  const initialImageUrl = dish?.imageUrl ?? null;
-  const initialResolved = resolveApiImage(initialImageUrl);
-  const [photoPreview, setPhotoPreview] = useState<string | null>(initialResolved);
-  const [photoPayload, setPhotoPayload] = useState<string | undefined>(undefined);
-  const [photoBusy, setPhotoBusy] = useState(false);
-  const photoRef = useRef<HTMLInputElement>(null);
-  // Поле ввода URL: инициализируем из существующего imageUrl только если это http-ссылка.
-  const initialPhotoUrlInput = initialImageUrl?.startsWith('http') ? initialImageUrl : '';
-  const [photoUrlInput, setPhotoUrlInput] = useState<string>(initialPhotoUrlInput);
-
-  async function onPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = '';
-    if (!file) return;
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-      setError('Фото: только PNG, JPG или WEBP');
-      return;
-    }
-    setPhotoBusy(true);
-    setError('');
-    try {
-      const dataUrl = await downscaleToDataUrl(file);
-      setPhotoPreview(dataUrl);
-      setPhotoPayload(dataUrl);
-      setPhotoUrlInput('');
-    } catch (err) {
-      setError(apiError(err));
-    } finally {
-      setPhotoBusy(false);
-    }
-  }
-
-  function isValidPhotoUrl(url: string) {
-    return /^https?:\/\/.+/i.test(url);
-  }
-
-  function onPhotoUrlCommit() {
-    const url = photoUrlInput.trim();
-    if (!url) return;
-    if (!isValidPhotoUrl(url)) {
-      setError('Ссылка на фото должна начинаться с https://');
-      return;
-    }
-    setPhotoPreview(url);
-    setPhotoPayload(url === initialPhotoUrlInput ? undefined : url);
-    setError('');
-  }
-
-  function removePhoto() {
-    setPhotoPreview(null);
-    setPhotoPayload('');
-    setPhotoUrlInput('');
-  }
-
-  function updateVariant(uid: string, patch: Partial<Pick<DishVariantDraft, 'name' | 'price' | 'stock' | 'unit'>>) {
-    setVariants((current) => current.map((variant) => (variant.uid === uid ? { ...variant, ...patch } : variant)));
-  }
-
-  function addVariant() {
-    setVariants((current) => [...current, variantDraft()]);
-  }
-
-  function removeVariant(uid: string) {
-    setVariants((current) => current.filter((variant) => variant.uid !== uid));
-  }
-
-  function moveVariant(from: number, to: number) {
-    setVariants((current) => {
-      if (from === to || from < 0 || to < 0 || from >= current.length || to >= current.length) return current;
-      const next = [...current];
-      const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      return next;
-    });
-  }
-
-  async function onSubmit() {
-    setError('');
-    if (!name.trim() || !categoryId) {
-      setError('Заполните название и категорию');
-      return;
-    }
-    const filledVariants = variants
-      .map((variant) => ({
-        id: variant.id,
-        name: variant.name.trim(),
-        price: variant.price.trim(),
-        stock: variant.stock.trim(),
-        unit: variant.unit,
-      }))
-      .filter((variant) => variant.name || variant.price);
-    for (const variant of filledVariants) {
-      const variantPrice = Number(variant.price);
-      if (!variant.name || !variant.price || !Number.isFinite(variantPrice) || variantPrice <= 0) {
-        setError('У каждого варианта должны быть название и цена больше 0');
-        return;
-      }
-    }
-    const priceValue = price.trim() ? Number(price) : undefined;
-    if (priceValue !== undefined && (!Number.isFinite(priceValue) || priceValue < 0)) {
-      setError('Цена блюда должна быть числом');
-      return;
-    }
-    if ((filledVariants.length === 0 || isWeighted) && (!priceValue || priceValue <= 0)) {
-      setError('Укажите цену блюда или добавьте варианты с ценами');
-      return;
-    }
-    const typedPhotoUrl = photoUrlInput.trim();
-    let imageUrl = photoPayload;
-    if (typedPhotoUrl && typedPhotoUrl !== initialPhotoUrlInput && typedPhotoUrl !== photoPayload) {
-      if (!isValidPhotoUrl(typedPhotoUrl)) {
-        setError('Ссылка на фото должна начинаться с https://');
-        return;
-      }
-      imageUrl = typedPhotoUrl;
-    }
-    try {
-      const body = {
-        name: name.trim(),
-        categoryId,
-        price: priceValue,
-        description: description.trim() || undefined,
-        voiceName: voiceName.trim() || null,
-        isAvailable,
-        isWeighted,
-        weightedMeasure,
-        weightedPriceBase,
-        // Фото отправляем только при изменении (новое data URL или '' для удаления).
-        imageUrl,
-        prepStation: prepStation === '' ? null : prepStation,
-        trackInventory: filledVariants.length > 0 ? filledVariants.some(v => v.stock.trim() !== '') : stock.trim() !== '',
-        stock: priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
-        initialStock: !isEdit && priceValue !== undefined ? (stock.trim() ? Number(stock) : undefined) : undefined,
-        unit: priceValue !== undefined ? unit : undefined,
-        variants: filledVariants.map((variant) => ({
-          id: variant.id,
-          name: variant.name,
-          price: Number(variant.price),
-          stock: variant.stock.trim() ? Number(variant.stock) : undefined,
-          initialStock: (!isEdit || !variant.id) && variant.stock.trim() ? Number(variant.stock) : undefined,
-          unit: variant.unit,
-        })),
-      };
-      if (isEdit) {
-        await update.mutateAsync({ id: dish!.id, ...body });
-        push({ message: 'Блюдо обновлено', at: new Date().toISOString() });
-      } else {
-        await create.mutateAsync(body);
-        push({ message: 'Блюдо добавлено', at: new Date().toISOString() });
-      }
-      onClose();
-    } catch (err) {
-      setError(apiError(err));
-    }
-  }
-
-  async function onDeleteDish() {
-    if (!dish || !confirm(`Удалить блюдо «${dish.name}»?`)) return;
-    setError('');
-    try {
-      await remove.mutateAsync(dish.id);
-      push({ message: 'Блюдо удалено', at: new Date().toISOString() });
-      onClose();
-    } catch (err) {
-      setError(apiError(err));
-    }
-  }
-
-  const sampleAmount = 1250;
-  const smallUnit = weightedMeasure === 'weight' ? 'г' : 'мл';
-  const largeUnit = weightedMeasure === 'weight' ? 'кг' : 'л';
-  const baseLabel = weightedPriceBase === 1000 ? `1 ${largeUnit}` : `${weightedPriceBase} ${smallUnit}`;
-  const sampleTotal = Number(price || 0) * sampleAmount / weightedPriceBase;
-
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title={isEdit ? 'Изменить блюдо' : 'Новое блюдо'}
-      panelClassName="sm:w-[min(1160px,calc(100vw-48px))] sm:max-w-none"
-      footer={
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            {isEdit && (
-              <button type="button" className="btn-secondary btn-md border-danger/50 text-danger hover:bg-danger/5" disabled={pending} onClick={onDeleteDish}>
-                <IconTrash className="h-4 w-4" /> Удалить блюдо
-              </button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <button type="button" className="btn-secondary btn-md px-6" disabled={pending} onClick={onClose}>Отмена</button>
-            <button className="btn-primary btn-md min-w-36 font-semibold" disabled={pending} onClick={onSubmit}>
-              {pending ? <Spinner /> : 'Сохранить'}
-            </button>
-          </div>
-        </div>
-      }
-    >
-      <div className="space-y-3">
-        <div className="-mt-3 flex gap-1 border-b border-border">
-          <ModalTab active={tab === 'main'} onClick={() => setTab('main')}>
-            Основное
-          </ModalTab>
-          {isEdit && (
-            <ModalTab active={tab === 'recipe'} onClick={() => setTab('recipe')}>
-              Техкарта
-            </ModalTab>
-          )}
-        </div>
-
-        {tab === 'recipe' && isEdit && (
-          <RecipeEditor dishId={dish!.id} price={Number(dish!.price)} />
-        )}
-
-        <div className={tab === 'main' ? 'space-y-3' : 'hidden'}>
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.04fr)]">
-            <section className="rounded-xl border border-border p-4">
-              <Field label="Фото блюда">
-                <input ref={photoRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={onPhoto} />
-                <div className="flex gap-4">
-                  <div className="group relative flex h-[118px] w-[130px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-background">
-                    {photoPreview ? <img src={photoPreview} alt="" className="h-full w-full object-cover" /> : <span className="text-xs text-text-muted">Нет фото</span>}
-                    {photoPreview && <button type="button" onClick={removePhoto} className="absolute right-1.5 top-1.5 rounded-md bg-white/90 p-1 text-danger opacity-0 shadow group-hover:opacity-100" aria-label="Удалить фото"><IconTrash className="h-4 w-4" /></button>}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <button type="button" className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-primary/35 bg-primary/[0.02] px-3 text-sm font-medium text-primary hover:bg-primary/5" disabled={photoBusy} onClick={() => photoRef.current?.click()}>
-                      {photoBusy ? <Spinner /> : <><IconPlus className="h-4 w-4" /> Загрузить фото</>}
-                    </button>
-                    <p className="mt-2 text-[11px] text-text-muted">PNG, JPG, WEBP. Рекомендуемый размер 800×800px</p>
-                    <div className="mt-2 flex gap-2">
-                      <input className="input h-9 flex-1 text-xs" placeholder="или ссылка https://..." value={photoUrlInput} onChange={(e) => setPhotoUrlInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && onPhotoUrlCommit()} onBlur={onPhotoUrlCommit} />
-                      <button type="button" className="btn-secondary h-9 shrink-0 px-3 text-xs" onClick={onPhotoUrlCommit}>По ссылке</button>
-                    </div>
-                  </div>
-                </div>
-              </Field>
-              <div className="mt-3 space-y-3">
-                <Field label="Название"><input className="input h-11" value={name} onChange={(e) => setName(e.target.value)} /></Field>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label="Категория"><Select className="h-11 w-full" value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ value: c.id, label: c.name }))} /></Field>
-                  <Field label="Куда отправлять"><Select className="h-11 w-full" value={prepStation} onChange={(v) => setPrepStation(v as '' | 'kitchen' | 'bar' | 'none')} options={[{ value: '', label: 'По категории' }, { value: 'kitchen', label: 'Кухня' }, { value: 'bar', label: 'Бар' }, { value: 'none', label: 'Без отправки' }]} /></Field>
-                </div>
-                <Field label="Описание">
-                  <div className="relative"><textarea className="input min-h-[84px] resize-none py-2.5 pr-12" maxLength={300} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Необязательно" /><span className="absolute bottom-2 right-3 text-[11px] text-text-muted">{description.length}/300</span></div>
-                </Field>
-                {variants.length === 0 && !isWeighted && (
-                  <div className="grid grid-cols-3 gap-3">
-                    <Field label="Цена (с)"><input className="input h-11" type="number" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /></Field>
-                    <Field label="Остаток"><input className="input h-11" type="number" inputMode="numeric" value={stock} placeholder="Без учета" onChange={(e) => setStock(e.target.value)} /></Field>
-                    <Field label="Ед. изм."><Select value={unit} onChange={setUnit} options={unitLabelOptions(unit)} className="h-11 w-full" /></Field>
-                  </div>
-                )}
-                <div className="rounded-lg border border-border bg-background/60 p-3 text-xs leading-relaxed text-text-secondary">ⓘ &nbsp;Для напитков и готовых товаров используйте остаток блюда.<br />&nbsp;&nbsp;&nbsp;&nbsp;Для блюд кухни используйте техкарту. Не включайте оба варианта.</div>
-                {isEdit && hasRecipe && hasDishStock && <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs leading-relaxed text-warning">У блюда есть техкарта и заполнен остаток. Проверьте, нужен ли двойной учёт.</div>}
-              </div>
-            </section>
-
-            <section className="rounded-xl border border-border p-4">
-              <h4 className="text-base font-semibold text-text-primary">Настройки блюда</h4>
-              <div className="mt-3 grid grid-cols-2 divide-x divide-border">
-                <Toggle checked={isAvailable} onChange={setIsAvailable} label="Доступно для заказа" />
-                <div className="pl-6"><Toggle checked={isWeighted} onChange={setIsWeighted} label="Весовое блюдо" /></div>
-              </div>
-              {isWeighted && (
-                <div className="mt-4 rounded-xl border border-border p-4">
-                  <h5 className="font-semibold text-text-primary">Параметры весового блюда</h5>
-                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_12px_minmax(150px,.62fr)] items-end gap-2">
-                    <Field label="Ед. измерения (автоматическое масштабирование)"><Select className="h-11 w-full" value={weightedMeasure} onChange={(v) => setWeightedMeasure(v as 'weight' | 'volume')} options={[{ value: 'weight', label: 'г / кг' }, { value: 'volume', label: 'мл / л' }]} /></Field>
-                    <span className="pb-3 text-center text-text-muted">·</span>
-                    <Field label="Цена указана за"><Select className="h-11 w-full" value={String(weightedPriceBase)} onChange={(v) => setWeightedPriceBase(Number(v))} options={[1, 100, 1000].map((value) => ({ value: String(value), label: value === 1000 ? `1 ${largeUnit}` : `${value} ${smallUnit}` }))} /></Field>
-                  </div>
-                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(150px,.62fr)] gap-6">
-                    <div className="rounded-lg bg-background p-3 text-xs leading-relaxed text-text-secondary"><b className="text-primary">• {weightedMeasure === 'weight' ? 'г / кг' : 'мл / л'}</b><br />До 999 — в {smallUnit === 'г' ? 'граммах' : 'миллилитрах'}, свыше — в {largeUnit === 'кг' ? 'килограммах' : 'литрах'} (например, 1.25 {largeUnit})</div>
-                    <Field label="Цена"><div className="relative"><input className="input h-11 pr-14" type="number" min="0" step="0.01" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} /><span className="absolute right-3 top-3 text-sm text-text-muted">сом</span></div><p className="mt-2 text-xs text-text-muted">Например: {price || '50'} сом за {baseLabel}</p></Field>
-                  </div>
-                </div>
-              )}
-              {isWeighted && (
-                <div className="mt-4 rounded-xl border border-primary/20 bg-primary/[0.035] p-4">
-                  <h5 className="flex items-center gap-2 font-semibold text-text-primary"><span className="text-primary">▣</span> Пример расчёта</h5>
-                  <div className="mt-4 grid grid-cols-[1fr_1fr_24px_1fr] items-end gap-3 text-xs text-text-muted">
-                    <div><span>Выбрано количество:</span><strong className="mt-1 block text-sm text-primary">1250 {smallUnit} = 1.25 {largeUnit}</strong></div>
-                    <div><span>Цена за {baseLabel}:</span><strong className="mt-1 block text-sm text-text-primary">{Number(price || 0).toFixed(2)} сом</strong></div>
-                    <span className="pb-1 text-xl text-text-muted">→</span>
-                    <div><span>Итоговая цена:</span><strong className="mt-1 block text-sm text-primary">{sampleTotal.toFixed(2)} сом</strong></div>
-                  </div>
-                  <p className="mt-6 text-center text-xs text-text-muted">Система автоматически пересчитывает вес и рассчитывает итоговую цену.</p>
-                </div>
-              )}
-
-              <div className="mt-4 space-y-4">
-                <Field label="Название для озвучки"><input className="input h-11" value={voiceName} onChange={(e) => setVoiceName(e.target.value)} placeholder={name.trim() ? `Напр. «Пепперрони» (на экране — ${name.trim()})` : 'Как произносить вслух (необязательно)'} /></Field>
-
-                <section className="rounded-xl border border-border p-4">
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <h4 className="text-base font-semibold text-text-primary">Варианты блюда</h4>
-                    <button type="button" className="btn-secondary btn-md" onClick={addVariant}>
-                      <IconPlus className="h-4 w-4" /> Добавить вариант
-                    </button>
-                  </div>
-                  <div className="overflow-hidden overflow-x-auto rounded-xl border border-border">
-                    <div className="grid min-w-[520px] grid-cols-[28px_minmax(118px,1fr)_92px_92px_92px_36px] gap-2 border-b border-border bg-background px-3 py-2 text-xs font-medium text-text-muted">
-                      <span />
-                      <span>Название варианта</span>
-                      <span>Цена (с)</span>
-                      <span>Остаток</span>
-                      <span>Ед. изм.</span>
-                      <span />
-                    </div>
-                    {variants.length === 0 ? (
-                      <div className="px-3 py-4 text-sm text-text-muted">Варианты не добавлены</div>
-                    ) : (
-                      <div className="min-w-[520px]">
-                        {variants.map((variant, index) => (
-                          <div
-                            key={variant.uid}
-                            draggable
-                            onDragStart={() => setDragIndex(index)}
-                            onDragOver={(event) => event.preventDefault()}
-                            onDrop={() => {
-                              if (dragIndex !== null) moveVariant(dragIndex, index);
-                              setDragIndex(null);
-                            }}
-                            onDragEnd={() => setDragIndex(null)}
-                            className={`grid grid-cols-[28px_minmax(118px,1fr)_92px_92px_92px_36px] items-center gap-2 border-b border-border px-3 py-2 last:border-0 ${
-                              dragIndex === index ? 'bg-primary/5' : 'bg-white'
-                            }`}
-                          >
-                            <span className="cursor-grab select-none text-center text-lg leading-none text-text-light" title="Изменить порядок">
-                              ⋮⋮
-                            </span>
-                            <input
-                              className="input h-10"
-                              value={variant.name}
-                              placeholder="30 см"
-                              onChange={(e) => updateVariant(variant.uid, { name: e.target.value })}
-                            />
-                            <input
-                              className="input h-10"
-                              type="number"
-                              inputMode="numeric"
-                              min="0"
-                              value={variant.price}
-                              placeholder="400"
-                              onChange={(e) => updateVariant(variant.uid, { price: e.target.value })}
-                            />
-                            <input
-                              className="input h-10"
-                              type="number"
-                              inputMode="numeric"
-                              min="0"
-                              value={variant.stock}
-                              placeholder="Без учета"
-                              onChange={(e) => updateVariant(variant.uid, { stock: e.target.value })}
-                            />
-                            <Select
-                              value={variant.unit}
-                              onChange={(value) => updateVariant(variant.uid, { unit: value })}
-                              options={unitLabelOptions(variant.unit)}
-                              className="h-10 w-full"
-                            />
-                            <button
-                              type="button"
-                              className="flex h-9 w-9 items-center justify-center rounded-lg text-danger transition-colors hover:bg-danger/5"
-                              title="Удалить вариант"
-                              onClick={() => removeVariant(variant.uid)}
-                            >
-                              <IconTrash className="h-4 w-4" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </section>
-              </div>
-            </section>
-          </div>
-        </div>
-        {error && <p className="rounded-lg bg-danger/5 px-3 py-2 text-sm text-danger">{error}</p>}
-      </div>
-    </Modal>
-  );
+  const setsQ = useAdminSets();
+  if (setsQ.isPending)
+    return (
+      <EditorPage title="Сет" onClose={onClose}>
+        <Spinner />
+      </EditorPage>
+    );
+  if (setsQ.isError)
+    return (
+      <EditorPage title="Сет" onClose={onClose}>
+        <ListLoadError
+          error={setsQ.error}
+          onRetry={() => void setsQ.refetch()}
+          pending={setsQ.isFetching}
+        />
+      </EditorPage>
+    );
+  const set = setsQ.data.find((item) => item.id === id);
+  if (!set)
+    return (
+      <EditorPage title="Сет не найден" onClose={onClose}>
+        <p>Позиция удалена или недоступна.</p>
+      </EditorPage>
+    );
+  return <SetModal key={id} set={set} stations={stations} onClose={onClose} />;
 }
-
-function ModalTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`-mb-px shrink-0 border-b-2 px-3.5 py-2 text-sm font-medium transition-colors ${
-        active ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (checked: boolean) => void; label: string }) {
-  return (
-    <label className="flex cursor-pointer items-center gap-3 text-sm text-text-secondary">
-      <input type="checkbox" className="peer sr-only" checked={checked} onChange={(event) => onChange(event.target.checked)} />
-      <span className="relative h-5 w-9 shrink-0 rounded-full bg-slate-300 transition-colors peer-checked:bg-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary/30 after:absolute after:left-0.5 after:top-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:shadow-sm after:transition-transform peer-checked:after:translate-x-4" />
-      <span>{label}</span>
-    </label>
-  );
-}
-
-function CategoryModal({
-  categories,
-  onClose,
-}: {
-  categories: AdminCategory[];
-  onClose: () => void;
-}) {
-  const { create, update, reorder } = useCategoryMutations();
-  const push = useNotifications((s) => s.push);
-  const [name, setName] = useState('');
-  const [prepStation, setPrepStation] = useState<'kitchen' | 'bar' | 'none'>('kitchen');
-  const [error, setError] = useState('');
-  // Инлайн-переименование.
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  // Категория, которую удаляем (открывает выбор: перенести блюда или удалить вместе).
+export function MenuCategoriesPage() {
+  const categoriesQ = useAdminCategories();
+  const stations = usePreparationStations().data ?? [];
+  usePreparationStationUpdates();
+  const [search, setSearch] = usePageFilter('search');
+  const { editor, openEditor, closeEditor } = useEditorRoute();
+  const { can } = usePermissions();
+  const editable = can('actions.editMenu');
+  const { reorder } = useCategoryMutations();
+  const push = useNotifications((state) => state.push);
   const [deleteTarget, setDeleteTarget] = useState<AdminCategory | null>(null);
-
-  const sorted = [...categories].sort((a, b) => a.sortOrder - b.sortOrder);
-
-  async function add() {
-    setError('');
-    if (!name.trim()) return;
-    try {
-      await create.mutateAsync({ name: name.trim(), prepStation });
-      setName('');
-      setPrepStation('kitchen');
-      push({ message: 'Категория добавлена', at: new Date().toISOString() });
-    } catch (err) {
-      setError(apiError(err));
-    }
-  }
-
-  async function changeStation(id: string, value: 'kitchen' | 'bar' | 'none') {
-    try {
-      await update.mutateAsync({ id, prepStation: value });
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
-    }
-  }
-
-  async function saveRename(id: string) {
-    const newName = editName.trim();
-    setEditingId(null);
-    if (!newName || newName === sorted.find((c) => c.id === id)?.name) return;
-    try {
-      await update.mutateAsync({ id, name: newName });
-      push({ message: 'Категория переименована', at: new Date().toISOString() });
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
-    }
-  }
-
-  async function move(index: number, dir: -1 | 1) {
-    const next = index + dir;
-    if (next < 0 || next >= sorted.length) return;
-    const ids = sorted.map((c) => c.id);
-    [ids[index], ids[next]] = [ids[next], ids[index]];
+  const sorted = [...(categoriesQ.data ?? [])].sort((a, b) => a.sortOrder - b.sortOrder);
+  const rows = sorted.filter((category) =>
+    category.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+  );
+  const stationNames = new Map(
+    routingOptions(stations).map((station) => [station.value, station.label]),
+  );
+  for (const station of stations) stationNames.set(station.id, station.name);
+  async function move(categoryId: string, offset: number) {
+    const index = sorted.findIndex((category) => category.id === categoryId),
+      destination = index + offset;
+    if (index < 0 || destination < 0 || destination >= sorted.length) return;
+    const ids = sorted.map((category) => category.id);
+    [ids[index], ids[destination]] = [ids[destination], ids[index]];
     try {
       await reorder.mutateAsync(ids);
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+    } catch (failure) {
+      push({ message: apiError(failure), at: new Date().toISOString() });
     }
   }
-
+  const editingCategory = editor?.type === 'category' && !!editor.id;
+  const categoryIndex = editingCategory ? sorted.findIndex((category) => category.id === editor.id) : -1;
+  if (editor?.type === 'category' && !editor.id && categoriesQ.isSuccess) {
+    return <MenuCategoryForm stations={stations} onClose={closeEditor} />;
+  }
   return (
-    <Modal open onClose={onClose} title="Категории">
-      <div className="mb-4 flex flex-wrap gap-2">
-        <input
-          className="input flex-1"
-          placeholder="Название категории"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && add()}
-        />
-        <Select
-          className="h-11 w-40 shrink-0"
-          value={prepStation}
-          onChange={(v) => setPrepStation(v as 'kitchen' | 'bar' | 'none')}
-          options={[
-            { value: 'kitchen', label: 'Кухня' },
-            { value: 'bar', label: 'Бар' },
-            { value: 'none', label: 'Без отправки' },
-          ]}
-        />
-        <button className="btn-primary btn-md shrink-0" disabled={create.isPending} onClick={add}>
-          {create.isPending ? <Spinner /> : 'Добавить'}
-        </button>
+    <div className="min-w-0">
+      <WorkspaceHeaderCount count={categoriesQ.isSuccess ? rows.length : undefined} />
+      <div className="poster-toolbar">
+        <WorkspaceSearch label="Поиск категорий меню" value={search} onChange={setSearch} />
+        {editable && (
+          <button
+            aria-label="Добавить категорию"
+            className="btn-primary btn-md ml-auto"
+            onClick={() => openEditor({ type: 'category' })}
+          >
+            Добавить
+          </button>
+        )}
       </div>
-      {error && <p className="mb-2 text-sm text-danger">{error}</p>}
-      <ul className="space-y-2">
-        {sorted.map((c, index) => (
-          <li key={c.id} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2.5">
-            {/* Порядок */}
-            <div className="flex shrink-0 flex-col">
-              <button
-                onClick={() => move(index, -1)}
-                disabled={index === 0 || reorder.isPending}
-                className="text-text-muted hover:text-primary disabled:opacity-30"
-                title="Выше"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m18 15-6-6-6 6" /></svg>
-              </button>
-              <button
-                onClick={() => move(index, 1)}
-                disabled={index === sorted.length - 1 || reorder.isPending}
-                className="text-text-muted hover:text-primary disabled:opacity-30"
-                title="Ниже"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
-              </button>
+      {categoriesQ.isPending ? (
+        <WorkspacePending />
+      ) : categoriesQ.isError ? (
+        <ListLoadError
+          error={categoriesQ.error}
+          onRetry={() => void categoriesQ.refetch()}
+          pending={categoriesQ.isFetching}
+        />
+      ) : (
+        <div className="min-w-0 overflow-x-auto">
+          <table className="poster-table poster-directory-table w-full min-w-[480px]">
+            <thead>
+              <tr>
+                <th scope="col">Название</th>
+                <th scope="col">Станция</th>
+                <th scope="col" className="text-right">Позиций меню</th>
+                <th>
+                  <span className="sr-only">Действия</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((category) => (
+                <tr key={category.id} id={`menu-category-${category.id}`}>
+                  <td>
+                    <button
+                      type="button"
+                      className="text-left text-primary"
+                      onClick={() => openEditor({ type: 'category', id: category.id })}
+                    >
+                      {category.name}
+                    </button>
+                  </td>
+                  <td className="text-text-secondary">
+                    {stationNames.get(category.prepStation) ?? category.prepStation}
+                  </td>
+                  <td className="text-right tabular-nums">{category._count.dishes}</td>
+                  <td className="w-px text-right">
+                    <div className="poster-row-actions">
+                      {editable && <button type="button" title="Изменить" aria-label={`Изменить категорию ${category.name}`}
+                        className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-background hover:text-primary"
+                        onClick={() => openEditor({ type: 'category', id: category.id })}>
+                        <IconEdit className="h-4 w-4" />
+                      </button>}
+                      {editable && (
+                        <MenuActions
+                          ariaLabel={`Действия категории ${category.name}`}
+                          disabled={reorder.isPending}
+                          onChange={(action) => {
+                            if (action === 'delete') setDeleteTarget(category);
+                            else if (action === 'up') void move(category.id, -1);
+                            else if (action === 'down') void move(category.id, 1);
+                          }}
+                          options={[
+                            ...(sorted[0]?.id === category.id
+                              ? []
+                              : [{ value: 'up', label: 'Поднять выше' }]),
+                            ...(sorted.at(-1)?.id === category.id
+                              ? []
+                              : [{ value: 'down', label: 'Опустить ниже' }]),
+                            { value: 'delete', label: 'Удалить' },
+                          ]}
+                        />
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!rows.length && (
+            <div className="space-y-3 py-12 text-center text-sm text-text-muted" role="status">
+              <p>
+                {search
+                  ? 'Категории по этому запросу не найдены'
+                  : editable
+                    ? 'Добавьте первую категорию товаров и блюд'
+                    : 'Категорий пока нет'}
+              </p>
+              {search && (
+                <button
+                  type="button"
+                  className="text-primary hover:underline"
+                  onClick={() => setSearch('')}
+                >
+                  Сбросить поиск
+                </button>
+              )}
             </div>
-
-            {/* Название / инлайн-правка */}
-            {editingId === c.id ? (
-              <input
-                className="input h-9 min-w-0 flex-1"
-                value={editName}
-                autoFocus
-                onChange={(e) => setEditName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') saveRename(c.id);
-                  if (e.key === 'Escape') setEditingId(null);
-                }}
-                onBlur={() => saveRename(c.id)}
-              />
-            ) : (
-              <button
-                className="min-w-0 flex-1 truncate text-left text-[15px] text-text-primary hover:text-primary"
-                onClick={() => { setEditingId(c.id); setEditName(c.name); }}
-                title="Переименовать"
-              >
-                {c.name}
-              </button>
-            )}
-
-            <div className="flex shrink-0 items-center gap-2">
-              <Select
-                className="h-9 w-32"
-                value={c.prepStation ?? 'kitchen'}
-                onChange={(v) => changeStation(c.id, v as 'kitchen' | 'bar' | 'none')}
-                options={[
-                  { value: 'kitchen', label: 'Кухня' },
-                  { value: 'bar', label: 'Бар' },
-                  { value: 'none', label: 'Без отправки' },
-                ]}
-              />
-              <span className="w-14 text-right text-xs text-text-muted">{c._count.dishes} бл.</span>
-              <button
-                onClick={() => setDeleteTarget(c)}
-                className="text-danger hover:opacity-80"
-                title="Удалить"
-              >
-                <IconTrash className="h-4 w-4" />
-              </button>
-            </div>
-          </li>
-        ))}
-      </ul>
-
+          )}
+        </div>
+      )}
+      {editingCategory && (categoryIndex >= 0 ? (
+        <MenuCategoryForm key={editor.id} category={sorted[categoryIndex]} position={categoryIndex + 1}
+          categoryCount={sorted.length} stations={stations} onClose={closeEditor} />
+      ) : (
+        <Modal open title="Категория" onClose={closeEditor}>
+          {categoriesQ.isPending ? <Spinner /> : categoriesQ.isError ? (
+            <ListLoadError error={categoriesQ.error} onRetry={() => void categoriesQ.refetch()} pending={categoriesQ.isFetching} />
+          ) : <p className="text-sm text-text-secondary">Категория недоступна.</p>}
+        </Modal>
+      ))}
       {deleteTarget && (
         <DeleteCategorySheet
           category={deleteTarget}
@@ -868,11 +560,116 @@ function CategoryModal({
           onDone={() => setDeleteTarget(null)}
         />
       )}
-    </Modal>
+    </div>
   );
 }
+function MenuCategoryForm({
+  category,
+  position = 1,
+  categoryCount = 1,
+  stations,
+  onClose,
+}: {
+  category?: AdminCategory;
+  position?: number;
+  categoryCount?: number;
+  stations: PreparationStation[];
+  onClose: () => void;
+}) {
+  const formId = useId();
+  const { create, update } = useCategoryMutations();
+  const { can } = usePermissions();
+  const editable = can('actions.editMenu');
+  const [name, setName] = useState(category?.name ?? '');
+  const [tax, setTax] = useState(category?.taxId ?? '');
+  const [prepStation, setPrepStation] = useState(
+    category?.prepStation ?? stations.find((station) => station.isActive)?.id ?? 'none',
+  );
+  const [initialPosition] = useState(position);
+  const [newPosition, setNewPosition] = useState(String(position));
+  const [error, setError] = useState('');
+  const push = useNotifications((state) => state.push);
+  const pending = create.isPending || update.isPending;
+  const Field = category ? CategoryModalField : DocumentField;
+  const close = () => { if (!pending) onClose(); };
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!editable || pending) return;
+    if (!name.trim()) {
+      setError('Укажите название категории.');
+      return;
+    }
+    const nextPosition = Number(newPosition);
+    if (category && (!Number.isInteger(nextPosition) || nextPosition < 1 || nextPosition > categoryCount)) {
+      setError(`Укажите позицию от 1 до ${categoryCount}.`);
+      return;
+    }
+    setError('');
+    try {
+      const body = { name: name.trim(), prepStation, ...(tax !== (category?.taxId ?? '') ? { taxId: tax || null } : {}) };
+      if (category) await update.mutateAsync({
+        id: category.id, ...body, ...(nextPosition !== initialPosition ? { position: nextPosition } : {}),
+      });
+      else await create.mutateAsync(body);
+      push({ message: 'Категория сохранена', at: new Date().toISOString() });
+      onClose();
+    } catch (failure) {
+      setError(apiError(failure));
+    }
+  }
+  const fields = (
+    <form id={formId} onSubmit={save}>
+      <fieldset disabled={!editable || pending} className="min-w-0 space-y-4">
+        <Field label="Название">
+          <input aria-label="Название категории" className="input" value={name} maxLength={60}
+            onChange={(event) => setName(event.target.value)} required autoFocus={editable} />
+        </Field>
+        <Field label="Станция">
+          <Select ariaLabel="Станция категории" className="h-11 w-full" value={prepStation}
+            onChange={setPrepStation} options={routingOptions(stations, prepStation)} disabled={!editable || pending} />
+        </Field>
+        <Field label="Налог">
+          <MenuTaxSelect value={tax} onChange={setTax} disabled={!editable || pending} />
+        </Field>
+        {category && <Field label="Позиция в списке">
+          <div className="flex items-center gap-3">
+            <input aria-label="Позиция в списке" className="input max-w-24" type="number" inputMode="numeric"
+              min={1} max={categoryCount} step={1} required value={newPosition}
+              onChange={(event) => setNewPosition(event.target.value)} />
+            <span className="text-text-muted">из {categoryCount}</span>
+          </div>
+        </Field>}
+      </fieldset>
+      {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
+    </form>
+  );
+  const footer = (
+    <div className={category ? 'flex justify-end gap-2' : 'flex gap-2'}>
+      <button type="button" className="btn-secondary btn-md" onClick={close} disabled={pending}>
+        {editable ? 'Отмена' : 'Закрыть'}
+      </button>
+      {editable && <button type="submit" form={formId} className="btn-primary btn-md" disabled={pending}>
+        {pending ? 'Сохранение…' : 'Сохранить'}
+      </button>}
+    </div>
+  );
+  if (category) {
+    return (
+      <Modal open title={editable ? 'Редактирование категории' : 'Категория'} onClose={close} footer={footer}>
+        {fields}
+      </Modal>
+    );
+  }
+  return <EditorPage title="Добавление категории" onClose={close} footer={footer}>{fields}</EditorPage>;
+}
 
-/** Подтверждение удаления категории: перенести блюда или удалить вместе с блюдами. */
+function CategoryModalField({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="grid gap-1.5 text-sm text-text-secondary">
+    <span>{label}</span>
+    {children}
+  </div>;
+}
+
 function DeleteCategorySheet({
   category,
   categories,
@@ -883,74 +680,68 @@ function DeleteCategorySheet({
   onDone: () => void;
 }) {
   const { remove } = useCategoryMutations();
-  const push = useNotifications((s) => s.push);
-  const others = categories.filter((c) => c.id !== category.id);
-  const [targetId, setTargetId] = useState(others[0]?.id ?? '');
+  const push = useNotifications((state) => state.push);
+  const others = categories.filter((item) => item.id !== category.id);
+  const strategyName = useId();
+  const [strategy, setStrategy] = useState<'move' | 'delete'>();
+  const [targetId, setTargetId] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [error, setError] = useState('');
   const hasDishes = category._count.dishes > 0;
+  const canDelete = confirmation.trim() === category.name.trim() &&
+    (!hasDishes || strategy === 'delete' || (strategy === 'move' && !!targetId));
 
-  async function run(strategy?: 'move' | 'delete', targetCategoryId?: string) {
+  async function run() {
+    if (!canDelete || remove.isPending) return;
+    const playEffect = captureDeletionEffect(`menu-category-${category.id}`);
+    setError('');
     try {
-      await remove.mutateAsync({ id: category.id, strategy, targetCategoryId });
+      await remove.mutateAsync({ id: category.id, strategy, targetCategoryId: strategy === 'move' ? targetId : undefined });
+      playEffect?.();
       push({ message: 'Категория удалена', at: new Date().toISOString() });
       onDone();
-    } catch (err) {
-      push({ message: apiError(err), at: new Date().toISOString() });
+    } catch (failure) {
+      setError(apiError(failure));
     }
   }
 
   return (
-    <Modal open onClose={onDone} title={`Удалить «${category.name}»`} panelClassName="max-w-md">
-      {!hasDishes ? (
-        <div className="space-y-3">
-          <p className="text-sm text-text-secondary">В категории нет блюд. Удалить её?</p>
-          <button className="btn-danger btn-lg w-full font-semibold" disabled={remove.isPending} onClick={() => run()}>
-            {remove.isPending ? <Spinner /> : 'Удалить категорию'}
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          <p className="text-sm text-text-secondary">
-            В категории {category._count.dishes} блюд. Что сделать с ними?
-          </p>
-
-          <div className="space-y-2 rounded-xl border border-border p-3">
-            <p className="text-sm font-medium text-text-primary">Перенести блюда в другую категорию</p>
-            {others.length === 0 ? (
-              <p className="text-xs text-text-muted">Нет другой категории для переноса.</p>
-            ) : (
-              <div className="flex gap-2">
-                <Select
-                  className="h-10 min-w-0 flex-1"
-                  value={targetId}
-                  onChange={setTargetId}
-                  options={others.map((c) => ({ value: c.id, label: c.name }))}
-                />
-                <button
-                  className="btn-primary btn-md shrink-0"
-                  disabled={remove.isPending || !targetId}
-                  onClick={() => run('move', targetId)}
-                >
-                  {remove.isPending ? <Spinner /> : 'Перенести и удалить'}
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-2 rounded-xl border border-danger/30 bg-danger/5 p-3">
-            <p className="text-sm font-medium text-danger">Удалить категорию вместе с блюдами</p>
-            <p className="text-xs text-text-muted">
-              Блюда полностью удалятся из меню. История заказов и чеки сохранятся.
-            </p>
-            <button
-              className="btn-danger btn-md w-full font-semibold"
-              disabled={remove.isPending}
-              onClick={() => run('delete')}
-            >
-              {remove.isPending ? <Spinner /> : 'Удалить вместе с блюдами'}
-            </button>
-          </div>
-        </div>
-      )}
+    <Modal open title="Удалить категорию" onClose={() => !remove.isPending && onDone()} footer={
+      <div className="flex gap-2">
+        <button type="button" className="btn-secondary btn-lg flex-1" disabled={remove.isPending} onClick={onDone}>
+          Отмена
+        </button>
+        <button type="button" className="btn-danger btn-lg flex-1 font-semibold"
+          disabled={remove.isPending || !canDelete} onClick={() => void run()}>
+          {remove.isPending ? <Spinner /> : strategy === 'move' ? 'Перенести и удалить' : 'Удалить'}
+        </button>
+      </div>
+    }>
+      <p className="text-sm text-text-secondary">Удалить категорию «{category.name}»?</p>
+      {hasDishes && <>
+        <p className="mt-2 text-sm text-text-muted">
+          Позиций в категории: {category._count.dishes}. История заказов и чеки сохранятся.
+        </p>
+        <fieldset disabled={remove.isPending} className="mt-3 space-y-2.5 text-sm">
+          <legend className="mb-1 font-medium">Что сделать с позициями?</legend>
+          {others.length > 0 && <label className="flex items-center gap-2">
+            <input type="radio" name={strategyName} checked={strategy === 'move'} onChange={() => setStrategy('move')} />
+            Перенести в другую категорию
+          </label>}
+          {strategy === 'move' && <Select ariaLabel="Категория для переноса" className="h-10 w-full"
+            value={targetId} onChange={setTargetId} disabled={remove.isPending}
+            options={[{ value: '', label: 'Выберите категорию' }, ...others.map((item) => ({ value: item.id, label: item.name }))]} />}
+          <label className="flex items-center gap-2">
+            <input type="radio" name={strategyName} checked={strategy === 'delete'} onChange={() => setStrategy('delete')} />
+            Удалить все позиции вместе с категорией
+          </label>
+        </fieldset>
+      </>}
+      <div className="mt-3">
+        <DeleteNameField label="Введите название категории для подтверждения"
+          value={confirmation} disabled={remove.isPending} onChange={setConfirmation} />
+      </div>
+      {error && <p role="alert" className="mt-3 text-sm text-danger">{error}</p>}
     </Modal>
   );
 }
@@ -965,12 +756,24 @@ interface SetCompDraft {
   replaceable: boolean;
 }
 
-function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void }) {
+function SetModal({
+  set,
+  stations,
+  onClose,
+}: {
+  set: AdminDish | null;
+  stations: PreparationStation[];
+  onClose: () => void;
+}) {
   const isEdit = !!set;
+  const { can } = usePermissions();
+  const editable = can('actions.editMenu');
   const { create, update } = useSetMutations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(set?.name ?? '');
   const [price, setPrice] = useState(set ? String(Number(set.price)) : '');
+  const [tax, setTax] = useState(() => dishTaxValue(set ?? undefined));
+  const [prepStation, setPrepStation] = useState(set?.prepStation ?? '');
   const [components, setComponents] = useState<SetCompDraft[]>(() =>
     (set?.setComponents ?? []).map((c) => ({
       uid: c.id,
@@ -993,10 +796,16 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
     .filter((d) => !d.isSet && d.isActive)
     .flatMap((d): Candidate[] =>
       d.variants.length > 0
-        ? d.variants.map((v) => ({ dishId: d.id, dishVariantId: v.id, name: `${d.name} ${v.name}` }))
+        ? d.variants.map((v) => ({
+            dishId: d.id,
+            dishVariantId: v.id,
+            name: `${d.name} ${v.name}`,
+          }))
         : [{ dishId: d.id, name: d.name }],
     )
-    .filter((c) => !components.some((x) => x.dishId === c.dishId && x.dishVariantId === c.dishVariantId));
+    .filter(
+      (c) => !components.some((x) => x.dishId === c.dishId && x.dishVariantId === c.dishVariantId),
+    );
 
   function addComp(c: Candidate) {
     setComponents((cur) => [
@@ -1017,14 +826,18 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
   }
 
   async function onSubmit() {
+    if (!editable || pending) return;
     setError('');
     const priceNum = Number(price);
     if (!name.trim()) return setError('Укажите название сета');
-    if (!Number.isFinite(priceNum) || priceNum <= 0) return setError('Цена сета должна быть больше 0');
+    if (!Number.isFinite(priceNum) || priceNum <= 0)
+      return setError('Цена сета должна быть больше 0');
     if (components.length === 0) return setError('Добавьте блюда в состав сета');
     const body = {
       name: name.trim(),
       price: priceNum,
+      ...(tax !== dishTaxValue(set ?? undefined) ? dishTaxInput(tax) : {}),
+      prepStation: prepStation || null,
       components: components.map((c) => ({
         dishId: c.dishId,
         dishVariantId: c.dishVariantId,
@@ -1048,21 +861,32 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
   }
 
   return (
-    <Modal
+    <EditorPage
       open
       onClose={onClose}
-      title={isEdit ? 'Изменить сет' : 'Новый сет'}
+      title={isEdit ? (editable ? 'Изменить сет' : set.name) : 'Новый сет'}
       panelClassName="max-w-xl"
       footer={
-        <button className="btn-primary btn-lg w-full font-semibold" disabled={pending} onClick={onSubmit}>
-          {pending ? <Spinner /> : isEdit ? 'Сохранить' : 'Создать сет'}
-        </button>
+        editable ? (
+          <button
+            className="btn-primary btn-lg w-full font-semibold"
+            disabled={pending}
+            onClick={onSubmit}
+          >
+            {pending ? <Spinner /> : isEdit ? 'Сохранить' : 'Создать сет'}
+          </button>
+        ) : undefined
       }
     >
-      <div className="space-y-3">
+      <fieldset disabled={!editable || pending} className="min-w-0 space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label="Название">
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Сет-6" />
+            <input
+              className="input"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Сет-6"
+            />
           </Field>
           <Field label="Цена (с)">
             <input
@@ -1075,23 +899,47 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
           </Field>
         </div>
 
+        <Field label="Куда отправлять сет">
+          <Select
+            className="h-11 w-full"
+            value={prepStation}
+            onChange={setPrepStation}
+            options={[
+              { value: '', label: 'По категории' },
+              ...routingOptions(stations, prepStation),
+            ]}
+          />
+        </Field>
+        <Field label="Налог">
+          <MenuTaxSelect value={tax} onChange={setTax} inherit disabled={!editable || pending}
+            categoryTaxId={set?.category.taxId} />
+        </Field>
         <div>
           <p className="mb-1.5 text-sm font-medium text-text-secondary">Состав сета</p>
           {components.length === 0 ? (
             <p className="rounded-xl border border-dashed border-border px-3 py-3 text-sm text-text-muted">
-              Добавьте блюда из списка ниже
+              {editable ? 'Добавьте блюда из списка ниже' : 'Состав сета не задан'}
             </p>
           ) : (
             <div className="space-y-1.5">
               {components.map((c) => (
-                <div key={c.uid} className="flex flex-wrap items-center gap-2 rounded-xl border border-border px-3 py-2">
-                  <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{c.name}</span>
+                <div
+                  key={c.uid}
+                  className="flex flex-wrap items-center gap-2 rounded-xl border border-border px-3 py-2"
+                >
+                  <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">
+                    {c.name}
+                  </span>
                   <input
                     className="input h-9 w-16 px-2 text-center"
                     type="number"
                     min="1"
                     value={c.quantity}
-                    onChange={(e) => patch(c.uid, { quantity: Math.max(1, Number(e.target.value) || 1) })}
+                    onChange={(e) =>
+                      patch(c.uid, {
+                        quantity: Math.max(1, Number(e.target.value) || 1),
+                      })
+                    }
                   />
                   <label className="flex items-center gap-1 text-xs text-text-secondary">
                     <input
@@ -1109,72 +957,68 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
                     />
                     заменять
                   </label>
-                  <button
-                    type="button"
-                    className="flex h-8 w-8 items-center justify-center rounded-lg text-danger hover:bg-danger/5"
-                    onClick={() => setComponents((cur) => cur.filter((x) => x.uid !== c.uid))}
-                    title="Убрать из состава"
-                  >
-                    <IconTrash className="h-4 w-4" />
-                  </button>
+                  {editable && (
+                    <button
+                      type="button"
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-danger hover:bg-danger/5"
+                      onClick={() => setComponents((cur) => cur.filter((x) => x.uid !== c.uid))}
+                      title="Убрать из состава"
+                    >
+                      <IconTrash className="h-4 w-4" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        <div>
-          <p className="mb-1.5 text-sm font-medium text-text-secondary">Добавить блюдо</p>
-          <input
-            className="input mb-2"
-            placeholder="Поиск блюда"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="max-h-48 space-y-1 overflow-y-auto">
-            {candidates.map((c) => (
-              <button
-                key={`${c.dishId}-${c.dishVariantId ?? ''}`}
-                type="button"
-                onClick={() => addComp(c)}
-                className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-left transition-colors hover:border-primary/40"
-              >
-                <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">{c.name}</span>
-                <IconPlus className="h-4 w-4 shrink-0 text-primary" />
-              </button>
-            ))}
-            {candidates.length === 0 && (
-              <p className="py-3 text-center text-sm text-text-muted">Блюда не найдены</p>
+        {editable && (
+          <div>
+            <p className="mb-1.5 text-sm font-medium text-text-secondary">Добавить блюдо</p>
+            <input
+              className="input mb-2"
+              placeholder="Поиск блюда"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {dishesQ.isPending ? (
+              <Spinner />
+            ) : dishesQ.isError ? (
+              <ListLoadError
+                error={dishesQ.error}
+                onRetry={() => void dishesQ.refetch()}
+                pending={dishesQ.isFetching}
+              />
+            ) : (
+              <div className="max-h-48 space-y-1 overflow-y-auto">
+                {candidates.map((c) => (
+                  <button
+                    key={`${c.dishId}-${c.dishVariantId ?? ''}`}
+                    type="button"
+                    onClick={() => addComp(c)}
+                    className="flex w-full items-center justify-between gap-3 rounded-xl border border-border px-3 py-2 text-left transition-colors hover:border-primary/40"
+                  >
+                    <span className="min-w-0 flex-1 truncate text-[15px] text-text-primary">
+                      {c.name}
+                    </span>
+                    <IconPlus className="h-4 w-4 shrink-0 text-primary" />
+                  </button>
+                ))}
+                {candidates.length === 0 && (
+                  <p className="py-3 text-center text-sm text-text-muted">Блюда не найдены</p>
+                )}
+              </div>
             )}
           </div>
-        </div>
+        )}
 
         {error && <p className="text-sm text-danger">{error}</p>}
-      </div>
-    </Modal>
+      </fieldset>
+    </EditorPage>
   );
 }
 
-function CatTab({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`shrink-0 rounded-lg px-3.5 py-2 text-sm font-medium transition-colors ${
-        active ? 'bg-primary text-white' : 'text-text-secondary hover:bg-background'
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
@@ -1183,34 +1027,146 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
-function Badge({ children, tone }: { children: React.ReactNode; tone: 'success' | 'danger' | 'muted' }) {
-  const bg = {
-    success: 'bg-success/15 text-success-dark',
-    danger: 'bg-danger/15 text-danger-dark',
-    muted: 'bg-slate-100 text-slate-600',
-  }[tone];
-  return <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${bg}`}>{children}</span>;
-}
-function IconBtn({
-  children,
-  onClick,
-  title,
-  danger,
+
+function MenuActions({
+  ariaLabel,
+  options,
+  onChange,
+  disabled = false,
 }: {
-  children: React.ReactNode;
-  onClick: () => void;
-  title: string;
-  danger?: boolean;
+  ariaLabel: string;
+  options: { value: string; label: string }[];
+  onChange: (action: string) => void;
+  disabled?: boolean;
 }) {
+  const trigger = useRef<HTMLButtonElement>(null),
+    menu = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const focusLast = useRef(false);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  function openMenu(last = false) {
+    const rect = trigger.current!.getBoundingClientRect(),
+      height = options.length * 40 + 8;
+    focusLast.current = last;
+    setPosition({
+      left: Math.max(8, Math.min(rect.right - 192, window.innerWidth - 200)),
+      top:
+        rect.bottom + height + 8 > window.innerHeight
+          ? Math.max(8, rect.top - height - 4)
+          : rect.bottom + 4,
+    });
+  }
+  function closeMenu() {
+    setPosition(null);
+    trigger.current?.focus();
+  }
+  useEffect(() => {
+    if (!position) return;
+    const buttons = menu.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+    buttons?.[focusLast.current ? buttons.length - 1 : 0]?.focus();
+    const outside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!trigger.current?.contains(target) && !menu.current?.contains(target)) setPosition(null);
+    };
+    const close = (event: Event) => {
+      if (!menu.current?.contains(event.target as Node)) setPosition(null);
+    };
+    document.addEventListener('mousedown', outside);
+    window.addEventListener('resize', close);
+    document.addEventListener('scroll', close, true);
+    return () => {
+      document.removeEventListener('mousedown', outside);
+      window.removeEventListener('resize', close);
+      document.removeEventListener('scroll', close, true);
+    };
+  }, [position]);
   return (
-    <button
-      onClick={onClick}
-      title={title}
-      className={`rounded-lg p-2 transition-colors hover:bg-background ${
-        danger ? 'text-danger hover:bg-danger/5' : 'text-text-light hover:text-primary'
-      }`}
-    >
-      {children}
-    </button>
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        aria-label={ariaLabel}
+        aria-haspopup="menu"
+        aria-expanded={!!position}
+        aria-controls={position ? menuId : undefined}
+        disabled={disabled}
+        className="flex h-8 w-10 items-center justify-center text-lg text-primary hover:bg-background focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50"
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            openMenu(event.key === 'ArrowUp');
+          }
+        }}
+        onClick={() => {
+          if (position) {
+            setPosition(null);
+            return;
+          }
+          openMenu();
+        }}
+      >
+        •••
+      </button>
+      {position &&
+        createPortal(
+          <div
+            ref={menu}
+            id={menuId}
+            role="menu"
+            aria-label={ariaLabel}
+            className="fixed z-[80] w-48 border border-border bg-white py-1 shadow-lg"
+            style={position}
+            onBlur={(event) => {
+              if (
+                event.relatedTarget !== trigger.current &&
+                !event.currentTarget.contains(event.relatedTarget as Node | null)
+              )
+                setPosition(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                closeMenu();
+              } else if (event.key === 'Tab') {
+                closeMenu();
+              } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault();
+                const buttons = Array.from(
+                  event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+                );
+                const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                const next =
+                  event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? buttons.length - 1
+                      : (current + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) %
+                        buttons.length;
+                buttons[next]?.focus();
+              }
+            }}
+          >
+            {options
+              .filter((option) => option.value)
+              .map((option) => (
+                <button
+                  key={option.value}
+                  role="menuitem"
+                  type="button"
+                  tabIndex={-1}
+                  className={`block w-full px-4 py-2.5 text-left text-sm hover:bg-background focus:bg-background focus:outline-none ${option.value === 'delete' ? 'text-danger' : 'text-text-secondary'}`}
+                  onClick={() => {
+                    closeMenu();
+                    onChange(option.value);
+                  }}
+                >
+                  {option.label}
+                </button>
+              ))}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }

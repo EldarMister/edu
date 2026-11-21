@@ -5,6 +5,7 @@ import { OrdersService } from '../orders/orders.service';
 import { MoveTableDto, TransferTableDto } from './dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, AuthUser } from '../common/decorators/current-user.decorator';
+import { RequirePermission } from '../common/decorators/require-permission.decorator';
 
 @Controller('tables')
 export class TablesController {
@@ -27,18 +28,21 @@ export class TablesController {
 
   @Post(':id/close')
   @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
+  @RequirePermission('sections.tables')
   close(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.orders.closeTable(id, user);
   }
 
   @Post(':id/move')
   @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
+  @RequirePermission('sections.tables')
   move(@Param('id') id: string, @Body() dto: MoveTableDto, @CurrentUser() user: AuthUser) {
     return this.orders.moveTable(id, dto.targetTableId, user);
   }
 
   @Post(':id/transfer')
   @Roles(Role.WAITER, Role.ADMIN, Role.OWNER)
+  @RequirePermission('sections.tables')
   transfer(@Param('id') id: string, @Body() dto: TransferTableDto, @CurrentUser() user: AuthUser) {
     return this.orders.transferTable(id, dto.waiterId, user);
   }

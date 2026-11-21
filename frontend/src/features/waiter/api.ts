@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, networkRetry } from '@/lib/api';
 import type {
   Category,
@@ -7,6 +7,7 @@ import type {
   Order,
   OrderStatus,
   PaymentMethod,
+  PaymentStatus,
   Receipt,
   AdministratorCall,
   ReceiptPrintRequest,
@@ -18,8 +19,11 @@ import type { CartLine } from '@/types';
 export interface CabinetRecentOrder {
   id: string;
   orderNumber: string;
+  source?: Order['source'];
   tableNumber: number;
   finalAmount: string;
+  refundedAmount?: string;
+  paymentStatus?: PaymentStatus;
   status: OrderStatus;
   createdAt: string;
 }
@@ -32,6 +36,19 @@ export function useWaiterCabinet(period: 'day' | 'week' | 'month' = 'week') {
   return useQuery({
     queryKey: ['waiter', 'cabinet', period],
     queryFn: async () => (await api.get<WaiterCabinetData>(`/orders/cabinet?period=${period}`)).data,
+  });
+}
+
+export function useWaiterOrderHistory(enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: ['orders', 'waiter-history'],
+    initialPageParam: null as string | null,
+    queryFn: async ({ pageParam, signal }) => (await api.get<{
+      items: CabinetRecentOrder[];
+      nextCursor: string | null;
+    }>('/orders/history', { params: { cursor: pageParam }, signal })).data,
+    getNextPageParam: (page) => page.nextCursor,
+    enabled,
   });
 }
 
@@ -71,9 +88,10 @@ export function useActiveOrders() {
   });
 }
 
-export function useCurrentShift() {
+export function useCurrentShift(enabled = true) {
   return useQuery({
     queryKey: ['waiter', 'shift', 'current'],
+    enabled,
     queryFn: async () => (await api.get<WaiterShift | null>('/waiter/shifts/current')).data,
   });
 }
@@ -151,6 +169,8 @@ function linesToItems(lines: CartLine[]) {
     dishId: l.dish.id,
     variantId: l.variant?.id,
     weightGrams: l.weightGrams,
+    modifierSelections: l.modifierSelections?.map(({ optionId, quantity }) => ({ optionId, quantity })),
+    excludedIngredientIds: l.excludedIngredientIds,
     quantity: l.quantity,
     comment: l.comment?.trim() || undefined,
     takeaway: l.takeaway || undefined,
@@ -166,18 +186,25 @@ function linesToItems(lines: CartLine[]) {
   }));
 }
 
+export interface DeliveryDetails {
+  customerName: string;
+  customerPhone: string;
+  deliveryAddress: string;
+}
+
+type OrderDestination = { tableId: string; delivery?: never } | { tableId?: never; delivery: DeliveryDetails };
+
 export function useCreateOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: {
-      tableId: string;
+    mutationFn: async (payload: OrderDestination & {
       comment?: string;
       idempotencyKey: string;
       lines: CartLine[];
     }) => {
       const items = linesToItems(payload.lines);
-      const { data } = await api.post<Order>('/orders', {
-        tableId: payload.tableId,
+      const { data } = await api.post<Order>(payload.delivery ? '/orders/delivery' : '/orders', {
+        ...(payload.delivery ?? { tableId: payload.tableId }),
         comment: payload.comment?.trim() || undefined,
         idempotencyKey: payload.idempotencyKey,
         items,
@@ -234,11 +261,17 @@ export function useEditOrder() {
 }
 
 /** Универсальная мутация перехода статуса заказа официантом. */
-function useOrderAction(path: (id: string) => string) {
+function useOrderAction(path: (id: string) => string, updateCachedStatusFrom?: Order['status']) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (orderId: string) => (await api.post<Order>(path(orderId))).data,
     retry: networkRetry,
+    onSuccess: (updated) => {
+      if (!updateCachedStatusFrom) return;
+      qc.setQueryData<Order[]>(['orders', 'active'], (current) => current?.map((order) =>
+        order.id === updated.id && order.status === updateCachedStatusFrom ? updated : order,
+      ));
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
@@ -249,9 +282,38 @@ function useOrderAction(path: (id: string) => string) {
 
 export const usePickedUp = () => useOrderAction((id) => `/orders/${id}/picked-up`);
 export const useServed = () => useOrderAction((id) => `/orders/${id}/served`);
-export const useToPayment = () => useOrderAction((id) => `/orders/${id}/to-payment`);
+export const useToPayment = () => useOrderAction((id) => `/orders/${id}/to-payment`, 'served');
 export const useResolvePartialRejection = () => useOrderAction((id) => `/orders/${id}/resolve-partial-rejection`);
 export const useClaimQrOrder = () => useOrderAction((id) => `/orders/${id}/claim-qr`);
+
+export type SplitOrderLine = { itemId: string; quantity: number };
+type SplitOrderResult = { sourceOrder: Order; newOrder: Order };
+
+export function useSplitOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ orderId, ...payload }: {
+      orderId: string;
+      items: SplitOrderLine[];
+      expectedUpdatedAt: string;
+      idempotencyKey: string;
+    }) => (await api.post<SplitOrderResult>(`/orders/${orderId}/split`, payload)).data,
+    retry: networkRetry,
+    onSuccess: async ({ sourceOrder, newOrder }) => {
+      const key = ['orders', 'active'];
+      await qc.cancelQueries({ queryKey: key });
+      qc.setQueryData<Order[]>(key, (current = []) => [
+        ...current.filter((order) => order.id !== sourceOrder.id && order.id !== newOrder.id),
+        ...[sourceOrder, newOrder].filter((order) => order.status !== 'paid' && order.status !== 'cancelled'),
+      ]);
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['orders'] });
+      void qc.invalidateQueries({ queryKey: ['halls'] });
+      void qc.invalidateQueries({ queryKey: ['waiter', 'shift'] });
+    },
+  });
+}
 
 export function useRemoveRejectedItem() {
   const qc = useQueryClient();
@@ -326,8 +388,10 @@ export function usePay() {
     mutationFn: async (payload: {
       orderId: string;
       method: PaymentMethod;
+      expectedAmount: number;
       cashAmount?: number;
       qrAmount?: number;
+      cardAmount?: number;
       splitPayments?: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[];
     }) => (await api.post<Order>('/payments', payload)).data,
     onSettled: () => {

@@ -1,0 +1,100 @@
+:root {
+  color-scheme: light;
+  --edu-background: 248 250 252;
+  --edu-card: 255 255 255;
+  --edu-border: 226 232 240;
+  --edu-text: 15 23 42;
+  --edu-text-secondary: 71 85 105;
+  --edu-text-muted: 100 116 139;
+  --edu-text-light: 148 163 184;
+  --edu-primary: 0 91 255;
+  --edu-primary-hover: 0 73 204;
+  --edu-focus: 0 91 255;
+  --edu-link: 0 91 255;
+  --edu-link-hover: 0 73 204;
+  --edu-danger: 239 68 68;
+  --edu-success: 22 163 74;
+  --edu-warning: 245 158 11;
+  --edu-shadow-card: 0 1px 3px rgb(15 23 42 / .06), 0 1px 2px rgb(15 23 42 / .04);
+  --edu-shadow-soft: 0 4px 16px rgb(15 23 42 / .08);
+  --edu-modal-chrome: rgb(149 153 158);
+  --edu-raised: #f1f5f9;
+  --edu-inset: #edf1f5;
+  --edu-selected: #edf4ff;
+}
+
+@media screen {
+  :root[data-theme='dark'] {
+    color-scheme: dark;
+    --edu-background: 16 16 16;
+    --edu-card: 25 25 25;
+    --edu-border: 55 55 55;
+    --edu-text: 240 240 240;
+    --edu-text-secondary: 211 211 211;
+    --edu-text-muted: 174 174 174;
+    --edu-text-light: 153 153 153;
+    --edu-primary: 38 100 216;
+    --edu-primary-hover: 36 91 193;
+    --edu-focus: 138 182 255;
+    --edu-link: 138 182 255;
+    --edu-link-hover: 174 206 255;
+    --edu-danger: 255 139 144;
+    --edu-success: 92 211 149;
+    --edu-warning: 250 198 104;
+    --edu-shadow-card: 0 1px 3px rgb(0 0 0 / .36);
+    --edu-shadow-soft: 0 7px 24px rgb(0 0 0 / .45);
+    --edu-modal-chrome: #0a0a0a;
+    --edu-raised: #252525;
+    --edu-inset: #131313;
+    --edu-selected: #303030;
+  }
+
+  :where(:root[data-theme='dark']) :is(.btn-danger, .bg-danger.text-white) {
+    background-color: #b62740;
+  }
+
+  :where(:root[data-theme='dark']) .brand-logo {
+    filter: brightness(0) invert(1);
+  }
+
+  :where(:root[data-theme='dark']) :is(.bg-slate-50, .bg-slate-100) {
+    background-color: var(--edu-raised);
+  }
+
+  :where(:root[data-theme='dark']) .bg-slate-200 {
+    background-color: #373737;
+  }
+
+  :where(:root[data-theme='dark']) .bg-slate-300 {
+    background-color: #484848;
+  }
+
+  :where(:root[data-theme='dark']) :is(.border-slate-200, .border-slate-300, .border-slate-400) {
+    border-color: rgb(var(--edu-border));
+  }
+
+  :where(:root[data-theme='dark']) :is(.bg-red-50, .bg-red-100, .hover\:bg-red-50:hover) {
+    background-color: #352129;
+  }
+
+  :where(:root[data-theme='dark']) :is(.bg-amber-50, .bg-amber-100, .bg-orange-100) {
+    background-color: #332819;
+  }
+
+  :where(:root[data-theme='dark']) .bg-green-50 { background-color: #172d26; }
+  :where(:root[data-theme='dark']) :is(.bg-purple-50, .bg-purple-100) { background-color: #2c2340; }
+
+  :where(:root[data-theme='dark']) :is(.text-red-500, .text-red-600) { color: rgb(var(--edu-danger)); }
+  :where(:root[data-theme='dark']) .text-green-600 { color: rgb(var(--edu-success)); }
+  :where(:root[data-theme='dark']) :is(.text-amber-600, .text-amber-700, .text-amber-800, .text-orange-600) {
+    color: rgb(var(--edu-warning));
+  }
+  :where(:root[data-theme='dark']) .text-purple-600 { color: #c4acff; }
+  :where(:root[data-theme='dark']) :is(.text-slate-500, .text-slate-700) {
+    color: rgb(var(--edu-text-secondary));
+  }
+
+  :where(:root[data-theme='dark']) .app-scrollbar-subtle {
+    scrollbar-color: #454545 transparent;
+  }
+}

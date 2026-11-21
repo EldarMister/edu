@@ -19,6 +19,11 @@ async function main() {
   });
 
   // --- Пользователи (вход по телефону + пароль) ---
+  const positions = await prisma.staffPosition.findMany({
+    where: { cafeId: cafe.id, isStarter: true },
+    select: { id: true, role: true },
+  });
+  const positionByRole = new Map(positions.map(({ id, role }) => [role, id]));
   const users = [
     { name: 'Иванов И.', phone: '+70000000001', role: Role.WAITER, password: 'waiter123' },
     { name: 'Петров А.', phone: '+70000000002', role: Role.KITCHEN, password: 'kitchen123' },
@@ -31,7 +36,7 @@ async function main() {
     await prisma.user.upsert({
       where: { phone: u.phone },
       update: { name: u.name, role: u.role, passwordHash, isActive: true },
-      create: { cafeId: cafe.id, name: u.name, phone: u.phone, role: u.role, passwordHash },
+      create: { cafeId: cafe.id, name: u.name, phone: u.phone, role: u.role, passwordHash, positionId: positionByRole.get(u.role) },
     });
   }
   console.log(`✓ ${users.length} пользователей`);
@@ -50,19 +55,17 @@ async function main() {
 
   // Столы как на макете: сетка номеров
   const mainTables = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19, 20, 21];
-  for (const number of mainTables) {
-    await prisma.table.upsert({
-      where: { hallId_number: { hallId: hall.id, number } },
-      update: {},
-      create: { cafeId: cafe.id, hallId: hall.id, number, seats: number % 3 === 0 ? 4 : 2, sortOrder: number },
-    });
-  }
-  for (const number of [1, 2, 3, 4]) {
-    await prisma.table.upsert({
-      where: { hallId_number: { hallId: terrace.id, number } },
-      update: {},
-      create: { cafeId: cafe.id, hallId: terrace.id, number, seats: 4, sortOrder: number },
-    });
+  for (const { hallId, numbers } of [{ hallId: hall.id, numbers: mainTables }, { hallId: terrace.id, numbers: [1, 2, 3, 4] }]) {
+    const existing = await prisma.table.findMany({ where: { hallId }, select: { number: true } });
+    const usedNumbers = new Set(existing.map(({ number }) => number));
+    const data = numbers.filter((number) => !usedNumbers.has(number)).map((number) => ({
+      cafeId: cafe.id,
+      hallId,
+      number,
+      seats: hallId === terrace.id || number % 3 === 0 ? 4 : 2,
+      sortOrder: number,
+    }));
+    if (data.length) await prisma.table.createMany({ data, skipDuplicates: true });
   }
   console.log(`✓ 2 зала, ${mainTables.length + 4} столов`);
 

@@ -1,12 +1,13 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/lib/order-cache';
-import type { EmployeePermissions, Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
+import type { EmployeePermissions, FloorPlanTable, Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
 
 // ---------- Типы ответов ----------
 export interface AdminTableItem {
   id: string;
   number: number;
+  name?: string | null;
   seats: number;
   status: TableStatus;
   isActive: boolean;
@@ -19,8 +20,12 @@ export interface AdminHall {
   isActive: boolean;
   sortOrder: number;
   tables: AdminTableItem[];
+  floorPlan?: FloorPlanTable[] | null;
+  floorPlanVersion?: number;
+  useFloorPlan?: boolean | null;
 }
 export interface AdminCategory {
+  taxId?: string | null;
   id: string;
   name: string;
   sortOrder: number;
@@ -29,12 +34,18 @@ export interface AdminCategory {
   _count: { dishes: number };
 }
 export interface AdminDish {
+  taxId?: string | null;
+  taxExempt?: boolean;
+  catalogKind?: 'goods' | 'recipe';
+  stockIngredientId?: string | null;
+  hasDirectStock?: boolean;
+  hasRecipe?: boolean;
   id: string;
   name: string;
   description: string | null;
   price: string;
   categoryId: string;
-  category: { id: string; name: string };
+  category: { id: string; name: string; taxId?: string | null };
   discountType: 'none' | 'percent' | 'fixed';
   discountValue: string;
   isAvailable: boolean;
@@ -55,6 +66,11 @@ export interface AdminDish {
   // Лёгкая ссылка на фото блюда (/dishes/:id/image?v=…) или null.
   imageUrl?: string | null;
 }
+export interface AdminGood extends AdminDish {
+  goodsStation: PrepStation;
+  goodsPrice: number;
+  goodsUnits: string[];
+}
 export interface AdminSetComponent {
   id: string;
   quantity: number;
@@ -74,6 +90,11 @@ export interface AdminDishVariant {
   unit?: string;
 }
 export interface StaffMember {
+  prepStation?: string | null;
+  positionId?: string | null;
+  positionName?: string | null;
+  positionIsStarter?: boolean;
+  canManage?: boolean;
   id: string;
   name: string;
   phone: string;
@@ -95,7 +116,8 @@ export interface WaiterOrdersReportItem {
   id: string;
   orderId: string;
   orderedAt: string;
-  servedAt: string;
+  paidAt: string;
+  waiterName: string;
   orderNumber: string;
   tableNumber: number;
   dishName: string;
@@ -112,7 +134,7 @@ export interface WaiterOrdersReportResponse {
     ordersCount: number;
     dishesCount: number;
     amount: number;
-    averageServingSeconds: number;
+    averagePaymentSeconds: number;
   };
 }
 export interface OrdersPage {
@@ -179,49 +201,6 @@ export interface AuditFilterOptions {
   actionTypes: string[];
 }
 
-// ---------- Сверка оплат ----------
-export type ReconStatus = 'matched' | 'not_found' | 'needs_review' | 'amount_mismatch' | 'extra';
-export interface ReconRow {
-  orderId: string | null;
-  orderNumber: string | null;
-  orderTime: string | null;
-  posAmount: number | null;
-  bankAmount: number | null;
-  bankTime: string | null;
-  timeDiffSec: number | null;
-  paymentMethod: string | null;
-  waiter: string | null;
-  status: ReconStatus;
-  comment: string;
-}
-export interface ReconResult {
-  from: string | null;
-  to: string | null;
-  toleranceMin: number;
-  stats: {
-    paidCount: number;
-    matched: number;
-    notFound: number;
-    needsReview: number;
-    amountMismatch: number;
-    extra: number;
-  };
-  rows: ReconRow[];
-}
-
-export function useReconcile() {
-  return useMutation({
-    mutationFn: async (vars: { file: File; from: string; to: string; toleranceMin: number }) => {
-      const fd = new FormData();
-      fd.append('file', vars.file);
-      fd.append('from', vars.from);
-      fd.append('to', vars.to);
-      fd.append('toleranceMin', String(vars.toleranceMin));
-      const { data } = await api.post<ReconResult>('/admin/reconciliation', fd);
-      return data;
-    },
-  });
-}
 
 // ---------- Хелперы ----------
 const get = async <T,>(url: string) => (await api.get<T>(url)).data;
@@ -234,14 +213,43 @@ function useInvalidate(keys: string[][]) {
 // ========== СТАТИСТИКА ==========
 export type StatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
 
-export function useStatistics(params: { period: StatsPeriod; from?: string; to?: string }) {
+type StatsPeriodParams = { period: StatsPeriod; from?: string; to?: string };
+
+function statisticsQuery(params: StatsPeriodParams) {
   const q = new URLSearchParams();
   q.set('period', params.period);
   if (params.from) q.set('from', params.from);
   if (params.to) q.set('to', params.to);
+  return q;
+}
+
+export function useStatistics(params: StatsPeriodParams, enabled = true) {
   return useQuery({
     queryKey: ['admin', 'stats', params],
-    queryFn: () => get<StatsDashboard>(`/admin/statistics?${q.toString()}`),
+    queryFn: () => get<StatsDashboard>(`/admin/statistics?${statisticsQuery(params)}`),
+    enabled,
+  });
+}
+
+type ProductStats = {
+  id: string; name: string; categoryId: string; category: string; waiterId: string; waiter: string;
+  quantity: number; gross: number; discount: number; revenue: number; cost: number | null; profit: number | null;
+};
+
+export interface StatisticsReports {
+  range: { from: string | null; to: string };
+  sales: { date: string; revenue: number; orders: number; avgCheck: number; discount: number }[];
+  products: ProductStats[];
+  categories: { id: string; name: string; quantity: number; revenue: number; cost: number | null; tax: number | null; profit: number | null }[];
+  staff: { id: string; name: string; revenue: number; orders: number; avgCheck: number; avgSeconds: number | null; profit: number | null }[];
+  payments: { date: string; orders: number; cash: number; card: number; qr: number; other: number; total: number }[];
+}
+
+export function useStatisticsReports(params: StatsPeriodParams, enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'stats', 'reports', params],
+    queryFn: () => get<StatisticsReports>(`/admin/statistics/reports?${statisticsQuery(params)}`),
+    enabled,
   });
 }
 
@@ -317,6 +325,7 @@ export function useAdminOrderDetails(id: string | null) {
 /** Результат пробития фискального чека (ответ /fiscal/...). */
 export interface FiscalResult {
   success: boolean;
+  simulated?: boolean;
   fiscalReceiptNumber?: string;
   fiscalSign?: string;
   qrCode?: string;
@@ -340,9 +349,9 @@ export function useRetryFiscal() {
 export function useFiscalizeForPrint() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (orderId: string) =>
-      api.post<FiscalResult | null>(`/fiscal/orders/${orderId}/print`).then((r) => r.data),
-    onSuccess: (_data, orderId) => {
+    mutationFn: ({ orderId, requestId }: { orderId: string; requestId?: string }) =>
+      api.post<FiscalResult | null>(`/fiscal/orders/${orderId}/print`, undefined, { params: { requestId } }).then((r) => r.data),
+    onSuccess: (_data, { orderId }) => {
       qc.invalidateQueries({ queryKey: ['admin', 'orders', 'detail', orderId] });
     },
   });
@@ -455,14 +464,33 @@ export function useAdminHalls() {
   return useQuery({ queryKey: ['admin', 'halls'], queryFn: () => get<AdminHall[]>('/admin/halls') });
 }
 
+export function useFloorPlanMutations() {
+  const qc = useQueryClient();
+  const save = useMutation({
+    mutationFn: async ({ id, version, tables }: { id: string; version: number; tables: FloorPlanTable[] }) =>
+      (await api.put<{ floorPlan: FloorPlanTable[]; floorPlanVersion: number }>(`/admin/halls/${id}/floor-plan`, { version, tables })).data,
+    onSuccess: (plan, { id }) => {
+      qc.setQueryData<AdminHall[]>(['admin', 'halls'], (halls) => halls?.map((hall) =>
+        hall.id === id && (hall.floorPlanVersion ?? 0) <= plan.floorPlanVersion ? { ...hall, ...plan } : hall));
+      void qc.invalidateQueries({ queryKey: ['admin', 'halls'] });
+      void qc.invalidateQueries({ queryKey: ['halls'] });
+    },
+  });
+  const setMode = useMutation({
+    mutationFn: (useFloorPlan: boolean) => api.put('/admin/tables/floor-plan-mode', { useFloorPlan }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
+  });
+  return { save, setMode };
+}
+
 export function useHallMutations() {
-  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
+  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview'], ['halls']]);
   const create = useMutation({
-    mutationFn: (b: { name: string }) => api.post('/admin/halls', b).then((r) => r.data),
+    mutationFn: (b: { name: string; useFloorPlan?: boolean | null }) => api.post('/admin/halls', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean }) =>
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; useFloorPlan?: boolean | null }) =>
       api.patch(`/admin/halls/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
@@ -474,20 +502,32 @@ export function useHallMutations() {
 }
 
 export function useTableMutations() {
+  const qc = useQueryClient();
   const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
   const create = useMutation({
-    mutationFn: (b: { hallId: string; number: number; seats: number }) =>
+    mutationFn: (b: { hallId: string; number?: number; name?: string | null; seats: number }) =>
       api.post('/admin/tables', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; number?: number; seats?: number; isActive?: boolean }) =>
+    mutationFn: ({ id, ...b }: { id: string; number?: number; name?: string | null; seats?: number; isActive?: boolean }) =>
       api.patch(`/admin/tables/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/admin/tables/${id}`).then((r) => r.data),
-    onSuccess: invalidate,
+    onSuccess: (_result, tableId) => {
+      // Стол исчезает из списка сразу, не дожидаясь повторного запроса.
+      // Сервер при наличии истории деактивирует стол, поэтому он больше не
+      // должен отображаться среди действующих столов владельца.
+      qc.setQueryData<AdminHall[]>(['admin', 'halls'], (halls) =>
+        halls?.map((hall) => ({
+          ...hall,
+          tables: hall.tables.filter((table) => table.id !== tableId),
+        })),
+      );
+      invalidate();
+    },
   });
   return { create, update, remove };
 }
@@ -508,36 +548,49 @@ export function useAdminCategories() {
     queryFn: () => get<AdminCategory[]>('/admin/categories'),
   });
 }
-export function useAdminDishes(categoryId: string, search: string) {
+export function useAdminDishes(categoryId: string, search: string, enabled = true) {
   const q = new URLSearchParams();
   if (categoryId) q.set('categoryId', categoryId);
   if (search) q.set('search', search);
   return useQuery({
     queryKey: ['admin', 'dishes', categoryId, search],
     queryFn: () => get<AdminDish[]>(`/admin/dishes?${q.toString()}`),
+    enabled,
+  });
+}
+
+export function useAdminGoods(enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'dishes', 'goods'],
+    queryFn: () => get<AdminGood[]>('/admin/menu/goods'),
+    enabled,
   });
 }
 
 export function useCategoryMutations() {
+  const qc = useQueryClient();
   const invalidate = useInvalidate([
     ['admin', 'categories'],
     ['admin', 'menu', 'overview'],
     ['admin', 'dishes'],
   ]);
   const create = useMutation({
-    mutationFn: (b: { name: string; prepStation?: PrepStation }) =>
+    mutationFn: (b: { name: string; prepStation?: PrepStation; taxId?: string | null }) =>
       api.post('/admin/categories', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number }) =>
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number; position?: number; taxId?: string | null }) =>
       api.patch(`/admin/categories/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const remove = useMutation({
     mutationFn: ({ id, strategy, targetCategoryId }: { id: string; strategy?: 'move' | 'delete'; targetCategoryId?: string }) =>
       api.delete(`/admin/categories/${id}`, { data: { strategy, targetCategoryId } }).then((r) => r.data),
-    onSuccess: invalidate,
+    onSuccess: (_result, { id }) => {
+      qc.setQueryData<AdminCategory[]>(['admin', 'categories'], (categories) => categories?.filter((category) => category.id !== id));
+      invalidate();
+    },
   });
   const reorder = useMutation({
     mutationFn: (ids: string[]) => api.patch('/admin/categories/reorder', { ids }).then((r) => r.data),
@@ -574,6 +627,7 @@ export interface DishInput {
   imageUrl?: string;
 }
 export function useDishMutations() {
+  const qc = useQueryClient();
   const invalidate = useInvalidate([['admin', 'dishes'], ['admin', 'menu', 'overview'], ['admin', 'warehouse']]);
   const create = useMutation({
     mutationFn: (b: DishInput) => api.post('/admin/dishes', b).then((r) => r.data),
@@ -586,7 +640,10 @@ export function useDishMutations() {
   });
   const remove = useMutation({
     mutationFn: (id: string) => api.delete(`/admin/dishes/${id}`).then((r) => r.data),
-    onSuccess: invalidate,
+    onSuccess: (_result, id) => {
+      qc.setQueriesData<AdminDish[]>({ queryKey: ['admin', 'dishes'] }, (dishes) => dishes?.filter((dish) => dish.id !== id));
+      invalidate();
+    },
   });
   return { create, update, remove };
 }
@@ -600,8 +657,11 @@ export interface SetComponentInput {
   replaceable?: boolean;
 }
 export interface SetInput {
+  taxId?: string | null;
+  taxExempt?: boolean;
   name: string;
   price: number;
+  prepStation?: PrepStation | null;
   components: SetComponentInput[];
 }
 export function useAdminSets() {
@@ -700,17 +760,20 @@ export interface ShiftReportRow {
   turnover: number;
   cashDue: number;
   cashHanded: number;
+  cashHandover?: boolean;
+  cashReceivedAt?: string | null;
   difference: number;
   categories: ShiftReportCategory[];
   cancellations: ShiftReportCancellation[];
 }
 
-export function useShiftReport(date: string) {
+export function useShiftReport(date: string, enabled = true) {
   const q = new URLSearchParams();
   if (date) q.set('date', date);
   return useQuery({
     queryKey: ['admin', 'staff', 'shift-report', date],
     queryFn: () => get<ShiftReportRow[]>(`/admin/staff/shift-report?${q.toString()}`),
+    enabled,
   });
 }
 
@@ -753,7 +816,7 @@ export interface ShiftHistoryResponse {
   range: { from: string; to: string };
 }
 
-export function useShiftHistory(filters: ShiftHistoryFilters) {
+export function useShiftHistory(filters: ShiftHistoryFilters, enabled = true) {
   const q = new URLSearchParams();
   q.set('period', filters.period);
   if (filters.from) q.set('from', filters.from);
@@ -763,12 +826,12 @@ export function useShiftHistory(filters: ShiftHistoryFilters) {
   return useQuery({
     queryKey: ['admin', 'staff', 'shift-history', filters],
     queryFn: () => get<ShiftHistoryResponse>(`/admin/staff/shift-history?${q.toString()}`),
+    enabled,
   });
 }
 
 export function useShiftHistoryActions() {
-  const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-history'] });
+  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'finance']]);
   const update = useMutation({
     mutationFn: ({ id, ...body }: { id: string; startedAt?: string; endedAt?: string | null }) =>
       api.patch(`/admin/staff/shift-history/${id}`, body).then((r) => r.data),
@@ -790,34 +853,36 @@ export function useSetCashHanded() {
   });
 }
 
+const staffListKey = ['admin', 'staff', 'list'];
+
 export function useStaff(role: string, search: string) {
   const q = new URLSearchParams();
   if (role) q.set('role', role);
   if (search) q.set('search', search);
   return useQuery({
-    queryKey: ['admin', 'staff', role, search],
+    queryKey: [...staffListKey, role, search],
     queryFn: () => get<StaffMember[]>(`/admin/staff?${q.toString()}`),
   });
 }
+export function useReportEmployees(enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'staff', 'report-employees'],
+    queryFn: () => get<Pick<StaffMember, 'id' | 'name' | 'role'>[]>('/admin/staff/report-employees'),
+    enabled,
+  });
+}
 export interface StaffInput {
+  prepStation?: string | null;
+  positionId?: string | null;
   name: string;
   phone: string;
-  role: Role;
+  role?: Role;
   password?: string;
   isActive?: boolean;
 }
-/** Сохранить права доступа сотрудника. Возвращает актуальные permissions. */
-export function useUpdatePermissions() {
-  const invalidate = useInvalidate([['admin', 'staff']]);
-  return useMutation({
-    mutationFn: ({ id, ...body }: { id: string } & EmployeePermissions) =>
-      api.patch<StaffMember>(`/admin/staff/${id}/permissions`, body).then((r) => r.data),
-    onSuccess: invalidate,
-  });
-}
-
 export function useStaffMutations() {
-  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'staff', 'overview']]);
+  const qc = useQueryClient();
+  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'positions'], ['admin', 'finance']]);
   const create = useMutation({
     mutationFn: (b: StaffInput) => api.post('/admin/staff', b).then((r) => r.data),
     onSuccess: invalidate,
@@ -828,8 +893,11 @@ export function useStaffMutations() {
     onSuccess: invalidate,
   });
   const remove = useMutation({
-    mutationFn: (id: string) => api.delete(`/admin/staff/${id}`).then((r) => r.data),
-    onSuccess: invalidate,
+    mutationFn: (id: string) => api.delete(`/admin/staff/${id}`),
+    onSuccess: (_, id) => {
+      qc.setQueriesData<StaffMember[]>({ queryKey: staffListKey }, (staff) => staff?.filter((member) => member.id !== id));
+      invalidate();
+    },
   });
   return { create, update, remove };
 }

@@ -1,7 +1,8 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { WarehouseCostInterceptor } from './warehouse/warehouse-cost.interceptor';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -18,8 +19,10 @@ import { QrModule } from './qr/qr.module';
 import { QueueModule } from './queue/queue.module';
 import { RealtimeModule } from './realtime/realtime.module';
 import { WaiterShiftsModule } from './waiter-shifts/waiter-shifts.module';
+import { CashShiftsModule } from './cash-shifts/cash-shifts.module';
 import { AdminModule } from './admin/admin.module';
 import { WarehouseModule } from './warehouse/warehouse.module';
+import { PreparationProductionModule } from './warehouse/preparation-production';
 import { SettingsModule } from './settings/settings.module';
 import { PushModule } from './push/push.module';
 import { AuditModule } from './audit/audit.module';
@@ -32,6 +35,7 @@ import { RolesGuard } from './common/guards/roles.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { TenantContextMiddleware } from './tenant/tenant-context.middleware';
 import { DeliveryIntegrationModule } from './delivery-integration/delivery-integration.module';
+import { FinanceModule } from './finance/finance.module';
 
 @Module({
   imports: [
@@ -47,6 +51,7 @@ import { DeliveryIntegrationModule } from './delivery-integration/delivery-integ
     DishesModule,
     OrdersModule,
     WaiterShiftsModule,
+    CashShiftsModule,
     KitchenModule,
     PaymentsModule,
     ReceiptPrintsModule,
@@ -55,6 +60,7 @@ import { DeliveryIntegrationModule } from './delivery-integration/delivery-integ
     QueueModule,
     AdminModule,
     WarehouseModule,
+    PreparationProductionModule,
     SettingsModule,
     PushModule,
     AuditModule,
@@ -63,12 +69,14 @@ import { DeliveryIntegrationModule } from './delivery-integration/delivery-integ
     BackupBotModule,
     PlatformModule,
     DeliveryIntegrationModule,
+    FinanceModule,
   ],
   providers: [
     // Глобально: сначала проверка JWT, затем роли, затем права доступа к разделам.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_INTERCEPTOR, useClass: WarehouseCostInterceptor },
   ],
 })
 export class AppModule implements NestModule {

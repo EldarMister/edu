@@ -15,7 +15,7 @@ export class HallsService {
         tables: {
           where: { isActive: true },
           orderBy: { sortOrder: 'asc' },
-          select: { id: true, number: true, seats: true, status: true, hallId: true },
+          select: { id: true, number: true, name: true, seats: true, status: true, hallId: true },
         },
       },
     });
@@ -24,6 +24,7 @@ export class HallsService {
     // другому официанту заходить в чужой занятый стол.
     const activeOrders = await this.prisma.order.findMany({
       where: {
+        source: { not: 'delivery' },
         status: { notIn: [OrderStatus.paid, OrderStatus.cancelled, OrderStatus.rejected] },
       },
       orderBy: { createdAt: 'desc' },

@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
+import { SheetHandle } from '@/components/SheetHandle';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
 import { useAudioPttSender } from './useAudioPttSender';
+import { preparePttCapture } from './liveAudio';
 import {
   PTT_CHANNELS,
   PTT_EVENTS,
@@ -14,7 +17,27 @@ import {
 } from './types';
 
 const CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
-const WAITER_NAV_INSET = 58;
+const POSITION_STORAGE_KEY = 'edu-pos:ptt-button-position';
+
+// Fractions of the available travel. Only the drag preview can sit between the two edges.
+type LauncherPosition = { x: number; y: number };
+type DockPosition = LauncherPosition & { x: 0 | 1 };
+
+function nearestDock({ x, y }: LauncherPosition): DockPosition {
+  return { x: x < 0.5 ? 0 : 1, y };
+}
+
+function readLauncherPosition(): DockPosition | null {
+  try {
+    const position = JSON.parse(localStorage.getItem(POSITION_STORAGE_KEY) ?? 'null');
+    if (position && [position.x, position.y].every((value) => Number.isFinite(value) && value >= 0 && value <= 1)) {
+      return nearestDock(position);
+    }
+  } catch {
+    // Storage can be unavailable or have invalid data.
+  }
+  return null;
+}
 
 function defaultChannelForRole(role?: string): PttChannel {
   if (role === 'WAITER') return 'waiters';
@@ -53,23 +76,33 @@ function useMediaQuery(query: string) {
   return matches;
 }
 
-function useDocumentModalOpen() {
-  const readModalOpen = () =>
-    typeof document !== 'undefined' &&
-    (document.documentElement.classList.contains('modal-open') || document.body.classList.contains('modal-open'));
+function hasBlockingOverlay() {
+  const overlays = document.querySelectorAll('.modal-backdrop, [role="dialog"], [data-radio-blocking]');
+  return Array.from(overlays).some((overlay) =>
+    !overlay.closest('[aria-hidden="true"]') && overlay.getClientRects().length > 0,
+  );
+}
 
-  const [modalOpen, setModalOpen] = useState(readModalOpen);
+function useBlockingOverlayOpen() {
+  const [overlayOpen, setOverlayOpen] = useState(false);
 
   useEffect(() => {
-    const sync = () => setModalOpen(readModalOpen());
+    const sync = () => setOverlayOpen(hasBlockingOverlay());
     const observer = new MutationObserver(sync);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    observer.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributeFilter: ['aria-hidden'],
+    });
+    window.addEventListener('resize', sync);
     sync();
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', sync);
+    };
   }, []);
 
-  return modalOpen;
+  return overlayOpen;
 }
 
 function useSocketConnected() {
@@ -146,7 +179,6 @@ const STATE_STYLES: Record<
 function RadioHeader({ onClose }: { onClose: () => void }) {
   return (
     <>
-      <div className="mx-auto mb-3 h-1.5 w-14 rounded-full bg-slate-300" />
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold text-text-primary">Рация</h2>
         <button
@@ -189,10 +221,9 @@ function RadioChannelTabs({
   );
 }
 
-function RadioMetaRow({ channelLabel, onlineCount }: { channelLabel: string; onlineCount: number }) {
+function RadioMetaRow({ onlineCount }: { onlineCount: number }) {
   return (
-    <div className="mb-3 flex h-10 items-center justify-between rounded-xl border border-border bg-background/60 px-4">
-      <span className="text-sm font-semibold text-text-primary">{channelLabel}</span>
+    <div className="mb-3 flex justify-end">
       <span className="flex items-center gap-1.5 text-sm text-text-muted">
         <span className="h-2 w-2 rounded-full bg-success" />
         {onlineCount} онлайн
@@ -272,6 +303,139 @@ function RadioStatusText({
   );
 }
 
+type LauncherDrag = {
+  id: number;
+  startX: number;
+  startY: number;
+  left: number;
+  top: number;
+  preview: LauncherPosition | null;
+};
+
+function RadioLauncher({ visible, bottom, state, onOpen }: {
+  visible: boolean;
+  bottom: string;
+  state: RadioState;
+  onOpen: () => void;
+}) {
+  const [saved, setSaved] = useState(readLauncherPosition);
+  const [preview, setPreview] = useState<LauncherPosition | null>(null);
+  const [pressed, setPressed] = useState(false);
+  const [docked, setDocked] = useState(false);
+  const wrapper = useRef<HTMLDivElement>(null);
+  const drag = useRef<LauncherDrag | null>(null);
+  const suppressClick = useRef(false);
+
+  useEffect(() => {
+    if (!visible) {
+      drag.current = null;
+      setPreview(null);
+      setPressed(false);
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || pressed || docked) return;
+    const timer = window.setTimeout(() => setDocked(true), 5000);
+    return () => window.clearTimeout(timer);
+  }, [visible, pressed, docked]);
+
+  function startDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (!event.isPrimary || event.button !== 0 || drag.current || !wrapper.current) return;
+    const { left, top } = wrapper.current.getBoundingClientRect();
+    drag.current = { id: event.pointerId, startX: event.clientX, startY: event.clientY, left, top, preview: null };
+    suppressClick.current = false;
+    setPressed(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveDrag(event: PointerEvent<HTMLButtonElement>) {
+    const current = drag.current;
+    if (!current || current.id !== event.pointerId || !wrapper.current) return;
+    const dx = event.clientX - current.startX;
+    const dy = event.clientY - current.startY;
+    if (!current.preview && Math.hypot(dx, dy) < 6) return;
+
+    const viewport = document.documentElement;
+    const maxX = Math.max(1, viewport.clientWidth - wrapper.current.offsetWidth);
+    const maxY = Math.max(1, viewport.clientHeight - wrapper.current.offsetHeight);
+    current.preview = {
+      x: Math.min(1, Math.max(0, (current.left + dx) / maxX)),
+      y: Math.min(1, Math.max(0, (current.top + dy) / maxY)),
+    };
+    setPreview(current.preview);
+  }
+
+  function endDrag(event: PointerEvent<HTMLButtonElement>, save: boolean) {
+    const current = drag.current;
+    if (!current || current.id !== event.pointerId) return;
+    drag.current = null;
+    suppressClick.current = !!current.preview;
+    setPressed(false);
+    setPreview(null);
+    if (save && current.preview) {
+      const position = nearestDock(current.preview);
+      setSaved(position);
+      setDocked(false);
+      try {
+        localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(position));
+      } catch {
+        // The position still applies while the app is open.
+      }
+    }
+  }
+
+  if (!visible) return null;
+  const position = preview ?? saved;
+  const rightSide = saved?.x !== 0;
+  const tucked = !preview && docked;
+  const dockOffset = tucked ? (rightSide ? 40 : -40) : 0;
+  const view = STATE_STYLES[state];
+
+  return (
+    <div
+      ref={wrapper}
+      className={`fixed z-[70] flex h-14 w-14 items-center justify-center ${position ? '' : 'right-2'} ${preview ? '' : 'transition-[left,transform] motion-reduce:transition-none'}`}
+      style={position
+        ? {
+            left: preview ? `${position.x * 100}%` : rightSide ? 'calc(100% - 8px)' : '8px',
+            top: `${position.y * 100}%`,
+            transform: `translate(${-position.x * 100}%, ${-position.y * 100}%) translateX(${dockOffset}px)`,
+          }
+        : { bottom, transform: tucked ? `translateX(${dockOffset}px)` : undefined }}
+    >
+      {(state === 'speakingSelf' || state === 'speakingOther') && (
+        <span
+          className={`pointer-events-none absolute animate-ptt-soft-pulse rounded-full border ${view.ring}`}
+          style={{ width: 74, height: 74 }}
+        />
+      )}
+      <button
+        type="button"
+        aria-label="Рация"
+        onPointerDown={startDrag}
+        onPointerMove={moveDrag}
+        onPointerUp={(event) => endDrag(event, true)}
+        onPointerCancel={(event) => endDrag(event, false)}
+        onLostPointerCapture={(event) => endDrag(event, false)}
+        onClick={(event) => {
+          if (suppressClick.current && event.detail !== 0) {
+            suppressClick.current = false;
+            return;
+          }
+          if (tucked) setDocked(false);
+          else onOpen();
+        }}
+        className={`ptt-no-select relative flex h-14 w-14 cursor-grab touch-none items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:cursor-grabbing active:scale-95 ${view.circle}`}
+      >
+        <span className={tucked ? `scale-75 ${rightSide ? '-translate-x-4' : 'translate-x-4'}` : undefined}>
+          <RadioIcon size={25} />
+        </span>
+      </button>
+    </div>
+  );
+}
+
 export function PttOverlay({
   waiterMode = false,
   buttonHidden = false,
@@ -280,28 +444,23 @@ export function PttOverlay({
   buttonHidden?: boolean;
 }) {
   const user = useAuth((s) => s.user);
+  const { effectiveRole } = usePermissions();
   const connected = useSocketConnected();
   const isMobile = useMediaQuery('(max-width: 1023px)');
-  const modalOpen = useDocumentModalOpen();
+  const overlayOpen = useBlockingOverlayOpen();
   const [open, setOpen] = useState(false);
-  const [channel, setChannel] = useState<PttChannel>(() => initialChannel(user?.role));
+  const panel = useRef<HTMLElement>(null);
+  const [channel, setChannel] = useState<PttChannel>(() => initialChannel(effectiveRole ?? undefined));
   const [onlineCount, setOnlineCount] = useState(0);
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
-  const hideForModal = isMobile && modalOpen;
-  const effectiveButtonHidden = buttonHidden || hideForModal;
+  const effectiveButtonHidden = buttonHidden || overlayOpen;
 
-  const selected = useMemo(
-    () => PTT_CHANNELS.find((item) => item.key === channel) ?? PTT_CHANNELS[0],
-    [channel],
-  );
-  const sender = useAudioPttSender(channel, true);
-  const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
+  const sender = useAudioPttSender(channel, !!user?.id);
+  const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, !!user?.id);
 
-  const bottomNavInset = waiterMode && isMobile ? WAITER_NAV_INSET : 0;
   const floatingBottom = waiterMode && isMobile
     ? 'calc(var(--edu-ptt-floating-bottom, 78px) + env(safe-area-inset-bottom, 0px))'
     : 'calc(24px + env(safe-area-inset-bottom, 0px))';
-  const sheetBottom = `calc(${bottomNavInset}px + env(safe-area-inset-bottom, 0px))`;
 
   const joinSeqRef = useRef(0);
   const joinChannel = useCallback(() => {
@@ -309,7 +468,7 @@ export function PttOverlay({
     const seq = ++joinSeqRef.current;
     const attempt = (retriesLeft: number) => {
       if (joinSeqRef.current !== seq) return;
-      sock.emit(PTT_EVENTS.JOIN, { channel }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
+      sock.emit(PTT_EVENTS.JOIN, { channel, codecs: ['opus-hq'], sequenced: true }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
         if (joinSeqRef.current !== seq) return;
         if (ack?.ok) {
           if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);
@@ -322,8 +481,8 @@ export function PttOverlay({
   }, [channel]);
 
   useEffect(() => {
-    setChannel(initialChannel(user?.role));
-  }, [user?.role]);
+    setChannel(initialChannel(effectiveRole ?? undefined));
+  }, [effectiveRole]);
 
   useEffect(() => {
     const sock = getSocket();
@@ -350,7 +509,10 @@ export function PttOverlay({
     sock.on(PTT_EVENTS.PRESENCE, onPresence);
     sock.on(PTT_EVENTS.CHANNEL_BUSY, onBusy);
     sock.on(PTT_EVENTS.CHANNEL_FREE, onFree);
+    const onDisconnect = () => { setBusySpeaker(null); setOnlineCount(0); };
+    sock.on('disconnect', onDisconnect);
     return () => {
+      sock.off('disconnect', onDisconnect);
       sock.off(PTT_EVENTS.PRESENCE, onPresence);
       sock.off(PTT_EVENTS.CHANNEL_BUSY, onBusy);
       sock.off(PTT_EVENTS.CHANNEL_FREE, onFree);
@@ -375,17 +537,22 @@ export function PttOverlay({
   };
 
   const onPressStop = () => sender.stop();
+  const openRadio = () => {
+    void preparePttCapture().catch(() => undefined);
+    setOpen(true);
+  };
 
-  // Кнопку прячем на некоторых экранах официанта и под мобильными модалками — при этом лист закрываем,
-  // но сам оверлей остаётся смонтированным (приём аудио не прерывается).
+  // Закрываем панель рации, сохраняя приём аудио.
+  const stopSending = sender.stop;
+  const closeRadio = useCallback(() => {
+    stopSending();
+    setOpen(false);
+  }, [stopSending]);
   useEffect(() => {
-    if (effectiveButtonHidden) setOpen(false);
-  }, [effectiveButtonHidden]);
+    if (effectiveButtonHidden) closeRadio();
+  }, [effectiveButtonHidden, closeRadio]);
 
-  // «Занято» = кто-то держит кнопку (channel_busy) ИЛИ у нас сейчас играет
-  // входящий файл (receiving). Второе продлевает блокировку на всё
-  // воспроизведение — иначе после отпускания канал выглядел бы свободным,
-  // пока длинное сообщение ещё звучит.
+  // Keep the floor occupied while the last received audio is still playing.
   const otherSpeaker = playingSpeaker ?? busySpeaker;
   const speakingOther =
     !sender.talking && (receiving || (!!busySpeaker && busySpeaker.id !== user?.id));
@@ -413,56 +580,33 @@ export function PttOverlay({
         ? 'Отпустите для остановки'
         : state === 'speakingOther'
           ? 'Дождитесь освобождения канала'
-          : (sender.deniedReason ?? 'Нажмите и удерживайте');
-
-  const outerView = STATE_STYLES[state];
-  const outerSpeaking = state === 'speakingSelf' || state === 'speakingOther';
+          : (sender.deniedReason ?? (sender.starting ? 'Подключаем микрофон…' : 'Нажмите и удерживайте'));
 
   return (
     <>
-      {!effectiveButtonHidden && (
-        <div
-          className="fixed right-2 z-[70] flex h-14 w-14 items-center justify-center"
-          style={{ bottom: floatingBottom }}
-        >
-          {/* Кольцо вокруг кнопки — только пока идёт передача или приём. */}
-          {outerSpeaking && (
-            <span
-              className={`pointer-events-none absolute animate-ptt-soft-pulse rounded-full border ${outerView.ring}`}
-              style={{ width: 74, height: 74 }}
-            />
-          )}
-          <button
-            type="button"
-            aria-label="Рация"
-            onClick={() => setOpen(true)}
-            className={`ptt-no-select relative flex h-14 w-14 items-center justify-center rounded-full text-white shadow-[0_8px_20px_rgba(0,91,255,0.26)] transition-colors active:scale-95 ${outerView.circle}`}
-          >
-            <RadioIcon size={25} />
-          </button>
-        </div>
-      )}
+      <RadioLauncher visible={!effectiveButtonHidden && !open} bottom={floatingBottom} state={state} onOpen={openRadio} />
 
       {open && (
         <div className="fixed inset-0 z-[90]">
           <button
             type="button"
             aria-label="Закрыть рацию"
-            className="absolute left-0 right-0 top-0 animate-fade-in bg-black/30"
-            style={{ bottom: sheetBottom }}
-            onClick={() => setOpen(false)}
+            className="absolute inset-0 animate-fade-in bg-black/30"
+            onClick={closeRadio}
           />
           <section
+            ref={panel}
             className="absolute left-0 right-0 mx-auto max-w-xl animate-sheet-up rounded-t-[24px] border border-border bg-white px-4 pt-2 shadow-none sm:px-6"
             style={{
-              bottom: sheetBottom,
-              paddingBottom: 16,
+              bottom: 0,
+              paddingBottom: 'calc(16px + env(safe-area-inset-bottom, 0px))',
               maxHeight: '55dvh',
             }}
           >
-            <RadioHeader onClose={() => setOpen(false)} />
+            <SheetHandle panel={panel} onClose={closeRadio} enabled={!sender.talking} />
+            <RadioHeader onClose={closeRadio} />
             <RadioChannelTabs channel={channel} onChange={changeChannel} />
-            <RadioMetaRow channelLabel={selected.label} onlineCount={onlineCount} />
+            <RadioMetaRow onlineCount={onlineCount} />
             <PushToTalkCircle
               state={state}
               disabled={state === 'error' || speakingOther}

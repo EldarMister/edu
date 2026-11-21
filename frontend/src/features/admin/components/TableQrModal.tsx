@@ -76,7 +76,7 @@ export function TableQrModal({
   return (
     <Modal open onClose={onClose} title={`QR-код · Стол ${table.number}`}>
       <div className="flex flex-col items-center">
-        <div className="flex h-64 w-64 items-center justify-center rounded-2xl border border-border bg-white p-3">
+        <div className="flex h-64 w-64 items-center justify-center rounded-2xl border border-border bg-paper p-3">
           {dataUrl ? (
             <img src={dataUrl} alt={`QR стола ${table.number}`} className="h-full w-full" />
           ) : (

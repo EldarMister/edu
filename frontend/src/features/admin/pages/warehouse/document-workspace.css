@@ -1,0 +1,27 @@
+/* Document-only refinements. The shared header, sidebar and EDU palette stay unchanged. */
+.poster-workspace .poster-writeoff-table > tbody > tr > td { vertical-align: middle; }
+.poster-workspace .poster-writeoff-table .poster-recipe-toggle { min-height: 36px; white-space: nowrap; }
+.poster-workspace .poster-writeoff-table .poster-recipe-row td { height: auto; }
+.poster-workspace .poster-writeoff-table .poster-recipe-row table { table-layout: fixed; }
+.poster-workspace .poster-writeoff-table .poster-recipe-row table th:first-child { width: 55%; }
+.poster-workspace .poster-writeoff-table .poster-recipe-row table td { padding-top: 8px; padding-bottom: 8px; }
+.poster-workspace .poster-writeoff-table .poster-inline-select { text-align: left; }
+.poster-workspace .poster-document-products .poster-document-entry-row > td { border-top: 1px solid var(--color-border, rgb(var(--edu-border))); }
+.poster-workspace .poster-purchase-form .poster-purchase-table th:first-child { min-width: 240px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .poster-workspace .poster-writeoff-table .poster-recipe-row { animation: document-recipe-appear 140ms ease-out; }
+}
+@keyframes document-recipe-appear { from { opacity: 0; } to { opacity: 1; } }
+.poster-stock-warning {
+  padding: 12px 16px;
+  border: 1px solid light-dark(#f3d58f, #74532a);
+  border-radius: 6px;
+  background: light-dark(#fffbef, #352b1b);
+  color: light-dark(#714c12, rgb(var(--edu-warning)));
+  font-size: 14px;
+}
+.poster-stock-warning h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.poster-stock-warning ul { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.poster-stock-warning li { display: flex; flex-wrap: wrap; column-gap: 10px; }
+.poster-stock-warning p { margin-top: 8px; font-size: 13px; }

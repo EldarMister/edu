@@ -16,11 +16,11 @@ export function ConnectionStatus({ compact = false }: { compact?: boolean }) {
 }
 
 /** Баннер при потере соединения (ТЗ §9). */
-export function OfflineBanner() {
+export function OfflineBanner({ inHeader = false }: { inHeader?: boolean } = {}) {
   const online = useConnectionStatus();
   if (online) return null;
   return (
-    <div className="pointer-events-none fixed inset-x-0 top-0 z-[70] bg-danger px-4 py-2 text-center text-sm font-medium text-white shadow-soft">
+    <div role="status" className={`bg-danger px-4 py-2 text-center text-sm font-medium text-white ${inHeader ? 'absolute inset-0 z-10 flex items-center justify-center' : 'pointer-events-none fixed inset-x-0 top-0 z-[70] shadow-soft'}`}>
       Нет соединения с сервером. Переподключаемся…
     </div>
   );

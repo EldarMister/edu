@@ -1,12 +1,16 @@
 import { DatePicker } from '@/components/DatePicker';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '@/components/Modal';
-import { Spinner } from '@/components/Spinner';
+import { WorkspacePending } from '../components/WorkspacePending';
+import { Select } from '@/components/Select';
+import { apiError } from '@/lib/api';
 import { money } from '@/lib/format';
-import type { PaymentMethod } from '@/types';
+import { useT } from '@/lib/i18n';
 import { IconCheck, IconOrders } from '../components/icons';
-import { useStatistics, type StatsPeriod } from '../api';
-import { usePublicSettings } from '@/features/settings/api';
+import { useStatistics, useStatisticsReports, type StatsPeriod } from '../api';
+import { StatisticsReport } from './StatisticsReport';
+import type { StatisticsView } from './statisticsViews';
+import { WorkspaceHeaderActions } from './WorkspaceHeader';
 
 const PERIODS: { value: StatsPeriod; label: string }[] = [
   { value: 'today', label: 'Сегодня' },
@@ -34,76 +38,52 @@ const PREPARED_LABEL: Record<StatsPeriod, string> = {
   custom: 'Приготовлено за период',
 };
 
-const METHOD_LABEL: Record<PaymentMethod, string> = {
-  qr: 'QR-код',
-  cash: 'Наличные',
-  card: 'Карта',
-  // Смешанная в статистике раскладывается на наличные/QR на бэке, отдельной строкой не выводится.
-  mixed: 'Смешанная',
-};
+const bishkekDay = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Bishkek', year: 'numeric', month: '2-digit', day: '2-digit' });
+const chartDay = new Intl.DateTimeFormat('ru-RU', { timeZone: 'UTC', day: 'numeric', month: 'short' });
 
-export function StatisticsPage() {
-  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const weekAgo = useMemo(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 6);
-    return d.toISOString().slice(0, 10);
-  }, []);
+export function StatisticsPage({ view }: { view: Exclude<StatisticsView, 'taxes'> }) {
+  const t = useT();
+  const today = useMemo(() => bishkekDay.format(new Date()), []);
+  const weekAgo = useMemo(() => bishkekDay.format(new Date(Date.now() - 6 * 86_400_000)), []);
   const [period, setPeriod] = useState<StatsPeriod>('week');
   const [from, setFrom] = useState(weekAgo);
   const [to, setTo] = useState(today);
   const [viewAll, setViewAll] = useState<{ title: string; columns: Col[]; rows: string[][] } | null>(null);
-  const statsQ = useStatistics({
+  const params = {
     period,
     from: period === 'custom' ? from : undefined,
     to: period === 'custom' ? to : undefined,
-  });
-  const publicSettingsQ = usePublicSettings();
+  };
+  const statsQ = useStatistics(params, view === 'overview');
+  const reportsQ = useStatisticsReports(params, view !== 'overview');
   const d = statsQ.data;
-  const visiblePaymentMethods = (() => {
-    if (!d) return [];
-    const enabled = (publicSettingsQ.data?.paymentMethods ?? d.paymentMethods.map((m) => m.method)).filter(
-      (method): method is Extract<PaymentMethod, 'qr' | 'cash' | 'card'> =>
-        method === 'qr' || method === 'cash' || method === 'card',
-    );
-    return enabled.map((method) => d.paymentMethods.find((item) => item.method === method) ?? { method, amount: 0, percent: 0 });
-  })();
+  const activeQuery = view === 'overview' ? statsQ : reportsQ;
+  const periodControl = <Select className="h-10" ariaLabel={t('Период')} value={period} onChange={(value) => setPeriod(value as StatsPeriod)}
+    options={PERIODS.map(({ value, label }) => ({ value, label: t(label) }))} />;
 
   return (
     <div className="space-y-4 overflow-x-hidden">
-      {/* Переключатель периода */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="grid w-full grid-cols-3 gap-1 rounded-xl bg-background p-1 sm:inline-flex sm:w-auto sm:flex-wrap">
-          {PERIODS.map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setPeriod(p.value)}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                period === p.value
-                  ? 'bg-white text-primary shadow-sm'
-                  : 'text-text-muted hover:text-text-secondary'
-              }`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
+      {(view === 'overview' || !reportsQ.data) && <WorkspaceHeaderActions>{periodControl}</WorkspaceHeaderActions>}
+      {period === 'custom' && <div className="flex flex-wrap items-center gap-2">
+        <DatePicker aria-label={t('С даты')} className="input h-10 w-[150px]" value={from} max={to} onChange={setFrom} />
+        <span className="text-sm text-text-muted">—</span>
+        <DatePicker aria-label={t('По дату')} className="input h-10 w-[150px]" value={to} min={from} max={today} onChange={setTo} />
+      </div>}
 
-        {period === 'custom' && (
-          <div className="flex flex-wrap items-center gap-2">
-            <DatePicker className="input h-10 w-[150px]" value={from} max={to} onChange={(value) => setFrom(value)} />
-            <span className="text-sm text-text-muted">—</span>
-            <DatePicker className="input h-10 w-[150px]" value={to} max={today} onChange={(value) => setTo(value)} />
-          </div>
-        )}
-      </div>
-
-      {statsQ.isLoading || !d ? (
-        <div className="flex justify-center py-20 text-primary">
-          <Spinner className="h-7 w-7" />
-        </div>
-      ) : (
-        <>
+      {activeQuery.isError ? <div className="card space-y-3 p-5">
+        <p role="alert" className="text-danger">{apiError(activeQuery.error)}</p>
+        <button type="button" className="btn-secondary btn-md" onClick={() => void activeQuery.refetch()}>{t('Повторить')}</button>
+      </div> : activeQuery.isPending ? (
+        <WorkspacePending layout={view === 'overview' ? 'overview' : 'table'} />
+      ) : view !== 'overview' ? reportsQ.data && <div key={view} className="workspace-stagger space-y-4">
+        {view === 'sales' && reportsQ.data.sales.length > 0 && <section className="card p-4 sm:p-5">
+          <h2 className="mb-4 font-semibold text-text-primary">{t('Выручка за период')}</h2>
+          <RevenueChart data={[...reportsQ.data.sales].sort((a, b) => a.date.localeCompare(b.date))
+            .map(({ date, revenue }) => ({ label: chartDay.format(new Date(date + 'T00:00:00Z')), amount: revenue }))} />
+        </section>}
+        <StatisticsReport key={view} report={view} data={reportsQ.data} periodControl={periodControl} />
+      </div> : d && (
+        <div key={view} className="workspace-stagger space-y-4">
           {/* Метрики: десктоп — две карточки */}
           <div className="hidden gap-4 lg:grid lg:grid-cols-2">
             <MetricCard icon={<IconOrders />} label={ORDERS_LABEL[period]} value={String(d.cards.ordersPeriod)} delta={d.trends.orders} />
@@ -128,30 +108,7 @@ export function StatisticsPage() {
             <RevenueChart data={d.revenueSeries} />
           </section>
 
-          {/* Аналитические блоки */}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Panel title="Способы оплаты">
-              <MiniTable
-                columns={[{ label: 'Способ' }, { label: 'Сумма', align: 'right' }]}
-                rows={visiblePaymentMethods.map((m) => [METHOD_LABEL[m.method], money(m.amount)])}
-                footer={['Итого', money(visiblePaymentMethods.reduce((s, m) => s + m.amount, 0))]}
-                empty="Нет оплат за период"
-              />
-            </Panel>
-            <Panel title="Топ блюд">
-              <MiniTable
-                columns={[{ label: 'Блюдо' }, { label: 'Кол-во', align: 'right' }, { label: 'Выручка', align: 'right' }]}
-                rows={d.topDishes.map((x) => [x.name, `${x.count} шт`, money(x.amount)])}
-                empty="Нет продаж за период"
-              />
-            </Panel>
-            <Panel title="Лучшие официанты">
-              <MiniTable
-                columns={[{ label: 'Официант' }, { label: 'Заказы', align: 'right' }, { label: 'Выручка', align: 'right' }]}
-                rows={d.topWaiters.map((x) => [x.name, String(x.orders), money(x.amount)])}
-                empty="Нет данных за период"
-              />
-            </Panel>
             <Panel title="Часы пик">
               <MiniTable
                 columns={[{ label: 'Время' }, { label: 'Выручка', align: 'right' }]}
@@ -159,10 +116,6 @@ export function StatisticsPage() {
                 empty="Нет оплаченных заказов за период"
               />
             </Panel>
-          </div>
-
-          {/* Приготовленные блюда и проданные напитки */}
-          <div className="grid gap-3 lg:grid-cols-3">
             <Panel title="Приготовлено блюд">
               <table className="w-full text-sm">
                 <tbody>
@@ -195,7 +148,7 @@ export function StatisticsPage() {
               onViewAll={setViewAll}
             />
           </div>
-        </>
+        </div>
       )}
 
       <Modal open={!!viewAll} onClose={() => setViewAll(null)} title={viewAll?.title} panelClassName="max-w-md">
@@ -423,7 +376,7 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
   const pts = data.map((p, i) => [x(i), y(p.amount)] as const);
   const line = smoothPath(pts);
   const area = `${line} L ${x(n - 1)} ${H - padB} L ${x(0)} ${H - padB} Z`;
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => Math.round(niceMax * t));
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((t) => niceMax * t);
 
   // Подписи по оси X — прореживаем, чтобы не наезжали (на узком экране реже).
   const maxLabels = W < 480 ? 5 : 7;
@@ -485,7 +438,7 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
           const yy = y(t);
           return (
             <g key={t}>
-              <line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="#F1F5F9" strokeWidth="0.8" />
+              <line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="var(--edu-raised)" strokeWidth="0.8" />
               <text x={padL - 12} y={yy + 4} textAnchor="end" className="fill-text-light text-[11px] font-medium">
                 {shortMoney(t)}
               </text>
@@ -516,9 +469,9 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
         {/* Hover: crosshair + точка */}
         {hi && hover != null && (
           <g className="revenue-active-point">
-            <line x1={x(hover)} x2={x(hover)} y1={padT} y2={H - padB} stroke="#D8E2F0" strokeWidth="0.9" strokeDasharray="3 6" />
+            <line x1={x(hover)} x2={x(hover)} y1={padT} y2={H - padB} stroke="rgb(var(--edu-border))" strokeWidth="0.9" strokeDasharray="3 6" />
             <circle cx={x(hover)} cy={y(hi.amount)} r="9" fill="#005BFF" opacity="0.1" />
-            <circle cx={x(hover)} cy={y(hi.amount)} r="5.4" fill="#fff" stroke="#005BFF" strokeWidth="2.6" filter="url(#rev-active-glow)" />
+            <circle cx={x(hover)} cy={y(hi.amount)} r="5.4" fill="rgb(var(--edu-card))" stroke="#005BFF" strokeWidth="2.6" filter="url(#rev-active-glow)" />
           </g>
         )}
       </svg>
@@ -526,7 +479,7 @@ function RevenueChart({ data }: { data: { label: string; amount: number }[] }) {
       {/* Тултип */}
       {hi && hover != null && (
         <div
-          className="revenue-tooltip pointer-events-none absolute z-10 -translate-x-1/2 rounded-xl border border-[#E6ECF5] bg-white px-3.5 py-2.5 shadow-[0_16px_36px_rgba(15,23,42,0.12),0_2px_8px_rgba(15,23,42,0.06)]"
+          className="revenue-tooltip pointer-events-none absolute z-10 -translate-x-1/2 rounded-xl border border-border bg-white px-3.5 py-2.5 shadow-soft"
           style={{ left: `clamp(76px, ${(x(hover) / W) * 100}%, calc(100% - 76px))`, top: `${(y(hi.amount) / H) * 100}%`, transform: 'translate(-50%, calc(-100% - 14px))' }}
         >
           <p className="whitespace-nowrap text-[11px] font-medium leading-none text-text-muted">{formatTooltipLabel(hi.label)}</p>

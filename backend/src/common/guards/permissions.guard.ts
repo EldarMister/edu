@@ -21,13 +21,13 @@ export class PermissionsGuard implements CanActivate {
     ]);
     if (isPublic) return true;
 
-    const required = this.reflector.getAllAndOverride<string>(PERMISSION_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (!required) return true;
+    const required = [
+      this.reflector.get<string | string[] | undefined>(PERMISSION_KEY, context.getHandler()),
+      this.reflector.get<string | string[] | undefined>(PERMISSION_KEY, context.getClass()),
+    ].flatMap((permission) => permission ? (Array.isArray(permission) ? permission : [permission]) : []);
+    if (!required.length) return true;
 
-    const { user } = context.switchToHttp().getRequest();
+    const { user, method } = context.switchToHttp().getRequest();
     if (!user) {
       throw new ForbiddenException('У вас нет доступа к этому разделу');
     }
@@ -35,8 +35,12 @@ export class PermissionsGuard implements CanActivate {
 
     const perms: EmployeePermissions =
       user.permissions ?? resolvePermissions(user.role, null);
-    if (!hasPermission(perms, required)) {
+    if (!required.every((permission) => hasPermission(perms, permission))) {
       throw new ForbiddenException('У вас нет доступа к этому разделу');
+    }
+    if (method && !['GET', 'HEAD', 'OPTIONS'].includes(method.toUpperCase()) && required.some((permission) =>
+      permission.startsWith('sections.') && perms.readOnlySections?.includes(permission.slice(9) as keyof typeof perms.sections))) {
+      throw new ForbiddenException('Для этого раздела разрешён только просмотр');
     }
     return true;
   }

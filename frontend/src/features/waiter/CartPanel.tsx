@@ -1,6 +1,6 @@
 import type { TableItem } from '@/types';
 import { useCart, cartTotals } from './cart';
-import { displayOrderNumber, hallSuffix, money } from '@/lib/format';
+import { displayOrderNumber, hallSuffix, money, tableLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { NumberTicker } from '@/components/NumberTicker';
@@ -8,6 +8,8 @@ import { CartLinesList, TakeawaySwitch } from './CartItems';
 
 export function CartPanel({
   table,
+  delivery,
+  roundTotal,
   hallName,
   mode,
   orderNumber,
@@ -18,7 +20,9 @@ export function CartPanel({
   onBlockedSubmit,
   onCancelEdit,
 }: {
-  table: TableItem;
+  table: TableItem | null;
+  delivery?: boolean;
+  roundTotal?: boolean;
   hallName?: string;
   mode: 'create' | 'add' | 'edit';
   orderNumber?: string;
@@ -33,7 +37,7 @@ export function CartPanel({
   const t = useT();
   const { lines, comment, commentOpen, inc, dec, setComment, setCommentOpen, setLineTakeaway, setAllTakeaway, clear } =
     useCart();
-  const totals = cartTotals(lines);
+  const totals = cartTotals(lines, roundTotal);
   const hasLines = lines.length > 0;
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
   const canSend = hasLines && canSubmit && !submitting;
@@ -50,10 +54,12 @@ export function CartPanel({
                 ? `${t('Добавление в')} ${displayOrderNumber(orderNumber ?? '')}`
                 : t('Новый заказ')}
           </h2>
-          <p className="mt-0.5 text-sm text-text-muted">{t('Стол')} {table.number}{hallSuffix({ hall: hallName ? { name: hallName } : null })}</p>
+          <p className="mt-0.5 text-sm text-text-muted">
+            {delivery ? t('Доставка') : table && `${tableLabel(table, t('Стол'))}${hallSuffix({ hall: hallName ? { name: hallName } : null })}`}
+          </p>
         </div>
         <div className="flex shrink-0 items-center gap-4">
-          {hasLines && <TakeawaySwitch on={allTakeaway} onChange={setAllTakeaway} />}
+          {hasLines && !delivery && <TakeawaySwitch on={allTakeaway} onChange={setAllTakeaway} />}
           {mode === 'edit' && onCancelEdit && (
             <button
               onClick={onCancelEdit}
@@ -68,7 +74,7 @@ export function CartPanel({
       {/* Позиции — компактный список как в мобильной корзине */}
       <div className="no-scrollbar flex-1 overflow-y-auto py-3">
         {hasLines ? (
-          <CartLinesList lines={lines} inc={inc} dec={dec} onToggleTakeaway={setLineTakeaway} priceWidth="w-[88px]" />
+          <CartLinesList lines={lines} inc={inc} dec={dec} onToggleTakeaway={delivery ? undefined : setLineTakeaway} priceWidth="w-[88px]" />
         ) : (
           <p className="py-10 text-center text-sm text-text-muted">
             {t('Выберите блюда из меню, чтобы добавить в заказ')}
@@ -95,6 +101,7 @@ export function CartPanel({
           {totals.discount > 0 && (
             <Row label={t('Скидка')} value={`−${money(totals.discount)}`} valueClass="text-success" />
           )}
+          {totals.roundingAmount > 0 && <Row label={t('Округление')} value={`−${money(totals.roundingAmount)}`} />}
           <div className="flex items-center justify-between pt-1">
             <span className="text-[15px] font-medium text-text-secondary">{t('Итого')}</span>
             <NumberTicker value={totals.final} className="text-xl font-semibold text-text-primary" />

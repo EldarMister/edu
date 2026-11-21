@@ -53,6 +53,7 @@ function CafeCard({ cafe }: { cafe: PlatformCafe }) {
   const updateSub = useUpdateSubscription();
   const push = useNotifications((s) => s.push);
   const [date, setDate] = useState(cafe.paidUntil ? cafe.paidUntil.slice(0, 10) : '');
+  const [dateValid, setDateValid] = useState(true);
   const [showSuspend, setShowSuspend] = useState(false);
   const [showManage, setShowManage] = useState(false);
 
@@ -96,17 +97,19 @@ function CafeCard({ cafe }: { cafe: PlatformCafe }) {
             className="input h-9 w-40 px-2.5"
             value={date}
             onChange={(value) => setDate(value)}
+            onValidityChange={setDateValid}
           />
         </div>
         <button
           type="button"
-          disabled={updateSub.isPending}
-          onClick={() =>
-            act(
+          disabled={updateSub.isPending || !dateValid}
+          onClick={() => {
+            if (!dateValid || updateSub.isPending) return;
+            void act(
               () => updateSub.mutateAsync({ id: cafe.id, paidUntil: date ? new Date(date).toISOString() : null }),
               'Подписка обновлена',
-            )
-          }
+            );
+          }}
           className="btn-secondary btn-md h-9"
         >
           Сохранить

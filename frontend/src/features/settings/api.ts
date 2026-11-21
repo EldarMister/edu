@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, API_URL } from '@/lib/api';
 import type { WaiterOrderPermissions } from '@/lib/order-permissions';
-import type { PaymentMethod } from '@/types';
+import type { PaymentMethod, ReceiptPrintSettings } from '@/types';
 
 /** Преобразует значение QR из настроек в пригодный для <img src> адрес.
  *  Публичные настройки отдают лёгкую ссылку (/settings/qr?v=…), админские — data URL. */
@@ -11,7 +11,14 @@ export function resolveQrSrc(value: string | null | undefined): string | null {
   return `${API_URL}/api${value.startsWith('/') ? value : `/${value}`}`;
 }
 
-export interface Settings {
+export interface Settings extends Partial<ReceiptPrintSettings> {
+  taxesEnabled?: boolean;
+  roundOrderTotal?: boolean;
+  telegramStockAlertsEnabled?: boolean;
+  telegramStockChatId?: string | null;
+  telegramStockBotConfigured?: boolean;
+  receiptLogoData?: string | null;
+  receiptPrintRequestsOnly: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   id: string;
   cafeId: string | null;
@@ -22,7 +29,6 @@ export interface Settings {
   instagram: string | null;
   website: string | null;
   receiptText: string;
-  serviceChargeAmount: string;
   language: 'ru' | 'ky';
   payQr: boolean;
   payCash: boolean;
@@ -43,7 +49,7 @@ export interface Settings {
   qrGeoLng: number | null;
   qrGeoRadius: number;
   // ККМ / фискализация
-  fiscalProvider: string | null; // 'ekassa' | 'yakassa' | null
+  fiscalProvider: string | null; // mock или сохранённый ранее провайдер.
   fiscalEkassaApiKey: string | null;
   fiscalEkassaUrl: string | null;
   fiscalEkassaInn: string | null;
@@ -53,6 +59,9 @@ export interface Settings {
 }
 
 export interface PublicSettings {
+  roundOrderTotal?: boolean;
+  useFloorPlan?: boolean;
+  receiptPrintRequestsOnly: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   cafeName: string;
   address: string;
@@ -61,7 +70,6 @@ export interface PublicSettings {
   instagram: string | null;
   website: string | null;
   receiptText: string;
-  serviceChargeAmount: string;
   language: 'ru' | 'ky';
   paymentMethods: PaymentMethod[];
   qrImageUrl: string | null;
@@ -85,14 +93,10 @@ export function useAdminSettings() {
   return useQuery({
     queryKey: ['settings', 'admin'],
     queryFn: async () => (await api.get<Settings>('/admin/settings')).data,
-    staleTime: 0,
-    refetchOnMount: 'always',
   });
 }
 
-export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'queueDisplayCode' | 'updatedAt' | 'printerConnected' | 'serviceChargeAmount'>> & {
-  serviceChargeAmount?: number;
-};
+export type SettingsInput = Partial<Omit<Settings, 'id' | 'cafeId' | 'queueDisplayCode' | 'updatedAt' | 'printerConnected' | 'telegramStockBotConfigured'>>;
 
 /** Проверка соединения с ККМ (кнопка в блоке настроек). */
 export function useTestFiscalConnection() {
@@ -124,16 +128,9 @@ export function useUpdateSettings() {
       await qc.cancelQueries({ queryKey: ['settings', 'admin'] });
       const previous = qc.getQueryData<Settings>(['settings', 'admin']);
       if (previous) {
-        const { serviceChargeAmount, ...restPatch } = patch;
-        const optimisticPatch: Partial<Settings> = {
-          ...restPatch,
-          ...(serviceChargeAmount !== undefined
-            ? { serviceChargeAmount: String(serviceChargeAmount) }
-            : {}),
-        };
         qc.setQueryData<Settings>(['settings', 'admin'], {
           ...previous,
-          ...optimisticPatch,
+          ...patch,
           updatedAt: new Date().toISOString(),
         });
       }

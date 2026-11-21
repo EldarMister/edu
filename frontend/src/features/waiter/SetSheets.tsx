@@ -1,3 +1,6 @@
+import { SheetHandle } from '@/components/SheetHandle';
+import { useDialogEscape } from '@/components/useDialogEscape';
+import { IconX } from '@/features/admin/components/icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CartSetComponent, Category, Dish, DishVariant } from '@/types';
 import { dishUnitPrice, minDishUnitPrice, money, variantNamesLine } from '@/lib/format';
@@ -56,18 +59,13 @@ function SheetShell({
 }) {
   const [render, setRender] = useState(open);
   const [visible, setVisible] = useState(false);
-  const [drag, setDrag] = useState(0);
-  const [dragging, setDragging] = useState(false);
-  const startY = useRef<number | null>(null);
-  const dragRef = useRef(0);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  const panel = useRef<HTMLDivElement>(null);
+  const t = useT();
+  useDialogEscape(panel, open, onClose);
 
   useEffect(() => {
     if (open) {
       setRender(true);
-      setDrag(0);
-      dragRef.current = 0;
       let raf2 = 0;
       const raf1 = requestAnimationFrame(() => {
         raf2 = requestAnimationFrame(() => setVisible(true));
@@ -80,36 +78,11 @@ function SheetShell({
     setVisible(false);
     const id = setTimeout(() => {
       setRender(false);
-      setDrag(0);
-      dragRef.current = 0;
     }, SHEET_MS);
     return () => clearTimeout(id);
   }, [open]);
 
   if (!render) return null;
-
-  const sheetTransform = visible ? `translateY(${drag}px)` : 'translateY(100%)';
-
-  function onPointerDown(e: React.PointerEvent) {
-    startY.current = e.clientY;
-    setDragging(true);
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-  function onPointerMove(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    const dy = e.clientY - startY.current;
-    const next = dy > 0 ? dy : 0;
-    dragRef.current = next;
-    setDrag(next);
-  }
-  function onPointerUp(e: React.PointerEvent) {
-    if (startY.current === null) return;
-    startY.current = null;
-    e.currentTarget.releasePointerCapture?.(e.pointerId);
-    setDragging(false);
-    if (dragRef.current > 110) onCloseRef.current();
-    else requestAnimationFrame(() => { dragRef.current = 0; setDrag(0); });
-  }
 
   return (
     <div className="fixed inset-0 z-[70] flex items-end justify-center">
@@ -122,23 +95,24 @@ function SheetShell({
       />
       {/* Лист */}
       <div
-        className="relative z-10 flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft"
+        ref={panel}
+        className="terminal-dialog relative z-10 flex max-h-[82vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft md:max-w-xl"
+        data-visible={visible}
+        data-modal-panel={open || undefined}
         style={{
-          transform: sheetTransform,
-          transition: dragging ? 'none' : `transform ${SHEET_MS}ms ${SHEET_EASE}`,
+          transition: `transform ${SHEET_MS}ms ${SHEET_EASE}`,
         }}
         role="dialog"
+        aria-modal={open}
+        aria-label={title}
       >
-        {/* Drag handle + заголовок */}
-        <div
-          className="shrink-0 cursor-grab touch-none px-4 pb-1 pt-2.5"
-          onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
-        >
-          <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300" />
-          <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+        <SheetHandle panel={panel} onClose={onClose} enabled={open && visible} className="md:hidden" />
+        <div className="shrink-0 px-4 pb-2 md:pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold text-text-primary">{title}</h2>
+            <button type="button" onClick={onClose} aria-label={t('Закрыть')}
+              className="hidden shrink-0 rounded-lg p-1 text-text-muted hover:bg-background md:block"><IconX /></button>
+          </div>
           {subtitle && <p className="mt-0.5 text-sm text-text-muted">{subtitle}</p>}
         </div>
         {children}
@@ -342,7 +316,7 @@ export function SetConfigSheet({
   if (replacingId) {
     const replacingComp = components.find((c) => c.componentId === replacingId);
     return (
-      <div className="fixed inset-0 z-[80] flex flex-col bg-white">
+      <div data-radio-blocking className="fixed inset-0 z-[80] flex flex-col bg-white">
         {/* Шапка */}
         <div className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
           <button

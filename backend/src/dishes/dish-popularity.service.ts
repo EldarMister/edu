@@ -20,7 +20,7 @@ export class DishPopularityService {
   @Cron('0 */2 * * *')
   async scheduledRecalculate() {
     await this.recalculateAll();
-    this.events.emitBroadcast(SERVER_EVENTS.MENU_UPDATED, { source: 'dish-popularity-cron' });
+    this.events.emitPopularityRefresh();
   }
 
   async recalculateAll(): Promise<void> {

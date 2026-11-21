@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, UnauthorizedException } from '@nestjs/co
 import { OrderItemStatus, OrderStatus, Prisma } from '@prisma/client';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { defaultCategoryStation, lockStationRouting } from '../kitchen/preparation-stations';
 import { OrdersService } from '../orders/orders.service';
 import { orderInclude } from '../orders/order.helpers';
 import { setCafeId } from '../tenant/tenant-context';
@@ -147,6 +148,8 @@ export class DeliveryIntegrationService {
     let modifierGroupsReceived = 0;
 
     await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx);
+      const prepStation = await defaultCategoryStation(tx);
       for (const incomingCategory of dto.categories) {
         const categoryName = incomingCategory.name.trim();
         const existingCategory = await tx.category.findFirst({
@@ -166,6 +169,7 @@ export class DeliveryIntegrationService {
               data: {
                 id: incomingCategory.id,
                 name: categoryName,
+                prepStation,
                 sortOrder: incomingCategory.sortOrder,
                 isActive: true,
               },
