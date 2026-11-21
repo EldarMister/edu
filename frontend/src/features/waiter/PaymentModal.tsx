@@ -371,7 +371,7 @@ export function PaymentModal({
 
   if (wideLayout) return createPortal(
     <>
-      <FullScreenPayment order={order} enabled={enabled} qrImageUrl={qrImageUrl} allItemsServed={allActiveItemsServed}
+      <FullScreenPayment order={order} enabled={enabled} qrConfigured={!!qrImageUrl} allItemsServed={allActiveItemsServed}
         open={open} busy={pay.isPending} error={error} splitOpen={splitOpen} onClose={close}
         onSplit={() => setSplitOpen(true)} onConfirm={confirmTender} />
       {splitBill}

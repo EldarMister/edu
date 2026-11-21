@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { IconCard, IconCash, IconQr } from '@/features/admin/components/icons';
@@ -6,7 +6,7 @@ import { displayOrderNumber, money, orderPlaceLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import type { Order } from '@/types';
 import { PaymentKeypad, type PaymentKey } from './PaymentKeypad';
-import { normalizeAmount, tenderTotals, type TenderAmounts, type TenderMethod } from './paymentAmounts';
+import { normalizeAmount, quickCashAmounts, tenderTotals, type TenderAmounts, type TenderMethod } from './paymentAmounts';
 
 const METHODS = [
   { value: 'cash', label: 'Наличные', Icon: IconCash },
@@ -15,11 +15,11 @@ const METHODS = [
 ] as const;
 const EMPTY = { cash: '', card: '', qr: '' };
 
-export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, open, busy, error,
+export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed, open, busy, error,
   splitOpen, onClose, onSplit, onConfirm }: {
   order: Order;
   enabled: readonly string[];
-  qrImageUrl: string | null;
+  qrConfigured: boolean;
   allItemsServed: boolean;
   open: boolean;
   busy: boolean;
@@ -33,7 +33,6 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
   const [draft, setDraft] = useState(EMPTY);
   const [active, setActive] = useState<TenderMethod>();
   const replaceAmount = useRef(true);
-  const activeInput = useRef<HTMLInputElement | null>(null);
   const splitTrigger = useRef<HTMLButtonElement>(null);
   const prevSplitOpen = useRef(false);
   const total = Number(order.finalAmount);
@@ -45,8 +44,10 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
     qr: enabled.includes('qr') ? Number(draft.qr) || 0 : 0,
   };
   const { amounts, remaining, change, over } = tenderTotals(total, entered);
-  const showQr = selected === 'qr' || entered.qr > 0;
-  const qrMissing = !qrImageUrl && (entered.qr > 0 || (total === 0 && selected === 'qr'));
+  const showQrWarning = !qrConfigured && (selected === 'qr' || entered.qr > 0);
+  const qrMissing = !qrConfigured && (entered.qr > 0 || (total === 0 && selected === 'qr'));
+  const cashDue = amounts.cash + remaining;
+  const cashPresets = enabled.includes('cash') ? quickCashAmounts(cashDue) : [];
   const canConfirm = selected && allItemsServed && !busy && !remaining && !over && !qrMissing;
 
   useEffect(() => {
@@ -54,15 +55,9 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
     prevSplitOpen.current = splitOpen;
   }, [splitOpen]);
 
-  useLayoutEffect(() => {
-    if (replaceAmount.current && activeInput.current === document.activeElement) activeInput.current?.select();
-  }, [draft, selected]);
-
-  function focusTender(method: TenderMethod, input: HTMLInputElement) {
-    activeInput.current = input;
+  function focusTender(method: TenderMethod) {
     setActive(method);
     replaceAmount.current = true;
-    input.select();
   }
 
   function activate(method: TenderMethod) {
@@ -95,6 +90,12 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
     changeAmount(selected, base + key);
   }
 
+  function applyCashPreset(amount: number) {
+    setActive('cash');
+    changeAmount('cash', String(amount));
+    replaceAmount.current = true;
+  }
+
   function exactAmount() {
     if (!selected) return;
     const other = METHODS.reduce((sum, { value }) => value === selected ? sum : sum + Math.round(entered[value] * 100), 0);
@@ -107,7 +108,9 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
       onClose={() => { if (!busy && !splitOpen) onClose(); }}>
       <div className="grid min-h-full grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
         <aside className="flex justify-center border-r border-border bg-background p-4 min-[900px]:p-7 xl:p-10">
-          <PaymentKeypad disabled={busy || !selected} onKey={pressKey} onExact={exactAmount} />
+          <PaymentKeypad disabled={busy || !selected} onKey={pressKey} onExact={exactAmount}
+            cashPresets={cashPresets} cashPresetsDisabled={busy || (selected !== undefined && selected !== 'cash')}
+            onCashPreset={applyCashPreset} />
         </aside>
         <div className="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-5 p-5 min-[900px]:p-8 xl:p-10">
           <div>
@@ -133,7 +136,7 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
                   <span aria-hidden="true" className={selected === value ? 'text-primary' : 'text-text-muted'}><Icon /></span>
                   <span className="min-w-0 flex-1 font-medium text-text-primary">{t(label)}</span>
                   <input aria-label={t(label)} type="text" inputMode="none" className="input h-11 w-28 min-w-0 text-right font-medium tabular-nums min-[900px]:w-36"
-                    value={draft[value]} placeholder="0" onFocus={(event) => focusTender(value, event.currentTarget)}
+                    value={draft[value]} placeholder="0" onFocus={() => focusTender(value)}
                     onClick={() => activate(value)}
                     onKeyDown={(event) => { if (event.key === 'Enter') activate(value); }}
                     onChange={(event) => changeAmount(value, event.target.value)} />
@@ -143,16 +146,9 @@ export function FullScreenPayment({ order, enabled, qrImageUrl, allItemsServed, 
             </div>
           </fieldset> : <p role="alert" className="text-sm text-warning">{t('Нет доступных способов оплаты')}</p>}
 
-          {showQr && (qrImageUrl ? (
-            <div className="flex flex-wrap items-center gap-4 rounded-xl border border-border p-3">
-              <img src={qrImageUrl} alt={t('QR-код для оплаты')} className="h-36 w-36 max-w-full object-contain" />
-              <p className="text-sm text-text-secondary">{t('Покажите QR-код клиенту для оплаты')}</p>
-            </div>
-          ) : (
-            <p role="alert" className="text-sm text-warning">
-              {t('QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.')}
-            </p>
-          ))}
+          {showQrWarning && <p role="alert" className="text-sm text-warning">
+            {t('QR-код не загружен. Добавьте его в настройках или выберите другой способ оплаты.')}
+          </p>}
 
           <div className="space-y-2 border-t border-border pt-4 text-sm" aria-live="polite">
             {over ? <p className="text-danger">{t('Сумма превышает итог заказа')}</p> : (

@@ -10,6 +10,16 @@ export function normalizeAmount(value: string) {
   return amount;
 }
 
+export function quickCashAmounts(due: number): number[] {
+  const cents = Math.round(due * 100);
+  if (cents <= 0) return [];
+  const step = cents < 50_000 ? 50 : cents < 200_000 ? 100 : 500;
+  const nextStep = cents < 50_000 ? 50 : cents < 200_000 ? 500 : 1000;
+  const first = Math.ceil(cents / (step * 100)) * step;
+  const second = (Math.floor(first / nextStep) + 1) * nextStep;
+  return [first, second];
+}
+
 export function tenderTotals(total: number, entered: TenderAmounts) {
   const due = Math.round(total * 100);
   const card = Math.round(entered.card * 100);
