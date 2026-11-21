@@ -117,8 +117,9 @@ test('old playback completion cannot stop or advance the new session queue', asy
   assert.equal(env.sounds[1].unloads, 1);
 });
 
-test('live playout preserves timing through packet bursts and recovers from a stall at normal speed', () => {
-  const voices = [], cues = [];
+test('live playout schedules the MP3 before speech and recovers from stalls at normal speed', async () => {
+  const voices = [], cues = [], startCues = [];
+  const mp3 = { duration: 0.235 };
   let clock = 0;
   function source(list) {
     return {
@@ -131,7 +132,17 @@ test('live playout preserves timing through packet bursts and recovers from a st
     createBuffer(_channels, length, rate) {
       return { duration: length / rate, sampleRate: rate, copyToChannel() {} };
     }
-    createBufferSource() { return source(voices); }
+    createBufferSource() {
+      const node = source(voices);
+      const start = node.start;
+      node.start = function (at) {
+        if (this.buffer === mp3) {
+          this.startAt = at;
+          startCues.push(this);
+        } else start.call(this, at);
+      };
+      return node;
+    }
     createOscillator() { return source(cues); }
     createGain() {
       return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {} }, connect() {}, disconnect() {} };
@@ -139,14 +150,29 @@ test('live playout preserves timing through packet bursts and recovers from a st
   }
   const { RadioPlayout } = loadSource('src/features/ptt/nativeAudio.ts', {
     'react-native': { Platform: { OS: 'android' } },
-    'react-native-audio-api': { AudioContext },
+    'react-native-audio-api': {
+      AudioContext, AudioManager: { getDevicePreferredSampleRate: () => 48000 },
+      OfflineAudioContext: class {
+        async decodeAudioDataSource(uri) {
+          assert.equal(uri, 'file:///ptt1.mp3');
+          return mp3;
+        }
+      },
+    },
+    'expo-asset': { Asset: { fromModule(id) {
+      assert.equal(id, 1);
+      return { downloadAsync: async () => ({ localUri: 'file:///ptt1.mp3' }) };
+    } } },
+    './sounds': { PTT_START_SOUND: 1 },
     './opusAudio': {},
   });
   const play = new RadioPlayout();
+  await play.prepareStartCue();
   const samples = new Float32Array(480);
   play.push(samples, true, 24000);
-  assert.ok(voices[0].startAt <= 0.1);
-  assert.equal(cues.length, 1);
+  assert.equal(startCues.length, 1);
+  assert.ok(startCues[0].startAt < 0.02);
+  assert.equal(voices[0].startAt, startCues[0].startAt + mp3.duration);
   clock = 0.06;
   for (let frame = 0; frame < 30; frame++) play.push(samples, false, 24000);
   assert.ok(voices.every(voice => voice.playbackRate.value === 1));
@@ -154,15 +180,15 @@ test('live playout preserves timing through packet bursts and recovers from a st
     const previous = voices[index - 1];
     assert.equal(voices[index].startAt, previous.startAt + previous.buffer.duration);
   }
-  clock = 0.94;
+  clock = voices.at(-1).startAt + 0.12;
   play.push(samples, false, 24000);
   const resumed = voices.at(-1);
   assert.ok(resumed.startAt >= clock + 0.06);
   assert.ok(resumed.startAt <= clock + 0.24);
-  assert.equal(cues.length, 1);
+  assert.equal(startCues.length, 1);
   play.endCue();
-  assert.equal(cues[1].startAt, resumed.startAt + 0.02);
-  assert.ok(play.remainingMs() > (cues[1].startAt + 0.05 - clock) * 1000);
+  assert.equal(cues[0].startAt, resumed.startAt + 0.02);
+  assert.ok(play.remainingMs() > (cues[0].startAt + 0.05 - clock) * 1000);
 });
 
 test('live capture delivers 20 ms buffers and keeps the final short buffer on release', async () => {
@@ -182,6 +208,8 @@ test('live capture delivers 20 ms buffers and keeps the final short buffer on re
   }
   const { startRadioCapture } = loadSource('src/features/ptt/nativeAudio.ts', {
     'react-native': { Platform: { OS: 'android' } },
+    'expo-asset': {},
+    './sounds': {},
     'react-native-audio-api': { AudioRecorder },
     './opusAudio': { CAPTURE_RATE: 24000, CAPTURE_SAMPLES: 480 },
   });
@@ -205,6 +233,7 @@ test('live receiver plays high-quality Opus and coalesces legacy Opus packets at
     './audioPlayback': { PttPlaybackQueue: class { clear() {} } },
     './backgroundFlag': { isPttBackgroundRuntimeActive: () => false },
     './nativeAudio': { RadioPlayout: class {
+      async prepareStartCue() {}
       push(samples, newTalk, rate) { played.push([samples.length, newTalk, rate]); }
       remainingMs() { return 0; }
       endCue() {}
@@ -260,7 +289,7 @@ test('foreground receiver unmount cancels real playback and removes the socket l
     './types': { PTT_EVENTS: { AUDIO_MESSAGE: 'audio', AUDIO_PACKET: 'packet', AUDIO_FRAME: 'frame', CHANNEL_BUSY: 'busy', CHANNEL_FREE: 'free' } },
     './audioPlayback': env.playback,
     './backgroundFlag': { isPttBackgroundRuntimeActive: () => false },
-    './nativeAudio': { RadioPlayout: class { stop() {} } },
+    './nativeAudio': { RadioPlayout: class { async prepareStartCue() {} stop() {} } },
     './opusAudio': {},
   });
   useAudioPttReceiver('general', true);

@@ -2,7 +2,7 @@
   "expo": {
     "name": "EDU POS",
     "slug": "edu-pos-mobile",
-    "version": "0.3.8",
+    "version": "0.3.9",
     "orientation": "default",
     "icon": "./assets/launcher-icon.png",
     "scheme": "edupos",
@@ -30,7 +30,7 @@
     },
     "android": {
       "package": "com.edupos.mobile",
-      "versionCode": 16,
+      "versionCode": 17,
       "adaptiveIcon": {
         "foregroundImage": "./assets/launcher-icon.png",
         "backgroundColor": "#FFFFFF"
@@ -53,6 +53,8 @@
       "translucent": false
     },
     "plugins": [
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
       "expo-secure-store",
       [
         "expo-location",

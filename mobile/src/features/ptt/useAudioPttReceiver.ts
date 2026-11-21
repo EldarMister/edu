@@ -29,6 +29,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       setLegacySpeaker(payload ? { id: payload.senderId, name: payload.senderName, role: payload.senderRole } : null);
     });
     const playback = new RadioPlayout();
+    void playback.prepareStartCue().catch(() => undefined);
     let stream: { id: string; codec: OpusMode; header: Uint8Array; speaker: PttPlayingSpeaker } | undefined;
     let decoder: ReturnType<typeof createOpusDecoder> | undefined;
     let decoderId: string | undefined;

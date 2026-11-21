@@ -1,6 +1,8 @@
 import { Platform } from 'react-native';
-import type { AudioContext, AudioRecorder, AudioScheduledSourceNode } from 'react-native-audio-api';
+import { Asset } from 'expo-asset';
+import type { AudioBuffer, AudioContext, AudioRecorder, AudioScheduledSourceNode } from 'react-native-audio-api';
 import { CAPTURE_RATE, CAPTURE_SAMPLES } from './opusAudio';
+import { PTT_START_SOUND } from './sounds';
 
 const FLUSH_TIMEOUT_MS = 250;
 const START_BUFFER_SECONDS = 0.10;
@@ -70,10 +72,20 @@ export function startRadioCapture(onSamples: Capture['onSamples']) {
 
 export class RadioPlayout {
   private context?: AudioContext;
+  private startCue?: AudioBuffer;
   private endAt = 0;
   private expectedArrival?: number;
   private jitter = 0;
   private readonly sources = new Map<AudioScheduledSourceNode, () => void>();
+
+  async prepareStartCue() {
+    const asset = await Asset.fromModule(PTT_START_SOUND).downloadAsync();
+    if (!asset.localUri) return;
+    // Decode the cue without opening a live audio output while the radio is idle.
+    const { OfflineAudioContext, AudioManager } = audioApi();
+    const context = new OfflineAudioContext(1, 1, AudioManager.getDevicePreferredSampleRate());
+    this.startCue = await context.decodeAudioDataSource(asset.localUri);
+  }
 
   push(samples: Float32Array, newTalk: boolean, sampleRate: number) {
     if (!samples.length) return;
@@ -98,14 +110,22 @@ export class RadioPlayout {
     let startAt = this.endAt;
     if (newTalk) {
       const headroom = Math.min(MAX_BUFFER_SECONDS, START_BUFFER_SECONDS + 4 * this.jitter);
-      startAt = Math.max(startAt + CUE_SECONDS, now + headroom);
+      const cue = this.startCue;
+      const nextAt = Math.max(this.endAt, now + RENDER_GUARD_SECONDS);
+      startAt = Math.max(nextAt + (cue?.duration ?? 0), now + headroom);
+      if (cue) {
+        const signal = context.createBufferSource();
+        signal.buffer = cue;
+        signal.connect(context.destination);
+        this.track(signal);
+        signal.start(startAt - cue.duration);
+      }
     } else if (startAt < now + RENDER_GUARD_SECONDS) {
       // Leave enough audio queued after a stall to avoid repeated underruns.
       // Packets already queued always play back-to-back at their original speed.
       const headroom = Math.min(MAX_BUFFER_SECONDS, Math.max(0.06, 0.03 + 4 * this.jitter));
       startAt = now + headroom;
     }
-    if (newTalk) this.cue(context, startAt - CUE_SECONDS, 760);
     source.start(startAt);
     this.track(source);
     this.endAt = startAt + buffer.duration;

@@ -29,6 +29,7 @@ import {
 } from './backgroundRuntime';
 import { useRadioVisibility } from './radioVisibility';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
+import { useLiveKitPtt } from './useLiveKitPtt';
 import { useAudioPttSender } from './useAudioPttSender';
 import { PTT_CODEC_CAPABILITIES } from './opusAudio';
 import {
@@ -318,7 +319,8 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   const [channel, setChannel] = React.useState<PttChannel>(() => defaultChannelForRole(role));
   const [onlineCount, setOnlineCount] = React.useState(0);
   const [busySpeaker, setBusySpeaker] = React.useState<{ id: string; name?: string } | null>(null);
-  const sender = useAudioPttSender(channel, !!user?.id, workspace);
+  const legacySender = useAudioPttSender(channel, !!user?.id, workspace);
+  const sender = useLiveKitPtt(channel, !!user?.id, open, legacySender, user?.id);
   const { speaker: playingSpeaker } = useAudioPttReceiver(channel, !!user?.id);
   const stopRadio = sender.stop;
   const closeRadio = React.useCallback(() => {

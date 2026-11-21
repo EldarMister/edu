@@ -1,8 +1,9 @@
 import { Audio } from 'expo-av';
 import { configureAudioPlayback } from '@/lib/sound';
 
+export const PTT_START_SOUND = require('../../../assets/sounds/ptt1.mp3');
 const SOURCES = {
-  start: require('../../../assets/sounds/ptt1.mp3'),
+  start: PTT_START_SOUND,
   end: require('../../../assets/sounds/ptt2.mp3'),
 };
 
