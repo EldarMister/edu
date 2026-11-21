@@ -96,14 +96,15 @@ export class RecipesService {
       }
       foodCost = foodCost.add(lineCost);
       const amountBase = Number(amount);
+      const unitCost = amount.gt(0) ? lineCost.div(amount) : balance.avgCost;
       items.push({
         id: ri.id, ingredientId: ri.ingredientId, fromCommonWarehouse: ri.fromCommonWarehouse, warehouseId: ri.warehouseId,
         warehouseName: warehouse?.name ?? 'Основной склад', isPrepared: ri.ingredient.isPrepared, preparationMode: ri.ingredient.preparationMode,
         name: ri.ingredient.name, unit: unitLabel(amountUnit), amountUnit, unitType: ri.ingredient.unitType, ingredientDisplayUnit: ri.ingredient.displayUnit,
-        amount: round3(fromBase(amountBase, amountUnit)), baseAmount: round3(fromBase(Number(ri.amount), amountUnit)),
-        netAmount: ri.netAmount == null ? null : round3(fromBase(Number(ri.netAmount), amountUnit)), lossPercent: Number(ri.lossPercent), processingMethod: ri.processingMethod,
+        amount: fromBase(amountBase, amountUnit), baseAmount: fromBase(Number(ri.amount), amountUnit),
+        netAmount: ri.netAmount == null ? null : fromBase(Number(ri.netAmount), amountUnit), lossPercent: Number(ri.lossPercent), processingMethod: ri.processingMethod,
         variantAmounts: Object.fromEntries(Object.entries((ri.variantAmounts ?? {}) as Record<string, number>).map(([id, value]) => [id, fromBase(Number(value), amountUnit)])),
-        costKnown: lineCostKnown, avgCost: lineCostKnown ? round2(amountBase > 0 ? costFromBase(Number(lineCost.div(amount)), amountUnit) : costFromBase(Number(balance.avgCost), amountUnit)) : null,
+        costKnown: lineCostKnown, avgCost: lineCostKnown ? costFromBase(Number(unitCost), amountUnit) : null,
         costUnitLabel: costUnitLabel(amountUnit), lineCost: lineCostKnown ? round2(Number(lineCost)) : null, stock: round3(fromBase(Number(balance.stock), amountUnit)),
         isLow: balance.stock.lte(ri.ingredient.lowStockThreshold), isActive: ri.ingredient.isActive,
       });

@@ -34,10 +34,17 @@ test('view-only sections remain readable but reject direct writes and preserve i
   assert.equal(permissions.actions.manageStaff, false);
   for (const [controller, read, write] of [[SettingsController, 'get', 'update'],
     [CatalogController, 'halls', 'createHall'], [StaffController, 'list', 'setCashHanded'],
-    [ReceiptPrintsController, 'list', 'approve'], [OrdersController, 'findOne', 'cancel']]) {
+    [OrdersController, 'findOne', 'cancel']]) {
     assert.equal(guard.canActivate(context(controller, read, permissions)), true);
     assert.throws(() => guard.canActivate(context(controller, write, permissions, 'POST')), { status: 403 });
   }
+  const actor = { role: 'ADMIN', permissions };
+  const prints = new ReceiptPrintsController({
+    listPending: () => [],
+    approve: () => assert.fail('view-only manager tried to approve a receipt'),
+  });
+  assert.deepEqual(prints.list(actor), []);
+  assert.throws(() => prints.approve(actor, 'request'), { status: 403 });
   assert.equal(guard.canActivate(context(StaffShiftsController, 'start', permissions, 'POST')), true);
   assert.equal(resolvePermissions('OWNER', raw).readOnlySections, undefined);
 });

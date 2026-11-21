@@ -169,6 +169,7 @@ function StaffRecipeForm({
               onChange={setRows}
               variants={recipe.variants}
               showCosts={costs}
+              disabled={pending}
               allowCreate={false}
             />
             <div className="grid min-w-0 gap-5 md:max-w-3xl">

@@ -2,7 +2,7 @@ import { useId, useState, type FormEvent, type KeyboardEvent, type ReactNode } f
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
-import { ACTION_LABELS, ACTION_KEYS, getDefaultPermissionsByRole, READ_ONLY_SECTION_KEYS, resolvePermissions, SECTION_KEYS, SECTION_WRITE_ACTIONS } from '@/lib/permissions';
+import { ACTION_LABELS, ACTION_KEYS, getDefaultPermissionsByRole, READ_ONLY_SECTION_KEYS, resolvePermissions, SECTION_KEYS, SECTION_LABELS, SECTION_WRITE_ACTIONS } from '@/lib/permissions';
 import type { ActionKey, EmployeePermissions, SectionKey } from '@/types';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { DocumentField } from './warehouse/WarehouseUi';
@@ -10,17 +10,6 @@ import { parseMoney } from './finance/finance-format';
 import { SECTION_ACTIONS } from './position-permissions';
 import { useStaffPositionMutations, type PositionRole, type PositionSalary, type StaffPosition } from './positions-api';
 
-const groups: { key: string; label: string; sections: SectionKey[] }[] = [
-  { key: 'statistics', label: 'Статистика', sections: ['statistics'] },
-  { key: 'finance', label: 'Финансы', sections: ['finance'] },
-  { key: 'orders', label: 'Заказы', sections: ['orders'] },
-  { key: 'checks', label: 'Чеки', sections: ['checks'] },
-  { key: 'menu', label: 'Меню', sections: ['menu'] },
-  { key: 'warehouse', label: 'Склад', sections: ['warehouse'] },
-  { key: 'staff', label: 'Персонал', sections: ['staff'] },
-  { key: 'journal', label: 'Журнал', sections: ['journal'] },
-  { key: 'settings', label: 'Настройки / залы', sections: ['settings', 'tables'] },
-];
 const payFields: { key: keyof PositionSalary; label: string; percent?: boolean }[] = [
   { key: 'hourly', label: 'За час, с' }, { key: 'perShift', label: 'За смену, с' }, { key: 'monthly', label: 'За месяц, с' },
   { key: 'personalPercent', label: 'Процент от личных продаж', percent: true },
@@ -121,25 +110,22 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
     || (key === 'admin' && !position?.fixedWorkspace)
     || (key === 'terminal' && position?.fixedWorkspace !== 'production'));
 
-  function level(sections: SectionKey[]): SectionLevel | 'custom' {
-    if (sections.every((key) => !permissions.sections[key])) return 'none';
-    if (!sections.every((key) => permissions.sections[key])) return 'custom';
-    const writes = sections.filter((key) => READ_ONLY_SECTION_KEYS.includes(key));
-    if (writes.every((key) => permissions.readOnlySections?.includes(key))) return 'view';
-    if (sections.some((key) => permissions.readOnlySections?.includes(key))) return 'custom';
-    return sections.every((key) => (SECTION_ACTIONS[key] ?? []).every((action) => permissions.actions[action])) ? 'full' : 'custom';
+  function level(section: SectionKey): SectionLevel | 'custom' {
+    if (!permissions.sections[section]) return 'none';
+    const readOnly = !READ_ONLY_SECTION_KEYS.includes(section) || permissions.readOnlySections?.includes(section);
+    const requiredActions = (SECTION_ACTIONS[section] ?? []).filter((action) =>
+      !readOnly || !SECTION_WRITE_ACTIONS[section]?.includes(action));
+    if (requiredActions.some((action) => !permissions.actions[action])) return 'custom';
+    return readOnly ? 'view' : 'full';
   }
-  function setLevel(sections: SectionKey[], value: SectionLevel) {
+  function setLevel(section: SectionKey, value: SectionLevel) {
     setPermissions((current) => {
-      const next = { ...current, sections: { ...current.sections }, actions: { ...current.actions },
-        readOnlySections: (current.readOnlySections ?? []).filter((key) => !sections.includes(key)) };
-      for (const key of sections) {
-        next.sections[key] = value !== 'none';
-        for (const action of SECTION_ACTIONS[key] ?? []) next.actions[action] = value !== 'none';
-        if (value === 'view' && READ_ONLY_SECTION_KEYS.includes(key)) {
-          next.readOnlySections.push(key);
-          for (const action of SECTION_WRITE_ACTIONS[key] ?? []) next.actions[action] = false;
-        }
+      const next = { ...current, sections: { ...current.sections, [section]: value !== 'none' }, actions: { ...current.actions },
+        readOnlySections: (current.readOnlySections ?? []).filter((key) => key !== section) };
+      const readOnly = value === 'view' && READ_ONLY_SECTION_KEYS.includes(section);
+      if (readOnly) next.readOnlySections.push(section);
+      for (const action of SECTION_ACTIONS[section] ?? []) {
+        next.actions[action] = value !== 'none' && !(readOnly && SECTION_WRITE_ACTIONS[section]?.includes(action));
       }
       return next;
     });
@@ -236,13 +222,12 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
           selected={permissions.adminAccess ? 'allowed' : 'denied'}
           onChange={(value) => setPermissions((current) => ({ ...current, adminAccess: value === 'allowed' }))} />
         {permissions.adminAccess && <>
-          {groups.map((group) => {
-            const currentLevel = level(group.sections);
-            const canEdit = group.sections.some((key) => READ_ONLY_SECTION_KEYS.includes(key));
-            return <AccessRow<SectionLevel> key={group.key} name={`${formId}-section-${group.key}`} label={group.label}
-              options={canEdit ? sectionLevels : sectionLevels.filter(({ value }) => value !== 'full')}
+          {SECTION_KEYS.map((section) => {
+            const currentLevel = level(section);
+            return <AccessRow<SectionLevel> key={section} name={`${formId}-section-${section}`} label={SECTION_LABELS[section]}
+              options={READ_ONLY_SECTION_KEYS.includes(section) ? sectionLevels : sectionLevels.filter(({ value }) => value !== 'full')}
               selected={currentLevel} note={currentLevel === 'custom' ? 'Индивидуальные ограничения' : undefined}
-              onChange={(value) => setLevel(group.sections, value)} />;
+              onChange={(value) => setLevel(section, value)} />;
           })}
           <details className="mt-4 border-t border-border pt-2"><summary className="cursor-pointer py-2 font-medium text-primary">Отдельные действия и ограничения</summary>
             <div className="grid gap-x-6 sm:grid-cols-2">{ACTION_KEYS.filter((key) => key !== 'editPermissions' && !terminalActions.includes(key)

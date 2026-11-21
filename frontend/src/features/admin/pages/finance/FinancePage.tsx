@@ -20,7 +20,7 @@ import { FinanceRowMenu } from './FinanceRowMenu';
 import { CategoryDirectory } from './CategoryDirectory';
 import { TransactionCell } from './TransactionCell';
 import { categoryAccepts, categoryAncestors, categoryOptions } from './category-options';
-import { entryCategoryLabel, entryLabel, entryLabels, financeDateTime, financeDay, financeMoney } from './finance-format';
+import { entryCategoryLabel, entryLabel, entryLabels, financeDateTime, financeDay, financeLocalTime, financeMoney } from './finance-format';
 import type { FinanceView } from './navigation';
 import { PayrollRegister } from './PayrollRegister';
 import { SalaryAccrualCard } from './SalaryAccrualCard';
@@ -231,6 +231,7 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
     <WorkspaceHeaderCount count={transactions.length} />
     <FinanceRegister title="Транзакции" columnPreference="finance-transactions" columns={[
       { key: 'date', label: 'Дата', width: 132, sort: { ascending, toggle: toggleSort } },
+      { key: 'time', label: 'Время', width: 86 },
       { key: 'category', label: 'Категория', width: 152 },
       { key: 'note', label: 'Комментарий', width: 220 },
       { key: 'amount', label: 'Сумма', width: 128, numeric: true },
@@ -239,10 +240,10 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
       { key: 'type', label: 'Тип', width: 112 }, { key: 'actor', label: 'Сотрудник', width: 156 },
     ]} defaultColumns={transactionColumns}
       filters={<>{quickSearch}
-        {data.categories.length > 0 && <Select ariaLabel="Категория транзакции" value={categoryId}
+        {data.categories.length > 0 && <Select searchable ariaLabel="Категория транзакции" value={categoryId}
           onChange={(value) => setFilters({ financeCategory: value })}
           options={[{ value: '', label: 'Категория' }, ...categoryChoices]} />}
-        <Select ariaLabel="Счёт" value={scope} onChange={setScope}
+        <Select searchable ariaLabel="Счёт" value={scope} onChange={setScope}
           options={[{ value: '', label: 'Счёт' }, ...data.accounts.map(({ id, name }) => ({ value: id, label: name }))]} />
         <RegisterFilter active={!!kind}>
           <Select ariaLabel="Тип транзакции" value={kind} onChange={(value) => setFilters({ financeKind: value })}
@@ -275,12 +276,15 @@ function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
             date: { value: financeDateTime(entry.occurredAt), display: <time className={showDate ? undefined : 'sr-only'} dateTime={entry.occurredAt} title={financeDateTime(entry.occurredAt)}>
               {transactionDay.format(new Date(entry.occurredAt))}
             </time> },
+            time: { value: financeLocalTime(new Date(entry.occurredAt)).slice(11) },
             category: { value: categoryLabel, display: entry.editable ? <TransactionCell field="category" value={entry.categoryId ?? ''}
               display={categoryLabel} options={editOptions} onSave={(value) => editTransaction.mutateAsync({ id: entry.id, categoryId: value || null })} /> : undefined },
             note: { value: entry.note || '—', display: entry.editable ? <TransactionCell field="note" value={entry.note ?? ''}
               display={comment} onSave={(value) => editTransaction.mutateAsync({ id: entry.id, note: value })} /> : comment },
             amount: { value: amount, display: <span className={amount < 0 ? 'text-danger' : undefined}>{financeMoney(amount)}</span> },
-            balance: { value: entry.balanceAfter ?? null, display: <span className={entry.balanceAfter != null && entry.balanceAfter < 0 ? 'text-danger' : undefined}>
+            balance: { value: entry.balanceAfter ?? null, display: <span
+              title={entry.balanceAfter == null ? undefined : `Баланс счёта «${accountName}» после транзакции`}
+              className={entry.balanceAfter != null && entry.balanceAfter < 0 ? 'text-danger' : undefined}>
               {financeMoney(entry.balanceAfter)}
             </span> },
             account: { value: counterpartyName

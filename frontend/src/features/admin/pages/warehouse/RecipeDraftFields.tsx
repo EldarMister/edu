@@ -10,7 +10,7 @@ import {
   type RecipeItem,
   type RecipeRowInput,
 } from './api';
-import { ALL_UNITS, unitsForType, type UnitCode } from './units';
+import { ALL_UNITS, unitLabel, unitsForType, type UnitCode } from './units';
 
 export type RecipeDraftRow = RecipeRowInput & {
   ingredientId: string;
@@ -43,8 +43,12 @@ function unitFactor(unit: UnitCode) {
   return ALL_UNITS.find((value) => value.code === unit)!.factor;
 }
 
-function ingredientPrice(item: Ingredient) {
-  return item.isPrepared && item.preparationMode === 'virtual' ? item.recipeUnitCost : item.avgCost;
+function ingredientPrice(item: Ingredient, unit: UnitCode) {
+  if (item.isPrepared && item.preparationMode === 'virtual') {
+    return item.recipeUnitCost == null ? null : item.recipeUnitCost * unitFactor(unit) / unitFactor(item.displayUnit);
+  }
+  if (item.avgCostBase != null) return item.avgCostBase * unitFactor(unit);
+  return item.avgCost == null ? null : item.avgCost * unitFactor(unit) / unitFactor(item.displayUnit);
 }
 
 function lineCost(row: RecipeDraftRow, ingredient?: Ingredient) {
@@ -52,10 +56,7 @@ function lineCost(row: RecipeDraftRow, ingredient?: Ingredient) {
   let price = row.pricePerUnit;
   // The saved recipe's rate belongs to the selected warehouse, including an unknown rate.
   if (price === undefined && ingredient && !row.warehouseId && !row.fromCommonWarehouse) {
-    const displayPrice = ingredientPrice(ingredient);
-    if (displayPrice != null) {
-      price = displayPrice * unitFactor(row.unit ?? ingredient.displayUnit) / unitFactor(ingredient.displayUnit);
-    }
+    price = ingredientPrice(ingredient, row.unit ?? ingredient.displayUnit);
   }
   return price != null && Number.isFinite(price) && price >= 0 ? row.amount * price : null;
 }
@@ -72,18 +73,32 @@ export function recipeDraftCost(rows: readonly RecipeDraftRow[], ingredients: re
   return { total, complete };
 }
 
+function formatLineCost(cost: number | null) {
+  return cost == null ? '—' : money(cost);
+}
+
+function netRecipeOutput(rows: readonly RecipeDraftRow[]) {
+  const type = rows[0]?.unitType;
+  if (!type || rows.some((row) => row.unitType !== type || !row.unit)) return null;
+  const baseUnit = unitsForType(type)[0];
+  const net = rows.reduce((sum, row) => sum + (row.netAmount ?? row.amount) * unitFactor(row.unit!), 0);
+  return net > 0 ? `${net.toLocaleString('ru-RU', { maximumFractionDigits: 3 })} ${baseUnit.label}` : null;
+}
+
 export function RecipeDraftFields({
   rows,
   onChange,
   variants = [],
   showCosts = true,
   allowCreate = true,
+  disabled = false,
 }: {
   rows: RecipeDraftRow[];
   onChange: (rows: RecipeDraftRow[]) => void;
   variants?: { id?: string; name: string }[];
   showCosts?: boolean;
   allowCreate?: boolean;
+  disabled?: boolean;
 }) {
   const ingredients = useIngredients('');
   const [createIngredient, setCreateIngredient] = useState(false);
@@ -91,6 +106,7 @@ export function RecipeDraftFields({
     (item) => item.isActive && !rows.some((row) => row.ingredientId === item.id),
   );
   function add(item: Ingredient) {
+    const unit = item.baseUnit ?? item.displayUnit;
     onChange([
       ...rows,
       {
@@ -98,16 +114,17 @@ export function RecipeDraftFields({
         name: item.name,
         unitType: item.unitType,
         amount: 0,
-        unit: item.displayUnit,
+        unit,
         netAmount: 0,
-        pricePerUnit: ingredientPrice(item) ?? null,
+        pricePerUnit: ingredientPrice(item, unit),
       },
     ]);
   }
   function patch(index: number, value: Partial<RecipeDraftRow>) {
     onChange(rows.map((row, i) => (i === index ? { ...row, ...value } : row)));
   }
-  const { total, complete } = recipeDraftCost(rows);
+  const { total, complete } = recipeDraftCost(rows, ingredients.data);
+  const output = netRecipeOutput(rows);
   return (
     <section className="min-w-0 w-full space-y-4 border-t border-border pt-7">
       <h3 className="text-lg font-semibold">Состав техкарты</h3>
@@ -255,7 +272,7 @@ export function RecipeDraftFields({
                 </td>
                 {showCosts && (
                   <td className="px-2 py-5 text-right">
-                    {row.pricePerUnit == null ? '—' : money(row.amount * row.pricePerUnit)}
+                    {formatLineCost(lineCost(row, ingredients.data?.find((item) => item.id === row.ingredientId)))}
                   </td>
                 )}
                 <td className="py-3 pl-2">
@@ -281,20 +298,20 @@ export function RecipeDraftFields({
         )}
         <div className="w-full min-w-0 sm:max-w-sm">
           <Select
+            searchable
             ariaLabel="Добавить компонент"
+            placeholder="Добавить компонент…"
             className="h-11 w-full"
             value=""
+            disabled={disabled || ingredients.isPending}
             onChange={(id) => {
               const item = available.find((value) => value.id === id);
               if (item) add(item);
             }}
-            options={[
-              { value: '', label: 'Добавить компонент…' },
-              ...available.map((item) => ({
-                value: item.id,
-                label: item.name,
-              })),
-            ]}
+            options={available.map((item) => ({
+              value: item.id,
+              label: `${item.name} · ${unitLabel(item.baseUnit ?? item.displayUnit)}`,
+            }))}
           />
         </div>
         {allowCreate && (
@@ -306,11 +323,10 @@ export function RecipeDraftFields({
             + Новый ингредиент
           </button>
         )}
-        {showCosts && (
-          <span className="ml-auto text-sm">
-            Себестоимость: <strong>{complete ? money(total) : 'не рассчитана'}</strong>
-          </span>
-        )}
+        {(output || showCosts) && <div className="ml-auto flex flex-wrap gap-x-4 gap-y-1 text-sm">
+          {output && <span>Сумма нетто: <strong>{output}</strong></span>}
+          {showCosts && <span>Себестоимость: <strong>{complete ? money(total) : 'не рассчитана'}</strong></span>}
+        </div>}
       </div>
       {createIngredient && createPortal(
         <ItemCard

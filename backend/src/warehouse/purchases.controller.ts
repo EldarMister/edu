@@ -38,8 +38,8 @@ export class PurchasesController {
   @Get('last-prices')
   @RequirePermission('actions.warehouseCosts')
   lastPrices(@Query('ingredientIds') ingredientIds?: string, @Query('warehouseId') warehouseId?: string,
-    @Query('excludePurchaseId') excludePurchaseId?: string) {
-    return this.purchases.lastPrices({ ingredientIds, warehouseId, excludePurchaseId });
+    @Query('excludePurchaseId') excludePurchaseId?: string, @Query('before') before?: string) {
+    return this.purchases.lastPrices({ ingredientIds, warehouseId, excludePurchaseId, before });
   }
 
   @Get(':id')

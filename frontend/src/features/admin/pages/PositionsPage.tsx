@@ -106,10 +106,13 @@ export function PositionsPage() {
         </Modal>
       : <PositionEditor key={entry?.id ?? 'new'} position={entry} onClose={closeEditor} />)}
     {removePosition && <Modal open title="Удалить должность?" onClose={() => { if (!remove.isPending) setRemovePosition(null); }}
-      footer={<button type="button" className="btn-danger btn-md" disabled={remove.isPending || (removePosition.employees > 0 && !replacementId)}
-        onClick={() => remove.mutate({
-          id: removePosition.id, replacementPositionId: replacementId || undefined,
-        }, { onSuccess: () => setRemovePosition(null) })}>Удалить</button>}>
+      footer={<div className="flex justify-end gap-2">
+        <button type="button" className="btn-secondary btn-md" disabled={remove.isPending} onClick={() => setRemovePosition(null)}>Отмена</button>
+        <button type="button" className="btn-danger btn-md" disabled={remove.isPending || (removePosition.employees > 0 && !replacementId)}
+          onClick={() => remove.mutate({
+            id: removePosition.id, replacementPositionId: replacementId || undefined,
+          }, { onSuccess: () => setRemovePosition(null) })}>Удалить</button>
+      </div>}>
       <p>Должность «{removePosition.name}» будет удалена.</p>
       {removePosition.employees > 0 && <div className="mt-4 space-y-2">
         {replacementOptions.length ? <>

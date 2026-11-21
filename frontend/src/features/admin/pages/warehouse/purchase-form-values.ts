@@ -43,6 +43,27 @@ export function selectPurchaseProduct<T extends PurchaseRowValues & { ingredient
   };
 }
 
+const invoicePriceDigits = { minimumFractionDigits: 2, maximumFractionDigits: 8 };
+const unitPriceInput = new Intl.NumberFormat('en-US', { ...invoicePriceDigits, useGrouping: false });
+const unitPriceLabel = new Intl.NumberFormat('ru-RU', invoicePriceDigits);
+
+export function formatPurchaseUnitPrice(value: string, forInput = false): string {
+  const price = Number(value);
+  if (!value.trim() || !Number.isFinite(price)) return value;
+  return forInput ? unitPriceInput.format(price) : `${unitPriceLabel.format(price)} с`;
+}
+
+export function purchasePriceChange(price: string, previousPrice: string) {
+  if (!price.trim() || !previousPrice.trim()) return null;
+  const current = Number(price);
+  const previous = Number(previousPrice);
+  if (!Number.isFinite(current) || !Number.isFinite(previous) || current < 0 || previous < 0) return null;
+  return {
+    difference: current - previous,
+    ratio: previous > 0 ? current / previous - 1 : null,
+  };
+}
+
 export function purchaseRowTotal(row: PurchaseRowValues): number {
   return roundPurchaseMoney(
     row.total === undefined

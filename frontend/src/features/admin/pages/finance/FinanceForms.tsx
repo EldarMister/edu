@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { Modal } from '@/components/Modal';
 import { DatePicker } from '@/components/DatePicker';
+import { Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
 import { useEditorDirty } from '@/components/EditorNavigationGuard';
 import { EditorPage } from '../warehouse/EditorPage';
@@ -39,6 +40,20 @@ function Amount({ label, value, onChange, hint }: { label: string; value: string
   </DocumentField>;
 }
 
+function TransactionChoice({ label, value, onChange, options, placeholder, optional = false }: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  optional?: boolean;
+}) {
+  return <DocumentField label={label}>
+    <Select ariaLabel={label} className="h-9 w-full" searchable value={value} onChange={onChange}
+      placeholder={placeholder} options={optional ? [{ value: '', label: 'Без категории' }, ...options] : options} />
+  </DocumentField>;
+}
+
 function OperationKind<T extends string>({ label, options, value, onChange }: {
   label: string;
   options: readonly { value: T; label: string }[];
@@ -62,7 +77,7 @@ function Comment({ value, onChange, compact = false }: { value: string; onChange
   return <DocumentField label="Комментарий">{compact ? <input {...input} /> : <textarea {...input} rows={3} />}</DocumentField>;
 }
 
-function FormPage({ children, title, onClose, onSubmit, submitLabel = 'Сохранить', disabled = false, dialog = false, suspended = false }: {
+function FormPage({ children, title, onClose, onSubmit, submitLabel = 'Сохранить', disabled = false, dialog = false, suspended = false, changed }: {
   children: ReactNode;
   title: string;
   onClose: () => void;
@@ -71,13 +86,14 @@ function FormPage({ children, title, onClose, onSubmit, submitLabel = 'Сохр�
   disabled?: boolean;
   dialog?: boolean;
   suspended?: boolean;
+  changed?: boolean;
 }) {
   const id = useId();
   const busy = useRef(false);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const { markSaved } = useEditorDirty(dirty);
+  const { markSaved } = useEditorDirty(changed ?? dirty);
   const close = () => { if (!busy.current) onClose(); };
   const save =
     <button form={id} type="submit" className="btn-primary btn-md" disabled={disabled || saving}>{saving ? 'Сохранение…' : submitLabel}</button>;
@@ -85,7 +101,7 @@ function FormPage({ children, title, onClose, onSubmit, submitLabel = 'Сохр�
     {save}
     <button type="button" className="btn-secondary btn-md" onClick={close} disabled={saving}>Отменить</button>
   </div> : save;
-  const body = <form id={id} onChangeCapture={() => setDirty(true)} onSubmit={async (event) => {
+  const body = <form id={id} onChangeCapture={changed === undefined ? () => setDirty(true) : undefined} onSubmit={async (event) => {
       event.preventDefault();
       if (disabled || busy.current) return;
       busy.current = true;
@@ -224,35 +240,51 @@ export function TransactionForm({ accounts, categories, owner, entry, initialAcc
   const [date, setDate] = useState(initialDateTime.slice(0, 10));
   const [hour, setHour] = useState(initialDateTime.slice(11, 13));
   const [minute, setMinute] = useState(initialDateTime.slice(14, 16));
+  const [dateInputValid, setDateInputValid] = useState(true);
   const [note, setNote] = useState(entry?.note ?? '');
+  const snapshot = JSON.stringify([kind, accountId, categoryId, destinationAccountId, amount, date, hour, minute, note]);
+  const [originalSnapshot] = useState(snapshot);
   const validAmount = parseMoney(amount);
   const time = [hour, minute].map((part) => part.padStart(2, '0')).join(':');
-  const effectiveTime = new Date(date + 'T' + time + ':00+06:00');
+  const dateTime = date + 'T' + time;
+  const effectiveTime = new Date(dateTime + ':00+06:00');
   const validTime = /^\d{1,2}$/.test(hour) && Number(hour) < 24 && /^\d{1,2}$/.test(minute) && Number(minute) < 60;
-  const validDate = validTime && Number.isFinite(effectiveTime.getTime()) && effectiveTime.getTime() <= Date.now();
+  const futureDateTime = effectiveTime.getTime() > Date.now();
+  const validDate = dateInputValid && validTime && Number.isFinite(effectiveTime.getTime()) && !futureDateTime;
   const eligible = categoryOptions(categories, (category) => categoryAccepts(category, kind));
-  const types = owner ? transactionTypes : transactionTypes.filter(({ value }) => categories.some((category) => categoryAccepts(category, value)));
+  const types = transactionTypes.filter(({ value }) => value === 'transfer' ? owner && accounts.length > 1
+    : owner || categories.some((category) => categoryAccepts(category, value)));
+  const validAccount = accounts.some(({ id }) => id === accountId);
+  const validDestination = destinationAccountId !== accountId && accounts.some(({ id }) => id === destinationAccountId);
+  const validCategory = categoryId ? eligible.some(({ value }) => value === categoryId) : owner;
   return <FormPage title={entry ? 'Редактирование транзакции' : 'Добавить транзакцию'} onClose={onClose} dialog
-    disabled={!accountId || !validDate || !(validAmount != null && validAmount > 0) || (kind === 'transfer' ? !destinationAccountId : !owner && !categoryId)}
+    changed={snapshot !== originalSnapshot}
+    disabled={!validAccount || !validDate || validAmount == null || validAmount <= 0 || (kind === 'transfer' ? !validDestination : !validCategory)}
     onSubmit={() => {
+      const keepTimestamp = dateTime === initialDateTime;
       const values = {
         kind, accountId, amount: validAmount!, categoryId: kind === 'transfer' ? undefined : categoryId || undefined,
         destinationAccountId: kind === 'transfer' ? destinationAccountId : undefined,
-        note: note.trim() || undefined, occurredAt: date + 'T' + time === initialDateTime ? undefined : effectiveTime.toISOString(),
+        note: note.trim() || undefined, occurredAt: keepTimestamp ? undefined : effectiveTime.toISOString(),
       };
       return entry ? editTransactionDetails.mutateAsync({ id: entry.id, values }) : postTransaction.mutateAsync({ ...values, requestKey });
     }}>
-    <OperationKind label="Тип" value={kind} options={types} onChange={(next) => { setKind(next); setCategory(''); }} />
+    <OperationKind label="Тип" value={kind} options={types} onChange={(next) => {
+      setKind(next);
+      if (!categories.some((category) => category.id === categoryId && categoryAccepts(category, next))) setCategory('');
+    }} />
     <Amount label="Сумма" value={amount} onChange={setAmount} />
-    {kind === 'transfer' && <Choice label="На счёт" value={destinationAccountId} onChange={setDestination}
-      options={accounts.filter(({ id }) => id !== accountId).map(optionFor)} empty="Выберите счёт" />}
-    <Choice label={kind === 'income' ? 'На счёт' : 'Со счёта'} value={accountId}
-      options={accounts.filter(({ id }) => kind !== 'transfer' || id !== destinationAccountId).map(optionFor)} empty="Выберите счёт"
-      onChange={(value) => { setAccount(value); if (value === destinationAccountId) setDestination(''); }} />
-    {kind !== 'transfer' && <Choice label="Категория" value={categoryId} onChange={setCategory} options={eligible} empty="Выберите категорию" />}
+    <TransactionChoice label={kind === 'income' ? 'На счёт' : 'Со счёта'} value={accountId}
+      options={accounts.map(optionFor)} placeholder="Выберите счёт"
+      onChange={(value) => { setAccount(value); if (kind === 'transfer' && value === destinationAccountId) setDestination(''); }} />
+    {kind === 'transfer' ? <TransactionChoice label="На счёт" value={destinationAccountId} onChange={setDestination}
+      options={accounts.filter(({ id }) => id !== accountId).map(optionFor)} placeholder="Выберите счёт" />
+      : <TransactionChoice label="Категория" value={categoryId} onChange={setCategory}
+        options={eligible} placeholder="Выберите категорию" optional={owner} />}
     <DocumentField label="Дата транзакции">
       <div className="finance-transaction-date">
-        <DatePicker value={date} onChange={setDate} max={financeDay()} className="input w-[118px]" aria-label="Дата транзакции" required />
+        <DatePicker value={date} onChange={setDate} onValidityChange={setDateInputValid}
+          max={financeDay()} className="input w-[118px]" aria-label="Дата транзакции" required />
         <span className="inline-flex items-center gap-1">
           <input className="input w-11 px-1 text-center tabular-nums" aria-label="Часы транзакции" inputMode="numeric"
             value={hour} onChange={(event) => setHour(event.target.value)} onBlur={() => setHour(hour.length === 1 ? '0' + hour : hour)}
@@ -263,6 +295,7 @@ export function TransactionForm({ accounts, categories, owner, entry, initialAcc
             pattern="[0-9]{1,2}" maxLength={2} required />
         </span>
       </div>
+      {futureDateTime && <p className="mt-1.5 text-xs text-danger" role="alert">Дата и время транзакции ещё не наступили.</p>}
     </DocumentField>
     <Comment value={note} onChange={setNote} compact />
   </FormPage>;
@@ -296,8 +329,8 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
     <DocumentField label="Сумма"><p className="font-semibold tabular-nums">{financeMoney(entry.amount)}</p></DocumentField>
     <DocumentField label="Сотрудник"><p>{entry.actorName || '—'}</p></DocumentField>
     {entry.editable ? <>
-      <Choice label="Категория" value={categoryId} onChange={setCategory} options={eligible}
-        empty={owner ? 'Без категории' : 'Выберите категорию'} />
+      <TransactionChoice label="Категория" value={categoryId} onChange={setCategory} options={eligible}
+        placeholder="Выберите категорию" optional={owner} />
       <Comment value={note} onChange={setNote} />
     </> : <>
       <DocumentField label="Категория"><p>{categories.find((category) => category.id === entry.categoryId)?.name ?? '—'}</p></DocumentField>
@@ -310,7 +343,7 @@ export function TransactionDetail({ entry, accounts, categories, owner, onClose 
   </>;
   return <>
     {entry.editable ? <FormPage title={title} onClose={onClose} dialog suspended={showReverse}
-      disabled={(!owner && !categoryId) || !changed}
+      changed={changed} disabled={(!owner && !categoryId) || !changed}
       onSubmit={() => editTransaction.mutateAsync({ id: entry.id, categoryId: categoryId || null, note: note.trim() })}>
       {fields}
     </FormPage> : <Modal open title={title} onClose={onClose} panelClassName="finance-transaction-modal max-w-[520px]" suspended={showReverse}>

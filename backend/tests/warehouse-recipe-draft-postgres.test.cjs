@@ -94,6 +94,24 @@ test(
             ],
           },
         };
+        await t.test('draft reads preserve small recipe quantities and rates without display rounding', async () => {
+          const water = await db.ingredient.create({
+            data: { name: 'Вода', unitType: 'volume', displayUnit: 'l', stock: 1000, avgCost: 0.0025, valuationKnown: true },
+          });
+          const calculation = await db.dish.create({ data: { name: 'Проверка дозировки', categoryId: category.id, price: 15 } });
+          const saved = await service.saveDraft(calculation.id, { expectedVersion: 1, items: [{
+            ingredientId: water.id, amount: 0.0004, netAmount: 0.0003, unit: 'l',
+          }] });
+          const [item] = saved.recipe.items;
+          assert.equal(item.amount, 0.0004);
+          assert.equal(item.netAmount, 0.0003);
+          assert.equal(item.avgCost, 2.5);
+          const [millilitres] = (await service.saveDraft(calculation.id, { expectedVersion: saved.recipe.version, items: [{
+            ingredientId: water.id, amount: 200, netAmount: 180, unit: 'ml',
+          }] })).recipe.items;
+          assert.equal(millilitres.avgCost, 0.0025);
+          assert.equal(millilitres.lineCost, 0.5);
+        });
         let saved;
         await t.test(
           'composition, output, instructions and modifiers commit together; menu fields stay intact',

@@ -420,7 +420,7 @@ function MenuEntryForm({ incoming, kind, categoryId, onClose, initialTab, onCrea
         </fieldset>
 
         {!isGoods && canRecipe && <fieldset ref={recipeRef} disabled={!canEdit || busy} className="min-w-0 scroll-mt-4 space-y-5">
-          <RecipeDraftFields rows={rows} onChange={setRows} showCosts={canCosts}
+          <RecipeDraftFields rows={rows} onChange={setRows} showCosts={canCosts} disabled={!canEdit || busy}
             allowCreate={canEditSection('warehouse') && can('actions.warehouseReceive')}
             variants={activeVariants.map((variant) => ({ id: variant.id ?? variant.key, name: variant.name }))} />
           <div className="grid gap-4 rounded-xl border border-border p-4 md:grid-cols-[220px_minmax(0,1fr)]">

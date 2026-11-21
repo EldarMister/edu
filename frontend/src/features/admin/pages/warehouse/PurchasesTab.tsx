@@ -30,6 +30,8 @@ import { unitsForType, unitLabel, type UnitCode } from './units';
 import { balanceMoney } from './balance-format';
 import {
   convertPurchasePrice,
+  formatPurchaseUnitPrice,
+  purchasePriceChange,
   purchasePriceFromTotal,
   purchaseRowTotal,
   purchaseRowTotalText,
@@ -99,6 +101,7 @@ export function PurchaseModal({
 }
 
 type Row = PurchaseRowValues & { key: string; ingredientId: string; unit: string };
+const priceChangeFormatter = new Intl.NumberFormat('ru-RU', { style: 'percent', maximumFractionDigits: 1, signDisplay: 'exceptZero' });
 const emptyRow = (): Row => ({
   key: crypto.randomUUID(),
   ingredientId: '',
@@ -173,7 +176,9 @@ function PurchaseForm({
   const signature = JSON.stringify({ location, supplier, date, separateInvoiceDate, timing, rows, discount, note });
   const initialSignature = useRef(signature);
   const { markSaved } = useEditorDirty(editable && (signature !== initialSignature.current || !dateValid || !timingReady));
-  const lastPrices = useLastPurchasePrices(stockEditable ? rows.map((row) => row.ingredientId) : [], location, purchase?.id);
+  const previousPriceBefore = correcting ? purchase?.effectiveAt ?? purchase?.date : effectiveAt ?? undefined;
+  const previousPriceItems = stockEditable && timingReady && location ? rows.map((row) => row.ingredientId) : [];
+  const lastPrices = useLastPurchasePrices(previousPriceItems, location, purchase?.id, previousPriceBefore);
   const returns = useStockDocuments(purchase?.warehouseId ?? undefined, 'supplier_return');
   const linkedReturns = (returns.data ?? []).filter((document) => document.sourcePurchaseId === purchase?.id);
   const catalogReady = ingredients.isSuccess && packages.isSuccess;
@@ -438,6 +443,12 @@ function PurchaseForm({
                   purchaseUnitFactor(previousPrice.unitCode, item, packages.data),
                   purchaseUnitFactor(row.unit, item, packages.data, original),
                 ) : '';
+                const previousPriceDelta = purchasePriceChange(row.price, previousConverted);
+                const previousPriceAmount = formatPurchaseUnitPrice(previousConverted);
+                const previousPriceDetails = previousPrice
+                  ? [`Поставка от ${inventoryTimeDisplay(previousPrice.date)} (Бишкек) · ${previousPrice.supplier}`,
+                    previousPriceDelta?.ratio == null ? '' : `Изменение цены: ${priceChangeFormatter.format(previousPriceDelta.ratio)}`].filter(Boolean).join('. ')
+                  : '';
                 if (original?.packageId && row.unit === `package:${original.packageId}`) {
                   const selected = options.find((option) => option.value === row.unit);
                   if (selected && original.packageName) {
@@ -556,7 +567,7 @@ function PurchaseForm({
                                 aria-label={`Цена ${item?.name ?? 'продукта'}`}
                                 aria-invalid={!!issues?.price || undefined}
                                 aria-describedby={issues?.price ? `${errorId}-price` : undefined}
-                                value={focusedPrice === row.key ? row.price : priceInputText(row.price)}
+                                value={focusedPrice === row.key ? row.price : formatPurchaseUnitPrice(row.price, true)}
                                 onFocus={() => setFocusedPrice(row.key)}
                                 onBlur={() => setFocusedPrice(null)}
                                 disabled={busy || !row.ingredientId}
@@ -564,13 +575,18 @@ function PurchaseForm({
                               />
                               <span className="poster-value-unit__suffix">с</span>
                             </div>
-                            {previousPrice && !row.price.trim() && <button type="button" className="mt-1 block w-full text-right text-xs text-primary" disabled={busy} title={`Поставка от ${formatDocumentDate(previousPrice.date)}, ${previousPrice.supplier}`} onClick={() => update(row.key, { price: previousConverted, total: undefined })}>
-                              Предыдущая: {balanceMoney(Number(previousConverted))} · {new Date(previousPrice.date).toLocaleDateString('ru-RU')}
+                            {previousPriceAmount && <button type="button" className="mt-1 block w-full text-right text-xs text-primary hover:underline"
+                              aria-label={`Подставить предыдущую цену ${previousPriceAmount}`} disabled={busy}
+                              title={previousPriceDetails} onClick={() => update(row.key, { price: previousConverted, total: undefined })}>
+                              Предыдущая: {previousPriceAmount}
+                              {previousPriceDelta && previousPriceDelta.difference !== 0 && (
+                                <span aria-hidden="true"> {previousPriceDelta.difference > 0 ? '↑' : '↓'}</span>
+                              )}
                             </button>}
                             {issues?.price && <p id={`${errorId}-price`} className="mt-1 text-xs text-danger">{issues.price}</p>}
                           </>
                         ) : (
-                          <span className="block text-right tabular-nums">{balanceMoney(Number(row.price))}</span>
+                          <span className="block text-right tabular-nums">{formatPurchaseUnitPrice(row.price)}</span>
                         ))}
                     </td>
                     <td className="relative px-2 py-2">
@@ -770,15 +786,4 @@ function PurchaseForm({
       </DocumentFooter>
     </div>
   );
-}
-
-// Keep the exact calculation in row.price; shorten only its unfocused presentation.
-function priceInputText(value: string) {
-  const price = Number(value);
-  if (!value.trim() || !Number.isFinite(price)) return value;
-  return price.toLocaleString('en-US', {
-    useGrouping: false,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: price > 0 && price < 0.01 ? 8 : 2,
-  });
 }

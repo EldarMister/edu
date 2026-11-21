@@ -45,6 +45,16 @@ test('price follows kg, g, a 5 kg package, and a product-specific 25 kg sack', (
   assert.equal(values.convertPurchasePrice('100', 5000, kg), '20');
 });
 
+test('previous-price comparison accepts zero and skips incomplete fields', () => {
+  const rise = values.purchasePriceChange('125', '100');
+  assert.deepEqual(rise, { difference: 25, ratio: 0.25 });
+  assert.deepEqual(values.purchasePriceChange('0', '100'), { difference: -100, ratio: -1 });
+  assert.deepEqual(values.purchasePriceChange('125', '0'), { difference: 125, ratio: null });
+  assert.equal(values.purchasePriceChange('125', ''), null);
+  assert.equal(values.formatPurchaseUnitPrice('0.0125'), '0,0125 с');
+  assert.equal(values.formatPurchaseUnitPrice('0.0125', true), '0.0125');
+});
+
 test('archived package snapshots retain their original unit conversion', () => {
   const factor = values.purchaseUnitFactor('package:old', undefined, [], { packageId: 'old', packageFactor: 2000 });
   assert.equal(values.convertPurchasePrice('60', factor, values.purchaseUnitFactor('l')), '30');

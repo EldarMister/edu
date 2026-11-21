@@ -715,13 +715,17 @@ export function usePurchaseMutations() {
   return { create, update, complete, cancel };
 }
 
-export function useLastPurchasePrices(ingredientIds: string[], warehouseId?: string, excludePurchaseId?: string) {
+export function useLastPurchasePrices(ingredientIds: string[], warehouseId?: string, excludePurchaseId?: string, before?: string) {
   const ids = [...new Set(ingredientIds.filter(Boolean))].sort().join(',');
+  const query = new URLSearchParams({ ingredientIds: ids });
+  if (warehouseId) query.set('warehouseId', warehouseId);
+  if (excludePurchaseId) query.set('excludePurchaseId', excludePurchaseId);
+  if (before) query.set('before', before);
   return useQuery({
-    queryKey: [...KEY, 'last-purchase-prices', ids, warehouseId, excludePurchaseId],
+    queryKey: [...KEY, 'last-purchase-prices', ids, warehouseId, excludePurchaseId, before],
     enabled: !!ids,
     queryFn: () => get<{ ingredientId: string; unit: string; unitCode: UnitCode; unitPrice: number; date: string; purchaseId: string; supplier: string }[]>(
-      `/admin/warehouse/purchases/last-prices?${new URLSearchParams({ ingredientIds: ids, ...(warehouseId ? { warehouseId } : {}), ...(excludePurchaseId ? { excludePurchaseId } : {}) })}`),
+      `/admin/warehouse/purchases/last-prices?${query}`),
   });
 }
 

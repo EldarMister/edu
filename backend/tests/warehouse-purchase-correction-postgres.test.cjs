@@ -193,8 +193,15 @@ test('PostgreSQL: last purchase prices use invoices, warehouse/tenant scope and 
   assert.equal(mainPrice.date.toISOString(), earlier);
   assert.equal((await purchases.lastPrices({ ingredientIds: ingredient.id }))[0].purchaseId, barPurchase.id);
   assert.equal((await purchases.lastPrices({ ingredientIds: ingredient.id, excludePurchaseId: barPurchase.id }))[0].unitPrice, 100);
-  await purchases.create({ supplier: 'Old invoice entered later', effectiveAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+  const olderDate = new Date(Date.now() - 2 * 86400000).toISOString();
+  const older = await purchases.create({ supplier: 'Old invoice entered later', effectiveAt: olderDate,
     warehouseId: warehouse.id, complete: true, items: [{ ingredientId: ingredient.id, quantity: 1, unit: 'kg', purchasePrice: 999 }] });
+  assert.equal((await purchases.lastPrices({ ingredientIds: ingredient.id, warehouseId: warehouse.id, before: earlier }))[0].purchaseId, purchase.id);
+  assert.equal((await purchases.lastPrices({ ingredientIds: ingredient.id, warehouseId: warehouse.id, before: earlier,
+    excludePurchaseId: purchase.id }))[0].purchaseId, older.id, 'the old document must not compare its price to a later supply');
+  assert.deepEqual(await purchases.lastPrices({ ingredientIds: ingredient.id, warehouseId: warehouse.id,
+    before: new Date(Date.parse(olderDate) - 1).toISOString() }), []);
+  await assert.rejects(purchases.lastPrices({ ingredientIds: ingredient.id, before: 'not-an-instant' }), /дату и время/);
   const latestSupply = (await ingredients.supplies(ingredient.id, {})).rows[0];
   assert.equal(latestSupply.purchaseId, barPurchase.id);
   assert.equal(latestSupply.unitPrice, 240);
