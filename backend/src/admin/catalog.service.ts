@@ -158,7 +158,7 @@ export class CatalogService {
     const { hallId, seats, number: requestedNumber } = dto;
     const name = dto.name === undefined ? undefined : dto.name?.trim() || null;
     if (hallId.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
-    const result = await this.prisma.$transaction(async (tx) => {
+    const table = await this.prisma.$transaction(async (tx) => {
       const cafeId = getCafeId();
       // Serialize table creation per hall and verify access before reading its numbers.
       const halls = cafeId
@@ -181,27 +181,17 @@ export class CatalogService {
         if (number > 2147483647) throw new BadRequestException('Достигнут максимальный номер стола');
       } else {
         const existing = await tx.table.findFirst({
-          where: { hallId, number },
-          orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }],
+          where: { hallId, number, isActive: true },
+          select: { id: true },
         });
-        if (existing?.isActive) {
-          throw new BadRequestException(`Стол №${number} уже есть в этом зале`);
-        }
-        // Older clients can still explicitly restore an archived table by number.
         if (existing) {
-          const table = await tx.table.update({
-            where: { id: existing.id },
-            data: { isActive: true, name, seats, sortOrder: number, status: TableStatus.free },
-          });
-          return { table, action: 'restore-table' };
+          throw new BadRequestException(`Стол №${number} уже есть в этом зале`);
         }
       }
 
-      const table = await tx.table.create({ data: { hallId, number, name, seats, sortOrder: number } });
-      return { table, action: 'create-table' };
+      return tx.table.create({ data: { hallId, number, name, seats, sortOrder: number } });
     });
-    const { table, action } = result;
-    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: table.id, hallId: table.hallId, action });
+    this.events.emitBroadcast(SERVER_EVENTS.TABLES_UPDATED, { tableId: table.id, hallId: table.hallId, action: 'create-table' });
     return table;
   }
 

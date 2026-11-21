@@ -96,10 +96,14 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
           data: [1, 2, 3, 4, 5, 6, 7, 10].map((number) => ({ hallId: terrace.id, number })),
         });
         await db.table.create({ data: { hallId: hall.id, number: 8 } });
-        const archived = await db.table.create({ data: { hallId: terrace.id, number: 8, isActive: false } });
+        const archived = await db.table.create({ data: { hallId: terrace.id, number: 8 } });
         const historicalOrder = await db.order.create({
           data: { tableId: archived.id, orderNumber: 'Past terrace order', status: 'paid' },
         });
+        const unused = await db.table.create({ data: { hallId: terrace.id, number: 9 } });
+        await catalog.deleteTable(archived.id);
+        await catalog.deleteTable(unused.id);
+        assert.equal(await db.table.findUnique({ where: { id: unused.id } }), null);
 
         const added = await Promise.all([
           catalog.createTable({ hallId: terrace.id, seats: 2 }),
@@ -112,9 +116,12 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         assert.equal((await db.table.findUniqueOrThrow({ where: { id: archived.id } })).isActive, false);
         assert.equal((await db.order.findUniqueOrThrow({ where: { id: historicalOrder.id } })).tableId, archived.id);
         await assert.rejects(catalog.createTable({ hallId: terrace.id, seats: 2, number: 8 }), /уже есть/);
+        const formerTwelve = await db.table.create({ data: { hallId: terrace.id, number: 12, isActive: false } });
         const manual = await catalog.createTable({ hallId: terrace.id, seats: 2, number: 12, name: 'У окна' });
         assert.equal(manual.number, 12);
         assert.equal(manual.name, 'У окна');
+        assert.notEqual(manual.id, formerTwelve.id);
+        assert.notEqual(manual.qrToken, formerTwelve.qrToken);
 
         await catalog.updateTable(newEight.id, { isActive: false });
         const ten = await db.table.findFirstOrThrow({ where: { hallId: terrace.id, number: 10 } });
