@@ -4,6 +4,7 @@ import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
+import { useLiveKitPtt } from './useLiveKitPtt';
 import { useAudioPttSender } from './useAudioPttSender';
 import { preparePttCapture } from './liveAudio';
 import {
@@ -455,7 +456,10 @@ export function PttOverlay({
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
   const effectiveButtonHidden = buttonHidden || overlayOpen;
 
-  const sender = useAudioPttSender(channel, true);
+  const legacySender = useAudioPttSender(channel, true);
+  const sender = useLiveKitPtt(channel, !!user?.id, open, {
+    ...legacySender, preparing: legacySender.starting,
+  }, user?.id);
   const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
 
   const floatingBottom = waiterMode && isMobile
@@ -580,7 +584,7 @@ export function PttOverlay({
         ? 'Отпустите для остановки'
         : state === 'speakingOther'
           ? 'Дождитесь освобождения канала'
-          : (sender.deniedReason ?? (sender.starting ? 'Подключаем микрофон…' : 'Нажмите и удерживайте'));
+          : (sender.deniedReason ?? (sender.preparing ? 'Подключаем микрофон…' : 'Нажмите и удерживайте'));
 
   return (
     <>

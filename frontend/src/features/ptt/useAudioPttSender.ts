@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { setAudioRecording, unlockAudio } from '@/lib/audio';
-import { createPttCapture, playPttReadyCue } from './liveAudio';
+import { createPttCapture } from './liveAudio';
 import { createPttOpusEncoder, isPttOpusCodec } from './opusAudio';
+import { playPttCue } from './sounds';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload, type PttOpusCodec } from './types';
 
 type Socket = ReturnType<typeof getSocket>;
@@ -170,7 +171,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       }
       setStarting(false);
       setTalking(true);
-      playPttReadyCue();
+      void playPttCue('start');
       return true;
     } catch (error) {
       fail(error instanceof DOMException && error.name === 'NotAllowedError'

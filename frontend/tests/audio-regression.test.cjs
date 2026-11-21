@@ -226,8 +226,8 @@ function senderHarness({ captureFails = false, pendingPermission = false, pendin
     };
     if (id === '@/lib/socket') return { getSocket: () => socket };
     if (id === '@/lib/audio') return { unlockAudio() {}, setAudioRecording: (value) => modes.push(value) };
+    if (id === './sounds') return { playPttCue: (kind) => cues.push(kind) };
     if (id === './liveAudio') return {
-      playPttReadyCue() { cues.push('start'); },
       async createPttCapture(_stream, sendFrame) {
         if (captureFails) throw new Error('capture failed');
         onFrame = sendFrame;
@@ -364,11 +364,14 @@ test('capture worklet resamples 48 kHz and emits 20 ms PCM frames before the str
   assert.equal(frames.length, 3);
 });
 
-test('playback keeps all queued frames at normal speed after a burst and through a brief stall', () => {
+test('playback plays the MP3 before each talk and keeps speech continuous through packet bursts', async () => {
   const played = [];
+  const cues = [];
   const stopped = [];
+  const startCue = { duration: 0.235 };
   const ctx = {
     currentTime: 10, state: 'running', destination: {},
+    async decodeAudioData() { return startCue; },
     createBuffer(_channels, length, sampleRate) {
       const samples = new Float32Array(length);
       return { duration: length / sampleRate, getChannelData: () => samples };
@@ -377,24 +380,35 @@ test('playback keeps all queued frames at normal speed after a burst and through
       return {
         playbackRate: { value: 1 },
         connect() {}, disconnect() {},
-        start(at) { played.push([at, this.buffer.duration / this.playbackRate.value]); },
+        start(at) {
+          const timeline = this.buffer === startCue ? cues : played;
+          timeline.push([at, this.buffer.duration / this.playbackRate.value]);
+        },
         stop() { stopped.push(this); },
       };
     },
     createOscillator() { return { frequency: {}, connect(node) { return node; }, disconnect() {}, start() {}, stop() {} }; },
     createGain() { return { gain: { setValueAtTime() {}, linearRampToValueAtTime() {} }, connect() {}, disconnect() {} }; },
   };
-  const { PttPlayback } = load('src/features/ptt/liveAudio.ts', { ArrayBuffer, Float32Array }, (id) => {
+  const { PttPlayback } = load('src/features/ptt/liveAudio.ts', {
+    ArrayBuffer, Float32Array,
+    fetch: async (url) => {
+      assert.equal(url, '/sounds/ptt1.mp3');
+      return { ok: true, arrayBuffer: async () => new ArrayBuffer(1) };
+    },
+  }, (id) => {
     if (id === '@/lib/audio') return { getAudioContext: () => ctx };
+    if (id === './sounds') return { PTT_START_SOUND: '/sounds/ptt1.mp3' };
     if (id === './opusAudio') return load('src/features/ptt/opusAudio.ts');
     throw new Error(id);
   });
   const playback = new PttPlayback();
+  await playback.prepareStartCue();
   for (let index = 0; index < 24; index++) playback.push(new Float32Array(480), index === 0, 24000);
-  ctx.currentTime = 10.605;
+  ctx.currentTime = played.at(-1)[0] + 0.025;
   playback.push(new Float32Array(480), false, 24000);
   assert.ok(played.at(-1)[0] - ctx.currentTime < 0.02);
-  ctx.currentTime = 10.7;
+  ctx.currentTime = played.at(-1)[0] + 0.1;
   playback.push(new Float32Array(480), false, 24000);
   const resumedAt = played.at(-1)[0];
   assert.ok(resumedAt > ctx.currentTime + 0.12 && resumedAt <= ctx.currentTime + 0.3);
@@ -405,7 +419,10 @@ test('playback keeps all queued frames at normal speed after a burst and through
   playback.push(new ArrayBuffer(1280), true);
   assert.equal(played.length, 28);
   assert.deepEqual(stopped, []);
-  assert.ok(played[0][0] - 10 < 0.2);
+  assert.equal(cues.length, 2);
+  assert.ok(cues[0][0] < 10.02);
+  assert.equal(played[0][0], cues[0][0] + startCue.duration);
+  assert.equal(played.at(-1)[0], cues[1][0] + startCue.duration);
   assert.ok(played.slice(0, 27).every(([, duration]) => duration === 0.02));
   for (let index = 1; index < played.length; index++) {
     assert.ok(played[index][0] >= played[index - 1][0] + played[index - 1][1] - 1e-6);

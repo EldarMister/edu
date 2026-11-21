@@ -12,6 +12,7 @@ import { Server, Socket } from 'socket.io';
 import { getJwtAccessSecret } from '../auth/jwt.config';
 import { PrismaService } from '../prisma/prisma.service';
 import { assertCafeActive } from '../platform/cafe-status';
+import { liveKitRadio, radioPublishPermission, radioRoom, radioToken } from './ptt-livekit';
 
 const PTT_CHANNELS = ['general', 'waiters', 'kitchen', 'admin'] as const;
 type PttChannel = (typeof PTT_CHANNELS)[number];
@@ -27,6 +28,11 @@ const PTT_EVENTS = {
   AUDIO_PACKET: 'ptt_audio_packet',
   TALK_DENIED: 'ptt_talk_denied',
   PRESENCE: 'ptt_presence',
+  LIVEKIT_CONNECT: 'ptt_livekit_connect',
+  LIVEKIT_READY: 'ptt_livekit_ready',
+  LIVEKIT_TRACK_READY: 'ptt_livekit_track_ready',
+  LIVEKIT_WAIT_TRACK: 'ptt_livekit_wait_track',
+  LIVEKIT_KEEPALIVE: 'ptt_livekit_keepalive',
 } as const;
 
 // Целый аудиофайл (Telegram-модель) заметно больше отдельного чанка —
@@ -38,6 +44,7 @@ const LIVE_FRAME_BYTES = 1280;
 // Legacy Opus uses 40 ms frames at 12 kbit/s. The HQ profile uses 20 ms at 32 kbit/s.
 const OPUS_HEADER_BYTES = 16;
 const LIVE_IDLE_MS = 4000;
+const LIVEKIT_IDLE_MS = 9000;
 const CAPABILITY_CHECK_TIMEOUT_MS = 200;
 // TCP and the initial channel grant can deliver several seconds of queued frames together.
 const LEGACY_LIMIT = { burst: 110, perSecond: 30 };
@@ -66,6 +73,12 @@ interface TalkLock {
   live?: {
     id: string;
     opus?: { profile: OpusProfile; header: Buffer };
+    liveKit?: {
+      grant: Promise<unknown>;
+      closing: boolean;
+      listeners: Set<string>;
+      subscribed: Map<string, string>;
+    };
     frames: number;
     lastFrameAt: number;
     timeout: NodeJS.Timeout;
@@ -80,7 +93,7 @@ interface JoinBody {
 interface TalkBody {
   channel?: PttChannel;
   talkId?: string;
-  codec?: 'opus';
+  codec?: 'opus' | 'livekit';
   preferHq?: boolean;
 }
 
@@ -114,6 +127,7 @@ export class PttGateway implements OnGatewayDisconnect {
   handleDisconnect(client: Socket) {
     const channel = client.data.pttChannel as PttChannel | undefined;
     this.releaseTalker(client);
+    this.leaveLiveKit(client);
     if (channel) {
       void this.emitPresence(client, channel);
     }
@@ -128,6 +142,7 @@ export class PttGateway implements OnGatewayDisconnect {
     if (nextChannel === null) {
       this.releaseTalker(client);
       client.data.pttHq = false;
+      this.leaveLiveKit(client);
       await this.leaveCurrentChannel(client);
       return { ok: true, channel: null };
     }
@@ -138,12 +153,88 @@ export class PttGateway implements OnGatewayDisconnect {
     return { ok: true, channel: nextChannel, onlineCount };
   }
 
+  @SubscribeMessage(PTT_EVENTS.LIVEKIT_CONNECT)
+  async connectLiveKit(@ConnectedSocket() client: Socket, @MessageBody() body: JoinBody) {
+    const config = liveKitRadio();
+    if (!config) return { ok: false, reason: 'unavailable' };
+    const channel = body?.channel;
+    if (!this.isChannel(channel) || client.data.pttChannel !== channel) return { ok: false, reason: 'not_in_channel' };
+    const user = await this.hydrateUserFromToken(client);
+    if (!user || !client.connected || client.data.pttChannel !== channel) return { ok: false, reason: 'not_in_channel' };
+    const channels = channel === 'general' ? [channel] : ['general', channel] as const;
+    const credentials = await Promise.all(channels.map(async (name) => ({
+      channel: name, token: await radioToken(config, radioRoom(user.cafeId, name), client.id),
+    })));
+    if (!client.connected || client.data.pttChannel !== channel) return { ok: false, reason: 'not_in_channel' };
+    client.data.pttLiveKitChannel = channel;
+    client.data.pttLiveKitReady = false;
+    return { ok: true, url: config.url, channels: credentials };
+  }
+
+  @SubscribeMessage(PTT_EVENTS.LIVEKIT_READY)
+  readyLiveKit(@ConnectedSocket() client: Socket, @MessageBody() body: JoinBody & { ready?: boolean }) {
+    if (!this.isChannel(body?.channel) || body.channel !== client.data.pttLiveKitChannel
+      || body.channel !== client.data.pttChannel) return { ok: false };
+    client.data.pttLiveKitReady = body.ready === true;
+    const user = this.getCachedUser(client);
+    const lock = user && this.locks.get(this.lockKey(user.cafeId, body.channel));
+    if (!client.data.pttLiveKitReady && lock?.live?.liveKit) this.releaseTalker(client, body.channel);
+    return { ok: true };
+  }
+
+  @SubscribeMessage(PTT_EVENTS.LIVEKIT_KEEPALIVE)
+  keepLiveKitTalk(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody) {
+    const user = this.getCachedUser(client);
+    const channel = body?.channel;
+    if (!user || !this.isChannel(channel) || channel !== client.data.pttChannel) return { ok: false };
+    const lock = this.locks.get(this.lockKey(user.cafeId, channel));
+    if (lock?.socketId !== client.id || !lock.live?.liveKit || lock.live.liveKit.closing
+      || lock.live.id !== body.talkId) return { ok: false };
+    lock.live.timeout.refresh();
+    return { ok: true };
+  }
+
+  @SubscribeMessage(PTT_EVENTS.LIVEKIT_TRACK_READY)
+  subscribedLiveKit(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody & { publisher?: string; trackSid?: string }) {
+    const user = this.getCachedUser(client);
+    if (!user || !this.isChannel(body?.channel) || !this.isTrackSid(body.trackSid)) return { ok: false };
+    const lock = this.locks.get(this.lockKey(user.cafeId, body.channel));
+    const live = lock?.live?.liveKit;
+    if (!live || live.closing || lock.socketId !== body.publisher || !live.listeners.has(client.id)) return { ok: false };
+    live.subscribed.set(client.id, body.trackSid);
+    return { ok: true };
+  }
+
+  @SubscribeMessage(PTT_EVENTS.LIVEKIT_WAIT_TRACK)
+  async waitForLiveKitTrack(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody & { trackSid?: string }) {
+    const user = this.getCachedUser(client);
+    if (!user || !this.isChannel(body?.channel) || !this.isTrackSid(body.trackSid)) return { ok: false };
+    const lock = this.locks.get(this.lockKey(user.cafeId, body.channel));
+    const live = lock?.live?.liveKit;
+    if (!live || lock.socketId !== client.id || lock.live?.id !== body.talkId) return { ok: false };
+    const deadline = Date.now() + 950;
+    while (!live.closing && client.connected) {
+      if (Array.from(live.listeners).every((listener) => live.subscribed.get(listener) === body.trackSid)) return { ok: true };
+      if (Date.now() >= deadline) {
+        // A late subscriber may join during the talk. Give the ready listeners a
+        // live transmission instead of holding everyone behind that connection.
+        return { ok: Array.from(live.subscribed.values()).includes(body.trackSid) };
+      }
+      await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    }
+    return { ok: false };
+  }
+
+  private isTrackSid(value: unknown): value is string {
+    return typeof value === 'string' && /^TR_[a-zA-Z0-9]+$/.test(value) && value.length <= 64;
+  }
+
   @SubscribeMessage(PTT_EVENTS.START_TALK)
   async handleStartTalk(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody) {
     const user = await this.getUser(client);
     if (!user) return this.deny(client, body?.channel, 'unauthorized');
 
-    const channel = await this.resolveChannel(client, user, body, true);
+    const channel = await this.resolveChannel(client, user, body, body?.codec !== 'livekit');
     if (!channel) return this.deny(client, undefined, 'not_in_channel');
 
     if (!client.connected) return { ok: false, reason: 'disconnected' };
@@ -153,6 +244,7 @@ export class PttGateway implements OnGatewayDisconnect {
     }
 
     const requestedCodec = body?.codec;
+    if (requestedCodec === 'livekit' && id) return this.startLiveKitTalk(client, user, channel, id);
     if (requestedCodec !== undefined && (requestedCodec !== 'opus' || !id)) return { ok: false, reason: 'invalid_codec' };
 
     const rooms = this.broadcastRooms(user.cafeId, channel);
@@ -188,6 +280,54 @@ export class PttGateway implements OnGatewayDisconnect {
     return { ok: true, channel, talkId: id, codec };
   }
 
+  private async startLiveKitTalk(client: Socket, user: AuthenticatedSocketUser, channel: PttChannel, talkId: string) {
+    const config = liveKitRadio();
+    if (!config || client.data.pttLiveKitChannel !== channel || client.data.pttLiveKitReady !== true) {
+      return { ok: false, reason: 'legacy_required' };
+    }
+    const rooms = this.broadcastRooms(user.cafeId, channel);
+    const audience = await this.radioListeners(rooms);
+    const listeners = audience?.filter((socket) => socket.id !== client.id);
+    if (!listeners || !listeners.every((socket) => socket.data.pttLiveKitReady === true)) {
+      return { ok: false, reason: 'legacy_required' };
+    }
+    if (!client.connected || client.data.pttChannel !== channel || client.data.pttLiveKitReady !== true) {
+      return { ok: false, reason: 'disconnected' };
+    }
+    const current = this.findBlockingLock(user.cafeId, channel);
+    if (current) return this.deny(client, channel, 'busy', current.userId);
+    const key = this.lockKey(user.cafeId, channel);
+    const timeout = setTimeout(() => {
+      client.emit(PTT_EVENTS.TALK_DENIED, { channel, talkId, reason: 'audio_timeout' });
+      this.releaseTalker(client, channel, talkId);
+    }, LIVEKIT_IDLE_MS);
+    timeout.unref();
+    const grant = config.rooms.updateParticipant(radioRoom(user.cafeId, channel), client.id, {
+      permission: radioPublishPermission(true),
+    });
+    const lock: TalkLock = {
+      socketId: client.id, userId: user.id, role: user.role, name: user.name, startedAt: new Date().toISOString(),
+      live: {
+        id: talkId, frames: 0, lastFrameAt: 0, timeout,
+        liveKit: { grant, closing: false, listeners: new Set(listeners.map((socket) => socket.id)), subscribed: new Map() },
+      },
+    };
+    this.locks.set(key, lock);
+    try {
+      await grant;
+      if (lock.live?.liveKit?.closing || !client.connected || client.data.pttChannel !== channel) {
+        this.releaseTalker(client, channel, talkId);
+        return { ok: false, reason: 'disconnected' };
+      }
+      this.server.to(rooms).emit(PTT_EVENTS.CHANNEL_BUSY, this.talker(channel, lock));
+      return { ok: true, channel, talkId, codec: 'livekit' };
+    } catch {
+      // A timed-out request may still have changed permissions on the media server.
+      this.releaseTalker(client, channel, talkId);
+      return { ok: false, reason: 'media_unavailable' };
+    }
+  }
+
   @SubscribeMessage(PTT_EVENTS.AUDIO_FRAME)
   handleAudioFrame(@ConnectedSocket() client: Socket, @MessageBody() body: AudioFrameBody) {
     const user = this.getCachedUser(client);
@@ -196,7 +336,7 @@ export class PttGateway implements OnGatewayDisconnect {
     const lock = this.locks.get(this.lockKey(user.cafeId, channel));
     const live = lock?.live;
     const audio = body?.audio;
-    if (!lock || !live || live.opus || lock.socketId !== client.id || live.id !== body?.talkId
+    if (!lock || !live || live.opus || live.liveKit || lock.socketId !== client.id || live.id !== body?.talkId
       || !Buffer.isBuffer(audio) || audio.length !== LIVE_FRAME_BYTES) return;
     if (!this.acceptFrames(client, channel, live, 1)) return;
     client.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.AUDIO_FRAME, {
@@ -238,21 +378,25 @@ export class PttGateway implements OnGatewayDisconnect {
 
   private talker(channel: PttChannel, lock: TalkLock) {
     return {
-      channel, talkId: lock.live?.id, codec: lock.live?.opus?.profile,
+      channel, talkId: lock.live?.id, codec: lock.live?.liveKit ? 'livekit' : lock.live?.opus?.profile,
       speaker: { id: lock.userId, role: lock.role, name: lock.name }, startedAt: lock.startedAt,
     };
   }
 
   private async canUseHq(client: Socket, rooms: string | string[]) {
+    const listeners = await this.radioListeners(rooms);
+    return !!listeners?.every((socket) => socket.id === client.id || socket.data.pttHq === true);
+  }
+
+  private async radioListeners(rooms: string | string[]) {
     let timer: NodeJS.Timeout | undefined;
     try {
       const deadline = new Promise<null>((resolve) => {
         timer = setTimeout(resolve, CAPABILITY_CHECK_TIMEOUT_MS, null);
       });
-      const listeners = await Promise.race([this.server.in(rooms).fetchSockets(), deadline]);
-      return !!listeners?.every((socket) => socket.id === client.id || socket.data.pttHq === true);
+      return await Promise.race([this.server.in(rooms).fetchSockets(), deadline]);
     } catch {
-      return false;
+      return null;
     } finally {
       clearTimeout(timer);
     }
@@ -328,6 +472,7 @@ export class PttGateway implements OnGatewayDisconnect {
     const previous = client.data.pttChannel as PttChannel | undefined;
     if (previous && previous !== nextChannel) {
       this.releaseTalker(client);
+      this.leaveLiveKit(client, nextChannel);
       client.data.pttChannel = undefined;
       await this.leaveRooms(client, user.cafeId, previous);
       await this.emitPresenceFor(user.cafeId, previous);
@@ -344,7 +489,7 @@ export class PttGateway implements OnGatewayDisconnect {
     client.data.pttChannel = nextChannel;
     const general = this.locks.get(this.lockKey(user.cafeId, 'general'));
     const active = general ?? this.locks.get(this.lockKey(user.cafeId, nextChannel));
-    if (active?.live?.opus) {
+    if (active?.live?.opus || active?.live?.liveKit) {
       client.emit(PTT_EVENTS.CHANNEL_BUSY, this.talker(general ? 'general' : nextChannel, active));
     }
     return this.emitPresenceFor(user.cafeId, nextChannel);
@@ -363,6 +508,20 @@ export class PttGateway implements OnGatewayDisconnect {
     await Promise.all([client.leave(this.room(cafeId, channel)), client.leave(this.room(cafeId, channel, true))]);
   }
 
+  private leaveLiveKit(client: Socket, nextChannel?: PttChannel) {
+    const previous = client.data.pttLiveKitChannel;
+    client.data.pttLiveKitChannel = undefined;
+    client.data.pttLiveKitReady = false;
+    const user = this.getCachedUser(client);
+    const config = liveKitRadio();
+    if (!user || !config || !this.isChannel(previous)) return;
+    const rooms = previous === 'general' ? [previous] : ['general', previous];
+    for (const room of rooms) {
+      if (nextChannel && (room === 'general' || room === nextChannel)) continue;
+      void config.rooms.removeParticipant(radioRoom(user.cafeId, room), client.id).catch(() => undefined);
+    }
+  }
+
   private releaseTalker(client: Socket, preferredChannel?: PttChannel | null, expectedTalkId?: string | null) {
     const user = this.getCachedUser(client);
     if (!user) return;
@@ -372,14 +531,37 @@ export class PttGateway implements OnGatewayDisconnect {
       const lock = this.locks.get(key);
       if (!lock || lock.socketId !== client.id) continue;
       if (expectedTalkId !== undefined && (lock.live?.id ?? null) !== expectedTalkId) continue;
+      const liveKit = lock.live?.liveKit;
+      if (liveKit?.closing) continue;
       if (lock.live) clearTimeout(lock.live.timeout);
-      this.locks.delete(key);
-      this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_FREE, {
-        channel, talkId: lock.live?.id,
-        speakerId: user.id,
-        freedAt: new Date().toISOString(),
-      });
+      if (liveKit) {
+        liveKit.closing = true;
+        void this.revokeLiveKitTalk(user, channel, lock).finally(() => this.freeTalk(user, channel, lock));
+      } else {
+        this.freeTalk(user, channel, lock);
+      }
     }
+  }
+
+  private async revokeLiveKitTalk(user: AuthenticatedSocketUser, channel: PttChannel, lock: TalkLock) {
+    await lock.live?.liveKit?.grant.catch(() => undefined);
+    const config = liveKitRadio();
+    if (!config) return;
+    const room = radioRoom(user.cafeId, channel);
+    try {
+      await config.rooms.updateParticipant(room, lock.socketId, { permission: radioPublishPermission(false) });
+    } catch {
+      await config.rooms.removeParticipant(room, lock.socketId).catch(() => undefined);
+    }
+  }
+
+  private freeTalk(user: AuthenticatedSocketUser, channel: PttChannel, lock: TalkLock) {
+    const key = this.lockKey(user.cafeId, channel);
+    if (this.locks.get(key) !== lock) return;
+    this.locks.delete(key);
+    this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_FREE, {
+      channel, talkId: lock.live?.id, speakerId: user.id, freedAt: new Date().toISOString(),
+    });
   }
 
   private async emitPresence(client: Socket, channel: PttChannel): Promise<number> {

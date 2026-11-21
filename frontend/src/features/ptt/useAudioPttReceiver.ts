@@ -79,6 +79,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     if (!enabled) return;
     const socket = getSocket();
     const playback = new PttPlayback();
+    void playback.prepareStartCue().catch(() => undefined);
     type OpusTalk = { id: string; codec: PttOpusCodec; header: Uint8Array; speaker: PttPlayingSpeaker };
     let active = true;
     let talkId: string | undefined;

@@ -1,5 +1,6 @@
 import { getAudioContext, resumeAudioContext } from '@/lib/audio';
 import { PTT_CAPTURE_RATE, PTT_OPUS_PROFILES } from './opusAudio';
+import { PTT_START_SOUND } from './sounds';
 
 const START_BUFFER_SECONDS = 0.12;
 const MAX_BUFFER_SECONDS = 0.3;
@@ -85,17 +86,20 @@ function cue(ctx: AudioContext, when: number, frequency: number) {
   return tone;
 }
 
-export function playPttReadyCue() {
-  const ctx = getAudioContext();
-  if (ctx.state === 'running') cue(ctx, ctx.currentTime, 760);
-}
-
 export class PttPlayback {
   private context?: AudioContext;
+  private startCue?: AudioBuffer;
   private endAt = 0;
   private lastArrival?: number;
   private jitter = 0;
   private readonly sources = new Set<AudioScheduledSourceNode>();
+
+  async prepareStartCue() {
+    const ctx = getAudioContext();
+    const response = await fetch(PTT_START_SOUND);
+    if (!response.ok) return;
+    this.startCue = await ctx.decodeAudioData(await response.arrayBuffer());
+  }
 
   push(audio: unknown, startsTalk = false, sampleRate: number = PTT_OPUS_PROFILES.opus.sampleRate, framesInPacket = 1) {
     const frameSamples = sampleRate === PTT_CAPTURE_RATE
@@ -115,15 +119,6 @@ export class PttPlayback {
       const input = new DataView(audio);
       for (let index = 0; index < samples.length; index++) samples[index] = input.getInt16(index * 2, true) / 32768;
     }
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(ctx.destination);
-    this.sources.add(source);
-    source.onended = () => {
-      this.sources.delete(source);
-      source.disconnect();
-    };
-
     const now = ctx.currentTime;
     if (framesInPacket > 0) {
       if (this.lastArrival !== undefined) {
@@ -139,11 +134,14 @@ export class PttPlayback {
       this.lastArrival = now;
     }
     const canContinue = this.endAt > 0 && this.endAt >= now - buffer.duration;
+    const startCue = startsTalk ? this.startCue : undefined;
+    const nextAt = Math.max(this.endAt, now + SCHEDULING_MARGIN_SECONDS);
+    const cueEndAt = nextAt + (startCue?.duration ?? 0);
     const startAt = canContinue
-      ? Math.max(this.endAt, now + SCHEDULING_MARGIN_SECONDS) + (startsTalk ? CUE_SECONDS : 0)
-      : now + START_BUFFER_SECONDS + this.jitter;
-    if (startsTalk) this.playCue(ctx, startAt - CUE_SECONDS, 760);
-    source.start(startAt);
+      ? cueEndAt
+      : Math.max(cueEndAt, now + START_BUFFER_SECONDS + this.jitter);
+    if (startCue) this.playBuffer(ctx, startCue, startAt - startCue.duration);
+    this.playBuffer(ctx, buffer, startAt);
     this.endAt = startAt + buffer.duration;
     return true;
   }
@@ -154,6 +152,18 @@ export class PttPlayback {
     const when = Math.max(this.endAt, ctx.currentTime);
     this.playCue(ctx, when, 510);
     this.endAt = when + CUE_SECONDS;
+  }
+
+  private playBuffer(ctx: AudioContext, buffer: AudioBuffer, when: number) {
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(ctx.destination);
+    this.sources.add(source);
+    source.onended = () => {
+      this.sources.delete(source);
+      source.disconnect();
+    };
+    source.start(when);
   }
 
   private playCue(ctx: AudioContext, when: number, frequency: number) {
