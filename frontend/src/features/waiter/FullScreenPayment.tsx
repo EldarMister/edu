@@ -81,6 +81,10 @@ export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed
 
   function pressKey(key: PaymentKey) {
     if (!selected) return;
+    if (key === 'clear') {
+      changeAmount(selected, '');
+      return;
+    }
     const value = draft[selected];
     if (key === 'backspace') {
       changeAmount(selected, value.slice(0, -1));

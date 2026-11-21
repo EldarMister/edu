@@ -712,6 +712,13 @@ function ActionButton({
     );
   }
   if (s === 'waiting_payment') {
+    if (onToPayment) {
+      return (
+        <button type="button" className="btn-primary btn-lg w-full font-semibold" disabled={submitting} onClick={onToPayment}>
+          {spin ?? t('Перейти к оплате')}
+        </button>
+      );
+    }
     return (
       <div className="rounded-xl bg-purple-50 py-3 text-center text-sm text-purple-600">
         {t('Ожидает оплаты')}

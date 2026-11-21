@@ -568,8 +568,8 @@ export function WaiterApp() {
     setViewingOrderId(order.id);
     selectOrderCart(order);
     setTab(order.requiresWaiterDecision ? 'orders' : 'cart');
-    if (canTakePayment && order.status === 'waiting_payment') {
-      setPaymentOrder(order);
+    if (order.status === 'waiting_payment') {
+      void goToPayment(order);
     }
   }
 
@@ -653,6 +653,11 @@ export function WaiterApp() {
 
   async function goToPayment(order: Order) {
     if (!canTakePayment) return;
+    if (order.status === 'waiting_payment') {
+      setPaymentOrder(order);
+      return;
+    }
+
     try {
       const updated = await toPayment.mutateAsync(order.id);
       setPaymentOrder(updated);

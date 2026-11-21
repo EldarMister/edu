@@ -2,7 +2,7 @@ import { money } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 
 const KEYS = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', 'backspace'] as const;
-export type PaymentKey = (typeof KEYS)[number];
+export type PaymentKey = (typeof KEYS)[number] | 'clear';
 
 export function PaymentKeypad({ disabled, onKey, onExact, cashPresets, cashPresetsDisabled, onCashPreset }: {
   disabled: boolean;
@@ -33,11 +33,16 @@ export function PaymentKeypad({ disabled, onKey, onExact, cashPresets, cashPrese
             {key === 'backspace' ? '⌫' : key}
           </button>
         ))}
+        <button type="button" className="btn-secondary col-span-2 h-[clamp(3.5rem,10dvh,5rem)] text-lg font-semibold lg:text-xl"
+          disabled={disabled} onPointerDown={(event) => event.preventDefault()} onClick={onExact}>
+          {t('Точная сумма')}
+        </button>
+        <button type="button" className="btn-secondary h-[clamp(3.5rem,10dvh,5rem)] text-2xl lg:text-3xl"
+          aria-label={t('Очистить сумму')} disabled={disabled}
+          onPointerDown={(event) => event.preventDefault()} onClick={() => onKey('clear')}>
+          C
+        </button>
       </div>
-      <button type="button" className="btn-secondary mt-2.5 min-h-10 w-full text-base font-medium lg:mt-3"
-        disabled={disabled} onPointerDown={(event) => event.preventDefault()} onClick={onExact}>
-        {t('Точная сумма')}
-      </button>
     </div>
   );
 }

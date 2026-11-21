@@ -258,11 +258,17 @@ export function useEditOrder() {
 }
 
 /** Универсальная мутация перехода статуса заказа официантом. */
-function useOrderAction(path: (id: string) => string) {
+function useOrderAction(path: (id: string) => string, updateCachedStatusFrom?: Order['status']) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (orderId: string) => (await api.post<Order>(path(orderId))).data,
     retry: networkRetry,
+    onSuccess: (updated) => {
+      if (!updateCachedStatusFrom) return;
+      qc.setQueryData<Order[]>(['orders', 'active'], (current) => current?.map((order) =>
+        order.id === updated.id && order.status === updateCachedStatusFrom ? updated : order,
+      ));
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['halls'] });
@@ -273,7 +279,7 @@ function useOrderAction(path: (id: string) => string) {
 
 export const usePickedUp = () => useOrderAction((id) => `/orders/${id}/picked-up`);
 export const useServed = () => useOrderAction((id) => `/orders/${id}/served`);
-export const useToPayment = () => useOrderAction((id) => `/orders/${id}/to-payment`);
+export const useToPayment = () => useOrderAction((id) => `/orders/${id}/to-payment`, 'served');
 export const useResolvePartialRejection = () => useOrderAction((id) => `/orders/${id}/resolve-partial-rejection`);
 export const useClaimQrOrder = () => useOrderAction((id) => `/orders/${id}/claim-qr`);
 
