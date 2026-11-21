@@ -139,6 +139,25 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
       await request(`/orders/${order.id}/served`, { token, workspace: 'terminal', method: 'POST', status: 201 });
       const paid = await request('/payments', { token, workspace: 'terminal', method: 'POST', status: 201, body: { orderId: order.id, method: 'cash' } });
       assert.equal(paid.status, 'paid');
+      const terminal = { token, workspace: 'terminal', method: 'POST' };
+      const admin = { token, workspace: 'admin', method: 'PATCH' };
+      const nextTable = await newTable();
+      const mixed = await request('/orders', { ...terminal, status: 201,
+        body: { tableId: nextTable.id, items: [{ dishId: fixture.dish.id, quantity: 1 }] } });
+      await request(`/orders/${mixed.id}/served`, { ...terminal, status: 201 });
+      const mixedBody = { orderId: mixed.id, method: 'mixed', cashAmount: 19.75, cardAmount: 30.25 };
+      await request('/admin/settings', { ...admin, body: { payCard: false } });
+      await request('/payments', { ...terminal, status: 400, body: mixedBody });
+      await request('/admin/settings', { ...admin, body: { payCard: true } });
+      await request('/payments', { ...terminal, status: 400, body: { ...mixedBody, cardAmount: 30.24 } });
+      const payment = await request('/payments', { ...terminal, status: 201, body: mixedBody });
+      assert.equal(payment.status, 'paid');
+      const receipt = await request(`/payments/${mixed.id}/receipt`, { token, workspace: 'terminal' });
+      assert.deepEqual(receipt.payments.map((part) => [part.method, Number(part.amount), part.source]).sort(), [
+        ['card', 30.25, 'normal'],
+        ['cash', 19.75, 'normal'],
+      ]);
+      await request('/admin/settings', { ...admin, body: { payCard: false } });
       await request('/waiter/shifts/end', { token, workspace: 'terminal', method: 'POST', status: 201 });
       assert.equal((await request('/auth/me', { token, workspace: 'terminal' })).role, 'OWNER');
       assert.equal((await db.user.findUnique({ where: { id: fixture.owner.id } })).role, 'OWNER');

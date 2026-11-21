@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Order, PaymentMethod, Receipt } from '@/types';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
@@ -15,7 +16,8 @@ import { usePay, fetchReceipt, useCreateReceiptPrintRequest } from './api';
 import { useReceiptPrint } from './receiptPrint';
 import { SplitBillSheet } from './SplitBillSheet';
 import { useOrderReceiptPrinter } from './useOrderReceiptPrinter';
-import { PaymentKeypad, type PaymentKey } from './PaymentKeypad';
+import { FullScreenPayment } from './FullScreenPayment';
+import { normalizeAmount, type TenderAmounts, type TenderMethod } from './paymentAmounts';
 
 const ALL_METHODS: { value: PaymentMethod; label: string }[] = [
   { value: 'qr', label: 'QR-код' },
@@ -29,12 +31,6 @@ const METHOD_LABELS: Record<PaymentMethod, string> = {
   card: 'Карта',
   mixed: 'Смешанная',
 };
-
-function normalizeAmount(value: string) {
-  const amount = value.replace(',', '.');
-  if (!/^\d*(?:\.\d{0,2})?$/.test(amount)) return null;
-  return amount.startsWith('.') ? `0${amount}` : amount;
-}
 
 export function PaymentModal({
   order,
@@ -72,9 +68,6 @@ export function PaymentModal({
   // Суммы для смешанной оплаты (как строки из инпутов).
   const [cashInput, setCashInput] = useState('');
   const [qrInput, setQrInput] = useState('');
-  const [cashReceived, setCashReceived] = useState('');
-  const [mixedField, setMixedField] = useState<'cash' | 'qr'>('cash');
-  const replaceAmount = useRef(true);
   // Окно «Разделение счёта».
   const [splitOpen, setSplitOpen] = useState(false);
 
@@ -98,10 +91,6 @@ export function PaymentModal({
   const activeItems = order.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
   const mixedSelected = selected === 'mixed';
-  const cashSelected = selected === 'cash';
-  const showKeypad = wideLayout && (cashSelected || mixedSelected);
-  const received = cashReceived === '' ? total : Number(cashReceived);
-  const cashTooLow = wideLayout && cashSelected && received < total;
   const cashNum = Number(cashInput) || 0;
   const qrNum = Number(qrInput) || 0;
   const entered = cashNum + qrNum;
@@ -126,30 +115,17 @@ export function PaymentModal({
     setCashInput(complement(value));
   };
 
-  function changeAmount(field: 'received' | 'cash' | 'qr', value: string) {
+  function changeAmount(field: 'cash' | 'qr', value: string) {
     const next = normalizeAmount(value);
     if (next === null) return;
-    if (field === 'received') setCashReceived(next);
-    else if (field === 'cash') onCashChange(next);
+    if (field === 'cash') onCashChange(next);
     else onQrChange(next);
-    replaceAmount.current = false;
-  }
-
-  function pressKey(key: PaymentKey) {
-    const field = cashSelected ? 'received' : mixedField;
-    const value = field === 'received' ? cashReceived : field === 'cash' ? cashInput : qrInput;
-    if (key === 'backspace') {
-      changeAmount(field, value.slice(0, -1));
-      return;
-    }
-    const base = replaceAmount.current || (value === '0' && key !== '.') ? '' : value;
-    changeAmount(field, base + key);
   }
 
   async function completePayment(
     payload:
       | { orderId: string; method: PaymentMethod }
-      | { orderId: string; method: 'mixed'; cashAmount: number; qrAmount: number }
+      | { orderId: string; method: 'mixed'; cashAmount: number; qrAmount: number; cardAmount?: number }
       | { orderId: string; method: PaymentMethod; splitPayments: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[] },
   ) {
     await pay.mutateAsync(payload);
@@ -182,13 +158,25 @@ export function PaymentModal({
 
   async function onConfirm() {
     setError('');
-    if (cashTooLow || (mixedSelected && !mixedValid)) return;
+    if (mixedSelected && !mixedValid) return;
     try {
       await completePayment(
         mixedSelected
           ? { orderId: order.id, method: 'mixed', cashAmount: cashNum, qrAmount: qrNum }
           : { orderId: order.id, method: selected },
       );
+    } catch (err) {
+      setError(apiError(err));
+    }
+  }
+
+  async function confirmTender(amounts: TenderAmounts, active: TenderMethod) {
+    const used = (Object.keys(amounts) as TenderMethod[]).filter((method) => amounts[method] > 0);
+    setError('');
+    try {
+      await completePayment(used.length > 1
+        ? { orderId: order.id, method: 'mixed', cashAmount: amounts.cash, qrAmount: amounts.qr, cardAmount: amounts.card }
+        : { orderId: order.id, method: used[0] ?? active });
     } catch (err) {
       setError(apiError(err));
     }
@@ -215,9 +203,6 @@ export function PaymentModal({
     setMethod(null);
     setCashInput('');
     setQrInput('');
-    setCashReceived('');
-    setMixedField('cash');
-    replaceAmount.current = true;
     setSplitOpen(false);
     onClose();
     if (receipt) onPaid();
@@ -373,14 +358,33 @@ export function PaymentModal({
     return <CashShiftForm current={null} onClose={onClose} onComplete={() => setError('')} />;
   }
 
-  // Шаг 1 — выбор способа оплаты
+  const splitBill = <SplitBillSheet
+    key={order.id}
+    open={splitOpen}
+    total={total}
+    wideLayout={wideLayout}
+    paymentMethods={enabled}
+    submitting={pay.isPending}
+    onClose={() => setSplitOpen(false)}
+    onComplete={handleSplitComplete}
+  />;
+
+  if (wideLayout) return createPortal(
+    <>
+      <FullScreenPayment order={order} enabled={enabled} qrImageUrl={qrImageUrl} allItemsServed={allActiveItemsServed}
+        open={open} busy={pay.isPending} error={error} splitOpen={splitOpen} onClose={close}
+        onSplit={() => setSplitOpen(true)} onConfirm={confirmTender} />
+      {splitBill}
+    </>,
+    document.body,
+  );
+
   return (
     <>
     <Modal
       open={open}
       onClose={close}
       title={t('Оплата заказа')}
-      panelClassName={showKeypad ? 'max-w-3xl' : 'max-w-md'}
       footer={
         <div className="flex items-center gap-2.5">
           <button
@@ -392,7 +396,7 @@ export function PaymentModal({
           </button>
           <button
             className="btn-primary btn-lg min-w-0 flex-1 font-semibold"
-            disabled={pay.isPending || qrMissing || cashTooLow || (mixedSelected && !mixedValid) || !allActiveItemsServed}
+            disabled={pay.isPending || qrMissing || (mixedSelected && !mixedValid) || !allActiveItemsServed}
             onClick={onConfirm}
           >
             {pay.isPending ? (
@@ -406,7 +410,6 @@ export function PaymentModal({
         </div>
       }
     >
-      <div className={showKeypad ? 'grid grid-cols-[minmax(0,1fr)_minmax(13rem,16rem)] gap-5' : undefined}>
         <div className="min-w-0">
           <p className="mb-1 text-sm text-text-muted">
             {orderPlaceLabel(order, t)} · {displayOrderNumber(order.orderNumber)}
@@ -427,7 +430,7 @@ export function PaymentModal({
             {methods.map((m) => (
               <button
                 key={m.value}
-                onClick={() => { setMethod(m.value); replaceAmount.current = true; }}
+                onClick={() => setMethod(m.value)}
                 className={`rounded-xl border px-2 py-3 text-[15px] font-medium transition-colors lg:px-4 ${
                   selected === m.value
                     ? 'border-primary bg-primary/5 text-primary'
@@ -459,32 +462,15 @@ export function PaymentModal({
             </div>
           )}
 
-          {wideLayout && cashSelected && (
-            <div className="mt-4 space-y-3 rounded-xl border border-border bg-background p-4">
-              <label className="flex items-center justify-between gap-3">
-                <span className="text-text-secondary">{t('Получено наличными')}</span>
-                <input inputMode="none" className="input h-11 w-32 text-right" value={cashReceived}
-                  onFocus={() => { replaceAmount.current = true; }}
-                  onChange={(event) => changeAmount('received', event.target.value)} placeholder={String(total)} />
-              </label>
-              <div className="flex justify-between gap-3 text-sm">
-                <span className="text-text-muted">{t('Сдача')}</span>
-                <span className="font-semibold">{money(Math.max(0, Math.round((received - total) * 100) / 100))}</span>
-              </div>
-              {cashTooLow && <p className="text-sm text-danger">{t('Внесено меньше суммы заказа')}</p>}
-            </div>
-          )}
-
           {mixedSelected && (
             <div className="mt-4">
               <div className="space-y-3 rounded-xl border border-border bg-background p-4">
                 <label className="flex items-center justify-between gap-3">
                   <span className="text-[15px] text-text-secondary">{t('Наличные')}</span>
                   <input
-                    inputMode={wideLayout ? 'none' : 'decimal'}
-                    className={`input h-11 w-40 text-right ${wideLayout && mixedField === 'cash' ? 'border-primary' : ''}`}
+                    inputMode="decimal"
+                    className="input h-11 w-40 text-right"
                     value={cashInput}
-                    onFocus={() => { setMixedField('cash'); replaceAmount.current = true; }}
                     onChange={(event) => changeAmount('cash', event.target.value)}
                     placeholder="0"
                   />
@@ -492,10 +478,9 @@ export function PaymentModal({
                 <label className="flex items-center justify-between gap-3">
                   <span className="text-[15px] text-text-secondary">{t('QR-код')}</span>
                   <input
-                    inputMode={wideLayout ? 'none' : 'decimal'}
-                    className={`input h-11 w-40 text-right ${wideLayout && mixedField === 'qr' ? 'border-primary' : ''}`}
+                    inputMode="decimal"
+                    className="input h-11 w-40 text-right"
                     value={qrInput}
-                    onFocus={() => { setMixedField('qr'); replaceAmount.current = true; }}
                     onChange={(event) => changeAmount('qr', event.target.value)}
                     placeholder="0"
                   />
@@ -529,21 +514,8 @@ export function PaymentModal({
 
           {error && <p className="mt-3 text-sm text-danger">{error}</p>}
         </div>
-        {showKeypad && <PaymentKeypad disabled={pay.isPending} onKey={pressKey}
-          onExact={cashSelected ? () => changeAmount('received', String(total)) : undefined} />}
-      </div>
     </Modal>
-
-    {/* Разделение счёта — открывается поверх окна оплаты, состояние не сбрасывается */}
-    <SplitBillSheet
-      key={order.id}
-      open={splitOpen}
-      total={total}
-      paymentMethods={enabled}
-      submitting={pay.isPending}
-      onClose={() => setSplitOpen(false)}
-      onComplete={handleSplitComplete}
-    />
+    {splitBill}
     </>
   );
 }

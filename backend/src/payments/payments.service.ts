@@ -25,6 +25,7 @@ export class PaymentsService {
     cashAmount?: number,
     qrAmount?: number,
     splitPayments?: PaymentPartDto[],
+    cardAmount?: number,
   ) {
     if (splitPayments?.length) {
       const parts = splitPayments.filter((p) => p.amount > 0);
@@ -43,13 +44,12 @@ export class PaymentsService {
     }
 
     if (method === PaymentMethod.mixed) {
-      // Смешанная складывается из наличных и QR — оба способа должны быть включены.
-      await this.settings.assertMethodEnabled(PaymentMethod.cash);
-      await this.settings.assertMethodEnabled(PaymentMethod.qr);
       const parts = [
         { method: PaymentMethod.cash, amount: cashAmount ?? 0 },
         { method: PaymentMethod.qr, amount: qrAmount ?? 0 },
-      ];
+        { method: PaymentMethod.card, amount: cardAmount ?? 0 },
+      ].filter((part) => part.amount > 0);
+      for (const part of parts) await this.settings.assertMethodEnabled(part.method);
       return this.orders.markPaid(orderId, actor, method, parts);
     }
     await this.settings.assertMethodEnabled(method);
@@ -118,7 +118,7 @@ export class PaymentsService {
       roundingAmount: order.roundingAmount,
       finalAmount: order.finalAmount,
       paymentMethod: order.paymentMethod,
-      // Разбивка по способам (для смешанной оплаты — наличные + QR).
+      // Разбивка платежа по способам оплаты.
       payments: order.payments.map((p) => ({ method: p.method, amount: String(p.amount), source: p.source })),
       thanks: settings.receiptText,
     };

@@ -2286,7 +2286,7 @@ export class OrdersService {
     if (source === PaymentSource.split || method === PaymentMethod.mixed) {
       paymentParts = (parts ?? []).filter((p) => p.amount > 0);
       if (source === PaymentSource.normal && paymentParts.length < 2) {
-        throw new BadRequestException('Для смешанной оплаты укажите суммы наличными и по QR');
+        throw new BadRequestException('Для смешанной оплаты укажите суммы по двум или более способам оплаты');
       } else if (source === PaymentSource.split && paymentParts.length < 2) {
         throw new BadRequestException('Для раздельной оплаты укажите минимум два платежа');
       }

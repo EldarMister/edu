@@ -11,17 +11,17 @@ export function PaymentKeypad({ disabled, onKey, onExact }: {
   const t = useT();
   return (
     <div role="group" aria-label={t('Клавиатура ввода суммы')}
-      className="self-start rounded-xl border border-border bg-background p-3">
+      className="w-full max-w-md">
       {onExact && (
-        <button type="button" className="btn-secondary btn-md mb-2 w-full" disabled={disabled} onClick={onExact}>
+        <button type="button" className="btn-secondary mb-3 min-h-12 w-full text-base font-medium" disabled={disabled} onClick={onExact}>
           {t('Точная сумма')}
         </button>
       )}
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-2.5 lg:gap-3">
         {KEYS.map(key => (
           <button key={key} type="button" disabled={disabled}
             aria-label={key === 'backspace' ? t('Стереть цифру') : undefined}
-            className="grid h-12 place-items-center rounded-lg border border-border bg-card text-xl font-semibold text-text-primary tabular-nums transition-colors hover:border-primary hover:text-primary disabled:opacity-50 lg:h-14"
+            className="grid h-[clamp(2.75rem,9dvh,5.75rem)] place-items-center rounded-xl border border-border bg-card text-2xl font-medium text-text-primary tabular-nums transition-colors hover:border-primary hover:text-primary disabled:opacity-50 lg:text-3xl"
             onPointerDown={(event) => event.preventDefault()}
             onClick={() => onKey(key)}>
             {key === 'backspace' ? '⌫' : key}

@@ -281,7 +281,7 @@ export interface Order {
   deliveryCustomerPhone?: string | null;
   deliveryAddress?: string | null;
   items: OrderItem[];
-  /** Разбивка оплат (для смешанной — наличные + QR). Приходит в списке заказов админки. */
+  /** Разбивка по способам оплаты. Приходит в списке заказов админки. */
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
   // ККМ / фискализация (null = ККМ выключена или чек ещё не пробит).
   fiscalReceiptNumber?: string | null;
@@ -341,7 +341,7 @@ export interface Receipt extends Partial<ReceiptPrintSettings> {
   roundingAmount?: string;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
-  /** Разбивка по способам оплаты (для смешанной — наличные + QR). */
+  /** Разбивка по способам оплаты. */
   payments?: { method: PaymentMethod; amount: string; source?: PaymentSource }[];
   thanks: string;
 }

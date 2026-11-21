@@ -49,6 +49,7 @@ function splitAmounts(total: number, count: number): string[] {
 export function SplitBillSheet({
   open,
   total,
+  wideLayout = false,
   paymentMethods,
   submitting,
   onClose,
@@ -56,6 +57,7 @@ export function SplitBillSheet({
 }: {
   open: boolean;
   total: number;
+  wideLayout?: boolean;
   paymentMethods: PaymentMethod[];
   submitting: boolean;
   onClose: () => void;
@@ -181,9 +183,13 @@ export function SplitBillSheet({
   const busy = submitting || completing;
   const close = () => { if (!busy) onClose(); };
   useDialogEscape(panel, open, close);
+  useEffect(() => {
+    if (wideLayout && open) panel.current?.focus({ preventScroll: true });
+  }, [open, wideLayout]);
+  if (wideLayout && !open) return null;
 
   return (
-    <div className={`fixed inset-0 z-[60] ${open ? '' : 'pointer-events-none'}`} aria-hidden={!open}>
+    <div className={`fixed inset-0 z-[60] ${wideLayout ? 'flex items-center justify-center p-4' : ''} ${open ? '' : 'pointer-events-none'}`} aria-hidden={!open}>
       {/* Затемнение */}
       <div
         className="absolute inset-0 bg-black/40"
@@ -194,7 +200,10 @@ export function SplitBillSheet({
       {/* Лист */}
       <div
         ref={panel}
-        className="terminal-dialog absolute inset-x-0 bottom-0 mx-auto flex max-h-[88vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft sm:bottom-4 sm:rounded-2xl md:max-w-xl [--terminal-dialog-closed-offset:110%]"
+        tabIndex={wideLayout ? -1 : undefined}
+        className={wideLayout
+          ? 'relative flex max-h-[92dvh] w-full max-w-xl flex-col rounded-2xl bg-white shadow-soft outline-none'
+          : 'terminal-dialog absolute inset-x-0 bottom-0 mx-auto flex max-h-[88vh] w-full max-w-md flex-col rounded-t-2xl bg-white shadow-soft sm:bottom-4 sm:rounded-2xl md:max-w-xl [--terminal-dialog-closed-offset:110%]'}
         data-visible={open}
         data-modal-panel={open || undefined}
         style={{
@@ -205,7 +214,7 @@ export function SplitBillSheet({
         aria-modal={open}
         aria-label={t('Разделение счёта')}
       >
-        <SheetHandle panel={panel} onClose={close} enabled={open && !busy} className="md:hidden" />
+        {!wideLayout && <SheetHandle panel={panel} onClose={close} enabled={open && !busy} className="md:hidden" />}
         {/* Шапка */}
         <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
           <h3 className="text-base font-semibold text-text-primary">{t('Разделение счёта')}</h3>

@@ -13,6 +13,7 @@ export function Modal({
   panelClassName = 'max-w-md',
   suspended = false,
   bottomSheet = false,
+  fullScreen = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -22,6 +23,7 @@ export function Modal({
   panelClassName?: string;
   suspended?: boolean;
   bottomSheet?: boolean;
+  fullScreen?: boolean;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   useDialogEscape(panel, open && !suspended, onClose);
@@ -40,7 +42,7 @@ export function Modal({
   if (!open) return null;
 
   return (
-    <div className={`modal-backdrop z-[60] flex items-end justify-center p-0 ${bottomSheet ? '' : 'sm:items-center sm:p-4'}`} style={suspended ? { visibility: 'hidden' } : undefined} aria-hidden={suspended || undefined}>
+    <div className={`modal-backdrop z-[60] flex items-end justify-center p-0 ${bottomSheet || fullScreen ? '' : 'sm:items-center sm:p-4'}`} style={suspended ? { visibility: 'hidden' } : undefined} aria-hidden={suspended || undefined}>
       <div
         className="absolute inset-0"
         onClick={onClose}
@@ -52,12 +54,14 @@ export function Modal({
         role="dialog"
         aria-modal={!suspended}
         aria-label={title}
-        className={`card relative z-10 flex w-full flex-col rounded-b-none ${bottomSheet ? 'motion-safe:animate-panel-open' : 'max-sm:motion-safe:animate-panel-open sm:rounded-2xl'} ${panelClassName}`}
+        className={fullScreen
+          ? 'relative z-10 flex h-dvh w-full flex-col overflow-hidden bg-white'
+          : `card relative z-10 flex w-full flex-col rounded-b-none ${bottomSheet ? 'motion-safe:animate-panel-open' : 'max-sm:motion-safe:animate-panel-open sm:rounded-2xl'} ${panelClassName}`}
         // dvh (динамическая высота вьюпорта) учитывает адресную строку браузера —
         // иначе на низких телефонах низ модалки с кнопками уезжает за экран.
-        style={{ maxHeight: 'calc(92dvh - env(safe-area-inset-bottom, 0px))' }}
+        style={fullScreen ? undefined : { maxHeight: 'calc(92dvh - env(safe-area-inset-bottom, 0px))' }}
       >
-        <SheetHandle panel={panel} onClose={onClose} enabled={!suspended} className={bottomSheet ? '' : 'sm:hidden'} />
+        {!fullScreen && <SheetHandle panel={panel} onClose={onClose} enabled={!suspended} className={bottomSheet ? '' : 'sm:hidden'} />}
         {title && (
           <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-3">
             <h3 className="text-base font-semibold text-text-primary">{title}</h3>
@@ -68,7 +72,7 @@ export function Modal({
             </button>
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{children}</div>
+        <div className={fullScreen ? 'min-h-0 flex-1 overflow-y-auto' : 'min-h-0 flex-1 overflow-y-auto px-4 py-3'}>{children}</div>
         {footer && (
           <div className="shrink-0 border-t border-border px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
             {footer}
