@@ -1,10 +1,12 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
 import type { Order, OrderStatus, TableStatus } from '@/types';
 import { ORDER_STATUS, TABLE_STATUS, orderStationStatuses } from '@/theme/status';
-import { fontSize, radius, spacing } from '@/theme';
+import { colors, fontSize, radius, spacing } from '@/theme';
 import { usePrepStations } from '@/services/api/prepStations';
+import { refundStatusLabel } from '@/features/refunds/refundRules';
 
 /** Бейдж статуса заказа — зеркало OrderBadge из PWA. */
 export function OrderBadge({ status, size = 'md' }: { status: OrderStatus; size?: 'sm' | 'md' }) {
@@ -35,6 +37,14 @@ export function OrderStatusBadges({
   align?: 'start' | 'end';
 }) {
   const { stations } = usePrepStations();
+  const refundLabel = refundStatusLabel(order);
+  if (refundLabel) {
+    return (
+      <View style={[styles.badge, size === 'sm' ? styles.sm : styles.md, { backgroundColor: colors.warningSoft }]}>
+        <Text style={[styles.text, size === 'sm' ? styles.textSm : styles.textMd, { color: colors.warning }]} translate>{refundLabel}</Text>
+      </View>
+    );
+  }
   const chips = orderStationStatuses(order, stations);
   if (chips.length === 0) return <OrderBadge status={order.status} size={size} />;
 

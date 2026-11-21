@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { CartLine, Dish, DishVariant } from '@/types';
+import type { CartLine, Dish, DishVariant, Order } from '@/types';
 import { dishUnitPrice } from '@/utils/format';
 import { calcSetPrice } from '@/utils/set';
 
@@ -41,6 +41,28 @@ export function cartLineUnitPrice(line: CartLine): number {
 
 export function cartTotal(lines: CartLine[]): number {
   return lines.reduce((sum, line) => sum + linePrice(line), 0);
+}
+
+export function cartTotals(lines: CartLine[], round: boolean = false) {
+  const subtotal = Math.round(cartTotal(lines) * 100) / 100;
+  const total = round ? Math.floor(subtotal) : subtotal;
+  const rounding = Math.round((subtotal - total) * 100) / 100;
+  return { total, rounding };
+}
+
+const DELIVERY_CART_PREFIX = 'delivery-cart:';
+export const NEW_DELIVERY_CART = { id: `${DELIVERY_CART_PREFIX}new`, number: 0 };
+
+export function orderCartDestination(order: Order) {
+  return {
+    id: order.source === 'delivery' ? `${DELIVERY_CART_PREFIX}${order.id}` : order.table.id,
+    number: order.table.number,
+    hallName: order.table.hall?.name,
+  };
+}
+
+export function isDeliveryCart(id: string | null) {
+  return !!id?.startsWith(DELIVERY_CART_PREFIX);
 }
 
 interface CartState {
@@ -139,6 +161,12 @@ export const useCart = create<CartState>((set, get) => ({
       cleared = true;
       const carts = { ...s.carts };
       delete carts[tableId];
+      if (active && tableId === NEW_DELIVERY_CART.id) {
+        return {
+          carts, tableId: null, tableNumber: null, hallName: null, activeOrderId: null,
+          lines: [], comment: '', commentOpen: false, editingOrderId: null, editingOrderNumber: null,
+        };
+      }
       return active
         ? { carts, lines: [], comment: '', commentOpen: false, editingOrderId: null, editingOrderNumber: null, activeOrderId: orderId }
         : { carts };

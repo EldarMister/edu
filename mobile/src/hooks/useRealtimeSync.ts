@@ -74,6 +74,7 @@ export function useRealtimeSync() {
     const invalidateSettings = () => {
       qc.invalidateQueries({ queryKey: ['settings'] });
       qc.invalidateQueries({ queryKey: ['prep-stations'] });
+      qc.invalidateQueries({ queryKey: ['admin', 'warehouse', 'locations'] });
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['kitchen'] });
       qc.invalidateQueries({ queryKey: ['admin', 'stats'] });
@@ -180,6 +181,7 @@ export function useRealtimeSync() {
       [SERVER_EVENTS.TABLES_UPDATED, invalidateTables],
       [SERVER_EVENTS.MENU_UPDATED, invalidateMenu],
       [SERVER_EVENTS.SETTINGS_UPDATED, invalidateSettings],
+      [SERVER_EVENTS.WAREHOUSE_UPDATED, () => { void qc.invalidateQueries({ queryKey: ['admin', 'warehouse'] }); }],
     ];
 
     handlers.forEach(([event, fn]) => sock.on(event, fn));

@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { useStore, type StoreApi } from 'zustand';
 import { colors } from '@/theme';
 import { HandPointerContext, type HandPointerState } from './context';

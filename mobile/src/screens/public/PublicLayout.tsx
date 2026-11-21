@@ -1,7 +1,8 @@
+import { View, SafeAreaView } from '@/components/themed';
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { useNavigation } from '@react-navigation/native';
 import { FastPressable } from '@/components/FastPressable';
 import { Button } from '@/components/ui';

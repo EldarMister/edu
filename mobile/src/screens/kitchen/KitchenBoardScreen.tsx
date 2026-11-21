@@ -1,8 +1,10 @@
+import { RefreshControl, ScrollView, View, SafeAreaView } from '@/components/themed';
 import { gridLayout } from '@/lib/layout';
+import { StaffShiftCard } from '@/components/StaffShiftGate';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState, Image, Platform, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, Vibration, View } from 'react-native';
+import { AppState, Image, Platform, StyleSheet, useWindowDimensions, Vibration } from 'react-native';
 import { Text } from '@/components/typography';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card, EmptyState, Loading, SegmentTabs } from '@/components/ui';
 import { OrderBadge } from '@/components/StatusBadge';
@@ -47,6 +49,8 @@ import { useT } from '@/lib/i18n';
 import { StopListSheet } from './StopListSheet';
 import { KitchenVoiceSettingsSheet } from './KitchenVoiceSettingsSheet';
 import { KitchenStatsSheet } from './KitchenStatsSheet';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
+import { BottomSheet } from '@/components/BottomSheet';
 import { deliveryDetails, orderLocation } from '@/screens/waiter/orderRules';
 import type { Order, OrderItemStatus, OrderSetComponent, OrderStatus, PrepStation } from '@/types';
 import { KitchenHandControlProvider } from '@/features/hand-control/KitchenHandControl';
@@ -136,9 +140,13 @@ export function KitchenBoardScreen({ defaultStation }: { defaultStation: 'kitche
   const [now, setNow] = useState(() => Date.now());
   const [stopListOpen, setStopListOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const barThemeControl = useAuth((state) => state.user?.role === 'BAR');
   const [statsOpen, setStatsOpen] = useState(false);
   const [pending, setPending] = useState<PendingAction | null>(null);
   const orders = useKitchenOrders(tab, station, historyTab ? history : undefined);
+  const newOrders = useKitchenOrders('new', station, undefined, tab !== 'new');
+  const workingOrders = useKitchenOrders('in_work', station, undefined, tab !== 'in_work');
   const accept = useAccept(station);
   const readyItems = useReadyItems(station);
   const rejectItems = useRejectItems(station);
@@ -272,7 +280,7 @@ export function KitchenBoardScreen({ defaultStation }: { defaultStation: 'kitche
   const today = dateToIso(new Date(now));
 
   return (
-    <KitchenHandControlProvider activeLayer={voiceOpen ? 'voice' : stopListOpen ? 'stop-list' : 'board'}>
+    <KitchenHandControlProvider activeLayer={voiceOpen || settingsOpen ? 'voice' : stopListOpen ? 'stop-list' : 'board'}>
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
       <OfflineBanner />
       <AppHeader
@@ -284,6 +292,7 @@ export function KitchenBoardScreen({ defaultStation }: { defaultStation: 'kitche
         right={
           <>
             <ConnectionStatus />
+            {barThemeControl && <FastPressable onPress={() => setSettingsOpen(true)} hitSlop={8} accessibilityLabel="Настройки"><PwaIcon name="adminSettings" size={22} color={colors.textSecondary} /></FastPressable>}
             <FastPressable onPress={onLogout} hitSlop={8}>
               <Text style={styles.logout} translate>Выйти</Text>
             </FastPressable>
@@ -297,7 +306,7 @@ export function KitchenBoardScreen({ defaultStation }: { defaultStation: 'kitche
 
       <View style={[styles.tabsBar, stackedToolbar && styles.tabsBarStacked]}>
         <View style={stackedToolbar ? styles.tabsFullWidth : styles.tabsFlexible}>
-          <SegmentTabs items={TABS} value={statsOpen ? '' : tab} onChange={(value) => { if (value) setTab(value); setStatsOpen(false); }} count={statsOpen ? 0 : list.length} />
+          <SegmentTabs items={TABS} value={statsOpen ? '' : tab} onChange={(value) => { if (value) setTab(value); setStatsOpen(false); }} counts={{ new: (tab === 'new' ? list : newOrders.data)?.length ?? 0, in_work: (tab === 'in_work' ? list : workingOrders.data)?.length ?? 0 }} />
         </View>
         <ToolbarActions stacked={stackedToolbar}>
         <FastPressable
@@ -423,6 +432,7 @@ export function KitchenBoardScreen({ defaultStation }: { defaultStation: 'kitche
 
       <HandTargetLayer name="stop-list"><StopListSheet visible={stopListOpen} station={station} onClose={() => setStopListOpen(false)} /></HandTargetLayer>
       <HandTargetLayer name="voice"><KitchenVoiceSettingsSheet visible={voiceOpen} onClose={() => setVoiceOpen(false)} /></HandTargetLayer>
+      {barThemeControl && <HandTargetLayer name="voice"><BottomSheet visible={settingsOpen} onClose={() => setSettingsOpen(false)} title="Настройки"><StaffShiftCard /><ThemeSwitch /></BottomSheet></HandTargetLayer>}
     </SafeAreaView>
     </KitchenHandControlProvider>
   );

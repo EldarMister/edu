@@ -1,5 +1,6 @@
+import { ScrollView, View } from '@/components/themed';
 import React from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Card } from '@/components/ui';
 import { Text } from '@/components/typography';
 import { FastPressable } from '@/components/FastPressable';

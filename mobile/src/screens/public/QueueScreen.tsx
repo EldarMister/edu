@@ -1,6 +1,7 @@
+import { ScrollView, View, SafeAreaView } from '@/components/themed';
 import React from 'react';
-import { AppState, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { AppState, StyleSheet, useWindowDimensions } from 'react-native';
+
 import Svg, { Path } from 'react-native-svg';
 import { Text } from '@/components/typography';
 import { useRoute, type RouteProp } from '@react-navigation/native';

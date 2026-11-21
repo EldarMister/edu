@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const React = require('react');
+const { nativeThemeModules } = require('./helpers/native-theme.cjs');
 
 function loadSource(file, modules) {
   const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), {
@@ -81,13 +82,15 @@ function screenHarness(options = {}) {
   store.getState = () => ({ ...cart });
   const cancellations = [];
   api.useCancelOrder = () => ({ isPending: false, mutate: (payload, callbacks) => cancellations.push({ payload, callbacks }) });
+  const native = {
+    ActivityIndicator: 'ActivityIndicator', InteractionManager: {}, ScrollView: 'ScrollView',
+    StyleSheet: { create: styles => styles }, View: 'View',
+  };
+  const safeArea = { SafeAreaView: 'SafeAreaView' };
   const { OrderDetailScreen } = loadSource('src/screens/waiter/OrderDetailScreen.tsx', {
     react: hooks,
-    'react-native': {
-      ActivityIndicator: 'ActivityIndicator', InteractionManager: {}, ScrollView: 'ScrollView',
-      StyleSheet: { create: styles => styles }, View: 'View',
-    },
-    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
+    'react-native': native,
+    'react-native-safe-area-context': safeArea,
     '@react-navigation/native': {
       useRoute: () => ({ params: { orderId: 'order-102' } }),
       useNavigation: () => navigation,
@@ -97,14 +100,18 @@ function screenHarness(options = {}) {
     '@/components/typography': { Text: 'Text', TextInput: 'TextInput' },
     '@/components/FastPressable': { FastPressable: 'FastPressable' },
     '@/components/ui': { Button: 'Button', EmptyState: 'EmptyState', Loading: 'Loading' },
-    '@/components/BottomSheet': { BottomSheet: 'BottomSheet' },
+    '@/components/BottomSheet': { BottomSheet: 'BottomSheet', SheetScrollView: 'SheetScrollView' },
     '@/components/PwaIcon': { PwaIcon: 'PwaIcon' },
     '@/components/StatusBadge': { OrderStatusBadges: 'OrderStatusBadges' },
     '@/components/NumberTicker': { NumberTicker: 'NumberTicker' },
-    '@/theme': loadSource('src/theme/index.ts', {}),
+    ...nativeThemeModules(native, safeArea),
     '@/theme/status': { ORDER_STATUS: {} },
     '@/store/notifications': { useNotifications: store },
-    '@/store/cart': { useCart: store },
+    '@/store/cart': loadSource('src/store/cart.ts', {
+      zustand: { create: () => store },
+      '@/utils/format': {},
+      '@/utils/set': {},
+    }),
     '@/store/receiptPrint': { useReceiptPrint: store },
     '@/store/replacement': { useReplacement: store },
     '@/services/api/waiter': {
@@ -117,8 +124,11 @@ function screenHarness(options = {}) {
     '@/services/api/settings': { usePublicSettings: () => ({ data: undefined }) },
     '@/lib/order-permissions': loadSource('src/lib/order-permissions.ts', {}),
     '@/lib/api': { apiError: String },
+    '@/features/refunds/OrderRefunds': { TerminalOrderRefunds: 'TerminalOrderRefunds' },
     '@/utils/format': { displayOrderNumber: String, money: String },
     '@/utils/orderCart': { orderToCartLines: () => [] },
+    './useReceiptPrinter': { useReceiptPrinter: () => async () => {} },
+    '@/hooks/usePermissions': { usePermissions: () => ({ canAction: () => true }) },
     './PaymentSheet': { PaymentSheet: 'PaymentSheet' },
     './InsufficientPermissionsSheet': { InsufficientPermissionsSheet: 'InsufficientPermissionsSheet' },
     './orderRules': {
@@ -190,6 +200,34 @@ test('initial loading and missing order keep the same payment slot and show thei
   const missing = env.render();
   assert.equal(paymentSlot(missing).props.visible, false);
   assert.equal(missing.props.children[1].type, 'EmptyState');
+});
+
+test('a waiting order can reopen payment after cashier dismisses the sheet', () => {
+  const env = screenHarness();
+  const waiting = {
+    id: 'order-102', orderNumber: 102, status: 'waiting_payment', table: { id: 'table-2', number: 2 },
+    waiter: { id: 'waiter-1' }, items: [], finalAmount: 420,
+  };
+  env.queries.active = { data: [waiting], isLoading: false, isFetched: true };
+  const original = paymentSlot(env.render());
+  original.props.onClose();
+  const closed = env.render();
+  assert.equal(paymentSlot(closed).props.visible, false);
+
+  function findPaymentButton(node) {
+    if (node?.type === 'Button' && node.props.title === 'Перейти к оплате') return node;
+    for (const child of React.Children.toArray(node?.props?.children)) {
+      const match = findPaymentButton(child);
+      if (match) return match;
+    }
+  }
+
+  const button = findPaymentButton(closed);
+  assert.ok(button);
+  button.props.onPress();
+  const reopened = paymentSlot(env.render());
+  assert.equal(reopened.props.visible, true);
+  assert.equal(reopened.props.order, waiting);
 });
 
 

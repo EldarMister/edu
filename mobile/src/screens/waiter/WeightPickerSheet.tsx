@@ -1,12 +1,13 @@
+import { View } from '@/components/themed';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import Svg, { Circle, Defs, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
-import { colors, radius, softShadow, spacing } from '@/theme';
+import { colors, radius, softShadow, spacing, useThemeColors } from '@/theme';
 import { dishUnitPrice, money } from '@/utils/format';
 import type { Dish } from '@/types';
 
@@ -55,6 +56,7 @@ export function WeightPickerSheet({
   onAdd: (amount: number) => void;
 }) {
   const { width, height } = useWindowDimensions();
+  const palette = useThemeColors();
   const dialSize = Math.max(0, Math.min(width, 448) - 140);
   const [amount, setAmount] = useState(DEFAULT_AMOUNT);
   const [editing, setEditing] = useState(false);
@@ -198,25 +200,25 @@ export function WeightPickerSheet({
                   y1={tick.inner.y}
                   x2={tick.outer.x}
                   y2={tick.outer.y}
-                  stroke={index / 50 <= amount / dialMax ? '#2478ef' : '#d6deea'}
+                  stroke={index / 50 <= amount / dialMax ? palette.link : palette.border}
                   strokeWidth={tick.major ? 2.4 : 1.7}
                   strokeLinecap="round"
                 />
               ))}
-              <Circle cx="180" cy="180" r="110" fill={colors.white} />
-              <Path d={arcPath(180, 180, 116, START_ANGLE, END_ANGLE)} fill="none" stroke="#e9eef5" strokeWidth="7" strokeLinecap="round" />
+              <Circle cx="180" cy="180" r="110" fill={palette.card} />
+              <Path d={arcPath(180, 180, 116, START_ANGLE, END_ANGLE)} fill="none" stroke={palette.border} strokeWidth="7" strokeLinecap="round" />
               {amount > 0 ? <Path d={arcPath(180, 180, 116, START_ANGLE, angle)} fill="none" stroke="url(#weightedProgress)" strokeWidth="7" strokeLinecap="round" /> : null}
-              <Circle cx={knob.x} cy={knob.y} r="11" fill={colors.white} stroke="#1268ee" strokeWidth="7" />
+              <Circle cx={knob.x} cy={knob.y} r="11" fill={palette.card} stroke={palette.primary} strokeWidth="7" />
               {!editing ? (
                 <>
-                  <SvgText x={amountTextStart} y="197" fill="#07152d" fontFamily="Inter_700Bold" fontSize="50">{display.value}</SvgText>
-                  <SvgText x={amountTextStart + amountNumberWidth + amountUnitGap} y="197" fill="#07152d" fontFamily="Inter_600SemiBold" fontSize="22">{display.unit}</SvgText>
+                  <SvgText x={amountTextStart} y="197" fill={palette.textPrimary} fontFamily="Inter_700Bold" fontSize="50">{display.value}</SvgText>
+                  <SvgText x={amountTextStart + amountNumberWidth + amountUnitGap} y="197" fill={palette.textPrimary} fontFamily="Inter_600SemiBold" fontSize="22">{display.unit}</SvgText>
                 </>
               ) : null}
               <DialMark x={180} y={27} value={dialMax / 2} measure={measure} />
               <DialMark x={40} y={130} value={dialMax / 4} measure={measure} />
               <DialMark x={320} y={130} value={(dialMax * 3) / 4} measure={measure} />
-              <SvgText x="71" y="322" textAnchor="middle" fill="#60708d" fontFamily="Inter_400Regular" fontSize="15">0</SvgText>
+              <SvgText x="71" y="322" textAnchor="middle" fill={palette.textMuted} fontFamily="Inter_400Regular" fontSize="15">0</SvgText>
               <DialMark x={289} y={322} value={dialMax} measure={measure} />
             </Svg>
             {editing ? (
@@ -263,8 +265,9 @@ export function WeightPickerSheet({
 }
 
 function DialMark({ x, y, value, measure }: { x: number; y: number; value: number; measure: Dish['weightedMeasure'] }) {
+  const palette = useThemeColors();
   const label = amountLabel(value, measure);
-  return <SvgText x={x} y={y} textAnchor="middle" fill="#60708d" fontFamily="Inter_400Regular" fontSize="15">{`${label.value} ${label.unit}`}</SvgText>;
+  return <SvgText x={x} y={y} textAnchor="middle" fill={palette.textMuted} fontFamily="Inter_400Regular" fontSize="15">{`${label.value} ${label.unit}`}</SvgText>;
 }
 
 function Step({ label, onPress, disabled = false }: { label: string; onPress: () => void; disabled?: boolean }) {

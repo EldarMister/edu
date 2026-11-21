@@ -1,5 +1,6 @@
+import { View, PaperView } from '@/components/themed';
 import React from 'react';
-import { Share, StyleSheet, View } from 'react-native';
+import { Share, StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
 import QRCode from 'react-native-qrcode-svg';
 import { BottomSheet } from '@/components/BottomSheet';
@@ -8,6 +9,7 @@ import { Button } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { WEB_URL } from '@/config/env';
 import type { AdminTableItem } from '@/services/api/admin';
+import { tableLabel } from '@/utils/floorPlan';
 import type Svg from 'react-native-svg';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -25,6 +27,7 @@ export function TableQrModal({
   hallName: string;
   onClose: () => void;
 }) {
+  const label = tableLabel(table);
   const menuUrl = `${WEB_URL}/menu/${table.qrToken ?? ''}`;
   const qrRef = React.useRef<Svg | null>(null);
   const [busy, setBusy] = React.useState(false);
@@ -41,8 +44,8 @@ export function TableQrModal({
         await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
         await Sharing.shareAsync(uri, { mimeType: 'image/png', UTI: 'public.png', dialogTitle: 'Сохранить QR-код стола' });
       } else {
-        const safeHall = hallName.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
-        await Print.printAsync({ html: `<!doctype html><html><head><meta charset="utf-8"><style>body{text-align:center;font-family:sans-serif;padding:28px 20px;color:#0f172a}h1{font-size:26px}img{width:300px;height:300px}p{color:#64748b}</style></head><body><h1>Стол ${table.number}</h1><p>${safeHall}</p><img src="data:image/png;base64,${base64}"><h3>Отсканируйте — меню стола</h3><p>Закажите со своего телефона</p></body></html>` });
+        const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+        await Print.printAsync({ html: `<!doctype html><html><head><meta charset="utf-8"><style>body{text-align:center;font-family:sans-serif;padding:28px 20px;color:#0f172a}h1{font-size:26px}img{width:300px;height:300px}p{color:#64748b}</style></head><body><h1>${escapeHtml(label)}</h1><p>${escapeHtml(hallName)}</p><img src="data:image/png;base64,${base64}"><h3>Отсканируйте — меню стола</h3><p>Закажите со своего телефона</p></body></html>` });
       }
     } catch (error) { reportError(error); }
     finally { setBusy(false); }
@@ -53,14 +56,14 @@ export function TableQrModal({
   };
 
   return (
-    <BottomSheet visible onClose={onClose} title={`QR-код · Стол ${table.number}`} footer={<View><Button title="Поделиться ссылкой" size="md" style={{ marginTop: spacing.lg, alignSelf: 'stretch' }} onPress={share} />
+    <BottomSheet visible onClose={onClose} title={`QR-код · ${label}`} footer={<View><Button title="Поделиться ссылкой" size="md" style={{ marginTop: spacing.lg, alignSelf: 'stretch' }} onPress={share} />
         <View style={{ flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm, alignSelf: 'stretch' }}><Button title="Сохранить QR" variant="secondary" size="md" loading={busy} disabled={busy} onPress={() => void qrAction('save')} style={{ flex: 1 }} /><Button title="Печать" size="md" disabled={busy} onPress={() => void qrAction('print')} style={{ flex: 1 }} /></View></View>}>
       <View style={styles.wrap}>
-        <View style={styles.qrBox}>
+        <PaperView style={styles.qrBox}>
           <QRCode value={menuUrl} size={220} quietZone={16} ecl="M" getRef={(ref: Svg) => { qrRef.current = ref; }} />
-        </View>
+        </PaperView>
         <Text style={styles.caption} translate>
-          {hallName} · Стол {table.number}
+          {hallName} · {label}
         </Text>
         <FastPressable onPress={share}>
           <Text style={styles.url} numberOfLines={2}>

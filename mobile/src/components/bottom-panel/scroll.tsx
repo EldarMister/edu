@@ -1,8 +1,10 @@
+import { FlatList, ScrollView } from '@/components/themed';
 import React from 'react';
-import { FlatList, ScrollView, type FlatListProps, type ScrollViewProps, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
+import { type FlatListProps, type ScrollViewProps, type NativeScrollEvent, type NativeSyntheticEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { runOnJS, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { useBottomPanelPan, type PanelMotion } from './useBottomPanel';
+import { useThemedStyle, useThemeMode } from '@/theme/runtime';
 
 export const PanelMotionContext = React.createContext<PanelMotion | null>(null);
 function useScrollGesture(motion: PanelMotion, onScroll: ScrollViewProps['onScroll']) {
@@ -26,10 +28,13 @@ export const PanelScrollView = React.forwardRef<ScrollView, ScrollViewProps>(fun
 });
 const DraggableScroll = React.forwardRef<ScrollView, ScrollViewProps & { motion: PanelMotion }>(function DraggableScroll({ motion, onScroll, ...props }, ref) {
   const { gesture, handler } = useScrollGesture(motion, onScroll);
+  const style = useThemedStyle(props.style);
+  const contentStyle = useThemedStyle(props.contentContainerStyle);
+  const mode = useThemeMode();
   const forward = React.useCallback((node: ScrollView | null) => {
     if (typeof ref === 'function') ref(node); else if (ref) ref.current = node;
   }, [ref]);
-  return <GestureDetector gesture={gesture}><Animated.ScrollView {...props} ref={forward}
+  return <GestureDetector gesture={gesture}><Animated.ScrollView {...props} style={style} contentContainerStyle={contentStyle} indicatorStyle={props.indicatorStyle ?? (mode === 'dark' ? 'white' : 'black')} ref={forward}
     bounces={false} overScrollMode="never" scrollEventThrottle={props.scrollEventThrottle ?? 16} onScroll={handler} /></GestureDetector>;
 });
 

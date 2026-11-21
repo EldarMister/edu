@@ -1,18 +1,25 @@
+import { AdminLoadingSkeleton } from './AdminLoadingSkeleton';
+import { ScrollView, View } from '@/components/themed';
 import React, { useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, LayoutChangeEvent, PanResponder, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { LayoutChangeEvent, PanResponder, StyleSheet, useWindowDimensions } from 'react-native';
 import { Text } from '@/components/typography';
 import Svg, { Circle, Defs, G, Line, LinearGradient, Path, Stop, Text as SvgText } from 'react-native-svg';
-import { colors, fontSize, radius, spacing } from '@/theme';
+import { colors, fontSize, radius, spacing, useThemeColors } from '@/theme';
 import { money } from '@/utils/format';
 import { PwaIcon } from '@/components/PwaIcon';
 import { FastPressable } from '@/components/FastPressable';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { DateField } from '@/components/DateField';
 import { Button } from '@/components/ui';
+import { AnchoredSelectScope, Select } from '@/components/Select';
 import { apiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
+import type { StatisticsView } from '@/navigation/adminWorkspaceNavigation';
 import type { PaymentMethod } from '@/types';
-import { useStatistics, type StatsDashboard, type StatsPeriod } from '@/services/api/admin';
+import { useStatistics, useStatisticsReports, type StatsDashboard, type StatsPeriod } from '@/services/api/admin';
 import { usePublicSettings } from '@/services/api/settings';
+import { isAllowedDate } from '@/utils/calendarDate';
+import { StatisticsReport } from './StatisticsReport';
 
 const PERIODS: { value: StatsPeriod; label: string }[] = [
   { value: 'today', label: 'Сегодня' },
@@ -46,7 +53,8 @@ const METHOD_LABEL: Record<PaymentMethod, string> = {
 };
 
 /** Статистика владельца — порт PWA StatisticsPage. */
-export function StatisticsScreen() {
+export function StatisticsScreen({ view = 'overview' }: { view?: Exclude<StatisticsView, 'taxes'> }) {
+  const t = useT();
   const { width } = useWindowDimensions();
   const narrow = width < 640;
   const desktop = width >= 1024;
@@ -60,11 +68,15 @@ export function StatisticsScreen() {
   const [period, setPeriod] = useState<StatsPeriod>('week');
   const [from, setFrom] = useState(weekAgo);
   const [to, setTo] = useState(today);
-  const statsQ = useStatistics({
+  const rangeReady = period !== 'custom' || (isAllowedDate(from, undefined, to) && isAllowedDate(to, from, today));
+  const params = {
     period,
     from: period === 'custom' ? from : undefined,
     to: period === 'custom' ? to : undefined,
-  });
+  };
+  const statsQ = useStatistics(params, rangeReady && view === 'overview');
+  const reportsQ = useStatisticsReports(params, rangeReady && view !== 'overview');
+  const query = view === 'overview' ? statsQ : reportsQ;
   const publicSettingsQ = usePublicSettings();
   const d = statsQ.data;
   const [viewAll, setViewAll] = useState<{ title: string; rows: string[][] } | null>(null);
@@ -81,9 +93,11 @@ export function StatisticsScreen() {
   }, [d, publicSettingsQ.data]);
 
   return (
+    <AnchoredSelectScope>
     <SheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
       <View style={[styles.periodToolbar, !narrow && styles.periodToolbarWide]}>
-      <View style={[styles.periodTabs, !narrow && { alignSelf: 'flex-start' }]}>
+      {view !== 'overview' ? <Select title="Период отчёта" value={period} options={PERIODS} onChange={setPeriod}
+        style={styles.reportPeriod} /> : <View style={[styles.periodTabs, !narrow && { alignSelf: 'flex-start' }]}>
         {PERIODS.map((p) => {
           const active = period === p.value;
           return (
@@ -96,7 +110,7 @@ export function StatisticsScreen() {
             </FastPressable>
           );
         })}
-      </View>
+      </View>}
       {period === 'custom' ? (
         <View style={styles.dateRange}>
           <View style={narrow ? { flex: 1 } : { width: 150 }}><DateField style={{ height: 40 }} value={from} onChangeText={setFrom} accessibilityLabel="С даты" /></View>
@@ -106,11 +120,13 @@ export function StatisticsScreen() {
       ) : null}
       </View>
 
-      {statsQ.isError ? <View style={styles.loading}><Text style={{ color: colors.danger }}>{apiError(statsQ.error)}</Text><Button title="Повторить" onPress={() => void statsQ.refetch()} /></View> : statsQ.isLoading || !d ? (
-        <View style={styles.loading}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      ) : (
+      {!rangeReady ? <Text style={styles.tableEmpty} translate>Укажите начало и конец периода.</Text>
+      : query.isError ? <View style={styles.loading}><Text style={{ color: colors.danger }}>{apiError(query.error)}</Text><Button title="Повторить" onPress={() => void query.refetch()} /></View> : !query.data ? (
+        <AdminLoadingSkeleton />
+      ) : view !== 'overview' ? (
+        reportsQ.data && <StatisticsReport key={view} view={view} data={reportsQ.data}
+          periodLabel={period === 'custom' ? `${from} — ${to}` : t(PERIODS.find((option) => option.value === period)!.label)} />
+      ) : d && (
         <>
           {/* KPI — сплит-блок из двух показателей */}
           {desktop ? <DashboardGrid columns={2} gap={16}>
@@ -208,6 +224,7 @@ export function StatisticsScreen() {
         ) : null}
       </BottomSheet>
     </SheetScrollView>
+    </AnchoredSelectScope>
   );
 }
 
@@ -380,6 +397,7 @@ function MiniTable({
 /* ---------- График выручки (SVG) ---------- */
 
 export function RevenueChart({ data, stock = false }: { data: StatsDashboard['revenueSeries']; stock?: boolean }) {
+  const palette = useThemeColors();
   const [width, setWidth] = useState(320);
   const [hover, setHover] = useState<number | null>(null);
   const widthRef = useRef(320);
@@ -470,8 +488,8 @@ export function RevenueChart({ data, stock = false }: { data: StatsDashboard['re
           const yy = yAt(tk);
           return (
             <G key={`tick-${tk}`}>
-              <Line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke="#F1F5F9" strokeWidth={0.8} />
-              <SvgText x={padL - 12} y={yy + 4} textAnchor="end" fontSize={11} fontFamily="Inter_500Medium" fill={colors.textLight}>
+              <Line x1={padL} x2={W - padR} y1={yy} y2={yy} stroke={palette.border} strokeWidth={0.8} />
+              <SvgText x={padL - 12} y={yy + 4} textAnchor="end" fontSize={11} fontFamily="Inter_500Medium" fill={palette.textLight}>
                 {shortMoney(tk)}
               </SvgText>
             </G>
@@ -479,10 +497,10 @@ export function RevenueChart({ data, stock = false }: { data: StatsDashboard['re
         })}
 
         <Path d={area} fill="url(#rev-fill)" />
-        <Path d={line} fill="none" stroke="#005BFF" strokeWidth={2.8} strokeLinejoin="round" strokeLinecap="round" />
+        <Path d={line} fill="none" stroke={palette.link} strokeWidth={2.8} strokeLinejoin="round" strokeLinecap="round" />
 
         {xLabelIdx.map((i) => (
-          <SvgText key={i} x={xAt(i)} y={H - 10} textAnchor="middle" fontSize={11} fontFamily="Inter_500Medium" fill={colors.textLight}>
+          <SvgText key={i} x={xAt(i)} y={H - 10} textAnchor="middle" fontSize={11} fontFamily="Inter_500Medium" fill={palette.textLight}>
             {formatAxisLabel(data[i].label)}
           </SvgText>
         ))}
@@ -494,12 +512,12 @@ export function RevenueChart({ data, stock = false }: { data: StatsDashboard['re
               x2={xAt(hover)}
               y1={padT}
               y2={H - padB}
-              stroke="#D8E2F0"
+              stroke={palette.border}
               strokeWidth={0.9}
               strokeDasharray="3 6"
             />
-            <Circle cx={xAt(hover)} cy={yAt(hi.amount)} r={9} fill="#005BFF" opacity={0.1} />
-            <Circle cx={xAt(hover)} cy={yAt(hi.amount)} r={5.4} fill="#fff" stroke="#005BFF" strokeWidth={2.6} />
+            <Circle cx={xAt(hover)} cy={yAt(hi.amount)} r={9} fill={palette.link} opacity={0.1} />
+            <Circle cx={xAt(hover)} cy={yAt(hi.amount)} r={5.4} fill={palette.card} stroke={palette.link} strokeWidth={2.6} />
           </G>
         ) : null}
       </Svg>
@@ -588,6 +606,7 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: 16, paddingBottom: spacing.xxl },
   periodToolbar: { gap: 12 },
   periodToolbarWide: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' },
+  reportPeriod: { minWidth: 150, height: 40, borderRadius: radius.sm },
   desktopMetric: { flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 16, padding: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.white, borderRadius: 16 },
   desktopMetricIcon: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: colors.primarySoft },
   desktopMetricLabel: { fontSize: 13, color: colors.textMuted },

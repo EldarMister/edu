@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet } from 'react-native';
 import { colors } from '@/theme';
 
 /** The native launch screen continues while fonts and the saved session load. */

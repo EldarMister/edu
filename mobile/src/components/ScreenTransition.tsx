@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { View, type ViewStyle, type StyleProp } from 'react-native';
+import { type ViewStyle, type StyleProp } from 'react-native';
 
 /** PWA sections switch in place; only their specific dialogs animate. */
 export function ScreenTransition({ children, style }: {

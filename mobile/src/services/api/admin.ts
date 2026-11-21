@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { applyOrderStatusToCache } from '@/utils/orderCache';
-import type { EmployeePermissions, Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
+import type { EmployeePermissions, FloorPlanTable, Order, OrderStatus, PaymentMethod, PrepStation, ReceiptPrintRequest, Role, TableStatus } from '@/types';
 
 const get = async <T,>(url: string) => (await api.get<T>(url)).data;
 
@@ -12,6 +12,7 @@ function useInvalidate(keys: string[][]) {
 
 // ---------- Статистика (порт PWA features/admin/api useStatistics) ----------
 export type StatsPeriod = 'today' | 'week' | 'month' | 'all' | 'custom';
+type StatisticsRange = { period: StatsPeriod; from?: string; to?: string };
 
 export interface StatsDashboard {
   cards: {
@@ -42,15 +43,39 @@ export interface StatsDashboard {
   range: { from: string | null; to: string | null };
 }
 
-export function useStatistics(params: { period: StatsPeriod; from?: string; to?: string }) {
+function statisticsQuery(params: StatisticsRange) {
   // Query строим вручную (URLSearchParams в RN ненадёжен).
   const parts = [`period=${params.period}`];
-  if (params.from) parts.push(`from=${params.from}`);
-  if (params.to) parts.push(`to=${params.to}`);
-  const query = parts.join('&');
+  if (params.from) parts.push(`from=${encodeURIComponent(params.from)}`);
+  if (params.to) parts.push(`to=${encodeURIComponent(params.to)}`);
+  return parts.join('&');
+}
+
+export function useStatistics(params: StatisticsRange, enabled = true) {
   return useQuery({
     queryKey: ['admin', 'stats', params],
-    queryFn: async () => (await api.get<StatsDashboard>(`/admin/statistics?${query}`)).data,
+    queryFn: () => get<StatsDashboard>(`/admin/statistics?${statisticsQuery(params)}`),
+    enabled,
+  });
+}
+
+export interface StatisticsReports {
+  range: { from: string | null; to: string | null };
+  sales: { date: string; revenue: number; orders: number; avgCheck: number; discount: number; serviceCharge: number }[];
+  payments: { date: string; orders: number; cash: number; card: number; qr: number; other: number; total: number }[];
+  products: {
+    id: string; name: string; categoryId: string; category: string; waiterId: string; waiter: string;
+    quantity: number; gross: number; discount: number; revenue: number; cost: number | null; profit: number | null;
+  }[];
+  categories: { id: string; name: string; quantity: number; revenue: number; cost: number | null; profit: number | null }[];
+  staff: { id: string; name: string; revenue: number; orders: number; avgCheck: number; avgSeconds: number | null; profit: number | null }[];
+}
+
+export function useStatisticsReports(params: StatisticsRange, enabled: boolean) {
+  return useQuery({
+    queryKey: ['admin', 'stats', 'reports', params],
+    queryFn: () => get<StatisticsReports>(`/admin/statistics/reports?${statisticsQuery(params)}`),
+    enabled,
   });
 }
 
@@ -112,6 +137,8 @@ export interface OrdersSummary {
 }
 export interface StaffMember {
   prepStation?: string | null;
+  positionId?: string | null;
+  positionName?: string | null;
   id: string;
   name: string;
   phone: string;
@@ -123,6 +150,7 @@ export interface StaffMember {
 }
 export interface FiscalResult {
   success: boolean;
+  simulated?: boolean;
   fiscalReceiptNumber?: string;
   fiscalSign?: string;
   qrCode?: string;
@@ -188,14 +216,14 @@ export function useStaff(role: string, search: string) {
 // ---------- Персонал: CRUD + отчёт по сменам (порт PWA) ----------
 export interface StaffInput {
   prepStation?: string | null;
+  positionId: string;
   name: string;
   phone: string;
-  role: Role;
   password?: string;
   isActive?: boolean;
 }
 export function useStaffMutations() {
-  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'staff', 'overview']]);
+  const invalidate = useInvalidate([['admin', 'staff'], ['admin', 'positions'], ['admin', 'finance']]);
   const create = useMutation({
     mutationFn: (b: StaffInput) => api.post('/admin/staff', b).then((r) => r.data),
     onSuccess: invalidate,
@@ -461,10 +489,6 @@ export function useReceiptPrintActions() {
   return { approve, printed, reject };
 }
 
-export function useUpdatePermissions() {
-  const invalidate = useInvalidate([['admin', 'staff']]);
-  return useMutation({ mutationFn: ({ id, ...body }: { id: string } & EmployeePermissions) => api.patch<StaffMember>(`/admin/staff/${id}/permissions`, body).then((r) => r.data), onSuccess: invalidate });
-}
 
 export interface WaiterOrdersReportItem {
   id: string; orderId: string; orderedAt: string; servedAt: string; orderNumber: string; tableNumber: number;
@@ -482,6 +506,7 @@ export function useWaiterOrdersReport(waiterId: string, from: string, to: string
 export interface AdminTableItem {
   id: string;
   number: number;
+  name?: string | null;
   seats: number;
   status: TableStatus;
   isActive: boolean;
@@ -493,6 +518,9 @@ export interface AdminHall {
   name: string;
   isActive: boolean;
   sortOrder: number;
+  useFloorPlan?: boolean | null;
+  floorPlan?: FloorPlanTable[] | null;
+  floorPlanVersion?: number;
   tables: AdminTableItem[];
 }
 
@@ -510,14 +538,35 @@ export function useAdminHalls() {
   return useQuery({ queryKey: ['admin', 'halls'], queryFn: () => get<AdminHall[]>('/admin/halls') });
 }
 
+export function useFloorPlanMutations() {
+  const queryClient = useQueryClient();
+  const save = useMutation({
+    mutationFn: async ({ id, ...body }: { id: string; version: number; tables: FloorPlanTable[] }) =>
+      (await api.put<{ floorPlan: FloorPlanTable[]; floorPlanVersion: number }>(`/admin/halls/${id}/floor-plan`, body)).data,
+    onSuccess: async (result, { id }) => {
+      queryClient.setQueryData<AdminHall[]>(['admin', 'halls'], (halls) =>
+        halls?.map((hall) => hall.id === id ? { ...hall, ...result } : hall));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin', 'halls'] }),
+        queryClient.invalidateQueries({ queryKey: ['halls'] }),
+      ]);
+    },
+  });
+  const setMode = useMutation({
+    mutationFn: (useFloorPlan: boolean) => api.put('/admin/tables/floor-plan-mode', { useFloorPlan }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['settings'] }),
+  });
+  return { save, setMode };
+}
+
 export function useHallMutations() {
-  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
+  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview'], ['halls']]);
   const create = useMutation({
-    mutationFn: (b: { name: string }) => api.post('/admin/halls', b).then((r) => r.data),
+    mutationFn: (b: { name: string; useFloorPlan?: boolean | null }) => api.post('/admin/halls', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean }) =>
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; useFloorPlan?: boolean | null }) =>
       api.patch(`/admin/halls/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
@@ -529,14 +578,14 @@ export function useHallMutations() {
 }
 
 export function useTableMutations() {
-  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview']]);
+  const invalidate = useInvalidate([['admin', 'halls'], ['admin', 'tables', 'overview'], ['halls']]);
   const create = useMutation({
-    mutationFn: (b: { hallId: string; number?: number; seats: number }) =>
+    mutationFn: (b: { hallId: string; number?: number; name?: string | null; seats: number }) =>
       api.post('/admin/tables', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; number?: number; seats?: number; isActive?: boolean }) =>
+    mutationFn: ({ id, ...b }: { id: string; hallId?: string; number?: number; name?: string | null; seats?: number; isActive?: boolean }) =>
       api.patch(`/admin/tables/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
@@ -554,6 +603,7 @@ export interface AdminCategory {
   sortOrder: number;
   isActive: boolean;
   prepStation: PrepStation;
+  taxId?: string | null;
   _count: { dishes: number };
 }
 export interface AdminDishVariant {
@@ -564,6 +614,7 @@ export interface AdminDishVariant {
   stock?: number;
   initialStock?: number;
   unit?: string;
+  stockIngredientId?: string | null;
 }
 export interface AdminSetComponent {
   id: string;
@@ -576,11 +627,17 @@ export interface AdminSetComponent {
 }
 export interface AdminDish {
   id: string;
+  catalogKind?: 'goods' | 'recipe';
+  recipeVersion?: number;
+  hasDirectStock?: boolean;
+  stockIngredientId?: string | null;
   name: string;
   description: string | null;
   price: string;
   categoryId: string;
-  category: { id: string; name: string };
+  category: { id: string; name: string; taxId?: string | null };
+  taxId?: string | null;
+  taxExempt?: boolean;
   discountType: 'none' | 'percent' | 'fixed';
   discountValue: string;
   isAvailable: boolean;
@@ -600,7 +657,14 @@ export interface AdminDish {
   variants: AdminDishVariant[];
   imageUrl?: string | null;
 }
+export interface AdminGood extends AdminDish {
+  goodsStation: PrepStation;
+  goodsUnits: string[];
+  goodsPrice: number;
+}
 export interface DishInput {
+  taxId?: string | null;
+  taxExempt?: boolean;
   name: string;
   categoryId: string;
   price?: number;
@@ -629,6 +693,8 @@ export interface SetComponentInput {
   replaceable?: boolean;
 }
 export interface SetInput {
+  taxId?: string | null;
+  taxExempt?: boolean;
   name: string;
   price: number;
   prepStation?: PrepStation | null;
@@ -637,7 +703,7 @@ export interface SetInput {
 
 export function useMenuOverview() {
   return useQuery({
-    queryKey: ['admin', 'menu', 'overview'],
+    queryKey: ['admin', 'menu'],
     queryFn: () =>
       get<{ dishesCount: number; categoriesCount: number; activeDishesCount: number; avgPrice: number }>(
         '/admin/menu/overview',
@@ -645,26 +711,31 @@ export function useMenuOverview() {
   });
 }
 export function useAdminCategories(enabled = true) {
-  return useQuery({ queryKey: ['admin', 'categories'], queryFn: () => get<AdminCategory[]>('/admin/categories'), enabled });
+  return useQuery({ queryKey: ['admin', 'categories'], queryFn: () => get<AdminCategory[]>('/admin/categories'), enabled, gcTime: Infinity });
 }
-export function useAdminDishes(categoryId: string, search: string) {
+export function useAdminDishes(categoryId: string, search: string, enabled = true) {
   const parts: string[] = [];
   if (categoryId) parts.push(`categoryId=${categoryId}`);
   if (search) parts.push(`search=${encodeURIComponent(search)}`);
   const q = parts.join('&');
   return useQuery({
     queryKey: ['admin', 'dishes', categoryId, search],
+    enabled,
+    gcTime: !categoryId && !search ? Infinity : undefined,
     queryFn: () => get<AdminDish[]>(`/admin/dishes${q ? `?${q}` : ''}`),
   });
 }
+export function useAdminGoods(enabled: boolean) {
+  return useQuery({ queryKey: ['admin', 'menu', 'goods'], queryFn: () => get<AdminGood[]>('/admin/menu/goods'), enabled, gcTime: Infinity });
+}
 export function useCategoryMutations() {
-  const invalidate = useInvalidate([['categories'], ['dishes'], ['admin', 'categories'], ['admin', 'menu', 'overview'], ['admin', 'dishes']]);
+  const invalidate = useInvalidate([['categories'], ['dishes'], ['admin', 'categories'], ['admin', 'menu'], ['admin', 'dishes']]);
   const create = useMutation({
-    mutationFn: (b: { name: string; prepStation?: PrepStation }) => api.post('/admin/categories', b).then((r) => r.data),
+    mutationFn: (b: { name: string; prepStation?: PrepStation; taxId?: string | null }) => api.post('/admin/categories', b).then((r) => r.data),
     onSuccess: invalidate,
   });
   const update = useMutation({
-    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number }) =>
+    mutationFn: ({ id, ...b }: { id: string; name?: string; isActive?: boolean; prepStation?: PrepStation; sortOrder?: number; position?: number; taxId?: string | null }) =>
       api.patch(`/admin/categories/${id}`, b).then((r) => r.data),
     onSuccess: invalidate,
   });
@@ -680,7 +751,7 @@ export function useCategoryMutations() {
   return { create, update, remove, reorder };
 }
 export function useDishMutations() {
-  const invalidate = useInvalidate([['dishes'], ['categories'], ['admin', 'dishes'], ['admin', 'sets'], ['admin', 'menu', 'overview'], ['admin', 'warehouse']]);
+  const invalidate = useInvalidate([['dishes'], ['categories'], ['admin', 'dishes'], ['admin', 'sets'], ['admin', 'menu'], ['admin', 'warehouse']]);
   const create = useMutation({
     mutationFn: (b: DishInput) => api.post('/admin/dishes', b).then((r) => r.data),
     onSuccess: invalidate,
@@ -699,7 +770,7 @@ export function useAdminSets() {
   return useQuery({ queryKey: ['admin', 'sets'], queryFn: () => get<AdminDish[]>('/admin/sets') });
 }
 export function useSetMutations() {
-  const invalidate = useInvalidate([['dishes'], ['categories'], ['admin', 'sets'], ['admin', 'dishes'], ['admin', 'menu', 'overview'], ['admin', 'categories']]);
+  const invalidate = useInvalidate([['dishes'], ['categories'], ['admin', 'sets'], ['admin', 'dishes'], ['admin', 'menu'], ['admin', 'categories']]);
   const create = useMutation({
     mutationFn: (b: SetInput) => api.post('/admin/sets', b).then((r) => r.data),
     onSuccess: invalidate,

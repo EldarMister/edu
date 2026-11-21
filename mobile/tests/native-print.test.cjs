@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const React = require('react');
+const { nativeThemeModules } = require('./helpers/native-theme.cjs');
 
 function load(file, modules, globals = {}) {
   const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), {
@@ -169,11 +170,13 @@ test('actual receipt printing subscribes before the Expo module and waits for re
       env.emit('background');
     } },
     'expo-file-system': {}, 'expo-sharing': {}, qrcode: {},
-    '@/utils/format': { displayOrderNumber: String, money: String, orderItemDisplayName: String, paymentMethodLabel: String },
+    '@/lib/i18n': { translate: String },
+    '@/lib/receipt': load('src/lib/receipt.ts', { '@/lib/i18n': { translate: String } }),
+    '@/utils/format': { displayOrderNumber: String, money: String, orderItemDisplayName: String, paymentMethodLabel: String, timeHM: String },
     './nativePrintLifecycle': env,
   });
   let finished = false;
-  const printing = printNativeReceipt({ items: [], date: '2026-10-10', orderNumber: '102', finalAmount: 420 })
+  const printing = printNativeReceipt({ items: [], date: '2026-10-10', cafeName: '', orderNumber: '102', finalAmount: 420 })
     .then(() => { finished = true; });
   await tick();
   assert.equal(finished, false);
@@ -192,9 +195,10 @@ function receiptScreen(printNativeReceipt) {
     useRef: initial => ({ current: initial }),
     useEffect: effect => { const cleanup = effect(); if (cleanup) calls.cleanups.push(cleanup); },
   };
+  const native = { Platform: { OS: 'android' }, ActivityIndicator: 'ActivityIndicator', RefreshControl: 'RefreshControl', ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: value => value } };
   const { ReceiptPrintsScreen } = load('src/screens/admin/ReceiptPrintsScreen.tsx', {
     react: hooks,
-    'react-native': { Platform: { OS: 'android' }, ActivityIndicator: 'ActivityIndicator', RefreshControl: 'RefreshControl', ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: value => value } },
+    'react-native': native,
     '@/components/typography': { Text: 'Text', Alert: { alert: (title, message, buttons, options) => calls.alerts.push({ title, message, buttons, options }) } },
     '@/components/ui': { Button: 'Button', Card: 'Card' },
     '@/components/FastPressable': { FastPressable: 'FastPressable' },
@@ -211,9 +215,12 @@ function receiptScreen(printNativeReceipt) {
     },
     '@/services/api/settings': { usePublicSettings: () => ({ data: { fiscalEnabled: false } }) },
     '@/utils/format': { displayOrderNumber: String, money: String, timeHM: String },
-    '@/theme': load('src/theme/index.ts', {}),
+    ...nativeThemeModules(native),
     './OrderDetailsModal': { OrderDetailsModal: 'OrderDetailsModal' },
-    './print': { printNativeReceipt },
+    '@/screens/waiter/useReceiptPrinter': { useReceiptPrinter: () => (_orderId, options) => printNativeReceipt({ finalAmount: 420 }, options.preliminary, null, options.signal) },
+    '@/hooks/usePermissions': { usePermissions: () => ({ canAction: () => true, canEditSection: () => true, canSection: () => true }) },
+    '@tanstack/react-query': { useQueryClient: () => ({ invalidateQueries: () => {} }) },
+    '@/services/socket': { useSocketEvent: () => {} },
   });
   let button;
   const find = node => {

@@ -38,6 +38,7 @@ function authHarness() {
     } },
     'zustand/middleware': { persist: initializer => initializer, createJSONStorage: () => ({}) },
     'expo-secure-store': {},
+    '@/lib/workspaces': { homeWorkspace: () => 'terminal', activeWorkspace: () => 'terminal' },
     '@/lib/queryClient': { queryClient: { clear: noop } },
     './cart': { useCart: { getState: () => ({ resetAll: noop }) } },
     './replacement': { useReplacement: { getState: () => ({ clear: noop }) } },

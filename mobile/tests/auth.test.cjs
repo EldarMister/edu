@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
+const { AxiosHeaders } = require('axios');
 
 function setup() {
   let request, failure;
@@ -18,7 +19,7 @@ function setup() {
   const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/lib/api.ts'), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true } }).outputText;
   const module = { exports: {} };
   vm.runInNewContext(output, { module, exports: module.exports, require: name => ({ axios, '@/store/auth': { useAuth: { getState: () => state } }, '@/config/env': { API_URL: 'https://test.invalid', API_BASE: 'https://test.invalid/api' } })[name] });
-  return { state, request: () => request({ headers: {} }), failure: config => failure({ response: { status: 401 }, config }), resolveRefresh, rejectRefresh, retried, refreshCalls: () => refreshCalls };
+  return { state, request: () => request({ headers: new AxiosHeaders() }), failure: config => failure({ response: { status: 401 }, config }), resolveRefresh, rejectRefresh, retried, refreshCalls: () => refreshCalls };
 }
 test('concurrent expired requests share one refresh and retry with renewed token', async () => {
   const env = setup();
@@ -78,3 +79,14 @@ for (const status of [401, 403]) {
     assert.equal(env.state.refreshToken, null);
   });
 }
+
+test('authenticated requests use the current workspace and skip retries after switching workspaces', async () => {
+  const env = setup();
+  env.state.workspace = 'terminal';
+  const original = env.request();
+  assert.equal(original.headers.get('X-EDU-Workspace'), 'terminal');
+  env.state.workspace = 'admin';
+  await assert.rejects(env.failure(original));
+  assert.equal(env.refreshCalls(), 0);
+  assert.equal(env.request().headers.get('X-EDU-Workspace'), 'admin');
+});

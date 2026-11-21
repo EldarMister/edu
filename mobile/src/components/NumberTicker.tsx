@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { Animated, Easing, Platform, StyleSheet, View, type TextStyle } from 'react-native';
+import { Animated, Easing, Platform, StyleSheet, type TextStyle } from 'react-native';
 import { Text } from '@/components/typography';
 import { useReducedMotion } from 'react-native-reanimated';
 import { money } from '@/utils/format';

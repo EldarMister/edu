@@ -113,7 +113,25 @@ async function main() {
   assert.equal(routed.hasPrep, true);
   assert.equal(routed.multipleOrCustom, true);
   assert.equal(cartStations([{ dish: { categoryId: 'grill', prepStation: 'none' } }], [{ id: 'grill', prepStation: customStation }]).hasPrep, false);
-  console.log('Order contracts passed: waiter policy matrix, receipt statuses, delivery identity, batch actions and custom station routing.');
+  const warehouseDocuments = load('src/services/api/stockDocuments.ts', {
+    '@tanstack/react-query': { useMutation: (options) => options, useQueryClient: () => queryClient, useQuery: (options) => options },
+    '@/lib/api': { api: { post: ok, get: ok, patch: ok } },
+  });
+  await warehouseDocuments.useStockDocuments('inventory', 'main-warehouse').queryFn();
+  const documents = warehouseDocuments.useStockDocumentMutations();
+  const inventory = { warehouseId: 'main-warehouse', kind: 'inventory', mode: 'full' };
+  await documents.create.mutationFn(inventory);
+  await documents.save.mutationFn({ id: 'count/one', revision: 1, items: [{ ingredientId: 'rice', quantity: 0 }] });
+  for (const action of ['submit', 'reopen', 'approve']) {
+    await documents.transition.mutationFn({ id: 'count/one', revision: 2, action });
+  }
+  assert.deepEqual(calls.slice(5), [
+    { url: '/admin/warehouse/documents', body: { params: { kind: 'inventory', warehouseId: 'main-warehouse' } } },
+    { url: '/admin/warehouse/documents', body: inventory },
+    { url: '/admin/warehouse/documents/count%2Fone', body: { revision: 1, items: [{ ingredientId: 'rice', quantity: 0 }] } },
+    ...['submit', 'reopen', 'approve'].map((action) => ({ url: `/admin/warehouse/documents/count%2Fone/${action}`, body: { revision: 2 } })),
+  ]);
+  console.log('Order contracts passed: waiter policy matrix, receipt statuses, delivery identity, batch actions, custom station routing, warehouse document requests.');
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

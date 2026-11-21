@@ -1,5 +1,7 @@
+import { RefreshControl, View, SafeAreaView } from '@/components/themed';
 import React, { useMemo, useState } from 'react';
-import { RefreshControl, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
+import type { ViewStyle } from 'react-native';
 import { Text } from '@/components/typography';
 import Animated, {
   interpolate,
@@ -8,14 +10,14 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { useNavigation } from '@react-navigation/native';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Loading, PillTabs } from '@/components/ui';
 import { popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
-import { colors, fontSize, radius, softShadow, spacing, waiterLayout } from '@/theme';
+import { colors, fontSize, radius, softShadow, spacing, waiterLayout, useThemedStyle } from '@/theme';
 import { TABLE_STATUS } from '@/theme/status';
 import { useAuth } from '@/store/auth';
 import {
@@ -31,16 +33,21 @@ import { useCart } from '@/store/cart';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 import { tableGridLayout } from '@/lib/layout';
+import { FloorPlanCanvas } from '@/components/FloorPlanCanvas';
+import { usePublicSettings } from '@/services/api/settings';
+import { layoutFloorTables, tableLabel } from '@/utils/floorPlan';
 import type { TableStatus, TableItem, Order } from '@/types';
 
 const LEGEND: TableStatus[] = ['free', 'occupied', 'accepted', 'ready', 'waiting_payment'];
 type TableModal = 'close' | 'move' | 'transfer' | null;
 
 export function TablesScreen() {
+  const actionSurface = useThemedStyle(styles.tableActionsMenu);
   const navigation = useNavigation<any>();
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
   const halls = useHalls();
+  const settings = usePublicSettings();
   const ordersQ = useActiveOrders();
   const selectTable = useCart((s) => s.selectTable);
   const selectedTableId = useCart((s) => s.tableId);
@@ -91,7 +98,12 @@ export function TablesScreen() {
     }
   }, [currentHall?.name, navigation, ordersByTable, push, selectTable, user?.id]);
 
-  const tables = currentHall?.tables ?? [];
+  const tables = useMemo(() => currentHall?.tables ?? [], [currentHall?.tables]);
+  const showFloorPlan = currentHall?.useFloorPlan ?? settings.data?.useFloorPlan ?? false;
+  const placements = useMemo(() => showFloorPlan ? layoutFloorTables(tables, currentHall?.floorPlan) : [],
+    [currentHall?.floorPlan, showFloorPlan, tables]);
+  const tablesById = useMemo(() => new Map(tables.map((table) => [table.id, table])), [tables]);
+  const showMap = showFloorPlan && placements.length === tables.length && placements.length > 0;
   const tableLayout = useMemo(
     () => tableGridLayout(tables.length, gridSize.width || 340, gridSize.height || 420, spacing.md),
     [gridSize.height, gridSize.width, tables.length],
@@ -187,15 +199,17 @@ export function TablesScreen() {
     );
   };
 
-  const renderTable = React.useCallback((tbl: TableItem) => {
+  const renderTable = React.useCallback((tbl: TableItem, placement?: ViewStyle, customLabel?: string) => {
     const meta = TABLE_STATUS[tbl.status];
     const selected = tbl.id === selectedTableId;
     return (
       <FastPressable
         onPress={() => onTablePress(tbl)}
+        accessibilityLabel={customLabel || tableLabel(tbl)}
+        accessibilityState={{ selected }}
         style={[
           styles.table,
-          { width: tableLayout.side, height: tableLayout.side },
+          placement ?? { width: tableLayout.side, height: tableLayout.side },
           selected ? styles.tableSelected : null,
         ]}
       >
@@ -203,7 +217,8 @@ export function TablesScreen() {
           <View
             style={[
               styles.dot,
-              tableLayout.side >= 150 && styles.dotRoomy,
+              !placement && tableLayout.side >= 150 && styles.dotRoomy,
+              placement && styles.mapDot,
               { backgroundColor: meta.dot },
             ]}
           />
@@ -211,11 +226,12 @@ export function TablesScreen() {
         <Text
           style={[
             styles.tableNumber,
-            { fontSize: tableFontSize },
+            { fontSize: placement ? 16 : tableFontSize },
             selected && { color: colors.white },
           ]}
+          numberOfLines={2}
         >
-          {tbl.number}
+          {customLabel || tbl.name || tbl.number}
         </Text>
       </FastPressable>
     );
@@ -265,7 +281,10 @@ export function TablesScreen() {
               }
               contentContainerStyle={styles.grid}
             >
-              <View style={[styles.tableGrid, { width: tableLayout.gridWidth, gap: tableLayout.gap }]}>
+              {showMap ? <FloorPlanCanvas placements={placements} fit renderTable={(placement, style) => {
+                const table = tablesById.get(placement.tableId);
+                return table ? <React.Fragment key={table.id}>{renderTable(table, style, placement.label?.trim())}</React.Fragment> : null;
+              }} /> : <View style={[styles.tableGrid, { width: tableLayout.gridWidth, gap: tableLayout.gap }]}>
                 {Array.from({ length: Math.ceil(tables.length / tableLayout.columns) }, (_, rowIndex) => {
                   const start = rowIndex * tableLayout.columns;
                   const row = tables.slice(start, start + tableLayout.columns);
@@ -275,7 +294,7 @@ export function TablesScreen() {
                     </View>
                   );
                 })}
-              </View>
+              </View>}
             </SheetScrollView>
           )}
         </View>
@@ -301,7 +320,7 @@ export function TablesScreen() {
           <FastPressable style={StyleSheet.absoluteFill} onPress={() => setActionsOpen(false)} />
           <Animated.View
             style={[
-              styles.tableActionsMenu,
+              actionSurface,
               actionsMenuStyle,
             ]}
           >
@@ -451,7 +470,7 @@ function MoveTableSheet({
                     onPress={() => setTarget(tbl.id)}
                     style={[styles.pickTable, { width: tableWidth }, target === tbl.id && styles.pickTableSelected]}
                   >
-                    <Text style={[styles.pickTableText, target === tbl.id && styles.pickTableTextSelected]}>{tbl.number}</Text>
+                    <Text style={[styles.pickTableText, target === tbl.id && styles.pickTableTextSelected]}>{tbl.name || tbl.number}</Text>
                   </FastPressable>
                 ))}
               </View>
@@ -581,7 +600,8 @@ const styles = StyleSheet.create({
   tableSelected: { backgroundColor: 'rgba(0,91,255,0.90)', borderColor: 'rgba(0,91,255,0.90)' },
   dot: { position: 'absolute', right: 8, top: 8, width: 10, height: 10, borderRadius: 5 },
   dotRoomy: { right: 16, top: 16, width: 16, height: 16, borderRadius: 8 },
-  tableNumber: { fontWeight: '500', color: colors.textPrimary },
+  mapDot: { right: 5, top: 5, width: 7, height: 7 },
+  tableNumber: { fontWeight: '500', color: colors.textPrimary, textAlign: 'center', paddingHorizontal: 4 },
 
   legend: {
     marginTop: spacing.sm,

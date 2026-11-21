@@ -1,15 +1,16 @@
+import { ActivityIndicator, View, SafeAreaView } from '@/components/themed';
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View, useWindowDimensions, type ScrollView } from 'react-native';
+import { StyleSheet, useWindowDimensions, type ScrollView } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { Text, TextInput } from '@/components/typography';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { FastPressable } from '@/components/FastPressable';
 import { FullscreenSheet } from '@/components/FullscreenSheet';
 import { SheetScrollView } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { DateField } from '@/components/DateField';
 import { sheetTiming } from '@/components/motion';
-import { colors, fontSize, radius, spacing } from '@/theme';
+import { colors, fontSize, radius, spacing, useThemedStyle } from '@/theme';
 import { money } from '@/utils/format';
 import {
   useKitchenStats,
@@ -229,8 +230,9 @@ export function KitchenStatsSheet({
 function StatsSurface({ inline, visible, onClose, children }: {
   inline: boolean; visible: boolean; onClose: () => void; children: React.ReactNode;
 }) {
+  const surface = useThemedStyle(styles.screen);
   return inline
-    ? <Animated.View entering={statsEnter} style={styles.screen}>{children}</Animated.View>
+    ? <Animated.View entering={statsEnter} style={surface}>{children}</Animated.View>
     : <FullscreenSheet visible={visible} onClose={onClose} style={styles.screen}>{children}</FullscreenSheet>;
 }
 

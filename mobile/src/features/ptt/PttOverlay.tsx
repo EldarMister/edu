@@ -1,6 +1,7 @@
+import { ScrollView, View } from '@/components/themed';
 import React from 'react';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { Image, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Animated, {
@@ -20,6 +21,7 @@ import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, softShadow, spacing, waiterLayout } from '@/theme';
 import { getSocket, useConnectionStatus } from '@/services/socket';
 import { useAuth } from '@/store/auth';
+import { workspaceRole } from '@/lib/workspaces';
 import {
   startPttBackgroundRuntime,
   stopPttBackgroundRuntime,
@@ -307,15 +309,21 @@ function RadioStatusText({
 export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   const insets = useSafeAreaInsets();
   const user = useAuth((s) => s.user);
+  const workspace = useAuth((s) => s.workspace);
   const connected = useConnectionStatus();
-  const isWaiter = user?.role === 'WAITER';
+  const role = user && workspace ? workspaceRole(user, workspace) : user?.role;
+  const isWaiter = role === 'WAITER';
   const [open, setOpen] = React.useState(false);
-  const closeRadio = React.useCallback(() => setOpen(false), []);
-  const [channel, setChannel] = React.useState<PttChannel>(() => defaultChannelForRole(user?.role));
+  const [channel, setChannel] = React.useState<PttChannel>(() => defaultChannelForRole(role));
   const [onlineCount, setOnlineCount] = React.useState(0);
   const [busySpeaker, setBusySpeaker] = React.useState<{ id: string; name?: string } | null>(null);
-  const sender = useAudioPttSender(channel, true);
-  const { speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
+  const sender = useAudioPttSender(channel, !!user?.id, workspace);
+  const { speaker: playingSpeaker } = useAudioPttReceiver(channel, !!user?.id);
+  const stopRadio = sender.stop;
+  const closeRadio = React.useCallback(() => {
+    stopRadio();
+    setOpen(false);
+  }, [stopRadio]);
 
   // Кнопка рации у официанта — только на «Столах», списке «Заказов» и «Профиле».
   // Прячем на «Меню», подробном заказе и в личном кабинете.
@@ -376,12 +384,12 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
     let cancelled = false;
     void AsyncStorage.getItem(PTT_CHANNEL_STORAGE_KEY).catch(() => null).then((stored) => {
       if (cancelled) return;
-      setChannel(isPttChannel(stored) ? stored : defaultChannelForRole(user?.role));
+      setChannel(isPttChannel(stored) ? stored : defaultChannelForRole(role));
     });
     return () => {
       cancelled = true;
     };
-  }, [user?.role]);
+  }, [role]);
 
   React.useEffect(() => {
     if (!user?.id) return undefined;
@@ -421,13 +429,19 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
     const onFree = (payload: PttFreePayload) => {
       if (payload.channel === channel || payload.channel === 'general') setBusySpeaker(null);
     };
+    const onDisconnect = () => {
+      setBusySpeaker(null);
+      setOnlineCount(0);
+    };
     sock.on(PTT_EVENTS.PRESENCE, onPresence);
     sock.on(PTT_EVENTS.CHANNEL_BUSY, onBusy);
     sock.on(PTT_EVENTS.CHANNEL_FREE, onFree);
+    sock.on('disconnect', onDisconnect);
     return () => {
       sock.off(PTT_EVENTS.PRESENCE, onPresence);
       sock.off(PTT_EVENTS.CHANNEL_BUSY, onBusy);
       sock.off(PTT_EVENTS.CHANNEL_FREE, onFree);
+      sock.off('disconnect', onDisconnect);
     };
   }, [channel]);
 
@@ -439,10 +453,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
     updatePttBackgroundChannel(next);
   };
 
-  // «Занято» = кто-то держит кнопку (channel_busy) ИЛИ у нас сейчас играет
-  // входящий файл (playingSpeaker). Второе продлевает блокировку на всё
-  // воспроизведение — иначе после отпускания канал выглядел бы свободным,
-  // пока длинное сообщение ещё звучит.
+  // Keep the radio busy until the buffered audio finishes playing.
   const receivingFromOther =
     !sender.talking && (!!playingSpeaker || (!!busySpeaker && busySpeaker.id !== user?.id));
   const speakerName =

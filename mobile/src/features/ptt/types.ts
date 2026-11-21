@@ -21,6 +21,7 @@ export type PttAudioPayload = {
 
 export type PttDeniedPayload = {
   channel?: PttChannel;
+  talkId?: string;
   reason: string;
   speakerId?: string;
 };
@@ -32,6 +33,8 @@ export type PttPresencePayload = {
 
 export type PttBusyPayload = {
   channel: PttChannel;
+  talkId?: string;
+  codec?: 'opus';
   speaker?: { id: string; role: string; name?: string };
   startedAt?: string;
 };
@@ -40,8 +43,14 @@ export type RadioState = 'ready' | 'speakingSelf' | 'speakingOther' | 'error';
 
 export type PttFreePayload = {
   channel: PttChannel;
+  talkId?: string;
   speakerId?: string;
   freedAt?: string;
+};
+
+export type PttFramePayload = Omit<PttAudioPayload, 'chunk' | 'mimeType'> & {
+  talkId: string;
+  audio: unknown;
 };
 
 export const PTT_EVENTS = {
@@ -51,6 +60,8 @@ export const PTT_EVENTS = {
   CHANNEL_BUSY: 'ptt_channel_busy',
   CHANNEL_FREE: 'ptt_channel_free',
   AUDIO_MESSAGE: 'ptt_audio_message',
+  AUDIO_PACKET: 'ptt_audio_packet',
+  AUDIO_FRAME: 'ptt_audio_frame',
   TALK_DENIED: 'ptt_talk_denied',
   PRESENCE: 'ptt_presence',
 } as const;

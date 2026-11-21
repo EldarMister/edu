@@ -9,16 +9,20 @@ import { queryClient } from '@/lib/queryClient';
 import { RootNavigator } from '@/navigation/RootNavigator';
 import { IntroSplash } from '@/components/IntroSplash';
 import { useAuth } from '@/store/auth';
-import { colors } from '@/theme';
+import { useThemeColors } from '@/theme';
+import { useTheme } from '@/store/theme';
 
 export default function App() {
   const hydrated = useAuth((state) => state.hydrated);
+  const themeHydrated = useTheme((state) => state.hydrated);
+  const theme = useTheme((state) => state.theme);
+  const palette = useThemeColors();
   const [fontsLoaded, fontError] = useFonts({ Inter: require('./assets/fonts/Inter-Regular.ttf'), 'Inter-Medium': require('./assets/fonts/Inter-Medium.ttf'), 'Inter-SemiBold': require('./assets/fonts/Inter-SemiBold.ttf'), 'Inter-Bold': require('@expo-google-fonts/inter/Inter_700Bold.ttf') });
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1, backgroundColor: palette.background }}>
       <SafeAreaProvider>
-        <StatusBar barStyle="dark-content" backgroundColor={colors.white} translucent={false} />
-        {!hydrated || (!fontsLoaded && !fontError) ? (
+        <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} backgroundColor={palette.background} translucent={false} />
+        {!hydrated || !themeHydrated || (!fontsLoaded && !fontError) ? (
           <IntroSplash />
         ) : (
           <QueryClientProvider client={queryClient}>

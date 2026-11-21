@@ -16,6 +16,7 @@ export interface PrepStationEntry {
 
 export type SectionKey =
   | 'statistics'
+  | 'finance'
   | 'orders'
   | 'tables'
   | 'menu'
@@ -31,15 +32,37 @@ export type ActionKey =
   | 'refundChecks'
   | 'exportReports'
   | 'closeShift'
+  | 'financeCashShifts'
+  | 'acceptOrderPayments'
+  | 'printReceipts'
+  | 'requestReceiptPrints'
+  | 'createDeliveryOrders'
   | 'manageStaff'
-  | 'editPermissions';
+  | 'editPermissions'
+  | 'warehouseReceive'
+  | 'warehouseTransfer'
+  | 'warehouseWriteoff'
+  | 'warehouseCount'
+  | 'warehouseApprove'
+  | 'warehouseRecipes'
+  | 'warehouseProduce'
+  | 'warehouseCosts'
+  | 'warehouseReports'
+  | 'warehouseSettings';
 
 export interface EmployeePermissions {
+  terminalAccess?: boolean;
+  adminAccess?: boolean;
+  workShiftRequired?: boolean;
+  readOnlySections?: SectionKey[];
   sections: Record<SectionKey, boolean>;
   actions: Record<ActionKey, boolean>;
 }
 
 export interface AuthUser {
+  access?: { terminal: boolean; admin: boolean; production: 'kitchen' | 'bar' | null };
+  positionId?: string | null;
+  positionName?: string | null;
   prepStation?: string | null;
   id: string;
   cafeId?: string | null;
@@ -70,15 +93,28 @@ export type TableStatus =
 export interface TableItem {
   id: string;
   number: number;
+  name?: string | null;
   seats: number;
   status: TableStatus;
   hallId: string;
   occupiedBy?: { id: string; name: string } | null;
 }
 
+export interface FloorPlanTable {
+  tableId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  shape: 'rectangle' | 'round';
+  label?: string;
+}
+
 export interface Hall {
   id: string;
   name: string;
+  useFloorPlan?: boolean | null;
+  floorPlan?: FloorPlanTable[] | null;
   tables: TableItem[];
 }
 
@@ -178,6 +214,7 @@ export type OrderItemStatus =
 export type ReceiptPrintType = 'receipt' | 'preliminary';
 
 export type PaymentMethod = 'qr' | 'cash' | 'card' | 'mixed';
+export type PaymentStatus = 'pending' | 'paid' | 'refunded' | 'cancelled';
 export type PaymentSource = 'normal' | 'split';
 export type RejectionDecision = 'pending' | 'removed' | 'replaced';
 
@@ -209,6 +246,7 @@ export interface OrderItem {
   quantity: number;
   discountAmount: string;
   finalPrice: string;
+  refundedQuantity?: number;
   status: OrderItemStatus;
   prepStation: PrepStation;
   comment: string | null;
@@ -227,8 +265,11 @@ export interface Order {
   totalAmount: string;
   discountAmount: string;
   serviceChargeAmount: string;
+  roundOrderTotal?: boolean;
   finalAmount: string;
   paymentMethod: PaymentMethod | null;
+  paymentStatus?: PaymentStatus;
+  refundedAmount?: string;
   comment: string | null;
   requiresWaiterDecision: boolean;
   createdAt: string;
@@ -257,7 +298,32 @@ export interface Order {
   fiscalizedAt?: string | null;
 }
 
-export interface Receipt {
+export type ReceiptLanguage = 'ru' | 'ky';
+
+export interface ReceiptPrintSettings {
+  receiptLanguage: ReceiptLanguage;
+  receiptPrintCafeName: boolean;
+  receiptPrintAddress: boolean;
+  receiptPrintPhone: boolean;
+}
+
+export type MenuTaxType = 'vat' | 'turnover';
+export interface MenuTax {
+  id: string;
+  name: string;
+  rate: string;
+  type: MenuTaxType;
+}
+export interface ReceiptTax extends MenuTax {
+  amount: string;
+}
+
+export interface Receipt extends Partial<ReceiptPrintSettings> {
+  receiptLogoData?: string | null;
+  source?: string;
+  roundingAmount?: string;
+  taxTotal?: string;
+  taxes?: ReceiptTax[];
   cafeName: string;
   address?: string | null;
   phone?: string | null;

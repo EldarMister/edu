@@ -1,5 +1,7 @@
+import { AdminLoadingSkeleton } from './AdminLoadingSkeleton';
+import { ActivityIndicator, ScrollView, View } from '@/components/themed';
 import React, { useState } from 'react';
-import { ActivityIndicator, NativeScrollEvent, NativeSyntheticEvent, ScrollView, StyleSheet, View } from 'react-native';
+import { NativeScrollEvent, NativeSyntheticEvent, StyleSheet } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Select } from '@/components/Select';
@@ -10,6 +12,9 @@ import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { DateField } from '@/components/DateField';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
+import { RefundQueueButton } from '@/features/refunds/OrderRefunds';
+import { useCanManageOrderRefunds } from '@/features/refunds/api';
 import { useNotifications } from '@/store/notifications';
 import { displayOrderNumber, hallSuffix, money, paymentCell, timeHM } from '@/utils/format';
 import {
@@ -114,6 +119,9 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
   const [manualReason, setManualReason] = useState('');
 
   const push = useNotifications((s) => s.push);
+  const { canEditSection } = usePermissions();
+  const canEditOrders = canEditSection('orders');
+  const canManageRefunds = useCanManageOrderRefunds();
   const cancelOrder = useCancelOrder();
   const updateStatus = useUpdateOrderStatus();
 
@@ -144,7 +152,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
 
   const openStatusEditor = (order: Order) => {
     setStatusTarget(order);
-    setManualStatus(order.status === 'paid' || order.status === 'rejected' ? 'waiting_payment' : order.status);
+    setManualStatus(order.status === 'rejected' ? 'waiting_payment' : order.status);
     setManualReason('');
   };
 
@@ -194,6 +202,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
 
         {/* Фильтры */}
         <View style={styles.filters}>
+          {canManageRefunds ? <RefundQueueButton /> : null}
           <Select style={styles.filterControl} value={tab} onChange={setTab} options={STATUS_OPTIONS} title="Статус" />
           <Select style={styles.filterControl} value={paymentMethod} onChange={setPaymentMethod} options={PAYMENT_OPTIONS} title="Способ оплаты" />
           <Select style={styles.filterControl} value={waiterId} onChange={setWaiterId} options={waiterOptions} title="Официант" />
@@ -212,9 +221,7 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
         {/* Таблица заказов */}
         <View style={styles.tableCard}>
           {ordersQ.isLoading ? (
-            <View style={styles.center}>
-              <ActivityIndicator size="large" color={colors.primary} />
-            </View>
+            <AdminLoadingSkeleton />
           ) : ordersError ? (
             <View style={styles.center}>
               <Text style={styles.errTitle} translate>Не удалось загрузить заказы</Text>
@@ -244,8 +251,8 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
                     key={ord.id}
                     order={ord}
                     onOpen={() => { setDetailsOrder(ord); setDetailId(ord.id); }}
-                    onEdit={() => openStatusEditor(ord)}
-                    onCancel={CANCELLABLE.has(ord.status) ? () => setCancelTarget(ord) : undefined}
+                    onEdit={canEditOrders && ord.status !== 'paid' ? () => openStatusEditor(ord) : undefined}
+                    onCancel={canEditOrders && CANCELLABLE.has(ord.status) ? () => setCancelTarget(ord) : undefined}
                   />
                 ))}
               </View>
@@ -284,7 +291,8 @@ export function OrdersScreen({ initialOrderId }: { initialOrderId?: string } = {
         onClose={() => setStatusTarget(null)}
         onConfirm={confirmStatusChange}
       />
-      <OrderDetailsModal order={details.data ?? detailsOrder} onOrderChange={setDetailsOrder} allowItemCancellation onClose={() => { setDetailsOrder(null); setDetailId(null); }} />
+      <OrderDetailsModal order={details.data ?? detailsOrder} onOrderChange={setDetailsOrder} allowItemCancellation={canEditOrders}
+        allowRefunds={canManageRefunds && !!details.data} onClose={() => { setDetailsOrder(null); setDetailId(null); }} />
     </>
   );
 }
@@ -300,7 +308,7 @@ function OrderTableRow({
 }: {
   order: Order;
   onOpen: () => void;
-  onEdit: () => void;
+  onEdit?: () => void;
   onCancel?: () => void;
 }) {
   return (
@@ -327,9 +335,11 @@ function OrderTableRow({
         {paymentCell(order)}
       </Text>
       <View style={[styles.tdCell, styles.tdActions, { width: COL.act }]}>
-        <FastPressable onPress={onEdit} hitSlop={6} style={styles.actionBtn}>
-          <PwaIcon name="pencil" size={16} color={colors.textMuted} />
-        </FastPressable>
+        {onEdit ? (
+          <FastPressable onPress={onEdit} hitSlop={6} style={styles.actionBtn}>
+            <PwaIcon name="pencil" size={16} color={colors.textMuted} />
+          </FastPressable>
+        ) : null}
         {onCancel ? (
           <FastPressable onPress={onCancel} hitSlop={6} style={styles.actionBtn}>
             <PwaIcon name="close" size={16} color={colors.danger} />

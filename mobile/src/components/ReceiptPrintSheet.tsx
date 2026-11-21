@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Animated, Easing, StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';

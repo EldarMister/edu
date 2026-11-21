@@ -1,7 +1,10 @@
+import { useReceiptPrinter } from './useReceiptPrinter';
+import { usePermissions } from '@/hooks/usePermissions';
+import { ActivityIndicator, ScrollView, View, SafeAreaView } from '@/components/themed';
 import React, { useState } from 'react';
-import { ActivityIndicator, InteractionManager, ScrollView, StyleSheet, View } from 'react-native';
+import { InteractionManager, StyleSheet } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { useFocusEffect, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import Svg, { Path } from 'react-native-svg';
 import { FastPressable } from '@/components/FastPressable';
@@ -29,12 +32,13 @@ import {
   useDishes,
   fetchReceipt,
 } from '@/services/api/waiter';
-import { useCart } from '@/store/cart';
+import { orderCartDestination, useCart } from '@/store/cart';
 import { useReceiptPrint } from '@/store/receiptPrint';
 import { useReplacement } from '@/store/replacement';
 import { usePublicSettings } from '@/services/api/settings';
 import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permissions';
 import { apiError } from '@/lib/api';
+import { TerminalOrderRefunds } from '@/features/refunds/OrderRefunds';
 import { displayOrderNumber, money } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
 import { PaymentSheet } from './PaymentSheet';
@@ -54,6 +58,11 @@ export function OrderDetailScreen() {
   const dishes = useDishes();
   const settings = usePublicSettings();
   const policies = settings.data?.waiterOrderPermissions;
+  const { canAction } = usePermissions();
+  const canAcceptPayment = canAction('acceptOrderPayments');
+  const canPrint = canAction('printReceipts');
+  const canRequestPrint = canAction('requestReceiptPrints');
+  const printReceipt = useReceiptPrinter();
   const activeOrder = orders.data?.find((o) => o.id === orderId) ?? null;
   const details = useOrderDetails(orderId, orders.isFetched && !activeOrder);
   const order = activeOrder ?? details.data ?? null;
@@ -95,21 +104,21 @@ export function OrderDetailScreen() {
   }, [order]);
 
   React.useEffect(() => {
-    if (order?.status === 'waiting_payment') {
+    if (canAcceptPayment && order?.status === 'waiting_payment') {
       setPaymentOrder(order);
       setPayOpen(true);
     }
-  }, [order?.id, order?.status]);
+  }, [canAcceptPayment, order?.id, order?.status]);
 
   useFocusEffect(
     React.useCallback(() => {
       const focusedOrder = latestOrderRef.current;
-      if (focusedOrder?.status === 'waiting_payment') {
+      if (canAcceptPayment && focusedOrder?.status === 'waiting_payment') {
         setPaymentOrder(focusedOrder);
         setPayOpen(true);
       }
       return undefined;
-    }, [orderId]),
+    }, [canAcceptPayment, orderId]),
   );
 
   React.useEffect(() => {
@@ -130,7 +139,7 @@ export function OrderDetailScreen() {
   const paymentSheet = (
     <PaymentSheet
       order={paymentOrder ?? order}
-      visible={payOpen}
+      visible={payOpen && canAcceptPayment}
       onClose={() => setPayOpen(false)}
       onPaid={() => {
         setPayOpen(false);
@@ -163,7 +172,7 @@ export function OrderDetailScreen() {
   const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
   const currentBillItem = order.items.find((item) => item.id === billItem?.id);
   const cancelPermission = currentBillItem ? waiterItemPermission(order, currentBillItem, 'cancel', policies) : { allowed: false, reason: 'Позиция уже завершена.' };
-  const canPrintPreliminary = canRequestPreliminaryBill(order);
+  const canPrintPreliminary = (canPrint || canRequestPrint) && canRequestPreliminaryBill(order);
   const deliveryInfo = deliveryDetails(order);
 
   const runProtectedAction = (action: () => void) => {
@@ -173,6 +182,10 @@ export function OrderDetailScreen() {
 
   const requestPreliminaryReceipt = () => {
     if (!canPrintPreliminary || print.isPending) return;
+    if (canPrint) {
+      void printReceipt(order.id, { preliminary: true }).catch(onError);
+      return;
+    }
     Promise.all([
       print.mutateAsync({ orderId: order.id, type: 'preliminary' }),
       fetchReceipt(order.id),
@@ -229,13 +242,11 @@ export function OrderDetailScreen() {
         order={order}
         busy={resolve.isPending || removeRejected.isPending || cancelOrder.isPending}
         onReplacePress={(item) => {
-          selectTable(
-            { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
-            order.id,
-          );
+          const destination = orderCartDestination(order);
+          selectTable(destination, order.id);
           setReplacementTarget({
             orderId: order.id,
-            table: { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
+            table: destination,
             item,
           });
           push({ message: `Выберите блюдо на замену: ${orderItemName(item)}`, type: 'info', at: new Date().toISOString() });
@@ -263,7 +274,7 @@ export function OrderDetailScreen() {
             {
               onSuccess: () => {
                 const current = useCart.getState();
-                if (current.tableId === order.table.id && current.lines === draft.lines && (current.activeOrderId === order.id || current.editingOrderId === order.id)) current.clear();
+                if (current.tableId === orderCartDestination(order).id && current.lines === draft.lines && (current.activeOrderId === order.id || current.editingOrderId === order.id)) current.clear();
                 push({ message: 'Заказ отменён', type: 'success', at: new Date().toISOString() });
                 navigation.getParent()?.navigate('Tables');
               },
@@ -360,7 +371,7 @@ export function OrderDetailScreen() {
                   <Text style={styles.preReceiptText} translate>Счёт</Text>
                 )}
               </FastPressable> : null}
-              <Button
+              {canAcceptPayment && <Button
                 title={cooldownActive ? String(actionCooldown) : 'Перейти к оплате'}
                 style={{ flex: 1 }}
                 loading={busy && !cooldownActive}
@@ -376,15 +387,13 @@ export function OrderDetailScreen() {
                     })
                   )
                 }
-              />
+              />}
             </View>
           </View>
         );
       case 'waiting_payment':
         return (
-          <View style={styles.waitingPaymentBox}>
-            <Text style={styles.waitingPaymentText} translate>Ожидает оплаты</Text>
-          </View>
+          canAcceptPayment ? <Button title="Перейти к оплате" onPress={() => { setPaymentOrder(order); setPayOpen(true); }} /> : null
         );
       case 'sent_to_kitchen':
       case 'accepted_by_kitchen':
@@ -433,7 +442,7 @@ export function OrderDetailScreen() {
                     return;
                   }
                   startEditing(
-                    { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
+                    orderCartDestination(order),
                     { id: order.id, orderNumber: order.orderNumber, comment: order.comment },
                     lines,
                   );
@@ -467,6 +476,7 @@ export function OrderDetailScreen() {
             }}
           />
         ))}
+        <TerminalOrderRefunds order={order} />
       </SheetScrollView>
 
       <View style={styles.footer}>
@@ -482,6 +492,18 @@ export function OrderDetailScreen() {
           <Text style={styles.totalLabel} translate>Итого</Text>
           <NumberTicker value={Number(order.finalAmount)} style={styles.totalValue} digitHeight={26} />
         </View>
+        {Number(order.refundedAmount ?? 0) > 0 ? (
+          <>
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel} translate>Возвращено</Text>
+              <Text style={styles.totalLabel}>{money(order.refundedAmount ?? 0)}</Text>
+            </View>
+            <View style={styles.totalRow}>
+              <Text style={styles.totalLabel} translate>Оплата после возврата</Text>
+              <Text style={styles.totalLabel}>{money(Number(order.finalAmount) - Number(order.refundedAmount))}</Text>
+            </View>
+          </>
+        ) : null}
         <View style={styles.actions}>
           {canPrintPreliminary && order.status !== 'served' ? (
             <FastPressable disabled={print.isPending} onPress={requestPreliminaryReceipt}
@@ -973,13 +995,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: colors.textSecondary,
   },
-  waitingPaymentBox: {
-    borderRadius: radius.md,
-    backgroundColor: colors.purple100,
-    paddingVertical: spacing.md,
-    alignItems: 'center',
-  },
-  waitingPaymentText: { fontSize: fontSize.sm, color: colors.purple600 },
   statusInfoBox: {
     minHeight: 44,
     borderRadius: radius.md,

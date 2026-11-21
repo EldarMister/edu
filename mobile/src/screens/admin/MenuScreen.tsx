@@ -1,34 +1,52 @@
+import { ScrollView, View } from '@/components/themed';
 import React, { useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, type View as NativeView } from 'react-native';
 import { Alert, Text, TextInput } from '@/components/typography';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
+import { useDeletionParticles } from '@/components/DeletionParticles';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
-import { Select } from '@/components/Select';
-import { Button, Toggle } from '@/components/ui';
+import { AnchoredSelectScope, Select } from '@/components/Select';
+import { Button, Field as InputField, Toggle } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
 import { API_BASE } from '@/config/env';
 import { useNotifications } from '@/store/notifications';
 import { useAuth } from '@/store/auth';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useT } from '@/lib/i18n';
+import { useMenuEntry, useSaveMenuEntry, type MenuRecipeInput, type MenuEntry } from '@/services/api/menuEntries';
+import { filterMenuDishes, menuKind, type MenuView } from './menuCatalogue';
+import { MenuStockCatalogue, IngredientCategoriesPage } from './MenuStockCatalogue';
+import { WarehousePreparationTab } from './WarehousePreparationTab';
+import { useWarehouseLocations } from '@/services/api/warehouse';
+export type { MenuView } from './menuCatalogue';
 import { prepStationOptions, usePrepStations } from '@/services/api/prepStations';
 import { minDishUnitPrice, money, variantNamesLine } from '@/utils/format';
 import { normalizeUnitLabel, unitLabelOptions } from '@/utils/units';
 import {
   useAdminCategories,
   useAdminDishes,
+  useAdminGoods,
   useCategoryMutations,
   useDishMutations,
-  useMenuOverview,
   useSetMutations,
   type AdminCategory,
   type AdminDish,
+  type AdminGood,
   type AdminDishVariant,
 } from '@/services/api/admin';
 import type { PrepStation } from '@/types';
-import { RecipeEditor } from './WarehouseEditors';
-import { PrepStationsSheet } from './PrepStationsSheet';
-import { dishInventoryPayload, initialDishPrice } from './dishDraft';
+import { PrepStationsPage } from './PrepStationsPage';
+import { dishVariantPayload, initialDishPrice } from './dishDraft';
+import { DishRecipeFields, dishRecipePayload, hasRemovedVariantAmounts, initialDishRecipe } from './DishRecipeFields';
+import { WarehouseWorkspace } from './WarehouseWorkspace';
+import { AdminLoadingSkeleton } from './AdminLoadingSkeleton';
+import { WarehouseMultiSelect } from './WarehouseMultiSelect';
+import { WarehouseWorkbook } from './WarehouseWorkbook';
+import { GoodsColumnsEditor, goodsWorkbookUrl, initialMenuFilters, MenuAdditionalFilters, menuColumns, useGoodsColumns, type MenuColumn, type MenuFilters } from './MenuGoodsControls';
+import { dishTaxInput, dishTaxValue, effectiveMenuTaxId, MenuTaxSelect, menuTaxLabel } from './MenuTaxSelect';
+import { useMenuTaxOptions } from '@/services/api/taxes';
 import * as DocumentPicker from 'expo-document-picker';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 
@@ -46,30 +64,75 @@ function weightedBaseLabel(dish: Pick<AdminDish, 'weightedMeasure' | 'weightedPr
 }
 
 /** Меню (владелец/админ) — порт PWA MenuPage (блюда + категории + сеты). */
-export function MenuScreen() {
-  const [categoryId, setCategoryId] = useState('');
+export function MenuScreen({ view = 'goods' }: { view?: MenuView } = {}) {
+  if (view === 'ingredients') return <MenuStockCatalogue />;
+  if (view === 'ingredientCategories') return <IngredientCategoriesPage />;
+  if (view === 'preparations') return <MenuPreparations />;
+  if (view === 'categories') return <MenuCategoriesPage />;
+  if (view === 'stations') return <PrepStationsPage />;
+  return <MenuDishList key={view} view={view} />;
+}
+function MenuPreparations() {
+  const locations = useWarehouseLocations();
+  if (locations.isLoading) return <AdminLoadingSkeleton />;
+  return <SheetScrollView contentContainerStyle={styles.listContent}><WarehousePreparationTab locations={locations.data?.locations ?? []} /></SheetScrollView>;
+}
+function MenuCategoriesPage() {
+  const query = useAdminCategories();
+  if (query.isLoading) return <AdminLoadingSkeleton />;
+  if (query.isError) return <View style={styles.center}><Text style={styles.error}>{apiError(query.error)}</Text><Button title="Повторить" variant="secondary" onPress={() => void query.refetch()} /></View>;
+  return <CategoryDirectory categories={query.data ?? []} />;
+}
+function MenuDishList({ view }: { view: 'goods' | 'recipes' }) {
+  const [filters, setFilters] = useState(initialMenuFilters);
+  const [sort, setSort] = useState<'asc' | 'desc'>('asc');
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const particles = useDeletionParticles();
+  const updateFilters = (patch: Partial<MenuFilters>) => setFilters((current) => ({ ...current, ...patch }));
+  const { canAction } = usePermissions();
+  const editable = canAction('editMenu');
+  const isGoods = view === 'goods';
   const [search, setSearch] = useState('');
   const [dishModal, setDishModal] = useState<AdminDish | null | 'new'>(null);
   const [setModal, setSetModal] = useState<AdminDish | null | 'new'>(null);
-  const [catModal, setCatModal] = useState(false);
-  const [stationsOpen, setStationsOpen] = useState(false);
-  const [recipeDish, setRecipeDish] = useState<AdminDish | null>(null);
 
-  const overview = useMenuOverview();
   const categoriesQ = useAdminCategories();
   const { stations } = usePrepStations();
   const isOwner = useAuth((state) => state.user?.role === 'OWNER');
-  const dishesQ = useAdminDishes(categoryId, search);
+  const dishesQ = useAdminDishes('', search.trim(), !isGoods);
+  const goodsQ = useAdminGoods(isGoods);
+  const listQ = isGoods ? goodsQ : dishesQ;
+  const taxes = useMenuTaxOptions().data ?? [];
+  const savedColumns = useGoodsColumns();
+  const visibleColumns: MenuColumn[] = isGoods ? savedColumns.columns : ['category', 'price', 'stock', 'availability', ...(taxes.length ? ['tax' as const] : [])];
+  const tableColumns: MenuColumn[] = ['name', ...visibleColumns, 'actions'];
+  const tableWidth = tableColumns.reduce((total, column) => total + menuColumns[column].width, 0);
   const { remove } = useDishMutations();
   const push = useNotifications((s) => s.push);
-  const o = overview.data;
   const categories = categoriesQ.data ?? [];
 
   const stationByCat = new Map(categories.map((c) => [c.id, c.prepStation ?? 'kitchen']));
   const stationNames = new Map(stations.map((station) => [station.id, station.name]));
-  const dishStation = (d: AdminDish) => d.prepStation ?? stationByCat.get(d.categoryId) ?? 'kitchen';
+  const goodsById = new Map((goodsQ.data ?? []).map((good) => [good.id, good]));
+  const dishStation = (d: AdminDish) => goodsById.get(d.id)?.goodsStation ?? d.prepStation ?? stationByCat.get(d.categoryId) ?? 'none';
+  const stationOptions = prepStationOptions(stations);
+  const taxNames = new Map(taxes.map((tax) => [tax.id, menuTaxLabel(tax)]));
+  const units = [...new Set((goodsQ.data ?? []).flatMap((good) => good.goodsUnits))].sort((left, right) => left.localeCompare(right, 'ru'));
+  const nameFilter = filters.name.trim().toLocaleLowerCase('ru');
+  const searchTerm = search.trim().toLocaleLowerCase('ru');
+  const rows = filterMenuDishes(listQ.data ?? [], view, filters.availability).filter((dish) => {
+    const name = dish.name.toLocaleLowerCase('ru');
+    return (!searchTerm || name.includes(searchTerm)) && (!nameFilter || name.includes(nameFilter))
+      && (!filters.categories.length || filters.categories.includes(dish.categoryId))
+      && (!filters.stations.length || filters.stations.includes(dishStation(dish)))
+      && (!filters.tax || filters.tax === (effectiveMenuTaxId(dish) ?? 'none'))
+      && (!filters.weighted || !!dish.isWeighted === (filters.weighted === 'yes'))
+      && (!filters.units.length || goodsById.get(dish.id)?.goodsUnits.some((unit) => filters.units.includes(unit)));
+  });
+  if (sort === 'desc') rows.reverse();
 
-  const onDelete = (d: AdminDish) =>
+  const onDelete = (d: AdminDish) => {
+    const play = particles.capture(d.id);
     Alert.alert('Удалить блюдо?', `«${d.name}» будет удалено.`, [
       { text: 'Отмена', style: 'cancel' },
       {
@@ -78,10 +141,11 @@ export function MenuScreen() {
         onPress: () =>
           remove
             .mutateAsync(d.id)
-            .then(() => push({ message: 'Блюдо удалено', at: new Date().toISOString() }))
+            .then(() => { play?.(); push({ message: isGoods ? 'Товар удалён' : 'Техкарта удалена', at: new Date().toISOString() }); })
             .catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() })),
       },
     ]);
+  };
 
   const openEdit = (d: AdminDish) => {
     if (d.isSet) {
@@ -92,52 +156,56 @@ export function MenuScreen() {
   };
 
   return (
-    <>
+    <View style={styles.particleFrame}>
     <SheetScrollView contentContainerStyle={styles.listContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-      <View style={styles.summary}>
-        <Sum label="Блюд" value={o ? String(o.dishesCount) : '—'} />
-        <Sep />
-        <Sum label="Категорий" value={o ? String(o.categoriesCount) : '—'} />
-        <Sep />
-        <Sum label="Активных" value={o ? String(o.activeDishesCount) : '—'} />
-      </View>
       <View style={styles.menuCard}>
       <View style={styles.headerWrap}>
       <TextInput
         style={styles.search}
-        placeholder="Поиск блюда"
+        placeholder={isGoods ? "Поиск товаров" : "Поиск техкарт"}
         placeholderTextColor={colors.textLight}
         value={search}
         onChangeText={setSearch}
       />
 
-      <SheetScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.headerBtns}>
-        <MenuAction label="Категория" onPress={() => setCatModal(true)} />
-        <MenuAction label="Сет" onPress={() => setSetModal('new')} />
-        {isOwner ? <MenuAction label="Станции" onPress={() => setStationsOpen(true)} /> : null}
-        <MenuAction primary label="Добавить блюдо" onPress={() => setDishModal('new')} />
-      </SheetScrollView>
-
-      <SheetScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabs}>
-        <CatTab active={categoryId === ''} onPress={() => setCategoryId('')} label="Все блюда" />
-        {categories.map((c) => (
-          <CatTab key={c.id} active={categoryId === c.id} onPress={() => setCategoryId(c.id)} label={c.name} />
-        ))}
-      </SheetScrollView>
+      <View style={styles.filterRow}>
+        <WarehouseMultiSelect label="Категория" options={categories.map(({ id, name }) => ({ value: id, label: name, translate: false }))}
+          value={filters.categories} onChange={(selected) => updateFilters({ categories: selected })} />
+        <WarehouseMultiSelect label="Цех" options={stationOptions}
+          value={filters.stations} onChange={(selected) => updateFilters({ stations: selected })} />
       </View>
-      {dishesQ.isLoading ? (
-            <View style={styles.center}>
-              <ActivityIndicator size="large" color={colors.primary} />
-            </View>
-          ) : !dishesQ.data?.length ? (
-            <Text style={styles.empty} translate>Блюда не найдены</Text>
+      <MenuAdditionalFilters filters={filters} update={updateFilters} goods={isGoods}
+        taxes={[{ value: 'none', label: 'Без налога' }, ...Array.from(taxNames, ([value, label]) => ({ value, label, translate: false }))]}
+        units={units.map((unit) => ({ value: unit, label: unit }))} />
+      <View style={styles.directoryToolbar}>
+        <Text style={styles.checkHint}>{rows.length} {isGoods ? 'товаров' : 'техкарт'}</Text>
+        <View style={styles.filterRow}>
+          {isGoods ? <Button title="Столбцы" variant="secondary" size="md" onPress={() => setColumnsOpen(true)} /> : null}
+          {isGoods && canAction('exportReports') ? <WarehouseWorkbook filename="Товары.xlsx" disabled={!goodsQ.isSuccess}
+            url={goodsWorkbookUrl(savedColumns.columns, search, filters, sort)} /> : null}
+          {editable && !isGoods ? <Button title="Добавить сет" size="md" variant="secondary" onPress={() => setSetModal('new')} /> : null}
+          {editable ? <Button title={isGoods ? 'Добавить товар' : 'Добавить техкарту'} size="md" onPress={() => setDishModal('new')} /> : null}
+        </View>
+      </View>
+      </View>
+      {listQ.isLoading ? <AdminLoadingSkeleton /> : listQ.isError ? (
+            <View style={styles.center}><Text style={styles.error}>{apiError(listQ.error)}</Text><Button title="Повторить" variant="secondary" onPress={() => void listQ.refetch()} /></View>
+          ) : !rows.length ? (
+            <Text style={styles.empty} translate>{isGoods ? 'Товары не найдены' : 'Техкарты не найдены'}</Text>
           ) : (
-            <SheetScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ width: MENU_TABLE_WIDTH }}>
-              <View style={{ width: MENU_TABLE_WIDTH }}>
-                <View style={styles.tableHead}>{MENU_COLUMNS.map(column => <Text key={column.label} style={[styles.tableHeading, { width: column.width, textAlign: column.right ? 'right' : 'left' }]} translate>{column.label}</Text>)}</View>
-                {dishesQ.data.map(dish => {
+            <SheetScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ width: tableWidth }}>
+              <View style={{ width: tableWidth }}>
+                <View style={styles.tableHead}>{tableColumns.map((key) => {
+                  const column = menuColumns[key];
+                  const style = [styles.tableHeading, { width: column.width, textAlign: 'right' in column && column.right ? 'right' as const : 'left' as const }];
+                  return key === 'name' ? <FastPressable key={key} accessibilityRole="button" accessibilityLabel="Сортировать по названию"
+                    onPress={() => setSort((value) => value === 'asc' ? 'desc' : 'asc')}>
+                    <Text style={style} translate>Название {sort === 'asc' ? '↑' : '↓'}</Text>
+                  </FastPressable> : <Text key={key} style={style} translate>{column.label}</Text>;
+                })}</View>
+                {rows.map(dish => {
                   const station = dishStation(dish);
-                  return <DishRow key={dish.id} dish={dish} station={station} stationName={stationNames.get(station)} onEdit={() => openEdit(dish)} onDelete={() => onDelete(dish)} />;
+                  return <DishRow key={dish.id} rowRef={(row) => particles.register(dish.id, row)} dish={dish} good={goodsById.get(dish.id)} columns={visibleColumns} taxName={taxNames.get(effectiveMenuTaxId(dish) ?? '')} station={station} stationName={stationNames.get(station)} editable={editable} onEdit={() => openEdit(dish)} onDelete={() => onDelete(dish)} />;
                 })}
               </View>
             </SheetScrollView>
@@ -148,36 +216,38 @@ export function MenuScreen() {
 
       {dishModal !== null ? (
         <DishModal
+          catalogKind={isGoods ? 'goods' : 'recipe'}
           dish={dishModal === 'new' ? null : dishModal}
           categories={categories}
-          defaultCategoryId={categoryId}
+          defaultCategoryId={filters.categories.length === 1 ? filters.categories[0] : ''}
           onClose={() => setDishModal(null)}
-          onRecipe={dishModal !== 'new' ? () => { setRecipeDish(dishModal); setDishModal(null); } : undefined}
         />
       ) : null}
+      {columnsOpen ? <GoodsColumnsEditor columns={savedColumns.columns} onApply={savedColumns.apply} onClose={() => setColumnsOpen(false)} /> : null}
       {setModal !== null ? <SetModal set={setModal === 'new' ? null : setModal} onClose={() => setSetModal(null)} /> : null}
-      {catModal ? <CategoryModal categories={categories} onClose={() => setCatModal(false)} /> : null}
-      {stationsOpen ? <PrepStationsSheet onClose={() => setStationsOpen(false)} /> : null}
-      {recipeDish ? <RecipeEditor dish={recipeDish} onClose={() => setRecipeDish(null)} /> : null}
-    </>
+      {particles.overlay}
+    </View>
   );
 }
 
-const MENU_COLUMNS = [{ label: 'Название', width: 250 }, { label: 'Категория', width: 130 }, { label: 'Цена', width: 120, right: true }, { label: 'Остаток', width: 110, right: true }, { label: 'Статус', width: 150 }, { label: 'Действия', width: 100, right: true }];
-const MENU_TABLE_WIDTH = MENU_COLUMNS.reduce((total, column) => total + column.width, 0);
-
-function MenuAction({ label, primary, onPress }: { label: string; primary?: boolean; onPress: () => void }) {
-  return <FastPressable onPress={onPress} style={[styles.menuAction, primary && styles.menuActionPrimary]}><PwaIcon name="plus" size={16} color={primary ? colors.white : colors.textPrimary} /><Text style={[styles.menuActionText, primary && { color: colors.white }]} translate>{label}</Text></FastPressable>;
-}
-
 function DishRow({
+  rowRef,
   dish: d,
+  good,
+  columns,
+  taxName,
   station,
   stationName,
   onEdit,
   onDelete,
+  editable,
 }: {
+  rowRef: (row: NativeView | null) => void;
+  editable: boolean;
   dish: AdminDish;
+  good?: AdminGood;
+  columns: MenuColumn[];
+  taxName?: string;
   station: PrepStation;
   stationName?: string;
   onEdit: () => void;
@@ -193,7 +263,7 @@ function DishRow({
       : { label: 'Скрыто', bg: colors.slate100, fg: colors.textMuted };
 
   return (
-    <View style={styles.dishRow}>
+    <View ref={rowRef} collapsable={false} style={styles.dishRow}>
       <View style={[styles.menuCell, { width: 250 }]}>
         <View style={styles.dishNameRow}>
           <Text style={styles.dishName} numberOfLines={1}>
@@ -211,19 +281,31 @@ function DishRow({
           </Text>
         ) : null}
       </View>
-      <Text style={[styles.menuCellText, { width: 130 }]}>{d.category.name}</Text>
-      <Text style={[styles.menuCellText, styles.priceCell, { width: 120 }]}>{hasVar ? `от ${money(minDishUnitPrice(d))}` : money(d.price)}</Text>
-      <Text style={[styles.menuCellText, { width: 110, textAlign: 'right' }]}>{d.trackInventory ? `${stock} ${hasVar ? (new Set(d.variants.map(variant => normalizeUnitLabel(variant.unit))).size === 1 ? normalizeUnitLabel(d.variants[0].unit) : 'по вариантам') : normalizeUnitLabel(d.unit)}` : '—'}</Text>
-      <View style={[styles.menuCell, { width: 150 }]}>
-        <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
-          <Text style={[styles.statusText, { color: status.fg }]} translate>{status.label}</Text>
-        </View>
-      </View>
+      {columns.map((column) => {
+        const width = menuColumns[column].width;
+        if (column === 'availability') return <View key={column} style={[styles.menuCell, { width }]}>
+          <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
+            <Text style={[styles.statusText, { color: status.fg }]} translate>{status.label}</Text>
+          </View>
+        </View>;
+        const cells: Partial<Record<MenuColumn, string>> = {
+          category: d.category.name,
+          price: (hasVar ? 'от ' : '') + money(good?.goodsPrice ?? (hasVar ? minDishUnitPrice(d) : d.price)),
+          station: stationName ?? (station === 'none' ? 'Без цеха' : station),
+          stock: d.trackInventory ? stock + ' ' + (hasVar && new Set(d.variants.map((variant) => normalizeUnitLabel(variant.unit))).size !== 1 ? 'по вариантам' : normalizeUnitLabel(hasVar ? d.variants[0].unit : d.unit)) : '—',
+          unit: good?.goodsUnits.join(', ') ?? normalizeUnitLabel(d.unit),
+          weighted: d.isWeighted ? 'Да' : 'Нет',
+          tax: taxName ?? '—',
+        };
+        const right = column === 'price' || column === 'stock';
+        return <Text key={column} style={[styles.menuCellText, { width, textAlign: right ? 'right' : 'left' }, column === 'price' && styles.priceCell]}
+          translate={column === 'weighted' || (column === 'station' && station === 'none')} numberOfLines={2}>{cells[column]}</Text>;
+      })}
         <View style={[styles.dishActions, { width: 100 }]}>
-          <FastPressable onPress={onEdit} hitSlop={6} style={styles.iconBtn}>
+          <FastPressable disabled={!editable} onPress={onEdit} hitSlop={6} style={[styles.iconBtn, !editable && { opacity: 0.4 }]}>
             <PwaIcon name="pencil" size={16} color={colors.textMuted} strokeWidth={2} />
           </FastPressable>
-          <FastPressable onPress={onDelete} hitSlop={6} style={styles.iconBtn}>
+          <FastPressable disabled={!editable} onPress={onDelete} hitSlop={6} style={[styles.iconBtn, !editable && { opacity: 0.4 }]}>
             <PwaIcon name="trash" size={16} color={colors.danger} strokeWidth={2} />
           </FastPressable>
         </View>
@@ -238,7 +320,6 @@ interface VariantDraft {
   id?: string;
   name: string;
   price: string;
-  stock: string;
   unit: string;
 }
 interface SetCompDraft {
@@ -256,34 +337,52 @@ function variantDraft(v?: AdminDishVariant): VariantDraft {
     id: v?.id,
     name: v?.name ?? '',
     price: v ? String(Number(v.price)) : '',
-    stock: v?.stock != null ? String(v.stock) : '',
     unit: normalizeUnitLabel(v?.unit),
   };
 }
 
-export function DishModal({
-  dish,
-  categories,
-  defaultCategoryId,
-  onClose,
-  onRecipe,
-  presetInventory = false,
-}: {
+type DishModalProps = {
   dish: AdminDish | null;
   categories: AdminCategory[];
   defaultCategoryId: string;
   onClose: () => void;
-  onRecipe?: () => void;
-  presetInventory?: boolean;
-}) {
+  catalogKind?: 'goods' | 'recipe';
+};
+
+export function DishModal(props: DishModalProps) {
+  const [generation, setGeneration] = useState(0);
+  const query = useMenuEntry(props.dish?.id);
+  if (props.dish && !query.data) return <WarehouseWorkspace title="Позиция меню" onClose={props.onClose} pending={query.isPending}>
+    {query.isError ? <View style={styles.center}><Text style={styles.error}>{apiError(query.error)}</Text>
+      <Button title="Повторить" variant="secondary" onPress={() => void query.refetch()} /></View> : null}
+  </WarehouseWorkspace>;
+  return <DishForm key={props.dish?.id ?? generation} {...props} entry={query.data} onSaveAnother={() => setGeneration((current) => current + 1)} />;
+}
+
+function DishForm({
+  categories,
+  defaultCategoryId,
+  onClose,
+  catalogKind = 'recipe',
+  entry,
+  onSaveAnother,
+}: Omit<DishModalProps, 'dish'> & { entry?: MenuEntry; onSaveAnother: () => void }) {
+  const [snapshot] = useState(entry);
+  const dish = snapshot?.dish ?? null;
   const isEdit = !!dish;
+  const isGoods = (dish ? menuKind(dish) : catalogKind) === 'goods';
+  const { canAction } = usePermissions();
+  const editable = canAction('editMenu');
+  const canEditRecipe = editable && !isGoods && canAction('warehouseRecipes');
+  const weightedLocked = !!dish && isGoods && (!!dish.stockIngredientId || dish.variants.some(variant => !!variant.stockIngredientId));
+  const requestKey = React.useRef(`native-menu-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const { stations } = usePrepStations();
-  const { create, update } = useDishMutations();
+  const saveEntry = useSaveMenuEntry();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(dish?.name ?? '');
-  const [categoryId, setCategoryId] = useState(dish?.categoryId ?? (defaultCategoryId || categories[0]?.id || ''));
+  const [categoryId, setCategoryId] = useState(dish?.categoryId ?? defaultCategoryId);
+  const [tax, setTax] = useState(() => dishTaxValue(dish));
   const [price, setPrice] = useState(() => initialDishPrice(dish));
-  const [stock, setStock] = useState(dish?.stock != null ? String(dish.stock) : presetInventory ? '0' : '');
   const [unit, setUnit] = useState(normalizeUnitLabel(dish?.unit));
   const [description, setDescription] = useState(dish?.description ?? '');
   const [voiceName, setVoiceName] = useState(dish?.voiceName ?? '');
@@ -293,11 +392,23 @@ export function DishModal({
   const [weightedPriceBase, setWeightedPriceBase] = useState(dish?.weightedPriceBase ?? 100);
   const [prepStation, setPrepStation] = useState<PrepStation>(dish?.prepStation ?? '');
   const [variants, setVariants] = useState<VariantDraft[]>(() => dish?.variants.map(variantDraft) ?? []);
+  const [tab, setTab] = useState<'main' | 'recipe'>('main');
+  const [recipe, setRecipe] = useState(() => initialDishRecipe(snapshot?.recipe.items ?? [], snapshot?.recipe.metadata));
+  const [originalRecipe] = useState(recipe);
   const [photoUrl, setPhotoUrl] = useState(dish?.imageUrl?.startsWith('http') ? dish.imageUrl : '');
   const [photoPayload, setPhotoPayload] = useState<string | undefined>(undefined);
   const [photoLoading, setPhotoLoading] = useState(false);
   const [error, setError] = useState('');
-  const pending = create.isPending || update.isPending;
+  const pending = saveEntry.isPending;
+  const saving = React.useRef(false);
+  const recipeChanged = recipe !== originalRecipe && JSON.stringify(recipe) !== JSON.stringify(originalRecipe);
+  const signature = JSON.stringify({ name, categoryId, tax, price, unit, description, voiceName, isAvailable, isWeighted, weightedMeasure, weightedPriceBase, prepStation, variants, photoUrl, photoPayload, recipeChanged });
+  const initialSignature = React.useRef(signature);
+  const confirmLeave = (leave: () => void) => {
+    if (pending || saving.current) return;
+    if (signature === initialSignature.current) leave();
+    else Alert.alert('Есть несохранённые изменения', 'Выйти без сохранения?', [{ text: 'Продолжить', style: 'cancel' }, { text: 'Выйти', style: 'destructive', onPress: leave }]);
+  };
 
   const initialPreview = resolveApiImage(dish?.imageUrl ?? null);
   const preview = photoPayload !== undefined ? photoPayload || null : photoUrl.trim() ? photoUrl.trim() : initialPreview;
@@ -328,44 +439,63 @@ export function DishModal({
       return next;
     });
 
-  const onSubmit = async () => {
+  const onSubmit = async (createAnother = false) => {
+    if (pending || saving.current || photoLoading || !editable) return;
+    function invalidMain(message: string) {
+      setTab('main');
+      setError(message);
+    }
     setError('');
     if (!name.trim() || !categoryId) {
-      setError('Заполните название и категорию');
+      invalidMain('Заполните название и категорию');
       return;
     }
     const filled = variants
-      .map((v) => ({ id: v.id, name: v.name.trim(), price: v.price.trim(), stock: v.stock.trim(), unit: v.unit }))
+      .map((v) => ({ id: v.id, uid: v.uid, name: v.name.trim(), price: v.price.trim(), unit: v.unit }))
       .filter((v) => v.name || v.price);
     for (const v of filled) {
-      const p = Number(v.price);
+      const p = Number(v.price.replace(',', '.'));
       if (!v.name || !v.price || !Number.isFinite(p) || p <= 0) {
-        setError('У каждого варианта должны быть название и цена больше 0');
+        invalidMain('У каждого варианта должны быть название и цена больше 0');
         return;
       }
     }
-    const priceValue = price.trim() ? Number(price) : undefined;
+    const priceValue = price.trim() ? Number(price.replace(',', '.')) : undefined;
     if (priceValue !== undefined && (!Number.isFinite(priceValue) || priceValue < 0)) {
-      setError('Цена блюда должна быть числом');
+      invalidMain('Цена блюда должна быть числом');
       return;
     }
-    if ((filled.length === 0 || isWeighted) && (!priceValue || priceValue <= 0)) {
-      setError('Укажите цену блюда или добавьте варианты с ценами');
+    if ((filled.length === 0 || isWeighted) && priceValue === undefined) {
+      invalidMain('Укажите цену блюда или добавьте варианты с ценами');
       return;
     }
     const trimmedUrl = photoUrl.trim();
     let imageUrl: string | undefined = photoPayload;
     if (trimmedUrl) {
       if (!/^https?:\/\/.+/i.test(trimmedUrl)) {
-        setError('Ссылка на фото должна начинаться с https://');
+        invalidMain('Ссылка на фото должна начинаться с https://');
         return;
       }
       if (trimmedUrl !== (dish?.imageUrl ?? '')) imageUrl = trimmedUrl;
     }
+    const variantIds = filled.map((v) => v.id ?? v.uid);
+    let recipeInput: MenuRecipeInput | undefined;
+    if (canEditRecipe && (recipeChanged || hasRemovedVariantAmounts(recipe, variantIds))) {
+      const result = dishRecipePayload(recipe, variantIds);
+      if ('error' in result) {
+        setTab('recipe');
+        setError(result.error);
+        return;
+      }
+      recipeInput = result.payload;
+    }
+    saving.current = true;
     try {
+      const variantsPayload = dishVariantPayload({ unit, variants: filled }).variants;
       const body = {
         name: name.trim(),
         categoryId,
+        ...(tax !== dishTaxValue(dish) ? dishTaxInput(tax) : {}),
         price: priceValue,
         description: description.trim() || undefined,
         voiceName: voiceName.trim() || null,
@@ -375,51 +505,84 @@ export function DishModal({
         weightedPriceBase,
         imageUrl,
         prepStation: prepStation === '' ? null : prepStation,
-        ...dishInventoryPayload({ isEdit, priceValue, stock, unit, variants: filled }),
+        unit,
+        variants: variantsPayload.map((variant, index) => ({ ...variant, clientKey: filled[index].uid })),
       };
-      if (isEdit) {
-        await update.mutateAsync({ id: dish!.id, ...body });
-        push({ message: 'Блюдо обновлено', at: new Date().toISOString() });
-      } else {
-        await create.mutateAsync(body);
-        push({ message: 'Блюдо добавлено', at: new Date().toISOString() });
-      }
-      onClose();
+      await saveEntry.mutateAsync({ id: dish?.id, catalogKind: isGoods ? 'goods' : 'recipe', requestKey: requestKey.current, expectedVersion: snapshot?.recipe.version, dish: body, recipe: recipeInput });
+      push({ message: isGoods ? 'Товар сохранён' : 'Техкарта сохранена', at: new Date().toISOString() });
+      if (createAnother) onSaveAnother();
+      else onClose();
     } catch (err) {
       setError(apiError(err));
+    } finally {
+      saving.current = false;
     }
   };
 
   return (
-    <BottomSheet
-      visible
-      onClose={onClose}
-      title={isEdit ? 'Изменить блюдо' : 'Новое блюдо'}
-      maxHeight="92%"
-      footer={<Button title={isEdit ? 'Сохранить' : 'Добавить'} size="lg" loading={pending} onPress={onSubmit} />}
+    <WarehouseWorkspace
+      onClose={() => confirmLeave(onClose)}
+      title={isGoods ? (isEdit ? 'Редактирование товара' : 'Добавление товара') : (isEdit ? 'Редактирование техкарты' : 'Добавление техкарты')}
+      footer={editable ? <View style={styles.filterRow}>
+        <Button title="Сохранить" disabled={photoLoading} loading={pending} onPress={() => void onSubmit()} />
+        {!isEdit ? <Button title="Сохранить и создать ещё" variant="secondary" disabled={photoLoading || pending}
+          onPress={() => void onSubmit(true)} /> : null}
+      </View> : undefined}
     >
-      {onRecipe ? <Button title="Техкарта" variant="secondary" onPress={onRecipe} style={{ marginBottom: spacing.md }} /> : null}
-      <SheetScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: spacing.md, paddingBottom: spacing.md }}>
+      <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ gap: spacing.md, padding: spacing.md }}>
+        {canEditRecipe && <View style={styles.grid2}>
+          <Button title="Основное" size="md" variant={tab === 'main' ? 'primary' : 'secondary'} onPress={() => setTab('main')} />
+          <Button title="Состав" size="md" variant={tab === 'recipe' ? 'primary' : 'secondary'} onPress={() => setTab('recipe')} />
+        </View>}
+        {error ? <Text style={styles.error} accessibilityRole="alert">{error}</Text> : null}
+        {tab === 'recipe' && canEditRecipe ? <DishRecipeFields draft={recipe} onChange={setRecipe} disabled={pending}
+          variants={variants.filter((variant) => variant.name.trim()).map((variant) => ({ id: variant.id ?? variant.uid, name: variant.name.trim() }))} /> : <>
         <Field label="Название">
           <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Название блюда" placeholderTextColor={colors.textLight} />
         </Field>
         <Field label="Категория">
-          <Select value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ value: c.id, label: c.name , translate: false }))} title="Категория" />
+          <AnchoredSelectScope>
+            <Select value={categoryId} onChange={setCategoryId} options={categories.map((c) => ({ value: c.id, label: c.name, translate: false }))}
+              title="Категория" placeholder="Выберите категорию" searchable disabled={!editable || pending} />
+          </AnchoredSelectScope>
         </Field>
         <Field label="Направление">
           <Select value={prepStation} onChange={setPrepStation} options={[{ value: '', label: 'Из категории' }, ...prepStationOptions(stations, prepStation)]} title="Направление" />
+        </Field>
+        <Field label="Налог">
+          <MenuTaxSelect value={tax} onChange={setTax} inherit categoryTaxId={categories.find(({ id }) => id === categoryId)?.taxId}
+            disabled={!editable || pending} />
         </Field>
         <Field label="Цена">
           <TextInput style={styles.input} value={price} onChangeText={setPrice} keyboardType="decimal-pad" placeholder="0" placeholderTextColor={colors.textLight} />
         </Field>
 
-        <View style={styles.checkRow}>
-          <View style={{ flex: 1, paddingRight: spacing.md }}>
-            <Text style={styles.checkLabel} translate>Весовое блюдо</Text>
-            <Text style={styles.checkHint} translate>Количество выбирается в {weightedMeasure === 'weight' ? 'г / кг' : 'мл / л'}</Text>
+        <View style={styles.coverRow}>
+          <View style={styles.cover}>
+            <Text style={styles.fieldLabel} translate>Обложка</Text>
+            {preview ? <Image source={{ uri: preview }} style={styles.photoPreview} resizeMode="contain" />
+              : <View style={styles.coverPlaceholder}><PwaIcon name="menu" size={26} color={colors.textLight} /></View>}
+            <Button title="Загрузить фото" variant="secondary" size="md" loading={photoLoading} disabled={!editable}
+              onPress={() => void pickPhoto()} />
+            {preview ? <Button title="Удалить фото" variant="secondary" size="md" disabled={!editable}
+              onPress={() => { setPhotoPayload(''); setPhotoUrl(''); }} /> : null}
           </View>
-          <Toggle checked={isWeighted} onChange={setIsWeighted} />
+          <View style={styles.coverOptions}>
+            <View style={styles.switchEntry}>
+              <Text style={[styles.checkLabel, { flex: 1 }]} translate>Доступно для заказа</Text>
+              <Toggle accessibilityLabel="Доступно для заказа" checked={isAvailable} onChange={setIsAvailable} disabled={!editable} />
+            </View>
+            <View style={styles.switchEntry}>
+              <Text style={[styles.checkLabel, { flex: 1 }]} translate>{isGoods ? 'Весовой товар' : 'Весовое блюдо'}</Text>
+              <Toggle accessibilityLabel={isGoods ? 'Весовой товар' : 'Весовое блюдо'} checked={isWeighted}
+                onChange={setIsWeighted} disabled={!editable || weightedLocked} />
+            </View>
+          </View>
         </View>
+        <Field label="Фото по ссылке">
+          <TextInput style={styles.input} value={photoUrl} onChangeText={(value) => { setPhotoUrl(value); setPhotoPayload(undefined); }}
+            placeholder="https://…" placeholderTextColor={colors.textLight} autoCapitalize="none" editable={editable} />
+        </Field>
         {isWeighted ? (
           <View style={styles.weightedBox}>
             <Text style={styles.weightedTitle} translate>Параметры весового блюда</Text>
@@ -427,6 +590,7 @@ export function DishModal({
               <Field label="Единица" style={{ flex: 1 }}>
                 <Select
                   value={weightedMeasure}
+                  disabled={weightedLocked}
                   onChange={(value) => setWeightedMeasure(value as 'weight' | 'volume')}
                   options={[{ value: 'weight', label: 'г / кг' }, { value: 'volume', label: 'мл / л' }]}
                   title="Единица"
@@ -445,16 +609,9 @@ export function DishModal({
           </View>
         ) : null}
 
-        {variants.length === 0 && !isWeighted ? (
-          <View style={styles.grid2}>
-            <Field label="Остаток (склад)" style={{ flex: 1 }}>
-              <TextInput style={styles.input} value={stock} onChangeText={setStock} keyboardType="decimal-pad" placeholder="—" placeholderTextColor={colors.textLight} />
-            </Field>
-            <Field label="Ед." style={{ width: 110 }}>
-              <Select value={unit} onChange={setUnit} options={unitLabelOptions(unit)} title="Единица" />
-            </Field>
-          </View>
-        ) : null}
+        {variants.length === 0 && !isWeighted && <Field label="Единица продажи"><Select value={unit} disabled={weightedLocked} onChange={setUnit} options={unitLabelOptions(unit)} title="Единица продажи" /></Field>}
+        {isGoods && <Text style={styles.checkHint} translate>Остаток товара изменяется через поставки, списания и инвентаризации.</Text>}
+        {weightedLocked && <Text style={styles.checkHint} translate>Единица и весовой режим связаны со складским учётом.</Text>}
 
         {/* Варианты */}
         <View>
@@ -482,7 +639,6 @@ export function DishModal({
                 <TextInput style={styles.inputSm} value={v.name} onChangeText={(t) => updateVariant(v.uid, { name: t })} placeholder="Вариант" placeholderTextColor={colors.textLight} />
                 <View style={styles.grid2}>
                   <TextInput style={[styles.inputSm, { flex: 1 }]} value={v.price} onChangeText={(t) => updateVariant(v.uid, { price: t })} keyboardType="decimal-pad" placeholder="Цена" placeholderTextColor={colors.textLight} />
-                  <TextInput style={[styles.inputSm, { flex: 1 }]} value={v.stock} onChangeText={(t) => updateVariant(v.uid, { stock: t })} keyboardType="decimal-pad" placeholder="Остаток" placeholderTextColor={colors.textLight} />
                   <View style={{ width: 90 }}>
                     <Select value={v.unit} onChange={(u) => updateVariant(v.uid, { unit: u })} options={unitLabelOptions(v.unit)} title="Ед." />
                   </View>
@@ -501,20 +657,9 @@ export function DishModal({
         <Field label="Название для озвучки">
           <TextInput style={styles.input} value={voiceName} onChangeText={setVoiceName} placeholder="Необязательно" placeholderTextColor={colors.textLight} />
         </Field>
-        <Field label="Фото (ссылка https://)">
-            <TextInput style={styles.input} value={photoUrl} onChangeText={(value) => { setPhotoUrl(value); setPhotoPayload(undefined); }} placeholder="https://…" placeholderTextColor={colors.textLight} autoCapitalize="none" />
-        </Field>
-        {preview ? <Image source={{ uri: preview }} style={styles.photoPreview} resizeMode="cover" /> : null}
-          <Button title="Загрузить фото" variant="secondary" size="md" loading={photoLoading} onPress={() => void pickPhoto()} />
-          {preview ? <Button title="Удалить фото" variant="secondary" size="md" onPress={() => { setPhotoPayload(''); setPhotoUrl(''); }} /> : null}
-
-        <View style={styles.checkRow}>
-          <Text style={styles.checkLabel} translate>Доступно к заказу</Text>
-          <Toggle checked={isAvailable} onChange={setIsAvailable} />
-        </View>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-      </SheetScrollView>
-    </BottomSheet>
+        </>}
+      </ScrollView>
+    </WarehouseWorkspace>
   );
 }
 
@@ -524,6 +669,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
   const { stations } = usePrepStations();
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(set?.name ?? '');
+  const [tax, setTax] = useState(() => dishTaxValue(set));
   const [price, setPrice] = useState(set ? String(Number(set.price)) : '');
   const [prepStation, setPrepStation] = useState<PrepStation>(set?.prepStation ?? '');
   const [components, setComponents] = useState<SetCompDraft[]>(() =>
@@ -603,6 +749,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
     const body = {
       name: name.trim(),
       price: priceNum,
+      ...(tax !== dishTaxValue(set) ? dishTaxInput(tax) : {}),
       prepStation: prepStation || null,
       components: components.map((component) => ({
         dishId: component.dishId,
@@ -662,6 +809,9 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
             options={[{ value: '', label: 'Из категории' }, ...prepStationOptions(stations, prepStation)]} title="Направление" />
         </Field>
 
+        <Field label="Налог">
+          <MenuTaxSelect value={tax} onChange={setTax} inherit categoryTaxId={set?.category.taxId} disabled={pending} />
+        </Field>
         <View>
           <Text style={styles.setSectionTitle} translate>Состав сета</Text>
           {components.length === 0 ? (
@@ -748,7 +898,7 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
             {!dishesQ.isLoading && candidates.length === 0 ? <Text style={styles.emptySmall} translate>Блюда не найдены</Text> : null}
             {dishesQ.isLoading ? (
               <View style={styles.loadingSmall}>
-                <ActivityIndicator color={colors.primary} />
+                <AdminLoadingSkeleton />
               </View>
             ) : null}
           </View>
@@ -762,190 +912,216 @@ function SetModal({ set, onClose }: { set: AdminDish | null; onClose: () => void
 
 /* ---------- Категории ---------- */
 
-function CategoryModal({ categories, onClose }: { categories: AdminCategory[]; onClose: () => void }) {
-  const { create, update, reorder } = useCategoryMutations();
+function CategoryDirectory({ categories }: { categories: AdminCategory[] }) {
+  const { canAction } = usePermissions();
+  const { reorder } = useCategoryMutations();
   const { stations } = usePrepStations();
-  const push = useNotifications((s) => s.push);
-  const [name, setName] = useState('');
-  const defaultStation = stations.find((station) => station.isActive)?.id ?? 'none';
-  const [selectedStation, setPrepStation] = useState<PrepStation>();
-  const prepStation = selectedStation ?? defaultStation;
-  const [error, setError] = useState('');
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editName, setEditName] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<AdminCategory | null>(null);
+  const push = useNotifications((state) => state.push);
+  const t = useT();
+  const [search, setSearch] = useState('');
+  const [editor, setEditor] = useState<AdminCategory | 'new' | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ category: AdminCategory; play?: () => void } | null>(null);
+  const particles = useDeletionParticles();
+  const editable = canAction('editMenu');
+  const needle = search.trim().toLocaleLowerCase('ru');
   const sorted = [...categories].sort((a, b) => a.sortOrder - b.sortOrder);
+  const rows = sorted.filter(({ name }) => name.toLocaleLowerCase('ru').includes(needle));
 
-  const add = async () => {
-    setError('');
-    if (!name.trim()) return;
-    try {
-      await create.mutateAsync({ name: name.trim(), prepStation });
-      setName('');
-      setPrepStation(undefined);
-      push({ message: 'Категория добавлена', at: new Date().toISOString() });
-    } catch (err) {
-      setError(apiError(err));
-    }
-  };
-  const changeStation = (id: string, value: PrepStation) =>
-    update.mutateAsync({ id, prepStation: value }).catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }));
-  const saveRename = async (id: string) => {
-    const newName = editName.trim();
-    const currentName = sorted.find((c) => c.id === id)?.name;
-    setEditingId(null);
-    if (!newName || newName === currentName) return;
-    try {
-      await update.mutateAsync({ id, name: newName });
-      push({ message: 'Категория переименована', at: new Date().toISOString() });
-    } catch (err) {
-      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
-    }
-  };
-  const move = (index: number, dir: -1 | 1) => {
-    const next = index + dir;
-    if (next < 0 || next >= sorted.length) return;
-    const ids = sorted.map((c) => c.id);
+  function move(index: number, direction: -1 | 1) {
+    const next = index + direction;
+    if (!editable || reorder.isPending || needle || next < 0 || next >= sorted.length) return;
+    const ids = sorted.map(({ id }) => id);
     [ids[index], ids[next]] = [ids[next], ids[index]];
-    reorder.mutateAsync(ids).catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() }));
-  };
+    void reorder.mutateAsync(ids).catch((error) => push({ message: apiError(error), type: 'error', at: new Date().toISOString() }));
+  }
 
-  return (
-    <BottomSheet visible onClose={onClose} title="Категории" maxHeight="88%">
-      <View style={styles.catAddRow}>
-        <TextInput style={[styles.input, { flex: 1 }]} value={name} onChangeText={setName} placeholder="Название категории" placeholderTextColor={colors.textLight} />
-      </View>
-      <View style={[styles.grid2, { marginTop: spacing.sm }]}>
-        <View style={{ flex: 1 }}>
-          <Select value={prepStation} onChange={setPrepStation} options={prepStationOptions(stations, prepStation)} title="Направление" />
-        </View>
-        <Button title="Добавить" size="md" loading={create.isPending} onPress={add} />
-      </View>
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-
-      <SheetScrollView style={{ marginTop: spacing.md, maxHeight: 380 }} showsVerticalScrollIndicator={false}>
-        {sorted.map((c, index) => (
-          <View key={c.id} style={styles.catRow}>
-            <View style={styles.varMove}>
-              <FastPressable onPress={() => move(index, -1)} hitSlop={4} disabled={index === 0}>
-                <View style={{ transform: [{ rotate: '180deg' }], opacity: index === 0 ? 0.3 : 1 }}>
-                  <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} />
-                </View>
-              </FastPressable>
-              <FastPressable onPress={() => move(index, 1)} hitSlop={4} disabled={index === sorted.length - 1}>
-                <View style={{ opacity: index === sorted.length - 1 ? 0.3 : 1 }}>
-                  <PwaIcon name="chevronDown" size={14} color={colors.textMuted} strokeWidth={2} />
-                </View>
-              </FastPressable>
-            </View>
-            {editingId === c.id ? (
-              <View style={styles.catEditBox}>
-                <TextInput
-                  style={styles.catEditInput}
-                  value={editName}
-                  onChangeText={setEditName}
-                  autoFocus
-                  placeholder="Название"
-                  placeholderTextColor={colors.textLight}
-                  onSubmitEditing={() => saveRename(c.id)}
-                />
-                <FastPressable onPress={() => saveRename(c.id)} hitSlop={6} style={styles.iconBtn}>
-                  <PwaIcon name="check" size={16} color={colors.primary} strokeWidth={2.4} />
-                </FastPressable>
-                <FastPressable onPress={() => setEditingId(null)} hitSlop={6} style={styles.iconBtn}>
-                  <PwaIcon name="close" size={15} color={colors.textMuted} strokeWidth={2} />
-                </FastPressable>
-              </View>
-            ) : (
-              <FastPressable
-                onPress={() => {
-                  setEditingId(c.id);
-                  setEditName(c.name);
-                }}
-                style={styles.catNameBtn}
-              >
-                <Text style={styles.catName} numberOfLines={1}>
-                  {c.name}
-                </Text>
-                <PwaIcon name="pencil" size={14} color={colors.textMuted} strokeWidth={2} />
-              </FastPressable>
-            )}
-            <View style={{ width: 130 }}>
-              <Select value={c.prepStation ?? 'kitchen'} onChange={(v) => changeStation(c.id, v)} options={prepStationOptions(stations, c.prepStation)} title="Направление" />
-            </View>
-            <Text style={styles.catCount} translate>{c._count.dishes} бл.</Text>
-            <FastPressable onPress={() => setDeleteTarget(c)} hitSlop={6} style={styles.iconBtn}>
-              <PwaIcon name="trash" size={16} color={colors.danger} strokeWidth={2} />
-            </FastPressable>
+  return <View style={styles.particleFrame}>
+    <SheetScrollView contentContainerStyle={styles.listContent} keyboardShouldPersistTaps="handled">
+      <View style={styles.menuCard}>
+        <View style={styles.headerWrap}>
+          <View style={styles.directoryToolbar}>
+            <InputField containerStyle={styles.directorySearch} value={search} onChangeText={setSearch}
+              accessibilityLabel={t('Поиск категории')} placeholder={t('Быстрый поиск')} />
+            {editable && <Button title="Добавить" size="md" onPress={() => setEditor('new')} />}
           </View>
-        ))}
-      </SheetScrollView>
+        </View>
+        <View style={styles.directoryRow}><Text style={styles.checkHint} translate>Название</Text></View>
+        {rows.map((category, index) => {
+          const stationId = category.prepStation ?? 'kitchen';
+          const station = stations.find(({ id }) => id === stationId);
+          const stationLabel = station ? (station.isBuiltIn ? t(station.name) : station.name)
+            : stationId === 'none' ? t('Без отправки') : '—';
 
-      {deleteTarget ? (
-        <DeleteCategorySheet category={deleteTarget} categories={sorted} onDone={() => setDeleteTarget(null)} />
-      ) : null}
-    </BottomSheet>
-  );
+          return <View key={category.id} ref={(row) => particles.register(category.id, row)} collapsable={false} style={styles.directoryRow}>
+            {editable && !needle && <View style={styles.varMove}>
+              <FastPressable accessibilityRole="button" accessibilityLabel={t('Поднять категорию')}
+                disabled={index === 0 || reorder.isPending} onPress={() => move(index, -1)} hitSlop={4}>
+                <View style={{ transform: [{ rotate: '180deg' }], opacity: index === 0 ? 0.3 : 1 }}>
+                  <PwaIcon name="chevronDown" size={15} color={colors.textMuted} strokeWidth={2} />
+                </View>
+              </FastPressable>
+              <FastPressable accessibilityRole="button" accessibilityLabel={t('Опустить категорию')}
+                disabled={index === sorted.length - 1 || reorder.isPending} onPress={() => move(index, 1)} hitSlop={4}>
+                <View style={{ opacity: index === sorted.length - 1 ? 0.3 : 1 }}>
+                  <PwaIcon name="chevronDown" size={15} color={colors.textMuted} strokeWidth={2} />
+                </View>
+              </FastPressable>
+            </View>}
+            <View style={styles.directoryName}>
+              <Text style={styles.catName}>{category.name}</Text>
+              <Text style={styles.checkHint}>{stationLabel} · {t('Позиций')}: {category._count.dishes}</Text>
+            </View>
+            {editable && <>
+              <FastPressable accessibilityRole="button" accessibilityLabel={t('Редактировать категорию') + ' ' + category.name}
+                onPress={() => setEditor(category)} style={styles.directoryAction}>
+                <Text style={styles.directoryLink} translate>Ред.</Text>
+              </FastPressable>
+              <FastPressable accessibilityRole="button" accessibilityLabel={t('Удалить категорию') + ' ' + category.name}
+                onPress={() => setDeleteTarget({ category, play: particles.capture(category.id) })} style={styles.iconBtn} hitSlop={6}>
+                <PwaIcon name="trash" size={16} color={colors.danger} strokeWidth={2} />
+              </FastPressable>
+            </>}
+          </View>;
+        })}
+        {!rows.length && <Text style={styles.emptySmall} translate>{needle ? 'Категории не найдены' : 'Категорий пока нет'}</Text>}
+      </View>
+    </SheetScrollView>
+    {editable && editor && <CategoryEditor category={editor === 'new' ? undefined : editor} categoryCount={sorted.length}
+      position={editor === 'new' ? 1 : sorted.findIndex(({ id }) => editor.id === id) + 1} onClose={() => setEditor(null)} />}
+    {editable && deleteTarget && <DeleteCategorySheet category={deleteTarget.category} categories={sorted} onRemoved={deleteTarget.play} onDone={() => setDeleteTarget(null)} />}
+    {particles.overlay}
+  </View>;
 }
 
-function DeleteCategorySheet({
-  category,
-  categories,
-  onDone,
-}: {
+function CategoryEditor({ category, categoryCount, position, onClose }: { category?: AdminCategory; categoryCount: number; position: number; onClose: () => void }) {
+  const { create, update } = useCategoryMutations();
+  const { stations } = usePrepStations();
+  const push = useNotifications((state) => state.push);
+  const t = useT();
+  const [name, setName] = useState(category?.name ?? '');
+  const [tax, setTax] = useState(category?.taxId ?? '');
+  const [initialPosition] = useState(position);
+  const [newPosition, setNewPosition] = useState(String(position));
+  const [station, setStation] = useState<PrepStation | undefined>(category ? category.prepStation ?? 'kitchen' : undefined);
+  const [error, setError] = useState('');
+  const busy = create.isPending || update.isPending;
+  const prepStation = station ?? stations.find(({ isActive }) => isActive)?.id ?? 'none';
+
+  async function save() {
+    const normalized = name.trim();
+    if (busy || !normalized) return;
+    const nextPosition = Number(newPosition);
+    if (category && (!Number.isInteger(nextPosition) || nextPosition < 1 || nextPosition > categoryCount)) {
+      setError('Укажите позицию от 1 до ' + categoryCount);
+      return;
+    }
+    const taxChange = tax !== (category?.taxId ?? '') ? { taxId: tax || null } : {};
+    setError('');
+    try {
+      if (category) {
+        const hasNewName = normalized !== category.name;
+        const hasNewStation = prepStation !== (category.prepStation ?? 'kitchen');
+        if (hasNewName || hasNewStation || 'taxId' in taxChange || nextPosition !== initialPosition) {
+          await update.mutateAsync({
+            id: category.id,
+            ...(hasNewName ? { name: normalized } : {}),
+            ...(hasNewStation ? { prepStation } : {}),
+            ...taxChange,
+            ...(nextPosition !== initialPosition ? { position: nextPosition } : {}),
+          });
+          push({ message: 'Категория сохранена', at: new Date().toISOString() });
+        }
+      } else {
+        await create.mutateAsync({ name: normalized, prepStation, ...taxChange });
+        push({ message: 'Категория добавлена', at: new Date().toISOString() });
+      }
+      onClose();
+    } catch (cause) {
+      setError(apiError(cause));
+    }
+  }
+
+  const fields = <View style={styles.categoryFields}>
+    <InputField label="Название" accessibilityLabel={t('Название категории')} maxLength={60}
+      value={name} onChangeText={setName} editable={!busy} />
+    <Field label="Цех">
+      <AnchoredSelectScope><Select value={prepStation} onChange={setStation} options={prepStationOptions(stations, prepStation)}
+        title="Цех" disabled={busy} /></AnchoredSelectScope>
+    </Field>
+    <Field label="Налог"><MenuTaxSelect value={tax} onChange={setTax} disabled={busy} /></Field>
+    {category ? <Field label={'Позиция в списке · из ' + categoryCount}>
+      <TextInput style={styles.input} value={newPosition} onChangeText={setNewPosition} editable={!busy}
+        accessibilityLabel="Позиция в списке" keyboardType="number-pad" />
+    </Field> : null}
+    {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+  </View>;
+  const footer = <Button title="Сохранить" disabled={!name.trim()} loading={busy} onPress={() => void save()} />;
+  return category ? <BottomSheet visible title="Редактирование категории" onClose={onClose} footer={footer}>{fields}</BottomSheet>
+    : <WarehouseWorkspace title="Новая категория" onClose={() => { if (!busy) onClose(); }} footer={footer}>
+        <SheetScrollView contentContainerStyle={styles.listContent} keyboardShouldPersistTaps="handled">{fields}</SheetScrollView>
+      </WarehouseWorkspace>;
+}
+
+function DeleteCategorySheet({ category, categories, onRemoved, onDone }: {
   category: AdminCategory;
   categories: AdminCategory[];
+  onRemoved?: () => void;
   onDone: () => void;
 }) {
   const { remove } = useCategoryMutations();
-  const push = useNotifications((s) => s.push);
-  const others = categories.filter((c) => c.id !== category.id);
-  const [targetId, setTargetId] = useState(others[0]?.id ?? '');
+  const push = useNotifications((state) => state.push);
+  const others = categories.filter(({ id }) => id !== category.id);
+  const [strategy, setStrategy] = useState<'move' | 'delete'>();
+  const [targetId, setTargetId] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [error, setError] = useState('');
   const hasDishes = category._count.dishes > 0;
+  const canDelete = confirmation.trim() === category.name.trim()
+    && (!hasDishes || strategy === 'delete' || (strategy === 'move' && !!targetId));
 
-  const run = async (strategy?: 'move' | 'delete', targetCategoryId?: string) => {
+  async function run() {
+    if (!canDelete || remove.isPending) return;
+    setError('');
     try {
-      await remove.mutateAsync({ id: category.id, strategy, targetCategoryId });
+      await remove.mutateAsync({ id: category.id, strategy, targetCategoryId: strategy === 'move' ? targetId : undefined });
       push({ message: 'Категория удалена', at: new Date().toISOString() });
       onDone();
-    } catch (err) {
-      push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+      onRemoved?.();
+    } catch (failure) {
+      setError(apiError(failure));
     }
-  };
+  }
 
-  return (
-    <BottomSheet visible onClose={onDone} title={`Удалить «${category.name}»`}>
-      {!hasDishes ? (
-        <View style={{ gap: spacing.md }}>
-          <Text style={styles.hint} translate>В категории нет блюд. Удалить её?</Text>
-          <Button title="Удалить категорию" variant="danger" size="lg" loading={remove.isPending} onPress={() => run()} />
+  return <BottomSheet visible onClose={onDone} title="Удалить категорию" footer={<View style={styles.filterRow}>
+    <Button title="Отмена" variant="secondary" disabled={remove.isPending} onPress={onDone} />
+    <Button title={strategy === 'move' ? 'Перенести и удалить' : 'Удалить'} variant="danger" disabled={!canDelete}
+      loading={remove.isPending} onPress={() => void run()} />
+  </View>}>
+    <View style={styles.categoryFields}>
+      <Text style={styles.fieldLabel}>«{category.name}»</Text>
+      {hasDishes ? <>
+        <Text style={styles.hint} translate>Позиций в категории: {category._count.dishes}. История заказов и чеки сохранятся.</Text>
+        <View accessibilityRole="radiogroup">
+          {others.length > 0 ? <FastPressable style={styles.checkRow} accessibilityRole="radio"
+            accessibilityState={{ checked: strategy === 'move' }} onPress={() => setStrategy('move')}>
+            <Text style={styles.checkLabel} translate>Перенести в другую категорию</Text>
+            <PwaIcon name={strategy === 'move' ? 'check' : 'chevronRight'} size={18} color={strategy === 'move' ? colors.primary : colors.textLight} />
+          </FastPressable> : null}
+          {strategy === 'move' ? <AnchoredSelectScope><Select value={targetId} onChange={setTargetId} searchable
+            title="Категория для переноса" placeholder="Выберите категорию"
+            options={others.map(({ id, name }) => ({ value: id, label: name, translate: false }))} /></AnchoredSelectScope> : null}
+          <FastPressable style={styles.checkRow} accessibilityRole="radio" accessibilityState={{ checked: strategy === 'delete' }} onPress={() => setStrategy('delete')}>
+            <Text style={styles.checkLabel} translate>Удалить все позиции вместе с категорией</Text>
+            <PwaIcon name={strategy === 'delete' ? 'check' : 'chevronRight'} size={18} color={strategy === 'delete' ? colors.primary : colors.textLight} />
+          </FastPressable>
         </View>
-      ) : (
-        <View style={{ gap: spacing.lg }}>
-          <Text style={styles.hint} translate>В категории {category._count.dishes} блюд. Что сделать с ними?</Text>
-          <View style={styles.deleteBox}>
-            <Text style={styles.deleteBoxTitle} translate>Перенести блюда в другую категорию</Text>
-            {others.length === 0 ? (
-              <Text style={styles.hint} translate>Нет другой категории для переноса.</Text>
-            ) : (
-              <View style={{ gap: spacing.sm }}>
-                <Select value={targetId} onChange={setTargetId} options={others.map((c) => ({ value: c.id, label: c.name , translate: false }))} title="Категория" />
-                <Button title="Перенести и удалить" size="md" loading={remove.isPending} disabled={!targetId} onPress={() => run('move', targetId)} />
-              </View>
-            )}
-          </View>
-          <View style={[styles.deleteBox, styles.deleteBoxDanger]}>
-            <Text style={styles.deleteBoxTitleDanger} translate>Удалить категорию вместе с блюдами</Text>
-            <Text style={styles.hint} translate>Блюда полностью удалятся из меню. История заказов и чеки сохранятся.</Text>
-            <Button title="Удалить вместе с блюдами" variant="danger" size="md" loading={remove.isPending} onPress={() => run('delete')} />
-          </View>
-        </View>
-      )}
-    </BottomSheet>
-  );
+      </> : null}
+      <InputField label="Введите название категории для подтверждения" value={confirmation} onChangeText={setConfirmation}
+        editable={!remove.isPending} autoCapitalize="none" />
+      {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+    </View>
+  </BottomSheet>;
 }
-
-/* ---------- Мелочи ---------- */
 
 function CatTab({ active, onPress, label }: { active: boolean; onPress: () => void; label: string }) {
   return (
@@ -981,6 +1157,7 @@ function Sep() {
 }
 
 const styles = StyleSheet.create({
+  particleFrame: { flex: 1 },
   listContent: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: 12 },
   menuCard: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: 16, overflow: 'hidden' },
   headerWrap: { gap: 12, padding: 16, borderBottomWidth: 1, borderColor: colors.border },
@@ -999,9 +1176,6 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   headerBtns: { flexDirection: 'row', gap: spacing.sm },
-  menuAction: { height: 40, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 16, borderWidth: 1, borderColor: colors.border, borderRadius: 12, backgroundColor: colors.white },
-  menuActionPrimary: { backgroundColor: colors.primary, borderColor: colors.primary },
-  menuActionText: { fontSize: 14, fontWeight: '500', color: colors.textPrimary },
   tabs: { gap: 6, paddingVertical: 4 },
   catTab: { borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
   catTabActive: { borderColor: colors.primary, backgroundColor: colors.primary },
@@ -1063,7 +1237,12 @@ const styles = StyleSheet.create({
   addVarText: { fontSize: fontSize.sm, fontWeight: '600', color: colors.primary },
   varRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.sm, marginBottom: spacing.sm },
   varMove: { alignItems: 'center', justifyContent: 'center' },
-  photoPreview: { width: '100%', height: 160, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background },
+  coverRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  cover: { width: '42%', maxWidth: 180, gap: spacing.sm },
+  coverOptions: { flex: 1, minWidth: 0, gap: spacing.sm },
+  coverPlaceholder: { height: 96, alignItems: 'center', justifyContent: 'center', borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background },
+  switchEntry: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm },
+  photoPreview: { width: '100%', height: 96, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background },
   checkRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   checkLabel: { fontSize: fontSize.sm, color: colors.textSecondary },
   checkHint: { marginTop: 2, fontSize: fontSize.xs, color: colors.textMuted },
@@ -1125,27 +1304,14 @@ const styles = StyleSheet.create({
   emptySmall: { paddingVertical: spacing.md, textAlign: 'center', fontSize: fontSize.sm, color: colors.textMuted },
   loadingSmall: { paddingVertical: spacing.md, alignItems: 'center' },
 
-  catAddRow: { flexDirection: 'row', gap: spacing.sm },
-  catRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.sm, paddingVertical: spacing.sm, marginBottom: spacing.sm },
-  catNameBtn: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  catName: { flex: 1, minWidth: 0, fontSize: fontSize.base, color: colors.textPrimary },
-  catEditBox: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 2 },
-  catEditInput: {
-    flex: 1,
-    minWidth: 0,
-    height: 36,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.sm,
-    paddingHorizontal: 10,
-    fontSize: fontSize.sm,
-    color: colors.textPrimary,
-    backgroundColor: colors.white,
-  },
-  catCount: { width: 44, textAlign: 'right', fontSize: fontSize.xs, color: colors.textMuted },
+  categoryFields: { gap: spacing.md },
+  filterRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: spacing.sm },
+  directoryToolbar: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  directorySearch: { flex: 1, minWidth: 0 },
+  directoryRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 46, paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+  directoryName: { flex: 1, minWidth: 0, gap: 3 },
+  catName: { fontSize: fontSize.base, color: colors.textPrimary },
+  directoryAction: { minHeight: 36, paddingHorizontal: spacing.xs, justifyContent: 'center' },
+  directoryLink: { color: colors.primary, fontSize: 14, fontWeight: '500' },
   hint: { fontSize: fontSize.sm, color: colors.textSecondary },
-  deleteBox: { borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, gap: spacing.sm },
-  deleteBoxDanger: { borderColor: 'rgba(239,68,68,0.3)', backgroundColor: colors.dangerSoft },
-  deleteBoxTitle: { fontSize: fontSize.sm, fontWeight: '500', color: colors.textPrimary },
-  deleteBoxTitleDanger: { fontSize: fontSize.sm, fontWeight: '500', color: colors.danger },
 });

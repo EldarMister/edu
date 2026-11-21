@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
 import { Text } from '@/components/typography';
 import Animated, { FadeInRight, FadeOutRight } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';

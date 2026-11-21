@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useT, translate } from '@/lib/i18n';
 import { useLocale } from '@/store/locale';
-import { colors } from '@/theme';
+import { colors, useThemedStyle, useThemeColor, useThemeMode } from '@/theme';
 
 type Typography = {
   fontSize: number;
@@ -60,13 +60,14 @@ export const Text = React.forwardRef<Text, TextProps & { translate?: boolean }>(
   const parent = React.useContext(TypographyContext);
   const { typography, nativeStyle } = typographyStyle(style, parent);
   const t = useT();
+  const themedStyle = useThemedStyle([!parent && { fontSize: 15, color: colors.textPrimary }, style, nativeStyle]);
   const content = localized ? React.Children.map(children, child => typeof child === 'string' ? t(child) : child) : children;
   return (
     <TypographyContext.Provider value={typography}>
       <NativeText
         {...props}
         ref={ref}
-        style={[!parent && { fontSize: 15, color: colors.textPrimary }, style, nativeStyle]}
+        style={themedStyle}
         accessibilityLabel={accessibilityLabel ? t(accessibilityLabel) : undefined}
         accessibilityHint={accessibilityHint ? t(accessibilityHint) : undefined}
       >
@@ -78,11 +79,14 @@ export const Text = React.forwardRef<Text, TextProps & { translate?: boolean }>(
 
 export type TextInput = NativeTextInput;
 export const TextInput = Object.assign(React.forwardRef<TextInput, TextInputProps>(function TextInput(
-  { style, placeholder, accessibilityLabel, accessibilityHint, ...props }, ref,
+  { style, placeholder, placeholderTextColor, selectionColor, keyboardAppearance, accessibilityLabel, accessibilityHint, ...props }, ref,
 ) {
   const t = useT();
   const { nativeStyle } = typographyStyle(style);
-  return <NativeTextInput {...props} ref={ref} style={[{ fontSize: 15, color: colors.textPrimary }, style, nativeStyle]} placeholder={placeholder ? t(placeholder) : undefined} accessibilityLabel={accessibilityLabel ? t(accessibilityLabel) : undefined} accessibilityHint={accessibilityHint ? t(accessibilityHint) : undefined} />;
+  const mapColor = useThemeColor();
+  const mode = useThemeMode();
+  const themedStyle = useThemedStyle([{ fontSize: 15, color: colors.textPrimary }, style, nativeStyle]);
+  return <NativeTextInput {...props} ref={ref} style={themedStyle} placeholderTextColor={mapColor(placeholderTextColor ?? colors.textLight)} selectionColor={mapColor(selectionColor ?? colors.primary)} keyboardAppearance={keyboardAppearance ?? mode} placeholder={placeholder ? t(placeholder) : undefined} accessibilityLabel={accessibilityLabel ? t(accessibilityLabel) : undefined} accessibilityHint={accessibilityHint ? t(accessibilityHint) : undefined} />;
 }), { State: NativeTextInput.State });
 
 /** Native confirmation dialogs read the current locale at the moment they open. */

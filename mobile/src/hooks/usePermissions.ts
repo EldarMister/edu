@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
-import { hasPermission, resolvePermissions } from '@/lib/permissions';
 import { useAuth } from '@/store/auth';
+import { hasPermission } from '@/lib/permissions';
+import { workspacePermissions, workspaceRole } from '@/lib/workspaces';
 import type { ActionKey, EmployeePermissions, SectionKey } from '@/types';
 
 /**
@@ -8,20 +9,27 @@ import type { ActionKey, EmployeePermissions, SectionKey } from '@/types';
  * Если permissions ещё не пришли (старая сессия) — берём дефолты по роли.
  */
 export function usePermissions() {
-  const user = useAuth((state) => state.user);
+  const user = useAuth((s) => s.user);
+  const workspace = useAuth((s) => s.workspace);
 
   return useMemo(() => {
-    const permissions: EmployeePermissions | null = user
-      ? (user.permissions ?? resolvePermissions(user.role, null))
+    const perms: EmployeePermissions | null = user && workspace
+      ? workspacePermissions(user, workspace)
       : null;
-    const isOwner = user?.role === 'OWNER';
+    const effectiveRole = user && workspace ? workspaceRole(user, workspace) : null;
+    const isOwner = effectiveRole === 'OWNER';
 
     return {
-      permissions,
+      permissions: perms,
       isOwner,
-      canSection: (key: SectionKey) => isOwner || (!!permissions && permissions.sections[key] === true),
-      canAction: (key: ActionKey) => isOwner || (!!permissions && permissions.actions[key] === true),
-      can: (path: string) => isOwner || (!!permissions && hasPermission(permissions, path)),
+      effectiveRole,
+      /** Доступен ли раздел (владельцу — всегда). */
+      canSection: (key: SectionKey) => isOwner || (!!perms && perms.sections[key] === true),
+      canEditSection: (key: SectionKey) => isOwner || (!!perms && perms.sections[key] === true && !perms.readOnlySections?.includes(key)),
+      /** Разрешено ли действие (владельцу — всегда). */
+      canAction: (key: ActionKey) => isOwner || (!!perms && perms.actions[key] === true),
+      /** Универсальная проверка по строке "sections.warehouse" / "actions.editMenu". */
+      can: (path: string) => isOwner || (!!perms && hasPermission(perms, path)),
     };
-  }, [user]);
+  }, [user, workspace]);
 }

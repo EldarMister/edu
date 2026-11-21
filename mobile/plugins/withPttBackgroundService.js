@@ -17,6 +17,25 @@ module.exports = function withPttBackgroundService(config) {
     if (!configWithGradle.modResults.contents.includes(rule)) {
       configWithGradle.modResults.contents += `\n\n// Keep every native module on the AndroidX Core API required by the PTT service.\nallprojects {\n    configurations.all {\n        ${rule}\n    }\n}\n`;
     }
+    const radioCmakeMarker = '// Keep native radio object paths short on Windows.';
+    if (!configWithGradle.modResults.contents.includes(radioCmakeMarker)) {
+      configWithGradle.modResults.contents += `
+${radioCmakeMarker}
+if (org.apache.tools.ant.taskdefs.condition.Os.isFamily('windows')) {
+    subprojects { nativeProject ->
+        if (nativeProject.name == 'react-native-audio-api') {
+            nativeProject.pluginManager.withPlugin('com.android.library') {
+                nativeProject.androidComponents.finalizeDsl { androidDsl ->
+                    def projectKey = Integer.toHexString(nativeProject.projectDir.canonicalPath.hashCode())
+                    def stagingDir = new File(System.getProperty('java.io.tmpdir'), 'edu-ptt-' + projectKey)
+                    androidDsl.externalNativeBuild.cmake.buildStagingDirectory(stagingDir)
+                }
+            }
+        }
+    }
+}
+`;
+    }
     return configWithGradle;
   });
 

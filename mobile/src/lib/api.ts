@@ -1,4 +1,5 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios';
+import type { Workspace } from './workspaces';
 import { useAuth } from '@/store/auth';
 import { API_BASE, API_URL } from '@/config/env';
 
@@ -7,14 +8,17 @@ export const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
   timeout: 20_000,
 });
-type SessionRequest = InternalAxiosRequestConfig & { _retry?: boolean; _sessionUserId?: string };
+type SessionRequest = InternalAxiosRequestConfig & { _retry?: boolean; _sessionUserId?: string; _sessionWorkspace?: Workspace | null };
 
 // Подставляем access token в каждый запрос.
 api.interceptors.request.use((config) => {
-  (config as SessionRequest)._sessionUserId = useAuth.getState().user?.id;
-  const token = useAuth.getState().accessToken;
+  const { user, accessToken: token, workspace } = useAuth.getState();
+  const request = config as SessionRequest;
+  request._sessionUserId = user?.id;
+  request._sessionWorkspace = workspace;
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
+    if (workspace && !config.headers.has('X-EDU-Workspace')) config.headers.set('X-EDU-Workspace', workspace);
   }
   return config;
 });
@@ -49,7 +53,7 @@ api.interceptors.response.use(
     const original = error.config as SessionRequest;
     if (error.response?.status === 401 && original && !original._retry) {
       const current = useAuth.getState();
-      if (original._sessionUserId !== current.user?.id) return Promise.reject(error);
+      if (original._sessionUserId !== current.user?.id || original._sessionWorkspace !== current.workspace) return Promise.reject(error);
       original._retry = true;
       // A concurrent request may already have completed refresh for this session.
       if (current.accessToken && original.headers.Authorization !== `Bearer ${current.accessToken}`) {
@@ -59,7 +63,7 @@ api.interceptors.response.use(
       refreshing = refreshing ?? refreshTokens();
       const newToken = await refreshing;
       refreshing = null;
-      if (newToken) {
+      if (newToken && original._sessionWorkspace === useAuth.getState().workspace) {
         original.headers.Authorization = `Bearer ${newToken}`;
         return api(original);
       }

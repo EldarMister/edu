@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { Image, Linking, StyleSheet, View } from 'react-native';
+import { Image, Linking, StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
@@ -7,6 +8,7 @@ import { OrderStatusBadges } from '@/components/StatusBadge';
 import QRCode from 'react-native-qrcode-svg';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
+import { OrderRefunds } from '@/features/refunds/OrderRefunds';
 import { useNotifications } from '@/store/notifications';
 import {
   displayOrderNumber,
@@ -37,12 +39,19 @@ function mixedSumBy(order: { payments?: { method: string; amount: string }[] }, 
 }
 
 /** Подробная карточка заказа (порт PWA OrderDetailsModal). */
-export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCancellation = false }: { order: Order | null; onClose: () => void; onOrderChange?: (order: Order) => void; allowItemCancellation?: boolean }) {
+export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCancellation = false, allowRefunds = false }: {
+  order: Order | null;
+  onClose: () => void;
+  onOrderChange?: (order: Order) => void;
+  allowItemCancellation?: boolean;
+  allowRefunds?: boolean;
+}) {
   const [cancelItem, setCancelItem] = React.useState<Order['items'][number] | null>(null);
   const cancel = useCancelOrderItem();
   const push = useNotifications((s) => s.push);
   React.useEffect(() => { setCancelItem(null); }, [order?.id]);
   if (!order) return null;
+  const refunded = Number(order.refundedAmount ?? 0);
   const date = new Date(order.createdAt);
   const showMixedBreakdown =
     order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
@@ -119,6 +128,7 @@ export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCanc
                   <Text style={styles.dishName}>
                     {item.quantity}× {orderItemDisplayName(item)}
                   </Text>
+                  {item.refundedQuantity ? <Text style={styles.dishComment} translate>Возвращено · {item.refundedQuantity} / {item.quantity}</Text> : null}
                   {item.comment ? <Text style={styles.dishComment}>{item.comment}</Text> : null}
                   {item.rejectReason ? <Text style={styles.dishReject} translate>Отказ: {item.rejectReason}</Text> : null}
                 </View>
@@ -137,9 +147,16 @@ export function OrderDetailsModal({ order, onClose, onOrderChange, allowItemCanc
           <Total label="Итого" value={money(order.totalAmount)} />
           {Number(order.discountAmount) > 0 ? <Total label="Скидка" value={money(order.discountAmount)} /> : null}
           {Number(order.serviceChargeAmount) > 0 ? <Total label="Обслуживание" value={money(order.serviceChargeAmount)} /> : null}
-          <Total label="К оплате" value={money(order.finalAmount)} strong />
+          <Total label={order.status === 'paid' ? 'Оплачено' : 'К оплате'} value={money(order.finalAmount)} strong />
+          {refunded > 0 ? (
+            <>
+              <Total label="Возвращено" value={money(refunded)} />
+              <Total label="Оплата после возврата" value={money(Number(order.finalAmount) - refunded)} />
+            </>
+          ) : null}
         </View>
 
+        {allowRefunds && order.status === 'paid' ? <OrderRefunds key={order.id} order={order} mode="manage" /> : null}
         <FiscalBlock order={order} />
       </SheetScrollView>
     </BottomSheet>

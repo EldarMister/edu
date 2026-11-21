@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { StyleSheet, View, type ViewStyle } from 'react-native';
+import { StyleSheet, type ViewStyle } from 'react-native';
 import { colors, spacing } from '@/theme';
 
 /** Верхняя шапка приложения: белый фон, нижняя граница (как в PWA header). */

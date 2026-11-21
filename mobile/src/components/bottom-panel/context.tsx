@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { View, type ViewProps } from 'react-native';
+import { type ViewProps } from 'react-native';
 import { panelHistory } from './history';
 
 export type PanelCloseController = {

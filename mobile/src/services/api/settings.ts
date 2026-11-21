@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { API_URL } from '@/config/env';
 import type { WaiterOrderPermissions } from '@/lib/order-permissions';
-import type { PaymentMethod } from '@/types';
+import type { PaymentMethod, ReceiptPrintSettings } from '@/types';
 
 export interface PublicSettings {
   waiterOrderPermissions: WaiterOrderPermissions;
@@ -20,9 +20,16 @@ export interface PublicSettings {
   fiscalEnabled: boolean;
   serviceChargeAmount: string;
   deliveryEnabled: boolean;
+  useFloorPlan?: boolean;
+  roundOrderTotal?: boolean;
+  receiptPrintRequestsOnly?: boolean;
 }
 
-export interface Settings {
+export interface Settings extends Partial<ReceiptPrintSettings> {
+  receiptLogoData?: string | null;
+  receiptPrintRequestsOnly?: boolean;
+  roundOrderTotal?: boolean;
+  taxesEnabled?: boolean;
   waiterOrderPermissions: WaiterOrderPermissions;
   id: string;
   cafeId: string | null;

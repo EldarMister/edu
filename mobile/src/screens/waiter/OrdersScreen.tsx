@@ -1,6 +1,7 @@
+import { FlatList, RefreshControl, View, SafeAreaView } from '@/components/themed';
 import { gridLayout } from '@/lib/layout';
 import React, { memo } from 'react';
-import { FlatList, Image, InteractionManager, RefreshControl, StyleSheet, View, useWindowDimensions, type View as RNView } from 'react-native';
+import { Image, InteractionManager, StyleSheet, useWindowDimensions, type View as RNView } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import Animated, {
   interpolate,
@@ -9,7 +10,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { useNavigation } from '@react-navigation/native';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
@@ -17,15 +18,18 @@ import { Button, Card, EmptyState, Loading } from '@/components/ui';
 import { popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
 import { OrderBadge } from '@/components/StatusBadge';
-import { colors, fontSize, spacing } from '@/theme';
+import { colors, fontSize, spacing, useThemedStyle } from '@/theme';
 import { useActiveOrders, useCallAdministrator, useCancelOrder, useClaimQrOrder, useDishes } from '@/services/api/waiter';
-import { useCart } from '@/store/cart';
+import { NEW_DELIVERY_CART, orderCartDestination, useCart } from '@/store/cart';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useConnectionStatus } from '@/services/socket';
 import { useNotifications } from '@/store/notifications';
 import { displayOrderNumber, hallSuffix, money, timeHM } from '@/utils/format';
 import { orderToCartLines } from '@/utils/orderCart';
 import { usePublicSettings } from '@/services/api/settings';
 import { waiterOrderPermission } from '@/lib/order-permissions';
 import { apiError } from '@/lib/api';
+import { WaiterOrderArchive } from '@/features/refunds/WaiterOrderArchive';
 import type { Order } from '@/types';
 import { InsufficientPermissionsSheet } from './InsufficientPermissionsSheet';
 import { canWaiterCancelOrder, orderLocation } from './orderRules';
@@ -40,6 +44,7 @@ const DEFAULT_CANCEL_REASON = CANCEL_REASONS[0];
 type PendingCancel = { order: Order; reason: string; deadline: number };
 
 export function OrdersScreen() {
+  const actionSurface = useThemedStyle(styles.actionsMenuOverlay);
   const navigation = useNavigation<any>();
   const rootRef = React.useRef<View>(null);
   const { width: screenWidth } = useWindowDimensions();
@@ -49,11 +54,15 @@ export function OrdersScreen() {
   const policies = settings.data?.waiterOrderPermissions;
   const dishes = useDishes();
   const selectTable = useCart((s) => s.selectTable);
+  const canCreateDelivery = usePermissions().canAction('createDeliveryOrders');
+  const connected = useConnectionStatus();
+  const deliveryPending = useCart((s) => !!s.pendingTables[NEW_DELIVERY_CART.id]);
   const startEditing = useCart((s) => s.startEditing);
   const push = useNotifications((s) => s.push);
   const cancel = useCancelOrder();
   const claimQr = useClaimQrOrder();
   const administratorCall = useCallAdministrator();
+  const [archiveOpen, setArchiveOpen] = React.useState(false);
   const [menuFor, setMenuFor] = React.useState<{ order: Order; top: number; left: number } | null>(null);
   const [menuRender, setMenuRender] = React.useState<{ order: Order; top: number; left: number } | null>(null);
   const menuProgress = useSharedValue(0);
@@ -130,7 +139,7 @@ export function OrdersScreen() {
       return;
     }
     startEditing(
-      { id: order.table.id, number: order.table.number, hallName: order.table.hall?.name },
+      orderCartDestination(order),
       { id: order.id, orderNumber: order.orderNumber, comment: order.comment },
       lines,
     );
@@ -245,7 +254,21 @@ export function OrdersScreen() {
   return (
     <SafeAreaView ref={rootRef} style={styles.safe} edges={[]}>
       <View style={styles.panel}>
-        <Text style={styles.panelTitle} translate>Активные заказы</Text>
+        <View style={styles.panelHeader}>
+          <Text style={styles.panelTitle} translate>Активные заказы</Text>
+          <Button title="Архив заказов" size="md" variant="secondary" onPress={() => setArchiveOpen(true)} />
+          {canCreateDelivery ? (
+            <Button
+              title="Новая доставка"
+              size="md"
+              disabled={!connected || deliveryPending}
+              onPress={() => {
+                selectTable(NEW_DELIVERY_CART);
+                navigateToMenu();
+              }}
+            />
+          ) : null}
+        </View>
         {orders.isLoading ? (
           <Loading />
         ) : sorted.length === 0 ? (
@@ -270,12 +293,17 @@ export function OrdersScreen() {
           />
         )}
       </View>
+      <WaiterOrderArchive visible={archiveOpen} title="Архив заказов" onClose={() => setArchiveOpen(false)}
+        onSelect={(orderId) => {
+          setArchiveOpen(false);
+          navigation.navigate('OrderDetail', { orderId });
+        }} />
       {menuRender ? (
         <View pointerEvents="box-none" style={StyleSheet.absoluteFill}>
           <FastPressable style={StyleSheet.absoluteFill} onPress={closeMenu} />
           <Animated.View
             style={[
-              styles.actionsMenuOverlay,
+              actionSurface,
               {
                 top: menuRender.top,
                 left: menuRender.left,
@@ -512,7 +540,8 @@ const OrderCard = memo(function OrderCard({
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.white },
   panel: { flex: 1, paddingHorizontal: spacing.sm, paddingTop: 10 },
-  panelTitle: { fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.md },
+  panelHeader: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: spacing.sm, marginBottom: spacing.md },
+  panelTitle: { flexShrink: 1, fontSize: fontSize.lg, fontWeight: '600', color: colors.textPrimary },
   list: { gap: spacing.md, paddingHorizontal: 6, paddingBottom: spacing.lg },
   orderCard: { paddingHorizontal: spacing.lg, paddingVertical: 14 },
   row: { flexDirection: 'row', alignItems: 'stretch', gap: spacing.md, minHeight: 48 },

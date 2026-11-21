@@ -17,9 +17,9 @@ export type PanelMotion = {
   dismiss: (interaction: number) => void;
 };
 
-export function useBottomPanel({ id, parent, visible, persistent, inline, draggable, onClose, onDismiss, ownerKey }: {
+export function useBottomPanel({ id, parent, visible, persistent, inline, draggable, dismissible = true, onClose, onDismiss, ownerKey }: {
   id: string; parent?: string; visible: boolean; persistent: boolean; inline: boolean; draggable: boolean;
-  onClose: () => void; onDismiss?: () => void;
+  onClose: () => void; onDismiss?: () => void; dismissible?: boolean;
   ownerKey?: string;
 }) {
   const stack = useBottomPanelHistory();
@@ -35,7 +35,7 @@ export function useBottomPanel({ id, parent, visible, persistent, inline, dragga
   const reduceMotion = useReducedMotion();
   const completion = React.useRef(new PanelCompletion());
   const state = React.useRef({ visible, active, rendered, height: 0, phase: 'hidden', seq: 0, token: 0, requested: false, mounted: true, action: undefined as (() => void) | undefined });
-  const callbacks = React.useRef({ onClose, onDismiss }); callbacks.current = { onClose, onDismiss };
+  const callbacks = React.useRef({ onClose, onDismiss, dismissible }); callbacks.current = { onClose, onDismiss, dismissible };
   state.current.visible = visible; state.current.active = active; state.current.rendered = rendered;
 
   const finish = React.useCallback((seq: number, mode: Exit) => {
@@ -73,7 +73,7 @@ export function useBottomPanel({ id, parent, visible, persistent, inline, dragga
   }, [closing, enabled, finish, interaction, offset, reduceMotion]);
 
   const close = React.useCallback((velocity = 0, settled = false) => {
-    if (!state.current.visible || !state.current.active || state.current.phase === 'closing') return;
+    if (!callbacks.current.dismissible || !state.current.visible || !state.current.active || state.current.phase === 'closing') return;
     state.current.requested = true;
     // Keep the initiating owner's callback; a later order/status must not replace it.
     state.current.action = callbacks.current.onClose;

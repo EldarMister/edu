@@ -1,10 +1,12 @@
+import { ActivityIndicator, ScrollView, View } from '@/components/themed';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { Alert, Text, TextInput } from '@/components/typography';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
+import { useDeletionParticles } from '@/components/DeletionParticles';
 import { Button, Toggle } from '@/components/ui';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { apiError } from '@/lib/api';
@@ -13,6 +15,7 @@ import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import {
   useAdminHalls,
   useHallMutations,
+  useFloorPlanMutations,
   useTableMutations,
   useTablesOverview,
   type AdminHall,
@@ -20,21 +23,32 @@ import {
 } from '@/services/api/admin';
 import type { TableStatus } from '@/types';
 import { TableQrModal } from './TableQrModal';
+import { HallFloorPlanEditor } from './HallFloorPlanEditor';
+import { Select } from '@/components/Select';
+import { usePermissions } from '@/hooks/usePermissions';
+import { usePublicSettings } from '@/services/api/settings';
+import { tableLabel } from '@/utils/floorPlan';
 
 /** Столы и залы (порт PWA TablesPage): аккордеон залов + CRUD. */
 export function TablesScreen() {
   const focused = useIsFocused();
   const overview = useTablesOverview();
   const hallsQ = useAdminHalls();
+  const settings = usePublicSettings();
+  const { canEditSection } = usePermissions();
+  const editable = canEditSection('tables');
+  const { setMode } = useFloorPlanMutations();
   const { remove: removeHall } = useHallMutations();
   const { remove: removeTable } = useTableMutations();
   const push = useNotifications((s) => s.push);
+  const particles = useDeletionParticles();
 
   const [hallModal, setHallModal] = useState<AdminHall | null | 'new'>(null);
   const [tableModal, setTableModal] = useState<{ hall: AdminHall; table: AdminTableItem | null } | null>(null);
   const [qrModal, setQrModal] = useState<{ table: AdminTableItem; hallName: string } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [accordionReady, setAccordionReady] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
 
   const o = overview.data;
   const halls = hallsQ.data ?? [];
@@ -71,8 +85,9 @@ export function TablesScreen() {
       },
     ]);
 
-  const delTable = (t: AdminTableItem) =>
-    Alert.alert('Удалить стол?', `Стол №${t.number} будет удалён.`, [
+  const delTable = (t: AdminTableItem, onRemoved?: () => void) => {
+    const play = onRemoved ?? particles.capture(t.id);
+    Alert.alert('Удалить стол?', tableLabel(t), [
       { text: 'Отмена', style: 'cancel' },
       {
         text: 'Удалить',
@@ -80,12 +95,14 @@ export function TablesScreen() {
         onPress: () =>
           removeTable
             .mutateAsync(t.id)
+            .then(() => play?.())
             .catch((err) => push({ message: apiError(err), type: 'error', at: new Date().toISOString() })),
       },
     ]);
+  };
 
   return (
-    <>
+    <View style={styles.particleFrame}>
       <SheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.topRow}>
           <View style={styles.summary}>
@@ -98,7 +115,16 @@ export function TablesScreen() {
             <Sum label="Занятых" value={o ? String(o.occupiedCount) : '—'} />
           </View>
         </View>
-        <Button title="+ Добавить зал" variant="secondary" size="md" onPress={() => setHallModal('new')} />
+        <View style={styles.toolbar}>
+          {editable ? <Button title="+ Добавить зал" variant="secondary" size="md" onPress={() => setHallModal('new')} /> : null}
+          <Button title="Карта зала" variant="secondary" size="md" onPress={() => setMapOpen(true)} />
+        </View>
+        <View style={styles.toolbar}>
+          <Text style={styles.checkLabel} translate>Показывать карту зала на кассе</Text>
+          <Toggle checked={settings.data?.useFloorPlan === true} disabled={!editable || !settings.isSuccess || setMode.isPending}
+            accessibilityLabel="Показывать карту зала на кассе"
+            onChange={(useMap) => setMode.mutate(useMap, { onError: (error) => push({ message: apiError(error), type: 'error', at: new Date().toISOString() }) })} />
+        </View>
 
         {hallsQ.isLoading ? (
           <View style={styles.center}>
@@ -118,7 +144,7 @@ export function TablesScreen() {
                       <Text style={styles.hallName} numberOfLines={1}>
                         {hall.name}
                       </Text>
-                      <Text style={styles.hallSub} translate>{hall.tables.length} столов</Text>
+                      <Text style={styles.hallSub} translate>{hall.tables.length} столов{hall.useFloorPlan == null ? '' : hall.useFloorPlan ? ' · Карта зала' : ' · Обычные кнопки'}</Text>
                     </View>
                   </FastPressable>
                   {!hall.isActive ? (
@@ -126,14 +152,14 @@ export function TablesScreen() {
                       <Text style={styles.offBadgeText} translate>отключён</Text>
                     </View>
                   ) : null}
-                  <View style={styles.hallActions}>
+                  {editable ? <View style={styles.hallActions}>
                     <FastPressable onPress={() => setTableModal({ hall, table: null })} style={styles.addTableBtn}>
                       <PwaIcon name="plus" size={14} color={colors.textPrimary} />
                       <Text style={styles.addTableText} translate>Стол</Text>
                     </FastPressable>
                     <IconBtn icon="pencil" onPress={() => setHallModal(hall)} />
                     <IconBtn icon="trash" danger onPress={() => delHall(hall)} />
-                  </View>
+                  </View> : null}
                 </View>
 
                 {!isCollapsed ? (
@@ -141,21 +167,21 @@ export function TablesScreen() {
                     <Text style={styles.emptyTables} translate>В зале пока нет столов</Text>
                   ) : (
                     hall.tables.map((t, i) => (
-                      <View key={t.id} style={[styles.tableRow, i > 0 && styles.tableRowBorder]}>
+                      <View key={t.id} ref={(row) => particles.register(t.id, row)} collapsable={false} style={[styles.tableRow, i > 0 && styles.tableRowBorder]}>
                         <View style={styles.tableLeft}>
                           <View style={styles.numBadge}>
                             <Text style={styles.numBadgeText}>{t.number}</Text>
                           </View>
                           <View style={{ minWidth: 0 }}>
-                            <Text style={styles.tableName} translate>Стол {t.number}</Text>
+                            <Text style={styles.tableName} translate={!t.name} numberOfLines={1}>{tableLabel(t)}</Text>
                             <Text style={styles.tableSeats} translate>{t.seats} мест</Text>
                           </View>
                         </View>
                         <View style={styles.tableActions}>
                           <TableBadge status={t.status} />
                           <IconBtn icon="qr" onPress={() => setQrModal({ table: t, hallName: hall.name })} />
-                          <IconBtn icon="pencil" onPress={() => setTableModal({ hall, table: t })} />
-                          <IconBtn icon="trash" danger onPress={() => delTable(t)} />
+                          {editable ? <><IconBtn icon="pencil" onPress={() => setTableModal({ hall, table: t })} />
+                          <IconBtn icon="trash" danger onPress={() => delTable(t)} /></> : null}
                         </View>
                       </View>
                     ))
@@ -167,14 +193,19 @@ export function TablesScreen() {
         )}
       </SheetScrollView>
 
+      {mapOpen ? <HallFloorPlanEditor halls={halls} editable={editable} onClose={() => setMapOpen(false)}
+        onAdd={(hall) => setTableModal({ hall, table: null })}
+        onEdit={(hall, table) => setTableModal({ hall, table })}
+        onRemove={delTable} /> : null}
       {hallModal !== null ? (
         <HallModal hall={hallModal === 'new' ? null : hallModal} onClose={() => setHallModal(null)} />
       ) : null}
       {tableModal ? (
-        <TableModal hall={tableModal.hall} table={tableModal.table} onClose={() => setTableModal(null)} />
+        <TableModal hall={tableModal.hall} halls={halls} table={tableModal.table} onClose={() => setTableModal(null)} />
       ) : null}
       {qrModal ? <TableQrModal table={qrModal.table} hallName={qrModal.hallName} onClose={() => setQrModal(null)} /> : null}
-    </>
+      {particles.overlay}
+    </View>
   );
 }
 
@@ -198,6 +229,7 @@ function HallModal({ hall, onClose }: { hall: AdminHall | null; onClose: () => v
   const push = useNotifications((s) => s.push);
   const [name, setName] = useState(hall?.name ?? '');
   const [isActive, setIsActive] = useState(hall?.isActive ?? true);
+  const [display, setDisplay] = useState(hall?.useFloorPlan == null ? 'inherit' : hall.useFloorPlan ? 'map' : 'buttons');
   const [error, setError] = useState('');
   const pending = create.isPending || update.isPending;
 
@@ -208,8 +240,9 @@ function HallModal({ hall, onClose }: { hall: AdminHall | null; onClose: () => v
       return;
     }
     try {
-      if (isEdit) await update.mutateAsync({ id: hall!.id, name: name.trim(), isActive });
-      else await create.mutateAsync({ name: name.trim() });
+      const fields = { name: name.trim(), useFloorPlan: display === 'inherit' ? null : display === 'map' };
+      if (isEdit) await update.mutateAsync({ id: hall!.id, isActive, ...fields });
+      else await create.mutateAsync(fields);
       push({ message: isEdit ? 'Зал обновлён' : 'Зал добавлен', at: new Date().toISOString() });
       onClose();
     } catch (err) {
@@ -227,6 +260,10 @@ function HallModal({ hall, onClose }: { hall: AdminHall | null; onClose: () => v
       <Field label="Название зала">
         <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="Основной зал" placeholderTextColor={colors.textLight} />
       </Field>
+      <Field label="Отображение на кассе">
+        <Select title="Отображение на кассе" value={display} onChange={setDisplay}
+          options={[{ value: 'inherit', label: 'По настройке кассы' }, { value: 'buttons', label: 'Обычные кнопки' }, { value: 'map', label: 'Карта зала' }]} />
+      </Field>
       {isEdit ? (
         <View style={styles.checkRow}>
           <Text style={styles.checkLabel} translate>Зал активен</Text>
@@ -238,10 +275,12 @@ function HallModal({ hall, onClose }: { hall: AdminHall | null; onClose: () => v
   );
 }
 
-function TableModal({ hall, table, onClose }: { hall: AdminHall; table: AdminTableItem | null; onClose: () => void }) {
+function TableModal({ hall, halls, table, onClose }: { hall: AdminHall; halls: AdminHall[]; table: AdminTableItem | null; onClose: () => void }) {
   const isEdit = !!table;
   const { create, update } = useTableMutations();
   const push = useNotifications((s) => s.push);
+  const [hallId, setHallId] = useState(hall.id);
+  const [name, setName] = useState(table?.name ?? '');
   const [number, setNumber] = useState(table ? String(table.number) : '');
   const [seats, setSeats] = useState(table ? String(table.seats) : '2');
   const [isActive, setIsActive] = useState(table?.isActive ?? true);
@@ -250,16 +289,22 @@ function TableModal({ hall, table, onClose }: { hall: AdminHall; table: AdminTab
 
   const onSubmit = async () => {
     setError('');
-    if (!seats || (isEdit && !number)) {
-      setError(isEdit ? 'Укажите номер и количество мест' : 'Укажите количество мест');
+    const positiveInteger = (value: string) => /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 2147483647;
+    if (!positiveInteger(seats)) {
+      setError('Укажите целое количество мест больше нуля');
       return;
     }
+    if ((isEdit || number.length > 0) && !positiveInteger(number)) {
+      setError('Укажите целый номер стола больше нуля');
+      return;
+    }
+    const fields = { hallId, name: name.trim() || null, seats: Number(seats), ...(number ? { number: Number(number) } : {}) };
     try {
       if (isEdit) {
-        await update.mutateAsync({ id: table!.id, number: Number(number), seats: Number(seats), isActive });
+        await update.mutateAsync({ id: table!.id, isActive, ...fields });
         push({ message: 'Стол обновлён', at: new Date().toISOString() });
       } else {
-        await create.mutateAsync({ hallId: hall.id, seats: Number(seats) });
+        await create.mutateAsync(fields);
         push({ message: 'Стол добавлен', at: new Date().toISOString() });
       }
       onClose();
@@ -272,19 +317,25 @@ function TableModal({ hall, table, onClose }: { hall: AdminHall; table: AdminTab
     <BottomSheet
       visible
       onClose={onClose}
-      title={isEdit ? `Стол №${table!.number}` : `Новый стол · ${hall.name}`}
+      title={table ? tableLabel(table) : `Новый стол · ${hall.name}`}
       footer={<Button title={isEdit ? 'Сохранить' : 'Добавить'} size="lg" loading={pending} onPress={onSubmit} />}
     >
-      <View style={isEdit ? styles.grid2 : undefined}>
-        {isEdit && (
-          <Field label="Номер стола" style={{ flex: 1 }}>
-            <TextInput style={styles.input} value={number} onChangeText={setNumber} keyboardType="number-pad" />
-          </Field>
-        )}
-        <Field label="Мест" style={isEdit ? { flex: 1 } : undefined}>
-          <TextInput style={styles.input} value={seats} onChangeText={setSeats} keyboardType="number-pad" />
+      <Field label="Название стола">
+        <TextInput style={styles.input} value={name} onChangeText={setName} maxLength={40}
+          placeholder="Например, Бар" placeholderTextColor={colors.textLight} />
+      </Field>
+      <View style={styles.grid2}>
+        <Field label="Номер стола" style={{ flex: 1 }}>
+          <TextInput style={styles.input} value={number} onChangeText={setNumber} keyboardType="number-pad"
+            placeholder={isEdit ? undefined : 'Автоматически'} placeholderTextColor={colors.textLight} maxLength={10} />
+        </Field>
+        <Field label="Мест" style={{ flex: 1 }}>
+          <TextInput style={styles.input} value={seats} onChangeText={setSeats} keyboardType="number-pad" maxLength={10} />
         </Field>
       </View>
+      {isEdit ? <Field label="Зал">
+        <Select title="Зал" value={hallId} onChange={setHallId} options={halls.map((item) => ({ value: item.id, label: item.name, translate: false }))} />
+      </Field> : null}
       {isEdit ? (
         <View style={styles.checkRow}>
           <Text style={styles.checkLabel} translate>Стол активен</Text>
@@ -325,7 +376,9 @@ function Sep() {
 }
 
 const styles = StyleSheet.create({
+  particleFrame: { flex: 1 },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
+  toolbar: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, alignItems: 'center' },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   summary: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
   sumText: { fontSize: fontSize.sm, color: colors.textSecondary },

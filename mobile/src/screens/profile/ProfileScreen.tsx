@@ -1,17 +1,23 @@
+import { StaffShiftCard } from '@/components/StaffShiftGate';
+import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
+import { ScrollView, View, SafeAreaView } from '@/components/themed';
 import React from 'react';
-import { BackHandler, Image, Linking, ScrollView, StyleSheet, View } from 'react-native';
+import { BackHandler, Image, Linking, StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import Constants from 'expo-constants';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, Card } from '@/components/ui';
-import { BottomSheet, SheetFlatList, SheetScrollView } from '@/components/BottomSheet';
+import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { ORDER_STATUS } from '@/theme/status';
 import { beep } from '@/lib/sound';
 import { apiError } from '@/lib/api';
+import { TerminalOrderRefunds } from '@/features/refunds/OrderRefunds';
+import { refundStatusLabel } from '@/features/refunds/refundRules';
+import { CabinetOrderRow, WaiterOrderArchive } from '@/features/refunds/WaiterOrderArchive';
 import { useAuth } from '@/store/auth';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
 import { useLocale, type Locale } from '@/store/locale';
@@ -22,11 +28,11 @@ import {
   useOrderDetails,
   useStartShift,
   useWaiterCabinet,
-  useWaiterOrderHistory,
   type CabinetRecentOrder,
 } from '@/services/api/waiter';
 import { useRetryFiscal } from '@/services/api/admin';
 import { WaiterVoiceSettingsSheet } from '@/screens/kitchen/KitchenVoiceSettingsSheet';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { disconnectSocket } from '@/services/socket';
 import {
   playNotificationSoundTest,
@@ -43,7 +49,7 @@ import {
   paymentMethodLabel,
   timeHM,
 } from '@/utils/format';
-import type { Order, OrderItemStatus, OrderStatus, WaiterShift } from '@/types';
+import type { Order, OrderItemStatus, WaiterShift } from '@/types';
 
 const ROLE_LABEL: Record<string, string> = {
   WAITER: 'Официант',
@@ -71,8 +77,9 @@ export function ProfileScreen() {
   const focused = useIsFocused();
   const user = useAuth((s) => s.user);
   const logout = useAuth((s) => s.logout);
-  const isWaiter = user?.role === 'WAITER';
-  const shiftQuery = useCurrentShift(isWaiter);
+  const isWaiter = useAuth((state) => state.workspace === 'terminal');
+  const trackShift = isWaiter && user?.permissions?.workShiftRequired !== false;
+  const shiftQuery = useCurrentShift(trackShift);
   const startShift = useStartShift();
   const endShift = useEndShift();
   const push = useNotifications((s) => s.push);
@@ -97,7 +104,7 @@ export function ProfileScreen() {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => { setCabinetOpen(false); return true; });
     return () => subscription.remove();
   }, [focused, isWaiter, cabinetOpen]);
-  const shift = isWaiter ? shiftQuery.data : null;
+  const shift = trackShift ? shiftQuery.data : null;
   const shiftActive = shift?.status === 'active';
   const visibleNotifs = showAllNotif ? history : history.slice(0, 3);
   const showEnablePush =
@@ -153,7 +160,7 @@ export function ProfileScreen() {
     }
   };
 
-  if (isWaiter && cabinetOpen) {
+  if (isWaiter && user && cabinetOpen) {
     return (
       <WaiterCabinetScreen
         userId={user.id}
@@ -179,14 +186,14 @@ export function ProfileScreen() {
                 {user?.name}
               </Text>
               <Text style={styles.userMeta} numberOfLines={1}>
-                {ROLE_LABEL[user?.role ?? ''] ?? user?.role} · {user?.phone}
+                {user?.positionName ?? ROLE_LABEL[user?.role ?? ''] ?? user?.role} · {user?.phone}
               </Text>
             </View>
-            <PwaIcon name="chevronRight" size={20} color={colors.textLight} />
+            {isWaiter && <PwaIcon name="chevronRight" size={20} color={colors.textLight} />}
           </Card>
 
           {/* Смена (только официант) */}
-          {isWaiter ? (
+          {trackShift ? (
           <Card style={styles.shiftCard}>
               <View style={styles.cardHead}>
                 <Text style={styles.cardTitle} translate>Смена</Text>
@@ -216,6 +223,8 @@ export function ProfileScreen() {
               />
             </Card>
           ) : null}
+
+          {!isWaiter && <StaffShiftCard />}
 
           {/* Уведомления */}
           <Card style={styles.notificationCard}>
@@ -294,6 +303,7 @@ export function ProfileScreen() {
             ) : null}
           </Card>
 
+          <WorkspaceSwitcher />
           <Button title="Выйти" variant="secondary" danger onPress={onLogout} />
 
           <Text style={styles.version}>v{Constants.expoConfig?.version ?? '0.1.1'}</Text>
@@ -393,6 +403,7 @@ function WaiterCabinetScreen({
             <LanguageSwitch locale={locale} onChange={setLocale} />
           </Card>
           <Button title="Настройки озвучки" variant="secondary" onPress={() => setVoiceOpen(true)} />
+          <Card><ThemeSwitch /></Card>
 
           <Card style={styles.cabinetSection}>
             <View style={styles.cabinetSectionHead}>
@@ -444,6 +455,7 @@ function WaiterCabinetScreen({
             )}
           </Card>
 
+          <WorkspaceSwitcher />
           <Button title="Выйти" variant="secondary" danger onPress={onLogout} />
         </SheetScrollView>
       </SafeAreaView>
@@ -457,7 +469,7 @@ function WaiterCabinetScreen({
           setPeriodOpen(false);
         }}
       />
-      <OrderHistorySheet
+      <WaiterOrderArchive
         visible={historyOpen}
         onClose={() => setHistoryOpen(false)}
         onSelect={setDetailId}
@@ -471,64 +483,6 @@ function WaiterCabinetScreen({
         onRetriedFiscal={() => void detail.refetch()}
       />
     </>
-  );
-}
-
-function OrderHistorySheet({
-  visible,
-  onClose,
-  onSelect,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  onSelect: (id: string) => void;
-}) {
-  const history = useWaiterOrderHistory(visible);
-  const orders = React.useMemo(() => history.data?.pages.flatMap((page) => page.items) ?? [], [history.data]);
-
-  return (
-    <BottomSheet visible={visible} onClose={onClose} title="История заказов" inline expanded maxHeight="88%">
-      <SheetFlatList
-        data={orders}
-        keyExtractor={(order) => order.id}
-        showsVerticalScrollIndicator={false}
-        renderItem={({ item, index }) => {
-          const date = orderDate(item.createdAt);
-          const newDate = index === 0 || orderDate(orders[index - 1].createdAt) !== date;
-          return (
-            <View>
-              {newDate ? <Text style={[styles.orderGroupLabel, styles.historyDate]}>{date}</Text> : null}
-              <CabinetOrderRow order={item} onPress={() => onSelect(item.id)} />
-            </View>
-          );
-        }}
-        ListEmptyComponent={history.isLoading ? (
-          <Text style={styles.cabinetMuted} translate>Загрузка заказов...</Text>
-        ) : history.isError ? (
-          <View style={styles.historyAction}>
-            <Text style={styles.cabinetError} translate>Не удалось загрузить заказы</Text>
-            <Button title="Повторить" size="md" variant="secondary" onPress={() => void history.refetch()} />
-          </View>
-        ) : (
-          <Text style={styles.cabinetMuted} translate>Заказов пока нет</Text>
-        )}
-        ListFooterComponent={history.hasNextPage ? (
-          <View style={[styles.historyAction, styles.historyFooter]}>
-            {history.isFetchNextPageError ? (
-              <Text style={styles.cabinetError} translate>Не удалось загрузить заказы</Text>
-            ) : null}
-            <Button
-              title={history.isFetchNextPageError ? 'Повторить' : 'Показать ещё'}
-              size="md"
-              variant="secondary"
-              loading={history.isFetchingNextPage}
-              disabled={history.isFetching}
-              onPress={() => void history.fetchNextPage({ cancelRefetch: false })}
-            />
-          </View>
-        ) : null}
-      />
-    </BottomSheet>
   );
 }
 
@@ -584,34 +538,6 @@ function StatRow({
   );
 }
 
-function CabinetOrderRow({ order, onPress }: { order: CabinetRecentOrder; onPress: () => void }) {
-  return (
-    <FastPressable accessibilityRole="button" onPress={onPress} style={styles.cabinetOrderRow}>
-      <Text style={styles.cabinetOrderNo} numberOfLines={1}>
-        {displayOrderNumber(order.orderNumber)}
-      </Text>
-      <Text style={styles.cabinetOrderTable} numberOfLines={1} translate>
-        Стол {order.tableNumber}
-      </Text>
-      <Text style={styles.cabinetOrderTime}>{timeHM(order.createdAt)}</Text>
-      <Text style={styles.cabinetOrderAmount} numberOfLines={1}>
-        {money(order.finalAmount)}
-      </Text>
-      <CabinetStatusBadge status={order.status} />
-      <PwaIcon name="chevronRight" size={14} color={colors.textLight} strokeWidth={2} />
-    </FastPressable>
-  );
-}
-
-function CabinetStatusBadge({ status }: { status: OrderStatus }) {
-  const meta = cabinetStatusMeta(status);
-  return (
-    <View style={[styles.cabinetStatusBadge, { backgroundColor: meta.bg }]}>
-      <Text style={[styles.cabinetStatusText, { color: meta.fg }]} translate>{meta.label}</Text>
-    </View>
-  );
-}
-
 function OrderDetailsSheet({
   visible,
   order,
@@ -626,6 +552,7 @@ function OrderDetailsSheet({
   onRetriedFiscal: () => void;
 }) {
   const showMixedBreakdown = order?.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
+  const refunded = Number(order?.refundedAmount ?? 0);
   return (
     <BottomSheet
       visible={visible}
@@ -643,7 +570,7 @@ function OrderDetailsSheet({
             <Text style={styles.detailSectionTitle} translate>Информация</Text>
             <View style={styles.detailInfoBox}>
               <View style={styles.detailInfoPair}>
-                <DetailRow label="Статус" value={ORDER_STATUS[order.status]?.label ?? order.status} column />
+                <DetailRow label="Статус" value={refundStatusLabel(order) ?? ORDER_STATUS[order.status]?.label ?? order.status} column />
                 <View style={styles.detailInfoDivider} />
                 <DetailRow label="Официант" value={order.waiter?.name ?? 'QR menu'} column />
               </View>
@@ -697,6 +624,7 @@ function OrderDetailsSheet({
                     <Text style={styles.detailItemName}>
                       {item.quantity}× {orderItemDisplayName(item)}
                     </Text>
+                    {item.refundedQuantity ? <Text style={styles.detailItemComment} translate>Возвращено · {item.refundedQuantity} / {item.quantity}</Text> : null}
                     {item.comment ? <Text style={styles.detailItemComment}>{item.comment}</Text> : null}
                     {item.rejectReason ? <Text style={styles.detailItemReject} translate>Отказ: {item.rejectReason}</Text> : null}
                   </View>
@@ -713,9 +641,16 @@ function OrderDetailsSheet({
             <DetailTotal label="Итого" value={money(order.totalAmount)} />
             {Number(order.discountAmount) > 0 ? <DetailTotal label="Скидка" value={money(order.discountAmount)} /> : null}
             {Number(order.serviceChargeAmount) > 0 ? <DetailTotal label="Обслуживание" value={money(order.serviceChargeAmount)} /> : null}
-            <DetailTotal label="К оплате" value={money(order.finalAmount)} strong />
+            <DetailTotal label={order.status === 'paid' ? 'Оплачено' : 'К оплате'} value={money(order.finalAmount)} strong />
+            {refunded > 0 ? (
+              <>
+                <DetailTotal label="Возвращено" value={money(refunded)} />
+                <DetailTotal label="Оплата после возврата" value={money(Number(order.finalAmount) - refunded)} />
+              </>
+            ) : null}
           </View>
 
+          <TerminalOrderRefunds order={order} />
           <FiscalBlock order={order} onRetried={onRetriedFiscal} />
         </SheetScrollView>
       )}
@@ -839,13 +774,6 @@ function mixedSumBy(order: { payments?: { method: string; amount: string }[] }, 
   return (order.payments ?? [])
     .filter((payment) => payment.method === method)
     .reduce((sum, payment) => sum + Number(payment.amount), 0);
-}
-
-function cabinetStatusMeta(status: OrderStatus) {
-  if (status === 'paid') return { label: 'Оплачен', bg: colors.successSoft, fg: colors.success };
-  if (status === 'cancelled') return { label: 'Отменён', bg: colors.dangerSoft, fg: colors.danger };
-  if (status === 'rejected') return { label: 'Отказан', bg: colors.dangerSoft, fg: colors.danger };
-  return { label: ORDER_STATUS[status]?.label ?? status, bg: colors.slate100, fg: colors.textMuted };
 }
 
 function PeriodPickerSheet({
@@ -1054,32 +982,17 @@ const styles = StyleSheet.create({
   orderGroups: { gap: spacing.md },
   orderGroup: { gap: 4 },
   orderGroupLabel: { fontSize: fontSize.xs, fontWeight: '500', color: colors.textLight, textTransform: 'uppercase' },
-  historyDate: { paddingTop: spacing.md, paddingBottom: spacing.xs },
-  historyAction: { gap: spacing.sm },
-  historyFooter: { paddingTop: spacing.md },
+
+
+
   cabinetOrdersList: { borderTopWidth: 1, borderTopColor: colors.border },
-  cabinetOrderRow: {
-    minHeight: 42,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingVertical: 10,
-  },
-  cabinetOrderNo: { width: 52, fontSize: fontSize.sm, fontWeight: '500', color: colors.textPrimary },
-  cabinetOrderTable: { width: 58, fontSize: fontSize.sm, color: colors.textMuted },
-  cabinetOrderTime: { width: 45, fontSize: fontSize.sm, color: colors.textLight },
-  cabinetOrderAmount: {
-    flex: 1,
-    minWidth: 58,
-    textAlign: 'right',
-    fontSize: fontSize.sm,
-    fontWeight: '500',
-    color: colors.textPrimary,
-  },
-  cabinetStatusBadge: { borderRadius: 6, paddingHorizontal: spacing.sm, paddingVertical: 2 },
-  cabinetStatusText: { fontSize: fontSize.xs, fontWeight: '500' },
+
+
+
+
+
+
+
   orderDetailsBody: { gap: spacing.lg, paddingBottom: spacing.md },
   detailSectionHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
   detailSectionTitle: { marginBottom: spacing.sm, fontSize: fontSize.sm, fontWeight: '800', color: colors.textPrimary },

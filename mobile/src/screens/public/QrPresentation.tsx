@@ -1,6 +1,7 @@
+import { RefreshControl, ScrollView, View, SafeAreaView } from '@/components/themed';
 import React from 'react';
-import { Image, RefreshControl, ScrollView, StyleSheet, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image, StyleSheet, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
+
 import Svg, { Circle, Defs, G, Mask, Path, Rect } from 'react-native-svg';
 import { Text, TextInput } from '@/components/typography';
 import { FastPressable } from '@/components/FastPressable';

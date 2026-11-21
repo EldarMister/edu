@@ -1,6 +1,7 @@
+import { SafeAreaView } from '@/components/themed';
 import React from 'react';
 import { type ViewStyle } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { BottomPanel } from './BottomPanel';
 export function FullscreenSheet({ visible, onClose, onDismiss, children, style }: {
   visible: boolean; onClose: () => void; onDismiss?: () => void; children: React.ReactNode; style?: ViewStyle;

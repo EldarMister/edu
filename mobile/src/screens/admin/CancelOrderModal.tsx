@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React, { useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';

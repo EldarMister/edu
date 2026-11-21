@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { AppState, PermissionsAndroid, Platform, StyleSheet, View } from 'react-native';
+import { AppState, PermissionsAndroid, Platform, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
 import { createStore } from 'zustand/vanilla';

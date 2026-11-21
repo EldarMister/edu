@@ -9,6 +9,7 @@ import type {
   Order,
   OrderStatus,
   PaymentMethod,
+  PaymentStatus,
   Receipt,
   ReceiptPrintRequest,
   ReceiptPrintType,
@@ -18,8 +19,11 @@ import type {
 export interface CabinetRecentOrder {
   id: string;
   orderNumber: string;
+  source?: Order['source'];
   tableNumber: number;
   finalAmount: string;
+  refundedAmount?: string;
+  paymentStatus?: PaymentStatus;
   status: OrderStatus;
   createdAt: string;
 }
@@ -188,17 +192,20 @@ function linesToItems(lines: CartLine[]) {
   }));
 }
 
+export type DeliveryDetails = { customerName: string; customerPhone: string; deliveryAddress: string };
+
 export function useCreateOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: {
-      tableId: string;
+    mutationFn: async (payload: ({ tableId: string } | { delivery: DeliveryDetails }) & {
       comment?: string;
       idempotencyKey: string;
       lines: CartLine[];
     }) => {
-      const { data } = await api.post<Order>('/orders', {
-        tableId: payload.tableId,
+      const delivery = 'delivery' in payload;
+      const destination = delivery ? payload.delivery : { tableId: payload.tableId };
+      const { data } = await api.post<Order>(delivery ? '/orders/delivery' : '/orders', {
+        ...destination,
         comment: payload.comment?.trim() || undefined,
         idempotencyKey: payload.idempotencyKey,
         items: linesToItems(payload.lines),
@@ -340,6 +347,7 @@ export function usePay() {
       method: PaymentMethod;
       cashAmount?: number;
       qrAmount?: number;
+      cardAmount?: number;
       splitPayments?: { method: Exclude<PaymentMethod, 'mixed'>; amount: number }[];
     }) => (await api.post<Order>('/payments', p)).data,
     onSettled: () => {

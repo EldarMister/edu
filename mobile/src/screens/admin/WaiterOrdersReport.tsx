@@ -1,35 +1,70 @@
+import { ActivityIndicator, ScrollView, View } from '@/components/themed';
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
-import { Select } from '@/components/Select';
+import { AnchoredSelectScope, Select } from '@/components/Select';
 import { DateField } from '@/components/DateField';
-import { Button } from '@/components/ui';
+import { Button, SegmentTabs } from '@/components/ui';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { useWaiterOrdersReport, type StaffMember, type WaiterOrdersReportItem } from '@/services/api/admin';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 import { colors, spacing } from '@/theme';
-import { displayOrderNumber, money, timeHM } from '@/utils/format';
+import { displayOrderNumber, money } from '@/utils/format';
+import { warehouseLocalTime, warehouseReportRange, type WarehousePeriod } from '@/utils/warehouseTiming';
+import { WarehouseDirectorySearch } from './WarehouseDirectoryTable';
+import { WarehouseMultiSelect } from './WarehouseMultiSelect';
 import { shareCsv } from './print';
 
-const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 type DishTotal = { name: string; quantity: number; amount: number };
 type Category = DishTotal & { dishes: Map<string, DishTotal> };
-const COLUMNS = [
-  { label: 'Время заказа', width: 120 }, { label: 'Время подачи', width: 120 },
-  { label: '№ заказа', width: 100 }, { label: 'Стол', width: 70 },
-  { label: 'Блюдо', width: 210 }, { label: 'Категория', width: 160 },
-  { label: 'Кол-во', width: 80 }, { label: 'Цена', width: 90 }, { label: 'Сумма', width: 90 },
+type ColumnKey = 'dishName' | 'orderNumber' | 'orderedAt' | 'servedAt' | 'tableNumber' | 'categoryName' | 'quantity' | 'unitPrice' | 'amount';
+const COLUMNS: { value: ColumnKey; label: string; width: number }[] = [
+  { value: 'dishName', label: 'Блюдо', width: 205 }, { value: 'orderNumber', label: '№ заказа', width: 100 },
+  { value: 'orderedAt', label: 'Время заказа', width: 158 }, { value: 'servedAt', label: 'Время подачи', width: 158 },
+  { value: 'tableNumber', label: 'Стол', width: 70 }, { value: 'categoryName', label: 'Категория', width: 145 },
+  { value: 'quantity', label: 'Кол-во', width: 80 }, { value: 'unitPrice', label: 'Цена', width: 90 },
+  { value: 'amount', label: 'Сумма', width: 98 },
 ];
-const TABLE_WIDTH = COLUMNS.reduce((sum, column) => sum + column.width, 0);
+const optionalColumns = COLUMNS.filter(({ value }) => value !== 'dishName');
+const defaults = optionalColumns.map(({ value }) => value);
+const tabs = [{ key: 'orders', label: 'Позиции заказов' }, { key: 'dishes', label: 'По блюдам' }] as const;
+type ReportTab = typeof tabs[number]['key'];
+const periods: { value: WarehousePeriod; label: string }[] = [
+  { value: 'today', label: 'Сегодня' }, { value: 'yesterday', label: 'Вчера' },
+  { value: 'week', label: 'Последние 7 дней' }, { value: 'month', label: 'Последние 30 дней' },
+  { value: 'currentMonth', label: 'Текущий месяц' }, { value: 'lastMonth', label: 'Прошлый месяц' },
+  { value: 'custom', label: 'Свой период' },
+];
+const reportTime = new Intl.DateTimeFormat('ru-RU', {
+  timeZone: 'Asia/Bishkek', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+});
+const sorter = new Intl.Collator('ru-RU', { numeric: true });
+const emptyRows: WaiterOrdersReportItem[] = [];
+
+function rowValue(row: WaiterOrdersReportItem, key: ColumnKey) {
+  if (key === 'orderedAt' || key === 'servedAt') return reportTime.format(new Date(row[key]));
+  if (key === 'unitPrice' || key === 'amount') return money(row[key]);
+  return key === 'orderNumber' ? displayOrderNumber(row.orderNumber) : row[key];
+}
+
 const byQuantity = (a: DishTotal, b: DishTotal) => b.quantity - a.quantity || b.amount - a.amount;
 const durationLabel = (seconds: number) => seconds < 60 ? `${seconds} сек` : `${Math.floor(seconds / 60)} мин ${seconds % 60} сек`;
 
 export function WaiterOrdersReport({ staff, staffLoading = false }: { staff: StaffMember[]; staffLoading?: boolean }) {
-  const [from, setFrom] = useState(today);
-  const [to, setTo] = useState(today);
+  const today = warehouseLocalTime().date;
+  const [period, setPeriod] = useState<WarehousePeriod>('today');
+  const [customFrom, setCustomFrom] = useState(today);
+  const [customTo, setCustomTo] = useState(today);
+  const { from = today, to = today } = warehouseReportRange(period, new Date(), { from: customFrom, to: customTo });
+  const [tab, setTab] = useState<ReportTab>('orders');
+  const [search, setSearch] = useState('');
+  const [shown, saveColumns] = useColumnPreference('waiter-orders-report', defaults);
+  const [sort, setSort] = useState<{ key: ColumnKey; desc: boolean }>({ key: 'orderedAt', desc: true });
+  const columns = COLUMNS.filter(({ value }) => value === 'dishName' || shown.includes(value));
   const [waiterId, setWaiterId] = useState('');
   const [exporting, setExporting] = useState(false);
   const { canAction } = usePermissions();
@@ -38,6 +73,18 @@ export function WaiterOrdersReport({ staff, staffLoading = false }: { staff: Sta
   const selectedId = options.some((s) => s.value === waiterId) ? waiterId : options[0]?.value ?? '';
   const q = useWaiterOrdersReport(selectedId, from, to);
   const data = q.data;
+  const rows = data?.items ?? emptyRows;
+  const query = search.trim().toLocaleLowerCase('ru');
+  const activeSort = columns.some(({ value }) => value === sort.key) ? sort : { key: 'dishName' as const, desc: false };
+  const visibleRows = rows.filter((row) => !query || [row.dishName, row.categoryName, row.orderNumber, String(row.tableNumber)]
+    .some((value) => value?.toLocaleLowerCase('ru').includes(query))).sort((left, right) => {
+      const a = left[activeSort.key];
+      const b = right[activeSort.key];
+      const difference = typeof a === 'number' && typeof b === 'number' ? a - b : sorter.compare(String(a), String(b));
+      return activeSort.desc ? -difference : difference;
+    });
+  const quantity = visibleRows.reduce((sum, row) => sum + row.quantity, 0);
+  const amount = visibleRows.reduce((sum, row) => sum + row.amount, 0);
   const totals = useMemo(() => {
     const categories = new Map<string, Category>();
     for (const row of q.data?.items ?? []) {
@@ -51,49 +98,74 @@ export function WaiterOrdersReport({ staff, staffLoading = false }: { staff: Sta
   }, [q.data]);
 
   async function exportReport() {
-    if (!data) return;
+    if (!data || !visibleRows.length) return;
     setExporting(true);
     try {
       await shareCsv(`waiter-orders-${data.waiter.name}-${from}-${to}`, [
         COLUMNS.map(column => column.label),
-        ...data.items.map(row => [timeHM(row.orderedAt), timeHM(row.servedAt), displayOrderNumber(row.orderNumber), row.tableNumber, row.dishName, row.categoryName, row.quantity, row.unitPrice, row.amount]),
+        ...visibleRows.map((row) => COLUMNS.map(({ value }) => value === 'unitPrice' || value === 'amount' ? row[value] : rowValue(row, value))),
       ]);
     } catch (error) { push({ message: apiError(error), type: 'error', at: new Date().toISOString() }); }
     finally { setExporting(false); }
   }
 
   return <View style={styles.panel}>
-    <View><Text style={styles.title} translate>Отчет официанта по заказам</Text><Text style={styles.subtitle} translate>Отдельная страница по одному официанту</Text></View>
-    <View style={styles.stack}>
-      <View style={styles.period}><Text style={styles.filterLabel} translate>Период:</Text><View style={{ flex: 1 }}><DateField value={from} onChangeText={value => { setFrom(value); if (value > to) setTo(value); }} /></View><Text style={styles.muted}>—</Text><View style={{ flex: 1 }}><DateField value={to} onChangeText={value => { setTo(value); if (value < from) setFrom(value); }} /></View></View>
-      <View style={styles.period}><Text style={styles.filterLabel} translate>Официант:</Text><View style={{ flex: 1 }} pointerEvents={staffLoading || !options.length ? 'none' : 'auto'}><Select value={selectedId} options={options} onChange={setWaiterId} title="Официант" placeholder={staffLoading ? 'Загрузка...' : 'Выберите официанта'} style={styles.select} /></View></View>
-      {canAction('exportReports') ? <Button title="Экспорт" disabled={!data} size="md" loading={exporting} onPress={() => void exportReport()} style={{ alignSelf: 'flex-end', paddingHorizontal: 20 }} /> : null}
+    <View style={styles.toolbar}>
+      <Text style={styles.title} translate>Отчёт официанта</Text>
+      <AnchoredSelectScope>
+        <Select title="Официант" placeholder="Выберите официанта" searchable disabled={staffLoading || !options.length}
+          value={selectedId} options={options} onChange={setWaiterId} />
+        <Select title="Период отчёта" value={period} options={periods} onChange={setPeriod} />
+      </AnchoredSelectScope>
     </View>
-    {data ? <View style={styles.summary}>
-      {[['Официант', data.waiter.name], ['Заказов', data.summary.ordersCount], ['Блюд', data.summary.dishesCount], ['Сумма', money(data.summary.amount)], ['Среднее время подачи', durationLabel(data.summary.averageServingSeconds)]].map(([label, value]) => <Text key={label} style={styles.summaryItem}><Text translate>{label}:</Text> <Text style={styles.label}>{value}</Text></Text>)}
-    </View> : null}
+    {period === 'custom' && <View style={styles.toolbar}>
+      <DateField value={customFrom} accessibilityLabel="Начало периода" onChangeText={(value) => { setCustomFrom(value); if (value > customTo) setCustomTo(value); }} />
+      <DateField value={customTo} accessibilityLabel="Конец периода" onChangeText={(value) => { setCustomTo(value); if (value < customFrom) setCustomFrom(value); }} />
+    </View>}
+    {data && <View style={styles.summary}>
+      {[
+        ['Сумма по позициям', money(data.summary.amount)], ['Оплачено заказов', data.summary.ordersCount],
+        ['Блюд', data.summary.dishesCount],
+        ['Среднее время подачи', data.summary.ordersCount ? durationLabel(data.summary.averageServingSeconds) : '—'],
+      ].map(([label, value]) => <View key={label} style={styles.summaryItem}>
+        <Text style={styles.muted} translate>{label}</Text><Text style={styles.label}>{value}</Text>
+      </View>)}
+    </View>}
     <View style={styles.tableFrame}>
+      <View style={styles.filters}>
+        <SegmentTabs<ReportTab> items={[...tabs]} value={tab} onChange={setTab} />
+        {tab === 'orders' && <View style={styles.toolbar}>
+          <WarehouseDirectorySearch label="Поиск по заказам" placeholder="Блюдо или № заказа" value={search} onChange={setSearch} />
+          <WarehouseMultiSelect label="Столбцы" value={shown} options={optionalColumns} onChange={saveColumns} />
+          {canAction('exportReports') && <Button title="Экспорт CSV" size="md" variant="secondary" disabled={!visibleRows.length}
+            loading={exporting} onPress={() => void exportReport()} />}
+        </View>}
+      </View>
       {q.isLoading || staffLoading ? <View style={styles.empty}><ActivityIndicator color={colors.primary} /></View>
-        : !selectedId ? <Text style={styles.emptyText} translate>Добавьте официанта, чтобы сформировать отчет</Text>
-        : q.isError ? <View style={styles.empty}><Text style={{ color: colors.danger }} translate>Не удалось загрузить отчет</Text><Button title="Повторить" variant="secondary" onPress={() => void q.refetch()} /></View>
-        : !data?.items.length ? <Text style={styles.emptyText} translate>За выбранный период оплаченных заказов нет</Text>
-        : <ScrollView horizontal showsHorizontalScrollIndicator><View style={{ width: TABLE_WIDTH }}>
-          <View style={[styles.tableRow, styles.tableHeader]}>{COLUMNS.map(column => <Text key={column.label} style={[styles.cell, styles.muted, { width: column.width }]} translate>{column.label}</Text>)}</View>
-          {data.items.map(row => <ReportRow key={row.id} row={row} />)}
-          <View style={[styles.tableRow, styles.tableFooter]}><Text style={[styles.cell, styles.label, { width: TABLE_WIDTH - 260, textAlign: 'left' }]} translate>Итого</Text><Text style={[styles.cell, styles.label, { width: 80 }]}>{data.summary.dishesCount}</Text><View style={{ width: 90 }} /><Text style={[styles.cell, styles.label, { width: 90 }]}>{money(data.summary.amount)}</Text></View>
+        : !selectedId ? <Text style={styles.emptyText} translate>Добавьте официанта, чтобы сформировать отчёт</Text>
+        : q.isError && !data ? <View style={styles.empty}><Text style={{ color: colors.danger }} translate>Не удалось загрузить отчёт</Text><Button title="Повторить" variant="secondary" onPress={() => void q.refetch()} /></View>
+        : tab === 'dishes' && totals.length ? <View style={styles.categories}>
+          {totals.map((category, index) => <CategoryRow key={category.name} category={category} defaultOpen={index === 0} />)}
+        </View> : tab === 'dishes' || !visibleRows.length ? <Text style={styles.emptyText} translate>
+          {tab === 'orders' && rows.length ? 'По вашему запросу ничего не найдено' : 'За выбранный период оплаченных заказов нет'}
+        </Text>
+        : <ScrollView horizontal showsHorizontalScrollIndicator><View>
+          <View style={[styles.tableRow, styles.tableHeader]}>{columns.map(({ label, width, value }) => (
+            <FastPressable key={value} style={{ width }} accessibilityRole="button" onPress={() => setSort({ key: value, desc: activeSort.key === value && !activeSort.desc })}>
+              <Text style={[styles.cell, styles.muted]} translate>{label}{activeSort.key === value ? activeSort.desc ? ' ↓' : ' ↑' : ''}</Text>
+            </FastPressable>
+          ))}</View>
+          {visibleRows.map((row) => <View key={row.id} style={styles.tableRow}>
+            {columns.map(({ value, width }) => <Text key={value} style={[styles.cell, { width }]}>{rowValue(row, value)}</Text>)}
+          </View>)}
+          <View style={[styles.tableRow, styles.tableFooter]}>
+            {columns.map(({ value, width }) => <Text key={value} style={[styles.cell, styles.label, { width }]} translate>
+              {value === 'dishName' ? 'Итого' : value === 'quantity' ? quantity : value === 'amount' ? money(amount) : ''}
+            </Text>)}
+          </View>
         </View></ScrollView>}
     </View>
-    {totals.length ? <View style={styles.totals}>
-      <View><Text style={styles.totalsTitle} translate>Итоги по блюдам</Text><Text style={styles.subtitle} translate>Товарная разбивка за выбранный период</Text></View>
-      {totals.map((category, index) => <CategoryRow key={category.name} category={category} defaultOpen={index === 0} />)}
-      <View style={[styles.between, styles.grandTotal]}><Text style={styles.label} translate>Всего</Text><Text style={styles.label} translate>{data?.summary.dishesCount ?? 0} шт. ({money(data?.summary.amount ?? 0)})</Text></View>
-    </View> : null}
   </View>;
-}
-
-function ReportRow({ row }: { row: WaiterOrdersReportItem }) {
-  const values = [timeHM(row.orderedAt), timeHM(row.servedAt), displayOrderNumber(row.orderNumber), row.tableNumber, row.dishName, row.categoryName, row.quantity, money(row.unitPrice), money(row.amount)];
-  return <View style={styles.tableRow}>{values.map((value, index) => <Text key={index} style={[styles.cell, { width: COLUMNS[index].width }, (index === 4 || index === 5) && { textAlign: 'left' }, index === 4 && styles.label]}>{value}</Text>)}</View>;
 }
 
 function CategoryRow({ category, defaultOpen }: { category: Category; defaultOpen: boolean }) {
@@ -107,12 +179,14 @@ function CategoryRow({ category, defaultOpen }: { category: Category; defaultOpe
 }
 
 const styles = StyleSheet.create({
-  panel: { borderRadius: 16, backgroundColor: colors.white, padding: 16, gap: 20 }, stack: { gap: 12 },
+  panel: { borderRadius: 16, backgroundColor: colors.white, padding: 16, gap: 20 }, toolbar: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: spacing.sm },
+  categories: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm },
+  filters: { padding: spacing.sm, gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   title: { color: colors.textPrimary, fontSize: 24, fontWeight: '600', letterSpacing: -0.4 }, subtitle: { color: colors.textMuted, fontSize: 14, marginTop: 4 },
   label: { color: colors.textPrimary, fontSize: 14, fontWeight: '600' }, muted: { color: colors.textMuted, fontSize: 14 },
   period: { minHeight: 50, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: 12 },
   filterLabel: { paddingHorizontal: 12, color: colors.textMuted, fontSize: 14 }, select: { borderWidth: 0, borderRadius: 12, height: 48 },
-  summary: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, summaryItem: { color: colors.textPrimary, fontSize: 14, paddingRight: 10, borderRightWidth: 1, borderColor: colors.border },
+  summary: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, summaryItem: { flexGrow: 1, minWidth: 130, gap: 4, padding: spacing.sm, borderWidth: 1, borderRadius: 10, borderColor: colors.border },
   tableFrame: { borderWidth: 1, borderColor: colors.border, borderRadius: 12, overflow: 'hidden' },
   tableRow: { flexDirection: 'row', alignItems: 'stretch', borderBottomWidth: 1, borderColor: colors.border }, tableHeader: { backgroundColor: colors.background }, tableFooter: { backgroundColor: '#FAFBFC', borderBottomWidth: 0 },
   cell: { textAlign: 'center', paddingHorizontal: 12, paddingVertical: 12, borderRightWidth: 1, borderColor: colors.border, fontSize: 14, color: colors.textPrimary },

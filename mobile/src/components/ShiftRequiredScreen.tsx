@@ -1,7 +1,8 @@
+import { View, SafeAreaView } from '@/components/themed';
 import React from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { FastPressable } from '@/components/FastPressable';
 import { ShiftStartAnimation, type ShiftAnimState } from './ShiftStartAnimation';
 import { colors, fontSize, radius, spacing } from '@/theme';

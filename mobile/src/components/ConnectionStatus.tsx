@@ -1,7 +1,9 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 import { Text } from '@/components/typography';
 import { colors, fontSize, spacing } from '@/theme';
+import { useThemeColors } from '@/theme/runtime';
 import { useConnectionStatus } from '@/services/socket';
 
 /** Индикатор соединения: точка + «Онлайн/Нет соединения» (как в PWA). */
@@ -11,9 +13,10 @@ export function ConnectionStatus({ compact = false }: { compact?: boolean }) {
 }
 
 export function ConnectionBadge({ online, compact = false }: { online: boolean; compact?: boolean }) {
+  const palette = useThemeColors();
   return (
     <View style={styles.row}>
-      <View style={[styles.dot, { backgroundColor: online ? colors.success : colors.danger }]} />
+      <View style={[styles.dot, { backgroundColor: online ? palette.success : palette.danger }]} />
       {!compact ? (
         <Text style={[styles.text, { color: online ? colors.textSecondary : colors.danger }]} translate>
           {online ? 'Онлайн' : 'Нет соединения'}

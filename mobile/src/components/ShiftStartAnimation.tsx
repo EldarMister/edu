@@ -1,8 +1,9 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { Animated, Easing, Image, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Image, StyleSheet } from 'react-native';
 import Svg, { Circle, Defs, Path, RadialGradient, Stop } from 'react-native-svg';
 import { useReducedMotion } from 'react-native-reanimated';
-import { colors } from '@/theme';
+import { colors, useThemeMode, useThemedStyle } from '@/theme';
 
 export type ShiftAnimState = 'idle' | 'loading' | 'success';
 
@@ -32,6 +33,9 @@ const EP_MARK = require('../../assets/ep-mark.png');
  * success — белая галочка в синем круге.
  */
 export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
+  const mode = useThemeMode();
+  const logoSurface = useThemedStyle(styles.logo);
+  const successSurface = useThemedStyle(styles.success);
   const reduceMotion = useReducedMotion();
   const enter = React.useRef(new Animated.Value(0)).current;
   const breathe = React.useRef(new Animated.Value(0)).current;
@@ -210,13 +214,13 @@ export function ShiftStartAnimation({ state }: { state: ShiftAnimState }) {
       </Animated.View>
 
       {/* Полупрозрачный круг с логотипом EP — как в PWA. */}
-      {state !== 'success' ? <Animated.View style={[styles.logo, { opacity: enter, transform: [{ scale: enterScale }, { translateY: enterTranslate }] }]}>
-        <Image source={EP_MARK} style={styles.mark} resizeMode="contain" />
+      {state !== 'success' ? <Animated.View style={[logoSurface, { opacity: enter, transform: [{ scale: enterScale }, { translateY: enterTranslate }] }]}>
+        <Image source={EP_MARK} style={[styles.mark, mode === 'dark' && { tintColor: '#FFFFFF' }]} resizeMode="contain" />
       </Animated.View> : null}
 
       {/* Успех: белая галочка в синем круге */}
       <Animated.View
-        style={[styles.success, { opacity: successOpacity, transform: [{ scale: success }] }]}
+        style={[successSurface, { opacity: successOpacity, transform: [{ scale: success }] }]}
         pointerEvents="none"
       >
         <Svg width={34} height={34} viewBox="0 0 24 24" fill="none">

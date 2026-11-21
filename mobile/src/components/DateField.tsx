@@ -1,11 +1,12 @@
+import { ScrollView, View } from '@/components/themed';
 import React from 'react';
-import { Keyboard, Modal, Platform, ScrollView, StyleSheet, View, useWindowDimensions, type TextInputProps, type ViewStyle } from 'react-native';
+import { Keyboard, Modal, Platform, StyleSheet, useWindowDimensions, type TextInputProps, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { Text, TextInput } from '@/components/typography';
 import { useT } from '@/lib/i18n';
-import { colors } from '@/theme';
+import { colors, useThemedStyle, useThemeColor } from '@/theme';
 import { calendarCells, calendarMonth, dateToIso, displayDate, isAllowedDate, parseDisplayDate, shiftCalendarMonth } from '@/utils/calendarDate';
 import { FastPressable } from './FastPressable';
 import { PwaIcon } from './PwaIcon';
@@ -37,6 +38,8 @@ export function DateField({
   accessibilityLabel, onFocus, onBlur, maxLength, ...inputProps
 }: Props) {
   const tr = useT();
+  const calendarSurface = useThemedStyle(styles.calendar);
+  const mapColor = useThemeColor();
   const insets = useSafeAreaInsets();
   const dimensions = useWindowDimensions();
   const canEdit = editable && !readOnly;
@@ -147,7 +150,7 @@ export function DateField({
           onBlur={event => { setFocused(false); setTypedDate(displayDate(value)); onBlur?.(event); }} />
         <FastPressable style={styles.icon} onPress={() => open ? close() : show()} disabled={!canEdit}
           accessibilityRole="button" accessibilityLabel={fieldLabel} accessibilityState={{ disabled: !canEdit, expanded: open }}>
-          <Svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="#324A76" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" opacity={canEdit ? 1 : 0.5}>
+          <Svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke={mapColor(colors.textSecondary)} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" opacity={canEdit ? 1 : 0.5}>
             <Rect x={3} y={5} width={18} height={16} rx={2} /><Path d="M7 3v4M17 3v4M3 10h18" />
           </Svg>
         </FastPressable>
@@ -159,7 +162,7 @@ export function DateField({
       <View style={styles.modalRoot} accessibilityViewIsModal onAccessibilityEscape={close}
         onLayout={event => { const { width, height } = event.nativeEvent.layout; setViewport({ width, height }); measureAnchor(); }}>
         <FastPressable style={StyleSheet.absoluteFill} onPress={close} accessibilityRole="button" accessibilityLabel="Закрыть календарь" handExclude={handPanelRef} />
-        {anchor ? <Animated.View entering={calendarEnter} ref={handPanelRef} collapsable={false} style={[styles.calendar, { top, left, width: popupWidth, height: popupHeight }]} accessibilityLabel={fieldLabel}>
+        {anchor ? <Animated.View entering={calendarEnter} ref={handPanelRef} collapsable={false} style={[calendarSurface, { top, left, width: popupWidth, height: popupHeight }]} accessibilityLabel={fieldLabel}>
           <ScrollView ref={handScrollRef} style={{ flex: 1 }} contentContainerStyle={styles.calendarContent} showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="always" bounces={false}
             onContentSizeChange={(_width, height) => { if (height > 0) setContentHeight(current => Math.abs(current - height) > 0.5 ? height : current); }}>

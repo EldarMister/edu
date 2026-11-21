@@ -1,5 +1,6 @@
 import React from 'react';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { useThemeColor } from '@/theme/runtime';
 
 export type PwaIconName =
   | 'grid'
@@ -52,6 +53,8 @@ export function PwaIcon({
   color: string;
   strokeWidth?: number;
 }) {
+  const mapColor = useThemeColor();
+  color = mapColor(color);
   const common = {
     stroke: color,
     strokeWidth,

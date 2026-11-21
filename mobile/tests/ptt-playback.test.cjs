@@ -129,7 +129,11 @@ test('foreground receiver unmount cancels real playback and removes the socket l
     'react-native': { Platform: { OS: 'android' }, AppState: { currentState: 'active' } },
     '@/services/socket': { getSocket: () => ({ on: (event, callback) => listeners.set(event, callback), off: event => listeners.delete(event) }) },
     '@/store/auth': { useAuth: selector => selector({ user: { id: 'staff' } }) },
-    './types': { PTT_EVENTS: { AUDIO_MESSAGE: 'audio' } }, './audioPlayback': env.playback,
+    './types': { PTT_EVENTS: { AUDIO_MESSAGE: 'audio', AUDIO_PACKET: 'packet', AUDIO_FRAME: 'frame', CHANNEL_BUSY: 'busy', CHANNEL_FREE: 'free' } },
+    './audioPlayback': env.playback,
+    './backgroundFlag': { isPttBackgroundRuntimeActive: () => false },
+    './nativeAudio': { RadioPlayout: class { stop() {} } },
+    './opusAudio': {},
   });
   useAudioPttReceiver('general', true);
   const cleanups = effects.map(effect => effect());

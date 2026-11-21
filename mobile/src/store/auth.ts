@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage, type StateStorage } from 'zustand/middleware';
 import * as SecureStore from 'expo-secure-store';
 import type { AuthUser } from '@/types';
+import { activeWorkspace, homeWorkspace, type Workspace } from '@/lib/workspaces';
 import { queryClient } from '@/lib/queryClient';
 import { useCart } from './cart';
 import { useReplacement } from './replacement';
@@ -37,6 +38,8 @@ const secureStorage: StateStorage = {
 
 interface AuthState {
   user: AuthUser | null;
+  workspace: Workspace | null;
+  setWorkspace: (workspace: Workspace) => void;
   accessToken: string | null;
   refreshToken: string | null;
   /** Гидрация persist завершена — можно решать про редирект (login vs рабочий экран). */
@@ -50,8 +53,16 @@ interface AuthState {
 
 export const useAuth = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
+      workspace: null,
+      setWorkspace: (workspace) => {
+        const { user, workspace: current } = get();
+        if (!user || workspace === current || activeWorkspace(user, workspace) !== workspace) return;
+        queryClient.clear();
+        useReceiptPrint.getState().dismiss();
+        set({ workspace });
+      },
       accessToken: null,
       refreshToken: null,
       hydrated: false,
@@ -60,16 +71,27 @@ export const useAuth = create<AuthState>()(
         clearSessionData();
         set({
           user: data.user,
+          workspace: homeWorkspace(data.user),
           accessToken: data.accessToken,
           refreshToken: data.refreshToken,
         });
       },
       setTokens: (accessToken, refreshToken) => set({ accessToken, refreshToken }),
-      updateUser: (patch) => set(state => ({ user: state.user ? { ...state.user, ...patch } : null })),
+      updateUser: (patch) => {
+        const state = get();
+        if (!state.user) return;
+        const user = { ...state.user, ...patch };
+        const workspace = activeWorkspace(user, state.workspace);
+        if (workspace !== state.workspace) {
+          queryClient.clear();
+          useReceiptPrint.getState().dismiss();
+        }
+        set({ user, workspace });
+      },
       logout: () => {
         // Чистим кэш, чтобы при входе другого пользователя не «мигали» чужие данные.
         clearSessionData();
-        set({ user: null, accessToken: null, refreshToken: null });
+        set({ user: null, workspace: null, accessToken: null, refreshToken: null });
       },
     }),
     {
@@ -77,11 +99,15 @@ export const useAuth = create<AuthState>()(
       storage: createJSONStorage(() => secureStorage),
       partialize: (state) => ({
         user: state.user,
+        workspace: state.workspace,
         accessToken: state.accessToken,
         refreshToken: state.refreshToken,
       }),
       onRehydrateStorage: () => (state) => {
-        if (state) state.setHydrated();
+        if (state) {
+          if (state.user) useAuth.setState({ workspace: activeWorkspace(state.user, state.workspace) });
+          state.setHydrated();
+        }
         else useAuth.setState({ hydrated: true });
       },
     },

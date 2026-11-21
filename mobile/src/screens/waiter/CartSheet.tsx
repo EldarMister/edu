@@ -1,5 +1,6 @@
+import { View } from '@/components/themed';
 import React from 'react';
-import { Animated, Easing, StyleSheet, View } from 'react-native';
+import { Animated, Easing, StyleSheet } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import { useIsFocused } from '@react-navigation/native';
 import { Button, RoundBtn } from '@/components/ui';
@@ -8,7 +9,8 @@ import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing } from '@/theme';
-import { cartLineName, linePrice, useCart } from '@/store/cart';
+import { cartLineName, cartTotals, linePrice, useCart } from '@/store/cart';
+import { money } from '@/utils/format';
 import { setChanged } from '@/utils/set';
 
 /** Корзина как нижний лист поверх меню — повторяет PWA CartSheet. */
@@ -18,12 +20,16 @@ export function CartSheet({
   onSubmit,
   submitting,
   submitLabel,
+  delivery = false,
+  roundTotal = false,
 }: {
   visible: boolean;
   onClose: () => void;
   onSubmit: () => void;
   submitting: boolean;
   submitLabel: string;
+  delivery?: boolean;
+  roundTotal?: boolean;
 }) {
   const focused = useIsFocused();
   const {
@@ -36,13 +42,13 @@ export function CartSheet({
     setOrderComment,
     setCommentOpen,
     clear,
-    total,
   } =
     useCart();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const hasLines = lines.length > 0;
   const clearDisabled = submitting || lines.some((line) => line.editAllowed === false || line.cancelAllowed === false);
   const allTakeaway = hasLines && lines.every((l) => l.takeaway);
+  const totals = cartTotals(lines, roundTotal);
 
   const footer = (
     <View style={styles.footerContent}>
@@ -57,9 +63,15 @@ export function CartSheet({
           autoFocus
         />
       ) : null}
+      {totals.rounding > 0 ? (
+        <View style={styles.totalRow}>
+          <Text style={styles.takeawayLabel} translate>Округление</Text>
+          <Text style={styles.takeawayLabel}>−{money(totals.rounding)}</Text>
+        </View>
+      ) : null}
       <View style={styles.totalRow}>
         <Text style={styles.totalLabel} translate>Итого</Text>
-        <NumberTicker value={total()} style={styles.totalValue} digitHeight={22} />
+        <NumberTicker value={totals.total} style={styles.totalValue} digitHeight={22} />
       </View>
       <Button
         title={submitLabel}
@@ -103,7 +115,7 @@ export function CartSheet({
           </Text>
         </View>
         <View style={styles.headActions}>
-          {hasLines ? (
+          {hasLines && !delivery ? (
             <View style={styles.takeawayRow}>
               <Text style={styles.takeawayLabel} translate>С собой</Text>
               <TakeawaySwitch
@@ -143,7 +155,7 @@ export function CartSheet({
                     <Text style={styles.setToggle}>{open ? ' ▴' : ' ▾'}</Text>
                   </Text>
                 ) : null}
-                {l.takeaway ? (
+                {l.takeaway && !delivery ? (
                   <FastPressable disabled={submitting || l.editAllowed === false} onPress={() => setTakeaway(i, false)} style={styles.takeawayChip} hitSlop={6}>
                     <PwaIcon name="bag" size={12} color={colors.textSecondary} strokeWidth={2} />
                     <Text style={styles.takeawayChipText} translate>С собой</Text>

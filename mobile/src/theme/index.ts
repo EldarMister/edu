@@ -1,6 +1,7 @@
 /**
  * Тема EDU POS mobile — точные токены из PWA (frontend/tailwind.config + index.css).
- * Светлый интерфейс, синий primary, мягкие скругления, лёгкие тени.
+ * Статические светлые токены совместимы с существующими StyleSheet.
+ * Реактивные native-компоненты отображают их через палитру runtime.
  */
 export const colors = {
   primary: '#005BFF',
@@ -44,6 +45,8 @@ export const colors = {
   red600: '#DC2626',
   green600: '#16A34A',
 } as const;
+
+export { ThemeScope, useThemeMode, useThemeColor, useThemeColors, useThemedStyle } from './runtime';
 
 // Отступы в духе tailwind (4px-сетка).
 export const spacing = {

@@ -1,5 +1,6 @@
+import { ActivityIndicator, ScrollView, View } from '@/components/themed';
 import React from 'react';
-import { ActivityIndicator, Animated, Easing, ScrollView, StyleSheet, View, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native';
+import { Animated, Easing, StyleSheet, type TextInputProps, type TextStyle, type ViewStyle } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import { colors, radius, spacing, fontSize, cardShadow, waiterLayout } from '@/theme';
 import { PwaIcon } from './PwaIcon';
@@ -196,11 +197,13 @@ export function SegmentTabs<T extends string>({
   value,
   onChange,
   count,
+  counts,
 }: {
   items: { key: T; label: string }[];
   value: T;
   onChange: (key: T) => void;
   count?: number;
+  counts?: Partial<Record<T, number>>;
 }) {
   return (
     <ScrollView
@@ -210,6 +213,7 @@ export function SegmentTabs<T extends string>({
     >
       {items.map((it) => {
         const active = it.key === value;
+        const visibleCount = counts?.[it.key] ?? (active ? count : undefined);
         return (
           <FastPressable
             key={it.key}
@@ -217,9 +221,9 @@ export function SegmentTabs<T extends string>({
             style={[styles.segment, active && styles.segmentActive]}
           >
             <Text style={[styles.segmentText, active && styles.segmentTextActive]} translate>{it.label}</Text>
-            {active && count != null && count > 0 ? (
-              <View style={styles.segmentCount}>
-                <Text style={styles.segmentCountText}>{count}</Text>
+            {visibleCount != null && visibleCount > 0 ? (
+              <View style={[styles.segmentCount, active && styles.segmentCountActive]}>
+                <Text style={[styles.segmentCountText, active && styles.segmentCountTextActive]}>{visibleCount}</Text>
               </View>
             ) : null}
           </FastPressable>
@@ -230,10 +234,11 @@ export function SegmentTabs<T extends string>({
 }
 
 /** Тумблер — повторяет PWA Toggle (track 44×24, анимированный бегунок). */
-export function Toggle({ checked, onChange, accessibilityLabel }: {
+export function Toggle({ checked, onChange, accessibilityLabel, disabled = false }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   accessibilityLabel?: string;
+  disabled?: boolean;
 }) {
   const progress = React.useRef(new Animated.Value(checked ? 1 : 0)).current;
 
@@ -251,10 +256,11 @@ export function Toggle({ checked, onChange, accessibilityLabel }: {
     <FastPressable
       accessibilityRole="switch"
       accessibilityLabel={accessibilityLabel}
-      accessibilityState={{ checked }}
+      accessibilityState={{ checked, disabled }}
+      disabled={disabled}
       onPress={() => onChange(!checked)}
       hitSlop={8}
-      style={styles.toggle}
+      style={[styles.toggle, disabled && { opacity: 0.6 }]}
     >
       <View style={[styles.toggleTrack, { backgroundColor: checked ? colors.primary : colors.slate300 }]}>
         <Animated.View style={[styles.toggleThumb, { transform: [{ translateX }] }]} />
@@ -347,8 +353,10 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: colors.primary },
   segmentText: { fontSize: fontSize.base, color: colors.textSecondary, fontWeight: '500' },
   segmentTextActive: { color: colors.white },
-  segmentCount: { backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: radius.pill, paddingHorizontal: 6, paddingVertical: 1 },
-  segmentCountText: { color: colors.white, fontSize: fontSize.xs },
+  segmentCount: { minWidth: 20, minHeight: 20, paddingHorizontal: 5, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.border, borderRadius: radius.pill },
+  segmentCountActive: { backgroundColor: 'rgba(255,255,255,0.25)' },
+  segmentCountText: { color: colors.textPrimary, fontSize: fontSize.xs },
+  segmentCountTextActive: { color: colors.white },
 
   toggle: { width: 44, height: 24 },
   toggleTrack: { width: 44, height: 24, borderRadius: 12, justifyContent: 'center' },

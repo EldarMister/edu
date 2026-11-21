@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const React = require('react');
+const { nativeThemeModules } = require('./helpers/native-theme.cjs');
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
@@ -23,19 +24,23 @@ function harness() {
   };
   const requests = [], payloads = [];
   const props = { visible: true, instantDismiss: false, orderId: 'a', total: 100, paymentMethods: ['qr', 'cash'], qrAvailable: true, submitting: false, onClose() {}, onComplete: payload => { const request = deferred(); payloads.push(payload); requests.push(request); return request.promise; } };
+  const native = { View: 'View', StyleSheet: { create: value => value }, ScrollView: 'ScrollView' };
   const modules = {
     react: hooks,
-    'react-native': { View: 'View', StyleSheet: { create: value => value }, ScrollView: 'ScrollView' },
+    'react-native': native,
     'react-native-reanimated': {},
     '@/components/typography': { Text: 'Text', TextInput: 'TextInput' },
     '@/components/FastPressable': { FastPressable: 'FastPressable' },
     '@/components/ui': { Button: 'Button' },
     '@/components/BottomSheet': { BottomSheet: 'BottomSheet', SheetScrollView: 'SheetScrollView' },
     '@/components/motion': {}, '@/components/PwaIcon': { PwaIcon: 'PwaIcon' },
-    '@/theme': { colors: {}, fontSize: {}, radius: {}, spacing: {} },
+    ...nativeThemeModules(native),
     '@/services/api/waiter': {}, '@/services/api/settings': {},
     '@/lib/api': { apiError: error => error.message }, '@/lib/sound': {},
     '@/store/notifications': {}, '@/store/receiptPrint': {}, '@/store/auth': {},
+    '@/features/finance/CashShifts': {},
+    '@/features/cash-shifts/CashShiftControls': { useCashShift: () => ({}) },
+    './WidePayment': {}, './useReceiptPrinter': {}, '@/lib/receipt': {}, '@/lib/i18n': {}, '@/hooks/usePermissions': {},
     '@/utils/format': { money: String }, './orderRules': {},
   };
   const source = fs.readFileSync(path.join(__dirname, '../src/screens/waiter/PaymentSheet.tsx'), 'utf8').replace('function SplitBillSheet(', 'export function SplitBillSheet(');

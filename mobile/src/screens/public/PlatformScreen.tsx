@@ -1,6 +1,7 @@
+import { RefreshControl, ScrollView, View, SafeAreaView } from '@/components/themed';
 import React from 'react';
-import { RefreshControl, ScrollView, StyleSheet, Switch, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { StyleSheet, Switch } from 'react-native';
+
 import { useNavigation } from '@react-navigation/native';
 import { Alert, Text } from '@/components/typography';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
@@ -14,6 +15,7 @@ import { usePlatformAuth } from '@/store/platformAuth';
 import { useCafeStaff, useCafes, useCleanupCafe, useCreateCafe, useDeleteCafe, useDeleteStaff, useHealth, useMemory, usePlatformLogin, useResumeCafe, useSetStaffActive, useSuspendCafe, useUpdateSubscription, type CleanupScope, type PlatformCafe } from '@/services/api/platform';
 import { colors, fontSize, radius, spacing } from '@/theme';
 import { PublicError } from './PublicLayout';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
 
 export function PlatformScreen() {
   const navigation = useNavigation();
@@ -41,12 +43,12 @@ export function PlatformScreen() {
   </SafeAreaView>;
 }
 function PlatformDashboard() {
-  const [page, setPage] = React.useState<'cafes' | 'monitoring'>('cafes');
+  const [page, setPage] = React.useState<'cafes' | 'monitoring' | 'settings'>('cafes');
   return <View style={styles.screen}>
     <View style={styles.platformHeader}><View style={styles.row}><Text style={styles.platformTitle}>EDU POS · Платформа</Text><FastPressable hitSlop={10} onPress={() => usePlatformAuth.getState().logout()}><Text style={styles.logout} translate>Выйти</Text></FastPressable></View>
-      <View style={styles.platformTabs}>{([{ key: 'cafes', label: 'Кафе' }, { key: 'monitoring', label: 'Мониторинг' }] as const).map(item => <FastPressable key={item.key} onPress={() => setPage(item.key)} style={[styles.platformTab, page === item.key && styles.platformTabActive]}><Text style={[styles.platformTabText, page === item.key && { color: colors.primary }]} translate>{item.label}</Text></FastPressable>)}</View>
+      <View style={styles.platformTabs}>{([{ key: 'cafes', label: 'Кафе' }, { key: 'monitoring', label: 'Мониторинг' }, { key: 'settings', label: 'Настройки' }] as const).map(item => <FastPressable key={item.key} onPress={() => setPage(item.key)} style={[styles.platformTab, page === item.key && styles.platformTabActive]}><Text style={[styles.platformTabText, page === item.key && { color: colors.primary }]} translate>{item.label}</Text></FastPressable>)}</View>
     </View>
-    <ScreenTransition style={styles.screen} transitionKey={page}>{page === 'cafes' ? <Cafes /> : <Monitoring />}</ScreenTransition>
+    <ScreenTransition style={styles.screen} transitionKey={page}>{page === 'cafes' ? <Cafes /> : page === 'monitoring' ? <Monitoring /> : <View style={styles.content}><ThemeSwitch /></View>}</ScreenTransition>
   </View>;
 }
 function Cafes() {

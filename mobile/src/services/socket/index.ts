@@ -17,7 +17,8 @@ function socketIsConnecting(sock: Socket) {
 }
 
 function shouldConnectNow() {
-  return (AppState.currentState === 'active' || isPttBackgroundRuntimeActive()) && !!useAuth.getState().accessToken;
+  const { accessToken, workspace } = useAuth.getState();
+  return (AppState.currentState === 'active' || isPttBackgroundRuntimeActive()) && !!accessToken && !!workspace;
 }
 
 function connectIfNeeded(sock: Socket) {
@@ -28,10 +29,10 @@ function connectIfNeeded(sock: Socket) {
 
 /** Singleton-сокет, подключённый с текущим JWT (тот же способ, что и PWA). */
 export function getSocket(): Socket {
-  const token = useAuth.getState().accessToken;
+  const { accessToken: token, workspace } = useAuth.getState();
   if (!socket) {
     socket = io(API_URL, {
-      auth: { token },
+      auth: { token, workspace },
       // Как в PWA: websocket предпочтительнее, polling оставляем fallback для
       // нестабильной мобильной сети и прокси, где чистый websocket не поднимается.
       transports: ['websocket', 'polling'],
@@ -43,7 +44,7 @@ export function getSocket(): Socket {
     });
   } else {
     // Обновляем токен на случай повторного входа.
-    socket.auth = { token };
+    socket.auth = { token, workspace };
   }
   connectIfNeeded(socket);
   return socket;
@@ -60,7 +61,8 @@ export function reconnectSocket() {
     getSocket();
     return;
   }
-  socket.auth = { token: useAuth.getState().accessToken };
+  const { accessToken: token, workspace } = useAuth.getState();
+  socket.auth = { token, workspace };
   if (socket.connected || socketIsConnecting(socket)) {
     socket.disconnect();
   }
@@ -71,7 +73,7 @@ export function reconnectSocket() {
 export function useSocketLifecycle() {
   const token = useAuth((state) => state.accessToken);
   const userId = useAuth((state) => state.user?.id);
-  const role = useAuth((state) => state.user?.role);
+  const workspace = useAuth((state) => state.workspace);
   useEffect(() => {
     const sock = getSocket();
     reconnectSocket();
@@ -118,7 +120,7 @@ export function useSocketLifecycle() {
       network.remove();
       if (!isPttBackgroundRuntimeActive()) sock.disconnect();
     };
-  }, [token, userId, role]);
+  }, [token, userId, workspace]);
 }
 
 /** Хук: статус соединения. Используется индикатором «Онлайн / Нет соединения». */

@@ -1,8 +1,9 @@
+import { View, SafeAreaView } from '@/components/themed';
 import { PanelScreenBoundary } from '@/components/bottom-panel/context';
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -19,6 +20,8 @@ import { OrdersNavigator } from './OrdersNavigator';
 import { ProfileScreen } from '@/screens/profile/ProfileScreen';
 import { useActiveOrders, useCurrentShift } from '@/services/api/waiter';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
+import { useAuth } from '@/store/auth';
+import { CashShiftBanner } from '@/features/cash-shifts/CashShiftControls';
 import type { WaiterTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<WaiterTabParamList>();
@@ -33,7 +36,8 @@ const ICONS: Record<keyof WaiterTabParamList, PwaIconName> = {
 export function WaiterNavigator() {
   const insets = useSafeAreaInsets();
   const orders = useActiveOrders();
-  const shiftQ = useCurrentShift();
+  const trackShift = useAuth((state) => state.user?.permissions?.workShiftRequired !== false);
+  const shiftQ = useCurrentShift(trackShift);
   const ordersCount = (orders.data ?? []).filter(
     (order) => order.requiresWaiterDecision || order.status === 'ready' || order.status === 'rejected',
   ).length;
@@ -44,8 +48,8 @@ export function WaiterNavigator() {
   const [busy, setBusy] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState<keyof WaiterTabParamList>('Tables');
   const setShiftGateOpen = useRadioVisibility((s) => s.setShiftGateOpen);
-  const showShiftLoading = !shiftResolved;
-  const showGate = busy || (shiftResolved && !shiftActive);
+  const showShiftLoading = trackShift && !shiftResolved;
+  const showGate = trackShift && (busy || (shiftResolved && !shiftActive));
   const showGateOverlay = showGate && activeTab !== 'Profile';
   const tabBarHeight = waiterLayout.navBarHeight + insets.bottom;
 
@@ -70,6 +74,7 @@ export function WaiterNavigator() {
     <SafeAreaView style={styles.workSafe} edges={['top']}>
       <PanelScreenBoundary mode="inline" style={{ flex: 1 }}>
       <WaiterHeader />
+      <CashShiftBanner />
       <View style={styles.tabsHost}>
         <Tab.Navigator
           tabBar={(props) => (

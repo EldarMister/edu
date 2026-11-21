@@ -1,50 +1,50 @@
-import React, { useState } from 'react';
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import React from 'react';
+import { StyleSheet, useWindowDimensions } from 'react-native';
+import { View } from '@/components/themed';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { Text } from '@/components/typography';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { Button } from '@/components/ui';
-import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon, type PwaIconName } from '@/components/PwaIcon';
-import { ACTION_KEYS, SECTION_KEYS, resolvePermissions } from '@/lib/permissions';
-import { apiError } from '@/lib/api';
-import { useNotifications } from '@/store/notifications';
-import { useUpdatePermissions, type StaffMember } from '@/services/api/admin';
+import { ACTION_KEYS, ACTION_LABELS, SECTION_KEYS, SECTION_LABELS, resolvePermissions } from '@/lib/permissions';
+import type { StaffMember } from '@/services/api/admin';
 import { colors } from '@/theme';
 import type { ActionKey, SectionKey } from '@/types';
 
-const sectionLabels: Record<SectionKey, string> = { statistics: 'Статистика', orders: 'Заказы', tables: 'Столы', menu: 'Меню', warehouse: 'Склад', staff: 'Персонал', journal: 'Журнал', paymentReconciliation: 'Сверка оплат', checks: 'Чеки / Оплата', settings: 'Настройки' };
-const actionLabels: Record<ActionKey, string> = { editMenu: 'Редактировать меню', refundChecks: 'Возврат / отмена чеков', exportReports: 'Экспорт отчётов', closeShift: 'Закрытие смены', manageStaff: 'Управление сотрудниками', editPermissions: 'Редактирование прав доступа' };
 type PermissionIcon = PwaIconName | 'download' | 'lock' | 'key' | 'card';
-const sectionIcons: Record<SectionKey, PermissionIcon> = { statistics: 'adminStats', orders: 'adminOrders', tables: 'grid', menu: 'menu', warehouse: 'adminWarehouse', staff: 'adminStaff', journal: 'adminJournal', paymentReconciliation: 'adminReconcile', checks: 'card', settings: 'adminSettings' };
-const actionIcons: Record<ActionKey, PermissionIcon> = { editMenu: 'pencil', refundChecks: 'clock', exportReports: 'download', closeShift: 'lock', manageStaff: 'adminStaff', editPermissions: 'key' };
+const sectionIcons: Partial<Record<SectionKey, PermissionIcon>> = { finance: 'card', statistics: 'adminStats', orders: 'adminOrders', tables: 'grid', menu: 'menu', warehouse: 'adminWarehouse', staff: 'adminStaff', journal: 'adminJournal', paymentReconciliation: 'adminReconcile', checks: 'card', settings: 'adminSettings' };
+const actionIcons: Partial<Record<ActionKey, PermissionIcon>> = { acceptOrderPayments: 'card', printReceipts: 'adminOrders', requestReceiptPrints: 'adminOrders', createDeliveryOrders: 'adminOrders',
+  editMenu: 'pencil', refundChecks: 'clock', exportReports: 'download', closeShift: 'lock', financeCashShifts: 'clock', manageStaff: 'adminStaff', editPermissions: 'key',
+  warehouseReceive: 'adminWarehouse', warehouseTransfer: 'transfer', warehouseWriteoff: 'adminJournal', warehouseCount: 'grid',
+  warehouseApprove: 'key', warehouseRecipes: 'menu', warehouseProduce: 'adminOrders', warehouseCosts: 'card',
+  warehouseReports: 'adminStats', warehouseSettings: 'adminSettings',
+};
 const roleLabels = { OWNER: 'Владелец', ADMIN: 'Администратор', WAITER: 'Официант', KITCHEN: 'Кухня', BAR: 'Бар' };
 
 export function EmployeePermissionsSheet({ member, onClose }: { member: StaffMember; onClose: () => void }) {
   const owner = member.role === 'OWNER';
   const twoColumns = useWindowDimensions().width >= 640;
-  const [permissions, setPermissions] = useState(() => resolvePermissions(member.role, member.permissions));
-  const update = useUpdatePermissions();
-  const push = useNotifications((s) => s.push);
-  async function save() {
-    try { await update.mutateAsync({ id: member.id, ...permissions }); push({ message: 'Права доступа сохранены', type: 'success', at: new Date().toISOString() }); onClose(); }
-    catch (error) { push({ message: apiError(error), type: 'error', at: new Date().toISOString() }); }
-  }
-  return <BottomSheet visible onClose={onClose} title="Изменить права сотрудника" panelStyle={{ width: '100%', maxWidth: 672, alignSelf: 'center' }} footer={<View style={styles.footer}><Button title="Отмена" variant="secondary" onPress={onClose} disabled={update.isPending} /><Button title="Сохранить" disabled={owner} loading={update.isPending} onPress={() => void save()} /></View>}>
+  const permissions = resolvePermissions(member.role, member.permissions);
+  return <BottomSheet visible onClose={onClose} title="Права сотрудника" panelStyle={{ width: '100%', maxWidth: 672, alignSelf: 'center' }}
+    footer={<Button title="Закрыть" variant="secondary" onPress={onClose} />}>
     <SheetScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-      <View style={styles.member}><View style={styles.avatar}><Text style={styles.avatarText}>{member.name.trim().charAt(0).toUpperCase() || '—'}</Text></View><View style={{ flex: 1 }}><Text style={styles.name} numberOfLines={1}>{member.name}</Text><Text style={styles.muted} translate>Роль: {roleLabels[member.role]}</Text></View></View>
-      {owner ? <Text style={[styles.muted, styles.ownerNote]} translate>Владелец всегда имеет полный доступ — права изменить нельзя.</Text> : null}
-      <View><Text style={styles.heading} translate>Доступ к разделам</Text><View style={styles.grid}>{SECTION_KEYS.map(key => <PermissionItem key={key} label={sectionLabels[key]} icon={sectionIcons[key]} checked={permissions.sections[key]} disabled={owner || update.isPending} twoColumns={twoColumns} onToggle={() => setPermissions(p => ({ ...p, sections: { ...p.sections, [key]: !p.sections[key] } }))} />)}</View></View>
-      <View><Text style={styles.heading} translate>Дополнительные права</Text><View style={styles.grid}>{ACTION_KEYS.map(key => <PermissionItem key={key} label={actionLabels[key]} icon={actionIcons[key]} checked={permissions.actions[key]} disabled={owner || update.isPending} twoColumns={twoColumns} onToggle={() => setPermissions(p => ({ ...p, actions: { ...p.actions, [key]: !p.actions[key] } }))} />)}</View></View>
+      <View style={styles.member}><View style={styles.avatar}><Text style={styles.avatarText}>{member.name.trim().charAt(0).toUpperCase() || '—'}</Text></View><View style={{ flex: 1 }}><Text style={styles.name} numberOfLines={1}>{member.name}</Text><Text style={styles.muted} translate>Должность: {member.positionName ?? roleLabels[member.role]}</Text></View></View>
+      {owner ? <Text style={[styles.muted, styles.ownerNote]} translate>Владелец всегда имеет полный доступ.</Text> : <Text style={[styles.muted, styles.ownerNote]} translate>Права сотрудника определяются его должностью.</Text>}
+      {permissions.adminAccess ? <View><Text style={styles.heading} translate>Доступ к админ-панели</Text><View style={styles.grid}>{SECTION_KEYS.filter((key) => permissions.sections[key]).map((key) =>
+        <PermissionItem key={key} label={SECTION_LABELS[key]} icon={sectionIcons[key] ?? 'grid'} twoColumns={twoColumns} readOnly={permissions.readOnlySections?.includes(key)} />)}</View></View> : null}
+      {permissions.terminalAccess ? <Text style={styles.heading} translate>Разрешён вход в кассу</Text> : null}
+      {member.role === 'KITCHEN' || member.role === 'BAR' ? <Text style={styles.heading} translate>Разрешён экран приготовления</Text> : null}
+      <View><Text style={styles.heading} translate>Разрешённые действия</Text><View style={styles.grid}>{ACTION_KEYS.filter((key) => permissions.actions[key]).map((key) =>
+        <PermissionItem key={key} label={ACTION_LABELS[key]} icon={actionIcons[key] ?? 'key'} twoColumns={twoColumns} />)}</View></View>
     </SheetScrollView>
   </BottomSheet>;
 }
 
-function PermissionItem({ label, icon, checked, disabled, twoColumns, onToggle }: { label: string; icon: PermissionIcon; checked: boolean; disabled: boolean; twoColumns: boolean; onToggle: () => void }) {
-  return <FastPressable accessibilityRole="checkbox" accessibilityState={{ checked, disabled }} disabled={disabled} onPress={onToggle} style={[styles.permission, twoColumns && { width: '49%' }, !checked && { backgroundColor: colors.background }, disabled && { opacity: 0.6 }]}>
-    <View style={[styles.checkbox, checked && { backgroundColor: colors.primary, borderColor: colors.primary }]}>{checked ? <PwaIcon name="check" size={12} strokeWidth={3} color={colors.white} /> : null}</View>
-    <PermissionSymbol icon={icon} color={checked ? colors.textSecondary : colors.textLight} /><Text style={[styles.label, !checked && { color: colors.textMuted }]} translate>{label}</Text>
-  </FastPressable>;
+function PermissionItem({ label, icon, twoColumns, readOnly }: { label: string; icon: PermissionIcon; twoColumns: boolean; readOnly?: boolean }) {
+  return <View style={[styles.permission, twoColumns && { width: '49%' }]}>
+    <PermissionSymbol icon={icon} color={colors.textSecondary} />
+    <Text style={styles.label} translate>{label}{readOnly ? ' · Просмотр' : ''}</Text>
+  </View>;
 }
 function PermissionSymbol({ icon, color }: { icon: PermissionIcon; color: string }) {
   if (icon !== 'download' && icon !== 'lock' && icon !== 'key' && icon !== 'card') return <PwaIcon name={icon} size={18} color={color} />;
@@ -53,11 +53,11 @@ function PermissionSymbol({ icon, color }: { icon: PermissionIcon; color: string
   </Svg>;
 }
 const styles = StyleSheet.create({
-  content: { gap: 20 }, footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
+  content: { gap: 20 },
   member: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, paddingHorizontal: 16, paddingVertical: 12 },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primarySoft, alignItems: 'center', justifyContent: 'center' }, avatarText: { fontSize: 16, fontWeight: '600', color: colors.primary },
   name: { fontSize: 16, fontWeight: '600', color: colors.textPrimary }, muted: { color: colors.textMuted, fontSize: 14 }, ownerNote: { padding: 12, backgroundColor: colors.background, borderRadius: 8 },
   heading: { color: colors.textPrimary, fontWeight: '600', fontSize: 14, marginBottom: 8 }, grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8 },
   permission: { width: '100%', flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: colors.border, borderRadius: 8, backgroundColor: colors.white },
-  checkbox: { width: 18, height: 18, borderRadius: 5, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' }, label: { fontSize: 14, color: colors.textPrimary, flex: 1 },
+  label: { fontSize: 14, color: colors.textPrimary, flex: 1 },
 });

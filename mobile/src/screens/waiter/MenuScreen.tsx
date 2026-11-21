@@ -1,8 +1,9 @@
+import { FlatList, ScrollView, View, SafeAreaView } from '@/components/themed';
 import { gridLayout } from '@/lib/layout';
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { FastPressable } from '@/components/FastPressable';
 import { Button, EmptyState, Loading, PillTabs } from '@/components/ui';
@@ -11,8 +12,9 @@ import { FullscreenSheet } from '@/components/FullscreenSheet';
 import { PwaIcon } from '@/components/PwaIcon';
 import { NumberTicker } from '@/components/NumberTicker';
 import { colors, fontSize, radius, spacing, waiterLayout } from '@/theme';
-import { useActiveOrders, useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem } from '@/services/api/waiter';
-import { formatWeightedAmount, linePrice, useCart } from '@/store/cart';
+import { useActiveOrders, useAddItems, useCategories, useCreateOrder, useDishes, useEditOrder, useReplaceRejectedItem, type DeliveryDetails } from '@/services/api/waiter';
+import { usePublicSettings } from '@/services/api/settings';
+import { cartTotals, formatWeightedAmount, isDeliveryCart, NEW_DELIVERY_CART, useCart } from '@/store/cart';
 import { useAuth } from '@/store/auth';
 import { useNotifications } from '@/store/notifications';
 import { useReplacement } from '@/store/replacement';
@@ -20,12 +22,16 @@ import { buildSetLine, calcSetPrice, defaultSetComponents } from '@/utils/set';
 import { dishUnitPrice, displayOrderNumber, makeIdempotencyKey, minDishUnitPrice, money, variantNamesLine } from '@/utils/format';
 import { cartStations } from '@/utils/prepStation';
 import { apiError } from '@/lib/api';
+import { usePermissions } from '@/hooks/usePermissions';
 import { useConnectionStatus } from '@/services/socket';
 import { CartSheet } from './CartSheet';
+import { DeliveryDetailsSheet } from './DeliveryDetailsSheet';
 import { TablePickerSheet } from './TablePickerSheet';
 import { WeightPickerSheet } from './WeightPickerSheet';
 import { orderLocation } from './orderRules';
 import type { CartLine, CartSetComponent, Category, Dish, DishVariant } from '@/types';
+
+const EMPTY_DELIVERY: DeliveryDetails = { customerName: '', customerPhone: '', deliveryAddress: '' };
 
 function currentDishQuantity(dishId: string): number {
   return useCart.getState().lines.reduce((sum, line) => sum + (line.dish.id === dishId ? line.quantity : 0), 0);
@@ -59,14 +65,18 @@ export function MenuScreen() {
   const completeSubmission = useCart((s) => s.completeSubmission);
   const cancelEditing = useCart((s) => s.cancelEditing);
   const cartCount = useCart((s) => s.lines.length);
-  const cartTotal = useCart((s) => s.lines.reduce((sum, line) => sum + linePrice(line), 0));
+  const canCreateDelivery = usePermissions().canAction('createDeliveryOrders');
   const push = useNotifications((s) => s.push);
 
   const categories = useCategories();
   const dishes = useDishes();
   const orders = useActiveOrders();
   const selectedOrder = orders.data?.find((order) => order.id === activeOrderId);
-  const deliveryOrder = selectedOrder?.source === 'delivery';
+  const deliveryOrder = isDeliveryCart(tableId) || selectedOrder?.source === 'delivery';
+  const newDelivery = tableId === NEW_DELIVERY_CART.id;
+  const settings = usePublicSettings();
+  const roundCart = activeOrderId ? !!editingOrderId && !!selectedOrder?.roundOrderTotal : !!settings.data?.roundOrderTotal;
+  const { total: cartTotal } = cartTotals(cartLines, roundCart);
   const createOrder = useCreateOrder();
   const addItems = useAddItems();
   const editOrder = useEditOrder();
@@ -78,6 +88,10 @@ export function MenuScreen() {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string>('all');
   const [cartOpen, setCartOpen] = useState(false);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
+  const [deliveryDetails, setDeliveryDetails] = useState(EMPTY_DELIVERY);
+  const [deliveryError, setDeliveryError] = useState('');
+  const [deliveryKey, setDeliveryKey] = useState(makeIdempotencyKey);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
   const [variantDish, setVariantDish] = useState<Dish | null>(null);
   const [weightDish, setWeightDish] = useState<Dish | null>(null);
@@ -206,7 +220,7 @@ export function MenuScreen() {
     );
   }
 
-  const onSubmit = () => {
+  const onSubmit = (delivery?: DeliveryDetails) => {
     const { tableId, tableNumber, activeOrderId, editingOrderId, lines: cartLines, comment: orderComment, commentOpen: orderCommentOpen } = useCart.getState();
     if (!tableId) return;
     const selectedOrder = orders.data?.find((order) => order.id === activeOrderId);
@@ -222,7 +236,22 @@ export function MenuScreen() {
       push({ message: 'Этот заказ уже закрыт. Выберите стол заново.', type: 'error', at: new Date().toISOString() });
       return;
     }
-    if (!activeOrderId && (tableNumber === 0 || tableId.startsWith('delivery-table:'))) {
+    const isNewDelivery = tableId === NEW_DELIVERY_CART.id;
+    if (isNewDelivery) {
+      if (!canCreateDelivery) {
+        push({ message: 'У вас нет доступа к оформлению доставки', type: 'error', at: new Date().toISOString() });
+        return;
+      }
+      if (!delivery) {
+        setDeliveryError('');
+        setDeliveryOpen(true);
+        return;
+      }
+      if (!/^\+?(?:[ ()-]*\d){6,15}[ ()-]*$/.test(delivery.customerPhone)) {
+        setDeliveryError('Укажите корректный телефон клиента');
+        return;
+      }
+    } else if (!activeOrderId && (tableNumber === 0 || tableId.startsWith('delivery-table:'))) {
       push({ message: 'Служебный стол доставки недоступен для нового заказа. Выберите стол в зале.', type: 'error', at: new Date().toISOString() });
       return;
     }
@@ -243,17 +272,28 @@ export function MenuScreen() {
         navigation.navigate('Orders');
       }
     };
-    const onError = (e: unknown) => { if (stillOwns()) push({ message: apiError(e), type: 'error', at: new Date().toISOString() }); };
+    const onError = (e: unknown) => {
+      if (!stillOwns()) return;
+      if (isNewDelivery) setDeliveryError(apiError(e));
+      else push({ message: apiError(e), type: 'error', at: new Date().toISOString() });
+    };
 
+    const createPayload = {
+      idempotencyKey: isNewDelivery ? deliveryKey : idempotencyKey,
+      comment: orderCommentOpen ? orderComment : '',
+      lines: owner.lines,
+    };
+    if (isNewDelivery) setDeliveryError('');
     const request = editingOrderId
       ? editOrder.mutateAsync({ orderId: editingOrderId, reason: 'Изменение состава заказа', comment: orderCommentOpen ? orderComment : '', lines: owner.lines })
       : activeOrderId
         ? addItems.mutateAsync({ orderId: activeOrderId, idempotencyKey, lines: owner.lines })
-        : createOrder.mutateAsync({ tableId: owner.tableId, idempotencyKey, comment: orderCommentOpen ? orderComment : '', lines: owner.lines });
+        : createOrder.mutateAsync({ ...createPayload, ...(delivery ? { delivery } : { tableId: owner.tableId }) });
     void request.then((updated) => {
       if (!stillOwns()) return;
       push({
-        message: editingOrderId ? 'Изменения сохранены'
+        message: isNewDelivery ? 'Заказ доставки оформлен'
+          : editingOrderId ? 'Изменения сохранены'
           : cartOnlyNone ? (activeOrderId ? 'Позиции добавлены в заказ' : 'Заказ создан')
           : destinations.multipleOrCustom ? 'Заказ отправлен на приготовление'
           : destinations.kitchen ? 'Заказ отправлен на кухню' : 'Заказ отправлен в бар',
@@ -261,6 +301,11 @@ export function MenuScreen() {
         at: new Date().toISOString(),
       });
       done(editingOrderId || activeOrderId ? 'update' : 'create', updated.id);
+      if (isNewDelivery) {
+        setDeliveryOpen(false);
+        setDeliveryDetails(EMPTY_DELIVERY);
+        setDeliveryKey(makeIdempotencyKey());
+      }
     }).catch(onError).finally(settled);
   };
 
@@ -278,7 +323,7 @@ export function MenuScreen() {
     ? 'Сохранить изменения'
     : activeOrderId
       ? 'Добавить к заказу'
-      : cartSendLabel;
+      : newDelivery ? 'Данные доставки' : cartSendLabel;
   const replacing = !!replacementTarget;
 
   return (
@@ -296,7 +341,7 @@ export function MenuScreen() {
       {/* Выбранный стол + поиск */}
       <View style={styles.searchRow}>
         <FastPressable style={[styles.tableChip, tablePickerOpen && styles.tableChipActive]}
-          accessibilityRole="button" accessibilityLabel={selectedOrder ? orderLocation(selectedOrder) : `Стол ${tableNumber}${hallName ? ` · ${hallName}` : ''}`}
+          accessibilityRole="button" accessibilityLabel={deliveryOrder ? 'Доставка' : selectedOrder ? orderLocation(selectedOrder) : `Стол ${tableNumber}${hallName ? ` · ${hallName}` : ''}`}
           disabled={tableSubmitting || deliveryOrder || !!editingOrderId} onPress={() => setTablePickerOpen(true)}>
           <Text style={styles.tableChipText} numberOfLines={1} translate>
             {deliveryOrder ? 'Доставка' : `Стол ${tableNumber}`}
@@ -383,7 +428,7 @@ export function MenuScreen() {
         </FastPressable>
         <Button
           title={submitLabel}
-          onPress={onSubmit}
+          onPress={() => onSubmit()}
           loading={submitting}
           disabled={count === 0}
           style={{ flex: 1, borderRadius: radius.sm }}
@@ -395,10 +440,23 @@ export function MenuScreen() {
       <CartSheet
         visible={cartOpen && !replacing}
         onClose={() => setCartOpen(false)}
-        onSubmit={onSubmit}
+        onSubmit={() => onSubmit()}
         submitting={submitting}
         submitLabel={submitLabel}
+        delivery={deliveryOrder}
+        roundTotal={roundCart}
       />
+      {newDelivery && canCreateDelivery ? (
+        <DeliveryDetailsSheet
+          visible={deliveryOpen}
+          details={deliveryDetails}
+          error={deliveryError}
+          pending={submitting}
+          onChange={setDeliveryDetails}
+          onClose={() => setDeliveryOpen(false)}
+          onSubmit={onSubmit}
+        />
+      ) : null}
 
       <VariantSheet
         dish={variantDish}

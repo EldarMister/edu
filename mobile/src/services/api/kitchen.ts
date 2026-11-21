@@ -6,12 +6,13 @@ export type KitchenTab = 'new' | 'in_work' | 'ready' | 'rejected' | 'cancelled';
 
 export type KitchenHistoryRange = { from: string; to: string };
 
-export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitchen', range?: KitchenHistoryRange) {
+export function useKitchenOrders(tab: KitchenTab, station: PrepStation = 'kitchen', range?: KitchenHistoryRange, enabled = true) {
   const historyQuery = range ? `&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}` : '';
   return useQuery({
     queryKey: ['kitchen', station, tab, range],
     queryFn: async () =>
       (await api.get<Order[]>(`/kitchen/orders?tab=${tab}&station=${encodeURIComponent(station)}${historyQuery}`)).data,
+    enabled,
     refetchInterval: 15_000, // подстраховка, основное обновление — через сокет
   });
 }

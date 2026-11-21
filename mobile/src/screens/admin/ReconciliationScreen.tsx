@@ -1,5 +1,6 @@
+import { ScrollView, View } from '@/components/themed';
 import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
 import * as DocumentPicker from 'expo-document-picker';
 import { Button, Card, Field } from '@/components/ui';

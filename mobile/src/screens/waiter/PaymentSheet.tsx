@@ -1,5 +1,8 @@
+import { CashShiftForm } from '@/features/finance/CashShifts';
+import { useCashShift } from '@/features/cash-shifts/CashShiftControls';
+import { ActivityIndicator, ScrollView, View } from '@/components/themed';
 import React, { useMemo, useState } from 'react';
-import { ActivityIndicator, Image, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, StyleSheet, useWindowDimensions } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import Animated, {
   interpolate,
@@ -16,7 +19,7 @@ import { Button } from '@/components/ui';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { cardPopTiming, popTiming } from '@/components/motion';
 import { PwaIcon } from '@/components/PwaIcon';
-import { colors, fontSize, radius, softShadow, spacing } from '@/theme';
+import { colors, fontSize, radius, softShadow, spacing, useThemedStyle } from '@/theme';
 import { fetchReceipt, useCreateReceiptPrintRequest, usePay } from '@/services/api/waiter';
 import { usePublicSettings, resolveQrSrc } from '@/services/api/settings';
 import { apiError } from '@/lib/api';
@@ -24,6 +27,12 @@ import { beep } from '@/lib/sound';
 import { useNotifications } from '@/store/notifications';
 import { useReceiptPrint } from '@/store/receiptPrint';
 import { useAuth } from '@/store/auth';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useReceiptPrinter } from './useReceiptPrinter';
+import { receiptHeader, receiptPrintSettings } from '@/lib/receipt';
+import { translate } from '@/lib/i18n';
+import { WidePayment } from './WidePayment';
+import type { TenderAmounts, TenderMethod } from './paymentAmounts';
 import {
   displayOrderNumber,
   isSplitPayment,
@@ -39,7 +48,7 @@ type SplitPart = { method: Exclude<PaymentMethod, 'mixed'>; amount: number };
 type OperationOwner = { epoch: number; orderId: string; userId?: string };
 type PaymentPayload =
   | { orderId: string; method: PaymentMethod }
-  | { orderId: string; method: 'mixed'; cashAmount: number; qrAmount: number }
+  | { orderId: string; method: 'mixed'; cashAmount: number; qrAmount: number; cardAmount?: number }
   | { orderId: string; method: PaymentMethod; splitPayments: SplitPart[] };
 
 const ALL_METHODS: { key: Exclude<PaymentMethod, 'mixed'>; label: string }[] = [
@@ -95,6 +104,14 @@ export function PaymentSheet({
   onPaid: () => void;
 }) {
   const settings = usePublicSettings();
+  const { width } = useWindowDimensions();
+  const { canAction } = usePermissions();
+  const canAcceptPayment = canAction('acceptOrderPayments');
+  const canManageCashShift = canAction('financeCashShifts');
+  const cashShift = useCashShift(visible && canManageCashShift && Number(order?.finalAmount ?? 0) > 0);
+  const canPrint = canAction('printReceipts');
+  const printReceipt = useReceiptPrinter();
+  const [printingDirect, setPrintingDirect] = useState(false);
   const pay = usePay();
   const print = useCreateReceiptPrintRequest();
   const push = useNotifications((s) => s.push);
@@ -205,7 +222,7 @@ export function PaymentSheet({
   const qrMissing = selected === 'qr' && !qrSrc;
   const activeItems = activeOrder.items.filter((item) => item.status !== 'rejected' && item.status !== 'cancelled');
   const allActiveItemsServed = activeItems.length > 0 && activeItems.every((item) => item.status === 'served');
-  const confirmDisabled = pay.isPending || !paymentMethodReady(selected, enabled, !!qrSrc) || qrMissing || (mixedSelected && !mixedValid) || !allActiveItemsServed;
+  const confirmDisabled = !canAcceptPayment || pay.isPending || !paymentMethodReady(selected, enabled, !!qrSrc) || qrMissing || (mixedSelected && !mixedValid) || !allActiveItemsServed;
 
   const complement = (value: string) => {
     const trimmed = value.trim();
@@ -222,14 +239,19 @@ export function PaymentSheet({
   };
 
   const completePayment = async (payload: PaymentPayload) => {
-    if (paymentPendingRef.current) return;
+    if (!canAcceptPayment || paymentPendingRef.current) return;
     const owner = operationOwner(payload.orderId);
     if (!ownsOperation(owner)) return;
     paymentPendingRef.current = owner;
     setError('');
     try {
       try {
-        const methods = 'splitPayments' in payload ? payload.splitPayments.map((part) => part.method) : [payload.method];
+        const methods = 'splitPayments' in payload ? payload.splitPayments.map((part) => part.method)
+          : 'cashAmount' in payload ? [
+            ...(payload.cashAmount > 0 ? ['cash' as const] : []),
+            ...(payload.qrAmount > 0 ? ['qr' as const] : []),
+            ...((payload.cardAmount ?? 0) > 0 ? ['card' as const] : []),
+          ] : [payload.method];
         if (methods.some((method) => !paymentMethodReady(method, enabled, !!qrSrc))) {
           throw new Error('Выбранный способ оплаты недоступен. Проверьте настройки оплаты.');
         }
@@ -271,12 +293,18 @@ export function PaymentSheet({
   };
 
   const requestPrint = async () => {
-    if (!currentReceipt || !activeOrder.waiter || printPendingRef.current) return;
+    if (!currentReceipt || printPendingRef.current || (!canPrint && (!activeOrder.waiter || !canAction('requestReceiptPrints')))) return;
     const owner = operationOwner(activeOrder.id);
     if (!ownsOperation(owner)) return;
     printPendingRef.current = owner;
     setError('');
     try {
+      if (canPrint) {
+        setPrintingDirect(true);
+        await printReceipt(owner.orderId);
+        if (ownsOperation(owner)) close();
+        return;
+      }
       const request = await print.mutateAsync({ orderId: owner.orderId, type: 'receipt' });
       if (!ownsOperation(owner)) return;
       beginPrint(request, currentReceipt);
@@ -289,6 +317,7 @@ export function PaymentSheet({
         push({ message, type: 'error', at: new Date().toISOString() });
       }
     } finally {
+      setPrintingDirect(false);
       if (printPendingRef.current === owner) printPendingRef.current = null;
     }
   };
@@ -299,6 +328,14 @@ export function PaymentSheet({
     const payload: PaymentPayload = mixedSelected
       ? { orderId: activeOrder.id, method: 'mixed', cashAmount: cashNum, qrAmount: qrNum }
       : { orderId: activeOrder.id, method: selected };
+    void completePayment(payload).catch(() => undefined);
+  };
+
+  const confirmTender = (amounts: TenderAmounts, active: TenderMethod) => {
+    const used = (Object.keys(amounts) as TenderMethod[]).filter((method) => amounts[method] > 0);
+    const payload: PaymentPayload = used.length > 1
+      ? { orderId: activeOrder.id, method: 'mixed', cashAmount: amounts.cash, qrAmount: amounts.qr, cardAmount: amounts.card }
+      : { orderId: activeOrder.id, method: used[0] ?? active };
     void completePayment(payload).catch(() => undefined);
   };
 
@@ -323,6 +360,12 @@ export function PaymentSheet({
   // этого пользователь видел второй «въезд» снизу после оплаты.
   const showReceipt = !!currentReceipt && !showSuccess;
   const showReceiptError = isPaymentComplete && !showSuccess && !currentReceipt;
+  const wide = width >= 768 && !isPaymentComplete;
+  const requiresCashShift = visible && total > 0 && canManageCashShift && cashShift.data?.enabled && !cashShift.data.current && !pay.isPending;
+  if (requiresCashShift) {
+    return <CashShiftForm current={null} endpoint="/cash-shifts" onClose={close} onComplete={() => setError('')} />;
+  }
+
 
   return (
     <>
@@ -330,17 +373,23 @@ export function PaymentSheet({
         visible={visible}
         ownerKey={activeOrder.id}
         onClose={close}
+        fullScreen={wide}
+        dismissible={!pay.isPending && !splitOpen && !printingDirect}
+        hideHandle={wide}
+        draggable={!wide}
+        panelStyle={wide ? { width: '100%', maxWidth: undefined } : undefined}
+        paddingBottomInset={wide ? 0 : undefined}
         onDismiss={() => { if (mountedRef.current && !visibleRef.current) setRenderOrder(null); }}
         presentation={showSuccess ? 'center' : 'bottom'}
         contentKey={showSuccess ? 'success' : showReceipt ? 'receipt' : 'payment'}
         hideHeader={showSuccess}
-        bodyStyle={showSuccess ? { paddingHorizontal: 0, paddingVertical: 0 } : undefined}
-        title={isPaymentComplete ? 'Оплата принята' : 'Оплата заказа'}
+        bodyStyle={showSuccess || wide ? { paddingHorizontal: 0, paddingVertical: 0 } : undefined}
+        title={isPaymentComplete ? 'Оплата принята' : wide ? `Оплата заказа · ${displayOrderNumber(activeOrder.orderNumber)}` : 'Оплата заказа'}
         footer={
-          showSuccess ? undefined : showReceipt ? (
+          showSuccess || wide ? undefined : showReceipt ? (
             <View style={styles.receiptActions}>
               <Button title="Готово" variant="secondary" onPress={close} style={{ flex: 1 }} />
-              {activeOrder.waiter ? <Button title="Печать чека" loading={print.isPending} onPress={() => void requestPrint()} style={{ flex: 1 }} /> : null}
+              {canPrint || activeOrder.waiter && canAction('requestReceiptPrints') ? <Button title="Печать чека" loading={printingDirect || print.isPending} onPress={() => void requestPrint()} style={{ flex: 1 }} /> : null}
             </View>
           ) : isPaymentComplete ? (
             <Button title="Готово" variant="secondary" onPress={close} />
@@ -348,7 +397,7 @@ export function PaymentSheet({
             <View style={styles.payActions}>
               <FastPressable
                 onPress={() => setSplitOpen(true)}
-                disabled={pay.isPending || !allActiveItemsServed}
+                disabled={pay.isPending || !allActiveItemsServed || !canAcceptPayment}
                 style={[
                   styles.splitButton,
                   (pay.isPending || !allActiveItemsServed) && styles.splitButtonDisabled,
@@ -370,7 +419,13 @@ export function PaymentSheet({
           )
         }
       >
-        {showSuccess ? <PaymentSuccessContent total={total} /> : <SheetScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{showReceipt && currentReceipt ? <ReceiptContent receipt={currentReceipt} error={error} location={orderLocation(activeOrder)} directPrint={!activeOrder.waiter} /> : showReceiptError ? <PaymentReceiptErrorContent error={error} /> : <>
+        {showSuccess ? <PaymentSuccessContent total={total} /> : wide ? (
+          <SheetScrollView keyboardShouldPersistTaps="always" contentContainerStyle={{ flexGrow: 1 }}>
+            <WidePayment key={`${activeOrder.id}:${operationEpoch.current}`} order={activeOrder} enabled={enabled} qrConfigured={!!qrSrc}
+              served={allActiveItemsServed} busy={pay.isPending || !canAcceptPayment} error={error}
+              onSplit={() => setSplitOpen(true)} onConfirm={confirmTender} />
+          </SheetScrollView>
+        ) : <SheetScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{showReceipt && currentReceipt ? <ReceiptContent receipt={currentReceipt} error={error} location={orderLocation(activeOrder)} directPrint={!activeOrder.waiter && !canPrint} /> : showReceiptError ? <PaymentReceiptErrorContent error={error} /> : <>
         <Text style={styles.subtitle}>
           {orderLocation(activeOrder)} · {displayOrderNumber(activeOrder.orderNumber)}
         </Text>
@@ -471,6 +526,7 @@ export function PaymentSheet({
         total={total}
         paymentMethods={enabled}
         qrAvailable={!!qrSrc}
+        tablet={width >= 768}
         submitting={pay.isPending}
         onClose={() => setSplitOpen(false)}
         onComplete={handleSplitComplete}
@@ -493,10 +549,15 @@ function ReceiptContent({
   location: string;
   directPrint: boolean;
 }) {
+  const header = receiptHeader(receipt);
+  const language = receiptPrintSettings(receipt).receiptLanguage;
   return (
     <>
       <View style={styles.receiptBox}>
-        <Text style={styles.receiptCafe} numberOfLines={2}>{receipt.cafeName}</Text>
+        {receipt.receiptLogoData ? <Image source={{ uri: receipt.receiptLogoData }} resizeMode="contain" style={{ height: 52, width: 100, alignSelf: 'center' }} /> : null}
+        {header.cafeName ? <Text style={styles.receiptCafe} numberOfLines={2}>{header.cafeName}</Text> : null}
+        {header.address ? <Text style={styles.receiptMeta}>{header.address}</Text> : null}
+        {header.phones ? <Text style={styles.receiptMeta}>{header.phones}</Text> : null}
         <Text style={styles.receiptMeta}>
           {displayOrderNumber(receipt.orderNumber)} · {location}
         </Text>
@@ -518,7 +579,7 @@ function ReceiptContent({
           </View>
         ) : null}
         <View style={styles.receiptTotal}>
-          <Text style={styles.receiptTotalLabel} translate>Итого</Text>
+          <Text style={styles.receiptTotalLabel}>{translate('Итого', language)}</Text>
           <Text style={styles.receiptTotalValue}>{money(receipt.finalAmount)}</Text>
         </View>
         {isSplitPayment(receipt) && receipt.payments?.length ? (
@@ -553,6 +614,8 @@ function ReceiptContent({
 }
 
 function PaymentSuccessContent({ total }: { total: number }) {
+  const cardSurface = useThemedStyle(styles.successCard);
+  const iconSurface = useThemedStyle(styles.successIcon);
   const reduceMotion = useReducedMotion();
   const card = useSharedValue(0);
   const check = useSharedValue(0.4);
@@ -591,8 +654,8 @@ function PaymentSuccessContent({ total }: { total: number }) {
 
   return (
     <View style={styles.successContent}>
-      <Animated.View style={[styles.successCard, cardStyle]}>
-        <Animated.View style={[styles.successIcon, checkStyle]}>
+      <Animated.View style={[cardSurface, cardStyle]}>
+        <Animated.View style={[iconSurface, checkStyle]}>
           <PwaIcon name="check" size={34} color={colors.success} strokeWidth={2.5} />
         </Animated.View>
         <Text style={styles.successTitle} translate>Оплата принята</Text>
@@ -626,6 +689,7 @@ function SplitBillSheet({
   total,
   paymentMethods,
   qrAvailable,
+  tablet,
   submitting,
   onClose,
   onComplete,
@@ -636,6 +700,7 @@ function SplitBillSheet({
   total: number;
   paymentMethods: PaymentMethod[];
   qrAvailable: boolean;
+  tablet?: boolean;
   submitting: boolean;
   onClose: () => void;
   onComplete: (totals: { cash: number; qr: number; payments: SplitPart[] }) => Promise<void>;
@@ -809,7 +874,7 @@ function SplitBillSheet({
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} title="Разделение счёта" animationPreset={instantDismiss ? 'default' : 'split'} maxHeight="88%">
+    <BottomSheet visible={visible} onClose={onClose} title="Разделение счёта" presentation={tablet ? 'dialog' : 'bottom'} hideHandle={tablet} animationPreset={instantDismiss ? 'default' : 'split'} maxHeight="88%">
       {completionError ? <Text style={styles.splitError}>{completionError}</Text> : null}
       {methodWarning ? <Text style={styles.splitError} translate>{methodWarning}</Text> : null}
       <View style={styles.splitHeader}>
@@ -971,6 +1036,7 @@ function SplitMethodSelect({
   onChange: (value: SplitMethod) => void;
 }) {
   const progress = useSharedValue(open ? 1 : 0);
+  const menuSurface = useThemedStyle(styles.methodSelectMenu);
   const [renderOpen, setRenderOpen] = React.useState(open);
 
   React.useEffect(() => {
@@ -1018,7 +1084,7 @@ function SplitMethodSelect({
       {renderOpen ? (
         <Animated.View
           style={[
-            styles.methodSelectMenu,
+            menuSurface,
             menuStyle,
           ]}
         >
@@ -1083,7 +1149,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   qrHint: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center' },
-  qrImage: { width: 288, maxWidth: '100%', height: 288 },
+  qrImage: { width: 288, maxWidth: '100%', height: 288, backgroundColor: '#FFFFFF' },
   qrMissingBox: { minHeight: 0, padding: 16, borderColor: 'rgba(255,155,0,0.3)', backgroundColor: 'rgba(255,155,0,0.05)' },
   qrMissing: { fontSize: fontSize.sm, lineHeight: 20, color: colors.warning, textAlign: 'center' },
   mixedFields: { backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 16, gap: 12 },

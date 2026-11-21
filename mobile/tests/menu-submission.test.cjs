@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const React = require('react');
+const { nativeThemeModules } = require('./helpers/native-theme.cjs');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function load(file, modules = {}) {
   const source = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), {
@@ -16,7 +17,7 @@ function load(file, modules = {}) {
 }
 const dish = { id: 'tea', name: 'Tea', price: '100', isAvailable: true, variants: [] };
 const first = { id: 'table-a', number: 1 }, second = { id: 'table-b', number: 2 };
-function harness() {
+function harness({ deliveryAllowed = false, roundOrderTotal = false } = {}) {
   const cells = []; let cursor = 0, effects = [], tree;
   const differs = (a, b) => !a || !b || a.length !== b.length || b.some((v, i) => !Object.is(v, a[i]));
   const hooks = { ...React,
@@ -39,12 +40,14 @@ function harness() {
     requests.push({ kind, payload, resolve, reject }); return promise;
   } });
   const mutations = { create: mutation('create'), add: mutation('add'), edit: mutation('edit'), replace: mutation('replace') };
+  const native = { useWindowDimensions: () => ({ width: 390, height: 844 }), FlatList: 'FlatList', ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: x => x } };
+  const safeArea = { SafeAreaView: 'SafeAreaView' };
   const { MenuScreen } = load('src/screens/waiter/MenuScreen.tsx', {
     react: hooks,
     '@/lib/layout': load('src/lib/layout.ts'),
-    'react-native': { useWindowDimensions: () => ({ width: 390, height: 844 }), FlatList: 'FlatList', ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: x => x } },
+    'react-native': native,
     'react-native-gesture-handler': {}, 'react-native-reanimated': {},
-    'react-native-safe-area-context': { SafeAreaView: 'SafeAreaView' },
+    'react-native-safe-area-context': safeArea,
     '@react-navigation/native': { useNavigation: () => ({ navigate: (...args) => navigations.push(args) }) },
     '@/components/typography': { Text: 'Text', TextInput: 'TextInput' },
     '@/components/FastPressable': { FastPressable: 'FastPressable' },
@@ -52,23 +55,31 @@ function harness() {
     '@/components/BottomSheet': { BottomSheet: 'BottomSheet', SheetScrollView: 'SheetScrollView' },
     '@/components/FullscreenSheet': { FullscreenSheet: 'FullscreenSheet' },
     '@/components/motion': {}, '@/components/PwaIcon': { PwaIcon: 'PwaIcon' }, '@/components/NumberTicker': { NumberTicker: 'NumberTicker' },
-    '@/theme': load('src/theme/index.ts'),
+    ...nativeThemeModules(native, safeArea),
     '@/services/api/waiter': {
       useCategories: () => ({ data: [] }), useDishes: () => ({ data: [dish] }), useActiveOrders: () => ({ data: [], isFetched: true }),
       useCreateOrder: () => mutations.create, useAddItems: () => mutations.add, useEditOrder: () => mutations.edit, useReplaceRejectedItem: () => mutations.replace,
     },
+    '@/services/api/settings': { usePublicSettings: () => ({ data: { roundOrderTotal } }) },
+    '@/hooks/usePermissions': { usePermissions: () => ({ canAction: permission => permission === 'createDeliveryOrders' && deliveryAllowed }) },
     '@/store/cart': { ...cartModule, useCart }, '@/store/auth': { useAuth }, '@/store/replacement': { useReplacement },
     '@/store/notifications': { useNotifications: selector => selector({ push: x => notices.push(x) }) },
     '@/utils/set': {}, '@/utils/format': { makeIdempotencyKey: () => 'key', displayOrderNumber: String },
     '@/utils/prepStation': { cartStations: () => ({ hasPrep: true, kitchen: true }) },
     '@/lib/api': { apiError: error => error.message }, '@/services/socket': { useConnectionStatus: () => true },
-    './CartSheet': { CartSheet: 'CartSheet' }, './TablePickerSheet': { TablePickerSheet: 'TablePickerSheet' }, './WeightPickerSheet': { WeightPickerSheet: 'WeightPickerSheet' }, './orderRules': {},
+    './CartSheet': { CartSheet: 'CartSheet' },
+    './DeliveryDetailsSheet': { DeliveryDetailsSheet: 'DeliveryDetailsSheet' },
+    './TablePickerSheet': { TablePickerSheet: 'TablePickerSheet' },
+    './WeightPickerSheet': { WeightPickerSheet: 'WeightPickerSheet' },
+    './orderRules': {},
   });
   const all = node => !node || typeof node !== 'object' ? [] : Array.isArray(node) ? node.flatMap(all) : [node, ...all(node.props?.children)];
   cart.getState().selectTable(first); cart.getState().add(dish);
-  return { cart, auth, replacement, requests, navigations, notices,
+  return { cart, auth, replacement, requests, navigations, notices, cartModule,
     render() { cursor = 0; effects = []; tree = MenuScreen(); effects.forEach(fn => fn()); return tree; },
     submit() { all(tree).find(x => x.type === 'CartSheet').props.onSubmit(); },
+    deliveryForm() { return all(tree).find(x => x.type === 'DeliveryDetailsSheet')?.props; },
+    cartSheet() { return all(tree).find(x => x.type === 'CartSheet')?.props; },
     replace() { const grid = all(tree).find(x => x.type === 'FlatList'); grid.props.renderItem({ item: dish }).props.onAdd(dish); },
     unmount() { cells.forEach(cell => cell.cleanup?.()); },
   };
@@ -85,6 +96,43 @@ test('same-frame submit runs once and late response only clears the submitted ta
   assert.equal(h.cart.getState().tableId, second.id);
   assert.equal(h.cart.getState().pendingTables[first.id], undefined);
   assert.equal(h.navigations.length, 0);
+});
+
+test('manual delivery validates customer details and isolates its checkout from table drafts', async () => {
+  const h = harness({ deliveryAllowed: true, roundOrderTotal: true });
+  const { NEW_DELIVERY_CART, orderCartDestination, cartTotals } = h.cartModule;
+  const tableLines = h.cart.getState().lines;
+  h.cart.getState().selectTable(NEW_DELIVERY_CART); h.cart.getState().add(dish);
+  h.render(); h.submit(); h.render();
+  assert.equal(h.deliveryForm().visible, true);
+  assert.equal(h.cartSheet().delivery, true);
+  assert.equal(h.cartSheet().roundTotal, true);
+  h.deliveryForm().onSubmit({ customerName: '', customerPhone: '998', deliveryAddress: 'Улица 1' });
+  h.render();
+  assert.equal(h.deliveryForm().error, 'Укажите корректный телефон клиента');
+  assert.equal(h.requests.length, 0);
+
+  const details = { customerName: '', customerPhone: '+996 550-111-222', deliveryAddress: 'Улица 1' };
+  h.deliveryForm().onSubmit(details);
+  assert.equal(h.requests[0].payload.delivery, details);
+  assert.equal(h.requests[0].payload.tableId, undefined);
+  h.requests[0].reject(new Error('Таймаут')); await flush(); h.render();
+  assert.equal(h.deliveryForm().error, 'Таймаут');
+  h.deliveryForm().onSubmit(details);
+  assert.equal(h.requests[1].payload.idempotencyKey, h.requests[0].payload.idempotencyKey);
+  h.requests[1].resolve({ id: 'delivery-order' }); await flush();
+  assert.equal(h.cart.getState().tableId, null);
+  h.cart.getState().selectTable(first);
+  assert.equal(h.cart.getState().lines, tableLines);
+  assert.ok(h.notices.some(notice => notice.message === 'Заказ доставки оформлен'));
+
+  const serviceTable = { id: 'service-table', number: 0 };
+  const firstDelivery = orderCartDestination({ id: 'delivery-a', source: 'delivery', table: serviceTable });
+  const secondDelivery = orderCartDestination({ id: 'delivery-b', source: 'delivery', table: serviceTable });
+  assert.notEqual(firstDelivery.id, secondDelivery.id);
+  const rounded = cartTotals([{ dish: { ...dish, price: '10.60' }, quantity: 1 }], true);
+  assert.equal(rounded.total, 10);
+  assert.equal(rounded.rounding, 0.6);
 });
 
 test('submission captures fresh store state and completes after the menu unmounts', async () => {

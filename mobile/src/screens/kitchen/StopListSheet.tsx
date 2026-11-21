@@ -1,5 +1,6 @@
+import { ScrollView, View, SafeAreaView } from '@/components/themed';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Modal as RNModal, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Modal as RNModal, StyleSheet, useWindowDimensions } from 'react-native';
 import { Text, TextInput } from '@/components/typography';
 import Animated, {
   cancelAnimation,
@@ -8,12 +9,12 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import { Loading, Toggle } from '@/components/ui';
 import { FastPressable } from '@/components/FastPressable';
 import { PwaIcon } from '@/components/PwaIcon';
 import { sheetTiming } from '@/components/motion';
-import { colors, fontSize, radius, spacing, softShadow } from '@/theme';
+import { colors, fontSize, radius, spacing, softShadow, useThemedStyle } from '@/theme';
 import { useSaveStopList, useStopList } from '@/services/api/kitchen';
 import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
@@ -105,6 +106,7 @@ export function StopListSheet({
 
   const backdropStyle = useAnimatedStyle(() => ({ opacity: backdrop.value }));
   const panelStyle = useAnimatedStyle(() => ({ transform: [{ translateX: translateX.value }] }));
+  const panelSurface = useThemedStyle(styles.panel);
 
   if (!render) return null;
 
@@ -121,7 +123,7 @@ export function StopListSheet({
         <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, backdropStyle]}>
           <FastPressable style={StyleSheet.absoluteFill} onPress={onClose} handExclude={handPanelRef} />
         </Animated.View>
-        <Animated.View ref={handPanelRef} collapsable={false} style={[styles.panel, { width: panelWidth }, panelStyle]}>
+        <Animated.View ref={handPanelRef} collapsable={false} style={[panelSurface, { width: panelWidth }, panelStyle]}>
           <SafeAreaView style={styles.panelSafe} edges={['top', 'bottom']}>
             <View style={styles.header}>
               <View style={{ flex: 1, minWidth: 0 }}>

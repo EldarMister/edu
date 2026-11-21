@@ -1,13 +1,20 @@
+import { View } from '@/components/themed';
 import { PanelScreenBoundary } from '@/components/bottom-panel/context';
 import React from 'react';
-import { AppState, StatusBar, View } from 'react-native';
-import { NavigationContainer, createNavigationContainerRef, type LinkingOptions } from '@react-navigation/native';
+import { AppState, StatusBar } from 'react-native';
+import { NavigationContainer, createNavigationContainerRef, DarkTheme, DefaultTheme, type LinkingOptions } from '@react-navigation/native';
+import * as SystemUI from 'expo-system-ui';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { StaffShiftGate } from '@/components/StaffShiftGate';
 import { Loading } from '@/components/ui';
 import { Toaster } from '@/components/Toaster';
 import { ReceiptPrintSheet } from '@/components/ReceiptPrintSheet';
-import { colors } from '@/theme';
+import { colors, ThemeScope } from '@/theme';
+import { useTheme } from '@/store/theme';
+import { darkPalette } from '@/theme/palette';
 import { useAuth } from '@/store/auth';
+import { accessForUser, canOpenWorkspace, workspaceRole } from '@/lib/workspaces';
+import { useRefundRealtime } from '@/features/refunds/useRefundRealtime';
 import { useRealtimeSync } from '@/hooks/useRealtimeSync';
 import { usePushNotificationLifecycle, useNotificationNavigation, type NotificationTarget } from '@/services/push';
 import { api } from '@/lib/api';
@@ -39,6 +46,8 @@ function AuthRuntime() {
   const accessToken = useAuth((state) => state.accessToken);
   useSocketLifecycle();
   useRealtimeSync();
+  const workspace = useAuth((state) => state.workspace);
+  useRefundRealtime(workspace === 'production' ? null : workspace);
   React.useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
@@ -57,15 +66,26 @@ function AuthRuntime() {
   }, [accessToken]);
   return null;
 }
-function AuthedArea({ children }: { children: React.ReactNode }) { return <>{children}</>; }
 
 export function RootNavigator() {
   const hydrated = useAuth((s) => s.hydrated);
   const user = useAuth((s) => s.user);
   const token = useAuth((s) => s.accessToken);
+  const workspace = useAuth((s) => s.workspace);
+  const production = user ? accessForUser(user).production : null;
+  const role = user && workspace ? workspaceRole(user, workspace) : undefined;
+  const canOpenProduction = !!user && workspace === 'admin' && canOpenWorkspace(user, 'kitchen');
   const [navigationReady, setNavigationReady] = React.useState(false);
   const [navigationState, setNavigationState] = React.useState<unknown>();
   const [activeRoot, setActiveRoot] = React.useState('');
+  const selectedTheme = useTheme((state) => state.theme);
+  const dark = selectedTheme === 'dark' && !['PublicHome', 'QrMenu', 'Queue'].includes(activeRoot);
+  const navigationTheme = React.useMemo(() => dark ? {
+    ...DarkTheme, colors: { ...DarkTheme.colors, primary: darkPalette.primary, background: darkPalette.background, card: darkPalette.card, text: darkPalette.textPrimary, border: darkPalette.border, notification: darkPalette.danger },
+  } : { ...DefaultTheme, colors: { ...DefaultTheme.colors, primary: colors.primary, background: colors.background, card: colors.card, text: colors.textPrimary, border: colors.border, notification: colors.danger } }, [dark]);
+  React.useEffect(() => {
+    void SystemUI.setBackgroundColorAsync(navigationTheme.colors.background).catch(() => undefined);
+  }, [navigationTheme.colors.background]);
   usePushNotificationLifecycle();
   const onNotification = React.useCallback((target: NotificationTarget) => {
     if (!navigationRef.isReady()) return;
@@ -81,7 +101,7 @@ export function RootNavigator() {
     }
     else navigationRef.navigate('Admin', { section: target.kind === 'admin-receipts' ? 'receipts' : 'orders', orderId: target.orderId });
   }, []);
-  useNotificationNavigation({ ready: hydrated && !!user && !!token && navigationReady, userId: user?.id, role: user?.role, onNavigate: onNotification });
+  useNotificationNavigation({ ready: hydrated && !!user && !!token && navigationReady, userId: user?.id, role, onNavigate: onNotification });
 
   if (!hydrated) {
     return (
@@ -94,56 +114,26 @@ export function RootNavigator() {
   const isAuthed = !!user && !!token;
 
   return (
-    <NavigationContainer ref={navigationRef} linking={linking} onReady={() => { setNavigationReady(true); const state = navigationRef.getRootState(); if (state) { setNavigationState(state); setActiveRoot(state.routes[state.index].name); } }} onStateChange={state => { if (state) { setNavigationState(state); setActiveRoot(state.routes[state.index].name); } }}>
+    <ThemeScope mode={dark ? 'dark' : 'light'}><NavigationContainer theme={navigationTheme} ref={navigationRef} linking={linking} onReady={() => { setNavigationReady(true); const state = navigationRef.getRootState(); if (state) { setNavigationState(state); setActiveRoot(state.routes[state.index].name); } }} onStateChange={state => { if (state) { setNavigationState(state); setActiveRoot(state.routes[state.index].name); } }}>
       <View style={{ flex: 1 }}>
-      <StatusBar animated barStyle={activeRoot === 'Waiter' ? 'light-content' : 'dark-content'} backgroundColor={activeRoot === 'Waiter' ? colors.primary : colors.white} />
+      <StatusBar animated barStyle={dark || activeRoot === 'Waiter' ? 'light-content' : 'dark-content'} backgroundColor={dark ? darkPalette.background : activeRoot === 'Waiter' ? colors.primary : colors.white} />
       {isAuthed ? <AuthRuntime key={user.id} /> : null}
       <PanelScreenBoundary style={{ flex: 1 }}><Stack.Navigator screenOptions={{ headerShown: false, animation: 'none' }}>
-        <Stack.Group navigationKey={isAuthed ? user.id : 'guest'}>
+        <Stack.Group navigationKey={isAuthed ? `${user.id}:${workspace ?? 'none'}` : 'guest'}>
         {!isAuthed ? (
           <Stack.Screen name="Login" component={LoginScreen} />
-        ) : user.role === 'WAITER' ? (
-          <Stack.Screen name="Waiter">
-            {() => (
-              <AuthedArea>
-                <WaiterNavigator />
-              </AuthedArea>
-            )}
-          </Stack.Screen>
-        ) : user.role === 'KITCHEN' ? (
-          <Stack.Screen name="Kitchen">
-            {() => (
-              <AuthedArea>
-                <KitchenNavigator />
-              </AuthedArea>
-            )}
-          </Stack.Screen>
-        ) : user.role === 'BAR' ? (
-          <Stack.Screen name="Bar">
-            {() => (
-              <AuthedArea>
-                <BarNavigator />
-              </AuthedArea>
-            )}
-          </Stack.Screen>
-        ) : user.role === 'ADMIN' || user.role === 'OWNER' ? (
-          <Stack.Screen name="Admin">
-            {() => (
-              <AuthedArea>
-                <AdminNavigator />
-              </AuthedArea>
-            )}
-          </Stack.Screen>
+        ) : workspace === 'terminal' ? (
+          <Stack.Screen name="Waiter" component={WaiterNavigator} />
+        ) : workspace === 'production' && production === 'kitchen' ? (
+          <Stack.Screen name="Kitchen" component={KitchenNavigator} />
+        ) : workspace === 'production' && production === 'bar' ? (
+          <Stack.Screen name="Bar" component={BarNavigator} />
+        ) : workspace === 'admin' ? (
+          <Stack.Screen name="Admin">{() => <StaffShiftGate><AdminNavigator /></StaffShiftGate>}</Stack.Screen>
         ) : (
-          <Stack.Screen name="Staff">
-            {() => (
-              <AuthedArea>
-                <StaffScreen />
-              </AuthedArea>
-            )}
-          </Stack.Screen>
+          <Stack.Screen name="Staff" component={StaffScreen} />
         )}
-        {isAuthed && (user.role === 'ADMIN' || user.role === 'OWNER') ? <>
+        {canOpenProduction ? <>
           <Stack.Screen name="Kitchen" component={KitchenNavigator} />
           <Stack.Screen name="Bar" component={BarNavigator} />
         </> : null}
@@ -155,6 +145,6 @@ export function RootNavigator() {
       </Stack.Navigator></PanelScreenBoundary>
       {isAuthed && (!activeRoot || ['Waiter', 'Kitchen', 'Bar', 'Admin', 'Staff'].includes(activeRoot)) ? <><PttOverlay navigationState={navigationState} /><ReceiptPrintSheet /><Toaster /></> : null}
       </View>
-    </NavigationContainer>
+    </NavigationContainer></ThemeScope>
   );
 }

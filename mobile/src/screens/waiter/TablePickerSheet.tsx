@@ -1,5 +1,6 @@
+import { ScrollView, View } from '@/components/themed';
 import React from 'react';
-import { ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, useWindowDimensions } from 'react-native';
 import { Text } from '@/components/typography';
 import { BottomSheet, SheetScrollView } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';

@@ -1,6 +1,7 @@
+import { View } from '@/components/themed';
 import { BottomSheet } from '@/components/BottomSheet';
 import React from 'react';
-import { Platform, View } from 'react-native';
+import { Platform } from 'react-native';
 import { Text } from '@/components/typography';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { DateField } from '@/components/DateField';

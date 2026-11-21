@@ -1,9 +1,10 @@
+import { ScrollView, View } from '@/components/themed';
 import React from 'react';
-import { Keyboard, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, useWindowDimensions, View, type ViewStyle } from 'react-native';
+import { Keyboard, KeyboardAvoidingView, Modal, Platform, StyleSheet, useWindowDimensions, type ViewStyle } from 'react-native';
 import { GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, { cancelAnimation, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, fontSize, spacing } from '@/theme';
+import { colors, fontSize, spacing, useThemedStyle } from '@/theme';
 import { Text } from './typography';
 import { FastPressable } from './FastPressable';
 import { PwaIcon } from './PwaIcon';
@@ -24,9 +25,9 @@ export type BottomPanelProps = {
   controller?: PanelController;
   closeActions?: readonly (() => void)[];
   children: React.ReactNode; title?: string; headerContent?: React.ReactNode; footer?: React.ReactNode;
-  expanded?: boolean; persistent?: boolean; containerHeight?: number;
+  expanded?: boolean; fullScreen?: boolean; dismissible?: boolean; persistent?: boolean; containerHeight?: number;
   handlePlacement?: 'outside' | 'inside'; hideHeader?: boolean; hideHandle?: boolean; draggable?: boolean; bodyDraggable?: boolean;
-  inline?: boolean; contentKey?: string; presentation?: 'bottom' | 'center';
+  inline?: boolean; contentKey?: string; presentation?: 'bottom' | 'center' | 'dialog';
   ownerKey?: string;
   bodyStyle?: ViewStyle; panelStyle?: ViewStyle; footerStyle?: ViewStyle;
   maxHeight?: ViewStyle['maxHeight']; bottomInset?: number; paddingBottomInset?: number;
@@ -69,10 +70,12 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
   const snapshot = React.useRef(current);
   if (visible) snapshot.current = current;
   const content = visible ? current : snapshot.current;
-  const full = expanded ?? fillBody;
+  const full = content.fullScreen || (expanded ?? fillBody);
+  const dismissible = content.dismissible !== false;
+  const centered = content.presentation === 'center' || content.presentation === 'dialog';
   const local = inline || persistent;
   const { rendered, active, interactive, measure, motion } = useBottomPanel({ id, parent: parent?.id, visible,
-    persistent, inline: local, draggable: draggable && content.presentation !== 'center', onClose, onDismiss, ownerKey: current.ownerKey });
+    persistent, inline: local, draggable: draggable && !centered && !content.fullScreen && dismissible, dismissible, onClose, onDismiss, ownerKey: current.ownerKey });
   const headerPan = useBottomPanelPan(motion);
   const handlePan = useBottomPanelPan(motion);
   const close = React.useCallback(() => motion.close(), [motion.close]);
@@ -99,7 +102,7 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
 
   const overlap = Platform.OS === 'android' && keyboardY !== null ? remainingKeyboardOverlap(container.y, container.height, keyboardY) : 0;
   const actualHeight = containerHeight ?? (inline && portalHeight > 0 ? portalHeight : container.height);
-  const topGap = Math.max(24, insets.top + 24 - container.y);
+  const topGap = content.fullScreen ? Math.max(0, insets.top - container.y) : Math.max(24, insets.top + 24 - container.y);
   const outsideHandle = !content.hideHandle && handlePlacement === 'outside';
   const available = Math.max(1, actualHeight - topGap - (content.bottomInset ?? 0) - overlap);
   const requestedHeight = typeof content.maxHeight === 'number' ? content.maxHeight
@@ -107,7 +110,6 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
   // The map's persistent compact card alone has a 52% cap.
   const maximum = Math.min(available, persistent ? actualHeight * 0.52 : requestedHeight);
   const bottomPadding = Math.max(content.paddingBottomInset ?? insets.bottom, 10);
-  const centered = content.presentation === 'center';
   const animation = useAnimatedStyle(() => ({
     opacity: motion.measured.value ? 1 : 0,
     transform: [{ translateY: motion.offset.value }],
@@ -127,6 +129,7 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
     }
   }, [content.contentKey, content.title, motion.reduceMotion, step]);
   const stepStyle = useAnimatedStyle(() => ({ transform: [{ translateY: step.value }] }));
+  const bodyStyle = useThemedStyle(content.bodyStyle);
   if (!rendered) return null;
 
   const handle = content.hideHandle ? null : (
@@ -140,7 +143,7 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
   );
   const header = content.headerContent ?? (content.title ? <View style={styles.header}>
     <Text style={styles.title} translate>{content.title}</Text>
-    <FastPressable onPress={close} accessibilityLabel="Закрыть" hitSlop={12} style={styles.close}>
+    <FastPressable onPress={close} disabled={!dismissible} accessibilityLabel="Закрыть" hitSlop={12} style={styles.close}>
       <PwaIcon name="close" size={22} color={colors.textLight} />
     </FastPressable>
   </View> : null);
@@ -162,16 +165,16 @@ function BottomPanelSession({ visible, onClose, onDismiss, inline = false, persi
           <Animated.View ref={handPanelRef} collapsable={false} accessibilityViewIsModal={!persistent && active}
             accessibilityElementsHidden={!active} importantForAccessibility={active ? 'yes' : 'no-hide-descendants'}
             pointerEvents={active ? 'auto' : 'none'} onLayout={event => measure(event.nativeEvent.layout.height)}
-            style={[styles.panel, { maxHeight: maximum, width: panelWidth ?? (dimensions.width >= 600 ? Math.min(dimensions.width - 48, 720) : '100%'), maxWidth, alignSelf: alignSelf ?? 'center' },
-              full && { height: maximum }, centered && { maxWidth: 300 }, animation]}>
+            style={[styles.panel, { maxHeight: maximum, width: panelWidth ?? (content.fullScreen ? '100%' : dimensions.width >= 600 ? Math.min(dimensions.width - 48, 720) : '100%'), maxWidth, alignSelf: alignSelf ?? 'center' },
+              full && { height: maximum }, content.presentation === 'center' && { maxWidth: 300 }, animation]}>
             {outsideHandle ? handle : null}
             <View style={[styles.surface, surfaceStyle, { flexShrink: 1, minHeight: 0 }, full && styles.fill,
-              { borderTopLeftRadius: 26, borderTopRightRadius: 26 }]}>
+              { borderTopLeftRadius: content.fullScreen ? 0 : 26, borderTopRightRadius: content.fullScreen ? 0 : 26 }]}>
               {handlePlacement === 'inside' ? handle : null}
               {!content.hideHeader ? <GestureDetector gesture={headerPan}><View collapsable={false}>
                 {header}
               </View></GestureDetector> : null}
-              <Animated.View style={[styles.body, full && styles.fill, content.bodyStyle, stepStyle]}>{body}</Animated.View>
+              <Animated.View style={[styles.body, full && styles.fill, bodyStyle, stepStyle]}>{body}</Animated.View>
               {content.footer ? <View style={[styles.footer, content.footerStyle]}>{content.footer}</View> : null}
               <View style={{ height: bottomPadding, flexShrink: 0 }} />
             </View>

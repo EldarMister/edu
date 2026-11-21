@@ -1,7 +1,8 @@
+import { ScrollView, View, SafeAreaView } from '@/components/themed';
 import React, { useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { Text } from '@/components/typography';
-import { SafeAreaView } from 'react-native-safe-area-context';
+
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 import { FastPressable } from '@/components/FastPressable';

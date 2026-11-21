@@ -1,5 +1,8 @@
+import { StaffShiftCard } from '@/components/StaffShiftGate';
+import { WorkspaceSwitcher } from '@/components/WorkspaceSwitcher';
+import { View } from '@/components/themed';
 import React, { useRef, useState } from 'react';
-import { PanResponder, StyleSheet, View, type LayoutChangeEvent } from 'react-native';
+import { PanResponder, StyleSheet, type LayoutChangeEvent } from 'react-native';
 import { Text } from '@/components/typography';
 import { BottomSheet } from '@/components/BottomSheet';
 import { FastPressable } from '@/components/FastPressable';
@@ -19,6 +22,8 @@ import {
 } from '@/services/kitchenVoiceSettings';
 import { defaultWaiterVoice, useWaiterVoiceSettings } from '@/services/waiterVoiceSettings';
 import { waiterVoice } from '@/services/waiterVoice';
+import { ThemeSwitch } from '@/components/ThemeSwitch';
+import { useAuth } from '@/store/auth';
 
 /** Настройки озвучки кухни — как PWA KitchenVoiceSettings (попап → нижний лист). */
 export function KitchenVoiceSettingsSheet({
@@ -76,6 +81,7 @@ function VoiceSettingsSheet({ visible, onClose, settings, patchSettings, getPrev
   waiter?: boolean;
 }) {
   const [testing, setTesting] = useState(false);
+  const kitchenThemeControl = useAuth((state) => state.user?.role === 'KITCHEN');
   const [waiterScenarioIndex, setWaiterScenarioIndex] = useState(0);
   const [testMessage, setTestMessage] = useState('');
 
@@ -170,6 +176,8 @@ function VoiceSettingsSheet({ visible, onClose, settings, patchSettings, getPrev
 
 
       {!waiter && <KitchenHandControlSetting />}
+      {!waiter && <View style={styles.section}><StaffShiftCard /><WorkspaceSwitcher /></View>}
+      {!waiter && kitchenThemeControl && <View style={styles.section}><ThemeSwitch /></View>}
     </BottomSheet>
   );
 }

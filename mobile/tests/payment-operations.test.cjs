@@ -5,6 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 const React = require('react');
+const { nativeThemeModules } = require('./helpers/native-theme.cjs');
 
 function loadSource(file, modules, timers = { setTimeout, clearTimeout }) {
   const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), {
@@ -26,7 +27,7 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 const order = id => ({ id, orderNumber: id, finalAmount: '100', waiter: { id: 'staff' }, items: [{ status: 'served' }] });
 
 // Preserve real hook state while controlling native boundaries and API completion order.
-function paymentHarness() {
+function paymentHarness({ width = 390, paymentMethods = ['cash'] } = {}) {
   const cells = [], timers = [];
   let cursor = 0, effects = [], changed = false;
   const differs = (before, after) => !before || !after || before.length !== after.length || after.some((value, index) => !Object.is(value, before[index]));
@@ -62,15 +63,23 @@ function paymentHarness() {
   const payments = new Map(), receipts = new Map(), printing = deferred();
   const paymentCalls = [], printCalls = [], begins = [], sounds = [], notices = [];
   const props = { order: order('a'), visible: true, onClose: () => { props.visible = false; }, onPaid() {} };
+  const native = { ActivityIndicator: 'ActivityIndicator', Image: 'Image', ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: value => value } };
   const { PaymentSheet } = loadSource('src/screens/waiter/PaymentSheet.tsx', {
     react: hooks,
-    'react-native': { ActivityIndicator: 'ActivityIndicator', Image: 'Image', ScrollView: 'ScrollView', View: 'View', StyleSheet: { create: value => value } },
+    '@/features/finance/CashShifts': {},
+    '@/features/cash-shifts/CashShiftControls': { useCashShift: () => ({}) },
+    './WidePayment': { WidePayment: 'WidePayment' },
+    './useReceiptPrinter': { useReceiptPrinter: () => async () => {} },
+    '@/lib/receipt': { receiptHeader: () => ({}), receiptPrintSettings: () => ({ receiptLanguage: 'ru' }) },
+    '@/lib/i18n': { translate: String },
+    '@/hooks/usePermissions': { usePermissions: () => ({ canAction: (key) => key !== 'printReceipts' }) },
+    'react-native': { ...native, useWindowDimensions: () => ({ width }) },
     'react-native-reanimated': {},
     '@/components/typography': { Text: 'Text', TextInput: 'TextInput' },
     '@/components/FastPressable': { FastPressable: 'FastPressable' },
     '@/components/ui': { Button: 'Button' }, '@/components/BottomSheet': { BottomSheet: 'BottomSheet', SheetScrollView: 'SheetScrollView' },
     '@/components/motion': {}, '@/components/PwaIcon': { PwaIcon: 'PwaIcon' },
-    '@/theme': loadSource('src/theme/index.ts', {}),
+    ...nativeThemeModules(native),
     '@/services/api/waiter': {
       usePay: () => ({ isPending: false, mutateAsync: payload => {
         paymentCalls.push(payload);
@@ -79,7 +88,7 @@ function paymentHarness() {
       fetchReceipt: id => { const request = deferred(); receipts.set(id, request); return request.promise; },
       useCreateReceiptPrintRequest: () => ({ isPending: false, mutateAsync: payload => { printCalls.push(payload); return printing.promise; } }),
     },
-    '@/services/api/settings': { usePublicSettings: () => ({ data: { paymentMethods: ['cash'] } }), resolveQrSrc: () => null },
+    '@/services/api/settings': { usePublicSettings: () => ({ data: { paymentMethods } }), resolveQrSrc: () => null },
     '@/lib/api': { apiError: error => error.message }, '@/lib/sound': { beep: async sound => sounds.push(sound) },
     '@/store/notifications': { useNotifications: selector => selector({ push: value => notices.push(value) }) },
     '@/store/receiptPrint': { useReceiptPrint: selector => selector({ begin: (...value) => begins.push(value) }) },
@@ -110,6 +119,22 @@ function paymentHarness() {
     finishAnimation() { timers.splice(0).forEach(callback => callback()); },
   };
 }
+
+test('tablet checkout uses the full screen and submits cash plus card directly', async () => {
+  const env = paymentHarness({ width: 1024, paymentMethods: ['cash', 'card'] });
+  env.render();
+  assert.equal(env.find('BottomSheet').props.fullScreen, true);
+  assert.equal(env.find('WidePayment').props.qrConfigured, false);
+  env.find('WidePayment').props.onConfirm({ cash: 30, card: 70, qr: 0 }, 'card');
+  assert.deepEqual(JSON.parse(JSON.stringify(env.paymentCalls[0])), {
+    orderId: 'a', method: 'mixed', cashAmount: 30, cardAmount: 70, qrAmount: 0,
+  });
+  env.payments.get('a').resolve(order('a'));
+  await settle();
+  env.receipts.get('a').resolve({ orderNumber: 'receipt-a' });
+  env.finishAnimation();
+  await settle();
+});
 
 test('normal payment preserves success animation, receipt and print owner', async () => {
   const env = paymentHarness(); env.render(); env.pay();
@@ -222,12 +247,13 @@ test('printed realtime updates and the visible receipt sheet play exactly one ac
   useRealtimeSync(); listeners.get(events.RECEIPT_PRINT_REQUEST_PRINTED)(request);
   const refs = [];
   let refCursor = 0;
+  const native = { StyleSheet: { create: value => value }, View: 'View' };
   const { ReceiptPrintSheet } = loadSource('src/components/ReceiptPrintSheet.tsx', {
     react: { ...React, useRef: initial => refs[refCursor++] ?? (refs[refCursor - 1] = { current: initial }), useEffect: effect => effect() },
-    'react-native': { StyleSheet: { create: value => value }, View: 'View' },
+    'react-native': native,
     '@/components/typography': { Text: 'Text' }, '@/components/BottomSheet': { BottomSheet: 'BottomSheet', SheetScrollView: 'SheetScrollView' },
     '@/components/FastPressable': { FastPressable: 'FastPressable' }, '@/components/ui': { Button: 'Button' },
-    '@/components/PwaIcon': { PwaIcon: 'PwaIcon' }, '@/theme': loadSource('src/theme/index.ts', {}),
+    '@/components/PwaIcon': { PwaIcon: 'PwaIcon' }, ...nativeThemeModules(native),
     '@/store/receiptPrint': { useReceiptPrint: () => state }, '@/utils/format': {},
     '@/lib/sound': { beep: value => sounds.push(value) },
     '@/services/waiterVoiceSettings': { waiterNotificationSoundEnabled: () => true },
