@@ -33,6 +33,11 @@ export function OrderStatusBadges({
   const chips = orderStationStatuses(order);
   const stations = usePreparationStations(chips.some((chip) => chip.station !== 'kitchen' && chip.station !== 'bar'));
   const sizeCls = size === 'sm' ? 'rounded-md px-2 py-0.5 text-[11px]' : 'rounded-lg px-2.5 py-1 text-xs';
+  if (order.paymentStatus === 'refunded' || Number(order.refundedAmount ?? 0) > 0) {
+    return <span className={`inline-flex whitespace-nowrap font-medium bg-warning/10 text-warning ${sizeCls}`}>
+      {t(order.paymentStatus === 'refunded' ? 'Возвращён' : 'Частичный возврат')}
+    </span>;
+  }
   if (chips.length === 0) return <OrderBadge status={order.status} source={order.source} size={size} />;
   return (
     <div className={className}>

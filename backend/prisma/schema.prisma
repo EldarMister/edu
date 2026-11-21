@@ -87,6 +87,12 @@ enum PaymentStatus {
   cancelled
 }
 
+enum OrderRefundStatus {
+  pending
+  approved
+  rejected
+}
+
 enum PaymentSource {
   normal
   split
@@ -506,7 +512,8 @@ model Table {
   incidents  Incident[]
   qrSessions QrTableSession[]
 
-  @@unique([hallId, number])
+  // Table numbers are unique among active tables in the same hall (partial database index).
+  @@index([hallId, number])
   @@map("tables")
 }
 
@@ -695,6 +702,7 @@ model Order {
   roundOrderTotal        Boolean        @default(false) @map("round_order_total")
   roundingAmount         Decimal        @default(0) @map("rounding_amount") @db.Decimal(10, 2)
   finalAmount            Decimal        @default(0) @map("final_amount") @db.Decimal(10, 2)
+  refundedAmount         Decimal        @default(0) @map("refunded_amount") @db.Decimal(10, 2)
   paymentStatus          PaymentStatus  @default(pending) @map("payment_status")
   paymentMethod          PaymentMethod? @map("payment_method")
   comment                String?
@@ -723,6 +731,7 @@ model Order {
   incidents            Incident[]
   actions              OrderAction[]
   receiptPrintRequests ReceiptPrintRequest[]
+  refunds              OrderRefund[]
   // Заполняется, если заказ создан из QR-сессии стола.
   qrSession            QrTableSession?
 
@@ -765,6 +774,7 @@ model OrderTax {
   soldAt       DateTime    @map("sold_at")
   reversedAt   DateTime?   @map("reversed_at")
   fiscalizedAt DateTime?   @map("fiscalized_at")
+  itemAmounts  Json?       @map("item_amounts")
   order        Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@unique([orderId, soldAt, taxId])
@@ -870,6 +880,7 @@ model OrderItem {
   dishVoiceSnapshot       String?            @map("dish_voice_snapshot")
   priceSnapshot           Decimal            @map("price_snapshot") @db.Decimal(10, 2)
   quantity                Int                @default(1)
+  refundedQuantity        Int                @default(0) @map("refunded_quantity")
   discountAmount          Decimal            @default(0) @map("discount_amount") @db.Decimal(10, 2)
   finalPrice              Decimal            @map("final_price") @db.Decimal(10, 2)
   status                  OrderItemStatus    @default(new)
@@ -945,6 +956,7 @@ model Payment {
   id        String        @id @default(uuid())
   orderId   String        @map("order_id")
   amount    Decimal       @db.Decimal(10, 2)
+  refundedAmount Decimal  @default(0) @map("refunded_amount") @db.Decimal(10, 2)
   method    PaymentMethod
   source    PaymentSource @default(normal)
   status    PaymentStatus @default(paid)
@@ -955,6 +967,36 @@ model Payment {
   cashier User  @relation(fields: [cashierId], references: [id])
 
   @@map("payments")
+}
+
+model OrderRefund {
+  id                    String            @id @default(uuid())
+  cafeId                String?           @map("cafe_id")
+  orderId               String            @map("order_id")
+  itemId                String?           @map("item_id")
+  quantity              Int?
+  reason                String
+  status                OrderRefundStatus @default(pending)
+  amount                Decimal           @db.Decimal(10, 2)
+  items                 Json
+  paymentParts          Json              @map("payment_parts")
+  taxReversals          Json              @map("tax_reversals")
+  quoteVersion          String            @map("quote_version")
+  requestedById         String            @map("requested_by_id")
+  requestedByName       String            @map("requested_by_name")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  decidedById           String?           @map("decided_by_id")
+  decidedByName         String?           @map("decided_by_name")
+  decidedAt             DateTime?         @map("decided_at")
+  fiscalRefundReference String?           @map("fiscal_refund_reference")
+  restockedGoods        Boolean           @default(false) @map("restocked_goods")
+  order                 Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, fiscalRefundReference], map: "order_refunds_fiscal_reference_key")
+  @@index([orderId, createdAt])
+  @@index([cafeId, status, createdAt])
+  @@index([cafeId, status, decidedAt])
+  @@map("order_refunds")
 }
 
 model KitchenEvent {

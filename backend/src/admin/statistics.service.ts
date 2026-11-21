@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { OrderStatus, PaymentMethod, PaymentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { StatsQueryDto } from './dto';
 import { SettingsService } from '../settings/settings.service';
 import { warehouseDay } from '../warehouse/report-range';
@@ -84,11 +85,12 @@ export class StatisticsService {
         },
         select: {
           finalAmount: true,
+          refundedAmount: true,
           paymentMethod: true,
           closedAt: true,
           waiterId: true,
           waiter: { select: { name: true } },
-          payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true } },
+          payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true, refundedAmount: true } },
         },
       }),
       this.prisma.order.findMany({
@@ -96,18 +98,19 @@ export class StatisticsService {
           ...paidWhere,
           closedAt: { gte: previousRange.from, lt: previousRange.to },
         },
-        select: { finalAmount: true },
+        select: { finalAmount: true, refundedAmount: true },
       }),
       this.prisma.order.aggregate({
         where: { ...paidWhere, closedAt: { gte: startOfDay(), lt: endExclusive(new Date()) } },
-        _sum: { finalAmount: true },
+        _sum: { finalAmount: true, refundedAmount: true },
         _count: true,
       }),
       this.settings.enabledMethods(),
     ]);
 
-    const revenuePeriod = currentOrders.reduce((s, o) => s + Number(o.finalAmount), 0);
-    const previousRevenue = previousOrders.reduce((s, o) => s + Number(o.finalAmount), 0);
+    const netOrders = currentOrders.map((order) => ({ ...order, finalAmount: netOrderAmount(order) }));
+    const revenuePeriod = netOrders.reduce((s, o) => s + Number(o.finalAmount), 0);
+    const previousRevenue = previousOrders.reduce((s, o) => s + Number(netOrderAmount(o)), 0);
     const ordersPeriod = currentOrders.length;
     const avgCheck = ordersPeriod > 0 ? revenuePeriod / ordersPeriod : 0;
     const previousAvg =
@@ -116,7 +119,8 @@ export class StatisticsService {
     // Считаем по строкам оплат, чтобы смешанная оплата корректно разложилась на наличные/QR.
     const methodTotals: Record<PaymentMethod, number> = { qr: 0, cash: 0, card: 0, mixed: 0 };
     for (const o of currentOrders) {
-      for (const p of o.payments) methodTotals[p.method] += Number(p.amount);
+      const payments = o.payments.length ? o.payments : o.paymentMethod ? [{ method: o.paymentMethod, amount: o.finalAmount, refundedAmount: o.refundedAmount }] : [];
+      for (const p of payments) methodTotals[p.method] += Number(netPaymentAmount(p));
     }
     const visibleMethods = enabledMethods.filter(
       (method): method is Extract<PaymentMethod, 'qr' | 'cash' | 'card'> =>
@@ -134,7 +138,7 @@ export class StatisticsService {
       // QR-заказы без официанта группируем под «QR-меню».
       const key = o.waiterId ?? 'qr';
       const cur = waiterMap.get(key) ?? { name: o.waiter?.name ?? 'QR-меню', amount: 0, orders: 0, avgCheck: 0 };
-      cur.amount += Number(o.finalAmount);
+      cur.amount += Number(netOrderAmount(o));
       cur.orders += 1;
       waiterMap.set(key, cur);
     }
@@ -156,6 +160,7 @@ export class StatisticsService {
         dishVariantNameSnapshot: true,
         finalPrice: true,
         quantity: true,
+        refundedQuantity: true,
         order: { select: { closedAt: true } },
         dish: { select: { category: { select: { name: true } } } },
       },
@@ -163,6 +168,7 @@ export class StatisticsService {
     const dishMap = new Map<string, { name: string; amount: number; count: number }>();
     // Приготовленные блюда: количество по дням — для «в среднем» и «максимум за день».
     const preparedPerDay = new Map<string, number>();
+    const preparedByDish = new Map<string, number>();
     let preparedTotal = 0;
     // Проданные напитки: позиции из категории «Напитки» (по названию категории блюда).
     const drinksMap = new Map<string, number>();
@@ -171,25 +177,26 @@ export class StatisticsService {
         ? `${it.dishNameSnapshot} · ${it.dishVariantNameSnapshot}`
         : it.dishNameSnapshot;
       const cur = dishMap.get(name) ?? { name, amount: 0, count: 0 };
-      cur.amount += Number(it.finalPrice);
-      cur.count += it.quantity;
+      cur.amount += Number(netItemAmount(it, it.finalPrice));
+      cur.count += netItemQuantity(it);
       dishMap.set(name, cur);
 
       preparedTotal += it.quantity;
+      preparedByDish.set(name, (preparedByDish.get(name) ?? 0) + it.quantity);
       if (it.order?.closedAt) {
         const day = warehouseDay(it.order.closedAt);
         preparedPerDay.set(day, (preparedPerDay.get(day) ?? 0) + it.quantity);
       }
 
       if ((it.dish?.category?.name ?? '').toLowerCase().includes('напит')) {
-        drinksMap.set(name, (drinksMap.get(name) ?? 0) + it.quantity);
+        drinksMap.set(name, (drinksMap.get(name) ?? 0) + netItemQuantity(it));
       }
     }
     const topDishes = [...dishMap.values()].sort((a, b) => b.amount - a.amount).slice(0, 5);
 
     // Сводка по приготовленным блюдам и список блюд за период (по количеству).
-    const preparedDishes = [...dishMap.values()]
-      .map((d) => ({ name: d.name, count: d.count }))
+    const preparedDishes = [...preparedByDish]
+      .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
     const activeDays = preparedPerDay.size;
     const prepared = {
@@ -209,7 +216,7 @@ export class StatisticsService {
 
     return {
       cards: {
-        revenueToday: Number(todayAgg._sum.finalAmount ?? 0),
+        revenueToday: Number(todayAgg._sum.finalAmount ?? 0) - Number(todayAgg._sum.refundedAmount ?? 0),
         ordersToday: todayAgg._count,
         avgCheck,
         revenuePeriod,
@@ -220,7 +227,7 @@ export class StatisticsService {
         orders: percentChange(ordersPeriod, previousOrders.length),
         avgCheck: percentChange(avgCheck, previousAvg),
       },
-      revenueSeries: this.revenueSeries(currentOrders, range.from ?? startOfDay(), range.to, period),
+      revenueSeries: this.revenueSeries(netOrders, range.from ?? startOfDay(), range.to, period),
       peakHours: this.peakHours(currentOrders),
       paymentMethods,
       topDishes,

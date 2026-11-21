@@ -39,12 +39,13 @@ test('at payment a dish inherits the category rate, overrides it or can be exemp
     ] },
     orderTax: { createMany: async ({ data }) => { snapshot = data; } },
   };
-  const item = (dishId, finalPrice, status = 'served') => ({ dishId, finalPrice: decimal(finalPrice), status });
+  const item = (dishId, finalPrice, status = 'served') => ({ id: 'line-' + dishId, dishId, finalPrice: decimal(finalPrice), status });
   const soldAt = new Date('2026-11-21T12:00:00+06:00');
   await recordOrderTaxes(tx, 'order', 'cafe',
     [item('inherit', '112'), item('override', '50'), item('exempt', '70'), item('foreign', '20'), item('inherit', '20', 'cancelled')],
     soldAt);
   assert.deepEqual(snapshot.map((row) => [row.taxId, String(row.amount), row.soldAt]), [['vat', '12', soldAt], ['turnover', '2', soldAt]]);
+  assert.deepEqual(snapshot.map((row) => row.itemAmounts), [{ 'line-inherit': '112' }, { 'line-override': '50' }]);
   await recordOrderTaxes({ settings: { findFirst: async () => ({ taxesEnabled: false }) } }, 'order', 'cafe', [item('inherit', '112')], soldAt);
 });
 
@@ -72,7 +73,7 @@ test('a reversal belongs to its own business day and uses the original rate and 
   const service = new TaxesService({ orderTax: { findMany: async ({ where }) => {
     assert.equal(where.cafeId, 'cafe');
     return [entry];
-  } } }, {});
+  } }, orderRefund: { findMany: async () => [] } }, {});
   await runWithTenant({ cafeId: 'cafe' }, async () => {
     const sale = await service.report({ from: '2026-11-20', to: '2026-11-20' });
     const reversal = await service.report({ from: '2026-11-21', to: '2026-11-21' });

@@ -134,7 +134,7 @@ export class AdminOrdersService {
       this.prisma.order.count({ where: { ...base, status: { in: ACTIVE_STATUSES } } }),
       this.prisma.order.aggregate({
         where: { ...base, status: OrderStatus.paid },
-        _sum: { finalAmount: true },
+        _sum: { finalAmount: true, refundedAmount: true },
       }),
     ]);
     return {
@@ -142,7 +142,7 @@ export class AdminOrdersService {
       paid,
       unpaid,
       cancelled,
-      revenue: Number(revenueAgg._sum.finalAmount ?? 0),
+      revenue: Number(revenueAgg._sum.finalAmount ?? 0) - Number(revenueAgg._sum.refundedAmount ?? 0),
     };
   }
 

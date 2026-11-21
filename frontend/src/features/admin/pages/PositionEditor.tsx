@@ -95,7 +95,11 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
     [key, position?.salary?.[key] ? String(position.salary[key]) : ''])) as Record<keyof PositionSalary, string>);
   const { save } = useStaffPositionMutations();
   const production = role === 'KITCHEN' || role === 'BAR';
-  const hasAccess = permissions.terminalAccess || production || (permissions.adminAccess && SECTION_KEYS.some((key) => permissions.sections[key]));
+  const canChangeAdmin = !position?.fixedWorkspace;
+  const canChangeTerminal = position?.fixedWorkspace !== 'production';
+  const adminEnabled = canChangeAdmin && permissions.adminAccess === true;
+  const terminalEnabled = canChangeTerminal && permissions.terminalAccess === true;
+  const hasAccess = terminalEnabled || production || (adminEnabled && SECTION_KEYS.some((key) => permissions.sections[key]));
   const parsed = payFields.map(({ key, percent }) => {
     const value = rates[key].trim() ? parseMoney(rates[key]) : 0;
     return [key, value !== null && value >= 0 && (!percent || value <= 100) ? value : null] as const;
@@ -107,8 +111,8 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
   const { markSaved } = useEditorDirty(dirty);
   const valid = !!name.trim() && !!hasAccess && validSalary;
   const tabs = editorTabs.filter(({ key }) => key === 'general'
-    || (key === 'admin' && !position?.fixedWorkspace)
-    || (key === 'terminal' && position?.fixedWorkspace !== 'production'));
+    || (key === 'admin' && adminEnabled)
+    || (key === 'terminal' && terminalEnabled));
 
   function level(section: SectionKey): SectionLevel | 'custom' {
     if (!permissions.sections[section]) return 'none';
@@ -190,6 +194,13 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
       {tabPanel('general', <fieldset disabled={save.isPending} className="min-w-0 space-y-6">
         <DocumentField label="Название должности"><input maxLength={80} required className="input w-full" value={name}
           onChange={(event) => setName(event.target.value)} placeholder="Например, управляющий" /></DocumentField>
+        {(canChangeAdmin || canChangeTerminal) && <div>
+          <h4 className="text-base font-semibold">Рабочие места</h4>
+          {canChangeAdmin && <Check label="Вход в админ-панель" checked={adminEnabled}
+            onChange={(checked) => setPermissions((current) => ({ ...current, adminAccess: checked }))} />}
+          {canChangeTerminal && <Check label="Открывать кассу и оформлять заказы гостей" checked={terminalEnabled}
+            onChange={(checked) => setPermissions((current) => ({ ...current, terminalAccess: checked }))} />}
+        </div>}
         <div>
           <h4 className="mb-2 text-base font-semibold">Экран приготовления</h4>
           <div className="max-w-lg space-y-2">
@@ -217,31 +228,23 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
           <p className="text-xs text-text-muted">Ставки складываются. Изменения относятся ко всему текущему месяцу и будущим месяцам; прошлые месяцы сохраняются.</p>
         </div>
       </fieldset>)}
-      {!position?.fixedWorkspace && tabPanel('admin', <fieldset disabled={save.isPending} className="min-w-0">
-        <AccessRow name={`${formId}-admin`} label="Вход в админ-панель" options={actionLevels}
-          selected={permissions.adminAccess ? 'allowed' : 'denied'}
-          onChange={(value) => setPermissions((current) => ({ ...current, adminAccess: value === 'allowed' }))} />
-        {permissions.adminAccess && <>
-          {SECTION_KEYS.map((section) => {
-            const currentLevel = level(section);
-            return <AccessRow<SectionLevel> key={section} name={`${formId}-section-${section}`} label={SECTION_LABELS[section]}
-              options={READ_ONLY_SECTION_KEYS.includes(section) ? sectionLevels : sectionLevels.filter(({ value }) => value !== 'full')}
-              selected={currentLevel} note={currentLevel === 'custom' ? 'Индивидуальные ограничения' : undefined}
-              onChange={(value) => setLevel(section, value)} />;
-          })}
-          <details className="mt-4 border-t border-border pt-2"><summary className="cursor-pointer py-2 font-medium text-primary">Отдельные действия и ограничения</summary>
-            <div className="grid gap-x-6 sm:grid-cols-2">{ACTION_KEYS.filter((key) => key !== 'editPermissions' && !terminalActions.includes(key)
-              && !SECTION_KEYS.some((section) => (SECTION_ACTIONS[section] ?? []).includes(key) && (!permissions.sections[section]
-                || (permissions.readOnlySections?.includes(section) && (SECTION_WRITE_ACTIONS[section] ?? []).includes(key))))).map(actionControl)}</div>
-            <p className="mt-2 text-xs text-text-muted">Управление должностями и передача прав доступны владельцу.</p>
-          </details>
-        </>}
+      {adminEnabled && tabPanel('admin', <fieldset disabled={save.isPending} className="min-w-0">
+        {SECTION_KEYS.map((section) => {
+          const currentLevel = level(section);
+          return <AccessRow<SectionLevel> key={section} name={`${formId}-section-${section}`} label={SECTION_LABELS[section]}
+            options={READ_ONLY_SECTION_KEYS.includes(section) ? sectionLevels : sectionLevels.filter(({ value }) => value !== 'full')}
+            selected={currentLevel} note={currentLevel === 'custom' ? 'Индивидуальные ограничения' : undefined}
+            onChange={(value) => setLevel(section, value)} />;
+        })}
+        <details className="mt-4 border-t border-border pt-2"><summary className="cursor-pointer py-2 font-medium text-primary">Отдельные действия и ограничения</summary>
+          <div className="grid gap-x-6 sm:grid-cols-2">{ACTION_KEYS.filter((key) => key !== 'editPermissions' && !terminalActions.includes(key)
+            && !SECTION_KEYS.some((section) => (SECTION_ACTIONS[section] ?? []).includes(key) && (!permissions.sections[section]
+              || (permissions.readOnlySections?.includes(section) && (SECTION_WRITE_ACTIONS[section] ?? []).includes(key))))).map(actionControl)}</div>
+          <p className="mt-2 text-xs text-text-muted">Управление должностями и передача прав доступны владельцу.</p>
+        </details>
       </fieldset>)}
-      {position?.fixedWorkspace !== 'production' && tabPanel('terminal', <fieldset disabled={save.isPending} className="min-w-0">
-        <AccessRow name={`${formId}-terminal`} label="Открывать кассу и оформлять заказы гостей" options={actionLevels}
-          selected={permissions.terminalAccess ? 'allowed' : 'denied'}
-          onChange={(value) => setPermissions((current) => ({ ...current, terminalAccess: value === 'allowed' }))} />
-        {permissions.terminalAccess && terminalActions.map((key) => <AccessRow key={key} name={`${formId}-action-${key}`}
+      {terminalEnabled && tabPanel('terminal', <fieldset disabled={save.isPending} className="min-w-0">
+        {terminalActions.map((key) => <AccessRow key={key} name={`${formId}-action-${key}`}
           label={ACTION_LABELS[key]} options={actionLevels} selected={permissions.actions[key] ? 'allowed' : 'denied'}
           onChange={(value) => setPermissions((current) => ({ ...current, actions: { ...current.actions, [key]: value === 'allowed' } }))} />)}
       </fieldset>)}

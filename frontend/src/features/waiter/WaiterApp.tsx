@@ -62,7 +62,8 @@ import { cartStations } from '@/lib/prep-station';
 import { OrderPanel } from './OrderPanel';
 import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
-import { WaiterCabinet } from './WaiterCabinet';
+import { WaiterCabinet, WaiterOrderArchive } from './WaiterCabinet';
+import { useRefundUpdates } from '@/features/refunds/api';
 import { CashShiftBanner } from '@/features/settings/CashShiftControls';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
@@ -105,6 +106,7 @@ function isWideTerminal() {
 export function WaiterApp() {
   const wideLayout = useSyncExternalStore(subscribeToTerminalSize, isWideTerminal);
   useWaiterRealtime();
+  useRefundUpdates('terminal');
   const settings = usePublicSettings();
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
@@ -162,6 +164,7 @@ export function WaiterApp() {
   const [pendingCancel, setPendingCancel] = useState<PendingCancel | null>(null);
   const [now, setNow] = useState(() => Date.now());
   const [cabinetOpen, setCabinetOpen] = useState(false);
+  const [orderArchiveOpen, setOrderArchiveOpen] = useState(false);
   const [shiftSummary, setShiftSummary] = useState<WaiterShift | null>(null);
   const [tableModal, setTableModal] = useState<'close' | 'move' | 'transfer' | null>(null);
   const [tablePickerOpen, setTablePickerOpen] = useState(false);
@@ -971,6 +974,15 @@ export function WaiterApp() {
     </button>
   );
 
+  const ordersActions = (
+    <div className="flex flex-wrap items-center gap-2">
+      <button type="button" aria-label={t('Архив заказов')} className="btn-secondary btn-md" onClick={() => setOrderArchiveOpen(true)}>
+        {t('Архив')}
+      </button>
+      {newDeliveryButton}
+    </div>
+  );
+
   const profilePanel = (
     <WaiterProfile
       shift={activeShift}
@@ -997,7 +1009,7 @@ export function WaiterApp() {
 
   // Личный кабинет официанта — отдельный экран поверх вкладки «Профиль».
   const cabinetNode = (
-    <WaiterCabinet onBack={() => setCabinetOpen(false)} />
+    <WaiterCabinet onBack={() => setCabinetOpen(false)} onOpenHistory={() => setOrderArchiveOpen(true)} />
   );
 
   const desktopView: DesktopTab = activeNavTab === 'orders' || activeNavTab === 'profile' ? activeNavTab : 'tables';
@@ -1044,7 +1056,7 @@ export function WaiterApp() {
               <>
                 <div className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-2">
                   <h2 className="text-lg font-semibold text-text-primary">{t('Активные заказы')}</h2>
-                  {newDeliveryButton}
+                  {ordersActions}
                 </div>
                 <div className="no-scrollbar min-h-0 flex-1 overflow-y-auto">
                   <OrdersList
@@ -1075,7 +1087,7 @@ export function WaiterApp() {
           viewingOrder ? (
             rightPanel
           ) : (
-            <Panel title={t('Активные заказы')} action={newDeliveryButton}>
+            <Panel title={t('Активные заказы')} action={ordersActions}>
               <div className="no-scrollbar overflow-y-auto">
                 <OrdersList
                   orders={orders}
@@ -1172,6 +1184,8 @@ export function WaiterApp() {
       )}
 
       <BottomNav tab={activeNavTab} setTab={changeTab} ordersCount={ordersAttentionCount} />
+
+      {orderArchiveOpen && <WaiterOrderArchive onClose={() => setOrderArchiveOpen(false)} />}
 
       {canPrintReceipts && canWork && printQueueOpen && (
         <Modal open title={t('Печать чека')} onClose={() => setPrintQueueOpen(false)} panelClassName="max-w-5xl max-h-[90dvh]">

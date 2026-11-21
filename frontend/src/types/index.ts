@@ -211,6 +211,7 @@ export type OrderItemStatus =
   | 'cancelled';
 
 export type PaymentMethod = 'qr' | 'cash' | 'card' | 'mixed';
+export type PaymentStatus = 'pending' | 'paid' | 'refunded' | 'cancelled';
 export type PaymentSource = 'normal' | 'split';
 export type RejectionDecision = 'pending' | 'removed' | 'replaced';
 
@@ -244,6 +245,7 @@ export interface OrderItem {
   weightGrams?: number | null;
   priceSnapshot: string;
   quantity: number;
+  refundedQuantity?: number;
   discountAmount: string;
   finalPrice: string;
   status: OrderItemStatus;
@@ -269,6 +271,8 @@ export interface Order {
   roundOrderTotal?: boolean;
   roundingAmount?: string;
   finalAmount: string;
+  refundedAmount?: string;
+  paymentStatus?: PaymentStatus;
   paymentMethod: PaymentMethod | null;
   comment: string | null;
   requiresWaiterDecision: boolean;

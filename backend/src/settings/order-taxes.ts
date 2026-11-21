@@ -4,7 +4,7 @@ import { getCafeId } from '../tenant/tenant-context';
 
 const rateSelect = { id: true, cafeId: true, name: true, type: true, rate: true } as const;
 type Rate = Prisma.MenuTaxGetPayload<{ select: typeof rateSelect }>;
-type SaleItem = { dishId: string | null; status: OrderItemStatus; finalPrice: Prisma.Decimal };
+type SaleItem = { id: string; dishId: string | null; status: OrderItemStatus; finalPrice: Prisma.Decimal };
 type TaxableLine = { rate: Rate; salesAmount: Prisma.Decimal };
 
 export const receiptTaxes = {
@@ -64,10 +64,17 @@ export async function recordOrderTaxes(
   const rates = new Map(dishes.map((dish) => [dish.id, dish.taxExempt ? null : (dish.tax ?? dish.category.tax)]));
   const lines = active.flatMap((item) => {
     const rate = rates.get(item.dishId!);
-    return rate && rate.cafeId === cafeId ? [{ rate, salesAmount: item.finalPrice }] : [];
+    return rate && rate.cafeId === cafeId ? [{ itemId: item.id, rate, salesAmount: item.finalPrice }] : [];
   });
+  const itemAmountsByTax = new Map<string, Record<string, string>>();
+  for (const { itemId, rate, salesAmount } of lines) {
+    if (salesAmount.lte(0)) continue;
+    const itemAmounts = itemAmountsByTax.get(rate.id) ?? {};
+    itemAmounts[itemId] = salesAmount.toString();
+    itemAmountsByTax.set(rate.id, itemAmounts);
+  }
   const snapshot = calculateSaleTaxes(lines, saleFactor);
   if (snapshot.length) {
-    await tx.orderTax.createMany({ data: snapshot.map((line) => ({ ...line, orderId, cafeId, soldAt })) });
+    await tx.orderTax.createMany({ data: snapshot.map((line) => ({ ...line, orderId, cafeId, soldAt, itemAmounts: itemAmountsByTax.get(line.taxId) })) });
   }
 }

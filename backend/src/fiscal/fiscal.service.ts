@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { OrderStatus, PaymentMethod, Settings } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus, Settings } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SettingsService } from '../settings/settings.service';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -91,6 +91,9 @@ export class FiscalService {
         fiscalSign: order.fiscalSign ?? undefined,
         qrCode: order.fiscalQrCode ?? undefined,
       };
+    }
+    if (order.paymentStatus === PaymentStatus.refunded || order.refundedAmount.gt(0)) {
+      throw new BadRequestException('Заказ уже был возвращён. Используйте исходный чек.');
     }
     const provider = this.resolveProvider(settings);
     if (!provider) return { success: false, error: unsupportedProvider };

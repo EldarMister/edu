@@ -11,6 +11,7 @@ const ACTION_LABELS: Record<string, string> = {
   ORDER_CANCELLED: 'Отмена заказа',
   ORDER_UPDATED: 'Изменение заказа',
   ORDER_PAID: 'Оплата',
+  ORDER_REFUND: 'Возврат оплаты',
   ORDER_PAYMENT_METHOD_CHANGED: 'Смена способа оплаты',
   ORDER_ITEM_ADDED: 'Добавление блюда',
   ORDER_ITEM_REMOVED: 'Удаление блюда',

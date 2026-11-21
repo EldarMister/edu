@@ -10,7 +10,9 @@ import { OrdersFilters, type OrderSort } from '../components/OrdersFilters';
 import { OrdersTable } from '../components/OrdersTable';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
-import { useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff, useUpdateOrderStatus } from '../api';
+import { useCanManageOrderRefunds } from '@/features/refunds/api';
+import { RefundQueueButton } from '@/features/refunds/OrderRefunds';
+import { useAdminOrderDetails, useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff, useUpdateOrderStatus } from '../api';
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { useListPeriod } from './warehouse/ListPeriodFilter';
 import './orders-redesign.css';
@@ -42,6 +44,8 @@ export function OrdersPage() {
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
+  const detail = useAdminOrderDetails(detailsOrder?.id ?? null);
+  const canManageRefunds = useCanManageOrderRefunds();
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
   const [manualStatus, setManualStatus] = useState<OrderStatus>('served');
   const [manualReason, setManualReason] = useState('');
@@ -131,7 +135,7 @@ export function OrdersPage() {
 
   return (
     <div className="orders-redesign">
-      <WorkspaceHeaderActions>{period.filter}</WorkspaceHeaderActions>
+      <WorkspaceHeaderActions>{canManageRefunds && <RefundQueueButton />}{period.filter}</WorkspaceHeaderActions>
       {/* Inline-сводка под заголовком */}
       <div className="orders-summary workspace-enter" aria-busy={summaryQ.isPending}>
         <Sum label={tr('Всего заказов')} value={s?.total ?? summaryPlaceholder} />
@@ -194,7 +198,8 @@ export function OrdersPage() {
         onConfirm={confirmStatusChange}
       />
       <OrderDetailsModal
-        order={detailsOrder}
+        order={detail.data ?? detailsOrder}
+        refundMode={canManageRefunds ? 'manage' : undefined}
         onClose={() => setDetailsOrder(null)}
         onOrderChange={setDetailsOrder}
         allowItemCancellation

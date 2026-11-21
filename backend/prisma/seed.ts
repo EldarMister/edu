@@ -55,19 +55,17 @@ async function main() {
 
   // Столы как на макете: сетка номеров
   const mainTables = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 19, 20, 21];
-  for (const number of mainTables) {
-    await prisma.table.upsert({
-      where: { hallId_number: { hallId: hall.id, number } },
-      update: {},
-      create: { cafeId: cafe.id, hallId: hall.id, number, seats: number % 3 === 0 ? 4 : 2, sortOrder: number },
-    });
-  }
-  for (const number of [1, 2, 3, 4]) {
-    await prisma.table.upsert({
-      where: { hallId_number: { hallId: terrace.id, number } },
-      update: {},
-      create: { cafeId: cafe.id, hallId: terrace.id, number, seats: 4, sortOrder: number },
-    });
+  for (const { hallId, numbers } of [{ hallId: hall.id, numbers: mainTables }, { hallId: terrace.id, numbers: [1, 2, 3, 4] }]) {
+    const existing = await prisma.table.findMany({ where: { hallId }, select: { number: true } });
+    const usedNumbers = new Set(existing.map(({ number }) => number));
+    const data = numbers.filter((number) => !usedNumbers.has(number)).map((number) => ({
+      cafeId: cafe.id,
+      hallId,
+      number,
+      seats: hallId === terrace.id || number % 3 === 0 ? 4 : 2,
+      sortOrder: number,
+    }));
+    if (data.length) await prisma.table.createMany({ data, skipDuplicates: true });
   }
   console.log(`✓ 2 зала, ${mainTables.length + 4} столов`);
 

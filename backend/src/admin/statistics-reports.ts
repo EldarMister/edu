@@ -1,17 +1,18 @@
 import { Prisma } from '@prisma/client';
+import { netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { preparedLossQuantity } from '../warehouse/movement-cost';
 import { warehouseDay } from '../warehouse/report-range';
 
 export const statisticsOrderSelect = {
   id: true, createdAt: true, closedAt: true, waiterId: true, finalAmount: true,
-  paymentMethod: true, discountAmount: true,
+  paymentMethod: true, discountAmount: true, refundedAmount: true,
   waiter: { select: { name: true } },
-  payments: { select: { method: true, amount: true, status: true } },
+  payments: { select: { method: true, amount: true, status: true, refundedAmount: true } },
   items: {
     where: { status: { notIn: ['cancelled', 'rejected'] } },
     select: {
       id: true, dishId: true, dishVariantId: true, dishNameSnapshot: true, dishVariantNameSnapshot: true,
-      quantity: true, priceSnapshot: true, discountAmount: true, finalPrice: true,
+      quantity: true, refundedQuantity: true, priceSnapshot: true, discountAmount: true, finalPrice: true,
       stockSourceLineId: true, stockAccountingSnapshot: true,
       dish: { select: { category: { select: { id: true, name: true } } } },
     },
@@ -99,10 +100,11 @@ function costsForOrder(items: Item[], costs: Map<string, number | null>, showCos
 function addPayments(report: Payments, order: Order) {
   const confirmed = order.payments.filter(({ status }) => status === 'paid');
   // Older closed checks can have only a method and a check total.
-  const payments = order.payments.length ? confirmed : [{ method: order.paymentMethod, amount: order.finalAmount }];
-  for (const { method, amount } of payments) {
+  const payments = order.payments.length ? confirmed : [{ method: order.paymentMethod, amount: order.finalAmount, refundedAmount: order.refundedAmount }];
+  for (const payment of payments) {
+    const { method } = payment;
     const column = method === 'cash' || method === 'card' || method === 'qr' ? method : 'other';
-    report[column] += Number(amount);
+    report[column] += Number(netPaymentAmount(payment));
   }
 }
 
@@ -119,7 +121,7 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
     const date = warehouseDay(order.closedAt);
     const sale = sales.get(date) ?? { date, orders: 0, revenue: 0, discount: 0 };
     sale.orders++;
-    sale.revenue += Number(order.finalAmount);
+    sale.revenue += Number(netOrderAmount(order));
     sale.discount += Number(order.discountAmount);
     sales.set(date, sale);
     const payment = payments.get(date) ?? { date, orders: 0, cash: 0, card: 0, qr: 0, other: 0 };
@@ -131,7 +133,7 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
     const waiter = order.waiter?.name ?? 'QR-меню';
     const employee = staff.get(waiterId) ?? { id: waiterId, name: waiter, orders: 0, revenue: 0, seconds: 0, cost: 0 };
     employee.orders++;
-    employee.revenue += Number(order.finalAmount);
+    employee.revenue += Number(netOrderAmount(order));
     employee.seconds += Math.max(0, (order.closedAt.getTime() - order.createdAt.getTime()) / 1000);
     if (!order.items.length || !showCosts) employee.cost = null;
     staff.set(waiterId, employee);
@@ -144,15 +146,16 @@ export function buildStatisticsReports(orders: Order[], movements: Movement[], s
       const name = item.dishVariantNameSnapshot ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}` : item.dishNameSnapshot;
       const id = JSON.stringify([item.dishId, item.dishVariantId, name, categoryId, waiterId]);
       const product = products.get(id) ?? { id, name, categoryId, category, waiterId, waiter, quantity: 0, gross: 0, discount: 0, revenue: 0, cost: 0 };
-      const revenue = Number(item.finalPrice);
+      const revenue = Number(netItemAmount(item, item.finalPrice));
+      const quantity = netItemQuantity(item);
       const cost = itemCosts.get(item.id) ?? null;
-      product.quantity += item.quantity;
-      product.gross += Number(item.priceSnapshot) * item.quantity;
-      product.discount += Number(item.discountAmount);
+      product.quantity += quantity;
+      product.gross += Number(item.priceSnapshot) * quantity;
+      product.discount += Number(netItemAmount(item, item.discountAmount));
       product.revenue += revenue;
       product.cost = plusCost(product.cost, cost);
       products.set(id, product);
-      categoryRow.quantity += item.quantity;
+      categoryRow.quantity += quantity;
       categoryRow.revenue += revenue;
       categoryRow.cost = plusCost(categoryRow.cost, cost);
       categories.set(categoryId, categoryRow);

@@ -14,7 +14,7 @@ import { Modal } from '@/components/Modal';
 import { useState } from 'react';
 import { useWaiterCabinet, useWaiterOrderHistory, useOrderDetails, type CabinetRecentOrder } from './api';
 
-export function WaiterCabinet({ onBack }: { onBack: () => void }) {
+export function WaiterCabinet({ onBack, onOpenHistory }: { onBack: () => void; onOpenHistory: () => void }) {
   const logout = useAuth((s) => s.logout);
   const userId = useAuth((s) => s.user?.id);
   const { locale, setLocale } = useLocale();
@@ -22,10 +22,6 @@ export function WaiterCabinet({ onBack }: { onBack: () => void }) {
   const [period, setPeriod] = useState<'day' | 'week' | 'month'>('week');
   const cabinetQ = useWaiterCabinet(period);
   const [detailId, setDetailId] = useState<string | null>(null);
-  const detailQ = useOrderDetails(detailId);
-  const [historyOpen, setHistoryOpen] = useState(false);
-  const history = useWaiterOrderHistory(historyOpen);
-  const orders = history.data?.pages.flatMap((page) => page.items) ?? [];
 
   function onLogout() {
     disconnectSocket();
@@ -103,7 +99,7 @@ export function WaiterCabinet({ onBack }: { onBack: () => void }) {
       <div className="card p-5">
         <div className="mb-2 flex items-center justify-between gap-3">
           <h3 className="text-[15px] font-semibold text-text-primary">{t('Последние заказы')}</h3>
-          <button onClick={() => setHistoryOpen(true)} className="text-sm font-medium text-primary hover:underline">
+          <button onClick={onOpenHistory} className="text-sm font-medium text-primary hover:underline">
             {t('Смотреть все')}
           </button>
         </div>
@@ -139,7 +135,18 @@ export function WaiterCabinet({ onBack }: { onBack: () => void }) {
         {t('Выйти')}
       </button>
 
-      <Modal open={historyOpen} suspended={!!detailId} onClose={() => setHistoryOpen(false)} title={t('История заказов')}>
+      {detailId && <WaiterOrderDetails id={detailId} onClose={() => setDetailId(null)} />}
+    </div>
+  );
+}
+
+export function WaiterOrderArchive({ onClose }: { onClose: () => void }) {
+  const t = useT();
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const history = useWaiterOrderHistory(true);
+  const orders = history.data?.pages.flatMap((page) => page.items) ?? [];
+  return <>
+      <Modal open suspended={!!detailId} onClose={onClose} title={t('История заказов')}>
         {history.isLoading && <Spinner className="mx-auto h-5 w-5" />}
         {history.isError && <p className="py-2 text-sm text-danger">{t('Не удалось загрузить заказы')}</p>}
         {!history.isLoading && !history.isError && !orders.length && <p>{t('Заказов пока нет')}</p>}
@@ -158,12 +165,17 @@ export function WaiterCabinet({ onBack }: { onBack: () => void }) {
           onClick={() => void (orders.length ? history.fetchNextPage({ cancelRefetch: false }) : history.refetch())}
         >{t(history.isError ? 'Повторить' : 'Показать ещё')}</button>}
       </Modal>
-      <OrderDetailsModal order={detailQ.data ?? null} onClose={() => setDetailId(null)} waiterLayout />
-      <Modal open={!!detailId && !detailQ.data} onClose={() => setDetailId(null)} title={t('Заказ')}>
-        {detailQ.isError ? <p>{t('Не удалось загрузить заказ')}</p> : <Spinner className="mx-auto h-5 w-5" />}
-      </Modal>
-    </div>
-  );
+      {detailId && <WaiterOrderDetails id={detailId} onClose={() => setDetailId(null)} />}
+  </>;
+}
+
+function WaiterOrderDetails({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT();
+  const detail = useOrderDetails(id);
+  if (detail.data) return <OrderDetailsModal order={detail.data} onClose={onClose} waiterLayout refundMode="request" />;
+  return <Modal open onClose={onClose} title={t('Заказ')}>
+    {detail.isError ? <p>{t('Не удалось загрузить заказ')}</p> : <Spinner className="mx-auto h-5 w-5" />}
+  </Modal>;
 }
 
 function LangButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -213,13 +225,15 @@ function OrderRow({
   onOpen: () => void;
 }) {
   const t = useT();
-  const s = statusMeta(order.status);
+  const s = order.paymentStatus === 'refunded' || Number(order.refundedAmount ?? 0) > 0
+    ? { label: order.paymentStatus === 'refunded' ? 'Возвращён' : 'Частичный возврат', cls: 'bg-warning/10 text-warning' }
+    : statusMeta(order.status);
   return (
     <button
       onClick={onOpen}
-      className="-mx-1 flex w-[calc(100%+0.5rem)] items-center gap-2 rounded-lg px-1 py-2.5 text-left text-sm transition-colors hover:bg-background"
+      className="-mx-1 flex w-[calc(100%+0.5rem)] flex-wrap items-center gap-2 rounded-lg px-1 py-2.5 text-left text-sm transition-colors hover:bg-background"
     >
-      <span className="w-14 shrink-0 font-medium text-text-primary">{displayOrderNumber(order.orderNumber)}</span>
+      <span className="w-11 shrink-0 font-medium text-text-primary sm:w-14">{displayOrderNumber(order.orderNumber)}</span>
       <span className="shrink-0 text-text-muted">{order.source === 'delivery' ? t('Доставка') : `${tableLabel} ${order.tableNumber}`}</span>
       <span className="shrink-0 text-text-light">{timeHM(order.createdAt)}</span>
       <span className="ml-auto shrink-0 font-medium text-text-primary">{money(order.finalAmount)}</span>

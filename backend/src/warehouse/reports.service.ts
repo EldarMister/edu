@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { Prisma, StockMovementType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { getCafeId } from '../tenant/tenant-context';
@@ -69,8 +70,8 @@ export class WarehouseReportsService {
     const orders = await db.order.findMany({ where: { cafeId,
       OR: [{ status: 'paid' }, { paymentStatus: 'refunded' }],
       ...(period ? { closedAt: period } : {}), ...(query.employeeId ? { waiterId: query.employeeId } : {}),
-    }, select: { id: true, paymentStatus: true, finalAmount: true, serviceChargeAmount: true,
-      payments: { select: { amount: true, status: true } },
+    }, select: { id: true, paymentStatus: true, finalAmount: true, refundedAmount: true, serviceChargeAmount: true,
+      payments: { select: { amount: true, status: true, refundedAmount: true } },
       items: { where: { status: { notIn: ['cancelled', 'rejected'] } }, select: { id: true, stockSourceLineId: true, stockAccountingSnapshot: true } },
     } });
     const movements = orders.length ? await db.stockMovement.findMany({ where: {
@@ -78,8 +79,8 @@ export class WarehouseReportsService {
     } }) : [];
     let revenue = zero;
     for (const order of orders) {
-      const paid = order.payments.length ? order.payments.filter((payment) => payment.status === 'paid').reduce((sum, payment) => sum.add(payment.amount), zero)
-        : order.paymentStatus === 'refunded' ? zero : order.finalAmount;
+      const paid = order.payments.length ? order.payments.filter((payment) => payment.status === 'paid').reduce((sum, payment) => sum.add(netPaymentAmount(payment)), zero)
+        : order.paymentStatus === 'refunded' ? zero : netOrderAmount(order);
       const merchandise = Prisma.Decimal.max(order.finalAmount.sub(order.serviceChargeAmount), 0);
       const retained = order.finalAmount.gt(0) ? Prisma.Decimal.min(paid.div(order.finalAmount), 1) : zero;
       revenue = revenue.add(merchandise.mul(retained));

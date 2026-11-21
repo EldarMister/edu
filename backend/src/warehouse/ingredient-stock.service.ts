@@ -154,7 +154,22 @@ export class IngredientStockService {
     return [...warnings, ...postedWarnings];
   }
 
-  async restoreDishSale(tx: Prisma.TransactionClient, orderId: string, lines: OrderLine[], reason?: string) {
+  async restockPaidGoods(
+    tx: Prisma.TransactionClient, orderId: string, refundId: string,
+    lines: { item: { id: string; stockSourceLineId: string | null }; quantity: number }[], reason: string,
+  ) {
+    // Keep each refund movement distinct while pointing it to the original sale line.
+    const items = lines.map(({ item, quantity }) => ({
+      id: refundId + ':' + item.id, sourceLineId: item.stockSourceLineId ?? item.id, quantity,
+    }));
+    await this.restoreDishSale(tx, orderId, items, reason, true);
+    return !!await tx.stockMovement.findFirst({
+      where: { sourceType: 'order', sourceId: orderId, type: 'return', orderItemId: { startsWith: refundId + ':' } },
+      select: { id: true },
+    });
+  }
+
+  async restoreDishSale(tx: Prisma.TransactionClient, orderId: string, lines: OrderLine[], reason?: string, paidGoodsOnly = false) {
     await this.lockOrderStock(tx, orderId);
     const sourceIds = [...new Set(lines.flatMap((line) => [line.sourceLineId, line.stockSourceLineId, line.id].filter((id): id is string => !!id)))];
     if (!sourceIds.length) return [];
@@ -213,8 +228,9 @@ export class IngredientStockService {
         // Returning money must not replenish consumed ingredients.
         const snapshot = sale.recipeSnapshot as { kind?: string; parts?: { kind?: string }[] } | null;
         const direct = snapshot?.kind === 'direct' || (snapshot?.parts?.length && snapshot.parts.every((part) => part.kind === 'direct'));
+        if (paidGoodsOnly && !direct) continue;
         const unstarted = status === 'new' || status === 'accepted';
-        const restorable = unstarted || (direct && (line.prepStation ?? original?.prepStation) === 'none' && status === 'ready');
+        const restorable = paidGoodsOnly || unstarted || (direct && (line.prepStation ?? original?.prepStation) === 'none' && status === 'ready');
         const key = [sourceId, sale.ingredientId, sale.saleCycle, sale.warehouseKey].join(':');
         if (sale.saleCycle !== latestCycle || recorded.has([line.id, sale.ingredientId, sale.saleCycle, sale.warehouseKey].join(':'))) continue;
         const quantity = sale.saleQuantity ?? line.sourceLineQuantity ?? original?.quantity ?? line.quantity;
@@ -235,7 +251,7 @@ export class IngredientStockService {
           continue;
         }
         plan.push({ ingredient: sale.ingredient, warehouse: sale.warehouse, lineId: line.id, quantity: line.quantity, cycle: sale.saleCycle,
-          sourceLineId: sourceId, change, cost: sale.costAtMoment, costKnown: sale.costKnown, comment: 'Возврат до начала приготовления',
+          sourceLineId: sourceId, change, cost: sale.costAtMoment, costKnown: sale.costKnown, comment: paidGoodsOnly ? 'Возврат оплаченного товара: ' + reason : 'Возврат до начала приготовления',
           snapshot: sale.recipeSnapshot as Prisma.InputJsonValue ?? undefined });
       }
     }

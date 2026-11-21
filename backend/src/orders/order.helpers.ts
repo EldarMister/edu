@@ -26,6 +26,7 @@ export const orderInclude = {
       dishVoiceSnapshot: true,
       priceSnapshot: true,
       quantity: true,
+      refundedQuantity: true,
       discountAmount: true,
       finalPrice: true,
       status: true,

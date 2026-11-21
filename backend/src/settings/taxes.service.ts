@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { PrismaService } from '../prisma/prisma.service';
+import type { RefundTaxReversal } from '../orders/order-refund-plan';
 import { getCafeId } from '../tenant/tenant-context';
 import { warehouseDateRange } from '../warehouse/report-range';
 import { SaveTaxDto, TaxListQuery, type TaxReportKind, TaxReportQuery } from './taxes.dto';
@@ -84,16 +85,23 @@ export class TaxesService {
 
   async report(query: TaxReportQuery) {
     const range = warehouseDateRange(query.from, query.to);
-    const where: Prisma.OrderTaxWhereInput = { cafeId: getCafeId() ?? null };
+    const cafeId = getCafeId() ?? null;
+    const where: Prisma.OrderTaxWhereInput = { cafeId };
     if (range) where.OR = [{ soldAt: range }, { reversedAt: range }];
-    const entries = await this.prisma.orderTax.findMany({
-      where, select: { taxId: true, name: true, rate: true, type: true, salesAmount: true, amount: true,
-        fiscalizedAt: true, soldAt: true, reversedAt: true },
-    });
+    const [entries, refunds] = await Promise.all([
+      this.prisma.orderTax.findMany({
+        where, select: { taxId: true, name: true, rate: true, type: true, salesAmount: true, amount: true,
+          fiscalizedAt: true, soldAt: true, reversedAt: true },
+      }),
+      !query.kind || query.kind === 'reversal' ? this.prisma.orderRefund.findMany({
+        where: { cafeId, status: 'approved', decidedAt: range },
+        select: { taxReversals: true },
+      }) : [],
+    ]);
     const inRange = (date: Date | null) => date != null
       && (!range?.gte || date >= range.gte) && (!range?.lte || date <= range.lte);
     const grouped = new Map<string, ReportRow>();
-    function add(entry: typeof entries[number], kind: TaxReportKind, sign: 1 | -1) {
+    function add(entry: Omit<ReportRow, 'kind' | 'rate'> & { rate: Prisma.Decimal }, kind: TaxReportKind, sign: 1 | -1) {
       if (query.kind && query.kind !== kind) return;
       const rate = entry.rate.toNumber();
       const key = JSON.stringify([entry.taxId, entry.name, rate, entry.type, kind]);
@@ -109,6 +117,12 @@ export class TaxesService {
     for (const entry of entries) {
       if (inRange(entry.soldAt)) add(entry, entry.fiscalizedAt ? 'fiscal' : 'nonFiscal', 1);
       if (inRange(entry.reversedAt)) add(entry, 'reversal', -1);
+    }
+    for (const refund of refunds) {
+      for (const entry of refund.taxReversals as RefundTaxReversal[]) {
+        add({ ...entry, rate: new Prisma.Decimal(entry.rate), salesAmount: new Prisma.Decimal(entry.salesAmount),
+          amount: new Prisma.Decimal(entry.amount) }, 'reversal', -1);
+      }
     }
     const sort = query.sort ?? 'name';
     return Array.from(grouped.values()).sort((a, b) => {

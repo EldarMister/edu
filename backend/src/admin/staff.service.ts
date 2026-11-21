@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { OrderItemStatus, OrderStatus, PaymentMethod, PaymentStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
+import { netItemAmount, netItemQuantity, netOrderAmount, netPaymentAmount } from '../orders/order-net';
 import { AuditService, type AuditActor } from '../audit/audit.service';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { lockStationRouting, staffStation } from '../kitchen/preparation-stations';
@@ -401,7 +402,7 @@ export class StaffService {
         status: { in: [OrderStatus.paid, OrderStatus.cancelled] },
         closedAt: { gte: from, lt: to },
       },
-      select: { waiterId: true, status: true, finalAmount: true },
+      select: { waiterId: true, status: true, finalAmount: true, refundedAmount: true },
     });
 
     const report = waiters.map(w => ({
@@ -418,7 +419,7 @@ export class StaffService {
       const w = o.waiterId ? waiterMap.get(o.waiterId) : undefined;
       if (!w) continue;
       if (o.status === OrderStatus.paid) {
-        w.revenue += Number(o.finalAmount);
+        w.revenue += Number(netOrderAmount(o));
         w.closedOrders += 1;
       } else if (o.status === OrderStatus.cancelled) {
         w.cancelledOrders += 1;
@@ -448,13 +449,15 @@ export class StaffService {
       select: {
         waiterId: true,
         finalAmount: true,
-        payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true } },
+        refundedAmount: true,
+        payments: { where: { status: PaymentStatus.paid }, select: { method: true, amount: true, refundedAmount: true } },
         items: {
           where: { status: { notIn: [OrderItemStatus.rejected, OrderItemStatus.cancelled] } },
           select: {
             dishNameSnapshot: true,
             dishVariantNameSnapshot: true,
             quantity: true,
+            refundedQuantity: true,
             finalPrice: true,
             dish: { select: { categoryId: true, category: { select: { name: true, sortOrder: true } } } },
             // Состав сета — чтобы показать его под строкой сета в разбивке.
@@ -571,11 +574,14 @@ export class StaffService {
     for (const o of paidOrders) {
       if (!o.waiterId) continue; // QR-заказ без официанта в отчёт сотрудника не идёт
       const a = ensure(o.waiterId);
-      a.turnover += Number(o.finalAmount);
+      a.turnover += Number(netOrderAmount(o));
       for (const p of o.payments) {
-        if (p.method === PaymentMethod.cash) a.cashDue += Number(p.amount);
+        if (p.method === PaymentMethod.cash) a.cashDue += Number(netPaymentAmount(p));
       }
       for (const it of o.items) {
+        const quantity = netItemQuantity(it);
+        if (quantity <= 0) continue;
+        const amount = Number(netItemAmount(it, it.finalPrice));
         const catId = it.dish?.categoryId ?? 'other';
         const catName = it.dish?.category?.name ?? 'Прочее';
         const sortOrder = it.dish?.category?.sortOrder ?? 9999;
@@ -587,15 +593,15 @@ export class StaffService {
         const lineName = it.dishVariantNameSnapshot
           ? `${it.dishNameSnapshot} · ${it.dishVariantNameSnapshot}`
           : it.dishNameSnapshot;
-        cat.qty += it.quantity;
-        cat.amount += Number(it.finalPrice);
+        cat.qty += quantity;
+        cat.amount += amount;
         let line = cat.items.get(lineName);
         if (!line) {
           line = { name: lineName, qty: 0, amount: 0, components: new Map() };
           cat.items.set(lineName, line);
         }
-        line.qty += it.quantity;
-        line.amount += Number(it.finalPrice);
+        line.qty += quantity;
+        line.amount += amount;
         // Сет: показываем СОСТАВ под строкой сета (информативно, на счёт категорий
         // не влияет — владельцам так понятнее, чем подмешивать блюда в категории).
         for (const sc of it.setComponents ?? []) {
@@ -606,7 +612,7 @@ export class StaffService {
             sc.action === 'replaced' && sc.finalNameSnapshot
               ? [sc.finalNameSnapshot, sc.finalVariantNameSnapshot].filter(Boolean).join(' ')
               : sc.originalNameSnapshot;
-          line.components.set(compName, (line.components.get(compName) ?? 0) + sc.quantity * it.quantity);
+          line.components.set(compName, (line.components.get(compName) ?? 0) + sc.quantity * quantity);
         }
       }
     }
@@ -768,7 +774,7 @@ export class StaffService {
         waiter: { select: { id: true, name: true, role: true } },
         orders: {
           where: { status: OrderStatus.paid },
-          select: { id: true, orderNumber: true, finalAmount: true },
+          select: { id: true, orderNumber: true, finalAmount: true, refundedAmount: true },
         },
       },
     });
@@ -777,7 +783,7 @@ export class StaffService {
     const rows = shifts.map((s) => {
       const effectiveEnd = s.endedAt ?? now;
       const durationMin = Math.max(0, Math.round((Math.min(effectiveEnd.getTime(), to.getTime()) - Math.max(s.startedAt.getTime(), from.getTime())) / 60000));
-      const turnover = s.orders.reduce((sum, o) => sum + Number(o.finalAmount), 0);
+      const turnover = s.orders.reduce((sum, o) => sum + Number(netOrderAmount(o)), 0);
       return {
         id: s.id,
         employeeId: s.waiterId,
@@ -794,7 +800,7 @@ export class StaffService {
         orders: s.orders.map((o) => ({
           id: o.id,
           orderNumber: o.orderNumber,
-          amount: Number(o.finalAmount),
+          amount: Number(netOrderAmount(o)),
         })),
       };
     });
@@ -830,6 +836,7 @@ export class StaffService {
       where: {
         waiterId: waiter.id,
         status: OrderStatus.paid,
+        paymentStatus: { not: PaymentStatus.refunded },
         closedAt: { gte: from, lt: to },
       },
       orderBy: { closedAt: 'asc' },
@@ -846,6 +853,7 @@ export class StaffService {
             dishNameSnapshot: true,
             dishVariantNameSnapshot: true,
             quantity: true,
+            refundedQuantity: true,
             finalPrice: true,
             updatedAt: true,
             dish: { select: { category: { select: { name: true } } } },
@@ -861,8 +869,10 @@ export class StaffService {
         : order.createdAt;
       servingSeconds.push(Math.max(0, Math.round((servedAt.getTime() - order.createdAt.getTime()) / 1000)));
 
-      return order.items.map((item) => {
-        const amount = Number(item.finalPrice);
+      return order.items.flatMap((item) => {
+        const quantity = netItemQuantity(item);
+        if (quantity <= 0) return [];
+        const amount = Number(netItemAmount(item, item.finalPrice));
         return {
           id: item.id,
           orderId: order.id,
@@ -874,8 +884,8 @@ export class StaffService {
             ? `${item.dishNameSnapshot} · ${item.dishVariantNameSnapshot}`
             : item.dishNameSnapshot,
           categoryName: item.dish?.category.name ?? 'Прочее',
-          quantity: item.quantity,
-          unitPrice: item.quantity > 0 ? amount / item.quantity : amount,
+          quantity,
+          unitPrice: amount / quantity,
           amount,
         };
       });

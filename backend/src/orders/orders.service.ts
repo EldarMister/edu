@@ -1,5 +1,5 @@
 import { lockRecipeGraph } from '../warehouse/recipe-resolution';
-import { recordOrderReceipts, reverseOrderReceipts } from '../finance/order-receipts';
+import { recordOrderReceipts } from '../finance/order-receipts';
 import { receiptTaxes, recordOrderTaxes } from '../settings/order-taxes';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { hasPermission, resolveUserPermissions } from '../common/permissions';
@@ -66,6 +66,8 @@ const cabinetOrderSelect = {
   orderNumber: true,
   source: true,
   finalAmount: true,
+  refundedAmount: true,
+  paymentStatus: true,
   status: true,
   createdAt: true,
   table: { select: { number: true } },
@@ -78,6 +80,8 @@ function formatCabinetOrder(order: Prisma.OrderGetPayload<{ select: typeof cabin
     source: order.source,
     tableNumber: order.table.number,
     finalAmount: String(order.finalAmount),
+    refundedAmount: String(order.refundedAmount),
+    paymentStatus: order.paymentStatus,
     status: order.status,
     createdAt: order.createdAt,
   };
@@ -234,7 +238,7 @@ export class OrdersService {
         where: { waiterId, status: OrderStatus.cancelled, createdAt: { gte: since } },
       }),
       this.prisma.order.aggregate({
-        _sum: { finalAmount: true },
+        _sum: { finalAmount: true, refundedAmount: true },
         where: { waiterId, status: OrderStatus.paid, createdAt: { gte: since } },
       }),
       this.prisma.order.findMany({
@@ -249,7 +253,7 @@ export class OrdersService {
       stats: {
         completed,
         cancelled,
-        revenue: String(revenue._sum.finalAmount ?? 0),
+        revenue: (revenue._sum.finalAmount ?? new Prisma.Decimal(0)).sub(revenue._sum.refundedAmount ?? 0).toString(),
       },
       recentOrders: recent.map(formatCabinetOrder),
     };
@@ -2417,9 +2421,11 @@ export class OrdersService {
       await lockOrder(tx, orderId);
       const latest = await tx.order.findUniqueOrThrow({ where: { id: orderId } });
       if (latest.updatedAt.getTime() !== order.updatedAt.getTime()) throw new ConflictException('Заказ изменился. Обновите его и повторите действие');
-      if (actor.role !== Role.OWNER && (latest.status === OrderStatus.paid || latest.paymentStatus === PaymentStatus.paid)
-        && !hasPermission(actor.permissions, 'actions.refundChecks')) {
-        throw new ForbiddenException('Нет права на возврат или отмену оплаченного чека');
+      if (latest.status === OrderStatus.paid || latest.paymentStatus === PaymentStatus.paid || latest.paymentStatus === PaymentStatus.refunded) {
+        if (actor.role !== Role.OWNER && !hasPermission(actor.permissions, 'actions.refundChecks')) {
+          throw new ForbiddenException('Нет права на возврат или отмену оплаченного чека');
+        }
+        throw new ConflictException('Для оплаченного заказа оформите возврат в карточке заказа');
       }
       if (fromClosedCancelled && targetIsActive) {
         await this.ingredientStock.applyDishSale(tx, order.id, order.items, true);
@@ -2456,12 +2462,6 @@ export class OrdersService {
       }
 
       if (targetStatus !== OrderStatus.paid) {
-        if (latest.paymentStatus === PaymentStatus.paid) {
-          await tx.orderTax.updateMany({ where: { orderId, reversedAt: null }, data: { reversedAt: new Date() } });
-        }
-        if (latest.cafeId && latest.paymentStatus === PaymentStatus.paid) {
-          await reverseOrderReceipts(tx, latest.cafeId, orderId, actor.id);
-        }
         await tx.payment.updateMany({
           where: { orderId, status: PaymentStatus.paid },
           data: { status: PaymentStatus.cancelled },

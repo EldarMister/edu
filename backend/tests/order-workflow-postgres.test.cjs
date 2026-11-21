@@ -6,6 +6,7 @@ const { JwtService } = require('@nestjs/jwt');
 const { AuthService } = require('../src/auth/auth.service.ts');
 const { PrismaClient } = require('@prisma/client');
 const { OrdersService } = require('../src/orders/orders.service.ts');
+const { OrderRefundsService } = require('../src/orders/order-refunds.service.ts');
 const { SettingsService } = require('../src/settings/settings.service.ts');
 const { IngredientStockService } = require('../src/warehouse/ingredient-stock.service.ts');
 const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
@@ -87,6 +88,40 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         await settings.update({ waiterOrderPermissions: policy }, owner);
         return policy;
       };
+
+      await t.test('automatic table numbers fill gaps in the chosen hall without reviving archived tables', async () => {
+        const catalog = new CatalogService(db, events, audit);
+        const terrace = await db.hall.create({ data: { name: 'Терраса' } });
+        await db.table.createMany({
+          data: [1, 2, 3, 4, 5, 6, 7, 10].map((number) => ({ hallId: terrace.id, number })),
+        });
+        await db.table.create({ data: { hallId: hall.id, number: 8 } });
+        const archived = await db.table.create({ data: { hallId: terrace.id, number: 8, isActive: false } });
+        const historicalOrder = await db.order.create({
+          data: { tableId: archived.id, orderNumber: 'Past terrace order', status: 'paid' },
+        });
+
+        const added = await Promise.all([
+          catalog.createTable({ hallId: terrace.id, seats: 2 }),
+          catalog.createTable({ hallId: terrace.id, seats: 4 }),
+        ]);
+        assert.deepEqual(added.map(({ number }) => number).sort(), [8, 9]);
+        const newEight = added.find(({ number }) => number === 8);
+        assert.notEqual(newEight.id, archived.id);
+        assert.notEqual(newEight.qrToken, archived.qrToken);
+        assert.equal((await db.table.findUniqueOrThrow({ where: { id: archived.id } })).isActive, false);
+        assert.equal((await db.order.findUniqueOrThrow({ where: { id: historicalOrder.id } })).tableId, archived.id);
+        await assert.rejects(catalog.createTable({ hallId: terrace.id, seats: 2, number: 8 }), /уже есть/);
+        const manual = await catalog.createTable({ hallId: terrace.id, seats: 2, number: 12, name: 'У окна' });
+        assert.equal(manual.number, 12);
+        assert.equal(manual.name, 'У окна');
+
+        await catalog.updateTable(newEight.id, { isActive: false });
+        const ten = await db.table.findFirstOrThrow({ where: { hallId: terrace.id, number: 10 } });
+        const corrected = await catalog.updateTable(ten.id, { number: 8 });
+        assert.equal(corrected.number, 8);
+        assert.equal(corrected.qrToken, ten.qrToken);
+      });
 
       await t.test('custom station routes a mixed ticket and keeps its own completion and cancellation history', async () => {
         const stationApi = new PreparationStationsController(db, events, audit);
@@ -387,15 +422,27 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
           await assert.rejects(orders.cancelReadyItem(order.id, order.items[0].id, owner, 'Cross tenant'), /не найден/);
         });
         assert.equal((await orders.findById(order.id)).status, 'paid');
-        await orders.adminUpdateStatus(order.id, owner, 'served', 'Отмена оплаты по существующему механизму');
-        await orders.adminUpdateStatus(order.id, owner, 'served', 'Повтор запроса');
-        const entries = await db.financeEntry.findMany({ where: { sourceKey: { in: [sourceKey, 'refund:' + sourceKey] } } });
+        await assert.rejects(orders.adminUpdateStatus(order.id, owner, 'served'), /оформите возврат в карточке заказа/);
+        const refunds = new OrderRefundsService(db, audit, events, new IngredientStockService());
+        const quote = await refunds.quote(owner, order.id, {});
+        const requestId = randomUUID();
+        const refund = {
+          requestId, quoteVersion: quote.version, reason: 'Возврат оплаченного заказа', approval: { fundsReturned: true },
+        };
+        await refunds.create(owner, order.id, refund, true);
+        await refunds.create(owner, order.id, refund, true);
+        const entries = await db.financeEntry.findMany({ where: { sourceKey: { in: [sourceKey, 'refund:' + requestId + ':0'] } } });
         assert.equal(entries.length, 2);
         assert.ok(entries.every(({ accountId }) => accountId === sale.accountId));
         assert.ok(entries.reduce((total, { amount }) => total.add(amount), sale.amount.mul(0)).isZero());
-        assert.equal((await orders.findById(order.id)).payments.length, 0);
-        await orders.cancelOrder(order.id, owner, 'Отмена после возврата');
-        assert.equal((await orders.findById(order.id)).status, 'cancelled');
+        const returned = await orders.findById(order.id);
+        assert.equal(returned.payments.length, 1);
+        const retainedPayment = await db.payment.findUniqueOrThrow({ where: { id: payment.id } });
+        assert.equal(retainedPayment.status, 'paid');
+        assert.ok(retainedPayment.refundedAmount.eq(payment.amount));
+        assert.equal(returned.status, 'paid');
+        assert.equal(returned.paymentStatus, 'refunded');
+        await assert.rejects(orders.cancelOrder(order.id, owner, 'Отмена после возврата'), /оплачен/);
       });
 
       await t.test('waiter history pages through tied timestamps and stays scoped to the waiter and cafe', async () => {

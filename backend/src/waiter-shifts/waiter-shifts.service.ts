@@ -57,7 +57,7 @@ export class WaiterShiftsService {
           waiterShiftId: shift.id,
           status: { notIn: [OrderStatus.cancelled] },
         },
-        _sum: { finalAmount: true },
+        _sum: { finalAmount: true, refundedAmount: true },
       }),
     ]);
 
@@ -65,7 +65,7 @@ export class WaiterShiftsService {
       ...workShiftView(shift),
       stats: {
         ordersCount,
-        totalAmount: String(totals._sum.finalAmount ?? 0),
+        totalAmount: (totals._sum.finalAmount ?? new Prisma.Decimal(0)).sub(totals._sum.refundedAmount ?? 0).toString(),
         activeOrdersCount,
       },
     };
@@ -159,14 +159,14 @@ export class WaiterShiftsService {
       }),
       this.prisma.order.aggregate({
         where: { waiterShiftId: shift.id, status: OrderStatus.paid },
-        _sum: { finalAmount: true },
+        _sum: { finalAmount: true, refundedAmount: true },
       }),
     ]);
     const result = {
       ...workShiftView(shift),
       stats: {
         ordersCount,
-        totalAmount: String(totals._sum.finalAmount ?? 0),
+        totalAmount: (totals._sum.finalAmount ?? new Prisma.Decimal(0)).sub(totals._sum.refundedAmount ?? 0).toString(),
         activeOrdersCount: 0,
       },
     };

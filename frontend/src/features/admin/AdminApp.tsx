@@ -17,6 +17,7 @@ import { beep } from '@/lib/sound';
 import { adminVoice } from '@/services/adminVoice';
 import { useNotifications } from '@/store/notifications';
 import type { AdministratorCall, Order, ReceiptPrintRequest } from '@/types';
+import { useCanManageOrderRefunds, useRefundUpdates } from '@/features/refunds/api';
 import {
   IconStats,
   IconOrders,
@@ -189,6 +190,8 @@ export function AdminApp() {
   const { canSection, can } = permissions;
   const isOwner = permissions.isOwner;
   const isAdmin = permissions.effectiveRole === 'ADMIN';
+  const canManageRefunds = useCanManageOrderRefunds();
+  useRefundUpdates('admin', canManageRefunds);
   const financeAccess = useFinanceAccess(isAdmin);
   const mayPostFinances = isOwner || financeAccess.data?.allowed === true;
   const mayViewFinances = isOwner || financeAccess.data?.canViewAll === true;

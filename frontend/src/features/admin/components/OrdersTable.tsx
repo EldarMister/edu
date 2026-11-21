@@ -87,7 +87,7 @@ export function OrdersTable({ items, isLoading, error, scrollRef, loadMoreRef, i
                   <Td className="whitespace-nowrap text-text-secondary">{paymentCell(order)}</Td>
                   <Td className="px-1">
                     <div className="flex items-center justify-center gap-1">
-                      {editable && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
+                      {editable && order.status !== 'paid' && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
                       {editable && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}
                     </div>
                   </Td>

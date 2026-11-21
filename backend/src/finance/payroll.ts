@@ -1,3 +1,4 @@
+import { netOrderAmount } from '../orders/order-net';
 import { BadRequestException } from '@nestjs/common';
 import { OrderStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import { warehouseDateRange, warehouseDay } from '../warehouse/report-range';
@@ -127,14 +128,14 @@ export async function payrollReport(db: Db, cafeId: string, month: string, onlyU
     const orders = await db.order.findMany({
       where: { cafeId, status: OrderStatus.paid, closedAt: { gte: new Date(window.start), lt: new Date(window.end) },
         ...(hasClosedShifts ? {} : { waiterId: { in: employeeIds } }) },
-      select: { closedAt: true, waiterId: true, finalAmount: true },
+      select: { closedAt: true, waiterId: true, finalAmount: true, refundedAmount: true },
       orderBy: { closedAt: 'asc' },
     });
     let cumul = zero;
     for (const order of orders) {
-      if (order.waiterId) paidByEmployee.set(order.waiterId, (paidByEmployee.get(order.waiterId) ?? zero).add(order.finalAmount));
+      if (order.waiterId) paidByEmployee.set(order.waiterId, (paidByEmployee.get(order.waiterId) ?? zero).add(netOrderAmount(order)));
       if (hasClosedShifts && order.closedAt) {
-        cumul = cumul.add(order.finalAmount);
+        cumul = cumul.add(netOrderAmount(order));
         paidOrders.push({ at: order.closedAt.getTime(), cumul });
       }
     }

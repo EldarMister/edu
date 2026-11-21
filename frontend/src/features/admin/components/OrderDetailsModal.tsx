@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Modal } from '@/components/Modal';
+import { OrderRefunds } from '@/features/refunds/OrderRefunds';
+import { useT } from '@/lib/i18n';
 import { EditorPage } from '../pages/warehouse/EditorPage';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import type { Order, OrderItemStatus } from '@/types';
@@ -26,6 +28,7 @@ export function OrderDetailsModal({
   onOrderChange,
   allowItemCancellation = false,
   waiterLayout = false,
+  refundMode,
   presentation = 'modal',
 }: {
   order: Order | null;
@@ -33,8 +36,10 @@ export function OrderDetailsModal({
   onOrderChange?: (order: Order) => void;
   allowItemCancellation?: boolean;
   waiterLayout?: boolean;
+  refundMode?: 'request' | 'manage';
   presentation?: 'modal' | 'page';
 }) {
+  const t = useT();
   const Container = presentation === 'page' ? EditorPage : Modal;
   const [cancelItem, setCancelItem] = useState<Order['items'][number] | null>(null);
   const cancelOrderItem = useCancelOrderItem();
@@ -47,6 +52,7 @@ export function OrderDetailsModal({
     order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
   const itemCancellationAllowed = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
   const isDelivery = order.source === 'delivery';
+  const refunded = Number(order.refundedAmount ?? 0);
 
   async function confirmItemCancellation(reason: string) {
     if (!cancelItem) return;
@@ -173,6 +179,7 @@ export function OrderDetailsModal({
                     <p className="text-sm font-medium text-text-primary">
                       {item.quantity}× {orderItemDisplayName(item)}
                     </p>
+                    {!!item.refundedQuantity && <p className="mt-0.5 text-xs text-text-muted">{t('Возвращено')} · {item.refundedQuantity} / {item.quantity}</p>}
                     {item.comment && <p className="mt-0.5 text-xs text-warning">{item.comment}</p>}
                     {item.rejectReason && (
                       <p className="mt-0.5 text-xs text-danger">
@@ -218,9 +225,14 @@ export function OrderDetailsModal({
           {Number(order.roundingAmount) > 0 && <Total label="Округление" value={`−${money(order.roundingAmount ?? 0)}`} />}
           {order.taxes?.map((tax) => <Total key={tax.id}
             label={`В т. ч. ${tax.name} (${taxRateLabel(tax.rate)})`} value={money(tax.amount)} />)}
-          <Total label="К оплате" value={money(order.finalAmount)} strong />
+          <Total label={order.status === 'paid' ? t('Оплачено') : t('К оплате')} value={money(order.finalAmount)} strong />
+          {refunded > 0 && <>
+            <Total label={t('Возвращено')} value={money(refunded)} />
+            <Total label={t('Оплата после возврата')} value={money(Number(order.finalAmount) - refunded)} />
+          </>}
         </div>
 
+        {refundMode && order.status === 'paid' && <OrderRefunds key={order.id} order={order} mode={refundMode} />}
         <FiscalBlock order={order} />
       </div>
       <CancelOrderModal

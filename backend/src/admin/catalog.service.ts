@@ -155,7 +155,7 @@ export class CatalogService {
   }
 
   async createTable(dto: CreateTableDto) {
-    const { hallId, seats, number } = dto;
+    const { hallId, seats, number: requestedNumber } = dto;
     const name = dto.name === undefined ? undefined : dto.name?.trim() || null;
     if (hallId.startsWith('delivery-hall:')) throw new NotFoundException('Зал не найден');
     const result = await this.prisma.$transaction(async (tx) => {
@@ -166,31 +166,35 @@ export class CatalogService {
         : await tx.$queryRaw<{ id: string }[]>`SELECT id FROM halls WHERE id = ${hallId} FOR UPDATE`;
       if (!halls.length) throw new NotFoundException('Зал не найден');
 
+      let number = requestedNumber;
       if (number == null) {
-        // Archived tables still reserve their numbers and QR codes.
-        const [last] = await tx.$queryRaw<{ number: number }[]>`
-          SELECT COALESCE(MAX(number), 0) AS number FROM tables WHERE hall_id = ${hallId}
-        `;
-        const next = last.number + 1;
-        if (next > 2147483647) throw new BadRequestException('Достигнут максимальный номер стола');
-        const table = await tx.table.create({ data: { hallId, number: next, name, seats, sortOrder: next } });
-        return { table, action: 'create-table' };
-      }
-
-      const exists = await tx.table.findUnique({
-        where: { hallId_number: { hallId, number } },
-      });
-      if (exists?.isActive) {
-        throw new BadRequestException(`Стол №${number} уже есть в этом зале`);
-      }
-
-      // Older clients can still explicitly restore an archived table by number.
-      if (exists) {
-        const table = await tx.table.update({
-          where: { id: exists.id },
-          data: { isActive: true, name, seats, sortOrder: number, status: TableStatus.free },
+        const activeTables = await tx.table.findMany({
+          where: { hallId, isActive: true, number: { gte: 1 } },
+          select: { number: true },
+          orderBy: { number: 'asc' },
         });
-        return { table, action: 'restore-table' };
+        number = 1;
+        for (const activeTable of activeTables) {
+          if (activeTable.number !== number) break;
+          number++;
+        }
+        if (number > 2147483647) throw new BadRequestException('Достигнут максимальный номер стола');
+      } else {
+        const existing = await tx.table.findFirst({
+          where: { hallId, number },
+          orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }, { id: 'asc' }],
+        });
+        if (existing?.isActive) {
+          throw new BadRequestException(`Стол №${number} уже есть в этом зале`);
+        }
+        // Older clients can still explicitly restore an archived table by number.
+        if (existing) {
+          const table = await tx.table.update({
+            where: { id: existing.id },
+            data: { isActive: true, name, seats, sortOrder: number, status: TableStatus.free },
+          });
+          return { table, action: 'restore-table' };
+        }
       }
 
       const table = await tx.table.create({ data: { hallId, number, name, seats, sortOrder: number } });

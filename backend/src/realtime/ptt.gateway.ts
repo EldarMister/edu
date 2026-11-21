@@ -23,6 +23,8 @@ const PTT_EVENTS = {
   CHANNEL_BUSY: 'ptt_channel_busy',
   CHANNEL_FREE: 'ptt_channel_free',
   AUDIO_MESSAGE: 'ptt_audio_message',
+  AUDIO_FRAME: 'ptt_audio_frame',
+  AUDIO_PACKET: 'ptt_audio_packet',
   TALK_DENIED: 'ptt_talk_denied',
   PRESENCE: 'ptt_presence',
 } as const;
@@ -31,6 +33,16 @@ const PTT_EVENTS = {
 // допускаем ~8 МБ base64, чего хватает на длинное голосовое сообщение.
 const MAX_AUDIO_CHARS = 8_000_000;
 const BASE64_RE = /^[A-Za-z0-9+/=]+$/;
+// Live frames contain 40 ms of mono, 16 kHz, signed 16-bit PCM.
+const LIVE_FRAME_BYTES = 1280;
+// A compact Opus packet has a 16-byte talk ID and one or two CBR 40 ms frames at 12 kbit/s.
+const OPUS_HEADER_BYTES = 16;
+const OPUS_FRAME_BYTES = 60;
+const LIVE_IDLE_MS = 4000;
+// TCP and the initial channel grant can deliver several seconds of queued frames together.
+const FRAME_BURST = 110;
+const FRAMES_PER_SECOND = 30;
+const TALK_ID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i;
 
 interface SocketUser {
   id: string;
@@ -44,8 +56,10 @@ type AuthenticatedSocketUser = SocketUser & { cafeId: string };
 interface TalkLock {
   socketId: string;
   userId: string;
+  startedAt: string;
   role: string;
   name?: string;
+  live?: { id: string; opusHeader?: Buffer; frames: number; lastFrameAt: number; timeout: NodeJS.Timeout };
 }
 
 interface JoinBody {
@@ -54,6 +68,12 @@ interface JoinBody {
 
 interface TalkBody {
   channel?: PttChannel;
+  talkId?: string;
+  codec?: 'opus';
+}
+
+interface AudioFrameBody extends TalkBody {
+  audio?: Buffer;
 }
 
 interface AudioMessageBody extends TalkBody {
@@ -112,20 +132,92 @@ export class PttGateway implements OnGatewayDisconnect {
     const channel = await this.resolveChannel(client, user, body, true);
     if (!channel) return this.deny(client, undefined, 'not_in_channel');
 
+    if (!client.connected) return { ok: false, reason: 'disconnected' };
+    const id = body?.talkId;
+    if (id !== undefined && (typeof id !== 'string' || !TALK_ID.test(id))) {
+      return { ok: false, reason: 'invalid_talk_id' };
+    }
+
+    const codec = body?.codec;
+    if (codec !== undefined && (codec !== 'opus' || !id)) return { ok: false, reason: 'invalid_codec' };
+
     const key = this.lockKey(user.cafeId, channel);
     const current = this.findBlockingLock(user.cafeId, channel);
-    if (current && current.socketId !== client.id) {
+    if (current) {
+      if (this.locks.get(key) === current && current.socketId === client.id
+        && current.live?.id === id && (current.live?.opusHeader ? 'opus' : undefined) === codec) {
+        return { ok: true, channel, talkId: id, codec };
+      }
       return this.deny(client, channel, 'busy', current.userId);
     }
 
-    const lock: TalkLock = { socketId: client.id, userId: user.id, role: user.role, name: user.name };
+    const lock: TalkLock = {
+      socketId: client.id, userId: user.id, role: user.role, name: user.name, startedAt: new Date().toISOString(),
+    };
+    if (id) {
+      const timeout = setTimeout(() => {
+        client.emit(PTT_EVENTS.TALK_DENIED, { channel, talkId: id, reason: 'audio_timeout' });
+        this.releaseTalker(client, channel, id);
+      }, LIVE_IDLE_MS);
+      timeout.unref();
+      const opusHeader = codec === 'opus' ? Buffer.from(id.replaceAll('-', ''), 'hex') : undefined;
+      lock.live = { id, opusHeader, frames: FRAME_BURST, lastFrameAt: Date.now(), timeout };
+    }
     this.locks.set(key, lock);
-    this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_BUSY, {
-      channel,
-      speaker: { id: user.id, role: user.role, name: user.name },
-      startedAt: new Date().toISOString(),
+    this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_BUSY, this.talker(channel, lock));
+    return { ok: true, channel, talkId: id, codec };
+  }
+
+  @SubscribeMessage(PTT_EVENTS.AUDIO_FRAME)
+  handleAudioFrame(@ConnectedSocket() client: Socket, @MessageBody() body: AudioFrameBody) {
+    const user = this.getCachedUser(client);
+    const channel = body?.channel;
+    if (!user || !this.isChannel(channel) || client.data.pttChannel !== channel) return;
+    const lock = this.locks.get(this.lockKey(user.cafeId, channel));
+    const live = lock?.live;
+    const audio = body?.audio;
+    if (!lock || !live || live.opusHeader || lock.socketId !== client.id || live.id !== body?.talkId
+      || !Buffer.isBuffer(audio) || audio.length !== LIVE_FRAME_BYTES) return;
+    if (!this.acceptFrames(client, channel, live, 1)) return;
+    client.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.AUDIO_FRAME, {
+      channel, talkId: live.id, audio, senderId: user.id, senderName: user.name, senderRole: user.role,
     });
-    return { ok: true, channel };
+  }
+
+  @SubscribeMessage(PTT_EVENTS.AUDIO_PACKET)
+  handleAudioPacket(@ConnectedSocket() client: Socket, @MessageBody() packet: unknown) {
+    const user = this.getCachedUser(client);
+    const channel = client.data.pttChannel;
+    if (!user || !this.isChannel(channel) || !Buffer.isBuffer(packet)) return;
+    const count = (packet.length - OPUS_HEADER_BYTES) / OPUS_FRAME_BYTES;
+    if (count !== 1 && count !== 2) return;
+    const lock = this.locks.get(this.lockKey(user.cafeId, channel));
+    const live = lock?.live;
+    if (!lock || !live?.opusHeader || lock.socketId !== client.id
+      || !live.opusHeader.equals(packet.subarray(0, OPUS_HEADER_BYTES))) return;
+    if (!this.acceptFrames(client, channel, live, count)) return;
+    client.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.AUDIO_PACKET, packet);
+  }
+
+  private acceptFrames(client: Socket, channel: PttChannel, live: NonNullable<TalkLock['live']>, count: number) {
+    const now = Date.now();
+    live.frames = Math.min(FRAME_BURST, live.frames + Math.max(0, now - live.lastFrameAt) * FRAMES_PER_SECOND / 1000);
+    live.lastFrameAt = now;
+    if (live.frames < count) {
+      client.emit(PTT_EVENTS.TALK_DENIED, { channel, talkId: live.id, reason: 'audio_backlog' });
+      this.releaseTalker(client, channel, live.id);
+      return false;
+    }
+    live.frames -= count;
+    live.timeout.refresh();
+    return true;
+  }
+
+  private talker(channel: PttChannel, lock: TalkLock) {
+    return {
+      channel, talkId: lock.live?.id, codec: lock.live?.opusHeader ? 'opus' : undefined,
+      speaker: { id: lock.userId, role: lock.role, name: lock.name }, startedAt: lock.startedAt,
+    };
   }
 
   @SubscribeMessage(PTT_EVENTS.AUDIO_MESSAGE)
@@ -141,6 +233,7 @@ export class PttGateway implements OnGatewayDisconnect {
       return this.deny(client, channel, lock ? 'busy' : 'not_talker', lock?.userId);
     }
 
+    if (lock.live) return { ok: false, reason: 'invalid_audio' };
     const chunk = body?.chunk;
     if (!this.isValidAudio(chunk)) return { ok: false, reason: 'invalid_audio' };
 
@@ -162,7 +255,7 @@ export class PttGateway implements OnGatewayDisconnect {
   async handleStopTalk(@ConnectedSocket() client: Socket, @MessageBody() body: TalkBody) {
     const user = await this.getUser(client);
     const channel = user ? await this.resolveChannel(client, user, body, false) : null;
-    this.releaseTalker(client, channel);
+    this.releaseTalker(client, channel, body?.talkId ?? null);
     return { ok: true };
   }
 
@@ -205,6 +298,11 @@ export class PttGateway implements OnGatewayDisconnect {
     const room = this.room(user.cafeId, nextChannel);
     client.join(room);
     client.data.pttChannel = nextChannel;
+    const general = this.locks.get(this.lockKey(user.cafeId, 'general'));
+    const active = general ?? this.locks.get(this.lockKey(user.cafeId, nextChannel));
+    if (active?.live?.opusHeader) {
+      client.emit(PTT_EVENTS.CHANNEL_BUSY, this.talker(general ? 'general' : nextChannel, active));
+    }
     return this.emitPresenceFor(user.cafeId, nextChannel);
   }
 
@@ -217,7 +315,7 @@ export class PttGateway implements OnGatewayDisconnect {
     void this.emitPresence(client, channel);
   }
 
-  private releaseTalker(client: Socket, preferredChannel?: PttChannel | null) {
+  private releaseTalker(client: Socket, preferredChannel?: PttChannel | null, expectedTalkId?: string | null) {
     const user = this.getCachedUser(client);
     if (!user) return;
     const channels = preferredChannel ? [preferredChannel] : PTT_CHANNELS;
@@ -225,9 +323,11 @@ export class PttGateway implements OnGatewayDisconnect {
       const key = this.lockKey(user.cafeId, channel);
       const lock = this.locks.get(key);
       if (!lock || lock.socketId !== client.id) continue;
+      if (expectedTalkId !== undefined && (lock.live?.id ?? null) !== expectedTalkId) continue;
+      if (lock.live) clearTimeout(lock.live.timeout);
       this.locks.delete(key);
       this.server.to(this.broadcastRooms(user.cafeId, channel)).emit(PTT_EVENTS.CHANNEL_FREE, {
-        channel,
+        channel, talkId: lock.live?.id,
         speakerId: user.id,
         freedAt: new Date().toISOString(),
       });

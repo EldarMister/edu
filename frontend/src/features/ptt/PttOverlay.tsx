@@ -5,6 +5,7 @@ import { useAuth } from '@/store/auth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
 import { useAudioPttSender } from './useAudioPttSender';
+import { preparePttCapture } from './liveAudio';
 import {
   PTT_CHANNELS,
   PTT_EVENTS,
@@ -508,7 +509,10 @@ export function PttOverlay({
     sock.on(PTT_EVENTS.PRESENCE, onPresence);
     sock.on(PTT_EVENTS.CHANNEL_BUSY, onBusy);
     sock.on(PTT_EVENTS.CHANNEL_FREE, onFree);
+    const onDisconnect = () => { setBusySpeaker(null); setOnlineCount(0); };
+    sock.on('disconnect', onDisconnect);
     return () => {
+      sock.off('disconnect', onDisconnect);
       sock.off(PTT_EVENTS.PRESENCE, onPresence);
       sock.off(PTT_EVENTS.CHANNEL_BUSY, onBusy);
       sock.off(PTT_EVENTS.CHANNEL_FREE, onFree);
@@ -533,6 +537,10 @@ export function PttOverlay({
   };
 
   const onPressStop = () => sender.stop();
+  const openRadio = () => {
+    void preparePttCapture().catch(() => undefined);
+    setOpen(true);
+  };
 
   // Закрываем панель рации, сохраняя приём аудио.
   const stopSending = sender.stop;
@@ -544,10 +552,7 @@ export function PttOverlay({
     if (effectiveButtonHidden) closeRadio();
   }, [effectiveButtonHidden, closeRadio]);
 
-  // «Занято» = кто-то держит кнопку (channel_busy) ИЛИ у нас сейчас играет
-  // входящий файл (receiving). Второе продлевает блокировку на всё
-  // воспроизведение — иначе после отпускания канал выглядел бы свободным,
-  // пока длинное сообщение ещё звучит.
+  // Keep the floor occupied while the last received audio is still playing.
   const otherSpeaker = playingSpeaker ?? busySpeaker;
   const speakingOther =
     !sender.talking && (receiving || (!!busySpeaker && busySpeaker.id !== user?.id));
@@ -575,11 +580,11 @@ export function PttOverlay({
         ? 'Отпустите для остановки'
         : state === 'speakingOther'
           ? 'Дождитесь освобождения канала'
-          : (sender.deniedReason ?? 'Нажмите и удерживайте');
+          : (sender.deniedReason ?? (sender.starting ? 'Подключаем микрофон…' : 'Нажмите и удерживайте'));
 
   return (
     <>
-      <RadioLauncher visible={!effectiveButtonHidden && !open} bottom={floatingBottom} state={state} onOpen={() => setOpen(true)} />
+      <RadioLauncher visible={!effectiveButtonHidden && !open} bottom={floatingBottom} state={state} onOpen={openRadio} />
 
       {open && (
         <div className="fixed inset-0 z-[90]">

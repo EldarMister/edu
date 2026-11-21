@@ -7,6 +7,7 @@ import type {
   Order,
   OrderStatus,
   PaymentMethod,
+  PaymentStatus,
   Receipt,
   AdministratorCall,
   ReceiptPrintRequest,
@@ -21,6 +22,8 @@ export interface CabinetRecentOrder {
   source?: Order['source'];
   tableNumber: number;
   finalAmount: string;
+  refundedAmount?: string;
+  paymentStatus?: PaymentStatus;
   status: OrderStatus;
   createdAt: string;
 }

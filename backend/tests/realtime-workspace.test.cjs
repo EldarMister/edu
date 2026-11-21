@@ -48,3 +48,100 @@ test('socket rooms follow validated workspace and one batched refresh disconnect
   assert.equal(forged.disconnected, true, 'reconnecting cannot restore a revoked workspace');
   gateway.onModuleDestroy();
 });
+
+test('live radio relays only valid frames from the current talker inside the same cafe', async () => {
+  const { PttGateway } = require('../src/realtime/ptt.gateway.ts');
+  const gateway = new PttGateway({}, {});
+  const notifications = [];
+  const frames = [];
+  gateway.server = { to: (rooms) => ({ emit: (event, payload) => notifications.push({ rooms, event, payload }) }) };
+  function socket(id, cafeId) {
+    return {
+      id, connected: true,
+      data: { user: { id, cafeId, role: 'WAITER' }, pttChannel: 'waiters' },
+      emit() {},
+      to: (rooms) => ({ emit: (event, payload) => frames.push({ rooms, event, payload }) }),
+    };
+  }
+  const first = socket('sender', 'a');
+  const other = socket('listener', 'a');
+  const foreign = socket('foreign', 'b');
+  const channel = 'waiters';
+  const talkId = '75d0a019-a195-450b-89e4-766c7de92ea5';
+  const frame = { channel, talkId, audio: Buffer.alloc(1280, 42) };
+  try {
+    assert.equal((await gateway.handleStartTalk(first, { channel, talkId })).talkId, talkId);
+    assert.equal((await gateway.handleStartTalk(other, { channel, talkId })).reason, 'busy');
+    gateway.handleAudioFrame(other, frame);
+    gateway.handleAudioFrame(foreign, frame);
+    gateway.handleAudioFrame(first, { ...frame, audio: 'not binary' });
+    gateway.handleAudioFrame(first, { ...frame, audio: Buffer.alloc(1282) });
+    gateway.handleAudioFrame(first, { ...frame, talkId: 'previous-talk' });
+    assert.equal(frames.length, 0);
+
+    await gateway.handleStopTalk(first, { channel, talkId: 'previous-talk' });
+    gateway.handleAudioFrame(first, frame);
+    assert.equal(frames.length, 1);
+    assert.equal(frames[0].rooms, 'restaurant_a_waiters');
+    assert.equal(frames[0].event, 'ptt_audio_frame');
+    assert.equal(frames[0].payload.audio, frame.audio);
+    assert.equal(frames[0].payload.senderId, first.id);
+    assert.equal(notifications.some(({ event }) => event === 'ptt_channel_free'), false);
+
+    for (let index = 0; index < 24; index++) gateway.handleAudioFrame(first, frame);
+    assert.equal(frames.length, 25);
+    await gateway.handleStopTalk(first, { channel, talkId });
+    gateway.handleAudioFrame(first, frame);
+    assert.equal(frames.length, 25);
+    assert.equal(notifications.at(-1).payload.talkId, talkId);
+
+    first.data.pttChannel = 'general';
+    await gateway.handleStartTalk(first, { channel: 'general', talkId });
+    gateway.handleAudioFrame(first, { ...frame, channel: 'general' });
+    assert.deepEqual(frames.at(-1).rooms, [
+      'restaurant_a_general', 'restaurant_a_waiters', 'restaurant_a_kitchen', 'restaurant_a_admin',
+    ]);
+    await gateway.handleStopTalk(first, { channel: 'general', talkId });
+  } finally {
+    await gateway.handleStopTalk(first, { channel: first.data.pttChannel, talkId });
+  }
+});
+
+test('compact Opus packets retain their talk and room identity, including for a late listener', async () => {
+  const { PttGateway } = require('../src/realtime/ptt.gateway.ts');
+  const gateway = new PttGateway({}, {});
+  const relayed = [];
+  const received = [];
+  const talkId = 'c6a5d98e-7a46-4926-9442-3b54c384ff0f';
+  const packet = Buffer.alloc(136);
+  Buffer.from(talkId.replaceAll('-', ''), 'hex').copy(packet);
+  gateway.server = { to: () => ({ emit() {} }), in: () => ({ async fetchSockets() { return []; } }) };
+  const socket = (id, cafeId) => ({
+    id, connected: true, data: { user: { id, cafeId, role: 'WAITER' }, pttChannel: 'waiters' },
+    join() {}, leave() {},
+    emit(event, body) { received.push({ id, event, body }); },
+    to: (room) => ({ emit: (event, body) => relayed.push({ room, event, body }) }),
+  });
+  const sender = socket('talker', 'a');
+  try {
+    assert.equal((await gateway.handleStartTalk(sender, { channel: 'waiters', talkId, codec: 'opus' })).codec, 'opus');
+    const listener = socket('listener', 'a');
+    await gateway.handleJoin(listener, { channel: 'waiters' });
+    const busy = received.find(({ event, id }) => event === 'ptt_channel_busy' && id === listener.id);
+    assert.equal(busy.body.talkId, talkId);
+    assert.equal(busy.body.codec, 'opus');
+
+    gateway.handleAudioPacket(socket('outsider', 'b'), packet);
+    gateway.handleAudioPacket(listener, packet);
+    gateway.handleAudioPacket(sender, Buffer.alloc(136));
+    gateway.handleAudioPacket(sender, packet.subarray(0, 135));
+    assert.equal(relayed.length, 0);
+    gateway.handleAudioPacket(sender, packet);
+    assert.deepEqual(relayed, [{ room: 'restaurant_a_waiters', event: 'ptt_audio_packet', body: packet }]);
+    await gateway.handleStopTalk(sender, { channel: 'waiters', talkId });
+    gateway.handleAudioPacket(sender, packet);
+    assert.equal(relayed.length, 1);
+  } finally {
+    await gateway.handleStopTalk(sender, { channel: 'waiters', talkId });
+  }
+});
