@@ -324,9 +324,12 @@ export class PreparationProductionService {
       if (!batch) throw new NotFoundException('Производственная партия не найдена');
       const ingredient = await tx.ingredient.findUniqueOrThrow({ where: { id: batch.ingredientId } });
       if (batch.reversedAt) return this.serializeBatch(batch, ingredient);
-      const movements = await tx.stockMovement.findMany({ where: { sourceType: 'production', sourceId: id, type: { in: ['production', 'correction'] } }, include: { warehouse: true } });
-      if (!movements.length) throw new BadRequestException('Исходные движения производства не найдены');
-      await lockIngredients(tx, movements.map((movement) => movement.ingredientId));
+      const history = { cafeId, sourceType: 'production', sourceId: id, type: { in: ['production', 'correction'] } } satisfies Prisma.StockMovementWhereInput;
+      const ingredients = await tx.stockMovement.findMany({ where: history, select: { ingredientId: true } });
+      if (!ingredients.length) throw new BadRequestException('Исходные движения производства не найдены');
+      await lockIngredients(tx, ingredients.map(({ ingredientId }) => ingredientId));
+      // A replay may have revalued the batch while this reversal waited for the stock locks.
+      const movements = await tx.stockMovement.findMany({ where: history, include: { warehouse: true } });
       const blocked = await this.reversalBlockedReason(tx, batch, movements);
       if (blocked) throw new ConflictException(blocked);
       // Remove the produced output first; consumed/transferred output cannot be silently restored.

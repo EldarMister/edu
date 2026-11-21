@@ -4,6 +4,8 @@ import { Prisma, type StockMovement } from '@prisma/client';
 import { calculateStockValuation } from './stock-posting';
 import { calculatePurchaseCorrection, historicalPurchaseCorrection, historicalPurchaseValue } from './purchase-correction';
 import { getWarehouseBalance, setWarehouseBalance, type WarehouseLocation } from './warehouse-location';
+import { conversionDependencies, conversionPricing, conversionStrictStock, isConversionMovement,
+  loadHistoricalConversions, persistHistoricalConversions } from './historical-conversion';
 
 type Movement = StockMovement;
 type Balance = { stock: Prisma.Decimal; avgCost: Prisma.Decimal | null; valuationKnown: boolean };
@@ -23,6 +25,9 @@ const saleKey = (row: Movement, sale: boolean) => JSON.stringify([
   row.sourceId, sale ? row.orderItemId : row.saleLineId ?? row.orderItemId, scopeKey(row), row.saleCycle,
 ]);
 const actualTime = (row: Movement) => (row.recordedAt ?? row.createdAt).getTime();
+const conversionKey = (row: Movement) => JSON.stringify([row.sourceType, row.sourceId]);
+const isConversionInput = (row: Pick<Movement, 'change' | 'sourceType' | 'type'>) => row.change.lt(0)
+  && (row.sourceType === 'production' || row.sourceType === 'processing') && row.type !== 'cancel';
 
 function cannotReplay(reason: string) {
   return new ConflictException(`Пересчёт задним числом невозможен: ${reason}`);
@@ -38,7 +43,7 @@ function usesBookCost(row: Pick<Movement, 'change' | 'sourceType' | 'type'>) {
     (row.sourceType === 'order' && row.type === 'sale') ||
     (row.sourceType === 'writeoff' && row.type === 'writeoff') ||
     (row.sourceType === 'transfer' && row.type === 'transfer') ||
-    (row.sourceType === 'supplier_return' && row.type === 'supplier_return')
+    (row.sourceType === 'supplier_return' && row.type === 'supplier_return') || isConversionInput(row)
   );
 }
 
@@ -117,23 +122,82 @@ function transferPair(pairs: Map<string, Movement[]>, movement: Movement) {
   return { debit, credit };
 }
 
-function chartLanes(starts: Map<string, number>, rows: Movement[], pairs: Map<string, Movement[]>) {
-  // A new source cost changes the corresponding destination and any further
-  // transfers. An unrelated warehouse holding the same SKU is independent.
-  const outbound = rows.filter((row) => row.sourceType === 'transfer' && row.type === 'transfer' && row.change.lt(0));
-  outbound.sort(compareChronology);
-  let expanded = true;
-  while (expanded) {
-    expanded = false;
-    for (const row of outbound) {
-      if ((starts.get(scopeKey(row)) ?? Infinity) > row.createdAt.getTime()) continue;
-      const { credit } = transferPair(pairs, row);
-      if ((starts.get(scopeKey(credit)) ?? Infinity) <= credit.createdAt.getTime()) continue;
-      starts.set(scopeKey(credit), credit.createdAt.getTime());
-      expanded = true;
+async function lockReplayIngredients(tx: Prisma.TransactionClient, cafeId: string, ids: string[]) {
+  try {
+    // The caller already holds the original ingredients. Fail and roll back
+    // instead of waiting on a later ingredient while another writer holds it.
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM ingredients WHERE cafe_id = ${cafeId} AND id IN (${Prisma.join(ids)})
+      ORDER BY id FOR UPDATE NOWAIT
+    `;
+    if (locked.length !== ids.length) throw cannotReplay('исходная складская позиция больше недоступна');
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2010' && error.meta?.code === '55P03') {
+      throw cannotReplay('связанные остатки изменяются другой операцией; повторите проведение');
+    }
+    throw error;
+  }
+}
+
+async function chartLanes(tx: Prisma.TransactionClient, cafeId: string, scanAt: Date, starts: Map<string, number>, seeds: string[]) {
+  const suffix: Movement[] = [];
+  const ingredients = new Set(seeds);
+  const loaded = new Set<string>();
+  const expanded = new Set<string>();
+  const follow = (row: Movement) => {
+    const key = scopeKey(row), time = row.createdAt.getTime();
+    if ((starts.get(key) ?? Infinity) <= time) return;
+    starts.set(key, time);
+    ingredients.add(row.ingredientId);
+  };
+
+  // Only the output lanes reachable from a changed cost need replay. Their
+  // output costs can in turn feed transfers and other conversion inputs.
+  while (true) {
+    const nextIngredients = [...ingredients].filter((id) => !loaded.has(id));
+    if (nextIngredients.length) {
+      await lockReplayIngredients(tx, cafeId, nextIngredients);
+      const rows = await tx.stockMovement.findMany({
+        where: { cafeId, ingredientId: { in: nextIngredients }, createdAt: { gte: scanAt } },
+        take: movementLimit - suffix.length + 1,
+      });
+      suffix.push(...rows);
+      if (suffix.length > movementLimit) throw cannotReplay('слишком много движений; выберите более позднюю дату');
+      nextIngredients.forEach((id) => loaded.add(id));
+    }
+    const sources = suffix.filter((row) => !expanded.has(row.id) && row.createdAt.getTime() >= (starts.get(scopeKey(row)) ?? Infinity)
+      && (isConversionInput(row) || (row.sourceType === 'transfer' && row.type === 'transfer' && row.change.lt(0))));
+    if (!sources.length) return { suffix, ingredientIds: [...ingredients] };
+    const transferIds = sources.flatMap((row) => row.sourceType === 'transfer' && row.sourceId ? [row.sourceId] : []);
+    const conversionIds = sources.flatMap((row) => isConversionInput(row) && row.sourceId ? [row.sourceId] : []);
+    const [transferLegs, conversionOutputs] = await Promise.all([
+      transferIds.length ? tx.stockMovement.findMany({ where: { cafeId, sourceId: { in: transferIds },
+        sourceType: 'transfer', type: 'transfer', ingredientId: { in: [...ingredients] } } }) : [],
+      conversionIds.length ? tx.stockMovement.findMany({ where: { cafeId, sourceId: { in: conversionIds },
+        sourceType: { in: ['production', 'processing'] }, type: { not: 'cancel' }, change: { gt: 0 } } }) : [],
+    ]);
+    const pairs = transferPairs(transferLegs);
+    const outputs = new Map<string, Movement[]>();
+    for (const row of conversionOutputs) {
+      const key = conversionKey(row);
+      const entries = outputs.get(key) ?? [];
+      entries.push(row);
+      outputs.set(key, entries);
+    }
+    for (const row of sources) {
+      if (row.sourceType === 'transfer') {
+        follow(transferPair(pairs, row).credit);
+      } else {
+        const results = outputs.get(conversionKey(row));
+        if (!results?.length) throw cannotReplay('в журнале нет выпуска по производству или переработке');
+        for (const output of results) {
+          if (compareChronology(row, output) > 0) throw cannotReplay('выпуск проведён до расхода сырья');
+          follow(output);
+        }
+      }
+      expanded.add(row.id);
     }
   }
-  return starts;
 }
 
 export function receiptMovementValue(movement: Movement, items: ReceiptLine[] | undefined) {
@@ -280,17 +344,30 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     select: { ingredientId: true, createdAt: true },
   }) : [];
   const scanAt = new Date(Math.min(effectiveAt.getTime(), ...repostedMovements.map(({ createdAt }) => createdAt.getTime())));
-  const ingredientIds = [...new Set([...inserted.map((row) => row.ingredientId), ...(reposted?.items ?? []).map(({ ingredientId }) => ingredientId)])];
-  const [suffix, ingredients, locations, settings] = await Promise.all([
-    tx.stockMovement.findMany({ where: { cafeId, ingredientId: { in: ingredientIds }, createdAt: { gte: scanAt } }, take: movementLimit + 1 }),
-    tx.ingredient.findMany({ where: { cafeId, id: { in: ingredientIds } } }),
+  const seedIngredients = [...new Set([...inserted.map((row) => row.ingredientId), ...(reposted?.items ?? []).map(({ ingredientId }) => ingredientId)])];
+  const [locations, settings] = await Promise.all([
     tx.warehouse.findMany({ where: { cafeId }, select: { id: true, cafeId: true, name: true, isDefault: true } }),
     tx.settings.findFirst({ where: { cafeId }, select: { allowNegativeIngredientStock: true } }),
   ]);
-  if (suffix.length > movementLimit) throw cannotReplay('слишком много движений; выберите более позднюю дату');
+  const byLocation = new Map(locations.map((location) => [location.id, location]));
+  const starts = new Map(inserted.map((row) => [scopeKey(row), row.createdAt.getTime()]));
+  if (reposted) {
+    const warehouse = byLocation.get(reposted.warehouseId);
+    if (!warehouse) throw cannotReplay('не удалось подтвердить склад инвентаризации');
+    const openingByIngredient = new Map(repostedMovements.map(({ ingredientId, createdAt }) => [ingredientId, createdAt]));
+    for (const { ingredientId } of reposted.items) {
+      const opening = openingByIngredient.get(ingredientId) ?? effectiveAt;
+      starts.set(JSON.stringify([ingredientId, warehouse.isDefault ? 'default' : warehouse.id]),
+        Math.min(effectiveAt.getTime(), opening.getTime()));
+    }
+  }
+  const { suffix, ingredientIds } = await chartLanes(tx, cafeId, scanAt, starts, seedIngredients);
+  const startFor = (row: Movement) => starts.get(scopeKey(row)) ?? Infinity;
+  const replayRows = suffix.filter((row) => row.createdAt.getTime() >= startFor(row));
 
   const suffixIds = [...new Set(suffix.flatMap((row) => row.sourceId ? [row.sourceId] : []))];
-  const [transferOrigins, saleOrigins, reversedOrigins, receipts, inventories] = await Promise.all([
+  const [ingredients, transferOrigins, saleOrigins, reversedOrigins, receipts, inventories, conversions] = await Promise.all([
+    tx.ingredient.findMany({ where: { cafeId, id: { in: ingredientIds } } }),
     tx.stockMovement.findMany({ where: { cafeId, ingredientId: { in: ingredientIds }, sourceId: { in: suffixIds },
       sourceType: 'transfer', type: 'transfer' } }),
     tx.stockMovement.findMany({ where: { cafeId, ingredientId: { in: ingredientIds }, sourceId: { in: suffixIds },
@@ -305,23 +382,9 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
       select: { ingredientId: true, quantity: true, reopenedQuantity: true, expected: true,
         document: { select: { id: true, warehouseId: true, postedAt: true, countedAt: true, reopenedAt: true, status: true,
           postedById: true, postedByName: true, note: true } } } }),
+    loadHistoricalConversions(tx, cafeId, replayRows),
   ]);
   const pairs = transferPairs(transferOrigins);
-  const byLocation = new Map(locations.map((location) => [location.id, location]));
-  const seeds = new Map(inserted.map((row) => [scopeKey(row), row.createdAt.getTime()]));
-  if (reposted) {
-    const warehouse = byLocation.get(reposted.warehouseId);
-    if (!warehouse) throw cannotReplay('не удалось подтвердить склад инвентаризации');
-    const openingByIngredient = new Map(repostedMovements.map(({ ingredientId, createdAt }) => [ingredientId, createdAt]));
-    for (const { ingredientId } of reposted.items) {
-      const opening = openingByIngredient.get(ingredientId) ?? effectiveAt;
-      seeds.set(JSON.stringify([ingredientId, warehouse.isDefault ? 'default' : warehouse.id]),
-        Math.min(effectiveAt.getTime(), opening.getTime()));
-    }
-  }
-  const starts = chartLanes(seeds, suffix, pairs);
-  const startFor = (row: Movement) => starts.get(scopeKey(row)) ?? Infinity;
-  const replayRows: Movement[] = suffix.filter((row) => row.createdAt.getTime() >= startFor(row));
   // Legacy immediate counts could post a movement milliseconds before
   // stamping the document. A movement already before this replay range
   // stays in the opening balance and needs no replacement anchor.
@@ -370,9 +433,6 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
   if (!inventoryRepost && [...earliestCounts.values()].some(({ document }) => !document.reopenedAt)) {
     throw cannotReplay('после выбранной даты проведена инвентаризация на затронутом складе; откройте ближайшую инвентаризацию на редактирование');
   }
-  if (replayRows.some(({ sourceType }) => sourceType === 'production' || sourceType === 'processing')) {
-    throw cannotReplay('после выбранной даты были производство или переработка; их распределение стоимости требует отдельной проверки');
-  }
   const replayById = new Map(replayRows.map((row) => [row.id, row]));
 
   const balances = new Map<string, Balance>();
@@ -412,14 +472,28 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
   const replayed = new Map<string, Replayed>();
   const revisedCounts = new Map<string, { change: Prisma.Decimal; quantity: Prisma.Decimal; expected: Prisma.Decimal; reset: boolean }>();
   const quantityDifferences = new Map<string, { at: number; change: Prisma.Decimal }[]>();
-  const dependency = (row: Movement) => {
+  const linkedMovement = (row: Movement) => {
     if (row.sourceType === 'transfer' && row.type === 'transfer' && row.change.gt(0)) return transferPair(pairs, row).debit;
     if (row.sourceType === 'order' && (row.type === 'return' || row.type === 'writeoff')) return sales.get(saleKey(row, false));
     if (row.type === 'cancel') return origins.get(warehouseDocumentKey(row));
     return undefined;
   };
+  const priceForMovement = (row: Movement) => replayed.get(row.id) ?? row;
+  const dependencies = new Map<string, Movement[]>();
+  for (const row of replayRows) {
+    const conversion = conversions.byMovement.get(row.id);
+    if (conversion) {
+      dependencies.set(row.id, conversionDependencies(conversion, row));
+    } else {
+      const original = linkedMovement(row);
+      if (original) dependencies.set(row.id, [original]);
+      if (isConversionMovement(row)) throw cannotReplay('не удалось подтвердить исходный документ выпуска');
+    }
+  }
   const derivePricing = (row: Movement, before: Balance, original?: Movement): Pricing => {
-    const sourcePrice = original && (replayed.get(original.id) ?? original);
+    const conversion = conversions.byMovement.get(row.id);
+    if (conversion && !isConversionInput(row)) return conversionPricing(conversion, row, priceForMovement);
+    const sourcePrice = original && priceForMovement(original);
     if (sourcePrice) {
       const cost = { costAtMoment: sourcePrice.costAtMoment, costKnown: sourcePrice.costKnown };
       return { mode: row.change.isZero() ? 'preserve' : row.change.gt(0) ? 'average' : 'value', price: cost };
@@ -452,8 +526,7 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     const time = Math.min(...heads.map(({ row }) => row.createdAt.getTime()));
     const next = heads.find(({ row }) => {
       if (row.createdAt.getTime() !== time) return false;
-      const source = dependency(row);
-      return !source || !replayById.has(source.id) || replayed.has(source.id);
+      return (dependencies.get(row.id) ?? []).every((source) => !replayById.has(source.id) || replayed.has(source.id));
     });
     if (!next) throw cannotReplay('связанные складские операции не образуют корректный порядок');
     const { key, row } = next;
@@ -498,13 +571,14 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
       const recordedShortage = !stagedOrder.has(row.id) && row.afterStock.lt(0) && afterStock.gte(row.afterStock);
       const canStayNegative = settings?.allowNegativeIngredientStock === true || recordedShortage
         || (row.sourceType === 'transfer' && row.type === 'transfer') || (row.sourceType === 'order' && row.type !== 'sale');
-      if (!canStayNegative && row.change.lt(0) && afterStock.lt(0)) {
-        throw cannotReplay('в историческом периоде недостаточно запаса для списания или перемещения');
+      if (row.change.lt(0) && afterStock.lt(0) && (!canStayNegative || conversionStrictStock(row))) {
+        throw cannotReplay(isConversionMovement(row) ? 'в историческом периоде недостаточно товара для производства, переработки или их сторно'
+          : 'в историческом периоде недостаточно запаса для списания или перемещения');
       }
-      const original = dependency(row);
-      if (original && original.createdAt > row.createdAt) throw cannotReplay('возврат или перемещение стоит раньше исходного движения');
+      const sources = dependencies.get(row.id) ?? [];
+      if (sources.some((source) => source.createdAt > row.createdAt)) throw cannotReplay('связанная операция стоит раньше исходного движения');
       result = historicalPurchaseCorrection(row) ? replayPurchaseCorrection(before, row)
-        : replayStep(before, row, derivePricing(row, before, original));
+        : replayStep(before, row, derivePricing(row, before, sources[0]));
       if (stagedOrder.has(row.id) && !row.change.isZero()) {
         chronicle.push({ at: row.createdAt.getTime(), change: row.change });
         quantityDifferences.set(key, chronicle);
@@ -516,6 +590,8 @@ export async function replayHistoricalStock(tx: Prisma.TransactionClient, input:
     cursors.set(key, index);
     if (index === laneRows.get(key)!.length) pending.delete(key);
   }
+
+  await persistHistoricalConversions(tx, cafeId, conversions.groups, replayed);
 
   for (const [id, movement] of replayed) {
     const row = replayById.get(id)!;

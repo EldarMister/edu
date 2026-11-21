@@ -98,15 +98,20 @@ test('PostgreSQL: backdated receipt reprices two warehouse transfers, writeoff, 
         effectiveAt: new Date(+effective - 2).toISOString(), items: [{ ingredientId: product.id, quantity: 1 }],
         finalize: 'post' }), /историческом периоде недостаточно/);
 
-      // A production output distributes cost across ingredients. Refusing an
-      // unsupported suffix must roll back the staged receipt and balances.
-      await locked((tx) => postStockMovement(tx, { ingredientId: product.id, warehouse: main,
+      // A journal with a debit and no matching output cannot establish the
+      // conversion cost. The provisional receipt and stock must roll back.
+      const orphan = await ingredients.create({ name: 'Incomplete production', unit: 'pcs' });
+      await locked((tx) => postStockMovement(tx, { ingredientId: orphan.id, warehouse: main, change: decimal(3), cost: decimal(10), costKnown: true,
+        valuation: 'average', movement: { type: 'correction', sourceType: 'manual', sourceId: orphan.id, comment: 'Начальный остаток' } }));
+      await locked((tx) => postStockMovement(tx, { ingredientId: orphan.id, warehouse: main,
         change: decimal(-1), movement: { type: 'production', sourceType: 'production', sourceId: randomUUID() } }));
-      const before = await db.stockMovement.findMany({ where: { ingredientId: product.id }, orderBy: { id: 'asc' } });
+      const before = await db.stockMovement.findMany({ where: { ingredientId: orphan.id }, orderBy: { id: 'asc' } });
+      const orphanBefore = await ingredients.findOne(orphan.id);
+      await assert.rejects(purchases.create({ ...receiptInput,
+        items: [{ ingredientId: orphan.id, quantity: 3, purchasePrice: 2 }] }, actor), /нет выпуска по производству или переработке/);
+      assert.deepEqual(await db.stockMovement.findMany({ where: { ingredientId: orphan.id }, orderBy: { id: 'asc' } }), before);
+      assert.deepEqual((await ingredients.findOne(orphan.id)).balances, orphanBefore.balances);
       const inventoryBefore = await ingredients.findOne(product.id);
-      await assert.rejects(purchases.create(receiptInput, actor), /были производство или переработка/);
-      assert.deepEqual(await db.stockMovement.findMany({ where: { ingredientId: product.id }, orderBy: { id: 'asc' } }), before);
-      assert.deepEqual((await ingredients.findOne(product.id)).balances, inventoryBefore.balances);
       assert.equal(await db.purchase.count({ where: { supplier: receiptInput.supplier } }), 1);
 
       const onHand = inventoryBefore.balances.find(({ warehouseId }) => warehouseId === main.id).stock;
