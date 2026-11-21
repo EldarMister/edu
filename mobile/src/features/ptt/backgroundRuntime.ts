@@ -69,7 +69,7 @@ async function readStoredChannel(): Promise<PttChannel> {
 function emitJoin(channel: PttChannel) {
   const sock = getSocket();
   if (!sock.connected) sock.connect();
-  sock.emit(PTT_EVENTS.JOIN, { channel, codecs: PTT_CODEC_CAPABILITIES });
+  sock.emit(PTT_EVENTS.JOIN, { channel, codecs: PTT_CODEC_CAPABILITIES, sequenced: true });
 }
 
 function onBackgroundAudio(payload: PttAudioPayload) {

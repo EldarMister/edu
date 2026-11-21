@@ -29,7 +29,6 @@ import {
 } from './backgroundRuntime';
 import { useRadioVisibility } from './radioVisibility';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
-import { useLiveKitPtt } from './useLiveKitPtt';
 import { useAudioPttSender } from './useAudioPttSender';
 import { PTT_CODEC_CAPABILITIES } from './opusAudio';
 import {
@@ -319,8 +318,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
   const [channel, setChannel] = React.useState<PttChannel>(() => defaultChannelForRole(role));
   const [onlineCount, setOnlineCount] = React.useState(0);
   const [busySpeaker, setBusySpeaker] = React.useState<{ id: string; name?: string } | null>(null);
-  const legacySender = useAudioPttSender(channel, !!user?.id, workspace);
-  const sender = useLiveKitPtt(channel, !!user?.id, open, legacySender, user?.id);
+  const sender = useAudioPttSender(channel, !!user?.id, workspace);
   const { speaker: playingSpeaker } = useAudioPttReceiver(channel, !!user?.id);
   const stopRadio = sender.stop;
   const closeRadio = React.useCallback(() => {
@@ -370,7 +368,7 @@ export function PttOverlay({ navigationState }: { navigationState?: unknown }) {
     const seq = ++joinSeqRef.current;
     const attempt = (retriesLeft: number) => {
       if (joinSeqRef.current !== seq) return;
-      sock.timeout(5000).emit(PTT_EVENTS.JOIN, { channel, codecs: PTT_CODEC_CAPABILITIES }, (error: Error | null, ack: { ok?: boolean; onlineCount?: number } | undefined) => {
+      sock.timeout(5000).emit(PTT_EVENTS.JOIN, { channel, codecs: PTT_CODEC_CAPABILITIES, sequenced: true }, (error: Error | null, ack: { ok?: boolean; onlineCount?: number } | undefined) => {
         if (joinSeqRef.current !== seq) return;
         if (!error && ack?.ok) {
           if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);

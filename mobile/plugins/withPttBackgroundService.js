@@ -1,4 +1,6 @@
-const { withAndroidManifest, withAppBuildGradle, withProjectBuildGradle } = require('@expo/config-plugins');
+const fs = require('node:fs');
+const path = require('node:path');
+const { withAndroidManifest, withAppBuildGradle, withProjectBuildGradle, withMainApplication } = require('@expo/config-plugins');
 
 module.exports = function withPttBackgroundService(config) {
   config = withAppBuildGradle(config, (configWithGradle) => {
@@ -37,6 +39,19 @@ if (org.apache.tools.ant.taskdefs.condition.Os.isFamily('windows')) {
 `;
     }
     return configWithGradle;
+  });
+
+  config = withMainApplication(config, (mod) => {
+    const registration = 'packages.add(PttMicrophonePackage())';
+    const file = mod.modResults;
+    if (!file.contents.includes(registration)) {
+      const packages = 'val packages = PackageList(this).packages';
+      if (!file.contents.includes(packages)) throw new Error('Cannot register PTT microphone in MainApplication');
+      file.contents = file.contents.replace(packages, packages + '\n            ' + registration);
+    }
+    fs.copyFileSync(path.join(__dirname, 'android/PttMicrophoneModule.kt'),
+      path.join(path.dirname(file.path), 'PttMicrophoneModule.kt'));
+    return mod;
   });
 
   return withAndroidManifest(config, (configWithManifest) => {

@@ -150,6 +150,7 @@ test('live playout schedules the MP3 before speech and recovers from stalls at n
   }
   const { RadioPlayout } = loadSource('src/features/ptt/nativeAudio.ts', {
     'react-native': { Platform: { OS: 'android' } },
+    './androidPttInput': { startAndroidPttInput: () => undefined },
     'react-native-audio-api': {
       AudioContext, AudioManager: { getDevicePreferredSampleRate: () => 48000 },
       OfflineAudioContext: class {
@@ -210,6 +211,7 @@ test('live capture delivers 20 ms buffers and keeps the final short buffer on re
     'react-native': { Platform: { OS: 'android' } },
     'expo-asset': {},
     './sounds': {},
+    './androidPttInput': { startAndroidPttInput: () => undefined },
     'react-native-audio-api': { AudioRecorder },
     './opusAudio': { CAPTURE_RATE: 24000, CAPTURE_SAMPLES: 480 },
   });
@@ -229,9 +231,11 @@ test('live receiver plays high-quality Opus and coalesces legacy Opus packets at
     'react-native': { Platform: { OS: 'android' }, AppState: { currentState: 'active' } },
     '@/services/socket': { getSocket: () => ({ on: (event, callback) => listeners.set(event, callback), off: event => listeners.delete(event) }) },
     '@/store/auth': { useAuth: selector => selector({ user: { id: 'listener' } }) },
-    './types': { PTT_EVENTS: { AUDIO_MESSAGE: 'audio', AUDIO_PACKET: 'packet', AUDIO_FRAME: 'frame', CHANNEL_BUSY: 'busy', CHANNEL_FREE: 'free' } },
+    './types': { PTT_EVENTS: { AUDIO_MESSAGE: 'audio', AUDIO_PACKET: 'packet', AUDIO_FRAME: 'frame', AUDIO_BATCH: 'batch', PRESENCE: 'presence', CHANNEL_BUSY: 'busy', CHANNEL_FREE: 'free' } },
     './audioPlayback': { PttPlaybackQueue: class { clear() {} } },
     './backgroundFlag': { isPttBackgroundRuntimeActive: () => false },
+    './radioAudioGate': { radioInputActive: () => false, onRadioInput: () => () => {} },
+    './sequencedAudio': { pttAudioHistory: () => () => {}, createPttStreamReceiver: () => ({ batch() {}, joined() {}, disconnected() {}, dispose() {} }) },
     './nativeAudio': { RadioPlayout: class {
       async prepareStartCue() {}
       push(samples, newTalk, rate) { played.push([samples.length, newTalk, rate]); }
@@ -286,9 +290,11 @@ test('foreground receiver unmount cancels real playback and removes the socket l
     'react-native': { Platform: { OS: 'android' }, AppState: { currentState: 'active' } },
     '@/services/socket': { getSocket: () => ({ on: (event, callback) => listeners.set(event, callback), off: event => listeners.delete(event) }) },
     '@/store/auth': { useAuth: selector => selector({ user: { id: 'staff' } }) },
-    './types': { PTT_EVENTS: { AUDIO_MESSAGE: 'audio', AUDIO_PACKET: 'packet', AUDIO_FRAME: 'frame', CHANNEL_BUSY: 'busy', CHANNEL_FREE: 'free' } },
+    './types': { PTT_EVENTS: { AUDIO_MESSAGE: 'audio', AUDIO_PACKET: 'packet', AUDIO_FRAME: 'frame', AUDIO_BATCH: 'batch', PRESENCE: 'presence', CHANNEL_BUSY: 'busy', CHANNEL_FREE: 'free' } },
     './audioPlayback': env.playback,
     './backgroundFlag': { isPttBackgroundRuntimeActive: () => false },
+    './radioAudioGate': { radioInputActive: () => false, onRadioInput: () => () => {} },
+    './sequencedAudio': { pttAudioHistory: () => () => {}, createPttStreamReceiver: () => ({ batch() {}, joined() {}, disconnected() {}, dispose() {} }) },
     './nativeAudio': { RadioPlayout: class { async prepareStartCue() {} stop() {} } },
     './opusAudio': {},
   });
@@ -339,121 +345,54 @@ test('logout cancels a background runtime waiting for native audio initializatio
   assert.ok(!flags.includes(true));
 });
 
-function liveTalkHarness() {
-  const media = {
-    enabled: true, readyState: 'live',
-    stop() { this.readyState = 'ended'; },
-  };
-  const callbacks = [];
-  const delays = [];
-  const operations = [];
-  const cue = deferred();
-  let stopCue;
-  class Room {
-    constructor() {
-      this.localParticipant = {
-        permissions: { canPublish: true },
-        publishTrack: async track => {
-          operations.push(['published', track.mediaStreamTrack.enabled]);
-          return { trackSid: 'TR_radio' };
-        },
-      };
-    }
-    async connect() { this.state = 'connected'; }
-    async disconnect() { this.state = 'disconnected'; }
-    on() {}
-  }
-  const socket = {
-    connected: true,
-    timeout() { return this; },
-    on() {},
-    off() {},
-    emit(event) { operations.push([event, media.enabled]); },
-    async emitWithAck(event) {
-      if (event === 'ptt_livekit_connect') return { ok: true, url: 'wss://test', channels: [{ channel: 'general', token: 'test' }] };
-      if (event === 'ptt_start_talk') return { ok: true, codec: 'livekit' };
-      assert.ok(['ptt_livekit_ready', 'ptt_livekit_wait_track'].includes(event));
-      return { ok: true };
-    },
-  };
-  const modules = {
-    react: {
-      useRef: current => ({ current }),
-      useState: value => [value, () => {}],
-      useCallback: callback => callback,
-      useEffect: callback => { const cleanup = callback(); if (cleanup) callbacks.push(cleanup); },
-    },
-    'livekit-client': {
-      Room, RoomEvent: {}, Track: { Source: { Microphone: 'microphone' } },
-      LocalAudioTrack: class {
-        constructor(track) {
-          this.mediaStreamTrack = track;
-          queueMicrotask(() => { track.enabled = true; });
-        }
-        stop() { media.stop(); }
-      },
-    },
-    '@/services/socket': { getSocket: () => socket },
-    'expo-crypto': { randomUUID: () => 'talk' },
-    './liveKitAudio': {
-      activateRadioAudio: async () => () => {},
-      attachRemoteAudio: () => () => {},
-      observeRadioInterruption: () => () => {},
-      prepareRadioCue: () => {},
-      radioCue(side, signal) {
-        operations.push([side, media.enabled]);
-        stopCue = signal;
-        return cue.promise;
-      },
-    },
-  };
-  const { useLiveKitPtt } = loadSource('src/features/ptt/useLiveKitPtt.ts', modules, {
-    navigator: { mediaDevices: { async getUserMedia() { return { getAudioTracks: () => [media] }; } } },
-    setInterval: () => 0, clearInterval() {},
-    setTimeout(resolve, ms) { if (ms === 0) queueMicrotask(resolve); else delays.push(resolve); },
+const sequencedModule = loadSource('src/features/ptt/sequencedAudio.ts', { './types': { PTT_EVENTS: {} } }, { Uint8Array,Float32Array,ArrayBuffer });
+const settleSequenced = settle;
+
+test('a radio gap is repaired in order and overlapping live frames play only once', async () => {
+  const decodedFrames = [];
+  const played = [];
+  const ended = [];
+  const payload = (firstFrame, samples, senderId = 'other') => ({
+    channel: 'waiters', talkId: 'radio-talk', codec: 'opus-hq', firstFrame, senderId,
+    audio: new Uint8Array(samples).buffer,
   });
-  const sender = useLiveKitPtt('general', true, true, { start: () => assert.fail('unexpected fallback'), stop() {} }, 'staff-id');
-  return { sender, media, cue, delays, operations, cueSignal: () => stopCue, dispose: () => callbacks.forEach(callback => callback()) };
-}
-
-test('LiveKit listener receives silence before speech and drains the tail before permissions are revoked', async () => {
-  const h = liveTalkHarness();
-  try {
-    await settle();
-    const start = h.sender.start();
-    await settle();
-    assert.deepEqual(h.operations, [['published', false], ['sender', false]]);
-    h.cue.resolve();
-    assert.equal(await start, true);
-    assert.equal(h.media.enabled, true);
-
-    h.sender.stop();
-    assert.equal(h.media.enabled, true);
-    h.delays.shift()();
-    await settle();
-    assert.equal(h.media.enabled, false);
-    assert.equal(h.operations.length, 2);
-    h.delays.shift()();
-    await settle();
-    assert.deepEqual(h.operations.at(-1), ['ptt_stop_talk', false]);
-  } finally {
-    h.dispose();
-  }
+  const receiver = sequencedModule.createPttStreamReceiver({
+    hears: batch => batch.senderId !== 'me' && batch.channel === 'waiters',
+    openDecoder: () => ({ frameBytes: 1, frameSamples: 1, sampleRate: 24000,
+      decode(frame) { decodedFrames.push(frame[0]); return Float32Array.of(frame[0] / 255); },
+      close() {},
+    }),
+    async sync(id, frame) {
+      assert.equal(id, 'radio-talk');
+      if (frame === 2) return { ok: true, batch: payload(2, [20, 21, 30, 31]) };
+      assert.equal(frame, 6);
+      return { ok: true, finished: true, nextFrame: 8, batch: payload(6, [40, 41]) };
+    },
+    play(batch, samples) { played.push([batch.firstFrame, samples.length]); },
+    end(id) { ended.push(id); },
+  });
+  receiver.batch(payload(0, [200, 201], 'me'));
+  receiver.batch(payload(0, [10, 11]));
+  receiver.batch(payload(4, [30, 31]));
+  await settleSequenced();
+  receiver.disconnected();
+  receiver.joined();
+  await settleSequenced();
+  receiver.batch(payload(6, [40, 41]));
+  await settleSequenced();
+  assert.deepEqual(decodedFrames, [10, 11, 20, 21, 30, 31, 40, 41]);
+  assert.deepEqual(played, [[0, 2], [2, 4], [6, 2]]);
+  assert.deepEqual(ended, ['radio-talk']);
+  receiver.dispose();
 });
 
-test('releasing during the LiveKit cue never enables the microphone', async () => {
-  const h = liveTalkHarness();
-  try {
-    await settle();
-    const start = h.sender.start();
-    await settle();
-    h.sender.stop();
-    assert.equal(h.cueSignal().aborted, true);
-    h.cue.resolve();
-    assert.equal(await start, false);
-    assert.equal(h.media.enabled, false);
-    assert.deepEqual(h.operations.at(-1), ['ptt_stop_talk', false]);
-  } finally {
-    h.dispose();
-  }
+test('radio packs Opus frames and flushes the last partial batch before the channel is released', () => {
+  const sent = [];
+  const batcher = sequencedModule.createPttBatcher(2, (first, audio) => sent.push([first, Array.from(new Uint8Array(audio))]));
+  for (let frame = 1; frame <= 6; frame++) batcher.push(new Uint8Array(18).fill(frame).buffer);
+  assert.deepEqual(sent, [[0, [1, 1, 2, 2, 3, 3, 4, 4]]]);
+  assert.equal(batcher.flush(), 6);
+  assert.deepEqual(sent[1], [4, [5, 5, 6, 6]]);
+  assert.equal(batcher.flush(), 6);
+  assert.equal(sent.length, 2);
 });

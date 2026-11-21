@@ -7,15 +7,19 @@ import { getSocket } from '@/services/socket';
 import type { Workspace } from '@/lib/workspaces';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload } from './types';
 import { configureRadioAudioSession, startRadioCapture } from './nativeAudio';
-import { createOpusEncoder, type OpusMode } from './opusAudio';
+import { createOpusEncoder, getOpusProfile, type OpusMode } from './opusAudio';
 import { playPttCue } from './sounds';
+import { createPttBatcher } from './sequencedAudio';
+import { startRadioInput } from './radioAudioGate';
 
 type Socket = ReturnType<typeof getSocket>;
-type Ack = { ok: boolean; reason?: string; talkId?: string; codec?: OpusMode };
+type Ack = { ok: boolean; reason?: string; talkId?: string; sequenced?: boolean; codec?: OpusMode };
 type Attempt = {
   socket: Socket;
   channel: PttChannel;
   talkId: string;
+  batcher?: ReturnType<typeof createPttBatcher>;
+  releaseInput: () => void;
   requested: boolean;
   granted: boolean;
   released: boolean;
@@ -34,7 +38,7 @@ function releaseChannel({ socket, channel, talkId }: Attempt) {
 
 function requestChannel({ socket, channel, talkId }: Attempt) {
   return new Promise<Ack>((resolve) => {
-    socket.timeout(3500).emit(PTT_EVENTS.START_TALK, { channel, talkId, codec: 'opus', preferHq: true }, (error: Error | null, ack?: Ack) =>
+    socket.timeout(3500).emit(PTT_EVENTS.START_TALK, { channel, talkId, codec: 'opus', preferHq: true, sequenced: true }, (error: Error | null, ack?: Ack) =>
       resolve(error ? { ok: false, reason: 'timeout' } : ack ?? { ok: false }));
   });
 }
@@ -52,6 +56,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
     setTalking(false);
     setPreparing(false);
     attempt.cue.abort();
+    attempt.releaseInput();
     clearTimeout(attempt.firstAudioTimeout);
     attempt.encoder?.close();
     if (attempt.requested) releaseChannel(attempt);
@@ -77,9 +82,17 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
     finish(attempt);
   }, [finish]);
 
-  const complete = React.useCallback((attempt: Attempt) => {
+  const complete = React.useCallback(async (attempt: Attempt) => {
     try {
       attempt.encoder?.flush();
+      if (attempt.batcher) {
+        const frames = attempt.batcher.flush();
+        const response = await attempt.socket.timeout(4500).emitWithAck(PTT_EVENTS.STOP_TALK, {
+          channel: attempt.channel, talkId: attempt.talkId, frames,
+        });
+        if (!response?.ok) throw new Error('Incomplete radio transmission');
+        attempt.requested = false;
+      }
       finish(attempt);
     } catch {
       fail(attempt, 'Не удалось передать конец фразы. Повторите последние слова');
@@ -104,8 +117,9 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
       .then((flushed) => {
         if (attemptRef.current !== attempt) return;
         attempt.capture = undefined;
+        attempt.releaseInput();
         if (!flushed) setDeniedReason('Не удалось передать конец фразы. Повторите последние слова');
-        if (attempt.granted) complete(attempt);
+        if (attempt.granted) void complete(attempt);
       });
   }, [complete, finish]);
 
@@ -119,12 +133,12 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
     }
     const attempt: Attempt = {
       socket, channel, talkId: randomUUID(), requested: false, granted: false, released: false,
-      cue: new AbortController(), pending: [],
+      cue: new AbortController(), releaseInput: startRadioInput(), pending: [],
     };
     attemptRef.current = attempt;
     setPreparing(true);
-    // The local acknowledgement must never delay capture or the channel request.
-    void playPttCue('start', attempt.cue.signal).catch(() => undefined);
+    // The local cue stays out of the voice stream. Permission and sound load in parallel.
+    const cue = playPttCue('start', attempt.cue.signal, { timeoutMs: 400 }).catch(() => undefined);
     try {
       const current = await Audio.getPermissionsAsync();
       if (attemptRef.current !== attempt) return false;
@@ -137,6 +151,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
 
       attempt.configuring = configureAudioRecording(true);
       await attempt.configuring;
+      await cue;
       if (attemptRef.current !== attempt) return false;
       configureRadioAudioSession(true);
 
@@ -153,7 +168,9 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
         }
         try { attempt.encoder?.push(samples); }
         catch { fail(attempt, 'Не удалось передать звук. Повторите фразу'); }
-      });
+      }, () => fail(attempt, 'Микрофон рации отключился'));
+      await attempt.capture.ready;
+      if (attemptRef.current !== attempt) return false;
       attempt.requested = true;
       const ack = await requestChannel(attempt);
       if (attemptRef.current !== attempt) {
@@ -165,14 +182,21 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean, workspa
           ? 'Обновите EDU POS, чтобы включить рацию' : 'Не удалось начать разговор');
         return false;
       }
+      if (ack.sequenced) {
+        attempt.batcher = createPttBatcher(getOpusProfile(ack.codec).frameBytes, (firstFrame, audio) => {
+          socket.emit(PTT_EVENTS.AUDIO_BATCH, { channel, talkId: attempt.talkId, firstFrame, audio });
+        });
+      }
       const encoder = attempt.encoder = createOpusEncoder(attempt.talkId, (packet) => {
-        if (socket.connected && attemptRef.current === attempt) socket.emit(PTT_EVENTS.AUDIO_PACKET, packet);
+        if (!socket.connected || attemptRef.current !== attempt) return;
+        if (attempt.batcher) attempt.batcher.push(packet);
+        else socket.emit(PTT_EVENTS.AUDIO_PACKET, packet);
       }, ack.codec);
       attempt.granted = true;
       for (const samples of attempt.pending) encoder.push(samples);
       attempt.pending.length = 0;
       if (attempt.released) {
-        if (!attempt.capture) complete(attempt);
+        if (!attempt.capture) void complete(attempt);
         return false;
       }
       setPreparing(false);

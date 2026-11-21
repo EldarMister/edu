@@ -8,6 +8,7 @@ export const PTT_CHANNELS = [
 ] as const;
 
 export type PttChannel = (typeof PTT_CHANNELS)[number]['key'];
+export type PttOpusCodec = OpusMode;
 
 export const PTT_CHANNEL_STORAGE_KEY = 'edu-pos:ptt-channel';
 
@@ -34,6 +35,7 @@ export type PttPresencePayload = {
 };
 
 export type PttBusyPayload = {
+  sequenced?: boolean;
   channel: PttChannel;
   talkId?: string;
   codec?: OpusMode;
@@ -41,9 +43,21 @@ export type PttBusyPayload = {
   startedAt?: string;
 };
 
+export type PttBatchPayload = {
+  channel: PttChannel;
+  talkId: string;
+  codec: PttOpusCodec;
+  senderId: string;
+  senderName?: string;
+  senderRole?: string;
+  firstFrame: number;
+  audio: unknown;
+};
+
 export type RadioState = 'ready' | 'speakingSelf' | 'speakingOther' | 'error';
 
 export type PttFreePayload = {
+  frames?: number;
   channel: PttChannel;
   talkId?: string;
   speakerId?: string;
@@ -63,6 +77,8 @@ export const PTT_EVENTS = {
   CHANNEL_FREE: 'ptt_channel_free',
   AUDIO_MESSAGE: 'ptt_audio_message',
   AUDIO_PACKET: 'ptt_audio_packet',
+  AUDIO_BATCH: 'ptt_audio_batch',
+  AUDIO_SYNC: 'ptt_audio_sync',
   AUDIO_FRAME: 'ptt_audio_frame',
   TALK_DENIED: 'ptt_talk_denied',
   PRESENCE: 'ptt_presence',

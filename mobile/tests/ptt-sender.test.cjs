@@ -39,6 +39,8 @@ function harness({ permission, preparation, permissionGranted = false, cuePlayba
     'expo-crypto': { randomUUID: () => talkId },
     '@/lib/sound': { configureAudioRecording: async active => { if (active && preparation) await preparation.promise; } },
     '@/services/socket': { getSocket: () => socket },
+    './sequencedAudio': {},
+    './radioAudioGate': { startRadioInput: () => () => {} },
     './sounds': { playPttCue: async (kind, signal) => { cues.push({ kind, signal }); await cuePlayback?.promise; } },
     './nativeAudio': {
       configureRadioAudioSession() {},
@@ -77,13 +79,16 @@ function harness({ permission, preparation, permissionGranted = false, cuePlayba
   };
 }
 
-test('press plays the local radio cue once while capture and buffering continue', async () => {
+test('press plays the local cue before opening the microphone', async () => {
   const cuePlayback = deferred();
   const env = harness({ cuePlayback });
   const first = env.sender.start();
   assert.equal(await env.sender.start(), false);
   assert.deepEqual(env.cues.map(({ kind }) => kind), ['start']);
   assert.equal(env.cues[0].signal.aborted, false);
+  await settle();
+  assert.equal(env.hasCapture(), false);
+  cuePlayback.resolve();
   await settle();
   env.capture('first word');
   assert.deepEqual(env.eventNames(), ['start']);
@@ -92,7 +97,6 @@ test('press plays the local radio cue once while capture and buffering continue'
   assert.deepEqual(env.events[1], ['audio', 'first word']);
   env.sender.stop();
   assert.equal(env.cues[0].signal.aborted, true);
-  cuePlayback.resolve();
   await settle();
 });
 

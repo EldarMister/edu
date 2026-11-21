@@ -1,6 +1,6 @@
 {
   "name": "edu-pos-mobile",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "private": true,
   "main": "index.ts",
   "scripts": {
@@ -14,12 +14,8 @@
     "verify": "npm run lint && npm test && node scripts/verify-order-contracts.cjs"
   },
   "dependencies": {
-    "@config-plugins/react-native-webrtc": "10.0.0",
     "@expo-google-fonts/inter": "^0.2.3",
     "@expo/vector-icons": "~14.0.4",
-    "@livekit/react-native": "2.9.6",
-    "@livekit/react-native-expo-plugin": "1.0.1",
-    "@livekit/react-native-webrtc": "137.0.3",
     "@react-native-async-storage/async-storage": "1.23.1",
     "@react-native-community/datetimepicker": "^8.2.0",
     "@react-navigation/bottom-tabs": "^7.2.0",
@@ -46,7 +42,6 @@
     "expo-sharing": "~13.0.1",
     "expo-status-bar": "~2.0.0",
     "expo-system-ui": "~4.0.9",
-    "livekit-client": "2.15.8",
     "opusscript": "0.1.1",
     "qrcode": "^1.5.4",
     "react": "18.3.1",

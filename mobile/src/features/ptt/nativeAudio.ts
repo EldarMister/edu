@@ -3,6 +3,7 @@ import { Asset } from 'expo-asset';
 import type { AudioBuffer, AudioContext, AudioRecorder, AudioScheduledSourceNode } from 'react-native-audio-api';
 import { CAPTURE_RATE, CAPTURE_SAMPLES } from './opusAudio';
 import { PTT_START_SOUND } from './sounds';
+import { startAndroidPttInput } from './androidPttInput';
 
 const FLUSH_TIMEOUT_MS = 250;
 const START_BUFFER_SECONDS = 0.10;
@@ -45,7 +46,12 @@ type Capture = {
 let recorder: AudioRecorder | undefined;
 let capture: Capture | undefined;
 
-export function startRadioCapture(onSamples: Capture['onSamples']) {
+export function startRadioCapture(onSamples: Capture['onSamples'], onError: () => void): {
+  ready?: Promise<void>;
+  stop(): Promise<boolean>;
+} {
+  const nativeInput = startAndroidPttInput(onSamples, onError);
+  if (nativeInput) return nativeInput;
   if (capture) throw new Error('Radio microphone already active');
   // One callback for the lifetime of the RN audio engine. This SDK's recorder
   // does not expose removal of an audioReady callback.
@@ -98,7 +104,7 @@ export class RadioPlayout {
     this.startCue = await loadRadioStartCue();
   }
 
-  push(samples: Float32Array, newTalk: boolean, sampleRate: number) {
+  push(samples: Float32Array, newTalk: boolean, sampleRate: number, buffered = false) {
     if (!samples.length) return;
     if (!this.context) {
       if (!capture) configureRadioAudioSession(false);
@@ -118,9 +124,11 @@ export class RadioPlayout {
     }
     this.expectedArrival = now + buffer.duration;
 
+    const baseBuffer = buffered ? 0.32 : START_BUFFER_SECONDS;
+    const maxBuffer = buffered ? 0.72 : MAX_BUFFER_SECONDS;
     let startAt = this.endAt;
     if (newTalk) {
-      const headroom = Math.min(MAX_BUFFER_SECONDS, START_BUFFER_SECONDS + 4 * this.jitter);
+      const headroom = Math.min(maxBuffer, baseBuffer + 4 * this.jitter);
       const cue = this.startCue;
       const nextAt = Math.max(this.endAt, now + RENDER_GUARD_SECONDS);
       startAt = Math.max(nextAt + (cue?.duration ?? 0), now + headroom);
@@ -134,7 +142,7 @@ export class RadioPlayout {
     } else if (startAt < now + RENDER_GUARD_SECONDS) {
       // Leave enough audio queued after a stall to avoid repeated underruns.
       // Packets already queued always play back-to-back at their original speed.
-      const headroom = Math.min(MAX_BUFFER_SECONDS, Math.max(0.06, 0.03 + 4 * this.jitter));
+      const headroom = Math.min(maxBuffer, Math.max(buffered ? baseBuffer : 0.06, 0.03 + 4 * this.jitter));
       startAt = now + headroom;
     }
     source.start(startAt);
