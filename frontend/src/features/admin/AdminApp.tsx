@@ -160,19 +160,17 @@ const SIDEBAR_TOGGLE_LABELS: Record<SidebarMode, string> = {
 };
 
 // perm — ключ доступа к разделу.
-// adminOnly — раздел структурно только для админа (владельцу не показываем).
 const SECTIONS: {
   key: Section;
   label: string;
   icon: typeof IconStats;
   perm?: SectionKey;
-  adminOnly?: boolean;
 }[] = [
   { key: 'stats', label: 'Статистика', icon: IconStats, perm: 'statistics' },
   { key: 'finance', label: 'Финансы', icon: IconMoney },
   { key: 'orders', label: 'Заказы', icon: IconOrders, perm: 'orders' },
   { key: 'requests', label: 'Заявки', icon: IconJournal },
-  { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks', adminOnly: true },
+  { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks' },
   { key: 'tables', label: 'Столы', icon: IconTables, perm: 'tables' },
   { key: 'menu', label: 'Меню', icon: IconMenu, perm: 'menu' },
   { key: 'warehouse', label: 'Склад', icon: IconWarehouse, perm: 'warehouse' },
@@ -195,6 +193,7 @@ export function AdminApp() {
   const { canSection, can } = permissions;
   const isOwner = permissions.isOwner;
   const isAdmin = permissions.effectiveRole === 'ADMIN';
+  const canHandlePrintRequests = canSection('checks') && permissions.canOwnerOperation('printRequests');
   const canManageRefunds = useCanManageOrderRefunds();
   const canManageCancellations = (isAdmin || isOwner) && permissions.canEditSection('orders');
   const requestsNav = [
@@ -211,9 +210,8 @@ export function AdminApp() {
     : key === 'transactions' ? mayPostFinances : mayViewFinances);
   const personnelNav = PERSONNEL_NAV.filter(({ key }) => key !== 'positions' || isOwner);
 
-  // Раздел в меню: структурное ограничение (adminOnly) + право доступа к разделу.
   const sections = SECTIONS.filter((s) => {
-    if (s.adminOnly && !isAdmin) return false;
+    if (s.key === 'receipts') return canHandlePrintRequests;
     if (s.key === 'finance') return financeNav.length > 0;
     if (s.key === 'requests') return requestsNav.length > 0;
     return !!s.perm && canSection(s.perm);
@@ -338,6 +336,7 @@ export function AdminApp() {
   });
   // Печать чека: новая заявка / решение по ней — обновляем список без перезагрузки.
   useSocketEvent<ReceiptPrintRequest>('receipt_print_request_created', (request) => {
+    if (!canHandlePrintRequests) return;
     invalidateReceipts();
     beep('notify');
     adminVoice.enqueue(receiptRequestVoice(request));
@@ -694,7 +693,7 @@ export function AdminApp() {
               {section === 'orders' && canSection('orders') && <OrdersPage />}
               {section === 'requests' && (requestsView?.key === 'refunds' ? <RefundQueuePage />
                 : requestsView?.key === 'cancellations' ? <ItemCancellationQueuePage /> : <NoAccessScreen />)}
-              {section === 'receipts' && isAdmin && canSection('checks') && <ReceiptPrintsPage />}
+              {section === 'receipts' && canHandlePrintRequests && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
               {section === 'menu' && canSection('menu') && <>
                 {menuView === 'categories' && <MenuCategoriesPage />}

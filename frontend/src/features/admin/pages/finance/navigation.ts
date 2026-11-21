@@ -2,6 +2,7 @@ export const FINANCE_NAV = [
   { key: 'transactions', label: 'Транзакции' },
   { key: 'cashFlow', label: 'Движение денег' },
   { key: 'cashShifts', label: 'Кассовые смены' },
+  { key: 'cashHandover', label: 'Сдача наличных' },
   { key: 'payroll', label: 'Зарплата' },
   { key: 'accounts', label: 'Счета' },
   { key: 'categories', label: 'Категории' },

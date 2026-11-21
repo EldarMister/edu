@@ -2,7 +2,7 @@ import { lockRecipeGraph } from '../warehouse/recipe-resolution';
 import { recordOrderReceipts } from '../finance/order-receipts';
 import { receiptTaxes, recordOrderTaxes } from '../settings/order-taxes';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { hasPermission, resolveUserPermissions } from '../common/permissions';
+import { assertOwnerOperation, hasPermission, resolveUserPermissions, type EmployeePermissions } from '../common/permissions';
 import { assertAdminSectionAccess } from '../common/admin-section-access';
 import {
   BadRequestException,
@@ -772,7 +772,8 @@ export class OrdersService {
   }
 
   /** Отмена заказа официантом/админом/владельцем с причиной (audit обязателен). */
-  async cancelOrder(orderId: string, actor: AuditActor, reason?: string) {
+  async cancelOrder(orderId: string, actor: AuditActor & { permissions?: EmployeePermissions }, reason?: string) {
+    assertOwnerOperation(actor, 'cancelOrders');
     const cleanReason = this.cancellationReason(reason);
     let changedItemIds: string[] = [];
     const updated = await this.prisma.$transaction(async tx => {
@@ -782,7 +783,9 @@ export class OrdersService {
       const active = order.items.filter(i => ![OrderItemStatus.cancelled, OrderItemStatus.rejected].includes(i.status as any));
       changedItemIds = active.map(i => i.id);
       const policy = await this.orderPolicy(tx);
-      if (actor.role === Role.WAITER) for (const item of active) assertWaiterItemOperation(policy, order.status, item, 'cancel');
+      if (actor.role === Role.WAITER && actor.identityRole !== Role.OWNER) {
+        for (const item of active) assertWaiterItemOperation(policy, order.status, item, 'cancel');
+      }
       for (const item of active) await this.cancelLine(tx, orderId, item, actor, cleanReason);
       await this.recalcOrder(tx, orderId);
       await this.updateTableAfterClosingCheck(tx, order);
@@ -964,7 +967,7 @@ export class OrdersService {
    * Разрешено в статусах: sent_to_kitchen, accepted_by_kitchen, cooking.
    * Неизменные позиции сохраняют статус кухни; заказ в работе не возвращается в «Новые».
    */
-  async editOrder(orderId: string, actor: AuditActor, requestedItems: CreateOrderItemDto[], comment?: string, reason?: string) {
+  async editOrder(orderId: string, actor: AuditActor & { permissions?: EmployeePermissions }, requestedItems: CreateOrderItemDto[], comment?: string, reason?: string) {
     if (!requestedItems.length) throw new BadRequestException('Заказ не может быть пустым — используйте отмену');
     let changedItemIds: string[] = [];
     const updated = await this.prisma.$transaction(async tx => {
@@ -993,6 +996,7 @@ export class OrdersService {
         if (sameContent && old.quantity === input.quantity && !notesChanged) continue;
         if (actor.role === Role.WAITER) assertWaiterItemOperation(policy, order.status, old, 'edit');
         if (!sameContent || input.quantity < old.quantity) {
+          assertOwnerOperation(actor, 'cancelItems');
           if (actor.role === Role.WAITER) assertWaiterItemOperation(policy, order.status, old, 'cancel');
           const cleanReason = this.cancellationReason(reason);
           if (!sameContent) { await this.cancelLine(tx, orderId, old, actor, cleanReason); additions.push(input); }
@@ -1022,6 +1026,7 @@ export class OrdersService {
         changed.push(old.id);
       }
       for (const old of active.filter(i => !used.has(i.id))) {
+        assertOwnerOperation(actor, 'cancelItems');
         if (actor.role === Role.WAITER) { assertWaiterItemOperation(policy, order.status, old, 'edit'); assertWaiterItemOperation(policy, order.status, old, 'cancel'); }
         await this.cancelLine(tx, orderId, old, actor, this.cancellationReason(reason));
         changed.push(old.id);
@@ -2153,14 +2158,17 @@ export class OrdersService {
     return updated;
   }
 
-  async cancelReadyItem(orderId: string, itemId: string, actor: AuditActor, reason: string) {
+  async cancelReadyItem(orderId: string, itemId: string, actor: AuditActor & { permissions?: EmployeePermissions }, reason: string) {
+    assertOwnerOperation(actor, 'cancelItems');
     const cleanReason = this.cancellationReason(reason);
     const { updated, request } = await this.prisma.$transaction(async tx => {
       await lockOrder(tx, orderId);
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
       this.assertOrderEditable(order, actor);
       const item = this.cancellableItem(order, itemId);
-      if (actor.role === Role.WAITER) assertWaiterItemOperation(await this.orderPolicy(tx), order.status, item, 'cancel');
+      if (actor.role === Role.WAITER && actor.identityRole !== Role.OWNER) {
+        assertWaiterItemOperation(await this.orderPolicy(tx), order.status, item, 'cancel');
+      }
       const updated = await this.applyItemCancellation(tx, order, item, actor, cleanReason);
       const pending = await tx.orderItemCancellationRequest.findFirst({ where: { orderId, itemId, status: 'pending' } });
       const request = pending && await this.recordCancellationDecision(tx, pending.id, actor, 'approved');
@@ -2209,6 +2217,7 @@ export class OrdersService {
 
   async decideItemCancellation(orderId: string, requestId: string, actor: AuthUser, status: 'approved' | 'rejected') {
     assertAdminSectionAccess(actor, 'orders', true);
+    if (status === 'approved') assertOwnerOperation(actor, 'cancelItems');
     const { request, updated, orderNumber, changed } = await this.prisma.$transaction(async (tx) => {
       await lockOrder(tx, orderId);
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId, cafeId: actor.cafeId }, include: orderInclude });
@@ -2650,7 +2659,10 @@ export class OrdersService {
     const toClosedCancelled = targetStatus === OrderStatus.cancelled;
     const targetItemStatus = this.itemStatusForManualOrderStatus(targetStatus);
     const cleanReason = reason?.trim();
-    if (toClosedCancelled) this.cancellationReason(cleanReason);
+    if (toClosedCancelled) {
+      assertOwnerOperation(actor, 'cancelOrders');
+      this.cancellationReason(cleanReason);
+    }
 
     const updated = await this.prisma.$transaction(async (tx) => {
       await lockOrder(tx, orderId);
@@ -3454,7 +3466,7 @@ export class OrdersService {
       where: { isActive: true },
       select: {
         id: true, name: true, role: true, permissions: true,
-        position: { select: { role: true, permissions: true } },
+        position: { select: { role: true, permissions: true, isStarter: true } },
         waiterShifts: { where: { status: WaiterShiftStatus.active }, select: { id: true }, take: 1 },
       },
       orderBy: { name: 'asc' },

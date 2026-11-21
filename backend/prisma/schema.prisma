@@ -364,6 +364,8 @@ model FinanceEntry {
   counterpartyAccountId String?          @map("counterparty_account_id")
   salaryAccrualId       String?          @map("salary_accrual_id")
   cashShiftId           String?          @map("cash_shift_id")
+  cashCustodianId       String?          @map("cash_custodian_id")
+  cashCustodyDay        DateTime?        @map("cash_custody_day") @db.Date
   pendingCashShift      Boolean          @default(false) @map("pending_cash_shift")
   actorId               String?          @map("actor_id")
   sourceKey             String?          @map("source_key")
@@ -381,6 +383,7 @@ model FinanceEntry {
   @@index([cafeId, accountId, occurredAt])
   @@index([cafeId, salaryAccrualId])
   @@index([cafeId, cashShiftId])
+  @@index([cafeId, cashCustodyDay, cashCustodianId], map: "finance_entries_cash_custody_idx")
   @@map("finance_entries")
 }
 
@@ -856,6 +859,7 @@ model ShiftCashReport {
   waiterId    String   @map("waiter_id")
   date        DateTime @db.Date
   cashHanded  Decimal  @default(0) @map("cash_handed") @db.Decimal(10, 2)
+  cashReceivedAt DateTime? @map("cash_received_at")
   updatedById String?  @map("updated_by_id")
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
@@ -1123,6 +1127,7 @@ model Settings {
   taxesEnabled Boolean @default(false) @map("taxes_enabled")
   useFloorPlan Boolean @default(false) @map("use_floor_plan")
   cashShiftsEnabled            Boolean @default(false) @map("cash_shifts_enabled")
+  cashHandoverEnabled          Boolean @default(false) @map("cash_handover_enabled")
   waiterOrderPermissions Json? @map("waiter_order_permissions")
   cafeId                       String? @unique @map("cafe_id")
   id                           String  @id @default(uuid())

@@ -446,7 +446,7 @@ export class CashShiftsService {
     return this.db.$transaction(async (tx) => {
       await lockFinance(tx, cafeId);
       const actor = await tx.user.findFirst({ where: { cafeId, id: actorId },
-        select: { role: true, isActive: true, permissions: true, position: { select: { role: true, permissions: true } } } });
+        select: { role: true, isActive: true, permissions: true, position: { select: { role: true, permissions: true, isStarter: true } } } });
       if (!actor?.isActive) {
         throw new ForbiddenException('Нет доступа к кассовым сменам');
       }
@@ -462,7 +462,7 @@ export class CashShiftsService {
       }
       const { cash } = await ensureFinanceAccounts(tx, cafeId);
       await ensureCollectionAccount(tx, cafeId);
-      const movement = await tx.financeEntry.aggregate({ where: { cafeId, accountId: cash.id, pendingCashShift: false }, _sum: { amount: true } });
+      const movement = await tx.financeEntry.aggregate({ where: { cafeId, accountId: cash.id, pendingCashShift: false, cashCustodianId: null }, _sum: { amount: true } });
       const bookBalance = cash.openingBalance.add(movement._sum.amount ?? 0);
       const openingAmount = new Prisma.Decimal(amount);
       const shift = await tx.cashShift.create({ data: { cafeId, accountId: cash.id, openedById: actorId, openingAmount, openedAt: new Date() } });

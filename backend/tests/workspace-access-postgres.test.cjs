@@ -39,6 +39,8 @@ const { SettingsService } = require('../src/settings/settings.service.ts');
 const { SettingsController } = require('../src/settings/settings.controller.ts');
 const { ReceiptPrintsService } = require('../src/receipt-prints/receipt-prints.service.ts');
 const { ReceiptPrintsController } = require('../src/receipt-prints/receipt-prints.controller.ts');
+const { OrderRefundsController } = require('../src/orders/order-refunds.controller.ts');
+const { OrderRefundsService } = require('../src/orders/order-refunds.service.ts');
 const { IngredientStockService } = require('../src/warehouse/ingredient-stock.service.ts');
 const { getDefaultPermissionsByRole } = require('../src/common/permissions.ts');
 const { tenantPrismaMiddleware, runWithTenant } = require('../src/tenant/tenant-context.ts');
@@ -68,10 +70,11 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
     [JwtStrategy, new JwtStrategy(db)],
     [CatalogService, new CatalogService(db, events, audit)], [MenuEntryService, {}], [HallsService, new HallsService(db)],
     [FiscalService, fiscal], [SettingsService, settings], [ReceiptPrintsService, new ReceiptPrintsService(db, events, fiscal, push)],
+    [OrderRefundsService, new OrderRefundsService(db, audit, events, new IngredientStockService())],
   ].map(([provide, useValue]) => ({ provide, useValue }));
   class HttpFixtureModule {}
   Module({ imports: [PassportModule.register({ defaultStrategy: 'jwt' })],
-    controllers: [AuthController, OrdersController, PaymentsController, FiscalController, WaiterShiftsController, StaffShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController, CatalogController, HallsController], providers })(HttpFixtureModule);
+    controllers: [AuthController, OrdersController, OrderRefundsController, PaymentsController, FiscalController, WaiterShiftsController, StaffShiftsController, StaffController, PositionsController, TablesController, SettingsController, ReceiptPrintsController, CatalogController, HallsController], providers })(HttpFixtureModule);
   const app = await NestFactory.create(HttpFixtureModule, { logger: false });
   app.setGlobalPrefix('api');
   app.use((_req, _res, next) => runWithTenant({}, next));
@@ -129,6 +132,58 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
     const newTable = () => runWithTenant({ cafeId: cafe.id }, async () => await db.table.create({ data: { hallId: fixture.hall.id, number: ++tableNumber } }));
     let tableNumber = 1;
     let mixedOrder;
+    await t.test('starter administrator stays in management while custom roles can use both workspaces', async () => {
+      const starter = await db.staffPosition.findFirstOrThrow({ where: { cafeId: cafe.id, isStarter: true, role: 'ADMIN' } });
+      await db.staffPosition.update({ where: { id: starter.id }, data: { permissions: { terminalAccess: true, adminAccess: false } } });
+      const assigned = await db.user.create({ data: { cafeId: cafe.id, role: 'ADMIN', name: 'Starter admin',
+        phone: '+996' + randomInt(100_000_000, 1_000_000_000), positionId: starter.id,
+        passwordHash: await bcrypt.hash('workspace-test-password', 4) } });
+      const { accessToken, user } = await request('/auth/login', { method: 'POST', body: { phone: assigned.phone, password: 'workspace-test-password' } });
+      assert.deepEqual(user.access, { terminal: false, admin: true, production: null });
+      const me = await request('/auth/me', { token: accessToken, workspace: 'admin' });
+      assert.deepEqual(me.access, user.access);
+      await request('/orders/active', { token: accessToken, workspace: 'terminal', status: 403 });
+      assert.equal((await request('/auth/me', { token: sessions.mixed, workspace: 'admin' })).access.terminal, true);
+      const patched = await request('/admin/positions/' + starter.id, { token: sessions.owner, workspace: 'admin',
+        method: 'PATCH', body: { name: starter.name, permissions: { terminalAccess: true, adminAccess: false } } });
+      assert.equal(patched.fixedWorkspace, 'admin');
+      assert.equal(patched.permissions.terminalAccess, false);
+      assert.equal(patched.permissions.adminAccess, true);
+    });
+
+    await t.test('owner operations can be disabled and restored from the same session', async () => {
+      const admin = { token: sessions.owner, workspace: 'admin' };
+      const terminal = { token: sessions.owner, workspace: 'terminal' };
+      const flags = { refunds: false, cancelOrders: false, cancelItems: false, printRequests: false };
+      const setting = '/admin/positions/owner-operations';
+      await request(setting, { token: sessions.admin, workspace: 'admin', method: 'PATCH', body: flags, status: 403 });
+      await request(setting, { ...admin, method: 'PATCH', body: flags });
+      const me = await request('/auth/me', admin);
+      assert.deepEqual(me.permissions.ownerOperations, flags);
+      assert.equal(me.permissions.sections.staff, true);
+      assert.equal(me.access.admin, true);
+      const table = await newTable();
+      const order = await db.order.create({ data: {
+        cafeId: cafe.id, orderNumber: 'OWNER-' + randomUUID(), tableId: table.id, waiterId: fixture.owner.id, status: 'served',
+        totalAmount: 50, finalAmount: 50,
+        items: { create: { cafeId: cafe.id, dishNameSnapshot: 'Water', priceSnapshot: 50, finalPrice: 50, status: 'served' } },
+      }, include: { items: true } });
+      const post = (path, access, body, status) => request(path, { ...access, method: 'POST', body, status });
+      const cancellation = `/orders/${order.id}/items/${order.items[0].id}/cancel`;
+      await post(`/orders/${order.id}/cancel`, admin, { reason: 'Проверка прав' }, 403);
+      await post(cancellation, admin, { reason: 'Проверка прав' }, 403);
+      await post(cancellation, terminal, { reason: 'Проверка прав' }, 403);
+      await request('/order-refunds/pending', { ...admin, status: 403 });
+      await request('/receipt-prints', { ...admin, status: 403 });
+      await post('/receipt-prints', terminal, { orderId: order.id, type: 'preliminary' }, 403);
+      await request(setting, { ...admin, method: 'PATCH', body: { refunds: true, cancelOrders: true, cancelItems: true, printRequests: true } });
+      await request('/order-refunds/pending', admin);
+      const print = await post('/receipt-prints', terminal, { orderId: order.id, type: 'preliminary' }, 201);
+      assert.ok((await request('/receipt-prints', admin)).some(({ id }) => id === print.id));
+      await post(cancellation, terminal, { reason: 'Проверка прав' }, 201);
+      await post('/receipt-prints/' + print.id + '/reject', admin, {}, 201);
+    });
+
     await t.test('item cancellation requests use the administrator queue and cancel a position only once', async () => {
       const table = await newTable();
       const order = await runWithTenant({ cafeId: cafe.id }, () => db.order.create({ data: {

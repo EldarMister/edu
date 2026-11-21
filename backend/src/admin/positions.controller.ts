@@ -1,12 +1,12 @@
 import { BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
 import { Prisma, Role } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsIn, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
+import { IsBoolean, IsIn, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { AuditService } from '../audit/audit.service';
 import { AuthUser, CurrentUser } from '../common/decorators/current-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { fixedPositionWorkspace, resolvePermissions, sanitizePermissionsInput, type EmployeePermissions, type FixedWorkspace } from '../common/permissions';
+import { fixedPositionWorkspace, resolvePositionPermissions, sanitizePermissionsInput, type EmployeePermissions, type FixedWorkspace, type OwnerOperations } from '../common/permissions';
 import { PrismaService } from '../prisma/prisma.service';
 import { lockFinance } from '../finance/finance-ledger';
 import { currentPayrollMonth, salaryRates, type SalaryRates } from '../finance/payroll';
@@ -16,15 +16,15 @@ import { syncEmployeeSalary } from '../finance/employee-salary';
 
 const assignableRoles = [Role.ADMIN, Role.WAITER, Role.KITCHEN, Role.BAR];
 const positionSelect = {
-  id: true, name: true, role: true, permissions: true, _count: { select: { users: true } },
+  id: true, name: true, role: true, permissions: true, isStarter: true, _count: { select: { users: true } },
   salaryRates: { orderBy: { effectiveMonth: 'desc' }, take: 1 },
 } satisfies Prisma.StaffPositionSelect;
 
 type Position = Prisma.StaffPositionGetPayload<{ select: typeof positionSelect }>;
 
 function positionView({ _count, salaryRates: history, ...position }: Position) {
-  return { ...position, fixedWorkspace: fixedPositionWorkspace(position.role, position.permissions),
-    permissions: resolvePermissions(position.role, position.permissions), employees: _count.users,
+  return { ...position, fixedWorkspace: fixedPositionWorkspace(position.role, position.permissions, position.isStarter),
+    permissions: resolvePositionPermissions(position), employees: _count.users,
     salary: salaryRates(history[0]), salaryEffectiveMonth: history[0]?.effectiveMonth ?? null };
 }
 
@@ -71,6 +71,13 @@ class RemovePositionDto {
   replacementPositionId?: string | null;
 }
 
+class OwnerOperationsDto implements OwnerOperations {
+  @IsBoolean() refunds!: boolean;
+  @IsBoolean() cancelOrders!: boolean;
+  @IsBoolean() cancelItems!: boolean;
+  @IsBoolean() printRequests!: boolean;
+}
+
 @Controller('admin/positions')
 @Roles(Role.OWNER)
 export class PositionsController {
@@ -108,6 +115,18 @@ export class PositionsController {
     return positionView(row);
   }
 
+  @Patch('owner-operations')
+  async updateOwnerOperations(@CurrentUser() actor: AuthUser, @Body() dto: OwnerOperationsDto) {
+    const cafeId = this.cafe(actor);
+    const ownerOperations: OwnerOperations = { ...dto };
+    await this.prisma.user.update({ where: { id: actor.id, cafeId, role: Role.OWNER },
+      data: { permissions: { ownerOperations } } });
+    await this.audit.log({ actor, actionType: AuditAction.POSITION_UPDATED, entityType: AuditEntity.POSITION,
+      entityId: 'system:OWNER', description: 'Изменены права владельца',
+      oldValue: { ownerOperations: actor.permissions.ownerOperations ?? null }, newValue: { ownerOperations } });
+    return ownerOperations;
+  }
+
   @Patch(':id')
   async update(@CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() dto: UpdatePositionDto) {
     const cafeId = this.cafe(actor);
@@ -116,7 +135,7 @@ export class PositionsController {
       await lockFinance(db, cafeId);
       const before = await this.find(cafeId, id, db);
       const permissions = positionPermissions(before.role, dto.permissions,
-        fixedPositionWorkspace(before.role, before.permissions), resolvePermissions(before.role, before.permissions));
+        fixedPositionWorkspace(before.role, before.permissions, before.isStarter), resolvePositionPermissions(before));
       const next = { role: before.role, permissions };
       const losesAccess = losesOperationalAccess(before, next);
       const disablesTracking = disablesWorkTracking(before, next);

@@ -24,7 +24,7 @@ const QR_OFFLINE_CART_TTL_MS = 60 * 60 * 1000;
 const QR_OFFLINE_CART_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
 const STAFF_ACCESS_CHECK_INTERVAL_MS = 30_000;
 const socketUserSelect = { id: true, role: true, name: true, phone: true, cafeId: true, isActive: true,
-  prepStation: true, positionId: true, permissions: true, position: { select: { role: true, permissions: true } } } satisfies Prisma.UserSelect;
+  prepStation: true, positionId: true, permissions: true, position: { select: { role: true, permissions: true, isStarter: true } } } satisfies Prisma.UserSelect;
 type SocketEmployee = Prisma.UserGetPayload<{ select: typeof socketUserSelect }>;
 
 function socketActor(user: SocketEmployee, workspace?: unknown) {
@@ -150,7 +150,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         client.join(ROOMS.cafeKitchen(user.cafeId));
       } else if (user.role === 'WAITER') {
         client.join(ROOMS.cafeWaiters(user.cafeId));
-        if (user.permissions.actions.printReceipts) {
+        if (user.permissions.actions.printReceipts && user.permissions.ownerOperations?.printRequests !== false) {
           client.join(ROOMS.cafeReceiptPrinters(user.cafeId));
         }
       } else if (user.role === 'ADMIN' || user.role === 'OWNER') {
@@ -159,8 +159,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         if (orders) client.join(ROOMS.cafeKitchen(user.cafeId));
         if (user.role === 'ADMIN') {
           client.join(ROOMS.cafeAdmins(user.cafeId));
-          if (checks) client.join(ROOMS.cafeReceiptPrinters(user.cafeId));
         }
+        if (checks && user.permissions.ownerOperations?.printRequests !== false) client.join(ROOMS.cafeReceiptPrinters(user.cafeId));
       }
 
       this.logger.log(`Connected: ${user.role} ${user.id} (${client.id})`);

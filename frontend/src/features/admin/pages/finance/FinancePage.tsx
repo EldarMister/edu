@@ -11,6 +11,7 @@ import { useListPeriod } from '../warehouse/ListPeriodFilter';
 import { useFinance, useFinanceWrites, usePayroll, type FinanceAccount, type FinanceEntry } from './api';
 import { AccountTrashPage, ArchiveAccountDialog } from './AccountTrashPage';
 import { CashShiftsPage } from './CashShiftsPage';
+import { CashHandoverPage } from './CashHandoverPage';
 import { CashFlowMatrix } from './CashFlowMatrix';
 import { FinancePeriod } from './FinancePeriod';
 import { AccountForm, AccrualForm, CategoryForm, PayoutForm, ReverseTransactionDialog, TransactionDetail, TransactionForm } from './FinanceForms';
@@ -30,10 +31,12 @@ const transactionDay = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month:
 const transactionColumns = ['date', 'category', 'note', 'amount', 'account'];
 
 export function FinancePage({ view }: { view: FinanceView }) {
-  return view === 'cashShifts' ? <CashShiftsPage /> : <FinanceReport view={view} />;
+  if (view === 'cashShifts') return <CashShiftsPage />;
+  if (view === 'cashHandover') return <CashHandoverPage />;
+  return <FinanceReport view={view} />;
 }
 
-function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts'> }) {
+function FinanceReport({ view }: { view: Exclude<FinanceView, 'cashShifts' | 'cashHandover'> }) {
   const route = useEditorRoute();
   const { editor, openEditor, closeEditor } = route;
   const [today] = useState(() => financeDay());

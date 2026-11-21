@@ -89,10 +89,9 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
     [key, position?.salary?.[key] ? String(position.salary[key]) : ''])) as Record<keyof PositionSalary, string>);
   const { save } = useStaffPositionMutations();
   const production = role === 'KITCHEN' || role === 'BAR';
-  const canChangeAdmin = !position?.fixedWorkspace;
-  const canChangeTerminal = position?.fixedWorkspace !== 'production';
-  const adminEnabled = canChangeAdmin && permissions.adminAccess === true;
-  const terminalEnabled = canChangeTerminal && permissions.terminalAccess === true;
+  const canChangeWorkspaces = !position?.fixedWorkspace;
+  const adminEnabled = permissions.adminAccess === true;
+  const terminalEnabled = permissions.terminalAccess === true;
   const hasAccess = terminalEnabled || production || (adminEnabled && SECTION_KEYS.some((key) => permissions.sections[key]));
   const parsed = payFields.map(({ key, percent }) => {
     const value = rates[key].trim() ? parseMoney(rates[key]) : 0;
@@ -189,13 +188,14 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
       {tabPanel('general', <fieldset disabled={save.isPending} className="min-w-0 space-y-6">
         <DocumentField label="Название должности"><input maxLength={80} required className="input w-full" value={name}
           onChange={(event) => setName(event.target.value)} placeholder="Например, управляющий" /></DocumentField>
-        {(canChangeAdmin || canChangeTerminal) && <div>
+        {canChangeWorkspaces && <div>
           <h4 className="text-base font-semibold">Рабочие места</h4>
-          {canChangeAdmin && <Check label="Вход в админ-панель" checked={adminEnabled}
-            onChange={(checked) => setPermissions((current) => ({ ...current, adminAccess: checked }))} />}
-          {canChangeTerminal && <Check label="Открывать кассу и оформлять заказы гостей" checked={terminalEnabled}
-            onChange={(checked) => setPermissions((current) => ({ ...current, terminalAccess: checked }))} />}
+          <Check label="Вход в админ-панель" checked={adminEnabled}
+            onChange={(checked) => setPermissions((current) => ({ ...current, adminAccess: checked }))} />
+          <Check label="Открывать кассу и оформлять заказы гостей" checked={terminalEnabled}
+            onChange={(checked) => setPermissions((current) => ({ ...current, terminalAccess: checked }))} />
         </div>}
+        {position?.fixedWorkspace === 'admin' && <DocumentField label="Рабочее место">Админ-панель</DocumentField>}
         <div>
           <h4 className="mb-2 text-base font-semibold">Экран приготовления</h4>
           <div className="max-w-lg space-y-2">

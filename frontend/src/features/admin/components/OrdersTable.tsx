@@ -49,7 +49,8 @@ type Props = {
 
 export function OrdersTable({ items, isLoading, error, columns, loadMoreRef, isFetchingNextPage, hasNextPage, onOpen, onEdit, onCancel }: Props) {
   const tr = useT();
-  const editable = usePermissions().canEditSection('orders');
+  const { canEditSection, canOwnerOperation } = usePermissions();
+  const editable = canEditSection('orders');
   const minWidth = orderTableWidth(columns);
 
   function renderRow(order: Order) {
@@ -67,7 +68,7 @@ export function OrdersTable({ items, isLoading, error, columns, loadMoreRef, isF
       payment: paymentCell(order),
       actions: <div className="flex items-center justify-center gap-1">
         {editable && order.status !== 'paid' && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
-        {editable && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}
+        {editable && canOwnerOperation('cancelOrders') && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}
       </div>,
     };
     return (

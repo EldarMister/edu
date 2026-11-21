@@ -1,4 +1,5 @@
 import { PositionEditor } from './PositionEditor';
+import { OwnerOperationsEditor } from './OwnerOperationsEditor';
 import { useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
@@ -28,6 +29,7 @@ export function PositionsPage() {
   const [sortDirection, setSortDirection] = usePageFilter('sort', 'asc');
   const [removePosition, setRemovePosition] = useState<StaffPosition | null>(null);
   const [replacementId, setReplacementId] = useState('');
+  const [ownerEditorOpen, setOwnerEditorOpen] = useState(false);
   const { remove } = useStaffPositionMutations();
   const replacementOptions = removePosition
     ? (query.data ?? []).filter(({ id }) => id !== removePosition.id)
@@ -89,9 +91,14 @@ export function PositionsPage() {
                 }}>
                 <IconTrash className="h-4 w-4" />
               </button>
-            </div> : <span className="text-xs text-text-muted">Владелец аккаунта</span> }))}
+            </div> : <div className="flex justify-end">
+              <button type="button" title="Редактировать" aria-label="Редактировать права владельца"
+                className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-background hover:text-primary"
+                onClick={() => setOwnerEditorOpen(true)}><IconEdit className="h-4 w-4" /></button>
+            </div> }))}
         empty="Должности не найдены" />
     </QueryState>
+    {ownerEditorOpen && <OwnerOperationsEditor onClose={() => setOwnerEditorOpen(false)} />}
     {positionEditor && (positionEditor.id && !entry
       ? <Modal open title="Должность" onClose={closeEditor}>
           <QueryState pending={query.isPending} error={query.error}>

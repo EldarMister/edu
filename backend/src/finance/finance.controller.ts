@@ -5,15 +5,32 @@ import { Roles } from '../common/decorators/roles.decorator';
 import {
   FinanceAccountCreateDto, FinanceAccountUpdateDto, FinanceCategoryCreateDto, FinanceCategoryDeleteDto, FinanceCategoryUpdateDto,
   FinanceQueryDto, FinanceTransactionDto, SalaryAccrualDto, SalaryPaymentDto,
+  CashHandoverQueryDto, CashHandoverSaveDto, CashHandoverSettingsDto,
   FinanceTransactionEditDto, FinanceTransactionMetadataDto, FinanceTransactionReverseDto, SalaryAccrualEditDto, SalaryCorrectionDto,
 } from './finance.dto';
 import { FinanceService } from './finance.service';
 import { PayrollReportDto } from './finance.dto';
+import { CashHandoverService } from './cash-handover.service';
 
 @Roles(Role.OWNER, Role.ADMIN)
 @Controller('admin/finance')
 export class FinanceController {
-  constructor(private readonly finance: FinanceService) {}
+  constructor(private readonly finance: FinanceService, private readonly handover: CashHandoverService) {}
+
+  @Get('cash-handover')
+  cashHandover(@CurrentUser() actor: AuthUser, @Query() query: CashHandoverQueryDto) {
+    return this.handover.report(actor, query);
+  }
+
+  @Post('cash-handover')
+  receiveCash(@CurrentUser() actor: AuthUser, @Body() input: CashHandoverSaveDto) {
+    return this.handover.receive(actor, input);
+  }
+
+  @Patch('cash-handover/settings')
+  cashHandoverSettings(@CurrentUser() actor: AuthUser, @Body() input: CashHandoverSettingsDto) {
+    return this.handover.setEnabled(actor, input.enabled);
+  }
 
   @Get('access')
   access(@CurrentUser() actor: AuthUser) {

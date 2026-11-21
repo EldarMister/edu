@@ -4,6 +4,7 @@ import type { Role } from '@/types';
 import { useAssignableStaffPositions } from './positions-api';
 import { positionAccessSummary } from './position-permissions';
 import { parseMoney } from './finance/finance-format';
+import { Link } from 'react-router-dom';
 import { Modal } from '@/components/Modal';
 import { DeleteNameField } from '../components/DeleteNameField';
 import { captureDeletionEffect } from '../components/deletion-effect';
@@ -871,7 +872,7 @@ function ShiftEditModal({ row, onClose }: { row: ShiftHistoryRow; onClose: () =>
 }
 
 function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
-  const { canAction, canEditSection } = usePermissions();
+  const { canAction, canEditSection, canSection } = usePermissions();
   const setCash = useSetCashHanded();
   const [val, setVal] = useState(row.cashHanded ? String(row.cashHanded) : '');
   const [validationError, setValidationError] = useState('');
@@ -887,6 +888,13 @@ function CashHandedCell({ row, date }: { row: ShiftReportRow; date: string }) {
     setCash.mutate({ waiterId: row.waiterId, date, cashHanded: num });
   }
 
+  if (row.cashHandover) {
+    const label = row.cashReceivedAt || row.cashHanded ? money(row.cashHanded) : '—';
+    return canSection('finance') ? <Link className="text-primary hover:underline" aria-label="Открыть сдачу наличных"
+      to={{ search: new URLSearchParams({
+        section: 'finance', view: 'cashHandover', handoverFrom: date, handoverTo: date, handoverEmployee: row.waiterId,
+      }).toString() }}>{label === '—' ? 'Сдача наличных' : label}</Link> : <span>{label}</span>;
+  }
   if (!canEditSection('staff') || !canAction('closeShift')) return <span>{money(row.cashHanded)}</span>;
   return (
     <span className="inline-flex flex-wrap items-center justify-end gap-1">

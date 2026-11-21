@@ -11,10 +11,11 @@ import {
   FinanceTransactionEditDto, FinanceTransactionMetadataDto, PayrollReportDto, SalaryAccrualEditDto, SalaryCorrectionDto,
 } from './finance.dto';
 import { assertDrawerBalance, ensureFinanceAccounts, lockFinance } from './finance-ledger';
+import { cashHandoverKey } from './cash-custody';
 import { currentPayrollMonth, payrollPeriodReport, payrollReport } from './payroll';
 import { canReverseEntry, type AccountShift } from './entry-reversal';
 import { editSalaryAccrual, salaryAccrualDetails, reverseSalaryPayment } from './salary-corrections';
-import { resolvePermissions, resolveUserPermissions } from '../common/permissions';
+import { resolvePositionPermissions, resolveUserPermissions } from '../common/permissions';
 import { assertFinanceTransactionWrite, canEditFinancePermissions, canManageFinance, canViewFinance, financeTenant } from './finance-access';
 
 type Db = Prisma.TransactionClient;
@@ -132,6 +133,7 @@ async function transactionLegs(db: Db, cafeId: string, entry: FinanceEntry) {
 }
 
 const visibleFinanceMovement: Prisma.FinanceEntryWhereInput = {
+  cashCustodianId: null,
   account: { archivedAt: null },
 };
 
@@ -301,13 +303,13 @@ export class FinanceService {
         include: { payments: { select: { amount: true } } },
       });
       const employees = await db.user.findMany({ where: { cafeId, isActive: true, role: { not: Role.OWNER } },
-        select: { id: true, name: true, role: true, permissions: true, position: { select: { role: true, permissions: true } } }, orderBy: { name: 'asc' } });
+        select: { id: true, name: true, role: true, permissions: true, position: { select: { role: true, permissions: true, isStarter: true } } }, orderBy: { name: 'asc' } });
       const positions = await db.staffPosition.findMany({ where: { cafeId },
-        select: { id: true, name: true, role: true, permissions: true }, orderBy: { name: 'asc' } });
+        select: { id: true, name: true, role: true, permissions: true, isStarter: true }, orderBy: { name: 'asc' } });
       return {
         canManage, canViewAll, canEditPermissions, entries: entryRows.map((entry) => ({ ...entry, balanceAfter: entryBalances.get(entry.id) })), categories,
         employees: employees.map((employee) => ({ id: employee.id, name: employee.name, role: employee.role, adminAccess: resolveUserPermissions(employee).adminAccess })),
-        positions: positions.filter((position) => resolvePermissions(position.role, position.permissions).adminAccess).map(({ id, name }) => ({ id, name })),
+        positions: positions.filter((position) => resolvePositionPermissions(position).adminAccess).map(({ id, name }) => ({ id, name })),
         accounts: accounts.map((account) => ({
           ...account, openingBalance: Number(account.openingBalance),
           balance: Number(account.openingBalance.add(byAccount.get(account.id) ?? zero)),
@@ -409,7 +411,8 @@ export class FinanceService {
           cafeId,
           AND: [
             { OR: [{ accountId: id }, { counterpartyAccountId: id }] },
-            { OR: [{ cashShiftId: { not: null } }, { kind: { in: ['sale', 'refund', 'salary'] } }] },
+            { OR: [{ cashShiftId: { not: null } }, { kind: { in: ['sale', 'refund', 'salary'] } },
+              { sourceKey: { startsWith: cashHandoverKey } }] },
           ],
         },
         select: { id: true },
@@ -554,14 +557,14 @@ export class FinanceService {
       const addedPositions = positionIds.filter((value) => !previous?.positionIds.includes(value));
       if (addedUsers.length) {
         const candidates = await db.user.findMany({ where: { cafeId, id: { in: addedUsers }, isActive: true, role: { not: Role.OWNER } },
-          select: { id: true, role: true, permissions: true, position: { select: { role: true, permissions: true } } } });
+          select: { id: true, role: true, permissions: true, position: { select: { role: true, permissions: true, isStarter: true } } } });
         if (candidates.filter((candidate) => resolveUserPermissions(candidate).adminAccess).length !== addedUsers.length) {
           throw new BadRequestException('Выберите сотрудников с доступом к админ-панели этого заведения');
         }
       }
       if (addedPositions.length) {
-        const candidates = await db.staffPosition.findMany({ where: { cafeId, id: { in: addedPositions } }, select: { role: true, permissions: true } });
-        if (candidates.filter((candidate) => resolvePermissions(candidate.role, candidate.permissions).adminAccess).length !== addedPositions.length) {
+        const candidates = await db.staffPosition.findMany({ where: { cafeId, id: { in: addedPositions } }, select: { role: true, permissions: true, isStarter: true } });
+        if (candidates.filter((candidate) => resolvePositionPermissions(candidate).adminAccess).length !== addedPositions.length) {
           throw new BadRequestException('Выберите должности с доступом к админ-панели этого заведения');
         }
       }

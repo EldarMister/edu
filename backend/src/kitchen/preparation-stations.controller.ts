@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Delete, Get, NotFoundException, Param, Patch, Post } from '@nestjs/common';
 import { OrderItemStatus, Prisma, Role } from '@prisma/client';
 import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
@@ -21,6 +21,11 @@ class UpdateStationDto {
 
   @IsOptional() @IsBoolean()
   isActive?: boolean;
+}
+
+class DeleteStationDto {
+  @IsString() @MaxLength(80)
+  confirmation!: string;
 }
 
 @Controller('prep-stations')
@@ -72,30 +77,64 @@ export class PreparationStationsController {
       if (!current) throw new NotFoundException('Станция не найдена');
       if (name !== undefined) await this.ensureUniqueName(tx, cafeId, name, id);
       if (dto.isActive === false && current.isActive) {
-        const [categories, dishes, staff, pending] = await Promise.all([
-          tx.category.count({ where: { cafeId, prepStation: id } }),
-          tx.dish.count({ where: { cafeId, prepStation: id } }),
-          tx.user.count({ where: {
-            cafeId,
-            OR: [
-              { prepStation: id },
-              ...(builtin ? [{ prepStation: null, role: id === PrepStation.bar ? Role.BAR : Role.KITCHEN }] : []),
-            ],
-          } }),
-          tx.orderItem.count({ where: {
-            cafeId, prepStation: id,
-            status: { in: [OrderItemStatus.new, OrderItemStatus.accepted, OrderItemStatus.cooking] },
-          } }),
-        ]);
-        if (categories || dishes) throw new ConflictException('Сначала переназначьте блюда и категории станции');
-        if (staff) throw new ConflictException('Сначала переназначьте сотрудников станции');
-        if (pending) throw new ConflictException('Сначала завершите текущие заказы станции');
+        await this.assertNoActiveUsage(tx, cafeId, id, !!builtin);
       }
       const data = { name: name ?? current.name, isActive: dto.isActive ?? current.isActive };
       if (record) return tx.preparationStation.update({ where: { id: recordId, cafeId }, data });
       return tx.preparationStation.create({ data: { id: recordId, cafeId, ...data } });
     });
     return this.publish(user, { ...station, id }, !!builtin);
+  }
+
+  @Delete(':id')
+  @Roles(Role.OWNER)
+  async remove(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: DeleteStationDto) {
+    const cafeId = this.cafeId(user);
+    if (BUILTIN_STATIONS.some((station) => station.id === id)) {
+      throw new ConflictException('Встроенную станцию можно перевести в архив');
+    }
+    if (id.startsWith('builtin:')) throw new NotFoundException('Станция не найдена');
+    const station = await this.prisma.$transaction(async (tx) => {
+      await lockStationRouting(tx, cafeId);
+      const current = await tx.preparationStation.findFirst({ where: { id, cafeId } });
+      if (!current) throw new NotFoundException('Станция не найдена');
+      if (dto.confirmation?.trim() !== current.name) throw new BadRequestException('Введите точное название станции');
+      await this.assertNoActiveUsage(tx, cafeId, id);
+      const [item, event] = await Promise.all([
+        tx.orderItem.findFirst({ where: { cafeId, prepStation: id }, select: { id: true } }),
+        tx.kitchenEvent.findFirst({ where: { cafeId, prepStation: id }, select: { id: true } }),
+      ]);
+      if (item || event) throw new ConflictException('У станции есть история заказов. Переведите станцию в архив, чтобы сохранить историю.');
+      await tx.stationWarehouse.deleteMany({ where: { cafeId, stationId: id } });
+      return tx.preparationStation.delete({ where: { id, cafeId } });
+    });
+    await this.audit.log({
+      actor: user, actionType: AuditAction.SETTINGS_UPDATED, entityType: AuditEntity.SETTINGS,
+      entityId: station.id, description: `Удалена станция «${station.name}»`,
+      oldValue: { id: station.id, name: station.name, isActive: station.isActive },
+    });
+    this.events.emitBroadcast(SERVER_EVENTS.SETTINGS_UPDATED, { cafeId });
+    return { ok: true };
+  }
+
+  private async assertNoActiveUsage(tx: Prisma.TransactionClient, cafeId: string, id: string, builtin = false) {
+    const [categories, dishes, staff, pending] = await Promise.all([
+      tx.category.count({ where: { cafeId, prepStation: id } }),
+      tx.dish.count({ where: { cafeId, prepStation: id } }),
+      tx.user.count({ where: {
+        cafeId,
+        OR: [
+          { prepStation: id },
+          ...(builtin ? [{ prepStation: null, role: id === PrepStation.bar ? Role.BAR : Role.KITCHEN }] : []),
+        ],
+      } }),
+      tx.orderItem.count({ where: {
+        cafeId, prepStation: id, status: { in: [OrderItemStatus.new, OrderItemStatus.accepted, OrderItemStatus.cooking] },
+      } }),
+    ]);
+    if (categories || dishes) throw new ConflictException('Сначала переназначьте блюда и категории станции');
+    if (staff) throw new ConflictException('Сначала переназначьте сотрудников станции');
+    if (pending) throw new ConflictException('Сначала завершите текущие заказы станции');
   }
 
   private cafeId(user: AuthUser) {

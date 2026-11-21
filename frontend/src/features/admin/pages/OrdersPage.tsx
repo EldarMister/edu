@@ -52,7 +52,7 @@ export function OrdersPage() {
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
   const detail = useAdminOrderDetails(detailsOrder?.id ?? null);
   const canManageRefunds = useCanManageOrderRefunds();
-  const { canEditSection } = usePermissions();
+  const { canEditSection, canOwnerOperation } = usePermissions();
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
   const [manualStatus, setManualStatus] = useState<OrderStatus>('served');
   const [manualReason, setManualReason] = useState('');
@@ -221,7 +221,7 @@ export function OrdersPage() {
         refundMode={canManageRefunds ? 'manage' : undefined}
         onClose={() => setDetailsOrder(null)}
         onOrderChange={setDetailsOrder}
-        allowItemCancellation={canEditSection('orders')}
+        allowItemCancellation={canEditSection('orders') && canOwnerOperation('cancelItems')}
       />
     </div>
   );
@@ -249,6 +249,7 @@ function StatusEditorModal({
   onConfirm: () => void;
 }) {
   const tr = useT();
+  const { canOwnerOperation } = usePermissions();
   if (!open || !order) return null;
   return (
     <div data-radio-blocking className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4">
@@ -264,7 +265,8 @@ function StatusEditorModal({
             className="h-10 w-full text-sm"
             value={value}
             onChange={(next) => onValueChange(next as OrderStatus)}
-            options={MANUAL_STATUS_OPTIONS.map((o) => ({ ...o, label: tr(o.label) }))}
+            options={MANUAL_STATUS_OPTIONS.filter(({ value }) => value !== 'cancelled' || canOwnerOperation('cancelOrders'))
+              .map((o) => ({ ...o, label: tr(o.label) }))}
           />
           <textarea
             className="min-h-[84px] w-full resize-none rounded-xl border border-border bg-white px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/15"

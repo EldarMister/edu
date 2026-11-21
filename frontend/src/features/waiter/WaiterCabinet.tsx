@@ -5,6 +5,7 @@ import { disconnectSocket } from '@/lib/socket';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
 import { ORDER_STATUS } from '@/lib/status';
 import { useT } from '@/lib/i18n';
+import { usePermissions } from '@/hooks/usePermissions';
 import { Spinner } from '@/components/Spinner';
 import { ThemeSwitch } from '@/components/ThemeSwitch';
 import { OrderDetailsModal } from '@/features/admin/components/OrderDetailsModal';
@@ -171,8 +172,10 @@ export function WaiterOrderArchive({ onClose }: { onClose: () => void }) {
 
 function WaiterOrderDetails({ id, onClose }: { id: string; onClose: () => void }) {
   const t = useT();
+  const { canOwnerOperation } = usePermissions();
   const detail = useOrderDetails(id);
-  if (detail.data) return <OrderDetailsModal order={detail.data} onClose={onClose} waiterLayout refundMode="request" />;
+  if (detail.data) return <OrderDetailsModal order={detail.data} onClose={onClose} waiterLayout
+    refundMode={canOwnerOperation('refunds') ? 'request' : undefined} />;
   return <Modal open onClose={onClose} title={t('Заказ')}>
     {detail.isError ? <p>{t('Не удалось загрузить заказ')}</p> : <Spinner className="mx-auto h-5 w-5" />}
   </Modal>;

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
+import { usePermissions } from '@/hooks/usePermissions';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, timeHM } from '@/lib/format';
 import { useT } from '@/lib/i18n';
@@ -33,13 +34,14 @@ export function ItemCancellationQueuePage() {
 
 function ReviewCancellation({ request, onClose }: { request: ItemCancellationRequest; onClose: () => void }) {
   const t = useT();
+  const { canOwnerOperation } = usePermissions();
   const decision = useDecideItemCancellation(request);
   return <Modal open title={t('Заявка на отмену блюда')} onClose={decision.isPending ? () => undefined : onClose}
     footer={<div className="flex flex-wrap justify-end gap-2">
       <button type="button" className="btn-secondary btn-md" disabled={decision.isPending}
         onClick={() => decision.mutate('reject', { onSuccess: onClose })}>{t('Отклонить')}</button>
-      <button type="button" className="btn-danger btn-md" disabled={decision.isPending}
-        onClick={() => decision.mutate('approve', { onSuccess: onClose })}>{t('Подтвердить отмену')}</button>
+      {canOwnerOperation('cancelItems') && <button type="button" className="btn-danger btn-md" disabled={decision.isPending}
+        onClick={() => decision.mutate('approve', { onSuccess: onClose })}>{t('Подтвердить отмену')}</button>}
     </div>}>
     <p className="font-medium">{t('Заказ')} {displayOrderNumber(request.order.orderNumber)} · {request.quantity} × {request.itemName}</p>
     <p className="mt-2 break-words text-sm text-text-secondary">{request.reason}</p>

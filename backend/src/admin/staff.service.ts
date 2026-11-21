@@ -24,7 +24,7 @@ import {
 import {
   ACTION_KEYS,
   getDefaultPermissionsByRole,
-  resolvePermissions,
+  resolvePositionPermissions,
   resolveUserPermissions,
   SECTION_KEYS,
 } from '../common/permissions';
@@ -35,7 +35,7 @@ type StaffPosition = Prisma.StaffPositionGetPayload<{ select: typeof staffPositi
 function isManageableStarter(role: Role, position: StaffPosition | null) {
   if (!position?.isStarter || position.role !== role) return false;
   const baseline = getDefaultPermissionsByRole(role);
-  const effective = resolvePermissions(role, position.permissions);
+  const effective = resolvePositionPermissions(position);
   return SECTION_KEYS.every((key) => !effective.sections[key] || baseline.sections[key])
     && ACTION_KEYS.every((key) => !effective.actions[key] || baseline.actions[key]);
 }
@@ -71,8 +71,8 @@ export class StaffService {
       ...user,
       positionName: assigned?.name ?? null,
       positionIsStarter: isManageableStarter(user.role, assigned),
-      canManage: actor ? canManagePosition(actor, { role: user.role, permissions: assigned?.permissions ?? user.permissions }) : undefined,
-      permissions: resolvePermissions(user.role, assigned?.permissions ?? user.permissions),
+      canManage: actor ? canManagePosition(actor, assigned ?? { role: user.role, permissions: user.permissions }) : undefined,
+      permissions: resolveUserPermissions({ ...user, position: assigned }),
     };
   }
 
@@ -116,7 +116,7 @@ export class StaffService {
       where: { cafeId: actor.cafeId }, select: staffPositionSelect, orderBy: { name: 'asc' },
     });
     return positions.filter((position) => canManagePosition(actor, position)).map(({ isStarter, ...position }) => ({
-      ...position, permissions: resolvePermissions(position.role, position.permissions),
+      ...position, permissions: resolvePositionPermissions({ ...position, isStarter }),
     }));
   }
 
@@ -526,7 +526,7 @@ export class StaffService {
     });
 
     // A failed query must surface as a report error, never as a fictitious zero balance.
-    const [paidOrders, cancelledOrders, rejectedItems, cashReports] = await Promise.all([
+    const [paidOrders, cancelledOrders, rejectedItems, cashReports, custody, cashSettings] = await Promise.all([
       this.loadPaidOrders(waiterIds, from, to),
       this.prisma.order.findMany({
         where: { waiterId: { in: waiterIds }, status: OrderStatus.cancelled, closedAt: { gte: from, lt: to } },
@@ -535,8 +535,13 @@ export class StaffService {
       this.loadRejectedItems(waiterIds, from, to),
       this.prisma.shiftCashReport.findMany({
         where: { waiterId: { in: waiterIds }, date: dateKey },
-        select: { waiterId: true, cashHanded: true },
+        select: { waiterId: true, cashHanded: true, cashReceivedAt: true },
       }),
+      this.prisma.financeEntry.groupBy({
+        by: ['cashCustodianId'], _sum: { amount: true },
+        where: { cashCustodianId: { in: waiterIds }, cashCustodyDay: dateKey },
+      }),
+      this.prisma.settings.findFirst({ select: { cashHandoverEnabled: true } }),
     ]);
 
     // Причины отмены заказов — из журнала аудита.
@@ -553,7 +558,8 @@ export class StaffService {
       }
     }
 
-    const cashHandedByWaiter = new Map(cashReports.map((c) => [c.waiterId, Number(c.cashHanded)]));
+    const cashHandedByWaiter = new Map(cashReports.map((report) => [report.waiterId, report]));
+    const custodyByWaiter = new Map(custody.map((row) => [row.cashCustodianId, Number(row._sum.amount ?? 0)]));
 
     type LineAgg = { name: string; qty: number; amount: number; components: Map<string, number> };
     type CatAgg = { categoryId: string; name: string; sortOrder: number; qty: number; amount: number; items: Map<string, LineAgg> };
@@ -661,10 +667,12 @@ export class StaffService {
 
     const rows = users.map((u) => {
       const a = acc.get(u.id);
-      const isWaiter = u.role === Role.WAITER || !!a;
+      const custodyDue = custodyByWaiter.get(u.id);
+      const isWaiter = u.role === Role.WAITER || !!a || custodyDue !== undefined;
       const sh = shiftByWaiter.get(u.id);
-      const cashDue = a?.cashDue ?? 0;
-      const cashHanded = cashHandedByWaiter.get(u.id) ?? 0;
+      const receipt = cashHandedByWaiter.get(u.id);
+      const cashDue = custodyDue ?? a?.cashDue ?? 0;
+      const cashHanded = custodyDue !== undefined && !receipt?.cashReceivedAt ? 0 : Number(receipt?.cashHanded ?? 0);
       const durationMin = sh ? Math.round(payrollWorkTime(
         shifts.filter((shift) => shift.waiterId === u.id).map((shift) => ({
           startedAt: shift.startedAt, endedAt: shift.endedAt ?? new Date(),
@@ -705,6 +713,8 @@ export class StaffService {
         turnover: a?.turnover ?? 0,
         cashDue,
         cashHanded,
+        cashHandover: custodyDue !== undefined || !!cashSettings?.cashHandoverEnabled,
+        cashReceivedAt: receipt?.cashReceivedAt ?? null,
         difference: cashHanded - cashDue,
         categories,
         cancellations,
@@ -722,14 +732,26 @@ export class StaffService {
     if (!Number.isFinite(amount) || amount < 0) {
       throw new BadRequestException('Некорректная сумма');
     }
-    const waiter = await this.prisma.user.findUnique({ where: { id: waiterId }, select: { id: true, name: true } });
-    if (!waiter) throw new NotFoundException('Сотрудник не найден');
     const date = this.dateOnly(dateStr);
-
-    const saved = await this.prisma.shiftCashReport.upsert({
-      where: { waiterId_date: { waiterId, date } },
-      create: { waiterId, date, cashHanded: amount, updatedById: actor.id },
-      update: { cashHanded: amount, updatedById: actor.id },
+    const key = { waiterId, date };
+    const { waiter, saved } = await this.prisma.$transaction(async (db) => {
+      const waiter = await db.user.findUnique({ where: { id: waiterId }, select: { name: true, cafeId: true } });
+      if (!waiter) throw new NotFoundException('Сотрудник не найден');
+      if (waiter.cafeId) {
+        await lockFinance(db, waiter.cafeId);
+        const [settings, custody] = await Promise.all([
+          db.settings.findFirst({ where: { cafeId: waiter.cafeId }, select: { cashHandoverEnabled: true } }),
+          db.financeEntry.findFirst({
+            where: { cafeId: waiter.cafeId, cashCustodianId: waiterId, cashCustodyDay: date }, select: { id: true },
+          }),
+        ]);
+        if (settings?.cashHandoverEnabled || custody) throw new ConflictException('Откройте «Финансы → Сдача наличных»');
+      }
+      const saved = await db.shiftCashReport.upsert({
+        where: { waiterId_date: key }, create: { ...key, cafeId: waiter.cafeId, cashHanded: amount, updatedById: actor.id },
+        update: { cashHanded: amount, updatedById: actor.id },
+      });
+      return { waiter, saved };
     });
 
     await this.audit.log({

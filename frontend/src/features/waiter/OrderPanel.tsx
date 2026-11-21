@@ -10,6 +10,8 @@ import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
 import { Modal } from '@/components/Modal';
 import { Select } from '@/components/Select';
+import { useAuth } from '@/store/auth';
+import { usePermissions } from '@/hooks/usePermissions';
 
 const ITEM_CANCEL_REASONS = ['Клиент передумал', 'Ошибка официанта', 'Другое'] as const;
 
@@ -142,7 +144,10 @@ export function OrderPanel({
   const policies = settings.data?.waiterOrderPermissions;
   const editable = waiterOrderPermission(order, 'edit', policies).allowed;
   const billItem = order.items.find((item) => item.id === billItemId);
-  const billItemPermission = billItem ? waiterItemPermission(order, billItem, 'cancel', policies) : null;
+  const owner = useAuth((state) => state.user?.role === 'OWNER');
+  const { canOwnerOperation } = usePermissions();
+  const canCancelItem = (item: Order['items'][number]) => canOwnerOperation('cancelItems')
+    && (owner || waiterItemPermission(order, item, 'cancel', policies).allowed);
   const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
   const pendingCancellations = usePendingItemCancellations(billCorrection && !unclaimedQr ? order.id : undefined);
   const finalCancelReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
@@ -230,7 +235,7 @@ export function OrderPanel({
               type="button"
               disabled={!clickable || submitting}
               onClick={() => {
-                if (!waiterItemPermission(order, it, 'cancel', policies).allowed) {
+                if (!canCancelItem(it)) {
                   onInsufficientPermissions(it);
                   return;
                 }
@@ -400,7 +405,7 @@ export function OrderPanel({
               disabled={submitting || !billItem}
               onClick={() => {
                 if (!billItem) return;
-                if (billItemPermission?.allowed) onCancelReadyItem(billItem, finalCancelReason);
+                if (canCancelItem(billItem)) onCancelReadyItem(billItem, finalCancelReason);
                 else onInsufficientPermissions(billItem);
                 setBillItemId(null);
               }}
@@ -418,7 +423,7 @@ export function OrderPanel({
                 ×{billItem.quantity} · {money(billItem.finalPrice)}
               </p>
             </div>
-            {billItemPermission?.allowed && <div>
+            {canCancelItem(billItem) && <div>
               <p className="mb-2 text-sm font-medium text-text-secondary">{t('Причина отмены')}</p>
               <div className="space-y-2">
                 {ITEM_CANCEL_REASONS.map((reason) => (

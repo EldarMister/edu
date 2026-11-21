@@ -156,6 +156,7 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         await runWithTenant({ cafeId: otherCafe.id }, async () => {
           const foreign = await makeUser('Foreign owner', 'OWNER');
           assert.deepEqual((await stationApi.list(foreign)).map(({ id }) => id), ['kitchen', 'bar']);
+          await assert.rejects(stationApi.remove(foreign, station.id, { confirmation: station.name }), /не найдена/);
           await assert.rejects(resolveStation(db, foreign, station.id), /не найдена/);
           await assert.rejects(catalog.createCategory({ name: 'Invalid route', prepStation: station.id }, foreign), /действующую станцию/);
           await assert.rejects(staff.create({ name: 'Foreign cook', phone: '+996700000000', role: 'KITCHEN', password, prepStation: station.id }, foreign), /действующую станцию/);
@@ -164,6 +165,7 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         const customDish = await catalog.createDish({ name: 'Салат', categoryId: customCategory.id, price: 90 }, owner);
         const barDish = await catalog.createDish({ name: 'Чай', categoryId: customCategory.id, price: 50, prepStation: 'bar' }, owner);
         await assert.rejects(stationApi.update(owner, station.id, { isActive: false }), /переназначьте/);
+        await assert.rejects(stationApi.remove(owner, station.id, { confirmation: station.name }), /блюда и категории/);
         const order = await newOrder([{ dishId: dishes[0].id, quantity: 1 }, { dishId: customDish.id, quantity: 1 }, { dishId: barDish.id, quantity: 1 }]);
         const [kitchenLine, customLine, barLine] = order.items;
         assert.deepEqual(order.items.map(({ prepStation }) => prepStation), ['kitchen', station.id, 'bar']);
@@ -199,7 +201,22 @@ test('PostgreSQL: waiter policies, cooking races and retained history', { skip: 
         assert.equal(archived.isActive, false);
         assert.equal((await resolveStation(db, owner, station.id)).isActive, false);
         assert.ok((await board.findByTab('ready', station.id)).some(({ id }) => id === order.id));
+        await assert.rejects(stationApi.remove(owner, station.id, { confirmation: station.name }), /история заказов/);
         await assert.rejects(catalog.updateCategory(customCategory.id, { prepStation: station.id }, owner), /действующую станцию/);
+      });
+
+      await t.test('an unused custom station requires the current name and removes its warehouse route', async () => {
+        const stationApi = new PreparationStationsController(db, events, audit);
+        const station = await stationApi.create(owner, { name: 'Станция для удаления' });
+        const warehouse = await db.warehouse.create({ data: { cafeId: cafe.id, name: 'Склад станции на удаление' } });
+        await db.stationWarehouse.create({ data: { cafeId: cafe.id, stationId: station.id, warehouseId: warehouse.id } });
+        await assert.rejects(stationApi.remove(owner, station.id, { confirmation: 'Неверное название' }), /точное название/);
+        await assert.rejects(stationApi.remove(owner, 'kitchen', { confirmation: 'Кухня' }), /в архив/);
+        const renamed = await stationApi.update(owner, station.id, { name: 'Новое название станции' });
+        await assert.rejects(stationApi.remove(owner, station.id, { confirmation: station.name }), /точное название/);
+        assert.deepEqual(await stationApi.remove(owner, station.id, { confirmation: renamed.name }), { ok: true });
+        assert.equal((await stationApi.list(owner)).some(({ id }) => id === station.id), false);
+        assert.equal(await db.stationWarehouse.count({ where: { stationId: station.id } }), 0);
       });
 
       await t.test('built-in station settings are per cafe and archive preserves order history', async () => {

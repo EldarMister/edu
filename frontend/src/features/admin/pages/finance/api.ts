@@ -135,6 +135,55 @@ export function useFinance(params: { from?: string; to?: string; month?: string;
   });
 }
 
+export interface CashHandoverRow {
+  id: string;
+  employeeId: string;
+  employee: string;
+  date: string;
+  due: number;
+  received: number | null;
+  difference: number;
+  receivedAt: string | null;
+}
+
+interface CashHandoverReport {
+  enabled: boolean;
+  canReceive: boolean;
+  canConfigure: boolean;
+  rows: CashHandoverRow[];
+  daily: { date: string; amount: number }[];
+}
+
+const cashHandoverEndpoint = entrypoint + '/cash-handover';
+
+export function useCashHandover(from: string, to: string) {
+  return useQuery({
+    queryKey: [...financeKey, 'cash-handover', from, to],
+    queryFn: async () => (await api.get<CashHandoverReport>(cashHandoverEndpoint, { params: { from, to } })).data,
+    retry: false,
+  });
+}
+
+export function useCashHandoverWrites() {
+  const cache = useQueryClient();
+  const refresh = () => Promise.all([
+    cache.invalidateQueries({ queryKey: financeKey }),
+    cache.invalidateQueries({ queryKey: cashShiftKey }),
+    cache.invalidateQueries({ queryKey: ['admin', 'staff', 'shift-report'] }),
+  ]);
+  const receive = useMutation({
+    mutationFn: (input: { employeeId: string; date: string; amount: number; expectedReceivedAt?: string }) =>
+      api.post(cashHandoverEndpoint, input),
+    onSuccess: refresh,
+    onError: () => cache.invalidateQueries({ queryKey: [...financeKey, 'cash-handover'] }),
+  });
+  const setEnabled = useMutation({
+    mutationFn: (enabled: boolean) => api.patch(cashHandoverEndpoint + '/settings', { enabled }),
+    onSuccess: refresh,
+  });
+  return { receive, setEnabled };
+}
+
 type AccountInput = { name: string; type: AccountType; openingBalance?: number; isDefault?: boolean };
 interface TrashedAccount extends Pick<FinanceAccount, 'id' | 'name' | 'type'> {
   archivedAt: string;

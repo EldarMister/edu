@@ -44,7 +44,8 @@ export function workspacePermissions(user: AuthUser, workspace: Workspace) {
     permissions.actions.financeCashShifts = base.actions.financeCashShifts;
     permissions.actions.acceptOrderPayments = base.actions.acceptOrderPayments;
     permissions.actions.printReceipts = base.actions.printReceipts;
-    permissions.actions.requestReceiptPrints = base.actions.requestReceiptPrints;
+    permissions.actions.requestReceiptPrints = base.actions.requestReceiptPrints
+      && (user.role !== 'OWNER' || user.permissions?.ownerOperations?.printRequests !== false);
     permissions.actions.createDeliveryOrders = base.actions.createDeliveryOrders;
     permissions.actions.closeShift = base.actions.closeShift;
     return permissions;

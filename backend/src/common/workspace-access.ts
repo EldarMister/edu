@@ -34,7 +34,8 @@ export function projectWorkspaceUser(user: AuthUser, requested?: unknown): AuthU
     permissions.actions.financeCashShifts = user.permissions.actions.financeCashShifts;
     permissions.actions.acceptOrderPayments = user.permissions.actions.acceptOrderPayments;
     permissions.actions.printReceipts = user.permissions.actions.printReceipts;
-    permissions.actions.requestReceiptPrints = user.permissions.actions.requestReceiptPrints;
+    permissions.actions.requestReceiptPrints = user.permissions.actions.requestReceiptPrints && user.permissions.ownerOperations?.printRequests !== false;
+    permissions.ownerOperations = user.permissions.ownerOperations;
     permissions.actions.createDeliveryOrders = user.permissions.actions.createDeliveryOrders;
     permissions.actions.closeShift = user.permissions.actions.closeShift;
   } else if (workspace === 'admin') {

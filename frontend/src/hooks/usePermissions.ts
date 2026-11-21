@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/store/auth';
 import { hasPermission } from '@/lib/permissions';
 import { workspaceForPath, workspacePermissions, workspaceRole } from '@/lib/workspaces';
-import type { ActionKey, EmployeePermissions, SectionKey } from '@/types';
+import type { ActionKey, EmployeePermissions, OwnerOperations, SectionKey } from '@/types';
 
 /**
  * Итоговые права текущего пользователя + хелперы проверки.
@@ -29,6 +29,7 @@ export function usePermissions() {
       canEditSection: (key: SectionKey) => isOwner || (!!perms && perms.sections[key] === true && !perms.readOnlySections?.includes(key)),
       /** Разрешено ли действие (владельцу — всегда). */
       canAction: (key: ActionKey) => isOwner || (!!perms && perms.actions[key] === true),
+      canOwnerOperation: (key: keyof OwnerOperations) => user?.role !== 'OWNER' || user.permissions?.ownerOperations?.[key] !== false,
       /** Универсальная проверка по строке "sections.warehouse" / "actions.editMenu". */
       can: (path: string) => isOwner || (!!perms && hasPermission(perms, path)),
     };

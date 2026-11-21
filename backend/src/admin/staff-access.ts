@@ -1,20 +1,19 @@
 import { ConflictException } from '@nestjs/common';
 import { OrderStatus, Prisma, Role, WaiterShiftStatus } from '@prisma/client';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
-import { ACTION_KEYS, resolvePermissions } from '../common/permissions';
+import { ACTION_KEYS, resolvePermissions, resolvePositionPermissions } from '../common/permissions';
 
-type PositionAccess = { role: Role; permissions: unknown };
+type PositionAccess = { role: Role; permissions: unknown; isStarter?: boolean };
 
 export function losesOperationalAccess(before: PositionAccess, after: PositionAccess) {
-  const old = resolvePermissions(before.role, before.permissions);
-  const next = resolvePermissions(after.role, after.permissions);
+  const old = resolvePositionPermissions(before);
+  const next = resolvePositionPermissions(after);
   return (old.terminalAccess && !next.terminalAccess)
     || (old.adminAccess && !next.adminAccess && !next.terminalAccess && after.role !== Role.KITCHEN && after.role !== Role.BAR);
 }
 
 export function disablesWorkTracking(before: PositionAccess, after: PositionAccess) {
-  return resolvePermissions(before.role, before.permissions).workShiftRequired !== false
-    && resolvePermissions(after.role, after.permissions).workShiftRequired === false;
+  return resolvePositionPermissions(before).workShiftRequired !== false && resolvePositionPermissions(after).workShiftRequired === false;
 }
 
 export async function assertNoActiveWorkShifts(db: Prisma.TransactionClient, userIds: string[]) {
@@ -32,7 +31,7 @@ export function canManagePosition(actor: AuthUser, position: PositionAccess): bo
   const actorPermissions = actor.permissions ?? resolvePermissions(actor.role as Role, null);
   if (actor.role !== Role.ADMIN || !actorPermissions.sections.staff || !actorPermissions.actions.manageStaff || actorPermissions.readOnlySections?.includes('staff')
     || position.role === Role.OWNER) return false;
-  const permissions = resolvePermissions(position.role, position.permissions);
+  const permissions = resolvePositionPermissions(position);
   if (permissions.adminAccess) return false;
   const production = position.role === Role.KITCHEN || position.role === Role.BAR;
   // Terminal menu/orders are operational defaults, not grants to the administration panel.

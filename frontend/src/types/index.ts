@@ -38,6 +38,8 @@ export type ActionKey =
   | 'warehouseReports'
   | 'warehouseSettings';
 
+export type OwnerOperations = Record<'refunds' | 'cancelOrders' | 'cancelItems' | 'printRequests', boolean>;
+
 export interface EmployeePermissions {
   terminalAccess?: boolean;
   adminAccess?: boolean;
@@ -45,6 +47,7 @@ export interface EmployeePermissions {
   sections: Record<SectionKey, boolean>;
   actions: Record<ActionKey, boolean>;
   readOnlySections?: SectionKey[];
+  ownerOperations?: OwnerOperations;
 }
 
 export interface AuthUser {

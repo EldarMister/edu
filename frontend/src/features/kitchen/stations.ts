@@ -44,6 +44,20 @@ export function useSavePreparationStation() {
   });
 }
 
+export function useRemovePreparationStation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, confirmation }: { id: string; confirmation: string }) =>
+      (await api.delete<{ ok: true }>(`/prep-stations/${encodeURIComponent(id)}`, { data: { confirmation } })).data,
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['prep-stations'] }),
+        qc.invalidateQueries({ queryKey: ['admin', 'warehouse', 'locations'] }),
+      ]);
+    },
+  });
+}
+
 export function routingOptions(stations: PreparationStation[], selected?: string | null) {
   const options = stations.filter((station) => station.isActive || station.id === selected).map((station) => ({
     value: station.id,

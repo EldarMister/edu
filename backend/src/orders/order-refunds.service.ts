@@ -3,6 +3,7 @@ import { OrderRefundStatus, PaymentStatus, Prisma, Role, type OrderRefund } from
 import { AuditAction, AuditEntity } from '../audit/audit.constants';
 import { AuditService } from '../audit/audit.service';
 import { assertAdminSectionAccess } from '../common/admin-section-access';
+import { assertOwnerOperation } from '../common/permissions';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { recordRefundReceipts } from '../finance/refund-order-receipts';
 import { PrismaService } from '../prisma/prisma.service';
@@ -37,6 +38,7 @@ export class OrderRefundsService {
   ) {}
 
   private assertReviewer(actor: AuthUser) {
+    assertOwnerOperation(actor, 'refunds');
     if (actor.role !== Role.OWNER && actor.role !== Role.ADMIN) throw new ForbiddenException('Возврат подтверждает администратор');
     assertAdminSectionAccess(actor, 'orders', true);
     assertAdminSectionAccess(actor, 'checks', true, 'refundChecks');
@@ -85,6 +87,7 @@ export class OrderRefundsService {
   }
 
   async create(actor: AuthUser, orderId: string, dto: CreateOrderRefundDto, direct: boolean) {
+    assertOwnerOperation(actor, 'refunds');
     if (direct) this.assertReviewer(actor);
     else if (actor.role !== Role.WAITER) throw new ForbiddenException('Отправьте заявку из кассы');
     const reason = dto.reason.trim();

@@ -115,10 +115,11 @@ export function WaiterApp() {
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
   const t = useT();
-  const { canAction } = usePermissions();
+  const { canAction, canOwnerOperation } = usePermissions();
   const canCreateDelivery = canAction('createDeliveryOrders');
   const canTakePayment = canAction('acceptOrderPayments');
   const canPrintReceipts = canAction('printReceipts');
+  const canHandlePrintQueue = canPrintReceipts && canOwnerOperation('printRequests');
   const canRequestPrint = canAction('requestReceiptPrints');
   const pushNotifications = useWaiterPushNotifications(!!user);
 
@@ -516,7 +517,7 @@ export function WaiterApp() {
 
   function requestOrderCancellation(order: Order) {
     const permission = waiterOrderPermission(order, 'cancel', settings.data?.waiterOrderPermissions);
-    if (!permission.allowed) {
+    if (!canOwnerOperation('cancelOrders') || (user?.role !== 'OWNER' && !permission.allowed)) {
       openAdministratorPrompt(order);
       return;
     }
@@ -794,7 +795,7 @@ export function WaiterApp() {
   }
 
   async function cancelAfterPartialRejection(order: Order) {
-    if (!waiterOrderPermission(order, 'cancel', settings.data?.waiterOrderPermissions).allowed) {
+    if (!canOwnerOperation('cancelOrders') || (user?.role !== 'OWNER' && !waiterOrderPermission(order, 'cancel', settings.data?.waiterOrderPermissions).allowed)) {
       openAdministratorPrompt(order);
       return;
     }
@@ -1075,7 +1076,7 @@ export function WaiterApp() {
         </div>
         <DesktopNav current={desktopView} onChange={(next) => changeTab(next)} />
         <div className="flex items-center gap-3">
-          {canPrintReceipts && <button type="button" className="btn-secondary btn-md" disabled={!canWork}
+          {canHandlePrintQueue && <button type="button" className="btn-secondary btn-md" disabled={!canWork}
             onClick={() => setPrintQueueOpen(true)}>{t('Печать чека')}</button>}
           <ConnectionStatus />
           <span className="hidden text-sm text-text-secondary sm:inline">{user?.name}</span>
@@ -1238,7 +1239,7 @@ export function WaiterApp() {
 
       {orderArchiveOpen && <WaiterOrderArchive onClose={() => setOrderArchiveOpen(false)} />}
 
-      {canPrintReceipts && canWork && printQueueOpen && (
+      {canHandlePrintQueue && canWork && printQueueOpen && (
         <Modal open title={t('Печать чека')} onClose={() => setPrintQueueOpen(false)} panelClassName="max-w-5xl max-h-[90dvh]">
           <ReceiptPrintsPage terminal />
         </Modal>

@@ -760,6 +760,8 @@ export interface ShiftReportRow {
   turnover: number;
   cashDue: number;
   cashHanded: number;
+  cashHandover?: boolean;
+  cashReceivedAt?: string | null;
   difference: number;
   categories: ShiftReportCategory[];
   cancellations: ShiftReportCancellation[];

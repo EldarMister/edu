@@ -12,6 +12,22 @@ export class FinanceQueryDto {
   @IsOptional() @Matches(/^[\w-]{1,120}(,[\w-]{1,120}){0,99}$/) accountIds?: string;
 }
 
+export class CashHandoverQueryDto {
+  @IsOptional() @Matches(datePattern) from?: string;
+  @IsOptional() @Matches(datePattern) to?: string;
+}
+
+export class CashHandoverSaveDto {
+  @IsString() @Length(1, 120) employeeId!: string;
+  @Matches(datePattern) date!: string;
+  @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) @Max(99_999_999.99) amount!: number;
+  @IsOptional() @IsISO8601({ strict: true }) expectedReceivedAt?: string;
+}
+
+export class CashHandoverSettingsDto {
+  @IsBoolean() enabled!: boolean;
+}
+
 export class FinanceAccountUpdateDto {
   @IsOptional() @IsString() @Length(1, 120) name?: string;
   @IsOptional() @IsBoolean() isDefault?: boolean;
