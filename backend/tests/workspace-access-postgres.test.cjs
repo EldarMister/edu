@@ -129,6 +129,53 @@ test('HTTP + PostgreSQL: independent terminal and administration access with sta
     const newTable = () => runWithTenant({ cafeId: cafe.id }, async () => await db.table.create({ data: { hallId: fixture.hall.id, number: ++tableNumber } }));
     let tableNumber = 1;
     let mixedOrder;
+    await t.test('item cancellation requests use the administrator queue and cancel a position only once', async () => {
+      const table = await newTable();
+      const order = await runWithTenant({ cafeId: cafe.id }, () => db.order.create({ data: {
+        cafeId: cafe.id, orderNumber: 'QA-' + randomUUID(), tableId: table.id, waiterId: fixture.legacy.id, status: 'served',
+        finalAmount: 150, totalAmount: 150,
+        items: { create: [1, 2].map((quantity) => ({
+          cafeId: cafe.id, dishId: fixture.dish.id, dishNameSnapshot: fixture.dish.name, priceSnapshot: 50,
+          finalPrice: quantity * 50, quantity, status: 'served', prepStation: 'none',
+        })) },
+      }, include: { items: true } }));
+      const terminal = { token: sessions.legacy, workspace: 'terminal' };
+      const admin = { token: sessions.admin, workspace: 'admin' };
+      const [first, second] = [...order.items].sort((a, b) => a.quantity - b.quantity);
+      const requestPath = (line) => `/orders/${order.id}/items/${line.id}/cancellation-request`;
+      const requestInput = { ...terminal, method: 'POST', status: 201, body: { reason: 'Гость передумал' } };
+      const queuePath = '/orders/item-cancellation-requests';
+      await request(queuePath, { ...terminal, status: 403 });
+      await request(queuePath, { token: sessions.mixed, workspace: 'admin', status: 403 });
+      await request(requestPath(first), { ...requestInput, token: sessions.owner, status: 403 });
+      const [pending, repeated] = await Promise.all([request(requestPath(first), requestInput), request(requestPath(first), requestInput)]);
+      assert.equal(pending.id, repeated.id);
+      assert.equal((await db.orderItem.findUniqueOrThrow({ where: { id: first.id } })).status, 'served');
+      assert.deepEqual(await request(`/orders/${order.id}/item-cancellation-requests`, terminal), [{ itemId: first.id }]);
+      const queue = await request(queuePath, admin);
+      assert.deepEqual(queue.map(({ itemId, itemName }) => [itemId, itemName]), [[first.id, fixture.dish.name]]);
+
+      const decision = (entry, action, access = admin, code = 201) => request(
+        `/orders/${order.id}/item-cancellation-requests/${entry.id}/${action}`, { ...access, method: 'POST', status: code });
+      await decision(pending, 'approve', terminal, 403);
+      const approvals = await Promise.all([decision(pending, 'approve'), decision(pending, 'approve')]);
+      assert.ok(approvals.every(({ status }) => status === 'approved'));
+      assert.equal(await db.kitchenEvent.count({ where: { orderItemId: first.id, type: 'cancel' } }), 1);
+      assert.equal(Number((await db.order.findUniqueOrThrow({ where: { id: order.id } })).finalAmount), 100);
+
+      const rejected = await request(requestPath(second), requestInput);
+      await decision(rejected, 'reject');
+      await decision(rejected, 'approve', admin, 409);
+      assert.equal((await db.orderItem.findUniqueOrThrow({ where: { id: second.id } })).status, 'served');
+      const afterRejection = await request(requestPath(second), requestInput);
+      await db.orderItem.update({ where: { id: second.id }, data: { quantity: 3, finalPrice: 150 } });
+      await decision(afterRejection, 'approve', admin, 409);
+      assert.equal((await db.orderItemCancellationRequest.findUniqueOrThrow({ where: { id: afterRejection.id } })).status, 'pending');
+      await request(`/orders/${order.id}/items/${second.id}/cancel`, { ...requestInput, ...admin });
+      assert.equal((await db.orderItemCancellationRequest.findUniqueOrThrow({ where: { id: afterRejection.id } })).status, 'approved');
+      assert.deepEqual(await request(queuePath, admin), []);
+    });
+
     await t.test('owner operates a real terminal shift, order and payment without changing owner identity', async () => {
       const token = sessions.owner;
       await request('/waiter/shifts/start', { token, workspace: 'terminal', method: 'POST', status: 201 });

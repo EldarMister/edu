@@ -64,6 +64,7 @@ import { OrdersList } from './OrdersList';
 import { WaiterProfile } from './WaiterProfile';
 import { WaiterCabinet, WaiterOrderArchive } from './WaiterCabinet';
 import { useRefundUpdates } from '@/features/refunds/api';
+import { useItemCancellationUpdates, useRequestItemCancellation } from '@/features/requests/item-cancellations';
 import { CashShiftBanner } from '@/features/settings/CashShiftControls';
 import { WorkspaceLinks } from '@/components/WorkspaceLinks';
 import { useRadioVisibility } from '@/features/ptt/radioVisibility';
@@ -109,6 +110,7 @@ export function WaiterApp() {
   const wideLayout = useSyncExternalStore(subscribeToTerminalSize, isWideTerminal);
   useWaiterRealtime();
   useRefundUpdates('terminal');
+  useItemCancellationUpdates('terminal');
   const settings = usePublicSettings();
   const user = useAuth((s) => s.user);
   const push = useNotifications((s) => s.push);
@@ -159,7 +161,8 @@ export function WaiterApp() {
   const [splitOrder, setSplitOrder] = useState<Order | null>(null);
   const [editingOrderId, setEditingOrderId] = useState<string | null>(null);
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
-  const [administratorCallTarget, setAdministratorCallTarget] = useState<Order | null>(null);
+  const [administratorCallTarget, setAdministratorCallTarget] = useState<{ order: Order; item?: Order['items'][number] } | null>(null);
+  const itemCancellation = useRequestItemCancellation();
   const administratorPromptAudio = useRef<HTMLAudioElement>(null);
   useEffect(() => {
     const audio = administratorPromptAudio.current;
@@ -520,9 +523,10 @@ export function WaiterApp() {
     setCancelTarget(order);
   }
 
-  function openAdministratorPrompt(order: Order) {
+  function openAdministratorPrompt(order: Order, item?: Order['items'][number]) {
     setCancelTarget(null);
-    setAdministratorCallTarget(order);
+    itemCancellation.reset();
+    setAdministratorCallTarget({ order, item });
     const audio = administratorPromptAudio.current;
     if (!audio) return;
     audio.currentTime = 0;
@@ -537,7 +541,7 @@ export function WaiterApp() {
   async function callAdministrator() {
     if (!administratorCallTarget) return;
     try {
-      await administratorCall.mutateAsync(administratorCallTarget.id);
+      await administratorCall.mutateAsync(administratorCallTarget.order.id);
       closeAdministratorPrompt();
       push({
         message: t('Администратор вызван'),
@@ -546,6 +550,18 @@ export function WaiterApp() {
       });
     } catch (err) {
       push({ message: apiError(err), type: 'error', at: new Date().toISOString() });
+    }
+  }
+
+  async function requestItemCancellation(reason: string) {
+    const target = administratorCallTarget;
+    if (!target?.item) return;
+    try {
+      await itemCancellation.mutateAsync({ orderId: target.order.id, itemId: target.item.id, reason });
+      closeAdministratorPrompt();
+      push({ message: t('Заявка на отмену отправлена'), type: 'success', at: new Date().toISOString() });
+    } catch {
+      // Ошибка остаётся в форме вместе с введённой причиной.
     }
   }
 
@@ -772,7 +788,8 @@ export function WaiterApp() {
       setTab('orders');
       push({ message: `${orderItemName(item)} отменено`, type: 'success', at: new Date().toISOString() });
     } catch (err) {
-      showCancellationError(order, err);
+      if (isAxiosError(err) && err.response?.status === 403) openAdministratorPrompt(order, item);
+      else showCancellationError(order, err);
     }
   }
 
@@ -974,7 +991,7 @@ export function WaiterApp() {
           onRemoveRejectedItem={(item) => removeRejectedFromOrder(displayedOrder, item)}
           onCancelReadyItem={(item, reason) => cancelReadyItemFromOrder(displayedOrder, item, reason)}
           cancellationDeniedOpen={!!administratorCallTarget}
-          onInsufficientPermissions={() => openAdministratorPrompt(displayedOrder)}
+          onInsufficientPermissions={(item) => openAdministratorPrompt(displayedOrder, item)}
           onCancelOrder={() => cancelAfterPartialRejection(displayedOrder)}
           onEdit={() => startEditOrder(displayedOrder)}
           onSplitOrder={canTakePayment && canWork && canSplitOrder(displayedOrder) ? () => showSplitOrder(displayedOrder) : undefined}
@@ -1252,10 +1269,14 @@ export function WaiterApp() {
 
       <audio ref={administratorPromptAudio} src="/sounds/call-administrator.mp3" preload="auto" />
       <InsufficientPermissionsModal
+        key={administratorCallTarget?.item?.id ?? administratorCallTarget?.order.id ?? 'closed'}
         open={!!administratorCallTarget}
         onClose={closeAdministratorPrompt}
         onCallAdministrator={callAdministrator}
-        submitting={administratorCall.isPending}
+        itemName={administratorCallTarget?.item ? orderItemName(administratorCallTarget.item) : undefined}
+        onRequestCancellation={administratorCallTarget?.item ? requestItemCancellation : undefined}
+        requestError={itemCancellation.error ? apiError(itemCancellation.error) : undefined}
+        submitting={administratorCall.isPending || itemCancellation.isPending}
       />
 
       {/* Нижний лист «Печать чека» (ожидание / распечатан / отклонён) */}

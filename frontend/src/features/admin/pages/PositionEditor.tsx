@@ -165,7 +165,17 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
   }
 
   return <Modal open title={position ? 'Редактирование должности' : 'Добавление должности'} onClose={close}
-    panelClassName="max-w-[52rem]" footer={<div className="space-y-2">
+    panelClassName="max-w-[52rem]"
+    toolbar={tabs.length > 1 && <div role="tablist" aria-label="Настройки должности" onKeyDown={switchTab}
+      className="flex gap-1 overflow-x-auto sm:gap-4 sm:px-2">
+      {tabs.map(({ key, label }) => <button key={key} id={`${formId}-tab-${key}`} type="button" role="tab"
+        aria-selected={tab === key} aria-controls={`${formId}-panel-${key}`} tabIndex={tab === key ? 0 : -1}
+        onClick={() => setTab(key)} className={`min-h-11 shrink-0 border-b-2 px-2 text-sm font-medium transition-colors sm:px-3
+          ${tab === key ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
+        {label}
+      </button>)}
+    </div>}
+    footer={<div className="space-y-2">
       {save.error && <p role="alert" className="text-sm text-danger">{apiError(save.error)}</p>}
       {!validSalary && <p role="alert" className="text-sm text-danger">Укажите ставки от 0 и проценты от 0 до 100.</p>}
       {!hasAccess && <p className="text-xs text-text-muted">Разрешите хотя бы кассу, один раздел админ-панели или экран приготовления.</p>}
@@ -176,15 +186,6 @@ export function PositionEditor({ position, onClose }: { position?: StaffPosition
       </div>
     </div>}>
     <form id={formId} onSubmit={submit} className="text-sm">
-      {tabs.length > 1 && <div role="tablist" aria-label="Настройки должности" onKeyDown={switchTab}
-        className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b border-border bg-card sm:gap-4 sm:px-2">
-        {tabs.map(({ key, label }) => <button key={key} id={`${formId}-tab-${key}`} type="button" role="tab"
-          aria-selected={tab === key} aria-controls={`${formId}-panel-${key}`} tabIndex={tab === key ? 0 : -1}
-          onClick={() => setTab(key)} className={`min-h-11 shrink-0 border-b-2 px-2 text-sm font-medium transition-colors sm:px-3
-            ${tab === key ? 'border-primary text-primary' : 'border-transparent text-text-secondary hover:text-text-primary'}`}>
-          {label}
-        </button>)}
-      </div>}
       {tabPanel('general', <fieldset disabled={save.isPending} className="min-w-0 space-y-6">
         <DocumentField label="Название должности"><input maxLength={80} required className="input w-full" value={name}
           onChange={(event) => setName(event.target.value)} placeholder="Например, управляющий" /></DocumentField>

@@ -26,10 +26,8 @@ function Choice<T extends string>({ label, value, onChange, options, empty }: {
   empty?: string;
 }) {
   return <DocumentField label={label}>
-    <select className="input w-full" aria-label={label} value={value} onChange={(event) => onChange(event.target.value as T)}>
-      {empty && <option value="">{empty}</option>}
-      {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-    </select>
+    <Select className="w-full" ariaLabel={label} value={value} onChange={(next) => onChange(next as T)}
+      options={empty ? [{ value: '', label: empty }, ...options] : [...options]} />
   </DocumentField>;
 }
 
@@ -54,20 +52,22 @@ function TransactionChoice({ label, value, onChange, options, placeholder, optio
   </DocumentField>;
 }
 
-function OperationKind<T extends string>({ label, options, value, onChange }: {
+function OperationKind<T extends string>({ label, options, value, onChange, hint }: {
   label: string;
   options: readonly { value: T; label: string }[];
   value: T;
   onChange: (value: T) => void;
+  hint?: string;
 }) {
   const group = useId();
   return <DocumentField label={label}>
-    <span className="finance-operation-kind">
+    <span className="finance-operation-kind" role="group" aria-label={label} aria-describedby={hint ? group + '-hint' : undefined}>
       {options.map((option) => <label key={option.value}>
         <input type="radio" name={group} value={option.value} checked={option.value === value} onChange={() => onChange(option.value)} />
         <span>{option.label}</span>
       </label>)}
     </span>
+    {hint && <p id={group + '-hint'} className="mt-1.5 text-xs text-text-muted">{hint}</p>}
   </DocumentField>;
 }
 
@@ -199,7 +199,8 @@ export function CategoryForm({ category, categories, employees, positions, canEd
       </div>
     </DocumentField>
     <OperationKind label="Показывать на кассе" value={showOnPos ? 'yes' : 'no'} onChange={(value) => setShowOnPos(value === 'yes')}
-      options={[{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }]} />
+      options={[{ value: 'yes', label: 'Да' }, { value: 'no', label: 'Нет' }]}
+      hint="При выборе «Да» кассир сможет выбрать эту категорию при внесении или расходе наличных в кассовой смене." />
     {canEditPermissions && <div className="border-t border-border pt-4">
       <h2 className="mb-3 font-semibold text-text-primary">Ограниченный доступ к категории</h2>
       <div className="grid gap-4">

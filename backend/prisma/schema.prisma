@@ -735,6 +735,7 @@ model Order {
   actions              OrderAction[]
   receiptPrintRequests ReceiptPrintRequest[]
   refunds              OrderRefund[]
+  cancellationRequests OrderItemCancellationRequest[]
   // Заполняется, если заказ создан из QR-сессии стола.
   qrSession            QrTableSession?
 
@@ -1002,6 +1003,33 @@ model OrderRefund {
   @@index([cafeId, status, createdAt])
   @@index([cafeId, status, decidedAt])
   @@map("order_refunds")
+}
+
+enum OrderItemCancellationStatus {
+  pending
+  approved
+  rejected
+}
+
+model OrderItemCancellationRequest {
+  id              String                      @id @default(uuid())
+  cafeId          String?                     @map("cafe_id")
+  orderId         String                      @map("order_id")
+  itemId          String                      @map("item_id")
+  itemName        String                      @map("item_name")
+  quantity        Int
+  reason          String
+  status          OrderItemCancellationStatus @default(pending)
+  requestedById   String                      @map("requested_by_id")
+  requestedByName String                      @map("requested_by_name")
+  createdAt       DateTime                    @default(now()) @map("created_at")
+  decidedById     String?                     @map("decided_by_id")
+  decidedAt       DateTime?                   @map("decided_at")
+  order           Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([cafeId, status, createdAt])
+  @@index([orderId])
+  @@map("order_item_cancellation_requests")
 }
 
 model KitchenEvent {

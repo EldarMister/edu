@@ -50,7 +50,8 @@ export function OrderDetailsModal({
   const date = new Date(order.createdAt);
   const showMixedBreakdown =
     order.paymentMethod === 'mixed' && !isSplitPayment(order) && !!order.payments?.length;
-  const itemCancellationAllowed = !['paid', 'cancelled', 'rejected', 'waiting_payment'].includes(order.status);
+  const itemCancellationAllowed = order.paymentStatus !== 'paid' && order.paymentStatus !== 'refunded'
+    && !['paid', 'cancelled', 'rejected'].includes(order.status);
   const isDelivery = order.source === 'delivery';
   const refunded = Number(order.refundedAmount ?? 0);
 

@@ -3,7 +3,8 @@ import { waiterItemPermission, waiterOrderPermission } from '@/lib/order-permiss
 import { useEffect, useState } from 'react';
 import type { Order, OrderItemStatus, OrderSetComponent } from '@/types';
 import { OrderStatusBadges } from '@/components/StatusBadge';
-import { ORDER_STATUS } from '@/lib/status';
+import { ORDER_STATUS, orderStationStatuses } from '@/lib/status';
+import { usePendingItemCancellations } from '@/features/requests/item-cancellations';
 import { displayOrderNumber, money, orderItemDisplayName, orderPlaceLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
 import { Spinner } from '@/components/Spinner';
@@ -122,7 +123,7 @@ export function OrderPanel({
   onRemoveRejectedItem: (item: Order['items'][number]) => void;
   onCancelReadyItem: (item: Order['items'][number], reason: string) => void;
   cancellationDeniedOpen: boolean;
-  onInsufficientPermissions: () => void;
+  onInsufficientPermissions: (item: Order['items'][number]) => void;
   onCancelOrder: () => void;
   /** Открыть редактирование заказа (переиспользует логику корзины/сетов). */
   onEdit?: () => void;
@@ -143,6 +144,7 @@ export function OrderPanel({
   const billItem = order.items.find((item) => item.id === billItemId);
   const billItemPermission = billItem ? waiterItemPermission(order, billItem, 'cancel', policies) : null;
   const billCorrection = !['paid', 'cancelled', 'rejected'].includes(order.status);
+  const pendingCancellations = usePendingItemCancellations(billCorrection && !unclaimedQr ? order.id : undefined);
   const finalCancelReason = cancelReason === 'Другое' ? cancelOther.trim() || 'Другое' : cancelReason;
 
   useEffect(() => {
@@ -162,10 +164,11 @@ export function OrderPanel({
     );
   }
 
+  const showReadyInHeader = order.status === 'ready' && orderStationStatuses(order).length === 0;
+  const statusBadges = <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />;
+
   return (
     <div className="flex h-full flex-col">
-      {/* Компактная шапка: номер + стол и «Изменить» в первой строке, статусы —
-          второй строкой, чтобы широкие станционные чипы не съедали номер заказа. */}
       <div className="border-b border-border pb-1.5">
         <div className="flex items-center justify-between gap-2">
           <h2 className="min-w-0 flex-1 truncate text-[15px] font-semibold leading-tight text-text-primary">
@@ -173,6 +176,7 @@ export function OrderPanel({
             <span className="ml-2 text-[13px] font-normal text-text-muted">{orderPlaceLabel(order, t)}</span>
           </h2>
           <div className="flex shrink-0 items-center gap-2">
+            {showReadyInHeader && statusBadges}
             {unclaimedQr && (
               <span className="rounded-md bg-primary/10 px-2 py-0.5 text-[11px] font-semibold text-primary">
                 QR
@@ -197,14 +201,7 @@ export function OrderPanel({
           className="mt-2 h-9 w-full max-w-52" disabled={submitting}
           options={relatedChecks.map((check) => ({ value: check.id, label: `${t('Чек')} ${displayOrderNumber(check.orderNumber)}` }))}
           onChange={onSelectCheck} />}
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-          {waitingDecision && (
-            <span className="rounded-md bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
-              {t('Нужен ответ')}
-            </span>
-          )}
-          <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />
-        </div>
+        {!showReadyInHeader && <div className="mt-1.5">{statusBadges}</div>}
       </div>
 
       {/* Позиции — компактный список */}
@@ -224,7 +221,8 @@ export function OrderPanel({
           const waitingItem = waitingDecision && !rejected;
           const comment = safeComment(it.comment);
           const setParts = it.setComponents ?? [];
-          const clickable = billCorrection && !rejected && !cancelled;
+          const cancellationRequested = pendingCancellations.data?.some(({ itemId }) => itemId === it.id);
+          const clickable = billCorrection && !rejected && !cancelled && !cancellationRequested;
           const hasExtra = setParts.length > 0 || comment || ((rejected || cancelled) && it.rejectReason) || waitingItem;
           return (
             <button
@@ -233,7 +231,7 @@ export function OrderPanel({
               disabled={!clickable || submitting}
               onClick={() => {
                 if (!waiterItemPermission(order, it, 'cancel', policies).allowed) {
-                  onInsufficientPermissions();
+                  onInsufficientPermissions(it);
                   return;
                 }
                 setBillItemId(it.id);
@@ -285,6 +283,9 @@ export function OrderPanel({
                   )}
                 </div>
               </div>
+              {cancellationRequested && !rejected && !cancelled && (
+                <p className="mt-1 text-xs font-medium text-warning">{t('Отмена запрошена')}</p>
+              )}
               {it.modifierSelections?.map((option) => <p key={option.optionId} className="mt-1 text-sm text-text-secondary">+ {option.name} ×{option.quantity}</p>)}
               {it.excludedIngredientNames?.map((name) => <p key={name} className="mt-1 text-sm text-warning">Без {name}</p>)}
               {hasExtra && (
@@ -400,7 +401,7 @@ export function OrderPanel({
               onClick={() => {
                 if (!billItem) return;
                 if (billItemPermission?.allowed) onCancelReadyItem(billItem, finalCancelReason);
-                else onInsufficientPermissions();
+                else onInsufficientPermissions(billItem);
                 setBillItemId(null);
               }}
             >

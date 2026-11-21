@@ -3,6 +3,7 @@ import { recordOrderReceipts } from '../finance/order-receipts';
 import { receiptTaxes, recordOrderTaxes } from '../settings/order-taxes';
 import type { AuthUser } from '../common/decorators/current-user.decorator';
 import { hasPermission, resolveUserPermissions } from '../common/permissions';
+import { assertAdminSectionAccess } from '../common/admin-section-access';
 import {
   BadRequestException,
   ConflictException,
@@ -24,6 +25,7 @@ import {
   TableStatus,
   KitchenEventType,
   WaiterShiftStatus,
+  type OrderItemCancellationRequest,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../realtime/events.gateway';
@@ -59,6 +61,7 @@ const ACTIVE_ORDER_STATUSES: OrderStatus[] = [
 ];
 
 const WAITER_HISTORY_PAGE_SIZE = 30;
+type OrderForCancellation = Prisma.OrderGetPayload<{ include: typeof orderInclude }>;
 type TerminalOrderTarget = { tableId: string; delivery?: never } | {
   tableId?: never;
   delivery: Pick<CreateTerminalDeliveryDto, 'customerName' | 'customerPhone' | 'deliveryAddress'>;
@@ -2152,28 +2155,118 @@ export class OrdersService {
 
   async cancelReadyItem(orderId: string, itemId: string, actor: AuditActor, reason: string) {
     const cleanReason = this.cancellationReason(reason);
-    const updated = await this.prisma.$transaction(async tx => {
+    const { updated, request } = await this.prisma.$transaction(async tx => {
       await lockOrder(tx, orderId);
       const order = await tx.order.findUniqueOrThrow({ where: { id: orderId }, include: orderInclude });
       this.assertOrderEditable(order, actor);
-      const item = order.items.find(i => i.id === itemId);
-      if (!item) throw new NotFoundException('Блюдо не найдено');
-      if ([OrderItemStatus.cancelled, OrderItemStatus.rejected].includes(item.status as any)) throw new BadRequestException('Блюдо уже отменено или отклонено');
+      const item = this.cancellableItem(order, itemId);
       if (actor.role === Role.WAITER) assertWaiterItemOperation(await this.orderPolicy(tx), order.status, item, 'cancel');
-      await this.cancelLine(tx, orderId, item, actor, cleanReason);
-      await this.recalcOrder(tx, orderId);
-      const status = await this.statusFromActiveItems(tx, orderId);
-      const tableStatus = this.tableStatusForOrderStatus(status);
-      if (tableStatus === TableStatus.free) await this.updateTableAfterClosingCheck(tx, order);
-      else if (tableStatus) await tx.table.update({ where: { id: order.tableId }, data: { status: tableStatus } });
-      return tx.order.update({ where: { id: orderId }, data: { status, requiresWaiterDecision: await this.pendingRejectedDecisions(tx, orderId) > 0,
-        ...(status === OrderStatus.cancelled ? { closedAt: new Date() } : {}) }, include: orderInclude });
+      const updated = await this.applyItemCancellation(tx, order, item, actor, cleanReason);
+      const pending = await tx.orderItemCancellationRequest.findFirst({ where: { orderId, itemId, status: 'pending' } });
+      const request = pending && await this.recordCancellationDecision(tx, pending.id, actor, 'approved');
+      return { updated, request };
     });
+    if (request) this.emitItemCancellationRequest(request, updated.orderNumber);
+    return this.publishItemCancellation(updated, itemId, actor, cleanReason);
+  }
+
+  async pendingItemCancellations(actor: AuthUser) {
+    assertAdminSectionAccess(actor, 'orders', true);
+    return this.prisma.orderItemCancellationRequest.findMany({
+      where: { cafeId: actor.cafeId, status: 'pending' },
+      include: { order: { select: { orderNumber: true } } },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    });
+  }
+
+  async waiterItemCancellations(orderId: string, actor: AuthUser) {
+    const order = await this.prisma.order.findUniqueOrThrow({ where: { id: orderId, cafeId: actor.cafeId } });
+    if (!this.canWaiterAccessOrder(order, actor.id)) throw new ForbiddenException('Это не ваш заказ');
+    return this.prisma.orderItemCancellationRequest.findMany({
+      where: { cafeId: actor.cafeId, orderId, status: 'pending' }, select: { itemId: true },
+    });
+  }
+
+  async requestItemCancellation(orderId: string, itemId: string, actor: AuthUser, reason: string) {
+    const cleanReason = this.cancellationReason(reason);
+    const { order, request, created } = await this.prisma.$transaction(async (tx) => {
+      await lockOrder(tx, orderId);
+      const order = await tx.order.findUniqueOrThrow({ where: { id: orderId, cafeId: actor.cafeId }, include: orderInclude });
+      this.assertOrderEditable(order, actor);
+      const item = this.cancellableItem(order, itemId);
+      const pending = await tx.orderItemCancellationRequest.findFirst({ where: { orderId, itemId, status: 'pending' } });
+      if (pending) return { order, request: pending, created: false };
+      const itemName = [item.dishNameSnapshot, item.dishVariantNameSnapshot].filter(Boolean).join(' · ');
+      const request = await tx.orderItemCancellationRequest.create({ data: {
+        cafeId: order.cafeId, orderId, itemId, itemName, quantity: item.quantity, reason: cleanReason,
+        requestedById: actor.id, requestedByName: actor.name,
+      } });
+      return { order, request, created: true };
+    });
+    if (created) this.emitItemCancellationRequest(request, order.orderNumber);
+    return request;
+  }
+
+  async decideItemCancellation(orderId: string, requestId: string, actor: AuthUser, status: 'approved' | 'rejected') {
+    assertAdminSectionAccess(actor, 'orders', true);
+    const { request, updated, orderNumber, changed } = await this.prisma.$transaction(async (tx) => {
+      await lockOrder(tx, orderId);
+      const order = await tx.order.findUniqueOrThrow({ where: { id: orderId, cafeId: actor.cafeId }, include: orderInclude });
+      const pending = await tx.orderItemCancellationRequest.findFirstOrThrow({ where: { id: requestId, orderId, cafeId: actor.cafeId } });
+      if (pending.status === status) return { request: pending, updated: null, orderNumber: order.orderNumber, changed: false };
+      if (pending.status !== 'pending') throw new ConflictException('Заявка уже рассмотрена');
+      let updated: OrderForCancellation | null = null;
+      if (status === 'approved') {
+        this.assertOrderEditable(order, actor);
+        const item = this.cancellableItem(order, pending.itemId);
+        if (item.quantity !== pending.quantity) throw new ConflictException('Количество блюда изменилось. Отклоните заявку или отмените позицию в заказе.');
+        updated = await this.applyItemCancellation(tx, order, item, actor, pending.reason);
+      }
+      const request = await this.recordCancellationDecision(tx, requestId, actor, status);
+      return { request, updated, orderNumber: order.orderNumber, changed: true };
+    });
+    if (changed) this.emitItemCancellationRequest(request, orderNumber);
+    if (updated) await this.publishItemCancellation(updated, request.itemId, actor, request.reason);
+    return request;
+  }
+
+  private cancellableItem(order: OrderForCancellation, itemId: string) {
+    const item = order.items.find((line) => line.id === itemId);
+    if (!item) throw new NotFoundException('Блюдо не найдено');
+    if (item.status === OrderItemStatus.cancelled || item.status === OrderItemStatus.rejected) {
+      throw new BadRequestException('Блюдо уже отменено или отклонено');
+    }
+    return item;
+  }
+
+  private recordCancellationDecision(tx: Prisma.TransactionClient, id: string, actor: AuditActor, status: 'approved' | 'rejected') {
+    return tx.orderItemCancellationRequest.update({ where: { id }, data: { status, decidedById: actor.id, decidedAt: new Date() } });
+  }
+
+  private emitItemCancellationRequest(request: OrderItemCancellationRequest, orderNumber: string) {
+    const event = { cafeId: request.cafeId, orderId: request.orderId, orderNumber, status: request.status };
+    this.events.emitToAdmin(SERVER_EVENTS.ORDER_ITEM_CANCELLATION_UPDATED, event);
+    this.events.emitToWaiter(request.requestedById, SERVER_EVENTS.ORDER_ITEM_CANCELLATION_UPDATED, event);
+  }
+
+  private async applyItemCancellation(tx: Prisma.TransactionClient, order: OrderForCancellation, item: OrderForCancellation['items'][number], actor: AuditActor, reason: string) {
+    const orderId = order.id;
+    await this.cancelLine(tx, orderId, item, actor, reason);
+    await this.recalcOrder(tx, orderId);
+    const status = await this.statusFromActiveItems(tx, orderId);
+    const tableStatus = this.tableStatusForOrderStatus(status);
+    if (tableStatus === TableStatus.free) await this.updateTableAfterClosingCheck(tx, order);
+    else if (tableStatus) await tx.table.update({ where: { id: order.tableId }, data: { status: tableStatus } });
+    return tx.order.update({ where: { id: orderId }, data: { status, requiresWaiterDecision: await this.pendingRejectedDecisions(tx, orderId) > 0,
+      ...(status === OrderStatus.cancelled ? { closedAt: new Date() } : {}) }, include: orderInclude });
+  }
+
+  private async publishItemCancellation(updated: OrderForCancellation, itemId: string, actor: AuditActor, cleanReason: string) {
     Object.assign(updated, { kitchenChange: { itemIds: [itemId], kind: 'cancelled', reason: cleanReason } });
     this.emitStatusChanged(updated);
     const tableStatus = this.tableStatusForOrderStatus(updated.status);
     if (tableStatus) this.emitTableStatus(updated.table.id, updated.table.number, updated.table.status, updated.table.hallId);
-    await this.audit.log({ actor, actionType: AuditAction.ORDER_UPDATED, entityType: AuditEntity.ORDER, entityId: orderId, orderId, tableId: updated.tableId,
+    await this.audit.log({ actor, actionType: AuditAction.ORDER_UPDATED, entityType: AuditEntity.ORDER, entityId: updated.id, orderId: updated.id, tableId: updated.tableId,
       description: `${actor.name ?? 'Сотрудник'} отменил блюдо в заказе ${updated.orderNumber}: ${cleanReason}`, metadata: { itemId, reason: cleanReason } });
     return updated;
   }

@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Modal } from '@/components/Modal';
 import { Spinner } from '@/components/Spinner';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, timeHM } from '@/lib/format';
@@ -25,7 +24,7 @@ export function OrderRefunds({ order, mode }: { order: Order; mode: 'request' | 
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h4 className="font-semibold">{t('Возвраты')}</h4>
       {refundable && history.isSuccess && !pending && <button type="button" className="btn-secondary btn-md" onClick={() => setFormOpen(true)}>
-        {t(mode === 'request' ? 'Запросить возврат' : 'Оформить возврат')}
+        {t(mode === 'request' ? 'Оформить заявку на возврат' : 'Оформить возврат')}
       </button>}
       {pending && mode === 'manage' && <button type="button" className="btn-primary btn-md" onClick={() => setReview(pending)}>
         {t('Рассмотреть заявку')}
@@ -52,18 +51,12 @@ export function OrderRefunds({ order, mode }: { order: Order; mode: 'request' | 
   </section>;
 }
 
-export function RefundQueueButton() {
+export function RefundQueuePage() {
   const t = useT();
   const pending = usePendingRefunds(true);
-  const [open, setOpen] = useState(false);
   const [review, setReview] = useState<OrderRefund>();
   const requests = pending.data ?? [];
-  return <>
-    <button type="button" className="btn-secondary btn-md" onClick={() => setOpen(true)}>
-      {t('Заявки на возврат')}
-      {requests.length > 0 && <span className="rounded-full bg-primary px-2 py-0.5 text-xs text-white">{requests.length}</span>}
-    </button>
-    <Modal open={open} suspended={!!review} title={t('Заявки на возврат')} onClose={() => setOpen(false)} panelClassName="max-w-2xl">
+  return <section className="rounded-xl border border-border bg-white px-4 py-2">
       {pending.isPending && <Spinner className="mx-auto h-5 w-5" />}
       {pending.error && <div className="space-y-2 text-sm">
         <p role="alert" className="text-danger">{apiError(pending.error)}</p>
@@ -80,7 +73,6 @@ export function RefundQueueButton() {
           <button type="button" className="btn-primary btn-md" onClick={() => setReview(refund)}>{t('Рассмотреть заявку')}</button>
         </li>)}
       </ul>
-    </Modal>
     {review && <ReviewOrderRefund refund={review} onClose={() => setReview(undefined)} onDone={() => setReview(undefined)} />}
-  </>;
+  </section>;
 }

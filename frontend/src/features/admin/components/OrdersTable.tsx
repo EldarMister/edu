@@ -1,4 +1,4 @@
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import type { Order } from '@/types';
 import { OrderStatusBadges } from '@/components/StatusBadge';
 import { Spinner } from '@/components/Spinner';
@@ -14,11 +14,31 @@ const CANCELLABLE = new Set([
   'picked_up', 'served', 'waiting_payment', 'partially_rejected',
 ]);
 
+const orderColumns = {
+  number: { label: '№ заказа', width: 92, className: 'font-medium text-text-primary' },
+  date: { label: 'Дата и время', width: 156, className: 'whitespace-nowrap' },
+  table: { label: 'Стол', width: 122 },
+  waiter: { label: 'Официант', width: 128 },
+  amount: { label: 'Сумма', width: 104, className: 'text-right font-medium text-text-primary' },
+  status: { label: 'Статус заказа', width: 198, className: 'order-status-cell pl-4' },
+  payment: { label: 'Способ оплаты', width: 164, className: 'whitespace-nowrap' },
+  actions: { label: 'Действия', width: 100, className: 'px-1 text-center' },
+} satisfies Record<string, { label: string; width: number; className?: string }>;
+
+type OrderColumn = keyof typeof orderColumns;
+export const defaultOrderColumns = Object.keys(orderColumns) as OrderColumn[];
+export function orderColumnLabel(column: OrderColumn) {
+  return orderColumns[column].label;
+}
+export function orderTableWidth(columns: OrderColumn[]) {
+  return columns.reduce((sum, key) => sum + orderColumns[key].width, 0);
+}
+
 type Props = {
   items: Order[];
   isLoading: boolean;
   error: string | null;
-  scrollRef: RefObject<HTMLDivElement>;
+  columns: OrderColumn[];
   loadMoreRef: RefObject<HTMLDivElement>;
   isFetchingNextPage: boolean;
   hasNextPage: boolean | undefined;
@@ -27,9 +47,36 @@ type Props = {
   onCancel: (order: Order) => void;
 };
 
-export function OrdersTable({ items, isLoading, error, scrollRef, loadMoreRef, isFetchingNextPage, hasNextPage, onOpen, onEdit, onCancel }: Props) {
+export function OrdersTable({ items, isLoading, error, columns, loadMoreRef, isFetchingNextPage, hasNextPage, onOpen, onEdit, onCancel }: Props) {
   const tr = useT();
   const editable = usePermissions().canEditSection('orders');
+  const minWidth = orderTableWidth(columns);
+
+  function renderRow(order: Order) {
+    const cells: Record<OrderColumn, ReactNode> = {
+      number: <button type="button" className="rounded-sm text-left hover:text-primary hover:underline focus-visible:outline-primary">
+        {displayOrderNumber(order.orderNumber)}
+      </button>,
+      date: <>{new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)}</>,
+      table: order.source === 'delivery'
+        ? <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{tr('Доставка')}</span>
+        : orderPlaceLabel(order, tr),
+      waiter: order.waiter?.name ?? (order.source === 'delivery' ? tr('Онлайн-заказ') : 'QR menu'),
+      amount: money(order.finalAmount),
+      status: <OrderStatusBadges order={order} size="sm" className="flex flex-wrap items-center gap-1" />,
+      payment: paymentCell(order),
+      actions: <div className="flex items-center justify-center gap-1">
+        {editable && order.status !== 'paid' && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
+        {editable && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}
+      </div>,
+    };
+    return (
+      <tr key={order.id} className="orders-table-row" onClick={() => onOpen(order)}>
+        {columns.map((key) => <Td key={key} className={orderColumnClass(key)}>{cells[key]}</Td>)}
+      </tr>
+    );
+  }
+
   return (
     <div className="orders-table-card">
       {isLoading ? (
@@ -42,66 +89,28 @@ export function OrdersTable({ items, isLoading, error, scrollRef, loadMoreRef, i
       ) : items.length === 0 ? (
         <p className="py-12 text-center text-text-muted">{tr('Заказы не найдены')}</p>
       ) : (
-        <div ref={scrollRef} className="orders-table-scroll menu-scrollbar">
-          <table className="orders-table">
+        <>
+          <table className="orders-table" aria-label={tr('Заказы')}>
             <colgroup>
-              <col className="w-[8%]" /><col className="w-[14%]" /><col className="w-[10%]" /><col className="w-[11%]" />
-              <col className="w-[9%]" /><col className="w-[19%]" /><col className="w-[21%]" /><col className="w-[8%]" />
+              {columns.map((key) => <col key={key} style={{ width: (orderColumns[key].width / minWidth) * 100 + '%' }} />)}
             </colgroup>
             <thead><tr>
-              <Th>{tr('№ заказа')}</Th>
-              <Th>{tr('Дата и время')}</Th>
-              <Th>{tr('Стол')}</Th>
-              <Th>{tr('Официант')}</Th>
-              <Th className="text-right">{tr('Сумма')}</Th>
-              <Th className="pl-4">{tr('Статус заказа')}</Th>
-              <Th>{tr('Способ оплаты')}</Th>
-              <Th className="px-1 text-center">{tr('Действия')}</Th>
+              {columns.map((key) => <Th key={key} className={orderColumnClass(key)}>{tr(orderColumnLabel(key))}</Th>)}
             </tr></thead>
-            <tbody>
-              {items.map((order) => (
-                <tr
-                  key={order.id}
-                  className="orders-table-row"
-                  tabIndex={0}
-                  role="button"
-                  onClick={() => onOpen(order)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      onOpen(order);
-                    }
-                  }}
-                >
-                  <Td className="font-medium text-text-primary">{displayOrderNumber(order.orderNumber)}</Td>
-                  <Td className="whitespace-nowrap text-text-secondary">{new Date(order.createdAt).toLocaleDateString('ru-RU')} {timeHM(order.createdAt)}</Td>
-                  <Td className="text-text-secondary">
-                    {order.source === 'delivery' ? <span className="inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">{tr('Доставка')}</span>
-                      : orderPlaceLabel(order, tr)}
-                  </Td>
-                  <Td className="text-text-secondary">
-                    {order.waiter?.name ?? (order.source === 'delivery' ? tr('Онлайн-заказ') : 'QR menu')}
-                  </Td>
-                  <Td className="text-right font-medium text-text-primary">{money(order.finalAmount)}</Td>
-                  <Td className="order-status-cell pl-4"><OrderStatusBadges order={order} size="sm" className="flex flex-nowrap items-center justify-start gap-1" /></Td>
-                  <Td className="whitespace-nowrap text-text-secondary">{paymentCell(order)}</Td>
-                  <Td className="px-1">
-                    <div className="flex items-center justify-center gap-1">
-                      {editable && order.status !== 'paid' && <OrderRowAction label={tr('Изменить статус')} onClick={() => onEdit(order)}><IconEdit className="h-4 w-4" /></OrderRowAction>}
-                      {editable && CANCELLABLE.has(order.status) && <OrderRowAction label={tr('Отменить')} danger onClick={() => onCancel(order)}><IconX className="h-4 w-4" /></OrderRowAction>}
-                    </div>
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
+            <tbody>{items.map(renderRow)}</tbody>
           </table>
           <div ref={loadMoreRef} />
           {isFetchingNextPage && <div className="flex justify-center py-3 text-primary"><Spinner className="h-5 w-5" /></div>}
           {!hasNextPage && <p className="py-3 text-center text-xs text-text-light">{tr('Все заказы загружены')}</p>}
-        </div>
+        </>
       )}
     </div>
   );
+}
+
+function orderColumnClass(key: OrderColumn) {
+  const column = orderColumns[key];
+  return 'className' in column ? column.className : '';
 }
 
 function OrderRowAction({ label, danger = false, onClick, children }: { label: string; danger?: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -111,7 +120,6 @@ function OrderRowAction({ label, danger = false, onClick, children }: { label: s
       className={`orders-row-action ${danger ? 'orders-row-action-danger' : ''}`}
       title={label}
       aria-label={label}
-      onKeyDown={(event) => event.stopPropagation()}
       onClick={(event) => { event.stopPropagation(); onClick(); }}
     >
       {children}
@@ -120,7 +128,7 @@ function OrderRowAction({ label, danger = false, onClick, children }: { label: s
 }
 
 function Th({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <th className={`px-3 py-2.5 font-medium ${className}`}>{children}</th>;
+  return <th scope="col" className={`px-3 py-2.5 font-medium ${className}`}>{children}</th>;
 }
 function Td({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <td className={`px-3 py-2 ${className}`}>{children}</td>;

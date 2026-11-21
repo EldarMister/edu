@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { createPortal } from 'react-dom';
 import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { usePermissions } from '@/hooks/usePermissions';
-import { IconTables } from '../../components/icons';
+import { printReport } from '@/lib/report-output';
+import { IconPrinter, IconTables } from '../../components/icons';
 import type { CashFlow, FinanceAccount, FinanceCategory, FinanceEntry } from './api';
 import { buildCashFlowTable, flowCell, type FlowColumn, type FlowLine, type FlowMovement } from './cash-flow-table';
 import { downloadRegister } from './FinanceRegister';
@@ -12,6 +13,12 @@ const money = new Intl.NumberFormat('ru-RU', { minimumFractionDigits: 2, maximum
 const percent = new Intl.NumberFormat('ru-RU', { style: 'percent', maximumFractionDigits: 2 });
 const date = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeZone: 'Asia/Bishkek' });
 const types = [{ label: 'карта', type: 'noncash' }, { label: 'наличн.', type: 'cash' }] as const;
+const summaryMeasures = [
+  { id: 'opening', label: 'На начало периода' },
+  { id: 'income', label: 'Поступления' },
+  { id: 'expense', label: 'Расходы' },
+  { id: 'closing', label: 'На конец периода' },
+] as const;
 
 type Detail = { key: string; label: string; trigger: HTMLButtonElement; movements: FlowMovement[] };
 
@@ -22,6 +29,7 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
   const { canAction } = usePermissions();
   const [expanded, setExpanded] = useState<string[]>([]);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [printError, setPrintError] = useState(false);
   const [savedColumns, saveColumns] = useColumnPreference('finance-cash-flow');
   const extraColumns = savedColumns.split(',').filter(Boolean);
   const showAmounts = extraColumns.includes('amounts');
@@ -44,6 +52,8 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
     ...(showPercent ? types.map(({ label, type }) =>
       ({ id: bucket.key + ':' + type + ':%', label: bucket.shortLabel + ', ' + label + ' %', period: bucket, type, percent: true })) : []),
   ]);
+  const totalColumn = columns.find(({ id }) => id === 'total');
+  const netLine = lines.find(({ measure }) => measure === 'net');
 
   function toggle(id: string) {
     setExpanded((list) => list.includes(id) ? list.filter((key) => key !== id) : [...list, id]);
@@ -55,7 +65,7 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
     return percent.format(cents ? cents / total : 0);
   }
 
-  function exportReport() {
+  function outputReport(format: 'csv' | 'print') {
     function exportLines(visible: FlowLine[], depth: number): (string | number)[][] {
       return visible.flatMap((line) => [
         ['  '.repeat(depth) + line.label, ...columns.map((column) => {
@@ -65,10 +75,16 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
         ...exportLines(line.children ?? [], depth + 1),
       ]);
     }
-    downloadRegister('Движение денег ' + from + ' — ' + to, [
-      ['Движение денег', scopeLabel, from, to],
-      ['Статья', ...columns.map(({ label }) => label)], ...exportLines(lines, 0),
-    ]);
+    const headings = ['Статья', ...columns.map(({ label }) => label)];
+    const rows = exportLines(lines, 0);
+    if (format === 'csv') {
+      downloadRegister('Движение денег ' + from + ' — ' + to, [
+        ['Движение денег', scopeLabel, from, to], headings, ...rows,
+      ]);
+      return;
+    }
+    setPrintError(!printReport('Движение денег', scopeLabel + ' · ' + from + ' — ' + to, headings,
+      rows.map((row) => row.map((value) => typeof value === 'number' ? money.format(value) : value))));
   }
 
   function renderRows(visible: FlowLine[], prefix = '', depth = 0): ReactNode[] {
@@ -86,7 +102,7 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
             const { cents, movements } = flowCell(line, column, byAccount);
             const value = column.percent ? toPercent(line, column, cents) : money.format(cents / 100);
             const cell = id + ':' + column.id;
-            return <td key={column.id}>
+            return <td key={column.id} className={column === totalColumn ? 'cash-flow-period-total' : undefined}>
               {movements.length && !column.percent ? <button type="button" className="cash-flow-amount"
                 aria-label={line.label + ', ' + column.label + ', ' + value}
                 aria-haspopup="dialog" aria-expanded={detail?.key === cell}
@@ -101,32 +117,57 @@ export function CashFlowMatrix({ flow, accounts, categories, entries, from, to, 
     });
   }
 
-  return <section className="cash-flow-report min-w-0">
-    <div className="cash-flow-toolbar">
-      <CashFlowAccountFilter accounts={accounts} selected={scope} onChange={(value) => {
-        setDetail(null);
-        setAccounts(value);
-      }} />
-      <div className="cash-flow-tools">
-        {flow.accountOpening && <details className="cash-flow-column-menu">
-          <summary className="finance-tool"><IconTables /> Столбцы <span aria-hidden="true">▾</span></summary>
-          <div>
-            <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>
-            <label><input type="checkbox" checked={showPercent} onChange={(event) => toggleColumn('percent', event.target.checked)} /> Карта и наличные, %</label>
-          </div>
-        </details>}
-        {canAction('exportReports') && <button type="button" className="finance-tool" onClick={exportReport}>Экспорт CSV</button>}
-        {period}
+  return <section className="cash-flow-report min-w-0 space-y-3">
+    {totalColumn && <dl className="grid grid-cols-2 overflow-hidden rounded-xl border border-border bg-card md:grid-cols-4"
+      aria-label="Итоги за период">
+      {summaryMeasures.map(({ id, label }) => {
+        const line = lines.find((row) => row.id === id);
+        const cents = line ? flowCell(line, totalColumn, byAccount).cents : 0;
+        return <div key={id}
+          className="min-w-0 border-border px-4 py-3 even:border-l max-md:[&:nth-child(n+3)]:border-t md:border-l md:first:border-l-0">
+          <dt className="text-sm text-text-muted">{label}</dt>
+          <dd className="mt-1 break-words text-lg font-semibold tabular-nums text-text-primary sm:text-xl">{money.format(cents / 100)} с</dd>
+        </div>;
+      })}
+    </dl>}
+    <div className="cash-flow-card min-w-0 rounded-xl border border-border bg-card">
+      <div className="cash-flow-toolbar">
+        <div className="cash-flow-filters">
+          <CashFlowAccountFilter accounts={accounts} selected={scope} onChange={(value) => {
+            setDetail(null);
+            setAccounts(value);
+          }} />
+          {period}
+        </div>
+        <div className="cash-flow-tools">
+          {flow.accountOpening && <details className="cash-flow-column-menu">
+            <summary className="btn-secondary btn-md"><IconTables className="h-4 w-4" /> Столбцы <span aria-hidden="true">▾</span></summary>
+            <div>
+              <label><input type="checkbox" checked={showAmounts} onChange={(event) => toggleColumn('amounts', event.target.checked)} /> Карта и наличные, деньги</label>
+              <label><input type="checkbox" checked={showPercent} onChange={(event) => toggleColumn('percent', event.target.checked)} /> Карта и наличные, %</label>
+            </div>
+          </details>}
+          {canAction('exportReports') && <button type="button" className="btn-secondary btn-md" onClick={() => outputReport('csv')}>Экспорт CSV</button>}
+          <button type="button" className="btn-secondary btn-md" onClick={() => outputReport('print')}>
+            <IconPrinter className="h-4 w-4" /> Печать
+          </button>
+        </div>
       </div>
-    </div>
-    <div className="cash-flow-scroll" tabIndex={0} role="region" aria-label="Движение денег по месяцам">
-      <table className="cash-flow-grid">
-        <thead><tr>
-          <th scope="col" className="cash-flow-label"><span className="sr-only">Статья</span></th>
-          {columns.map(({ id, label }) => <th key={id} scope="col">{label}</th>)}
-        </tr></thead>
-        <tbody>{renderRows(lines)}</tbody>
-      </table>
+      {printError && <p role="alert" className="border-b border-border px-4 py-2 text-sm text-danger">
+        Разрешите всплывающие окна, чтобы распечатать отчёт
+      </p>}
+      <div className="cash-flow-scroll" tabIndex={0} role="region" aria-label="Движение денег по месяцам">
+        <table className="cash-flow-grid">
+          <thead><tr>
+            <th scope="col" className="cash-flow-label">Статья</th>
+            {columns.map((column) => <th key={column.id} scope="col" className={column === totalColumn ? 'cash-flow-period-total' : undefined}>
+              {column.label}
+            </th>)}
+          </tr></thead>
+          <tbody>{renderRows(lines.filter((line) => line !== netLine))}</tbody>
+          {netLine && <tfoot>{renderRows([netLine])}</tfoot>}
+        </table>
+      </div>
     </div>
     {detail && <CashFlowDetail detail={detail} accounts={byAccount} close={() => setDetail(null)} />}
   </section>;
@@ -147,7 +188,7 @@ function CashFlowAccountFilter({ accounts, selected, onChange }: {
       setDraft(new Set(selected));
     }
   }}>
-    <summary className="finance-tool" aria-label="Счёт">{caption} <span aria-hidden="true">▾</span></summary>
+    <summary className="btn-secondary btn-md" aria-label="Счёт"><span className="truncate">{caption}</span> <span aria-hidden="true">▾</span></summary>
     <div>
       <div className="cash-flow-filter-actions">
         <button type="button" className="text-primary" onClick={() => setDraft(new Set(accounts.map(({ id }) => id)))}>Выбрать все</button>

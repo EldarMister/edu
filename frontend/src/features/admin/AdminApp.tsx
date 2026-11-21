@@ -18,6 +18,9 @@ import { adminVoice } from '@/services/adminVoice';
 import { useNotifications } from '@/store/notifications';
 import type { AdministratorCall, Order, ReceiptPrintRequest } from '@/types';
 import { useCanManageOrderRefunds, useRefundUpdates } from '@/features/refunds/api';
+import { RefundQueuePage } from '@/features/refunds/OrderRefunds';
+import { ItemCancellationQueuePage } from '@/features/requests/ItemCancellationQueuePage';
+import { useItemCancellationUpdates } from '@/features/requests/item-cancellations';
 import {
   IconStats,
   IconOrders,
@@ -138,6 +141,7 @@ const SETTINGS_NAV = [
 type Section =
   | 'stats'
   | 'orders'
+  | 'requests'
   | 'receipts'
   | 'tables'
   | 'menu'
@@ -167,6 +171,7 @@ const SECTIONS: {
   { key: 'stats', label: 'Статистика', icon: IconStats, perm: 'statistics' },
   { key: 'finance', label: 'Финансы', icon: IconMoney },
   { key: 'orders', label: 'Заказы', icon: IconOrders, perm: 'orders' },
+  { key: 'requests', label: 'Заявки', icon: IconJournal },
   { key: 'receipts', label: 'Печать чека', icon: IconPrinter, perm: 'checks', adminOnly: true },
   { key: 'tables', label: 'Столы', icon: IconTables, perm: 'tables' },
   { key: 'menu', label: 'Меню', icon: IconMenu, perm: 'menu' },
@@ -191,7 +196,13 @@ export function AdminApp() {
   const isOwner = permissions.isOwner;
   const isAdmin = permissions.effectiveRole === 'ADMIN';
   const canManageRefunds = useCanManageOrderRefunds();
+  const canManageCancellations = (isAdmin || isOwner) && permissions.canEditSection('orders');
+  const requestsNav = [
+    ...(canManageRefunds ? [{ key: 'refunds', label: 'Заявки на возврат' }] : []),
+    ...(canManageCancellations ? [{ key: 'cancellations', label: 'Отмены блюд' }] : []),
+  ];
   useRefundUpdates('admin', canManageRefunds);
+  useItemCancellationUpdates('admin', canManageCancellations);
   const financeAccess = useFinanceAccess(isAdmin);
   const mayPostFinances = isOwner || financeAccess.data?.allowed === true;
   const mayViewFinances = isOwner || financeAccess.data?.canViewAll === true;
@@ -204,6 +215,7 @@ export function AdminApp() {
   const sections = SECTIONS.filter((s) => {
     if (s.adminOnly && !isAdmin) return false;
     if (s.key === 'finance') return financeNav.length > 0;
+    if (s.key === 'requests') return requestsNav.length > 0;
     return !!s.perm && canSection(s.perm);
   });
   const [route, setRoute] = useSearchParams();
@@ -211,11 +223,13 @@ export function AdminApp() {
   useWorkspaceScroll();
   const legacyStations = route.get('section') === 'menu' && route.get('view') === 'stations';
   const section = (legacyStations ? 'staff' : route.get('section') || (isOwner ? 'stats' : 'orders')) as Section;
+  const requestsView = requestsNav.find(({ key }) => key === route.get('view')) ?? requestsNav[0];
   const warehousePolicy = useWarehousePolicy(canSection('warehouse'));
   const warehouseLocations = useWarehouseLocations(canSection('warehouse'));
   function setSection(next: Section) {
     const defaults: Partial<Record<Section, string>> = {
       stats: 'overview', menu: 'goods', warehouse: 'balances', finance: financeNav[0]?.key, staff: 'employees', settings: 'general',
+      requests: requestsNav[0]?.key,
     };
     const view = defaults[next];
     setRoute(view ? { section: next, view } : { section: next });
@@ -425,9 +439,11 @@ export function AdminApp() {
       : section === 'menu' ? MENU_NAV.find((item) => item.key === menuView)?.label
         : section === 'finance' ? financeNav.find(({ key }) => key === financeView)?.label
           : section === 'staff' ? personnelNav.find(({ key }) => key === staffView)?.label
+            : section === 'requests' ? requestsView?.label
             : section === 'tables' && route.get('view') === 'map' ? 'Карта зала'
               : section === 'settings' ? settingsView === 'general' ? 'Общие настройки' : settingsTab.label : undefined;
   const pageTitle = profileOpen ? t('Личный кабинет') : current ? t(currentViewLabel ?? current.label) : '';
+  const scrollOrdersHeader = !profileOpen && section === 'orders' && canSection('orders');
   useEffect(() => {
     const previous = document.title;
     document.title = pageTitle ? `${pageTitle} · EDU POS` : 'EDU POS';
@@ -478,10 +494,11 @@ export function AdminApp() {
               : s.key === 'menu'
                 ? MENU_NAV.filter((item) => !['preparations', 'ingredients', 'ingredientCategories'].includes(item.key) || canSection('warehouse'))
                 : s.key === 'stats' ? STATISTICS_NAV
-                  : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav : s.key === 'settings' ? SETTINGS_NAV : [];
+                  : s.key === 'finance' ? financeNav : s.key === 'staff' ? personnelNav
+                    : s.key === 'requests' ? requestsNav : s.key === 'settings' ? SETTINGS_NAV : [];
           const currentView = s.key === 'warehouse' ? warehouseView
             : s.key === 'menu' ? menuView : s.key === 'stats' ? statsView
-              : s.key === 'finance' ? financeView : s.key === 'settings' ? settingsView : staffView;
+              : s.key === 'finance' ? financeView : s.key === 'settings' ? settingsView : s.key === 'requests' ? requestsView?.key : staffView;
           const hasChildren = children.length > 0;
           const expanded = hasChildren && active && collapsedSection !== s.key;
           const selectedSection = active && !hasChildren;
@@ -598,6 +615,33 @@ export function AdminApp() {
     </aside>;
   };
 
+  const workspaceHeader = (
+    <header className={`workspace-header flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 sm:flex-nowrap border-b border-border bg-white px-4 py-3 lg:px-6 ${scrollOrdersHeader ? 'sticky left-0' : ''}`}>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <button
+          className="-ml-1 shrink-0 rounded-lg p-1.5 text-text-secondary hover:bg-background lg:hidden"
+          onClick={() => setMobileNav(true)}
+          aria-label="Меню"
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        {sidebarMode === 'hidden' && <div className="hidden shrink-0 items-center gap-2 border-r border-border pr-3 lg:flex">
+          <BrandLogo />
+          {sidebarToggle}
+        </div>}
+        <WorkspaceTitleSlot><h1 key={pageTitle} className="workspace-enter text-xl font-semibold text-text-primary lg:text-2xl">
+          {pageTitle}
+        </h1></WorkspaceTitleSlot>
+      </div>
+      <div className="contents sm:flex sm:items-center sm:gap-3">
+        <WorkspaceActionsSlot className="order-last basis-full empty:hidden sm:order-none sm:basis-auto" />
+        <ConnectionStatus />
+      </div>
+    </header>
+  );
+
   return (
     <WorkspaceHeaderProvider>
     <div
@@ -637,46 +681,19 @@ export function AdminApp() {
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         <OfflineBanner />
-        <header className="workspace-header flex min-h-16 shrink-0 flex-wrap items-center justify-between gap-3 sm:flex-nowrap border-b border-border bg-white px-4 py-3 lg:px-6">
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <button
-              className="-ml-1 shrink-0 rounded-lg p-1.5 text-text-secondary hover:bg-background lg:hidden"
-              onClick={() => setMobileNav(true)}
-              aria-label="Меню"
-            >
-              <svg
-                width="22"
-                height="22"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-            {sidebarMode === 'hidden' && <div className="hidden shrink-0 items-center gap-2 border-r border-border pr-3 lg:flex">
-              <BrandLogo />
-              {sidebarToggle}
-            </div>}
-            <WorkspaceTitleSlot><h1 key={pageTitle} className="workspace-enter text-xl font-semibold text-text-primary lg:text-2xl">
-              {pageTitle}
-            </h1></WorkspaceTitleSlot>
-          </div>
-          <div className="contents sm:flex sm:items-center sm:gap-3">
-            <WorkspaceActionsSlot className="order-last basis-full empty:hidden sm:order-none sm:basis-auto" />
-            <ConnectionStatus />
-          </div>
-        </header>
+        {!scrollOrdersHeader && workspaceHeader}
         <main
-          className={`workspace-main app-scrollbar-subtle flex-1 overflow-y-auto overflow-x-hidden p-4 lg:p-6 ${posterWorkspace ? 'poster-workspace' : ''} ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
+          className={`workspace-main app-scrollbar-subtle flex-1 ${scrollOrdersHeader ? 'orders-workspace overflow-auto' : 'overflow-y-auto overflow-x-hidden p-4 lg:p-6'} ${posterWorkspace ? 'poster-workspace' : ''} ${['receipts', 'tables', 'menu', 'staff'].includes(section) ? 'pt-2 lg:pt-3' : ''}`}
         >
+          {scrollOrdersHeader && workspaceHeader}
           {profileOpen ? <AdminProfilePage /> : !current ? (
             <NoAccessScreen />
           ) : (
             <>
               {section === 'stats' && canSection('statistics') && (statsView === 'taxes' ? <TaxReportPage /> : <StatisticsPage view={statsView} />)}
               {section === 'orders' && canSection('orders') && <OrdersPage />}
+              {section === 'requests' && (requestsView?.key === 'refunds' ? <RefundQueuePage />
+                : requestsView?.key === 'cancellations' ? <ItemCancellationQueuePage /> : <NoAccessScreen />)}
               {section === 'receipts' && isAdmin && canSection('checks') && <ReceiptPrintsPage />}
               {section === 'tables' && canSection('tables') && <TablesPage />}
               {section === 'menu' && canSection('menu') && <>

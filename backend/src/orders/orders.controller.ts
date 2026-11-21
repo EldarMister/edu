@@ -48,6 +48,18 @@ export class OrdersController {
     return this.orders.waiterOrderHistory(user.id, cursor);
   }
 
+  @Get('item-cancellation-requests')
+  @Roles(Role.ADMIN, Role.OWNER)
+  pendingItemCancellations(@CurrentUser() user: AuthUser) {
+    return this.orders.pendingItemCancellations(user);
+  }
+
+  @Get(':id/item-cancellation-requests')
+  @Roles(Role.WAITER)
+  waiterItemCancellations(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.orders.waiterItemCancellations(id, user);
+  }
+
   @Get(':id')
   @Roles(Role.WAITER, Role.KITCHEN, Role.ADMIN, Role.OWNER)
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
@@ -122,6 +134,27 @@ export class OrdersController {
     @Body() dto: CancelOrderItemDto,
   ) {
     return this.orders.cancelReadyItem(id, itemId, user, dto.reason);
+  }
+
+  @Post(':id/items/:itemId/cancellation-request')
+  @Roles(Role.WAITER)
+  requestItemCancellation(
+    @Param('id') id: string, @Param('itemId') itemId: string,
+    @CurrentUser() user: AuthUser, @Body() dto: CancelOrderItemDto,
+  ) {
+    return this.orders.requestItemCancellation(id, itemId, user, dto.reason);
+  }
+
+  @Post(':id/item-cancellation-requests/:requestId/approve')
+  @Roles(Role.ADMIN, Role.OWNER)
+  approveItemCancellation(@Param('id') id: string, @Param('requestId') requestId: string, @CurrentUser() user: AuthUser) {
+    return this.orders.decideItemCancellation(id, requestId, user, 'approved');
+  }
+
+  @Post(':id/item-cancellation-requests/:requestId/reject')
+  @Roles(Role.ADMIN, Role.OWNER)
+  rejectItemCancellation(@Param('id') id: string, @Param('requestId') requestId: string, @CurrentUser() user: AuthUser) {
+    return this.orders.decideItemCancellation(id, requestId, user, 'rejected');
   }
 
   @Post(':id/served')

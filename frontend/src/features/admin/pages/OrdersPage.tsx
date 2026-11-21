@@ -6,15 +6,18 @@ import { useNotifications } from '@/store/notifications';
 import { apiError } from '@/lib/api';
 import { displayOrderNumber, money, orderPlaceLabel } from '@/lib/format';
 import { useT } from '@/lib/i18n';
+import { usePermissions } from '@/hooks/usePermissions';
+import { useColumnPreference } from '@/hooks/useColumnPreference';
 import { OrdersFilters, type OrderSort } from '../components/OrdersFilters';
-import { OrdersTable } from '../components/OrdersTable';
+import { defaultOrderColumns, orderColumnLabel, orderTableWidth, OrdersTable } from '../components/OrdersTable';
+import { IconTables } from '../components/icons';
 import { CancelOrderModal } from '../components/CancelOrderModal';
 import { OrderDetailsModal } from '../components/OrderDetailsModal';
 import { useCanManageOrderRefunds } from '@/features/refunds/api';
-import { RefundQueueButton } from '@/features/refunds/OrderRefunds';
 import { useAdminOrderDetails, useAdminOrdersInfinite, useOrdersSummary, useCancelOrder, useStaff, useUpdateOrderStatus } from '../api';
 import { WorkspaceHeaderActions } from './WorkspaceHeader';
 import { useListPeriod } from './warehouse/ListPeriodFilter';
+import { visibleWarehouseColumns, WarehouseColumnSettings } from './warehouse/WarehouseColumnSettings';
 import './orders-redesign.css';
 
 const MANUAL_STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
@@ -41,16 +44,19 @@ export function OrdersPage() {
   const period = useListPeriod('orders');
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState<OrderSort>('default');
+  const [columnsOpen, setColumnsOpen] = useState(false);
+  const [savedColumns, saveColumns] = useColumnPreference('admin-orders');
+  const columns = visibleWarehouseColumns(savedColumns, defaultOrderColumns);
 
   const [cancelTarget, setCancelTarget] = useState<Order | null>(null);
   const [detailsOrder, setDetailsOrder] = useState<Order | null>(null);
   const detail = useAdminOrderDetails(detailsOrder?.id ?? null);
   const canManageRefunds = useCanManageOrderRefunds();
+  const { canEditSection } = usePermissions();
   const [statusTarget, setStatusTarget] = useState<Order | null>(null);
   const [manualStatus, setManualStatus] = useState<OrderStatus>('served');
   const [manualReason, setManualReason] = useState('');
   const loadMoreRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   const tr = useT();
   const push = useNotifications((s) => s.push);
@@ -93,9 +99,7 @@ export function OrdersPage() {
       (entries) => {
         if (entries[0].isIntersecting && !isFetchingNextPage) fetchNextPage();
       },
-      // root — сам прокручиваемый контейнер списка, иначе на телефоне «маяк»
-      // не попадает во вьюпорт и автоподгрузка не срабатывает при скролле.
-      { root: scrollRef.current, rootMargin: '200px' },
+      { root: el.closest('main'), rootMargin: '200px' },
     );
     io.observe(el);
     return () => io.disconnect();
@@ -134,40 +138,48 @@ export function OrdersPage() {
   }
 
   return (
-    <div className="orders-redesign">
-      <WorkspaceHeaderActions>{canManageRefunds && <RefundQueueButton />}{period.filter}</WorkspaceHeaderActions>
-      {/* Inline-сводка под заголовком */}
-      <div className="orders-summary workspace-enter" aria-busy={summaryQ.isPending}>
-        <Sum label={tr('Всего заказов')} value={s?.total ?? summaryPlaceholder} />
-        <Sep />
-        <Sum label={tr('Оплачено')} value={s?.paid ?? summaryPlaceholder} />
-        <Sep />
-        <Sum label={tr('Не оплачено')} value={s?.unpaid ?? summaryPlaceholder} />
-        <Sep />
-        <Sum label={tr('Отменено')} value={s?.cancelled ?? summaryPlaceholder} />
-        <Sep />
-        <Sum label={tr('Выручка')} value={s ? money(s.revenue) : summaryPlaceholder} />
+    <div className="orders-redesign" style={items.length && !ordersError
+      ? { width: `max(100%, calc(${orderTableWidth(columns)}px + 2 * var(--orders-gutter)))` }
+      : undefined}>
+      <WorkspaceHeaderActions>
+        <button type="button" className="btn-secondary btn-md" onClick={() => setColumnsOpen(true)}>
+          <IconTables className="h-4 w-4" /> {tr('Столбцы')}
+        </button>
+        {period.filter}
+      </WorkspaceHeaderActions>
+      <div className="orders-controls">
+        <div className="orders-summary workspace-enter" aria-busy={summaryQ.isPending}>
+          <Sum label={tr('Всего заказов')} value={s?.total ?? summaryPlaceholder} />
+          <Sep />
+          <Sum label={tr('Оплачено')} value={s?.paid ?? summaryPlaceholder} />
+          <Sep />
+          <Sum label={tr('Не оплачено')} value={s?.unpaid ?? summaryPlaceholder} />
+          <Sep />
+          <Sum label={tr('Отменено')} value={s?.cancelled ?? summaryPlaceholder} />
+          <Sep />
+          <Sum label={tr('Выручка')} value={s ? money(s.revenue) : summaryPlaceholder} />
+        </div>
+
+        <OrdersFilters
+          tab={tab}
+          paymentMethod={paymentMethod}
+          waiterId={waiterId}
+          waiterOptions={waiterOptions}
+          sort={sort}
+          search={search}
+          onTabChange={setTab}
+          onPaymentMethodChange={setPaymentMethod}
+          onWaiterChange={setWaiterId}
+          onSortChange={setSort}
+          onSearchChange={setSearch}
+        />
       </div>
 
-      <OrdersFilters
-        tab={tab}
-        paymentMethod={paymentMethod}
-        waiterId={waiterId}
-        waiterOptions={waiterOptions}
-        sort={sort}
-        search={search}
-        onTabChange={setTab}
-        onPaymentMethodChange={setPaymentMethod}
-        onWaiterChange={setWaiterId}
-        onSortChange={setSort}
-        onSearchChange={setSearch}
-      />
-
       <OrdersTable
+        columns={columns}
         items={items}
         isLoading={ordersQ.isLoading}
         error={ordersError}
-        scrollRef={scrollRef}
         loadMoreRef={loadMoreRef}
         isFetchingNextPage={isFetchingNextPage}
         hasNextPage={hasNextPage}
@@ -175,6 +187,13 @@ export function OrdersPage() {
         onEdit={openStatusEditor}
         onCancel={setCancelTarget}
       />
+      {columnsOpen && <WarehouseColumnSettings columns={columns} defaults={defaultOrderColumns}
+        label={(key) => tr(orderColumnLabel(key))} onClose={() => setColumnsOpen(false)}
+        onApply={(selected) => {
+          const value = selected.join(',');
+          saveColumns(value === defaultOrderColumns.join(',') ? '' : value);
+          setColumnsOpen(false);
+        }} />}
       <CancelOrderModal
         open={!!cancelTarget}
         orderLabel={
@@ -202,7 +221,7 @@ export function OrdersPage() {
         refundMode={canManageRefunds ? 'manage' : undefined}
         onClose={() => setDetailsOrder(null)}
         onOrderChange={setDetailsOrder}
-        allowItemCancellation
+        allowItemCancellation={canEditSection('orders')}
       />
     </div>
   );

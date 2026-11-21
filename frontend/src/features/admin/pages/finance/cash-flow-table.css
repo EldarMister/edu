@@ -1,9 +1,11 @@
 .cash-flow-toolbar,
-.cash-flow-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
-.cash-flow-toolbar { justify-content: space-between; padding: 0 0 12px; }
-.cash-flow-tools { margin-left: auto; }
+.cash-flow-filters,
+.cash-flow-tools { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; }
+.cash-flow-toolbar { justify-content: space-between; gap: 8px 16px; padding: 8px 12px; border-bottom: 1px solid rgb(var(--edu-border)); }
+.cash-flow-toolbar .report-period-trigger { min-height: 36px; }
 .cash-flow-column-menu { position: relative; }
 .cash-flow-column-menu summary { cursor: pointer; list-style: none; }
+.cash-flow-column-menu summary::-webkit-details-marker { display: none; }
 .cash-flow-column-menu > div {
   position: absolute;
   top: calc(100% + 4px);
@@ -18,13 +20,14 @@
 }
 .cash-flow-column-menu label { display: flex; gap: 8px; align-items: center; padding: 5px 8px; cursor: pointer; }
 .cash-flow-column-menu input { accent-color: rgb(var(--edu-link)); }
+.cash-flow-account-filter summary { max-width: min(15rem, calc(100vw - 64px)); }
 .cash-flow-account-filter > div { left: 0; right: auto; width: min(295px, calc(100vw - 44px)); padding: 9px; }
 .cash-flow-filter-actions { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-size: 13px; }
 .cash-flow-account-options { max-height: 225px; overflow: auto; margin: 5px 0 8px; }
-.cash-flow-scroll { width: fit-content; max-width: 100%; overflow-x: auto; }
-.poster-workspace .cash-flow-grid { width: max-content; border-collapse: separate; border-spacing: 0; font-size: 14px; }
+.cash-flow-scroll { max-width: 100%; overflow-x: auto; border-radius: 0 0 0.75rem 0.75rem; }
+.poster-workspace .cash-flow-grid { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
 .poster-workspace .cash-flow-grid :is(th, td) {
-  height: 35px;
+  height: 38px;
   min-width: 142px;
   padding: 0 12px;
   text-align: right;
@@ -32,7 +35,7 @@
   font-variant-numeric: tabular-nums;
   border-bottom: 1px solid rgb(var(--edu-border) / .7);
 }
-.poster-workspace .cash-flow-grid thead th { height: 40px; color: rgb(var(--edu-text-muted)); font-size: 13px; font-weight: 500; }
+.poster-workspace .cash-flow-grid thead th { height: 42px; color: rgb(var(--edu-text-muted)); font-size: 13px; font-weight: 500; }
 .poster-workspace .cash-flow-grid thead th:not(.cash-flow-label) { text-align: right; }
 .poster-workspace .cash-flow-grid .cash-flow-label {
   position: sticky;
@@ -42,12 +45,17 @@
   text-align: left;
   font-weight: 400;
   background: rgb(var(--edu-card));
-  border-right: 1px solid rgb(var(--edu-border) / .7);
+  border-right: 1px solid rgb(var(--edu-border) / .55);
 }
 .poster-workspace .cash-flow-grid tbody tr { border-bottom: 0; }
-.cash-flow-grid .cash-flow-total,
-.poster-workspace .cash-flow-grid .cash-flow-total .cash-flow-label { background: rgb(var(--edu-background)); }
 .poster-workspace .cash-flow-grid .cash-flow-total > :is(th, td) { font-weight: 600; }
+.poster-workspace .cash-flow-grid tbody tr:hover .cash-flow-label { background: rgb(var(--edu-background)); }
+.poster-workspace .cash-flow-grid .cash-flow-period-total { border-left: 1px solid rgb(var(--edu-border) / .55); }
+.poster-workspace .cash-flow-grid tfoot :is(.cash-flow-label, td) {
+  height: 44px;
+  background: rgb(var(--edu-background));
+  border-bottom: 0;
+}
 .cash-flow-label button,
 .cash-flow-amount { display: inline-flex; min-height: 30px; align-items: center; gap: 6px; }
 .cash-flow-label button { text-align: left; }
@@ -79,7 +87,6 @@
 .cash-flow-detail :is(th, td):nth-child(4) { text-align: right; white-space: nowrap; }
 .cash-flow-close { position: absolute; right: 6px; top: 7px; width: 24px; height: 24px; font-size: 18px; color: rgb(var(--edu-text-muted)); }
 @media (max-width: 540px) {
-  .cash-flow-tools { justify-content: flex-end; gap: 8px 12px; }
   .poster-workspace .cash-flow-grid .cash-flow-label { width: 152px; min-width: 152px; max-width: 152px; white-space: normal; }
   .poster-workspace .cash-flow-grid :is(th, td):not(.cash-flow-label) { min-width: 130px; }
   .cash-flow-grid .cash-flow-label button { padding-block: 4px; }

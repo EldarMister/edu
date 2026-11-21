@@ -8,6 +8,7 @@ export function Modal({
   open,
   onClose,
   title,
+  toolbar,
   children,
   footer,
   panelClassName = 'max-w-md',
@@ -18,6 +19,7 @@ export function Modal({
   open: boolean;
   onClose: () => void;
   title?: string;
+  toolbar?: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
   panelClassName?: string;
@@ -72,6 +74,7 @@ export function Modal({
             </button>
           </div>
         )}
+        {toolbar && <div className="shrink-0 border-b border-border px-4">{toolbar}</div>}
         <div className={fullScreen ? 'min-h-0 flex-1 overflow-y-auto' : 'min-h-0 flex-1 overflow-y-auto px-4 py-3'}>{children}</div>
         {footer && (
           <div className="shrink-0 border-t border-border px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Modal } from '@/components/Modal';
 import { useT } from '@/lib/i18n';
 
@@ -6,13 +7,20 @@ export function InsufficientPermissionsModal({
   onClose,
   onCallAdministrator,
   submitting = false,
+  itemName,
+  onRequestCancellation,
+  requestError,
 }: {
   open: boolean;
   onClose: () => void;
   onCallAdministrator: () => void;
   submitting?: boolean;
+  itemName?: string;
+  onRequestCancellation?: (reason: string) => void;
+  requestError?: string;
 }) {
   const t = useT();
+  const [reason, setReason] = useState('');
 
   return (
     <Modal open={open} onClose={onClose} panelClassName="max-w-lg overflow-hidden">
@@ -29,16 +37,31 @@ export function InsufficientPermissionsModal({
           {t('Недостаточно прав')}
         </h2>
         <p className="mt-3 max-w-sm text-[17px] leading-7 text-text-secondary sm:text-lg">
-          {t('У вас недостаточно прав для отмены заказа. Пожалуйста, позовите администратора.')}
+          {itemName ? t('Отмену блюда подтверждает администратор') + ' · ' + itemName
+            : t('У вас недостаточно прав для отмены заказа. Пожалуйста, позовите администратора.')}
         </p>
         <div className="mt-7 w-full space-y-3">
+          {onRequestCancellation && <form className="space-y-3" onSubmit={(event) => {
+            event.preventDefault();
+            if (!submitting && reason.trim().length >= 2) onRequestCancellation(reason.trim());
+          }}>
+            <label className="block space-y-1 text-left text-sm text-text-secondary">
+              <span>{t('Причина отмены')}</span>
+              <input className="input w-full" value={reason} required minLength={2} maxLength={160}
+                onChange={(event) => setReason(event.target.value)} disabled={submitting} />
+            </label>
+            {requestError && <p role="alert" className="text-sm text-danger">{requestError}</p>}
+            <button type="submit" className="btn-primary btn-lg w-full" disabled={submitting || reason.trim().length < 2}>
+              {t('Отправить заявку на отмену')}
+            </button>
+          </form>}
           <button
             type="button"
-            className="btn-primary btn-lg w-full text-base font-semibold"
+            className={`${onRequestCancellation ? 'btn-secondary' : 'btn-primary'} btn-lg w-full text-base font-semibold`}
             disabled={submitting}
             onClick={onCallAdministrator}
           >
-            {submitting ? t('Отправляем вызов…') : t('Позвать администратора')}
+            {t('Позвать администратора')}
           </button>
           <button
             type="button"
