@@ -2,6 +2,22 @@
 set -eu
 
 : "${LIVEKIT_KEYS:?Set a LiveKit key and secret as a YAML mapping}"
+# On a host with public UDP, publish 7882/udp and 7881/tcp directly.
+# The HTTPS reverse proxy forwards signaling and the room API to 7880.
+if [ -n "${LIVEKIT_PUBLIC_IP:-}" ]; then
+  umask 077
+  cat > /tmp/livekit.yaml <<EOF
+port: 7880
+log_level: info
+rtc:
+  udp_port: 7882
+  tcp_port: 7881
+turn:
+  enabled: false
+EOF
+  exec livekit-server --config /tmp/livekit.yaml --node-ip "$LIVEKIT_PUBLIC_IP"
+fi
+
 : "${RAILWAY_TCP_PROXY_DOMAIN:?Create a Railway TCP proxy for this service}"
 : "${RAILWAY_TCP_PROXY_PORT:?Railway did not supply a public TCP port}"
 : "${RAILWAY_TCP_APPLICATION_PORT:?Railway did not supply the application TCP port}"

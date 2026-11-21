@@ -1,5 +1,5 @@
 import type { RemoteTrack, Room } from 'livekit-client';
-import { playPttCue } from './sounds';
+import { PTT_START_SOUND, playPttCue } from './sounds';
 
 export async function activateRadioAudio() {
   return () => {};
@@ -16,6 +16,9 @@ export function attachRemoteAudio(room: Room, { RoomEvent, Track }: typeof impor
   };
   const onTrack = (track: RemoteTrack) => {
     if (track.kind !== Track.Kind.Audio || elements.has(track)) return;
+    const receiver = track.receiver as (RTCRtpReceiver & { jitterBufferTarget?: number }) | undefined;
+    if (receiver && 'jitterBufferTarget' in receiver) receiver.jitterBufferTarget = 120;
+    else if (receiver && 'playoutDelayHint' in receiver) track.setPlayoutDelay(0.12);
     const element = document.createElement('audio');
     element.hidden = true;
     document.body.append(element);
@@ -46,6 +49,10 @@ export function observeRadioInterruption(interrupt: () => void) {
   };
 }
 
-export function radioCue(side: 'sender' | 'receiver') {
-  void playPttCue('start', side);
+export function prepareRadioCue() {
+  void fetch(PTT_START_SOUND).catch(() => undefined);
+}
+
+export function radioCue(side: 'sender' | 'receiver', signal?: AbortSignal) {
+  return playPttCue('start', side, { signal, timeoutMs: 425 });
 }
