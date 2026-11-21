@@ -15,6 +15,22 @@ function audioApi(): typeof import('react-native-audio-api') {
   return require('react-native-audio-api');
 }
 
+let startCueBuffer: Promise<AudioBuffer | undefined> | undefined;
+
+export function loadRadioStartCue() {
+  startCueBuffer ??= (async () => {
+    const asset = await Asset.fromModule(PTT_START_SOUND).downloadAsync();
+    if (!asset.localUri) return;
+    const { OfflineAudioContext, AudioManager } = audioApi();
+    const context = new OfflineAudioContext(1, 1, AudioManager.getDevicePreferredSampleRate());
+    return context.decodeAudioDataSource(asset.localUri);
+  })().catch(() => {
+    startCueBuffer = undefined;
+    return undefined;
+  });
+  return startCueBuffer;
+}
+
 export function configureRadioAudioSession(recording: boolean) {
   if (Platform.OS !== 'ios') return;
   audioApi().AudioManager.setAudioSessionOptions(recording
@@ -79,12 +95,7 @@ export class RadioPlayout {
   private readonly sources = new Map<AudioScheduledSourceNode, () => void>();
 
   async prepareStartCue() {
-    const asset = await Asset.fromModule(PTT_START_SOUND).downloadAsync();
-    if (!asset.localUri) return;
-    // Decode the cue without opening a live audio output while the radio is idle.
-    const { OfflineAudioContext, AudioManager } = audioApi();
-    const context = new OfflineAudioContext(1, 1, AudioManager.getDevicePreferredSampleRate());
-    this.startCue = await context.decodeAudioDataSource(asset.localUri);
+    this.startCue = await loadRadioStartCue();
   }
 
   push(samples: Float32Array, newTalk: boolean, sampleRate: number) {

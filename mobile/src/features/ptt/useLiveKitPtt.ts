@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createLocalAudioTrack, Room, RoomEvent, Track, type LocalAudioTrack } from 'livekit-client';
+import { LocalAudioTrack, Room, RoomEvent, Track } from 'livekit-client';
 import { getSocket } from '@/services/socket';
 import { randomUUID as newTalkId } from 'expo-crypto';
 import type { PttChannel } from './types';
-import { activateRadioAudio, attachRemoteAudio, observeRadioInterruption, radioCue } from './liveKitAudio';
+import { activateRadioAudio, attachRemoteAudio, observeRadioInterruption, radioCue, prepareRadioCue } from './liveKitAudio';
 
 type ChannelToken = { channel: PttChannel; token: string };
 type ConnectionAck = { ok: boolean; reason?: string; url?: string; channels?: ChannelToken[] };
@@ -16,9 +16,10 @@ type LegacySender = {
   deniedReason: string | null;
 };
 type Session = { rooms: Map<PttChannel, Room>; close(): void };
-type Attempt = { id: string; room: Room; released: boolean; active: boolean; keepalive?: ReturnType<typeof setInterval> };
-const TAIL_CAPTURE_MS = 130;
-const TAIL_DELIVERY_MS = 270;
+type Attempt = { id: string; room: Room; released: boolean; active: boolean; cue: AbortController; keepalive?: ReturnType<typeof setInterval> };
+const TAIL_CAPTURE_MS = 200;
+const TAIL_DELIVERY_MS = 450;
+const MICROPHONE_OPTIONS = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 };
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boolean, legacy: LegacySender, userId?: string) {
@@ -28,6 +29,7 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
   const [error, setError] = useState<string | null>(null);
   const session = useRef<Session | null>(null);
   const microphone = useRef<LocalAudioTrack | null>(null);
+  const releaseStream = useRef<(() => void) | null>(null);
   const micRequest = useRef<Promise<LocalAudioTrack | null> | null>(null);
   const attempt = useRef<Attempt | null>(null);
   const press = useRef(0);
@@ -40,23 +42,40 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
   const prepareMicrophone = useCallback(() => {
     if (microphone.current?.mediaStreamTrack.readyState === 'live') return Promise.resolve(microphone.current);
     if (micRequest.current) return micRequest.current;
-    const pending = createLocalAudioTrack({ echoCancellation: true, noiseSuppression: true, autoGainControl: true })
-      .then(async (track) => {
-        if (micRequest.current !== pending || !panelOpen.current) {
-          track.stop();
-          return null;
-        }
-        await track.mute();
-        if (micRequest.current !== pending || !panelOpen.current) {
-          track.stop();
-          return null;
-        }
-        microphone.current?.stop();
-        microphone.current = track;
-        return track;
-      }).finally(() => {
-        if (micRequest.current === pending) micRequest.current = null;
-      });
+    const pending = navigator.mediaDevices.getUserMedia({ audio: MICROPHONE_OPTIONS }).then(async (stream) => {
+      const release = () => (stream as MediaStream & { release?: () => void }).release?.();
+      const raw = stream.getAudioTracks()[0];
+      if (!raw) {
+        release();
+        throw new Error('Microphone unavailable');
+      }
+      if (micRequest.current !== pending || !panelOpen.current) {
+        raw.stop();
+        release();
+        return null;
+      }
+      // Keep the source user-provided so the SDK cannot reopen a stopped mic.
+      raw.enabled = false;
+      const track = new LocalAudioTrack(raw, MICROPHONE_OPTIONS);
+      // The SDK synchronizes enabled asynchronously during construction.
+      // Let initialization finish before storing a muted, unpublished source.
+      await delay(0);
+      if (micRequest.current !== pending || !panelOpen.current) {
+        track.stop();
+        release();
+        return null;
+      }
+      raw.enabled = false;
+      microphone.current?.stop();
+      releaseStream.current?.();
+      releaseStream.current = release;
+      microphone.current = track;
+      return track;
+    }).finally(() => {
+      if (micRequest.current === pending) {
+        micRequest.current = null;
+      }
+    });
     micRequest.current = pending;
     return pending;
   }, []);
@@ -65,17 +84,17 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
     micRequest.current = null;
     microphone.current?.stop();
     microphone.current = null;
+    releaseStream.current?.();
+    releaseStream.current = null;
   }, []);
 
   const finish = useCallback((talk: Attempt, socket = getSocket()) => {
     if (attempt.current !== talk) return;
     attempt.current = null;
     clearInterval(talk.keepalive);
+    talk.cue.abort();
     const mic = microphone.current;
-    if (mic) {
-      mic.mediaStreamTrack.enabled = false;
-      void mic.mute().catch(() => undefined);
-    }
+    if (mic) mic.mediaStreamTrack.enabled = false;
     if (socket.connected) socket.emit('ptt_stop_talk', { channel, talkId: talk.id });
     setPreparing(false);
     setTalking(false);
@@ -96,7 +115,10 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
   }, [open, interrupt]);
 
   useEffect(() => {
-    if (open && ready) void prepareMicrophone().catch(() => undefined);
+    if (open && ready) {
+      prepareRadioCue();
+      void prepareMicrophone().catch(() => undefined);
+    }
   }, [open, ready, prepareMicrophone]);
 
   useEffect(() => {
@@ -200,7 +222,7 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
       if (payload.codec !== 'livekit' || !payload.talkId || payload.talkId === lastCueId
         || !payload.speaker?.id || payload.speaker.id === userId || !session.current) return;
       lastCueId = payload.talkId;
-      radioCue('receiver');
+      void radioCue('receiver');
     }
     function denied(payload: { talkId?: string }) {
       if (!attempt.current || payload.talkId !== attempt.current.id) return;
@@ -242,9 +264,10 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
     if (!room || room.state !== 'connected') return useLegacy();
 
     const socket = getSocket();
-    const talk: Attempt = { id: newTalkId(), room, released: false, active: false };
+    const talk: Attempt = { id: newTalkId(), room, released: false, active: false, cue: new AbortController() };
     attempt.current = talk;
     setPreparing(true);
+    const micReady = prepareMicrophone().catch(() => null);
     try {
       const result: TalkAck = await socket.timeout(3200).emitWithAck('ptt_start_talk', {
         channel, talkId: talk.id, codec: 'livekit',
@@ -265,7 +288,7 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
         if (socket.connected) socket.emit('ptt_livekit_keepalive', { channel, talkId: talk.id });
       }, 2000);
 
-      const track = await prepareMicrophone();
+      const track = await micReady;
       if (attempt.current !== talk) return false;
       if (!track) throw new Error('Microphone unavailable');
       const cutoff = Date.now() + 1800;
@@ -275,8 +298,10 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
       if (attempt.current !== talk) return false;
       if (!room.localParticipant.permissions?.canPublish) throw new Error('Media publishing grant timed out');
 
+      // Negotiate with silence so the subscriber is already playing before speech.
+      track.mediaStreamTrack.enabled = false;
       const publication = await room.localParticipant.publishTrack(track, {
-        source: Track.Source.Microphone, audioPreset: { maxBitrate: 32000 }, dtx: false, red: true, stopMicTrackOnMute: false,
+        source: Track.Source.Microphone, audioPreset: { maxBitrate: 24000 }, forceStereo: false, dtx: false, red: true,
       });
       if (attempt.current !== talk) return false;
       const reception = await socket.timeout(1500).emitWithAck('ptt_livekit_wait_track', {
@@ -284,15 +309,15 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
       });
       if (attempt.current !== talk) return false;
       if (!reception?.ok) throw new Error('No listening client received the audio track');
-      await track.unmute();
-      if (attempt.current !== talk) {
-        if (attempt.current?.room !== room) void track.mute().catch(() => undefined);
-        return false;
+      await radioCue('sender', talk.cue.signal);
+      if (attempt.current !== talk) return false;
+      if (track.mediaStreamTrack.readyState !== 'live' || room.state !== 'connected') {
+        throw new Error('Microphone connection changed');
       }
+      track.mediaStreamTrack.enabled = true;
       talk.active = true;
       setPreparing(false);
       setTalking(true);
-      radioCue('sender');
       return true;
     } catch {
       if (attempt.current === talk) {
@@ -317,15 +342,12 @@ export function useLiveKitPtt(channel: PttChannel, enabled: boolean, open: boole
       return;
     }
     void (async () => {
-      // Keep the microphone alive briefly on a normal release, then let
-      // WebRTC deliver and play the last packets before revoking publishing.
+      // Send a short tail, then silence. A LiveKit mute would also mute
+      // receivers immediately, including speech already in their jitter buffers.
       await delay(TAIL_CAPTURE_MS);
       if (attempt.current !== talk) return;
       const track = microphone.current;
-      if (track) {
-        track.mediaStreamTrack.enabled = false;
-        void track.mute().catch(() => undefined);
-      }
+      if (track) track.mediaStreamTrack.enabled = false;
       setTalking(false);
       await delay(TAIL_DELIVERY_MS);
       if (attempt.current === talk) finish(talk);

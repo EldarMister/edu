@@ -5,13 +5,13 @@ const path = require('node:path');
 const vm = require('node:vm');
 const ts = require('typescript');
 
-function loadSource(file, modules) {
+function loadSource(file, modules, globals = {}) {
   const output = ts.transpileModule(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
   }).outputText;
   const module = { exports: {} };
   vm.runInNewContext(output, {
-    module, exports: module.exports, setTimeout, clearTimeout, AbortController,
+    module, exports: module.exports, setTimeout, clearTimeout, AbortController, ...globals,
     require: name => { assert.ok(name in modules, `Unexpected dependency: ${name}`); return modules[name]; },
   });
   return module.exports;
@@ -337,4 +337,123 @@ test('logout cancels a background runtime waiting for native audio initializatio
   assert.equal(starts, 0);
   assert.equal(listeners.size, 0);
   assert.ok(!flags.includes(true));
+});
+
+function liveTalkHarness() {
+  const media = {
+    enabled: true, readyState: 'live',
+    stop() { this.readyState = 'ended'; },
+  };
+  const callbacks = [];
+  const delays = [];
+  const operations = [];
+  const cue = deferred();
+  let stopCue;
+  class Room {
+    constructor() {
+      this.localParticipant = {
+        permissions: { canPublish: true },
+        publishTrack: async track => {
+          operations.push(['published', track.mediaStreamTrack.enabled]);
+          return { trackSid: 'TR_radio' };
+        },
+      };
+    }
+    async connect() { this.state = 'connected'; }
+    async disconnect() { this.state = 'disconnected'; }
+    on() {}
+  }
+  const socket = {
+    connected: true,
+    timeout() { return this; },
+    on() {},
+    off() {},
+    emit(event) { operations.push([event, media.enabled]); },
+    async emitWithAck(event) {
+      if (event === 'ptt_livekit_connect') return { ok: true, url: 'wss://test', channels: [{ channel: 'general', token: 'test' }] };
+      if (event === 'ptt_start_talk') return { ok: true, codec: 'livekit' };
+      assert.ok(['ptt_livekit_ready', 'ptt_livekit_wait_track'].includes(event));
+      return { ok: true };
+    },
+  };
+  const modules = {
+    react: {
+      useRef: current => ({ current }),
+      useState: value => [value, () => {}],
+      useCallback: callback => callback,
+      useEffect: callback => { const cleanup = callback(); if (cleanup) callbacks.push(cleanup); },
+    },
+    'livekit-client': {
+      Room, RoomEvent: {}, Track: { Source: { Microphone: 'microphone' } },
+      LocalAudioTrack: class {
+        constructor(track) {
+          this.mediaStreamTrack = track;
+          queueMicrotask(() => { track.enabled = true; });
+        }
+        stop() { media.stop(); }
+      },
+    },
+    '@/services/socket': { getSocket: () => socket },
+    'expo-crypto': { randomUUID: () => 'talk' },
+    './liveKitAudio': {
+      activateRadioAudio: async () => () => {},
+      attachRemoteAudio: () => () => {},
+      observeRadioInterruption: () => () => {},
+      prepareRadioCue: () => {},
+      radioCue(side, signal) {
+        operations.push([side, media.enabled]);
+        stopCue = signal;
+        return cue.promise;
+      },
+    },
+  };
+  const { useLiveKitPtt } = loadSource('src/features/ptt/useLiveKitPtt.ts', modules, {
+    navigator: { mediaDevices: { async getUserMedia() { return { getAudioTracks: () => [media] }; } } },
+    setInterval: () => 0, clearInterval() {},
+    setTimeout(resolve, ms) { if (ms === 0) queueMicrotask(resolve); else delays.push(resolve); },
+  });
+  const sender = useLiveKitPtt('general', true, true, { start: () => assert.fail('unexpected fallback'), stop() {} }, 'staff-id');
+  return { sender, media, cue, delays, operations, cueSignal: () => stopCue, dispose: () => callbacks.forEach(callback => callback()) };
+}
+
+test('LiveKit listener receives silence before speech and drains the tail before permissions are revoked', async () => {
+  const h = liveTalkHarness();
+  try {
+    await settle();
+    const start = h.sender.start();
+    await settle();
+    assert.deepEqual(h.operations, [['published', false], ['sender', false]]);
+    h.cue.resolve();
+    assert.equal(await start, true);
+    assert.equal(h.media.enabled, true);
+
+    h.sender.stop();
+    assert.equal(h.media.enabled, true);
+    h.delays.shift()();
+    await settle();
+    assert.equal(h.media.enabled, false);
+    assert.equal(h.operations.length, 2);
+    h.delays.shift()();
+    await settle();
+    assert.deepEqual(h.operations.at(-1), ['ptt_stop_talk', false]);
+  } finally {
+    h.dispose();
+  }
+});
+
+test('releasing during the LiveKit cue never enables the microphone', async () => {
+  const h = liveTalkHarness();
+  try {
+    await settle();
+    const start = h.sender.start();
+    await settle();
+    h.sender.stop();
+    assert.equal(h.cueSignal().aborted, true);
+    h.cue.resolve();
+    assert.equal(await start, false);
+    assert.equal(h.media.enabled, false);
+    assert.deepEqual(h.operations.at(-1), ['ptt_stop_talk', false]);
+  } finally {
+    h.dispose();
+  }
 });

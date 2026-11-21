@@ -1,7 +1,8 @@
 import { AndroidAudioTypePresets, AudioSession } from '@livekit/react-native';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import type { Room } from 'livekit-client';
 import { playPttCue } from './sounds';
+import { loadRadioStartCue } from './nativeAudio';
 
 let sessions = 0;
 let audioMode = Promise.resolve();
@@ -28,6 +29,7 @@ export async function activateRadioAudio() {
   };
   try {
     await audioMode;
+    prepareRadioCue();
     return release;
   } catch (error) {
     release();
@@ -47,6 +49,45 @@ export function observeRadioInterruption(interrupt: () => void) {
   return () => subscription.remove();
 }
 
-export function radioCue(_side: 'sender' | 'receiver') {
-  void playPttCue('start').catch(() => undefined);
+export function prepareRadioCue() {
+  if (Platform.OS === 'android') void loadRadioStartCue();
+}
+
+const CUE_TIMEOUT_MS = 425;
+
+export async function radioCue(_side: 'sender' | 'receiver', signal?: AbortSignal) {
+  if (signal?.aborted) return;
+  if (Platform.OS !== 'android') {
+    await playPttCue('start', signal, { configureMode: false, timeoutMs: CUE_TIMEOUT_MS });
+    return;
+  }
+
+  // Use local PCM playback without Expo AV taking the WebRTC audio focus.
+  let expired = false;
+  let context: import('react-native-audio-api').AudioContext | undefined;
+  let finish = () => {};
+  const done = new Promise<void>(resolve => { finish = resolve; });
+  const timer = setTimeout(finish, CUE_TIMEOUT_MS);
+  signal?.addEventListener('abort', finish, { once: true });
+  void loadRadioStartCue().then(buffer => {
+    if (!buffer || expired) { finish(); return; }
+    const { AudioContext } = require('react-native-audio-api') as typeof import('react-native-audio-api');
+    context = new AudioContext();
+    const source = context.createBufferSource();
+    const volume = context.createGain();
+    volume.gain.value = 0.45;
+    source.buffer = buffer;
+    source.connect(volume);
+    volume.connect(context.destination);
+    source.onEnded = finish;
+    source.start();
+  }).catch(finish);
+  try {
+    await done;
+  } finally {
+    expired = true;
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', finish);
+    await context?.close().catch(() => undefined);
+  }
 }

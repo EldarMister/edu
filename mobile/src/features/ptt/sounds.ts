@@ -8,14 +8,18 @@ const SOURCES = {
 };
 
 /** The same PWA cues, with a deadline so an optional sound cannot stall the radio. */
-export async function playPttCue(kind: 'start' | 'end', signal?: AbortSignal): Promise<void> {
+export async function playPttCue(
+  kind: 'start' | 'end',
+  signal?: AbortSignal,
+  { configureMode = true, timeoutMs = 3000 }: { configureMode?: boolean; timeoutMs?: number } = {},
+): Promise<void> {
   if (signal?.aborted) return;
   let sound: Audio.Sound | null = null;
   let expired = false;
   let finish = () => {};
   const done = new Promise<void>(resolve => { finish = resolve; });
   const cancel = () => { expired = true; finish(); };
-  const timeout = setTimeout(cancel, 3000);
+  const timeout = setTimeout(cancel, timeoutMs);
   signal?.addEventListener('abort', cancel);
   const release = async (value: Audio.Sound) => {
     value.setOnPlaybackStatusUpdate(null);
@@ -24,7 +28,7 @@ export async function playPttCue(kind: 'start' | 'end', signal?: AbortSignal): P
   // Native asset creation can complete after the deadline/logout. It must never autoplay.
   void (async () => {
     try {
-      await configureAudioPlayback();
+      if (configureMode) await configureAudioPlayback();
       if (expired) return;
       const created = await Audio.Sound.createAsync(SOURCES[kind], { shouldPlay: false, volume: 1 });
       if (expired) { await release(created.sound); return; }
