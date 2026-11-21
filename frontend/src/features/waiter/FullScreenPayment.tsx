@@ -127,20 +127,28 @@ export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed
 
           {methods.length > 0 ? <fieldset disabled={busy} className="min-w-0">
             <legend className="mb-2 text-sm font-medium text-text-secondary">{t('Способ оплаты')}</legend>
-            <div className="overflow-hidden rounded-xl border border-border">
+            <div className="grid gap-2">
               {methods.map(({ value, label, Icon }) => (
                 <label key={value}
-                  className={`flex cursor-text items-center gap-3 border-l-2 px-3 py-2 transition-colors [&:not(:first-child)]:border-t min-[900px]:px-4 ${
-                    selected === value ? 'border-l-primary bg-primary/5' : 'border-l-transparent hover:bg-background'
+                  className={`grid min-h-14 cursor-text grid-cols-[minmax(0,1fr)_minmax(5.5rem,40%)] items-center gap-x-3 rounded-xl border px-3 py-2 transition-colors min-[900px]:px-4 ${
+                    selected === value ? 'border-primary bg-primary/5 ring-1 ring-inset ring-primary/30' : 'border-border hover:bg-background'
                   }`}>
-                  <span aria-hidden="true" className={selected === value ? 'text-primary' : 'text-text-muted'}><Icon /></span>
-                  <span className="min-w-0 flex-1 font-medium text-text-primary">{t(label)}</span>
-                  <input aria-label={t(label)} type="text" inputMode="none" className="input h-11 w-28 min-w-0 text-right font-medium tabular-nums min-[900px]:w-36"
-                    value={draft[value]} placeholder="0" onFocus={() => focusTender(value)}
-                    onClick={() => activate(value)}
-                    onKeyDown={(event) => { if (event.key === 'Enter') activate(value); }}
-                    onChange={(event) => changeAmount(value, event.target.value)} />
-                  <span aria-hidden="true" className="text-sm text-text-muted">с</span>
+                  <span className="flex min-w-0 items-center gap-3 font-medium text-text-primary">
+                    <span aria-hidden="true" className={`shrink-0 ${selected === value ? 'text-primary' : 'text-text-muted'}`}><Icon /></span>
+                    <span className="break-words">{t(label)}</span>
+                  </span>
+                  <span className="flex min-w-0 items-baseline gap-1.5">
+                    <input aria-label={t(label)} type="text" inputMode="none"
+                      className="w-full min-w-0 bg-transparent py-1 text-right text-xl font-semibold tabular-nums text-text-primary outline-none placeholder:text-text-light lg:text-2xl"
+                      value={draft[value]} placeholder="0" onFocus={() => focusTender(value)}
+                      onClick={() => activate(value)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') activate(value); }}
+                      onChange={(event) => changeAmount(value, event.target.value)} />
+                    <span aria-hidden="true" className="text-sm text-text-muted">с</span>
+                  </span>
+                  {value === 'cash' && <span className="col-span-2 text-right text-sm text-text-secondary" aria-live="polite">
+                    {!over && change > 0 && `${t('Сдача')} ${money(change)}`}
+                  </span>}
                 </label>
               ))}
             </div>
@@ -157,10 +165,6 @@ export function FullScreenPayment({ order, enabled, qrConfigured, allItemsServed
                 <span className="font-medium text-text-primary">{money(remaining)}</span>
               </div>
             )}
-            {entered.cash > 0 && !over && <div className="flex justify-between gap-3">
-              <span className="text-text-muted">{t('Сдача')}</span>
-              <span className="font-medium text-text-primary">{money(change)}</span>
-            </div>}
             {error && <p role="alert" className="text-danger">{error}</p>}
           </div>
 
