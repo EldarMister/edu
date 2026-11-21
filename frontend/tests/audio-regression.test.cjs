@@ -214,7 +214,7 @@ function senderHarness({ captureFails = false, pendingPermission = false, pendin
   };
   const eventsApi = { START_TALK: 'start', STOP_TALK: 'stop', AUDIO_PACKET: 'frame' };
   const api = load('src/features/ptt/useAudioPttSender.ts', {
-    DOMException, AudioWorkletNode: class {},
+    DOMException, AbortController, AudioWorkletNode: class {},
     crypto: { randomUUID: () => '75d0a019-a195-450b-89e4-766c7de92ea5' },
     navigator: { mediaDevices: { getUserMedia(value) {
       constraints = value;
@@ -227,6 +227,8 @@ function senderHarness({ captureFails = false, pendingPermission = false, pendin
     if (id === '@/lib/socket') return { getSocket: () => socket };
     if (id === '@/lib/audio') return { unlockAudio() {}, setAudioRecording: (value) => modes.push(value) };
     if (id === './sounds') return { playPttCue: (kind) => cues.push(kind) };
+    if (id === './sequencedAudio') return {};
+    if (id === './radioAudioGate') return { startRadioInput: () => () => {} };
     if (id === './liveAudio') return {
       async createPttCapture(_stream, sendFrame) {
         if (captureFails) throw new Error('capture failed');
@@ -514,4 +516,59 @@ test('a stalled cue is stopped within its bound and its timer is cleared', async
   await pending;
   assert.deepEqual(h.calls, ['/sounds/ptt1.mp3', 'stop']);
   assert.equal(h.timers.size, 0);
+});
+
+const sequencedModule = load('src/features/ptt/sequencedAudio.ts', { Uint8Array, Float32Array, ArrayBuffer }, id => {
+  assert.equal(id, './types');
+  return { PTT_EVENTS: {} };
+});
+const settleSequenced = () => new Promise(resolve => setImmediate(resolve));
+
+test('a radio gap is repaired in order and overlapping live frames play only once', async () => {
+  const decodedFrames = [];
+  const played = [];
+  const ended = [];
+  const payload = (firstFrame, samples, senderId = 'other') => ({
+    channel: 'waiters', talkId: 'radio-talk', codec: 'opus-hq', firstFrame, senderId,
+    audio: new Uint8Array(samples).buffer,
+  });
+  const receiver = sequencedModule.createPttStreamReceiver({
+    hears: batch => batch.senderId !== 'me' && batch.channel === 'waiters',
+    openDecoder: () => ({ frameBytes: 1, frameSamples: 1, sampleRate: 24000,
+      decode(frame) { decodedFrames.push(frame[0]); return Float32Array.of(frame[0] / 255); },
+      close() {},
+    }),
+    async sync(id, frame) {
+      assert.equal(id, 'radio-talk');
+      if (frame === 2) return { ok: true, batch: payload(2, [20, 21, 30, 31]) };
+      assert.equal(frame, 6);
+      return { ok: true, finished: true, nextFrame: 8, batch: payload(6, [40, 41]) };
+    },
+    play(batch, samples) { played.push([batch.firstFrame, samples.length]); },
+    end(id) { ended.push(id); },
+  });
+  receiver.batch(payload(0, [200, 201], 'me'));
+  receiver.batch(payload(0, [10, 11]));
+  receiver.batch(payload(4, [30, 31]));
+  await settleSequenced();
+  receiver.disconnected();
+  receiver.joined();
+  await settleSequenced();
+  receiver.batch(payload(6, [40, 41]));
+  await settleSequenced();
+  assert.deepEqual(decodedFrames, [10, 11, 20, 21, 30, 31, 40, 41]);
+  assert.deepEqual(played, [[0, 2], [2, 4], [6, 2]]);
+  assert.deepEqual(ended, ['radio-talk']);
+  receiver.dispose();
+});
+
+test('radio packs Opus frames and flushes the last partial batch before the channel is released', () => {
+  const sent = [];
+  const batcher = sequencedModule.createPttBatcher(2, (first, audio) => sent.push([first, Array.from(new Uint8Array(audio))]));
+  for (let frame = 1; frame <= 6; frame++) batcher.push(new Uint8Array(18).fill(frame).buffer);
+  assert.deepEqual(sent, [[0, [1, 1, 2, 2, 3, 3, 4, 4]]]);
+  assert.equal(batcher.flush(), 6);
+  assert.deepEqual(sent[1], [4, [5, 5, 6, 6]]);
+  assert.equal(batcher.flush(), 6);
+  assert.equal(sent.length, 2);
 });

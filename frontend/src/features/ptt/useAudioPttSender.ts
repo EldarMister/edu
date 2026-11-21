@@ -2,14 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { setAudioRecording, unlockAudio } from '@/lib/audio';
 import { createPttCapture } from './liveAudio';
-import { createPttOpusEncoder, isPttOpusCodec } from './opusAudio';
+import { createPttOpusEncoder, isPttOpusCodec, PTT_OPUS_PROFILES } from './opusAudio';
 import { playPttCue } from './sounds';
+import { createPttBatcher } from './sequencedAudio';
+import { startRadioInput } from './radioAudioGate';
 import { PTT_EVENTS, type PttChannel, type PttDeniedPayload, type PttOpusCodec } from './types';
 
 type Socket = ReturnType<typeof getSocket>;
-type Ack = { ok: boolean; reason?: string; talkId?: string; codec?: PttOpusCodec };
+type Ack = { ok: boolean; reason?: string; talkId?: string; sequenced?: boolean; codec?: PttOpusCodec };
 type Transmission = {
   talkId: string;
+  batcher?: ReturnType<typeof createPttBatcher>;
+  releaseInput: () => void;
+  cue: AbortController;
   channel: PttChannel;
   socket: Socket;
   stream?: MediaStream;
@@ -34,7 +39,7 @@ function releaseChannel({ socket, channel, talkId }: Transmission) {
 
 function requestChannel({ socket, channel, talkId }: Transmission): Promise<Ack> {
   return new Promise((resolve) => {
-    socket.timeout(3500).emit(PTT_EVENTS.START_TALK, { channel, talkId, codec: 'opus', preferHq: true }, (error: Error | null, ack?: Ack) =>
+    socket.timeout(3500).emit(PTT_EVENTS.START_TALK, { channel, talkId, codec: 'opus', preferHq: true, sequenced: true }, (error: Error | null, ack?: Ack) =>
       resolve(error ? { ok: false, reason: 'timeout' } : ack ?? { ok: false }));
   });
 }
@@ -49,6 +54,8 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     const attempt = attemptRef.current;
     if (!attempt) return;
     attemptRef.current = null;
+    attempt.cue.abort();
+    attempt.releaseInput();
     stopTracks(attempt.stream);
     attempt.capture?.close();
     attempt.encoder?.close();
@@ -58,13 +65,21 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     if (attempt.requested) releaseChannel(attempt);
   }, []);
 
-  const complete = useCallback((attempt: Transmission) => {
+  const complete = useCallback(async (attempt: Transmission) => {
     try {
       attempt.encoder?.flush();
+      if (attempt.batcher) {
+        const frames = attempt.batcher.flush();
+        const response = await attempt.socket.timeout(4500).emitWithAck(PTT_EVENTS.STOP_TALK, {
+          channel: attempt.channel, talkId: attempt.talkId, frames,
+        });
+        if (!response?.ok) throw new Error('Incomplete radio transmission');
+        attempt.requested = false;
+      }
     } catch {
-      setDeniedReason('Не удалось передать конец фразы. Повторите последние слова');
+      if (attemptRef.current === attempt) setDeniedReason('Не удалось передать конец фразы. Повторите последние слова');
     }
-    finish();
+    if (attemptRef.current === attempt) finish();
   }, [finish]);
 
   const stop = useCallback(() => {
@@ -86,7 +101,8 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       if (!flushed) setDeniedReason('Не удалось передать конец фразы. Повторите последние слова');
       capture.close();
       attempt.capture = undefined;
-      if (attempt.granted) complete(attempt);
+      attempt.releaseInput();
+      if (attempt.granted) void complete(attempt);
       else setAudioRecording(false);
     });
   }, [complete, finish]);
@@ -109,6 +125,7 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
     const talkId = crypto.randomUUID();
     const attempt: Transmission = {
       talkId, channel, socket, requested: false, granted: false, released: false, pendingFrames: [],
+      cue: new AbortController(), releaseInput: startRadioInput(),
     };
     attemptRef.current = attempt;
     setAudioRecording(true);
@@ -140,6 +157,11 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
         capture.close();
         return false;
       }
+      await playPttCue('start', 'sender', { signal: attempt.cue.signal, timeoutMs: 400 });
+      if (attemptRef.current !== attempt) {
+        capture.close();
+        return false;
+      }
       attempt.capture = capture;
       capture.connect();
       attempt.requested = true;
@@ -154,8 +176,15 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
         return false;
       }
 
+      if (ack.sequenced) {
+        attempt.batcher = createPttBatcher(PTT_OPUS_PROFILES[ack.codec].frameBytes, (firstFrame, audio) => {
+          socket.emit(PTT_EVENTS.AUDIO_BATCH, { channel, talkId, firstFrame, audio });
+        });
+      }
       const encoder = await createPttOpusEncoder(talkId, (packet) => {
-        if (socket.connected && attemptRef.current === attempt) socket.emit(PTT_EVENTS.AUDIO_PACKET, packet);
+        if (!socket.connected || attemptRef.current !== attempt) return;
+        if (attempt.batcher) attempt.batcher.push(packet);
+        else socket.emit(PTT_EVENTS.AUDIO_PACKET, packet);
       }, ack.codec);
       if (attemptRef.current !== attempt) {
         encoder.close();
@@ -166,12 +195,11 @@ export function useAudioPttSender(channel: PttChannel, enabled: boolean) {
       for (const audio of attempt.pendingFrames) encoder.push(audio);
       attempt.pendingFrames.length = 0;
       if (attempt.released) {
-        if (!attempt.capture) complete(attempt);
+        if (!attempt.capture) void complete(attempt);
         return false;
       }
       setStarting(false);
       setTalking(true);
-      void playPttCue('start');
       return true;
     } catch (error) {
       fail(error instanceof DOMException && error.name === 'NotAllowedError'

@@ -4,7 +4,6 @@ import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/store/auth';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useAudioPttReceiver } from './useAudioPttReceiver';
-import { useLiveKitPtt } from './useLiveKitPtt';
 import { useAudioPttSender } from './useAudioPttSender';
 import { preparePttCapture } from './liveAudio';
 import {
@@ -456,11 +455,8 @@ export function PttOverlay({
   const [busySpeaker, setBusySpeaker] = useState<{ id: string; name?: string } | null>(null);
   const effectiveButtonHidden = buttonHidden || overlayOpen;
 
-  const legacySender = useAudioPttSender(channel, true);
-  const sender = useLiveKitPtt(channel, !!user?.id, open, {
-    ...legacySender, preparing: legacySender.starting,
-  }, user?.id);
-  const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, true);
+  const sender = useAudioPttSender(channel, !!user?.id);
+  const { receiving, speaker: playingSpeaker } = useAudioPttReceiver(channel, !!user?.id);
 
   const floatingBottom = waiterMode && isMobile
     ? 'calc(var(--edu-ptt-floating-bottom, 78px) + env(safe-area-inset-bottom, 0px))'
@@ -472,7 +468,7 @@ export function PttOverlay({
     const seq = ++joinSeqRef.current;
     const attempt = (retriesLeft: number) => {
       if (joinSeqRef.current !== seq) return;
-      sock.emit(PTT_EVENTS.JOIN, { channel, codecs: ['opus-hq'] }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
+      sock.emit(PTT_EVENTS.JOIN, { channel, codecs: ['opus-hq'], sequenced: true }, (ack: { ok?: boolean; onlineCount?: number } | undefined) => {
         if (joinSeqRef.current !== seq) return;
         if (ack?.ok) {
           if (typeof ack.onlineCount === 'number') setOnlineCount(ack.onlineCount);
@@ -584,7 +580,7 @@ export function PttOverlay({
         ? 'Отпустите для остановки'
         : state === 'speakingOther'
           ? 'Дождитесь освобождения канала'
-          : (sender.deniedReason ?? (sender.preparing ? 'Подключаем микрофон…' : 'Нажмите и удерживайте'));
+          : (sender.deniedReason ?? (sender.starting ? 'Подключаем микрофон…' : 'Нажмите и удерживайте'));
 
   return (
     <>

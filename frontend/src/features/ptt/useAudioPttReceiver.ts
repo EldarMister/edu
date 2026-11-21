@@ -5,7 +5,7 @@ import { playRadioAudio } from '@/lib/audio';
 import { PttPlayback } from './liveAudio';
 import { createPttOpusDecoder, isPttOpusCodec, preparePttOpus, pttOpusFrames, pttOpusHeader, PTT_OPUS_PROFILES } from './opusAudio';
 import { playPttCue, playPttMessage } from './sounds';
-import { PTT_EVENTS, type PttAudioPayload, type PttBusyPayload, type PttChannel, type PttFramePayload, type PttFreePayload, type PttOpusCodec } from './types';
+import { PTT_EVENTS, type PttPresencePayload, type PttAudioPayload, type PttBusyPayload, type PttChannel, type PttFramePayload, type PttFreePayload, type PttOpusCodec } from './types';
 
 function base64ToBytes(value: string): Uint8Array {
   const binary = window.atob(value);
@@ -13,6 +13,9 @@ function base64ToBytes(value: string): Uint8Array {
   for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
+
+import { createPttStreamReceiver, pttAudioHistory } from './sequencedAudio';
+import { onRadioInput, radioInputActive } from './radioAudioGate';
 
 export type PttPlayingSpeaker = { id: string; name?: string; role?: string };
 
@@ -35,6 +38,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
 
   const pump = useCallback(() => {
     if (playingRef.current) return;
+    if (radioInputActive()) queueRef.current.length = 0;
     const next = queueRef.current.shift();
     if (!next) {
       setReceiving(false);
@@ -65,7 +69,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     const sock = getSocket();
     const onAudio = (payload: PttAudioPayload) => {
       const audibleForCurrentChannel = payload.channel === channel || payload.channel === 'general';
-      if (!audibleForCurrentChannel || payload.senderId === userId) return;
+      if (!audibleForCurrentChannel || payload.senderId === userId || radioInputActive()) return;
       queueRef.current.push(payload);
       pump();
     };
@@ -104,14 +108,15 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       decoderTalkId = undefined;
     }
 
-    function playFrame(id: string, who: PttPlayingSpeaker, audio: ArrayBuffer | Float32Array, sampleRate?: number, framesInPacket?: number) {
+    function playFrame(id: string, who: PttPlayingSpeaker, audio: ArrayBuffer | Float32Array, sampleRate?: number, framesInPacket?: number, buffered = false) {
+      if (radioInputActive()) return;
       const startsTalk = id !== talkId;
+      window.clearTimeout(endTimer);
       if (startsTalk) {
-        window.clearTimeout(endTimer);
         talkId = id;
         setLiveSpeaker(who);
       }
-      if (!playback.push(audio, startsTalk, sampleRate, framesInPacket) && startsTalk) {
+      if (!playback.push(audio, startsTalk, sampleRate, framesInPacket, buffered) && startsTalk) {
         // Preserve the existing tap-to-unlock flow on browsers that suspend audio.
         void playPttCue('start', 'receiver');
       }
@@ -122,7 +127,7 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     }
 
     function onBusy(payload: PttBusyPayload) {
-      if (!isPttOpusCodec(payload.codec) || !payload.talkId || !payload.speaker || !hears(payload.channel, payload.speaker.id)) return;
+      if (payload.sequenced || !isPttOpusCodec(payload.codec) || !payload.talkId || !payload.speaker || !hears(payload.channel, payload.speaker.id)) return;
       opusTalk = { id: payload.talkId, codec: payload.codec, header: pttOpusHeader(payload.talkId), speaker: payload.speaker };
     }
 
@@ -162,6 +167,10 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
     }
 
     function onFree(payload: PttFreePayload) {
+      if (payload.frames !== undefined) {
+        sequenced.free(payload);
+        return;
+      }
       const finished = payload.talkId;
       if (!finished) return;
       if (opusTalk?.id === finished) opusTalk = undefined;
@@ -173,7 +182,34 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       });
     }
 
+    const sequenced = createPttStreamReceiver({
+      hears: (batch) => hears(batch.channel, batch.senderId),
+      async openDecoder(codec) {
+        const decoder = await createPttOpusDecoder(codec);
+        const profile = PTT_OPUS_PROFILES[codec];
+        return { ...profile, decode: (audio) => decoder.decodeFloat(audio), close: () => decoder.free() };
+      },
+      sync: pttAudioHistory(socket),
+      play(batch, samples, rate) {
+        playFrame(batch.talkId, { id: batch.senderId, name: batch.senderName, role: batch.senderRole }, samples, rate, 1, true);
+      },
+      end(id) {
+        if (talkId !== id) return;
+        playback.endCue();
+        clearSpeakerAfterPlayback();
+      },
+    });
+    const stopOnInput = onRadioInput(() => {
+      playback.stop();
+      talkId = undefined;
+      window.clearTimeout(endTimer);
+      setLiveSpeaker(null);
+    });
+    function onPresence(payload: PttPresencePayload) {
+      if (payload.channel === channel) sequenced.joined();
+    }
     function onDisconnect() {
+      sequenced.disconnected();
       opusTalk = undefined;
       queue(() => {
         closeDecoder();
@@ -183,6 +219,8 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
 
     socket.on(PTT_EVENTS.CHANNEL_BUSY, onBusy);
     socket.on(PTT_EVENTS.AUDIO_PACKET, onPacket);
+    socket.on(PTT_EVENTS.AUDIO_BATCH, sequenced.batch);
+    socket.on(PTT_EVENTS.PRESENCE, onPresence);
     socket.on(PTT_EVENTS.AUDIO_FRAME, onFrame);
     socket.on(PTT_EVENTS.CHANNEL_FREE, onFree);
     socket.on('disconnect', onDisconnect);
@@ -190,6 +228,10 @@ export function useAudioPttReceiver(channel: PttChannel, enabled: boolean) {
       active = false;
       socket.off(PTT_EVENTS.CHANNEL_BUSY, onBusy);
       socket.off(PTT_EVENTS.AUDIO_PACKET, onPacket);
+      socket.off(PTT_EVENTS.AUDIO_BATCH, sequenced.batch);
+      socket.off(PTT_EVENTS.PRESENCE, onPresence);
+      stopOnInput();
+      sequenced.dispose();
       socket.off(PTT_EVENTS.AUDIO_FRAME, onFrame);
       socket.off(PTT_EVENTS.CHANNEL_FREE, onFree);
       socket.off('disconnect', onDisconnect);

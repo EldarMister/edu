@@ -101,18 +101,22 @@ export class PttPlayback {
     this.startCue = await ctx.decodeAudioData(await response.arrayBuffer());
   }
 
-  push(audio: unknown, startsTalk = false, sampleRate: number = PTT_OPUS_PROFILES.opus.sampleRate, framesInPacket = 1) {
+  push(audio: unknown, startsTalk = false, sampleRate: number = PTT_OPUS_PROFILES.opus.sampleRate, framesInPacket = 1, buffered = false) {
     const frameSamples = sampleRate === PTT_CAPTURE_RATE
       ? PTT_OPUS_PROFILES['opus-hq'].frameSamples
       : PTT_OPUS_PROFILES.opus.frameSamples;
+    const sampleCount = buffered && audio instanceof Float32Array ? audio.length : frameSamples;
+    if (sampleCount < frameSamples || sampleCount % frameSamples !== 0) return false;
+    const startBuffer = buffered ? 0.32 : START_BUFFER_SECONDS;
+    const maxBuffer = buffered ? 0.72 : MAX_BUFFER_SECONDS;
     if (!(audio instanceof ArrayBuffer && audio.byteLength === frameSamples * 2)
-      && !(audio instanceof Float32Array && audio.length === frameSamples)) return false;
+      && !(audio instanceof Float32Array && audio.length === sampleCount)) return false;
     const ctx = getAudioContext();
     if (ctx.state !== 'running') return false;
     if (this.context !== ctx) this.stop();
     this.context = ctx;
 
-    const buffer = ctx.createBuffer(1, frameSamples, sampleRate);
+    const buffer = ctx.createBuffer(1, sampleCount, sampleRate);
     const samples = buffer.getChannelData(0);
     if (audio instanceof Float32Array) samples.set(audio);
     else {
@@ -126,20 +130,20 @@ export class PttPlayback {
         if (!startsTalk) {
           // Rebuffer after a stall based on recent jitter, then gradually return to the shorter delay.
           const expected = framesInPacket * buffer.duration;
-          this.jitter = Math.min(MAX_BUFFER_SECONDS - START_BUFFER_SECONDS, Math.max(this.jitter * 0.96, elapsed - expected));
+          this.jitter = Math.min(maxBuffer - startBuffer, Math.max(this.jitter * 0.96, elapsed - expected));
         } else if (elapsed > 1) {
           this.jitter *= Math.pow(0.5, elapsed);
         }
       }
       this.lastArrival = now;
     }
-    const canContinue = this.endAt > 0 && this.endAt >= now - buffer.duration;
+    const canContinue = this.endAt > 0 && this.endAt >= now - (buffered ? 0 : buffer.duration);
     const startCue = startsTalk ? this.startCue : undefined;
     const nextAt = Math.max(this.endAt, now + SCHEDULING_MARGIN_SECONDS);
     const cueEndAt = nextAt + (startCue?.duration ?? 0);
     const startAt = canContinue
       ? cueEndAt
-      : Math.max(cueEndAt, now + START_BUFFER_SECONDS + this.jitter);
+      : Math.max(cueEndAt, now + startBuffer + this.jitter);
     if (startCue) this.playBuffer(ctx, startCue, startAt - startCue.duration);
     this.playBuffer(ctx, buffer, startAt);
     this.endAt = startAt + buffer.duration;

@@ -1,6 +1,7 @@
 import { AccessToken, RoomServiceClient, TrackSource } from 'livekit-server-sdk';
 
 export function liveKitRadio() {
+  if (process.env.PTT_LIVEKIT_ENABLED !== 'true') return null;
   const url = process.env.PTT_LIVEKIT_URL?.trim();
   const key = process.env.PTT_LIVEKIT_API_KEY?.trim();
   const secret = process.env.PTT_LIVEKIT_API_SECRET?.trim();

@@ -40,6 +40,7 @@ export type PttPresencePayload = {
 };
 
 export type PttBusyPayload = {
+  sequenced?: boolean;
   talkId?: string;
   codec?: PttOpusCodec;
   channel: PttChannel;
@@ -47,9 +48,21 @@ export type PttBusyPayload = {
   startedAt?: string;
 };
 
+export type PttBatchPayload = {
+  channel: PttChannel;
+  talkId: string;
+  codec: PttOpusCodec;
+  senderId: string;
+  senderName?: string;
+  senderRole?: string;
+  firstFrame: number;
+  audio: unknown;
+};
+
 export type RadioState = 'ready' | 'speakingSelf' | 'speakingOther' | 'error';
 
 export type PttFreePayload = {
+  frames?: number;
   talkId?: string;
   channel: PttChannel;
   speakerId?: string;
@@ -65,6 +78,8 @@ export const PTT_EVENTS = {
   AUDIO_MESSAGE: 'ptt_audio_message',
   AUDIO_FRAME: 'ptt_audio_frame',
   AUDIO_PACKET: 'ptt_audio_packet',
+  AUDIO_BATCH: 'ptt_audio_batch',
+  AUDIO_SYNC: 'ptt_audio_sync',
   TALK_DENIED: 'ptt_talk_denied',
   PRESENCE: 'ptt_presence',
 } as const;
